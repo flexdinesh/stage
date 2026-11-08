@@ -16,6 +16,7 @@
   --accent: #0b0d14;
   --on-accent: #ffffff;
   --scrim: rgba(11, 13, 20, 0.28);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235b6170' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
 
   --need: #d9a900;
   --need-fg: #7a5c00;
@@ -39,6 +40,7 @@
     --accent: #eef0f5;
     --on-accent: #0b0d14;
     --scrim: rgba(0, 0, 0, 0.55);
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238b92a3' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
     --need: #e3c341;
     --need-fg: #efd36a;
     --run: #5ec4f0;
@@ -61,6 +63,7 @@
   --accent: #eef0f5;
   --on-accent: #0b0d14;
   --scrim: rgba(0, 0, 0, 0.55);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238b92a3' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
   --need: #e3c341;
   --need-fg: #efd36a;
   --run: #5ec4f0;
@@ -120,6 +123,16 @@
   }
   a {
     text-underline-offset: 3px;
+  }
+  button:not(:disabled),
+  select:not(:disabled),
+  [role="button"],
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled {
+    cursor: not-allowed;
   }
   input::placeholder,
   textarea::placeholder {
@@ -195,5 +208,13 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Authored chevron on selects (per-theme --chevron). */
+  .select-chevron {
+    background-image: var(--chevron);
+    background-size: 14px;
+    background-position: right 8px center;
+    background-repeat: no-repeat;
   }
 }

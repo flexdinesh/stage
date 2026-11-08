@@ -150,13 +150,10 @@ export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
   );
 }
 
-const CHEVRON =
-  "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238b92a3' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E\")] bg-[length:14px] bg-[right_8px_center] bg-no-repeat";
-
 export function Select({ className, small = false, ...rest }: ComponentProps<"select"> & { small?: boolean }) {
   return (
     <select
-      className={cx(inputBase, small ? "h-6 py-0 text-[12px]" : "h-8", "appearance-none pr-8", CHEVRON, className)}
+      className={cx(inputBase, small ? "h-6 py-0 text-[12px]" : "h-8", "select-chevron appearance-none pr-8", className)}
       {...rest}
     />
   );
@@ -210,7 +207,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cx(
             "border-r border-line-strong font-mono whitespace-nowrap transition-colors duration-150 last:border-r-0",
-            small ? "h-6 px-2 text-[11px]" : "h-7 px-2.5 text-[12px]",
+            small ? "h-6 px-2 text-[11px]" : "h-[30px] px-2.5 text-[12px]",
             o.value === value ? "bg-accent text-on-accent" : "text-muted hover:bg-panel hover:text-fg",
           )}
         >

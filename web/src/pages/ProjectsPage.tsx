@@ -157,8 +157,8 @@ export function ProjectsPage() {
         meta={`${projects.data === undefined ? "…" : list.length} projects · archived ${filter === "all" ? "shown" : "hidden"}`}
         actions={
           <>
-            <Segmented small label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
-            <Segmented small label="Archived filter" options={ARCHIVED_OPTIONS} value={filter} onChange={setFilter} />
+            <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
+            <Segmented label="Archived filter" options={ARCHIVED_OPTIONS} value={filter} onChange={setFilter} />
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
             </Button>

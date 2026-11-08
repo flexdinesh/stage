@@ -325,12 +325,12 @@ Compact, flat, and ink-led.
 - **Internal Padding:** 12px; flush for row lists.
 
 ### Inputs / Fields
-- **Style:** 32px, Paper fill, Strong Hairline border, square, 10px padding, 13px text; textareas switch to 12.5px mono. Selects carry an authored chevron.
+- **Style:** 32px, Paper fill, Strong Hairline border, square, 10px padding, 13px text; textareas switch to 12.5px mono. Selects carry an authored Slate chevron (`.select-chevron`, per-theme `--chevron`). Enabled buttons, selects and labels show a pointer cursor; disabled ones `not-allowed`.
 - **Focus:** border and a 1px ring both go Ink.
 - **Error / Disabled:** errors render as a red Alert below; disabled at 55% opacity. Labels sit above in the Label style.
 
 ### Segmented control
-Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Used for runtime mode, time window, follow-up mode and theme.
+Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall, matching buttons and inputs it sits beside; small (follow-up send mode) is 26px. Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter and the Dashboard view (list / by project).
 
 ### Navigation
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
@@ -338,6 +338,9 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 
 ### Stat strip (signature)
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
+
+### Project groups (Dashboard "by project" view)
+A header Segmented toggles the Dashboard between `list` (default) and `by project`, remembered per browser. By project, each state panel splits its rows under a 28px sub-header per project (Bench Gray at 55% over Paper, hairline below): a chevron button (`aria-expanded`) with the mono project name and Slate count, and a mono `project →` link right. Projects follow first-appearance order; external needs-input threads join their project. Each sub-header collapses independently per panel and the collapsed set is remembered. With a single project filtered, rows render ungrouped.
 
 ### Task row (signature)
 State chip, row title with a mono meta line (project, model, relative time, tags), optional run order chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.

@@ -4,8 +4,34 @@ import { useNeedsInputThreads, useProjects, useTasks } from "../api/queries.ts";
 import type { Task, TaskState } from "../api/types.ts";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { ExternalThreadRows, TaskRows } from "../components/TaskList.tsx";
-import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { ExternalThreadRows, ProjectGroupedRows, TaskRows } from "../components/TaskList.tsx";
+import { useCollapsedProjects } from "../lib/collapsed.ts";
+import { AppButton, ErrorText, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+
+const VIEW_OPTIONS = [
+  { value: "list", label: "list" },
+  { value: "project", label: "by project" },
+] as const;
+type View = (typeof VIEW_OPTIONS)[number]["value"];
+
+const VIEW_KEY = "t3stage-dashboard-view";
+
+function readView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return VIEW_OPTIONS.find((o) => o.value === v)?.value ?? "list";
+  } catch {
+    return "list";
+  }
+}
+
+function saveView(view: View): void {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Storage unavailable (private mode): view still applies for this page view.
+  }
+}
 
 type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
 
@@ -194,6 +220,14 @@ export function DashboardPage() {
   const [since] = useState(settledSince);
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
+  const collapsedProjects = useCollapsedProjects();
+  const [view, setView] = useState(readView);
+  const changeView = (v: View) => {
+    setView(v);
+    saveView(v);
+  };
+  // A single-project filter has nothing to group.
+  const grouped = view === "project" && project === "";
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
   const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
   const groupCount = (g: Group) => byGroup(g).length + (g.key === "needs" ? externalNeeds.length : 0);
@@ -237,7 +271,12 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         {...(meta === "" ? {} : { meta })}
-        actions={<ProjectSelect value={project} onChange={(v) => setParam("project", v)} />}
+        actions={
+          <>
+            <Segmented label="Dashboard view" options={VIEW_OPTIONS} value={view} onChange={changeView} />
+            <ProjectSelect value={project} onChange={(v) => setParam("project", v)} />
+          </>
+        }
       />
       <QueryState isPending={tasks.isPending || settled.isPending} error={tasks.error ?? settled.error}>
         <StatStrip
@@ -282,7 +321,16 @@ export function DashboardPage() {
                 meta={<span className="tabular">{groupCount(g)}</span>}
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
-                {g.key === "needs" && externalNeeds.length > 0 ? (
+                {grouped ? (
+                  <ProjectGroupedRows
+                    scope={g.key}
+                    tasks={list}
+                    threads={g.key === "needs" ? externalNeeds : []}
+                    emptyText={g.empty}
+                    isCollapsed={collapsedProjects.has}
+                    onToggle={collapsedProjects.toggle}
+                  />
+                ) : g.key === "needs" && externalNeeds.length > 0 ? (
                   <>
                     {list.length > 0 ? (
                       <div className="border-b border-line">
