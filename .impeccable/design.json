@@ -570,7 +570,7 @@
       },
       "row-title": {
         "displayName": "Row Title",
-        "purpose": "Task, chain, thread titles in rows."
+        "purpose": "Task and thread titles in rows."
       },
       "body": {
         "displayName": "Body",
@@ -721,7 +721,7 @@
       "kind": "nav",
       "refersTo": "top-bar",
       "description": "48px laptop bar: square mark, text tabs with ink underline, needs-input count chip.",
-      "html": "<nav class=\"ds-nav\"><a class=\"ds-mark\" href=\"#\"><span class=\"ds-mark-sq\"></span>t3-stage</a><a class=\"ds-tab ds-tab-active\" href=\"#\">Dashboard <span class=\"ds-count\">2</span></a><a class=\"ds-tab\" href=\"#\">Projects</a><a class=\"ds-tab\" href=\"#\">Chains</a><a class=\"ds-tab\" href=\"#\">History</a></nav>",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-mark\" href=\"#\"><span class=\"ds-mark-sq\"></span>t3-stage</a><a class=\"ds-tab ds-tab-active\" href=\"#\">Dashboard <span class=\"ds-count\">2</span></a><a class=\"ds-tab\" href=\"#\">Projects</a><a class=\"ds-tab\" href=\"#\">History</a></nav>",
       "css": ".ds-nav { display: flex; align-items: stretch; gap: 0; height: 48px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--bg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; } .ds-mark { display: flex; align-items: center; gap: 8px; margin-right: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); text-decoration: none; } .ds-mark-sq { width: 10px; height: 10px; background: var(--accent); } .ds-tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--muted); text-decoration: none; transition: color 150ms; } .ds-tab:hover { color: var(--fg); } .ds-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } .ds-tab-active { border-bottom-color: var(--accent); color: var(--fg); } .ds-count { padding: 0 6px; border: 1px solid color-mix(in srgb, var(--need) 45%, transparent); background: color-mix(in srgb, var(--need) 14%, transparent); color: var(--need-fg); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11px; line-height: 16px; }"
     },
     {

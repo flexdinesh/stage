@@ -1,4 +1,4 @@
-import type { ChainState, TaskState, ThreadStatus } from "../api/types.ts";
+import type { TaskState, ThreadStatus } from "../api/types.ts";
 import { Chip, type ChipTone } from "./ui.tsx";
 
 const TASK_TONES: Record<TaskState, ChipTone> = {
@@ -25,8 +25,6 @@ const TASK_LABELS: Record<TaskState, string> = {
   cancelled: "cancelled",
 };
 
-const CHAIN_TONES: Record<ChainState, ChipTone> = { idle: "idle", running: "run", paused: "need", done: "ok" };
-
 const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
   idle: "idle",
   preparing: "run",
@@ -49,12 +47,6 @@ export const threadStatusLabel = (s: ThreadStatus) => (s === "completed" ? "done
 export const TaskStateBadge = ({ state }: { state: TaskState }) => (
   <Chip tone={TASK_TONES[state]} dot>
     {TASK_LABELS[state]}
-  </Chip>
-);
-
-export const ChainStateBadge = ({ state }: { state: ChainState }) => (
-  <Chip tone={CHAIN_TONES[state]} dot>
-    {state}
   </Chip>
 );
 

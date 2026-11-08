@@ -13,8 +13,9 @@ import {
   type Workspace,
 } from "../api/types.ts";
 import { parseTags } from "../lib/format.ts";
-import { isFullyEditable } from "../lib/tasks.ts";
+import { isFinal, isFullyEditable } from "../lib/tasks.ts";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
+import { TaskPicker, useLinkCandidates } from "./Sequence.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea } from "./ui.tsx";
 
@@ -29,6 +30,10 @@ interface FormState {
   branch: string;
   tags: string;
   notes: string;
+  /** Runs-after predecessor id ("" none). */
+  afterTaskId: string;
+  /** Follower id ("" none). */
+  nextTaskId: string;
 }
 
 type DefaultsSource = "pinned" | "last used";
@@ -61,6 +66,8 @@ function initialState(task: Task | undefined, defaultProjectId: number | undefin
       branch: "",
       tags: "",
       notes: "",
+      afterTaskId: "",
+      nextTaskId: "",
     };
   }
   return {
@@ -79,6 +86,8 @@ function initialState(task: Task | undefined, defaultProjectId: number | undefin
     branch: task.workspace.type === "worktree" ? (task.workspace.branch ?? "") : "",
     tags: task.tags.join(", "),
     notes: task.notes,
+    afterTaskId: task.afterTaskId === null ? "" : String(task.afterTaskId),
+    nextTaskId: task.nextTaskId === null ? "" : String(task.nextTaskId),
   };
 }
 
@@ -98,18 +107,17 @@ function toWorkspace(s: FormState): Workspace {
 interface TaskFormProps {
   task?: Task;
   defaultProjectId?: number;
-  chainId?: number;
   onClose: () => void;
   onSaved?: (task: Task) => void;
 }
 
-/** Create (no `task`) or edit (`task`) form in a drawer. `chainId` appends the new task to that chain. A new task waits for preferences (usually cached) to prefill its model config. */
+/** Create (no `task`) or edit (`task`) form in a drawer. A new task waits for preferences (usually cached) to prefill its model config. */
 export function TaskFormModal(props: TaskFormProps) {
   const prefs = usePreferences();
   if (props.task !== undefined) return <TaskFormDrawer {...props} prefill={null} />;
   if (prefs.isPending) {
     return (
-      <Drawer title={props.chainId === undefined ? "New task" : "New chain step"} onClose={props.onClose} wide>
+      <Drawer title="New task" onClose={props.onClose} wide>
         <Muted>Loading defaults…</Muted>
       </Drawer>
     );
@@ -120,7 +128,6 @@ export function TaskFormModal(props: TaskFormProps) {
 function TaskFormDrawer({
   task,
   defaultProjectId,
-  chainId,
   onClose,
   onSaved,
   prefill,
@@ -131,6 +138,13 @@ function TaskFormDrawer({
   const templates = useTemplates();
   const invalidate = useInvalidateWork();
   const full = task === undefined || isFullyEditable(task);
+  const candidates = useLinkCandidates(task);
+  // Runs after: new or backlog tasks. Then run: any task that can still gate (not settled/cancelled).
+  const canLinkBefore = task === undefined || task.state === "backlog";
+  const canLinkAfter = task !== undefined && !isFinal(task);
+  const after = s.afterTaskId === "" ? null : Number(s.afterTaskId);
+  // A new task linked to run after another is saved waiting; it starts when that one settles.
+  const queued = task === undefined && after !== null;
 
   const save = useMutation({
     mutationFn: (start: boolean): Promise<Task> => {
@@ -151,7 +165,8 @@ function TaskFormDrawer({
               notes: s.notes,
             }
           : { title: s.title.trim(), tags, notes: s.notes };
-        return api.updateTask(task.id, body);
+        if (canLinkBefore && after !== task.afterTaskId) body.afterTaskId = after;
+        return api.updateTask(task.id, body).then((saved) => relinkNext(task, saved));
       }
       const body: CreateTaskRequest = {
         projectId: Number(s.projectId),
@@ -165,7 +180,7 @@ function TaskFormDrawer({
         workspace: toWorkspace(s),
         tags,
         notes: s.notes,
-        ...(chainId === undefined ? { start } : { chainId }),
+        ...(after === null ? { start } : { afterTaskId: after }),
       };
       return api.createTask(body);
     },
@@ -175,6 +190,15 @@ function TaskFormDrawer({
       onClose();
     },
   });
+
+  // "Then run" edits the follower's link: unlink the old one, link the new one.
+  async function relinkNext(self: Task, saved: Task): Promise<Task> {
+    const next = s.nextTaskId === "" ? null : Number(s.nextTaskId);
+    if (!canLinkAfter || next === self.nextTaskId) return saved;
+    if (self.nextTaskId !== null) await api.updateTask(self.nextTaskId, { afterTaskId: null });
+    if (next !== null) await api.updateTask(next, { afterTaskId: self.id });
+    return saved;
+  }
 
   const missing = [
     s.projectId === "" && "project",
@@ -203,20 +227,20 @@ function TaskFormDrawer({
     });
   };
 
-  const title = task === undefined ? (chainId === undefined ? "New task" : "New chain step") : `Edit task #${task.id}`;
+  const title = task === undefined ? "New task" : `Edit task #${task.id}`;
   const blocked = missing.length > 0 || save.isPending;
 
   const onKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
     if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
-    if (!save.isPending) submit(true)();
+    if (!save.isPending) submit(!queued)();
   };
 
-  const primaryLabel = task !== undefined ? "Save" : chainId !== undefined ? "Add to chain" : "Save & start";
+  const primaryLabel = task !== undefined ? "Save" : queued ? `Save · runs after #${after}` : "Save & start";
 
   const footer = (
     <>
-      {task === undefined && chainId === undefined ? (
+      {task === undefined && !queued ? (
         <Button busy={save.isPending && save.variables === false} disabled={blocked} onClick={() => submit(false)()}>
           <span className="md:hidden">Backlog</span>
           <span className="hidden md:inline">Save to backlog</span>
@@ -227,9 +251,9 @@ function TaskFormDrawer({
       </span>
       <Button
         variant="primary"
-        busy={save.isPending && (task !== undefined || chainId !== undefined || save.variables === true)}
+        busy={save.isPending && (task !== undefined || queued || save.variables === true)}
         disabled={blocked}
-        onClick={() => submit(true)()}
+        onClick={() => submit(!queued)()}
       >
         {primaryLabel}
         <kbd className="hidden border border-current/40 px-1 font-mono text-[10.5px] leading-4 md:inline">Ctrl ↵</kbd>
@@ -325,6 +349,36 @@ function TaskFormDrawer({
               : "model and mode prefilled from your last task · pin a default in Settings"}
           </p>
         )}
+        {canLinkBefore || canLinkAfter ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {canLinkBefore ? (
+              <Field label="Runs after" hint={after === null ? "Optional. Starts when that task settles in T3." : "Saved waiting; starts when that task settles in T3."}>
+                {(id) => (
+                  <TaskPicker
+                    id={id}
+                    value={s.afterTaskId}
+                    onChange={(afterTaskId) => set({ afterTaskId })}
+                    options={candidates.before}
+                    none="Nothing (start on its own)"
+                  />
+                )}
+              </Field>
+            ) : null}
+            {canLinkAfter ? (
+              <Field label="Then run" hint="A backlog task that starts when this one settles.">
+                {(id) => (
+                  <TaskPicker
+                    id={id}
+                    value={s.nextTaskId}
+                    onChange={(nextTaskId) => set({ nextTaskId })}
+                    options={candidates.after}
+                    none="Nothing"
+                  />
+                )}
+              </Field>
+            ) : null}
+          </div>
+        ) : null}
         <Field
           label="Tags"
           hint={

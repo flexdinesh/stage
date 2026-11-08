@@ -16,9 +16,6 @@ export const TASK_STATES = [
 ] as const;
 export type TaskState = (typeof TASK_STATES)[number];
 
-export const CHAIN_STATES = ["idle", "running", "paused", "done"] as const;
-export type ChainState = (typeof CHAIN_STATES)[number];
-
 export const THREAD_STATUSES = [
   "idle",
   "preparing",
@@ -163,8 +160,10 @@ export interface Task {
   notes: string;
   state: TaskState;
   t3ThreadId: string | null;
-  chainId: number | null;
-  chainPosition: number | null;
+  /** Runs after this task (launches when it settles). */
+  afterTaskId: number | null;
+  /** The task that runs after this one. */
+  nextTaskId: number | null;
   launchAttempt: number;
   lastError: string | null;
   t3WebUrl: string | null;
@@ -188,6 +187,8 @@ export interface TaskEvent {
 export interface TaskDetail extends Task {
   events: TaskEvent[];
   thread: Thread | null;
+  /** Linked run order containing this task, head first (just this task when unlinked). */
+  sequence: Task[];
 }
 
 export interface TaskList {
@@ -206,7 +207,8 @@ export interface CreateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
-  chainId?: number | null;
+  /** Run after this task (start is then ignored). */
+  afterTaskId?: number | null;
   start?: boolean;
 }
 
@@ -222,6 +224,8 @@ export interface UpdateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
+  /** null unlinks. */
+  afterTaskId?: number | null;
 }
 
 export interface FollowupRequest {
@@ -236,7 +240,6 @@ export interface TaskListQuery {
   q?: string;
   from?: string;
   to?: string;
-  chain?: number;
   /** settledAt >= this (ISO date or datetime). */
   settledFrom?: string;
 }
@@ -290,32 +293,6 @@ export interface ThreadListQuery {
   subagents?: SubagentsFilter;
   limit?: number;
   offset?: number;
-}
-
-// ---- Chains ----
-
-export interface Chain {
-  id: number;
-  title: string;
-  state: ChainState;
-  currentTaskId: number | null;
-  steps: Task[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ChainList {
-  chains: Chain[];
-}
-
-export interface CreateChainRequest {
-  title: string;
-  steps?: number[];
-}
-
-export interface UpdateChainRequest {
-  title?: string;
-  steps?: number[];
 }
 
 // ---- Templates ----

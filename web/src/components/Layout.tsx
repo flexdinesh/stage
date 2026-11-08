@@ -4,7 +4,6 @@ import { useT3Status, useTasks } from "../api/queries.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import {
-  IconChains,
   IconHistory,
   IconMoon,
   IconMore,
@@ -13,6 +12,7 @@ import {
   IconSearch,
   IconStage,
   IconSun,
+  IconTemplates,
   IconThemeSystem,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
@@ -21,7 +21,6 @@ import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
 const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
-  { to: "/chains", label: "Chains" },
   { to: "/history", label: "History" },
   { to: "/templates", label: "Templates" },
   { to: "/settings", label: "Settings" },
@@ -30,8 +29,8 @@ const NAV = [
 const TABS = [
   { to: "/", label: "Stage", icon: <IconStage /> },
   { to: "/projects", label: "Projects", icon: <IconProjects /> },
-  { to: "/chains", label: "Chains", icon: <IconChains /> },
   { to: "/history", label: "History", icon: <IconHistory /> },
+  { to: "/templates", label: "Templates", icon: <IconTemplates /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {
@@ -112,7 +111,7 @@ function Shell() {
     return () => document.removeEventListener("keydown", onKey);
   }, [newTask]);
 
-  const moreActive = ["/templates", "/settings"].some((p) => location.pathname.startsWith(p));
+  const moreActive = ["/settings"].some((p) => location.pathname.startsWith(p));
 
   return (
     <div className="min-h-screen bg-bg text-fg">

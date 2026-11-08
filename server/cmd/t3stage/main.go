@@ -13,9 +13,9 @@ import (
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
 	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/t3-stage/server/internal/links"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 	"github.com/flexdinesh/t3-stage/server/internal/webui"
@@ -78,9 +78,9 @@ func run() error {
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
-	runner := chains.NewRunner(store, syncSvc, t3Client, logger)
+	runner := links.NewRunner(store, syncSvc, logger)
 	syncSvc.OnTransition = runner.OnTransition
-	// Before the poller, chain runner and HTTP server can touch launching tasks.
+	// Before the poller, link runner and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
 	wg.Add(2)
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
@@ -88,7 +88,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(api.Deps{
-		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Chains: runner, Logger: logger,
+		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Logger: logger,
 	}))
 	mux.Handle("/", webui.Handler())
 

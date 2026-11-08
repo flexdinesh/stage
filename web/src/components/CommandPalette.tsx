@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { api } from "../api/client.ts";
-import { keys, useChains, useInvalidateWork, useProjects, useTasks } from "../api/queries.ts";
+import { keys, useInvalidateWork, useProjects, useTasks } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { IconSearch } from "./icons.tsx";
-import { ChainStateBadge, TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
+import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
 import { Kbd, cx } from "./ui.tsx";
 
 interface Item {
@@ -23,7 +23,6 @@ interface Item {
 const PAGES: [string, string][] = [
   ["Dashboard", "/"],
   ["Projects", "/projects"],
-  ["Chains", "/chains"],
   ["History", "/history"],
   ["Templates", "/templates"],
   ["Settings", "/settings"],
@@ -65,7 +64,6 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const debounced = useDebounced(q, 200);
   const tasks = useTasks();
   const projects = useProjects();
-  const chains = useChains();
   const threads = useQuery({
     queryKey: [...keys.threads, "palette", debounced],
     queryFn: () => api.threads({ q: debounced, limit: 8, subagents: "exclude" }),
@@ -94,15 +92,6 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
-      for (const c of (chains.data?.chains ?? []).filter((ch) => has(ch.title, q)).slice(0, 4))
-        out.push({
-          key: `chain-${c.id}`,
-          group: "Chains",
-          label: c.title,
-          hint: `${c.steps.length} steps`,
-          badge: <ChainStateBadge state={c.state} />,
-          run: go(`/chains/${c.id}`),
-        });
       if (debounced === q)
         for (const th of (threads.data?.threads ?? []).filter((hit) => !taskThreadIds.has(hit.t3ThreadId)))
           out.push({
@@ -131,7 +120,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, debounced, tasks.data, projects.data, chains.data, threads.data, navigate, onClose, onNewTask, setTheme, sync]);
+  }, [q, debounced, tasks.data, projects.data, threads.data, navigate, onClose, onNewTask, setTheme, sync]);
 
 
   function onKey(e: KeyboardEvent) {
@@ -176,7 +165,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
               setActive(0);
             }}
             autoFocus
-            placeholder="Search tasks, projects, chains, threads"
+            placeholder="Search tasks, projects, threads"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"

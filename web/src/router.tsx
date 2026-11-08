@@ -1,7 +1,5 @@
 import { createBrowserRouter } from "react-router";
 import { Layout } from "./components/Layout.tsx";
-import { ChainDetailPage } from "./pages/ChainDetailPage.tsx";
-import { ChainsPage } from "./pages/ChainsPage.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { HistoryPage } from "./pages/HistoryPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
@@ -20,8 +18,6 @@ export const router = createBrowserRouter([
       { path: "projects", element: <ProjectsPage /> },
       { path: "projects/:id", element: <ProjectDetailPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
-      { path: "chains", element: <ChainsPage /> },
-      { path: "chains/:id", element: <ChainDetailPage /> },
       { path: "history", element: <HistoryPage /> },
       { path: "templates", element: <TemplatesPage /> },
       { path: "settings", element: <SettingsPage /> },

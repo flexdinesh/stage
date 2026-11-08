@@ -5,7 +5,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ## Conventions
 
 - Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
-- IDs: app ids (`id`, `projectId`, `taskId`, `chainId`) are JSON numbers. T3 ids (`t3ProjectId`, `t3ThreadId`) are strings.
+- IDs: app ids (`id`, `projectId`, `taskId`, `afterTaskId`, `nextTaskId`) are JSON numbers. T3 ids (`t3ProjectId`, `t3ThreadId`) are strings.
 - Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
@@ -26,7 +26,6 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | Name | Values |
 |---|---|
 | TaskState | `backlog` `launching` `running` `needs_input` `done` `settled` `failed` `interrupted` `cancelled` (`done`: the run finished, not yet settled in T3; T3 calls this `completed`) |
-| ChainState | `idle` `running` `paused` `done` |
 | ThreadStatus (T3) | `idle` `preparing` `queued` `starting` `running` `waiting` `completed` `interrupted` `failed` `cancelled` `rolled_back` |
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
 | InteractionMode | `default` `plan` (default `default`) |
@@ -166,8 +165,8 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
   "notes": "",
   "state": "running",
   "t3ThreadId": "thread_abc",
-  "chainId": null,
-  "chainPosition": null,
+  "afterTaskId": null,
+  "nextTaskId": null,
   "launchAttempt": 1,
   "lastError": null,
   "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
@@ -180,7 +179,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 }
 ```
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
-- `chainPosition` is 1-based.
+- `afterTaskId`: runs after that task (launches when it is settled or cancelled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 
@@ -193,7 +192,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 `TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`.
 
 ### `GET /api/tasks`
-Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`), `chain` (chain id).
+Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -211,25 +210,25 @@ Body `CreateTaskRequest`:
   "workspace": { "type": "root" },// optional
   "tags": [],                    // optional
   "notes": "",                   // optional
-  "chainId": null,               // optional: append as last step of chain
-  "start": false                 // optional: true = Save & start (ignored when chainId set)
+  "afterTaskId": null,           // optional: run after this task (link rules)
+  "start": false                 // optional: true = Save & start (ignored when afterTaskId set)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400. 404 project/chain. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+201 `Task` (state `backlog`, or `launching` when started). 400. 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes`.
-In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others).
+Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId`.
+In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
 200 `Task`. 404.
 
 ### `DELETE /api/tasks/:id`
-204. 409 when state is `launching|running|needs_input` (stop first). Removes it from its chain.
+204. 409 when state is `launching|running|needs_input` (stop first). Its follower is relinked to its predecessor (A→X→B becomes A→B; B unlinked when X had none).
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. A `backlog` task in a chain is started only by the chain (409); `failed|interrupted|cancelled` chain steps may be restarted. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor that is not settled or cancelled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one.
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
 
@@ -240,11 +239,11 @@ Body `{ "message": string, "mode"?: SendMode }`. Sends `t3_thread_send`. 409 whe
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
 
-Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). They then poll the thread once: the thread mirror is refreshed, but task state does not change for `backlog`, `cancelled` (skipped) or `settled` chain-step tasks (a settled standalone task may reopen).
+Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). They then poll the thread once: the thread mirror is refreshed, but task state does not change for `backlog`, `cancelled` or `settled` tasks that have a follower (a settled task without one may reopen).
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
-New `backlog` task with the same project, title, prompt, model config, workspace, tags, notes; not in a chain.
+New `backlog` task with the same project, title, prompt, model config, workspace, tags, notes; not linked.
 201 `Task`. 404.
 
 ## Threads (history)
@@ -284,52 +283,6 @@ New `backlog` task with the same project, title, prompt, model config, workspace
 ### `GET /api/threads`
 Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
-
-## Chains
-
-`Chain`:
-```json
-{
-  "id": 2,
-  "title": "Refactor then test",
-  "state": "running",
-  "currentTaskId": 7,
-  "steps": [/* Task, ordered by chainPosition */],
-  "createdAt": "2026-11-08T10:00:00Z",
-  "updatedAt": "2026-11-08T10:00:00Z"
-}
-```
-`currentTaskId`: see chain rules; null when none.
-
-### `GET /api/chains`
-200 `{ "chains": Chain[] }` ordered by `updatedAt` desc.
-
-### `POST /api/chains`
-Body `{ "title": string, "steps"?: number[] }` (`steps` = existing `backlog` task ids not in another chain, in order).
-201 `Chain` (state `idle`). 400. 404 task. 409 task not eligible.
-
-### `GET /api/chains/:id`
-200 `Chain`. 404.
-
-### `PATCH /api/chains/:id`
-Body `{ "title"?: string, "steps"?: number[] }`. `steps` is the full ordered list of task ids: add (must be `backlog`, not in another chain), remove (detached, `chainId` null), reorder. Non-`backlog` steps must stay in the list, keep their relative order and come before every `backlog` step (409 otherwise).
-200 `Chain`. 404. 409.
-
-### `POST /api/chains/:id/start`
-`idle → running`; runner launches the current step. 409 if not `idle` or no steps.
-200 `Chain`.
-
-### `POST /api/chains/:id/pause`
-`running → paused`. Does not stop an active thread; only prevents launching the next step. 409 otherwise.
-200 `Chain`.
-
-### `POST /api/chains/:id/resume`
-`paused → running`. 409 if not `paused`, or if the current step is `failed|interrupted` (restart it with `POST /api/tasks/:id/start` or skip it).
-200 `Chain`.
-
-### `POST /api/chains/:id/skip`
-Skip the current step: set it `cancelled` (event detail `"skipped"`), then interrupt its thread if it was active (best effort: an interrupt failure is logged, not returned; the step stays `cancelled`). Chain state unchanged (a paused chain stays paused; a running chain advances). 409 when no current step.
-200 `Chain`.
 
 ## Templates
 
@@ -407,20 +360,14 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 | 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
 | 9 | otherwise (idle, no runs) | unchanged (keep current state) |
 
-Applied only to tasks with a thread whose state is not `backlog` or `cancelled`, and not to `settled` chain steps (the chain has moved past them). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
+Applied only to tasks with a thread whose state is not `backlog` or `cancelled`, and not to `settled` tasks with a follower (it has been released). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 
-Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final . A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
 
-## Chain rules, pure function
+## Link rules
 
-- Steps = chain tasks ordered by `chainPosition`.
-- A step is passed when its state is `settled` or `cancelled`.
-- Current step (`currentTaskId`) = first step not passed; none → chain becomes `done`.
-- Runner, chain `running`, by current step state:
-  - `backlog` → launch it (new thread).
-  - `launching|running|needs_input|done` → wait (a step is done only when settled in T3).
-  - `failed|interrupted` → set chain `paused`.
-- A step transition into `failed|interrupted|cancelled` (other than via skip) while the chain is `running` sets the chain `paused`.
-- A `paused` chain with no current step left (e.g. its last step skipped) becomes `done`.
-- Adding a not-yet-passed step to a `done` chain (`PATCH` steps or `POST /api/tasks` with `chainId`) sets it back to `idle`.
-- Chains may span projects.
+- A task runs after at most one task (`afterTaskId`) and has at most one follower (`nextTaskId`): a run order is a linear list. Links may span projects.
+- Linking (create or `PATCH afterTaskId`), 409 otherwise: the task is `backlog`; the predecessor exists (404), is not the task, is not `settled|cancelled`, has no other follower, and is not already after the task (no loops).
+- A predecessor is passed when it is `settled` or `cancelled`. The link runner launches every `backlog` task whose predecessor has passed: on each transition into `settled|cancelled`, at startup and every 10s. The link stays (history).
+- A `failed|interrupted` (or still running / `done`) predecessor keeps its follower waiting. Restart the predecessor, unlink the follower, or "Start now" on it.
+- `GET /api/tasks/:id` returns `sequence`: the whole run order containing the task, head first.

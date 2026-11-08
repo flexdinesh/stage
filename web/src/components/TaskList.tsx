@@ -5,7 +5,7 @@ import { api } from "../api/client.ts";
 import { useInvalidateWork } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
 import { dateTime, modelText, relativeTime } from "../lib/format.ts";
-import { canStart } from "../lib/tasks.ts";
+import { canStart, isWaiting } from "../lib/tasks.ts";
 import { IconChainLink, IconExternal } from "./icons.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Button, Chip, ErrorText, ExternalButton, Muted, cx } from "./ui.tsx";
@@ -34,20 +34,22 @@ export function TaskRows({ tasks, emptyText = "No tasks." }: { tasks: Task[]; em
   );
 }
 
-/** `allowBacklogStart` false: hide Start for backlog (chain steps are launched by the chain runner). */
-export function TaskRow({
-  task,
-  extra,
-  allowBacklogStart = true,
-}: {
-  task: Task;
-  extra?: ReactNode;
-  allowBacklogStart?: boolean;
-}) {
+/** A link chip: "after #X" while waiting on a predecessor, else "then #Y" when something runs after it. */
+function linkChip(task: Task): { to: number; label: string; title: string } | null {
+  if (isWaiting(task) && task.afterTaskId !== null)
+    return { to: task.afterTaskId, label: `after #${task.afterTaskId}`, title: "Starts when this task settles" };
+  if (task.nextTaskId !== null)
+    return { to: task.nextTaskId, label: `then #${task.nextTaskId}`, title: "Runs next when this task settles" };
+  return null;
+}
+
+/** Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). */
+export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
-  const showStart = canStart(task) && (allowBacklogStart || task.state !== "backlog");
+  const showStart = canStart(task) && !isWaiting(task);
+  const chip = linkChip(task);
   const needsInput = task.state === "needs_input";
   const hasActions = showStart || task.t3WebUrl !== null || extra !== undefined;
 
@@ -74,13 +76,14 @@ export function TaskRow({
           <span title={dateTime(since)} className="tabular">
             {relativeTime(since)}
           </span>
-          {task.chainId === null ? null : (
+          {chip === null ? null : (
             <Link
-              to={`/chains/${task.chainId}`}
+              to={`/tasks/${chip.to}`}
+              title={chip.title}
               className="inline-flex items-center gap-1 hover:text-fg hover:underline md:hidden"
             >
               <IconChainLink />
-              chain
+              {chip.label}
             </Link>
           )}
           {task.tags.map((tag) => (
@@ -90,11 +93,11 @@ export function TaskRow({
       </div>
 
       <div className="hidden md:order-3 md:block">
-        {task.chainId === null ? null : (
-          <Link to={`/chains/${task.chainId}`} title="Open chain" className="hover:opacity-80">
+        {chip === null ? null : (
+          <Link to={`/tasks/${chip.to}`} title={chip.title} className="hover:opacity-80">
             <Chip tone="plain">
               <IconChainLink />
-              chain
+              {chip.label}
             </Chip>
           </Link>
         )}

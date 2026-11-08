@@ -2,11 +2,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
-import { useChain, useInvalidateWork, useTask } from "../api/queries.ts";
+import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { IconArrowRight, IconExternal } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
+import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -27,7 +28,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
-import { canStart, canStop, isActive } from "../lib/tasks.ts";
+import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -67,19 +68,6 @@ function workspaceChip(task: TaskDetail): string {
 
 const linkClass = "text-fg underline-offset-2 hover:underline";
 
-function ChainMeta({ chainId, position }: { chainId: number; position: number | null }) {
-  const chain = useChain(chainId);
-  return (
-    <>
-      {" · chain "}
-      <Link to={`/chains/${chainId}`} className={linkClass}>
-        {chain.data?.title ?? `#${chainId}`}
-      </Link>
-      {position === null ? null : ` step ${position}`}
-    </>
-  );
-}
-
 function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
@@ -107,6 +95,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const waiting = task.state === "needs_input" || pending > 0;
   const hasThread = task.t3ThreadId !== null;
   const startable = canStart(task);
+  // Waiting on a predecessor: Start now unlinks it, so it takes a second click to confirm.
+  const blocked = isWaiting(task);
+  const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
   const webUrl = task.t3WebUrl;
   const phoneBar = webUrl !== null || hasThread || stoppable;
@@ -141,7 +132,15 @@ function TaskBody({ task }: { task: TaskDetail }) {
               {task.projectTitle}
             </Link>
             {` / task ${task.id}`}
-            {task.chainId === null ? null : <ChainMeta chainId={task.chainId} position={task.chainPosition} />}
+            {stepText(task) === null ? null : ` · ${stepText(task)}`}
+            {task.afterTaskId === null || !isWaiting(task) ? null : (
+              <>
+                {" · waits for "}
+                <Link to={`/tasks/${task.afterTaskId}`} className={linkClass}>
+                  #{task.afterTaskId}
+                </Link>
+              </>
+            )}
           </>
         }
       />
@@ -164,7 +163,17 @@ function TaskBody({ task }: { task: TaskDetail }) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          {startable ? (
+          {startable && blocked ? (
+            <Button
+              variant={armed ? "primary" : "secondary"}
+              busy={start.isPending}
+              title={`Unlinks it from #${task.afterTaskId ?? ""} and starts it now`}
+              onClick={() => (armed ? start.mutate() : setArmed(true))}
+              onBlur={() => setArmed(false)}
+            >
+              {armed ? `Confirm: unlink from #${task.afterTaskId ?? ""} and start` : "Start now"}
+            </Button>
+          ) : startable ? (
             <Button variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
               {task.state === "backlog" ? "Start" : "Restart"}
             </Button>
@@ -212,6 +221,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <TimelinePanel events={task.events} />
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
+            <SequencePanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
             <NotesPanel task={task} />

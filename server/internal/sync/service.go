@@ -16,11 +16,10 @@ import (
 
 // Change is a task state transition the service applied.
 type Change struct {
-	TaskID  int64
-	ChainID *int64
-	From    db.TaskState
-	To      db.TaskState
-	Detail  string
+	TaskID int64
+	From   db.TaskState
+	To     db.TaskState
+	Detail string
 }
 
 // Result is a full sync summary (POST /api/sync).
@@ -45,7 +44,7 @@ type Service struct {
 	t3    t3.Client
 	log   *slog.Logger
 
-	// OnTransition is called after every applied task transition (chain
+	// OnTransition is called after every applied task transition (link
 	// runner hook). Must not block for long.
 	OnTransition func(ctx context.Context, c Change)
 
@@ -114,7 +113,7 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
-// Run it once at startup before the poller, chain runner and HTTP server.
+// Run it once at startup before the poller, link runner and HTTP server.
 func (s *Service) RecoverLaunching(ctx context.Context) {
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}})
 	if err != nil {
@@ -138,7 +137,7 @@ func (s *Service) transition(ctx context.Context, t db.Transition) (db.Transitio
 	}
 	s.log.Info("task transition", "task", t.TaskID, "from", res.From, "to", t.To, "detail", t.Detail)
 	if s.OnTransition != nil {
-		s.OnTransition(ctx, Change{TaskID: t.TaskID, ChainID: res.ChainID, From: res.From, To: t.To, Detail: t.Detail})
+		s.OnTransition(ctx, Change{TaskID: t.TaskID, From: res.From, To: t.To, Detail: t.Detail})
 	}
 	return res, nil
 }
@@ -257,14 +256,14 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 }
 
 // frozen: the thread no longer drives the task state. backlog and cancelled
-// (skipped / rolled back) tasks, and settled chain steps (the chain has
-// moved past them). Settled standalone tasks may reopen.
+// (rolled back) tasks, and settled tasks with a follower (it has been
+// released). Other settled tasks may reopen.
 func frozen(t db.Task) bool {
 	switch t.State {
 	case db.StateBacklog, db.StateCancelled:
 		return true
 	case db.StateSettled:
-		return t.ChainID != nil
+		return t.NextTaskID != nil
 	}
 	return false
 }
@@ -303,14 +302,14 @@ func (s *Service) Catalog(ctx context.Context) (*CatalogSnapshot, error) {
 
 var launchable = []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}
 
-// StartTask is a manual start (POST /api/tasks/:id/start): LaunchTask, but
-// a backlog chain step is refused (409); only the chain runner launches
-// those. failed/interrupted/cancelled chain steps may be restarted.
+// StartTask is a manual start (POST /api/tasks/:id/start), "Start now": a
+// backlog task still waiting on an unfinished predecessor is unlinked from
+// it, then launched. Its own follower stays linked.
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, true)
 }
 
-// LaunchTask starts a task in T3 (chain runner path; no chain guard).
+// LaunchTask starts a task in T3 (link runner path; keeps links).
 func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, false)
 }
@@ -321,22 +320,19 @@ func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
 // task.
-func (s *Service) launch(ctx context.Context, id int64, standalone bool) (db.Task, error) {
+func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, error) {
 	// The launch must finish (or fail) even if the HTTP client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 
 	res, err := s.transition(ctx, db.Transition{
 		TaskID: id, From: launchable, To: db.StateLaunching, Detail: "launch requested", BeginAttempt: true,
-		StandaloneOnly: standalone,
+		UnlinkWaiting: manual,
 	})
 	if err != nil {
 		return db.Task{}, err
 	}
 	if !res.Changed {
-		if res.From == db.StateBacklog && res.ChainID != nil {
-			return db.Task{}, db.Conflict("task is a backlog step of chain %d; the chain launches it", *res.ChainID)
-		}
 		return db.Task{}, db.Conflict("task is %s; start is allowed from backlog, failed, interrupted or cancelled", res.From)
 	}
 	task, err := s.store.GetTask(ctx, id)

@@ -1,8 +1,5 @@
 import type {
   Catalog,
-  Chain,
-  ChainList,
-  CreateChainRequest,
   CreateProjectRequest,
   CreateTaskRequest,
   CreateTemplateRequest,
@@ -25,7 +22,6 @@ import type {
   TemplateList,
   ThreadList,
   ThreadListQuery,
-  UpdateChainRequest,
   UpdateProjectRequest,
   UpdateTaskRequest,
   UpdateTemplateRequest,
@@ -112,7 +108,7 @@ export const api = {
 
   tasks: (q: TaskListQuery = {}) =>
     apiFetch<TaskList>(
-      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, chain: q.chain, settledFrom: q.settledFrom })}`,
+      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom })}`,
     ),
   task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
   createTask: (body: CreateTaskRequest) => apiFetch<Task>("/tasks", post(body)),
@@ -140,11 +136,6 @@ export const api = {
       })}`,
     ),
 
-  chains: () => apiFetch<ChainList>("/chains"),
-  chain: (id: number) => apiFetch<Chain>(`/chains/${id}`),
-  createChain: (body: CreateChainRequest) => apiFetch<Chain>("/chains", post(body)),
-  updateChain: (id: number, body: UpdateChainRequest) => apiFetch<Chain>(`/chains/${id}`, patch(body)),
-  chainAction: (id: number, action: ChainAction) => apiFetch<Chain>(`/chains/${id}/${action}`, post()),
 
   templates: () => apiFetch<TemplateList>("/templates"),
   createTemplate: (body: CreateTemplateRequest) => apiFetch<Template>("/templates", post(body)),
@@ -158,4 +149,3 @@ export const api = {
 };
 
 export type ArchivedFilter = "true" | "false" | "all";
-export type ChainAction = "start" | "pause" | "resume" | "skip";

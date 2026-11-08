@@ -8,7 +8,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Tasks**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, notes. Save to backlog or start right away.
 - **Live status**: backlog → running → needs input → done → settled (or failed / interrupted). Polled from T3 every 5s.
 - **Task actions**: start, follow-up, stop, duplicate, open in T3.
-- **Chains**: ordered tasks (can span projects). The next step starts when the previous thread is settled in T3. A failure pauses the chain. Controls: start, pause, resume, skip, reorder.
+- **Run order**: link a task to run after another (while creating, viewing or editing it; can span projects). It starts when that thread is settled in T3; a failed predecessor keeps it waiting. Start now unlinks it and starts it immediately.
 - **Dashboard**: needs-input alert, plus running, done (awaiting settle), backlog and settled (last 7 days) across projects.
 - **History**: every T3 thread, including ones started outside this app. Filter by time window, project, status, provider and source; shows counts per project and per day.
 - **Templates**: reusable prompt + model presets.

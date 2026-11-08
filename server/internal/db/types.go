@@ -48,16 +48,6 @@ func (s TaskState) Active() bool {
 	return false
 }
 
-// ChainState values.
-type ChainState string
-
-const (
-	ChainIdle    ChainState = "idle"
-	ChainRunning ChainState = "running"
-	ChainPaused  ChainState = "paused"
-	ChainDone    ChainState = "done"
-)
-
 const (
 	SourceApp = "app"
 	SourceT3  = "t3"
@@ -116,8 +106,8 @@ type Task struct {
 	Notes              string           `json:"notes"`
 	State              TaskState        `json:"state"`
 	T3ThreadID         *string          `json:"t3ThreadId"`
-	ChainID            *int64           `json:"chainId"`
-	ChainPosition      *int             `json:"chainPosition"`
+	AfterTaskID        *int64           `json:"afterTaskId"` // runs after this task (launches when it settles)
+	NextTaskID         *int64           `json:"nextTaskId"`  // the task that runs after this one
 	LaunchAttempt      int              `json:"launchAttempt"`
 	LastError          *string          `json:"lastError"`
 	LaunchedAt         *time.Time       `json:"launchedAt"`
@@ -164,15 +154,6 @@ type Thread struct {
 	UpdatedAt           time.Time  `json:"updatedAt"`
 	SyncedAt            time.Time  `json:"syncedAt"`
 	Link                *string    `json:"-"`
-}
-
-type Chain struct {
-	ID        int64      `json:"id"`
-	Title     string     `json:"title"`
-	State     ChainState `json:"state"`
-	Steps     []Task     `json:"steps"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 type Template struct {

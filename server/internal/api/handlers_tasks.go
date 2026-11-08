@@ -17,9 +17,6 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
 		return err
 	}
-	if f.ChainID, err = queryInt64(q, "chain"); err != nil {
-		return err
-	}
 	f.States = multi(q, "state")
 	for _, st := range f.States {
 		if err := validEnum("state", st, taskStateStrings()); err != nil {
@@ -57,7 +54,7 @@ type createTaskReq struct {
 	Workspace          *db.Workspace    `json:"workspace"`
 	Tags               []string         `json:"tags"`
 	Notes              *string          `json:"notes"`
-	ChainID            *int64           `json:"chainId"`
+	AfterTaskID        *int64           `json:"afterTaskId"`
 	Start              bool             `json:"start"`
 }
 
@@ -71,7 +68,7 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		InteractionMode:    "default",
 		Workspace:          db.Workspace{Type: "root"},
 		Tags:               cleanTags(req.Tags),
-		ChainID:            req.ChainID,
+		AfterTaskID:        req.AfterTaskID,
 	}
 	if req.ProjectID == nil {
 		return in, db.Invalid("projectId is required")
@@ -132,7 +129,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		s.log.Warn("record last-used model", "task", task.ID, "err", err)
 	}
-	if req.Start && req.ChainID == nil {
+	if req.Start && req.AfterTaskID == nil {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
@@ -160,7 +157,11 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	env := s.envID(ctx)
-	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events}
+	seq, err := s.Store.Sequence(ctx, id)
+	if err != nil {
+		return err
+	}
+	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
 	if task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		switch {

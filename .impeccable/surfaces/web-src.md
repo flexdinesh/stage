@@ -6,7 +6,7 @@ related_targets: []
 ---
 
 ## Scope
-Whole t3-stage web app (web/src): Dashboard, Projects, Project detail, Task detail, Chains, Chain detail, History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
+Whole t3-stage web app (web/src): Dashboard, Projects, Project detail, Task detail (with Run order panel), History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
 
 ## Audience and task
 Owner, on laptop and phone, queueing T3 tasks, catching needs-input, watching running/completed work, browsing history.
@@ -20,7 +20,7 @@ FORM: User-pinned Workbench direction (px0/zed inspired), first of three present
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 ## Signature interaction
-The stat strip is the filter: clicking a count isolates that state's group (URL `?state=`); the Ctrl K palette reaches any task, thread, project or chain by title.
+The stat strip is the filter: clicking a count isolates that state's group (URL `?state=`); the Ctrl K palette reaches any task, thread, or project by title.
 
 ## Motion grammar
 150-200ms color/opacity transitions on state change only; no entrance choreography.

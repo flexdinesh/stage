@@ -3,7 +3,6 @@ package api
 import (
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
@@ -23,18 +22,9 @@ type threadJSON struct {
 
 type taskDetailJSON struct {
 	taskJSON
-	Events []db.TaskEvent `json:"events"`
-	Thread *threadJSON    `json:"thread"`
-}
-
-type chainJSON struct {
-	ID            int64         `json:"id"`
-	Title         string        `json:"title"`
-	State         db.ChainState `json:"state"`
-	CurrentTaskID *int64        `json:"currentTaskId"`
-	Steps         []taskJSON    `json:"steps"`
-	CreatedAt     time.Time     `json:"createdAt"`
-	UpdatedAt     time.Time     `json:"updatedAt"`
+	Events   []db.TaskEvent `json:"events"`
+	Thread   *threadJSON    `json:"thread"`
+	Sequence []taskJSON     `json:"sequence"` // linked run order containing the task (head first)
 }
 
 // webURL = T3_PUBLIC_URL/<environmentId>/<threadId> (path-escaped: provider
@@ -69,13 +59,6 @@ func (s *server) tasks(env string, ts []db.Task) []taskJSON {
 func (s *server) thread(env string, t db.Thread) threadJSON {
 	id := t.T3ThreadID
 	return threadJSON{Thread: t, T3WebURL: s.webURL(env, &id), T3AppURL: t.Link}
-}
-
-func (s *server) chain(env string, c db.Chain) chainJSON {
-	return chainJSON{
-		ID: c.ID, Title: c.Title, State: c.State, CurrentTaskID: chains.CurrentTaskID(c.Steps),
-		Steps: s.tasks(env, c.Steps), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
-	}
 }
 
 type catalogOptionJSON struct {
