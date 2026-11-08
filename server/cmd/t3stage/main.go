@@ -89,11 +89,12 @@ func run() error {
 	syncSvc.OnThreadChange = notifier.OnThreadChange
 	// Before the poller, link runner and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
-	wg.Add(4)
+	wg.Add(5)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	go func() { defer wg.Done(); runner.Run(ctx) }()
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
+	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger) }()
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(api.Deps{
@@ -130,6 +131,27 @@ func sweepStagedAttachments(ctx context.Context, store *db.Store, log *slog.Logg
 			log.Warn("sweep staged attachments", "err", err)
 		} else if n > 0 {
 			log.Info("swept staged attachments", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// notificationRetention: inbox entries older than this are pruned hourly.
+const notificationRetention = 30 * 24 * time.Hour
+
+// pruneNotifications hourly deletes inbox entries past notificationRetention.
+func pruneNotifications(ctx context.Context, store *db.Store, log *slog.Logger) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if n, err := store.PruneNotifications(ctx, notificationRetention); err != nil && ctx.Err() == nil {
+			log.Warn("prune notifications", "err", err)
+		} else if n > 0 {
+			log.Info("pruned notifications", "count", n)
 		}
 		select {
 		case <-ctx.Done():

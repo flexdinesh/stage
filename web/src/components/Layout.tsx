@@ -16,6 +16,7 @@ import {
   IconThemeSystem,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
+import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh } from "./Notifications.tsx";
 import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
 
 const NAV = [
@@ -95,7 +96,10 @@ function useAppBadge(count: number | undefined) {
 function Shell() {
   const badge = useBadge().data?.needsInput;
   useAppBadge(badge);
+  usePushRefresh();
   const needsInput = badge ?? 0;
+  const [inbox, setInbox] = useState(false);
+  const openInbox = useCallback(() => setInbox(true), []);
   const newTask = useNewTask();
   const { theme, setTheme } = useTheme();
   const [palette, setPalette] = useState(false);
@@ -158,6 +162,7 @@ function Shell() {
             <span className="hidden lg:inline">Search tasks, threads</span>
             <Kbd>Ctrl K</Kbd>
           </button>
+          <NotificationsBell onOpen={openInbox} />
           <ConnectionChip />
           <ThemeButton />
           <Button variant="primary" onClick={() => newTask()}>
@@ -172,6 +177,7 @@ function Shell() {
         <Mark />
         <div className="ml-auto flex items-center gap-2">
           <ConnectionChip compact />
+          <NotificationsBell onOpen={openInbox} compact />
           <Button variant="secondary" small onClick={() => setPalette(true)} aria-label="Search" className="h-8 w-8 px-0">
             <IconSearch size={15} />
           </Button>
@@ -252,6 +258,8 @@ function Shell() {
           </div>
         </Drawer>
       ) : null}
+
+      {inbox ? <NotificationsDrawer onClose={() => setInbox(false)} /> : <NotificationToasts onOpenInbox={openInbox} />}
 
       {palette ? <CommandPalette onClose={closePalette} onNewTask={openNewTask} /> : null}
     </div>

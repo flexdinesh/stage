@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, type ArchivedFilter } from "./client.ts";
 import type { StatsQuery, TaskListQuery, ThreadListQuery } from "./types.ts";
 
@@ -13,6 +13,7 @@ export const keys = {
   stats: ["stats"],
   preferences: ["preferences"],
   badge: ["badge"],
+  notifications: ["notifications"],
 } as const;
 
 export const useT3Status = () => useQuery({ queryKey: keys.t3Status, queryFn: api.t3Status });
@@ -41,6 +42,22 @@ export const useNeedsInputThreads = (project?: number) =>
 
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => useQuery({ queryKey: keys.badge, queryFn: api.badge });
+
+export const latestNotificationsKey = [...keys.notifications, "latest"];
+
+/** Latest notifications + unread count (bell, toasts). Polled. */
+export const useNotifications = () =>
+  useQuery({ queryKey: latestNotificationsKey, queryFn: () => api.notifications({ limit: 50 }) });
+
+/** Notifications drawer: newest first, older pages on demand. */
+export const useNotificationInbox = () =>
+  useInfiniteQuery({
+    queryKey: [...keys.notifications, "inbox"],
+    // pageParam 0 = newest page.
+    queryFn: ({ pageParam }) => api.notifications({ limit: 50, before: pageParam === 0 ? undefined : pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextBefore ?? undefined,
+  });
 
 export const useTemplates = () => useQuery({ queryKey: keys.templates, queryFn: api.templates });
 

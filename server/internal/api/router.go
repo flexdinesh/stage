@@ -94,6 +94,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/push/subscriptions", s.unsubscribePush)
 	h("POST /api/push/test", s.testPush)
 	h("GET /api/badge", s.badge)
+	h("GET /api/notifications", s.listNotifications)
+	h("POST /api/notifications/read", s.readNotifications)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

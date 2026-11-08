@@ -1,4 +1,5 @@
 // Service worker: shows Web Push notifications (docs/api.md "Push payload") and opens their url on click.
+// While an app window is focused (Chromium only) the in-app toast replaces the system notification.
 // No offline caching. Built as a standalone entry at /sw.js; must import nothing.
 
 // tsconfig.sw.json forces module detection, so this shadows the lib's global `self` without an export.
@@ -65,11 +66,36 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+/**
+ * Chromium lets a push skip the notification while a window is focused. Safari
+ * and Firefox may revoke the subscription for silent pushes, so they always show it.
+ */
+function maySkipNotification(): boolean {
+  const ua = self.navigator.userAgent;
+  return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
+}
+
+async function onPush(p: Payload): Promise<void> {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  // Client.postMessage takes no targetOrigin (same-origin clients only).
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin
+  for (const w of windows) w.postMessage({ type: "push" });
+  const focused = windows.some((w) => w.focused && w.visibilityState === "visible");
+  const tasks: Promise<void>[] = [updateBadge(p.badge)];
+  if (!(focused && maySkipNotification())) {
+    // NotificationOptions lacks renotify in the DOM lib; it makes a replaced (same tag) notification alert again.
+    const options: NotificationOptions & { renotify?: boolean } = { body: p.body, icon: ICON, badge: ICON, data: { url: p.url } };
+    if (p.tag !== null) {
+      options.tag = p.tag;
+      options.renotify = true;
+    }
+    tasks.push(self.registration.showNotification(p.title, options));
+  }
+  await Promise.all(tasks);
+}
+
 self.addEventListener("push", (event) => {
-  const p = parsePayload(event.data);
-  const options: NotificationOptions = { body: p.body, icon: ICON, badge: ICON, data: { url: p.url } };
-  if (p.tag !== null) options.tag = p.tag;
-  event.waitUntil(Promise.all([self.registration.showNotification(p.title, options), updateBadge(p.badge)]));
+  event.waitUntil(onPush(parsePayload(event.data)));
 });
 
 function clickUrl(data: unknown): string {
