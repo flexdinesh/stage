@@ -1,12 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { api, toQuery } from "../api/client.ts";
 import { useInvalidateWork } from "../api/queries.ts";
 import type { Task, Thread } from "../api/types.ts";
 import { dateTime, modelText, relativeTime } from "../lib/format.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
-import { IconArrowRight, IconChainLink, IconChevronDown } from "./icons.tsx";
+import { IconChainLink } from "./icons.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
@@ -20,126 +20,53 @@ export function TaskList({ tasks, emptyText = "No tasks." }: { tasks: Task[]; em
   );
 }
 
-/** Hairline-separated rows with no outer border (for `Panel flush`). Empty renders a padded hint line. */
-export function TaskRows({ tasks, emptyText = "No tasks." }: { tasks: Task[]; emptyText?: string }) {
+/**
+ * Hairline-separated rows with no outer border (for `Panel flush`). Empty renders a padded hint line.
+ * `showProject` gives the project its own column (laptop) or line above the title (phone).
+ */
+export function TaskRows({
+  tasks,
+  emptyText = "No tasks.",
+  showProject = false,
+}: {
+  tasks: Task[];
+  emptyText?: string;
+  showProject?: boolean;
+}) {
   if (tasks.length === 0) return <p className="px-3 py-2.5 text-[12.5px] text-muted">{emptyText}</p>;
   return (
     <ul>
       {tasks.map((t) => (
         <li key={t.id} className="border-b border-line last:border-b-0">
-          <TaskRow task={t} />
+          <TaskRow task={t} showProject={showProject} />
         </li>
       ))}
     </ul>
   );
 }
 
-interface ProjectGroup {
-  key: string;
-  title: string;
-  projectId: number | null;
-  tasks: Task[];
-  threads: Thread[];
-}
-
-/** Tasks and external threads bucketed by project, in first-appearance order (tasks first). */
-function groupByProject(tasks: Task[], threads: Thread[]): ProjectGroup[] {
-  const groups = new Map<string, ProjectGroup>();
-  const bucket = (key: string, title: string, projectId: number | null) => {
-    const found = groups.get(key);
-    if (found !== undefined) return found;
-    const g: ProjectGroup = { key, title, projectId, tasks: [], threads: [] };
-    groups.set(key, g);
-    return g;
-  };
-  for (const t of tasks) bucket(`p${t.projectId}`, t.projectTitle, t.projectId).tasks.push(t);
-  for (const t of threads) {
-    const g =
-      t.projectId === null
-        ? bucket(`t3:${t.t3ProjectId}`, t.projectTitle ?? t.t3ProjectId, null)
-        : bucket(`p${t.projectId}`, t.projectTitle ?? t.t3ProjectId, t.projectId);
-    g.threads.push(t);
-  }
-  return [...groups.values()];
-}
-
-/**
- * Rows split under one collapsible sub-header per project (for `Panel flush`). `collapsed` holds keys
- * `${scope}:${project key}`; `scope` is the state group so each panel collapses independently.
- */
-export function ProjectGroupedRows({
-  scope,
-  tasks,
-  threads = [],
-  emptyText,
-  isCollapsed,
-  onToggle,
-}: {
-  scope: string;
-  tasks: Task[];
-  threads?: Thread[];
-  emptyText: string;
-  isCollapsed: (key: string) => boolean;
-  onToggle: (key: string) => void;
-}) {
-  const id = useId();
-  const groups = groupByProject(tasks, threads);
-  if (groups.length === 0) return <p className="px-3 py-2.5 text-[12.5px] text-muted">{emptyText}</p>;
+/** Project name in Ink Text; links to the project when it is mirrored. Full name in `title` for truncation. */
+function ProjectName({ projectId, title, className }: { projectId: number | null; title: string; className: string }) {
+  const cls = cx("font-mono text-[12px] font-medium text-fg", className);
+  if (projectId === null)
+    return (
+      <span title={title} className={cls}>
+        {title}
+      </span>
+    );
   return (
-    <ul>
-      {groups.map((g) => {
-        const key = `${scope}:${g.key}`;
-        const collapsed = isCollapsed(key);
-        const bodyId = `${id}-${g.key}`;
-        const count = g.tasks.length + g.threads.length;
-        return (
-          <li key={g.key} className="border-b border-line last:border-b-0">
-            <div
-              className={cx(
-                "flex h-7 items-center gap-2 bg-[color-mix(in_srgb,var(--panel)_55%,var(--surface))] pr-3",
-                !collapsed && "border-b border-line",
-              )}
-            >
-              <button
-                type="button"
-                aria-expanded={!collapsed}
-                aria-controls={bodyId}
-                onClick={() => onToggle(key)}
-                className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 text-left font-mono text-[11.5px] text-fg transition-colors duration-150 hover:bg-panel"
-              >
-                <span
-                  aria-hidden
-                  className={cx("inline-flex text-muted transition-transform duration-150", collapsed && "-rotate-90")}
-                >
-                  <IconChevronDown size={12} />
-                </span>
-                <span className="truncate">{g.title}</span>
-                <span className="tabular text-[11px] text-muted">{count}</span>
-              </button>
-              {g.projectId === null ? null : (
-                <Link
-                  to={`/projects/${g.projectId}`}
-                  className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted hover:text-fg hover:underline"
-                >
-                  project
-                  <IconArrowRight size={12} />
-                </Link>
-              )}
-            </div>
-            {collapsed ? null : (
-              <div id={bodyId}>
-                {g.tasks.length === 0 ? null : (
-                  <div className={cx(g.threads.length > 0 && "border-b border-line")}>
-                    <TaskRows tasks={g.tasks} />
-                  </div>
-                )}
-                {g.threads.length === 0 ? null : <ExternalThreadRows threads={g.threads} />}
-              </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+    <Link to={`/projects/${projectId}`} title={title} className={cx(cls, "hover:underline")}>
+      {title}
+    </Link>
+  );
+}
+
+/** Laptop-only project column cell; sits between the state chip and the title. */
+function ProjectCell({ projectId, title }: { projectId: number | null; title: string }) {
+  return (
+    <div className="hidden min-w-0 md:order-2 md:block">
+      <ProjectName projectId={projectId} title={title} className="block truncate" />
+    </div>
   );
 }
 
@@ -153,7 +80,7 @@ function linkChip(task: Task): { to: number; label: string; title: string } | nu
 }
 
 /** Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). */
-export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
+export function TaskRow({ task, extra, showProject = false }: { task: Task; extra?: ReactNode; showProject?: boolean }) {
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
@@ -161,11 +88,16 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
   const chip = linkChip(task);
   const needsInput = task.state === "needs_input";
   const hasActions = showStart || task.t3DeepLink !== null || extra !== undefined;
+  // Full-width lines under the title start at the title column.
+  const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
   return (
     <div
       className={cx(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)_auto_auto] md:gap-x-3.5 md:py-2",
+        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
+        showProject
+          ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]"
+          : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
         needsInput ? "border-l-need" : "border-l-transparent",
       )}
     >
@@ -173,14 +105,21 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
         <TaskStateBadge state={task.state} />
       </div>
 
+      {showProject ? <ProjectCell projectId={task.projectId} title={task.projectTitle} /> : null}
+
       <div className="order-1 min-w-0 md:order-2">
+        {showProject ? (
+          <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
+        ) : null}
         <Link to={`/tasks/${task.id}`} className="text-[13.5px] font-medium break-words hover:underline">
           {task.title}
         </Link>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
-          <Link to={`/projects/${task.projectId}`} className="hover:text-fg hover:underline">
-            {task.projectTitle}
-          </Link>
+          {showProject ? null : (
+            <Link to={`/projects/${task.projectId}`} className="hover:text-fg hover:underline">
+              {task.projectTitle}
+            </Link>
+          )}
           <span>{modelText(task.model, task.modelOptions)}</span>
           <span title={dateTime(since)} className="tabular">
             {relativeTime(since)}
@@ -229,15 +168,12 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
       ) : null}
 
       {task.lastError === null ? null : (
-        <p
-          className="order-5 col-span-2 truncate font-mono text-[11.5px] text-bad md:col-span-3 md:col-start-2"
-          title={task.lastError}
-        >
+        <p className={cx("order-5 col-span-2 truncate font-mono text-[11.5px] text-bad", underTitle)} title={task.lastError}>
           {task.lastError}
         </p>
       )}
       {start.error === null ? null : (
-        <div className="order-6 col-span-2 md:col-span-3 md:col-start-2">
+        <div className={cx("order-6 col-span-2", underTitle)}>
           <ErrorText error={start.error} />
         </div>
       )}
@@ -245,7 +181,10 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
   );
 }
 
-/** External (non-task) threads needing input, styled as needs-input TaskRows. Title opens History filtered to it. */
+/**
+ * External (non-task) threads needing input, styled as needs-input TaskRows with the project column
+ * (Dashboard only). Title opens History filtered to it.
+ */
 export function ExternalThreadRows({ threads }: { threads: Thread[] }) {
   return (
     <ul>
@@ -262,23 +201,19 @@ function ExternalThreadRow({ thread }: { thread: Thread }) {
   const href = thread.t3DeepLink;
   const project = thread.projectTitle ?? thread.t3ProjectId;
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-need px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-need px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2">
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
         <TaskStateBadge state="needs_input" />
       </div>
 
+      <ProjectCell projectId={thread.projectId} title={project} />
+
       <div className="order-1 min-w-0 md:order-2">
+        <ProjectName projectId={thread.projectId} title={project} className="mb-0.5 block break-words md:hidden" />
         <Link to={`/history${toQuery({ q: thread.title })}`} className="text-[13.5px] font-medium break-words hover:underline">
           {thread.title}
         </Link>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
-          {thread.projectId === null ? (
-            <span>{project}</span>
-          ) : (
-            <Link to={`/projects/${thread.projectId}`} className="hover:text-fg hover:underline">
-              {project}
-            </Link>
-          )}
           <span title={dateTime(thread.updatedAt)} className="tabular">
             {relativeTime(thread.updatedAt)}
           </span>
