@@ -120,13 +120,13 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           onNewTask();
         },
       },
-      ...PAGES.map(([label, to]): Item => ({ key: `go-${to}`, group: "Go to", label, run: go(to) })),
-      ...THEMES.map((t): Item => ({ key: `theme-${t}`, group: "Actions", label: `Theme: ${t}`, run: () => setTheme(t) })),
       { key: "sync", group: "Actions", label: "Sync now", hint: "full T3 sync", run: () => {
           sync.mutate();
           onClose();
         },
       },
+      ...PAGES.map(([label, to]): Item => ({ key: `go-${to}`, group: "Go to", label, run: go(to) })),
+      ...THEMES.map((t): Item => ({ key: `theme-${t}`, group: "Theme", label: `Theme: ${t}`, run: () => setTheme(t) })),
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;

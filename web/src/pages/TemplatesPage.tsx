@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { api } from "../api/client.ts";
 import { keys, useTemplates } from "../api/queries.ts";
 import { INTERACTION_MODES, type CreateTemplateRequest, type InteractionMode, type Template } from "../api/types.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
-import { Badge, Button, ErrorText, Field, Input, Modal, PageHeader, QueryState, Select, Textarea } from "../components/ui.tsx";
+import { Button, Chip, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Select, Textarea } from "../components/ui.tsx";
 import { modelText, pick } from "../lib/format.ts";
 
 type Editing = { mode: "create" } | { mode: "edit"; template: Template };
@@ -18,19 +18,26 @@ export function TemplatesPage() {
     <>
       <PageHeader
         title="Templates"
-        subtitle="Reusable prompt + model presets for the task form."
+        meta={`${list.length} presets · prompt + model for the task form`}
         actions={
           <Button variant="primary" onClick={() => setEditing({ mode: "create" })}>
             New template
           </Button>
         }
       />
-      <QueryState isPending={templates.isPending} error={templates.error} empty={list.length === 0} emptyText="No templates yet.">
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900">
-          {list.map((t) => (
-            <TemplateRow key={t.id} template={t} onEdit={() => setEditing({ mode: "edit", template: t })} />
-          ))}
-        </ul>
+      <QueryState
+        isPending={templates.isPending}
+        error={templates.error}
+        empty={list.length === 0}
+        emptyText="No templates yet. Create one to prefill prompt and model on new tasks."
+      >
+        <Panel title="Templates" meta={list.length} flush>
+          <ul>
+            {list.map((t) => (
+              <TemplateRow key={t.id} template={t} onEdit={() => setEditing({ mode: "edit", template: t })} />
+            ))}
+          </ul>
+        </Panel>
       </QueryState>
       {editing === null ? null : (
         <TemplateFormModal
@@ -49,36 +56,38 @@ function TemplateRow({ template: t, onEdit }: { template: Template; onEdit: () =
     onSettled: () => qc.invalidateQueries({ queryKey: keys.templates }),
   });
   return (
-    <li className="px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="min-w-0 flex-1 basis-60">
-          <button type="button" onClick={onEdit} className="text-left font-medium hover:underline">
+    <li className="border-b border-line px-3 py-2.5 last:border-b-0">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={onEdit} className="text-left text-[13.5px] font-medium hover:underline">
             {t.name}
           </button>
-          <div className="flex flex-wrap gap-x-2 text-xs text-neutral-500">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11.5px] text-muted">
             <span>{t.providerInstanceId ?? "T3 default"}</span>
-            <span>{modelText(t.model, t.modelOptions)}</span>
+            <span className="min-w-0 break-all">{modelText(t.model, t.modelOptions)}</span>
             <span>{t.runtimeMode}</span>
-            {t.interactionMode === "plan" ? <Badge tone="violet">plan</Badge> : null}
+            {t.interactionMode === "plan" ? <Chip>plan</Chip> : null}
           </div>
-          {t.prompt === "" ? null : <p className="mt-0.5 truncate text-xs text-neutral-500">{t.prompt}</p>}
+          {t.prompt === "" ? null : <p className="mt-1 truncate font-mono text-[11.5px] text-muted">{t.prompt}</p>}
         </div>
-        <Button small onClick={onEdit}>
-          Edit
-        </Button>
-        <Button
-          small
-          variant="danger"
-          busy={remove.isPending}
-          onClick={() => {
-            if (window.confirm(`Delete template "${t.name}"?`)) remove.mutate();
-          }}
-        >
-          Delete
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <Button small onClick={onEdit}>
+            Edit
+          </Button>
+          <Button
+            small
+            variant="danger"
+            busy={remove.isPending}
+            onClick={() => {
+              if (window.confirm(`Delete template "${t.name}"?`)) remove.mutate();
+            }}
+          >
+            Delete
+          </Button>
+        </div>
       </div>
       {remove.error === null ? null : (
-        <div className="mt-1.5">
+        <div className="mt-2">
           <ErrorText error={remove.error} />
         </div>
       )}
@@ -88,6 +97,7 @@ function TemplateRow({ template: t, onEdit }: { template: Template; onEdit: () =
 
 function TemplateFormModal({ template, onClose }: { template?: Template; onClose: () => void }) {
   const qc = useQueryClient();
+  const formId = useId();
   const [name, setName] = useState(template?.name ?? "");
   const [prompt, setPrompt] = useState(template?.prompt ?? "");
   const [interactionMode, setInteractionMode] = useState<InteractionMode>(template?.interactionMode ?? "default");
@@ -114,9 +124,23 @@ function TemplateFormModal({ template, onClose }: { template?: Template; onClose
   };
 
   return (
-    <Modal title={template === undefined ? "New template" : `Edit template`} onClose={onClose} wide>
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} autoFocus />}</Field>
+    <Drawer
+      title={template === undefined ? "New template" : "Edit template"}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button onClick={onClose} className="ml-auto">
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" busy={save.isPending} disabled={name.trim() === ""}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} data-autofocus />}</Field>
         <Field label="Prompt" hint="Optional. Empty keeps the task's own prompt when applied.">
           {(id) => <Textarea id={id} rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} />}
         </Field>
@@ -137,13 +161,7 @@ function TemplateFormModal({ template, onClose }: { template?: Template; onClose
           )}
         </Field>
         <ErrorText error={save.error} />
-        <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" busy={save.isPending} disabled={name.trim() === ""}>
-            Save
-          </Button>
-        </div>
       </form>
-    </Modal>
+    </Drawer>
   );
 }

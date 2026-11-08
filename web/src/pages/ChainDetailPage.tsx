@@ -3,10 +3,11 @@ import { useState } from "react";
 import { api, type ChainAction } from "../api/client.ts";
 import { useChain, useInvalidateWork, useTasks } from "../api/queries.ts";
 import type { Chain, Task } from "../api/types.ts";
-import { ChainStateBadge } from "../components/StateBadge.tsx";
+import { ChainPipeline, sortedSteps, stepProgress } from "../components/ChainList.tsx";
+import { IconChevronDown, IconPlus } from "../components/icons.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import { TaskRow } from "../components/TaskList.tsx";
-import { Button, Card, ErrorText, Muted, PageHeader, QueryState, Select, cx } from "../components/ui.tsx";
+import { Button, ErrorText, PageHeader, Panel, QueryState, Select, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -37,7 +38,7 @@ function swap(ids: number[], i: number, j: number): number[] {
 function ChainBody({ chain }: { chain: Chain }) {
   const invalidate = useInvalidateWork();
   const [creating, setCreating] = useState(false);
-  const steps = chain.steps.toSorted((a, b) => (a.chainPosition ?? 0) - (b.chainPosition ?? 0));
+  const steps = sortedSteps(chain);
   const ids = steps.map((s) => s.id);
 
   const action = useMutation({
@@ -64,11 +65,13 @@ function ChainBody({ chain }: { chain: Chain }) {
     const canSwap = (other: Task | undefined) => other !== undefined && t.state === "backlog" && other.state === "backlog";
     return (
       <>
-        <Button small variant="ghost" disabled={busy || !canSwap(prev)} onClick={() => setSteps.mutate(swap(ids, i, i - 1))} aria-label="Move up">
-          ↑
+        <Button small variant="ghost" disabled={busy || !canSwap(prev)} onClick={() => setSteps.mutate(swap(ids, i, i - 1))} aria-label="Move up" title="Move up">
+          <span className="inline-flex rotate-180">
+            <IconChevronDown size={14} />
+          </span>
         </Button>
-        <Button small variant="ghost" disabled={busy || !canSwap(next)} onClick={() => setSteps.mutate(swap(ids, i, i + 1))} aria-label="Move down">
-          ↓
+        <Button small variant="ghost" disabled={busy || !canSwap(next)} onClick={() => setSteps.mutate(swap(ids, i, i + 1))} aria-label="Move down" title="Move down">
+          <IconChevronDown size={14} />
         </Button>
         <Button
           small
@@ -83,67 +86,69 @@ function ChainBody({ chain }: { chain: Chain }) {
     );
   };
 
+  const shown = controls.filter((c) => c.show);
+  const main = shown.find((c) => c.a !== "skip");
+
   return (
     <>
       <PageHeader
         title={chain.title}
-        subtitle={
-          <span className="flex items-center gap-2">
-            <ChainStateBadge state={chain.state} /> {steps.length} steps
-          </span>
-        }
-        actions={controls
-          .filter((c) => c.show)
-          .map((c) => (
-            <Button
-              key={c.a}
-              variant={c.a === "start" || c.a === "resume" ? "primary" : "secondary"}
-              busy={action.isPending && action.variables === c.a}
-              disabled={action.isPending}
-              onClick={() => action.mutate(c.a)}
-            >
-              {c.label}
-            </Button>
-          ))}
+        meta={`${chain.state} · ${stepProgress(chain)}`}
+        actions={shown.map((c) => (
+          <Button
+            key={c.a}
+            variant={c === main ? "primary" : "secondary"}
+            busy={action.isPending && action.variables === c.a}
+            disabled={action.isPending}
+            onClick={() => action.mutate(c.a)}
+          >
+            {c.label}
+          </Button>
+        ))}
       />
       <div className="flex flex-col gap-4">
-        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
-          The next step starts when the previous step&apos;s thread is <strong>settled in T3</strong>. A failed or
-          interrupted step pauses the chain: restart that step or skip it, then resume.
+        <ChainPipeline chain={chain} size="lg" />
+        <p className="text-[12.5px] text-muted">
+          The next step starts when the previous step&apos;s thread is <strong className="font-semibold text-fg">settled in T3</strong>.
+          A failed or interrupted step pauses the chain: restart that step or skip it, then resume.
         </p>
         <ErrorText error={action.error ?? setSteps.error} />
-        <Card
+        <Panel
+          flush
           title="Steps"
+          meta={steps.length}
           actions={
-            <Button small variant="primary" onClick={() => setCreating(true)}>
-              New task into chain
+            <Button small onClick={() => setCreating(true)}>
+              <IconPlus size={14} /> New task into chain
             </Button>
           }
         >
           {steps.length === 0 ? (
-            <Muted>No steps yet. Add a backlog task or create a new one.</Muted>
+            <p className="px-3 py-3 text-[12.5px] text-muted">No steps yet. Add a backlog task below or create a new one.</p>
           ) : (
-            <ol className="flex flex-col gap-2">
-              {steps.map((t, i) => (
-                <li
-                  key={t.id}
-                  className={cx(
-                    "flex items-start gap-2 rounded-lg border",
-                    t.id === chain.currentTaskId
-                      ? "border-blue-400 bg-blue-50/50 ring-1 ring-blue-400 dark:border-blue-700 dark:bg-blue-950/40 dark:ring-blue-700"
-                      : "border-neutral-200 dark:border-neutral-800",
-                  )}
-                >
-                  <span className="w-8 shrink-0 pt-2.5 text-center text-sm font-semibold text-neutral-400">{i + 1}</span>
-                  <div className="min-w-0 flex-1">
-                    <TaskRow task={t} extra={stepButtons(t, i)} allowBacklogStart={false} />
-                  </div>
-                </li>
-              ))}
+            <ol>
+              {steps.map((t, i) => {
+                const current = t.id === chain.currentTaskId;
+                return (
+                  <li
+                    key={t.id}
+                    aria-current={current ? "step" : undefined}
+                    className={cx("flex items-start border-b border-line last:border-b-0", current && "bg-panel")}
+                  >
+                    <span className="flex w-9 shrink-0 flex-col items-center pt-2 font-mono text-[12px] text-muted tabular">
+                      <span className={cx(current && "font-bold text-fg")}>{i + 1}</span>
+                      {current ? <span className="label-caps text-fg">now</span> : null}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <TaskRow task={t} extra={stepButtons(t, i)} allowBacklogStart={false} />
+                    </div>
+                  </li>
+                );
+              })}
             </ol>
           )}
           <AddExisting chainIds={ids} disabled={busy} onAdd={(taskId) => setSteps.mutate([...ids, taskId])} />
-        </Card>
+        </Panel>
       </div>
       {creating ? <TaskFormModal chainId={chain.id} onClose={() => setCreating(false)} /> : null}
     </>
@@ -155,7 +160,7 @@ function AddExisting({ chainIds, disabled, onAdd }: { chainIds: number[]; disabl
   const [selected, setSelected] = useState("");
   const eligible = (backlog.data?.tasks ?? []).filter((t) => t.chainId === null && !chainIds.includes(t.id));
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+    <div className="flex flex-wrap items-center gap-2 border-t border-line bg-panel px-3 py-2.5">
       <Select value={selected} onChange={(e) => setSelected(e.target.value)} className="min-w-60 flex-1" aria-label="Backlog task">
         <option value="">{eligible.length === 0 ? "No eligible backlog tasks" : "Add existing backlog task…"}</option>
         {eligible.map((t) => (

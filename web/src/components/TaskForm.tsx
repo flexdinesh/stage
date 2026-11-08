@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { api } from "../api/client.ts";
 import { useInvalidateWork, useProjects, useTemplates } from "../api/queries.ts";
 import {
@@ -10,10 +10,11 @@ import {
   type UpdateTaskRequest,
   type Workspace,
 } from "../api/types.ts";
-import { parseTags, pick } from "../lib/format.ts";
+import { parseTags } from "../lib/format.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
-import { Badge, Button, ErrorText, Field, Input, Modal, Select, Textarea } from "./ui.tsx";
+import { TaskStateBadge } from "./StateBadge.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Segmented, Select, Textarea } from "./ui.tsx";
 
 interface FormState {
   projectId: string;
@@ -62,13 +63,20 @@ function initialState(task: Task | undefined, defaultProjectId: number | undefin
   };
 }
 
+const WORKSPACE_OPTIONS: readonly { value: Workspace["type"]; label: string }[] = [
+  { value: "root", label: "root" },
+  { value: "worktree", label: "worktree" },
+];
+
+const INTERACTION_OPTIONS = INTERACTION_MODES.map((m) => ({ value: m, label: m }));
+
 function toWorkspace(s: FormState): Workspace {
   if (s.workspaceType === "root") return { type: "root" };
   const branch = s.branch.trim();
   return { type: "worktree", baseRef: s.baseRef.trim(), branch: branch === "" ? null : branch };
 }
 
-/** Create (no `task`) or edit (`task`) form in a modal. `chainId` appends the new task to that chain. */
+/** Create (no `task`) or edit (`task`) form in a drawer. `chainId` appends the new task to that chain. */
 export function TaskFormModal({
   task,
   defaultProjectId,
@@ -161,16 +169,48 @@ export function TaskFormModal({
   };
 
   const title = task === undefined ? (chainId === undefined ? "New task" : "New chain step") : `Edit task #${task.id}`;
+  const blocked = missing.length > 0 || save.isPending;
+
+  const onKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    if (!save.isPending) submit(true)();
+  };
+
+  const primaryLabel = task !== undefined ? "Save" : chainId !== undefined ? "Add to chain" : "Save & start";
+
+  const footer = (
+    <>
+      {task === undefined && chainId === undefined ? (
+        <Button busy={save.isPending && save.variables === false} disabled={blocked} onClick={() => submit(false)()}>
+          <span className="md:hidden">Backlog</span>
+          <span className="hidden md:inline">Save to backlog</span>
+        </Button>
+      ) : null}
+      <span className="min-w-0 flex-1 text-right font-mono text-[11px] text-muted">
+        {missing.length > 0 ? `required: ${missing.join(", ")}` : null}
+      </span>
+      <Button
+        variant="primary"
+        busy={save.isPending && (task !== undefined || chainId !== undefined || save.variables === true)}
+        disabled={blocked}
+        onClick={() => submit(true)()}
+      >
+        {primaryLabel}
+        <kbd className="hidden border border-current/40 px-1 font-mono text-[10.5px] leading-4 md:inline">Ctrl ↵</kbd>
+      </Button>
+    </>
+  );
 
   return (
-    <Modal title={title} onClose={onClose} wide>
-      <form onSubmit={submit(false)} className="flex flex-col gap-4">
-        {full ? null : (
-          <p className="text-xs text-neutral-500">
-            Task is <Badge>{task?.state ?? ""}</Badge>; only title, tags and notes can change.
-          </p>
+    <Drawer title={title} onClose={onClose} wide footer={footer}>
+      <form onSubmit={submit(false)} onKeyDown={onKeyDown} className="flex flex-col gap-3.5">
+        {task === undefined || full ? null : (
+          <Alert tone="plain">
+            Task is <TaskStateBadge state={task.state} />; only title, tags and notes can change.
+          </Alert>
         )}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Project">
             {(id) => (
               <Select id={id} disabled={!full} value={s.projectId} onChange={(e) => set({ projectId: e.target.value })}>
@@ -199,13 +239,13 @@ export function TaskFormModal({
           ) : null}
         </div>
         <Field label="Title">
-          {(id) => <Input id={id} value={s.title} onChange={(e) => set({ title: e.target.value })} autoFocus />}
+          {(id) => <Input id={id} data-autofocus value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
         <Field label="Prompt">
           {(id) => (
             <Textarea
               id={id}
-              rows={10}
+              rows={8}
               disabled={!full}
               value={s.prompt}
               onChange={(e) => set({ prompt: e.target.value })}
@@ -213,51 +253,36 @@ export function TaskFormModal({
           )}
         </Field>
         <ModelFields value={s.config} onChange={(config) => set({ config })} disabled={!full} />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Interaction mode">
-            {(id) => (
-              <Select
-                id={id}
-                disabled={!full}
-                value={s.interactionMode}
-                onChange={(e) => set({ interactionMode: pick(INTERACTION_MODES, e.target.value) ?? s.interactionMode })}
-              >
-                {INTERACTION_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-          <Field label="Workspace">
-            {(id) => (
-              <Select
-                id={id}
-                disabled={!full}
-                value={s.workspaceType}
-                onChange={(e) => set({ workspaceType: e.target.value === "worktree" ? "worktree" : "root" })}
-              >
-                <option value="root">Project root</option>
-                <option value="worktree">New worktree</option>
-              </Select>
-            )}
-          </Field>
+        <fieldset disabled={!full} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
+          <div className="flex min-w-0 flex-col items-start gap-1.5">
+            <span className="label-caps">Mode</span>
+            <Segmented
+              label="Interaction mode"
+              options={INTERACTION_OPTIONS}
+              value={s.interactionMode}
+              onChange={(interactionMode) => set({ interactionMode })}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col items-start gap-1.5">
+            <span className="label-caps">Workspace</span>
+            <Segmented
+              label="Workspace"
+              options={WORKSPACE_OPTIONS}
+              value={s.workspaceType}
+              onChange={(workspaceType) => set({ workspaceType })}
+            />
+          </div>
           {s.workspaceType === "worktree" ? (
             <>
               <Field label="Base ref">
-                {(id) => (
-                  <Input id={id} disabled={!full} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />
-                )}
+                {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
               </Field>
               <Field label="Branch" hint="Empty = T3 picks a name.">
-                {(id) => (
-                  <Input id={id} disabled={!full} value={s.branch} onChange={(e) => set({ branch: e.target.value })} />
-                )}
+                {(id) => <Input id={id} value={s.branch} onChange={(e) => set({ branch: e.target.value })} />}
               </Field>
             </>
           ) : null}
-        </div>
+        </fieldset>
         <Field
           label="Tags"
           hint={
@@ -266,9 +291,7 @@ export function TaskFormModal({
             ) : (
               <span className="flex flex-wrap gap-1">
                 {parseTags(s.tags).map((t) => (
-                  <Badge key={t} tone="violet">
-                    {t}
-                  </Badge>
+                  <Chip key={t}>#{t}</Chip>
                 ))}
               </span>
             )
@@ -280,34 +303,7 @@ export function TaskFormModal({
           {(id) => <Textarea id={id} rows={3} value={s.notes} onChange={(e) => set({ notes: e.target.value })} />}
         </Field>
         <ErrorText error={save.error} />
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {missing.length > 0 ? <span className="mr-auto text-xs text-neutral-500">Required: {missing.join(", ")}</span> : null}
-          <Button onClick={onClose}>Cancel</Button>
-          {task !== undefined ? (
-            <Button type="submit" variant="primary" busy={save.isPending} disabled={missing.length > 0}>
-              Save
-            </Button>
-          ) : chainId !== undefined ? (
-            <Button type="submit" variant="primary" busy={save.isPending} disabled={missing.length > 0}>
-              Add to chain
-            </Button>
-          ) : (
-            <>
-              <Button type="submit" busy={save.isPending && save.variables === false} disabled={missing.length > 0 || save.isPending}>
-                Save to backlog
-              </Button>
-              <Button
-                variant="primary"
-                busy={save.isPending && save.variables === true}
-                disabled={missing.length > 0 || save.isPending}
-                onClick={() => submit(true)()}
-              >
-                Save &amp; start
-              </Button>
-            </>
-          )}
-        </div>
       </form>
-    </Modal>
+    </Drawer>
   );
 }

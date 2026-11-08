@@ -1,16 +1,16 @@
 import type { ChainState, TaskState, ThreadStatus } from "../api/types.ts";
-import { Badge, type Tone } from "./ui.tsx";
+import { Chip, type ChipTone } from "./ui.tsx";
 
-const TASK_TONES: Record<TaskState, Tone> = {
-  backlog: "gray",
-  launching: "blue",
-  running: "blue",
-  needs_input: "amber",
-  completed: "teal",
-  settled: "green",
-  failed: "red",
-  interrupted: "red",
-  cancelled: "gray",
+const TASK_TONES: Record<TaskState, ChipTone> = {
+  backlog: "idle",
+  launching: "run",
+  running: "run",
+  needs_input: "need",
+  completed: "done",
+  settled: "ok",
+  failed: "bad",
+  interrupted: "bad",
+  cancelled: "idle",
 };
 
 const TASK_LABELS: Record<TaskState, string> = {
@@ -25,30 +25,38 @@ const TASK_LABELS: Record<TaskState, string> = {
   cancelled: "cancelled",
 };
 
-const CHAIN_TONES: Record<ChainState, Tone> = { idle: "gray", running: "blue", paused: "amber", done: "green" };
+const CHAIN_TONES: Record<ChainState, ChipTone> = { idle: "idle", running: "run", paused: "need", done: "ok" };
 
-const THREAD_TONES: Record<ThreadStatus, Tone> = {
-  idle: "gray",
-  preparing: "blue",
-  queued: "blue",
-  starting: "blue",
-  running: "blue",
-  waiting: "amber",
-  completed: "teal",
-  interrupted: "red",
-  failed: "red",
-  cancelled: "gray",
-  rolled_back: "gray",
+const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
+  idle: "idle",
+  preparing: "run",
+  queued: "run",
+  starting: "run",
+  running: "run",
+  waiting: "need",
+  completed: "done",
+  interrupted: "bad",
+  failed: "bad",
+  cancelled: "idle",
+  rolled_back: "idle",
 };
 
 export const taskStateLabel = (s: TaskState) => TASK_LABELS[s];
 
 export const TaskStateBadge = ({ state }: { state: TaskState }) => (
-  <Badge tone={TASK_TONES[state]}>{TASK_LABELS[state]}</Badge>
+  <Chip tone={TASK_TONES[state]} dot>
+    {TASK_LABELS[state]}
+  </Chip>
 );
 
-export const ChainStateBadge = ({ state }: { state: ChainState }) => <Badge tone={CHAIN_TONES[state]}>{state}</Badge>;
+export const ChainStateBadge = ({ state }: { state: ChainState }) => (
+  <Chip tone={CHAIN_TONES[state]} dot>
+    {state}
+  </Chip>
+);
 
 export const ThreadStatusBadge = ({ status }: { status: ThreadStatus }) => (
-  <Badge tone={THREAD_TONES[status]}>{status.replace("_", " ")}</Badge>
+  <Chip tone={THREAD_TONES[status]} dot>
+    {status.replace("_", " ")}
+  </Chip>
 );

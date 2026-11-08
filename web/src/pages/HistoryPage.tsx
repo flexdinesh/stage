@@ -1,18 +1,24 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useCatalog, useStats, useThreads } from "../api/queries.ts";
-import { THREAD_STATUSES, type Stats, type Thread, type ThreadListQuery } from "../api/types.ts";
+import { THREAD_STATUSES, type Stats, type SubagentsFilter, type Thread, type ThreadListQuery, type ThreadSource } from "../api/types.ts";
+import { IconExternal } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ThreadStatusBadge } from "../components/StateBadge.tsx";
-import { Badge, Button, Card, ErrorText, Field, Input, Muted, PageHeader, Select, cx } from "../components/ui.tsx";
-import { dateTime, localDateToIso, localMidnight, pick, relativeTime } from "../lib/format.ts";
+import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Segmented, Select, cx } from "../components/ui.tsx";
+import { dateTime, localDateToIso, localMidnight, pick } from "../lib/format.ts";
 
 const PAGE_SIZE = 50;
 const PRESETS = ["today", "7d", "30d", "all", "custom"] as const;
 type Preset = (typeof PRESETS)[number];
-const PRESET_LABELS: Record<Preset, string> = { today: "Today", "7d": "7 days", "30d": "30 days", all: "All", custom: "Custom" };
+const PRESET_OPTIONS: { value: Preset; label: string }[] = PRESETS.map((p) => ({ value: p, label: p }));
+const SOURCES: readonly ThreadSource[] = ["app", "t3"];
+const SUBAGENT_VALUES = ["hidden", "shown"] as const;
 const ALL_TIME_FROM = "2000-01-01";
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const TOP_PROJECTS = 6;
+/** Longest gap-filled day axis; beyond this the axis starts at the first day with data. */
+const MAX_FILLED_DAYS = 120;
 
 /** Preset → { from, to } (local-midnight aligned, so the query key is stable within a day). */
 function range(preset: Preset, fromDate: string, toDate: string): { from?: string; to?: string } {
@@ -33,7 +39,25 @@ function range(preset: Preset, fromDate: string, toDate: string): { from?: strin
   }
 }
 
-export function HistoryPage() {
+const pad = (n: number) => String(n).padStart(2, "0");
+const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const sameDay = (a: Date, b: Date) => dayKey(a) === dayKey(b);
+const isToday = (d: Date) => sameDay(d, new Date());
+const axisLabel = (d: Date) => (isToday(d) ? "today" : shortDay(d));
+const shortDay = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+
+/** "10:42" for today, "Nov 07" otherwise. */
+function compactTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  if (isToday(d)) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return shortDay(d);
+}
+
+type Filters = ReturnType<typeof useFilters>;
+
+/** URL-param backed filter state. */
+function useFilters() {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? "";
   const update = (patch: Record<string, string>) => {
@@ -45,124 +69,241 @@ export function HistoryPage() {
     if (!("page" in patch)) next.delete("page");
     setParams(next, { replace: true });
   };
-
-  const preset = pick(PRESETS, get("preset")) ?? "7d";
-  const { from, to } = range(preset, get("from"), get("to"));
+  const q = get("q");
+  // A title search (e.g. from the command palette) defaults to all time so older threads are found.
+  const defaultPreset: Preset = q === "" ? "7d" : "all";
+  const preset = pick(PRESETS, get("preset")) ?? defaultPreset;
   const status = pick(THREAD_STATUSES, get("status"));
-  const settled = get("settled");
-  const source = get("source");
-  const page = Math.max(0, Number(get("page")) || 0);
+  const subagentsShown = get("subagents") === "shown";
+  const subagents: SubagentsFilter = subagentsShown ? "include" : "exclude";
+  return {
+    get,
+    update,
+    q,
+    preset,
+    defaultPreset,
+    status,
+    subagentsShown,
+    subagents,
+    provider: get("provider"),
+    project: get("project"),
+    source: pick(SOURCES, get("source")),
+    page: Math.max(0, Number(get("page")) || 0),
+  };
+}
+
+export function HistoryPage() {
+  const f = useFilters();
+  const [drawer, setDrawer] = useState(false);
+  const { from, to } = range(f.preset, f.get("from"), f.get("to"));
 
   const query: ThreadListQuery = {
     limit: PAGE_SIZE,
-    offset: page * PAGE_SIZE,
+    offset: f.page * PAGE_SIZE,
+    subagents: f.subagents,
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to }),
-    ...(get("project") === "" ? {} : { project: Number(get("project")) }),
-    ...(status === undefined ? {} : { status: [status] }),
-    ...(settled === "" ? {} : { settled: settled === "true" }),
-    ...(get("provider") === "" ? {} : { provider: get("provider") }),
-    ...(source === "app" || source === "t3" ? { source } : {}),
-    ...(get("q") === "" ? {} : { q: get("q") }),
+    ...(f.project === "" ? {} : { project: Number(f.project) }),
+    ...(f.status === undefined ? {} : { status: [f.status] }),
+    ...(f.provider === "" ? {} : { provider: f.provider }),
+    ...(f.source === undefined ? {} : { source: f.source }),
+    ...(f.q === "" ? {} : { q: f.q }),
   };
   const threads = useThreads(query);
   // Stats default to the last 30 days when `from` is omitted; "all" needs an explicit early bound.
-  const stats = useStats({ tz: TZ, from: from ?? ALL_TIME_FROM, ...(to === undefined ? {} : { to }) });
+  const stats = useStats({
+    tz: TZ,
+    subagents: f.subagents,
+    from: from ?? ALL_TIME_FROM,
+    ...(to === undefined ? {} : { to }),
+  });
+
+  const activeCount = [f.project, f.status ?? "", f.provider, f.source ?? "", f.q].filter((v) => v !== "").length +
+    (f.subagentsShown ? 1 : 0);
+  const total = threads.data?.total;
+  const meta = `${total === undefined ? "…" : total} threads · subagents ${f.subagentsShown ? "shown" : "hidden"}`;
 
   return (
     <>
-      <PageHeader title="History" subtitle="All T3 threads mirrored from every project." />
-      <div className="flex flex-col gap-4">
-        <Card>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="flex overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-700">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => update({ preset: p === "7d" ? "" : p })}
-                    className={cx(
-                      "px-3 py-1.5 text-sm",
-                      p === preset
-                        ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                        : "hover:bg-neutral-100 dark:hover:bg-neutral-800",
-                    )}
-                  >
-                    {PRESET_LABELS[p]}
-                  </button>
-                ))}
-              </div>
-              {preset === "custom" ? (
-                <>
-                  <Field label="From">
-                    {(id) => <Input id={id} type="date" value={get("from")} onChange={(e) => update({ from: e.target.value })} />}
-                  </Field>
-                  <Field label="To (inclusive)">
-                    {(id) => <Input id={id} type="date" value={get("to")} onChange={(e) => update({ to: e.target.value })} />}
-                  </Field>
-                </>
-              ) : null}
+      <PageHeader title="History" meta={meta} />
+      <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented
+              label="Time window"
+              options={PRESET_OPTIONS}
+              value={f.preset}
+              onChange={(p) => f.update({ preset: p === f.defaultPreset ? "" : p })}
+            />
+            <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 md:flex">
+              <FilterControls f={f} />
+              <SearchBox key={f.q} initial={f.q} onSearch={(q) => f.update({ q })} className="ml-auto max-w-56 min-w-40 flex-1" />
             </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <ProjectSelect value={get("project")} onChange={(v) => update({ project: v })} />
-              <Select value={status ?? ""} onChange={(e) => update({ status: e.target.value })} aria-label="Status">
-                <option value="">Any status</option>
-                {THREAD_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </Select>
-              <Select value={settled} onChange={(e) => update({ settled: e.target.value })} aria-label="Settled">
-                <option value="">Settled: any</option>
-                <option value="true">Settled</option>
-                <option value="false">Not settled</option>
-              </Select>
-              <ProviderSelect value={get("provider")} onChange={(v) => update({ provider: v })} />
-              <Select value={source} onChange={(e) => update({ source: e.target.value })} aria-label="Source">
-                <option value="">Any source</option>
-                <option value="app">t3-stage tasks</option>
-                <option value="t3">Other T3 threads</option>
-              </Select>
-              <SearchBox key={get("q")} initial={get("q")} onSearch={(q) => update({ q })} />
-            </div>
+            <Button small className="ml-auto md:hidden" onClick={() => setDrawer(true)}>
+              Filters{activeCount === 0 ? "" : ` · ${activeCount}`}
+            </Button>
           </div>
-        </Card>
-        <StatsPanel stats={stats.data} error={stats.error} />
-        <ErrorText error={threads.error} />
-        {threads.data === undefined ? (
-          threads.isPending ? <Muted>Loading…</Muted> : null
-        ) : (
-          <>
-            <ThreadTable data={threads.data.threads} />
-            <Pager page={page} total={threads.data.total} onPage={(p) => update({ page: p === 0 ? "" : String(p) })} />
-          </>
-        )}
+          {f.preset === "custom" ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label="From" className="w-40">
+                {(id) => <Input id={id} type="date" value={f.get("from")} onChange={(e) => f.update({ from: e.target.value })} />}
+              </Field>
+              <Field label="To (inclusive)" className="w-40">
+                {(id) => <Input id={id} type="date" value={f.get("to")} onChange={(e) => f.update({ to: e.target.value })} />}
+              </Field>
+            </div>
+          ) : null}
+        </div>
+
+        <ErrorText error={stats.error} />
+        {stats.data === undefined ? null : <Summary stats={stats.data} preset={f.preset} />}
+
+        <QueryState isPending={threads.isPending} error={threads.error}>
+          {threads.data === undefined ? null : (
+            <>
+              <ThreadList data={threads.data.threads} />
+              <Pager page={f.page} total={threads.data.total} onPage={(p) => f.update({ page: p === 0 ? "" : String(p) })} />
+            </>
+          )}
+        </QueryState>
       </div>
+
+      {drawer ? (
+        <Drawer
+          title="Filters"
+          onClose={() => setDrawer(false)}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                disabled={activeCount === 0}
+                onClick={() => f.update({ project: "", status: "", provider: "", source: "", subagents: "", q: "" })}
+              >
+                Clear
+              </Button>
+              <Button variant="primary" className="ml-auto" onClick={() => setDrawer(false)}>
+                Done
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <Field label="Search title">
+              {(id) => <SearchBox key={f.q} id={id} initial={f.q} onSearch={(q) => f.update({ q })} />}
+            </Field>
+            <FilterControls f={f} labelled />
+          </div>
+        </Drawer>
+      ) : null}
     </>
   );
 }
 
-function SearchBox({ initial, onSearch }: { initial: string; onSearch: (q: string) => void }) {
+/** The select filters; `labelled` stacks each under a Field label (drawer), otherwise inline with aria-labels. */
+function FilterControls({ f, labelled = false }: { f: Filters; labelled?: boolean }) {
+  const wrap = (label: string, control: (id: string | undefined) => ReactNode) =>
+    labelled ? (
+      <Field label={label}>{(id) => control(id)}</Field>
+    ) : (
+      control(undefined)
+    );
+  const cls = labelled ? "w-full" : "w-auto";
+  return (
+    <>
+      {labelled ? (
+        <Field label="Project">
+          {(id) => <ProjectSelect id={id} value={f.project} onChange={(v) => f.update({ project: v })} />}
+        </Field>
+      ) : (
+        <ProjectSelect value={f.project} onChange={(v) => f.update({ project: v })} />
+      )}
+      {wrap("Status", (id) => (
+        <Select id={id} className={cls} value={f.status ?? ""} onChange={(e) => f.update({ status: e.target.value })} aria-label="Status">
+          <option value="">Any status</option>
+          {THREAD_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace("_", " ")}
+            </option>
+          ))}
+        </Select>
+      ))}
+      {wrap("Provider", (id) => (
+        <ProviderSelect id={id} className={cls} value={f.provider} onChange={(v) => f.update({ provider: v })} />
+      ))}
+      {wrap("Source", (id) => (
+        <Select id={id} className={cls} value={f.source ?? ""} onChange={(e) => f.update({ source: e.target.value })} aria-label="Source">
+          <option value="">Source: app + t3</option>
+          <option value="app">Source: app</option>
+          <option value="t3">Source: t3</option>
+        </Select>
+      ))}
+      {wrap("Subagents", (id) => (
+        <Select
+          id={id}
+          className={cls}
+          value={f.subagentsShown ? "shown" : "hidden"}
+          onChange={(e) => {
+            const v = pick(SUBAGENT_VALUES, e.target.value);
+            f.update({ subagents: v === "shown" ? "shown" : "" });
+          }}
+          aria-label="Subagents"
+        >
+          <option value="hidden">Subagents: hidden</option>
+          <option value="shown">Subagents: shown</option>
+        </Select>
+      ))}
+    </>
+  );
+}
+
+function SearchBox({
+  id,
+  initial,
+  onSearch,
+  className,
+}: {
+  id?: string;
+  initial: string;
+  onSearch: (q: string) => void;
+  className?: string;
+}) {
   const [q, setQ] = useState(initial);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onSearch(q.trim());
   };
   return (
-    <form onSubmit={submit} className="flex min-w-52 flex-1 gap-2">
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title…" aria-label="Search title" />
-      <Button type="submit">Search</Button>
+    <form onSubmit={submit} role="search" className={className}>
+      <Input
+        id={id}
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onBlur={() => {
+          if (q.trim() !== initial) onSearch(q.trim());
+        }}
+        placeholder="search titles"
+        aria-label="Search titles"
+      />
     </form>
   );
 }
 
-function ProviderSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ProviderSelect({
+  id,
+  className,
+  value,
+  onChange,
+}: {
+  id: string | undefined;
+  className: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
   const providers = useCatalog().data?.providers ?? [];
   const known = providers.some((p) => p.providerInstanceId === value);
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Provider">
+    <Select id={id} className={className} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Provider">
       <option value="">Any provider</option>
       {providers.map((p) => (
         <option key={p.providerInstanceId} value={p.providerInstanceId}>
@@ -174,67 +315,212 @@ function ProviderSelect({ value, onChange }: { value: string; onChange: (v: stri
   );
 }
 
-function ThreadTable({ data }: { data: Thread[] }) {
-  if (data.length === 0) return <Muted>No threads match.</Muted>;
+// ---- Summary ----
+
+type Day = { key: string; date: Date; count: number };
+
+/** Gap-filled day series between the stats range bounds (capped at today). */
+function daySeries(stats: Stats): Day[] {
+  const counts = new Map(stats.threadsByDay.map((d) => [d.day, d.count]));
+  const now = new Date();
+  const toBound = new Date(new Date(stats.to).getTime() - 1);
+  const end = Number.isNaN(toBound.getTime()) || toBound > now ? now : toBound;
+  const start = new Date(stats.from);
+  if (Number.isNaN(start.getTime())) return [];
+  start.setHours(0, 0, 0, 0);
+  const spanDays = Math.round((end.getTime() - start.getTime()) / 86_400_000);
+  if (spanDays > MAX_FILLED_DAYS) {
+    const first = stats.threadsByDay[0];
+    const m = first === undefined ? null : /^(\d{4})-(\d{2})-(\d{2})$/.exec(first.day);
+    if (m === null) return [];
+    start.setFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+  const endMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const n = Math.round((endMidnight.getTime() - start.getTime()) / 86_400_000);
+  const days: Day[] = [];
+  for (let i = 0; i <= n; i++) {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const key = dayKey(date);
+    days.push({ key, date, count: counts.get(key) ?? 0 });
+  }
+  return days;
+}
+
+function Summary({ stats, preset }: { stats: Stats; preset: Preset }) {
+  const days = daySeries(stats);
+  const total = stats.threadsByDay.reduce((n, d) => n + d.count, 0);
+  const projects = stats.threadsByProject.slice(0, TOP_PROJECTS);
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-neutral-200 text-xs text-neutral-500 dark:border-neutral-800">
-          <tr>
-            {["Created", "Title", "Project", "Status", "Settled", "Model", "Source"].map((h) => (
-              <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
-                {h}
-              </th>
+    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-[1fr_300px]">
+      <Panel title="Threads per day" meta={`${total} in ${days.length}d`}>
+        <DayBars days={days} />
+      </Panel>
+      <Panel title="Per project" meta={preset}>
+        {projects.length === 0 ? (
+          <p className="text-[12.5px] text-muted">No threads in this window.</p>
+        ) : (
+          <dl className="grid grid-cols-[1fr_auto] gap-x-2.5 gap-y-1.5 text-[12px]">
+            {projects.map((p) => (
+              <div key={p.t3ProjectId} className="contents">
+                <dt className="truncate" title={p.title}>
+                  {p.title}
+                </dt>
+                <dd className="tabular text-right font-mono text-muted">{p.count}</dd>
+              </div>
             ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-          {data.map((t) => (
-            <tr key={t.t3ThreadId} className="align-top">
-              <td className="px-3 py-2 whitespace-nowrap text-neutral-500" title={dateTime(t.createdAt)}>
-                {relativeTime(t.createdAt)}
-              </td>
-              <td className="max-w-96 px-3 py-2">
-                <div className="flex flex-wrap items-center gap-x-2">
-                  {t.taskId === null ? (
-                    <span className="font-medium">{t.title}</span>
-                  ) : (
-                    <Link to={`/tasks/${t.taskId}`} className="font-medium hover:underline">
-                      {t.title}
-                    </Link>
-                  )}
-                  {t.t3WebUrl === null ? null : (
-                    <a href={t.t3WebUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
-                      T3
-                    </a>
-                  )}
-                </div>
-                {t.branch === null ? null : <div className="font-mono text-xs text-neutral-500">{t.branch}</div>}
-              </td>
-              <td className="px-3 py-2 whitespace-nowrap">
-                {t.projectId === null ? (
-                  <span className="font-mono text-xs text-neutral-500">{t.t3ProjectId}</span>
-                ) : (
-                  <Link to={`/projects/${t.projectId}`} className="hover:underline">
-                    {t.projectTitle ?? t.t3ProjectId}
-                  </Link>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                <ThreadStatusBadge status={t.status} />
-              </td>
-              <td className="px-3 py-2">{t.settled ? <Badge tone="green">settled</Badge> : <span className="text-neutral-400">no</span>}</td>
-              <td className="px-3 py-2 text-xs whitespace-nowrap text-neutral-500">
-                {[t.providerInstanceId, t.model].filter((x) => x !== null).join(" / ") || "-"}
-              </td>
-              <td className="px-3 py-2">
-                <Badge tone={t.source === "app" ? "blue" : "gray"}>{t.source}</Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </dl>
+        )}
+      </Panel>
     </div>
+  );
+}
+
+function DayBars({ days }: { days: Day[] }) {
+  const first = days[0];
+  const last = days[days.length - 1];
+  if (first === undefined || last === undefined) return <p className="text-[12.5px] text-muted">No threads in this window.</p>;
+  const max = Math.max(...days.map((d) => d.count), 1);
+  return (
+    <div>
+      <ul aria-label="Threads per day" className={cx("flex h-16 items-end", days.length > 60 ? "gap-0" : "gap-[3px]")}>
+        {days.map((d) => {
+          const text = `${shortDay(d.date)}: ${d.count} thread${d.count === 1 ? "" : "s"}`;
+          return (
+            <li key={d.key} title={text} className="flex h-full min-w-0 flex-1 items-end">
+              <span className="sr-only">{text}</span>
+              <span
+                aria-hidden="true"
+                className={cx("block w-full", d === last ? "bg-accent" : "bg-accent/70", d.count === 0 && "bg-line")}
+                style={{ height: d.count === 0 ? "1px" : `${Math.max((d.count / max) * 100, 3)}%` }}
+              />
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-1.5 flex justify-between font-mono text-[10.5px] text-muted">
+        <span>{axisLabel(first.date)}</span>
+        {first === last ? null : <span>{axisLabel(last.date)}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ---- Thread list ----
+
+const COLS = "md:grid-cols-[64px_minmax(0,1fr)_110px_120px_120px_56px_24px]";
+
+function ThreadList({ data }: { data: Thread[] }) {
+  if (data.length === 0) {
+    return (
+      <Panel>
+        <p className="text-[12.5px] text-muted">No threads match. Widen the time window or clear filters.</p>
+      </Panel>
+    );
+  }
+  return (
+    <section aria-label="Threads" className="border border-line bg-surface">
+      <div className={cx("hidden items-center gap-3 border-b border-line bg-panel px-3 py-1.5 md:grid", COLS)}>
+        {["created", "title", "project", "status", "model", "source"].map((h) => (
+          <span key={h} className="label-caps">
+            {h}
+          </span>
+        ))}
+        <span className="sr-only">open in T3</span>
+      </div>
+      <ul>
+        {data.map((t) => (
+          <ThreadRow key={t.t3ThreadId} t={t} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ThreadRow({ t }: { t: Thread }) {
+  const title =
+    t.taskId === null ? (
+      <span className="font-medium">{t.title}</span>
+    ) : (
+      <Link to={`/tasks/${t.taskId}`} className="font-medium hover:underline">
+        {t.title}
+      </Link>
+    );
+  const project =
+    t.projectId === null ? (
+      <span className="font-mono text-[11.5px] text-muted">{t.t3ProjectId}</span>
+    ) : (
+      <Link to={`/projects/${t.projectId}`} className="hover:underline">
+        {t.projectTitle ?? t.t3ProjectId}
+      </Link>
+    );
+  const model = t.model ?? t.providerInstanceId ?? "-";
+  const subagent = t.parentThreadId === null ? null : <span className="ml-1.5 text-[11px] font-normal text-muted">subagent</span>;
+  const when = (
+    <time dateTime={t.createdAt} title={dateTime(t.createdAt)}>
+      {compactTime(t.createdAt)}
+    </time>
+  );
+  return (
+    <li
+      className={cx(
+        "border-b border-line px-3 py-2 text-[12.5px] last:border-b-0 hover:bg-panel md:grid md:items-center md:gap-3",
+        COLS,
+      )}
+    >
+      {/* laptop cells */}
+      <span className="hidden font-mono text-[11.5px] text-muted md:block">{when}</span>
+      <span className="hidden min-w-0 truncate text-[13px] md:block" title={t.title}>
+        {title}
+        {subagent}
+      </span>
+      <span className="hidden min-w-0 truncate md:block">{project}</span>
+      <span className="hidden md:block">
+        <ThreadStatusBadge status={t.status} />
+      </span>
+      <span className="hidden min-w-0 truncate font-mono text-[11.5px] text-muted md:block" title={model}>
+        {model}
+      </span>
+      <span className="hidden font-mono text-[11.5px] text-muted md:block">{t.source}</span>
+      <span className="hidden md:block">
+        <T3Link t={t} />
+      </span>
+
+      {/* phone stack */}
+      <div className="flex flex-col gap-1 md:hidden">
+        <div className="flex items-start gap-2">
+          <span className="min-w-0 flex-1 text-[13px] break-words">
+            {title}
+            {subagent}
+          </span>
+          <ThreadStatusBadge status={t.status} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-mono text-[11px] text-muted">
+          {when}
+          <span className="min-w-0 truncate">{project}</span>
+          <span className="min-w-0 truncate">{model}</span>
+          <span>{t.source}</span>
+          <span className="ml-auto">
+            <T3Link t={t} />
+          </span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function T3Link({ t }: { t: Thread }) {
+  if (t.t3WebUrl === null) return null;
+  return (
+    <a
+      href={t.t3WebUrl}
+      target="_blank"
+      rel="noreferrer"
+      title="Open in T3"
+      aria-label={`Open "${t.title}" in T3`}
+      className="inline-flex text-muted hover:text-fg"
+    >
+      <IconExternal size={14} />
+    </a>
   );
 }
 
@@ -242,8 +528,8 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
   const first = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const last = Math.min(total, (page + 1) * PAGE_SIZE);
   return (
-    <div className="flex items-center justify-between gap-2 text-sm text-neutral-500">
-      <span>
+    <div className="flex items-center justify-between gap-2">
+      <span className="tabular font-mono text-[11.5px] text-muted">
         {first}-{last} of {total}
       </span>
       <div className="flex gap-2">
@@ -254,58 +540,6 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
           Next
         </Button>
       </div>
-    </div>
-  );
-}
-
-function Bars({ rows, emptyText }: { rows: { key: string; label: string; count: number }[]; emptyText: string }) {
-  if (rows.length === 0) return <Muted>{emptyText}</Muted>;
-  const max = Math.max(...rows.map((r) => r.count), 1);
-  return (
-    <ul className="flex flex-col gap-1">
-      {rows.map((r) => (
-        <li key={r.key} className="grid grid-cols-[minmax(5rem,9rem)_1fr_3rem] items-center gap-2 text-xs">
-          <span className="truncate text-neutral-600 dark:text-neutral-400" title={r.label}>
-            {r.label}
-          </span>
-          <span className="h-3 rounded-sm bg-neutral-100 dark:bg-neutral-800">
-            <span className="block h-full rounded-sm bg-blue-500" style={{ width: `${(r.count / max) * 100}%` }} />
-          </span>
-          <span className="text-right tabular-nums">{r.count}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function StatsPanel({ stats, error }: { stats: Stats | undefined; error: unknown }) {
-  if (error !== null) return <ErrorText error={error} />;
-  if (stats === undefined) return null;
-  const total = stats.threadsByStatus.reduce((n, s) => n + s.count, 0);
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <Card title={`Threads per day (${total})`}>
-        <div className="max-h-72 overflow-y-auto">
-          <Bars rows={stats.threadsByDay.map((d) => ({ key: d.day, label: d.day, count: d.count }))} emptyText="No threads in range." />
-        </div>
-      </Card>
-      <Card title="Threads per project">
-        <div className="max-h-72 overflow-y-auto">
-          <Bars
-            rows={stats.threadsByProject.map((p) => ({ key: p.t3ProjectId, label: p.title, count: p.count }))}
-            emptyText="No threads in range."
-          />
-        </div>
-        {stats.threadsByStatus.length === 0 ? null : (
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-            {stats.threadsByStatus.map((s) => (
-              <span key={s.status} className="flex items-center gap-1 text-xs">
-                <ThreadStatusBadge status={s.status} /> {s.count}
-              </span>
-            ))}
-          </div>
-        )}
-      </Card>
     </div>
   );
 }

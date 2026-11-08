@@ -22,6 +22,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   return (
     <Button
+      variant="secondary"
       small
       title={text}
       onClick={() => {

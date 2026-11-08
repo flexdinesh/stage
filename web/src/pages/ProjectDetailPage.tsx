@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useChains, useProject, useTasks } from "../api/queries.ts";
 import { TASK_STATES } from "../api/types.ts";
 import { ChainList } from "../components/ChainList.tsx";
+import { IconPlus } from "../components/icons.tsx";
+import { useNewTask } from "../components/NewTask.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
-import { TaskFormModal } from "../components/TaskForm.tsx";
-import { TaskList } from "../components/TaskList.tsx";
-import { Badge, Button, PageHeader, QueryState, Select } from "../components/ui.tsx";
+import { TaskRows } from "../components/TaskList.tsx";
+import { Button, PageHeader, Panel, QueryState, Select } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -21,8 +22,9 @@ function ProjectDetail({ id }: { id: number }) {
   const state = pick(TASK_STATES, stateFilter);
   const tasks = useTasks({ project: id, ...(state === undefined ? {} : { state: [state] }) });
   const chains = useChains();
-  const [creating, setCreating] = useState(false);
+  const newTask = useNewTask();
   const projectChains = (chains.data?.chains ?? []).filter((c) => c.steps.some((s) => s.projectId === id));
+  const taskCount = tasks.data?.tasks.length;
 
   return (
     <QueryState isPending={project.isPending} error={project.error}>
@@ -30,25 +32,30 @@ function ProjectDetail({ id }: { id: number }) {
         <>
           <PageHeader
             title={project.data.title}
-            subtitle={
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="font-mono">{project.data.workspaceRoot}</span>
-                <Badge tone={project.data.source === "app" ? "blue" : "gray"}>{project.data.source}</Badge>
-                {project.data.archivedAt === null ? null : <Badge tone="amber">archived</Badge>}
-                <span className="font-mono text-xs">{project.data.t3ProjectId}</span>
+            meta={
+              <span title={`${project.data.source} · ${project.data.t3ProjectId}`} className="break-all">
+                {project.data.workspaceRoot}
+                {project.data.archivedAt === null ? null : " · archived"}
               </span>
             }
             actions={
-              <Button variant="primary" onClick={() => setCreating(true)}>
-                New task
+              <Button variant="primary" onClick={() => newTask(id)}>
+                <IconPlus /> New task
               </Button>
             }
           />
-          <div className="flex flex-col gap-6">
-            <section>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-neutral-600 dark:text-neutral-400">Tasks</h2>
-                <Select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+          <div className="flex flex-col gap-5">
+            <Panel
+              flush
+              title="Tasks"
+              {...(taskCount === undefined ? {} : { meta: taskCount })}
+              actions={
+                <Select
+                  value={stateFilter}
+                  onChange={(e) => setStateFilter(e.target.value)}
+                  aria-label="Filter by state"
+                  small
+                >
                   <option value="">All states</option>
                   {TASK_STATES.map((s) => (
                     <option key={s} value={s}>
@@ -56,19 +63,23 @@ function ProjectDetail({ id }: { id: number }) {
                     </option>
                   ))}
                 </Select>
-              </div>
+              }
+            >
               <QueryState isPending={tasks.isPending} error={tasks.error}>
-                <TaskList tasks={tasks.data?.tasks ?? []} />
+                <TaskRows
+                  tasks={tasks.data?.tasks ?? []}
+                  emptyText={state === undefined ? "No tasks in this project. Create one with New task." : "No tasks in this state."}
+                />
               </QueryState>
-            </section>
-            <section>
-              <h2 className="mb-2 text-sm font-semibold text-neutral-600 dark:text-neutral-400">Chains with steps here</h2>
-              <QueryState isPending={chains.isPending} error={chains.error}>
-                <ChainList chains={projectChains} />
-              </QueryState>
-            </section>
+            </Panel>
+            <QueryState isPending={chains.isPending} error={chains.error}>
+              <ChainList
+                title="Chains with steps here"
+                chains={projectChains}
+                emptyText="No chains use this project. Add one of its backlog tasks to a chain."
+              />
+            </QueryState>
           </div>
-          {creating ? <TaskFormModal defaultProjectId={id} onClose={() => setCreating(false)} /> : null}
         </>
       )}
     </QueryState>

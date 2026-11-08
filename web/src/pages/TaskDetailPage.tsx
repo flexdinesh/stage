@@ -1,29 +1,31 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
-import { useInvalidateWork, useTask } from "../api/queries.ts";
-import { SEND_MODES, type SendMode, type TaskDetail, type Thread } from "../api/types.ts";
+import { useChain, useInvalidateWork, useTask } from "../api/queries.ts";
+import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { IconExternal } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge } from "../components/StateBadge.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
-  Badge,
+  Alert,
   Button,
-  Card,
+  Chip,
   Detail,
   Details,
   ErrorText,
   ExternalButton,
-  Field,
   Muted,
   PageHeader,
+  Panel,
   QueryState,
-  Select,
+  Segmented,
   Textarea,
   buttonClass,
+  cx,
 } from "../components/ui.tsx";
-import { dateTime, modelText, pick, relativeTime, workspaceText } from "../lib/format.ts";
+import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -44,10 +46,45 @@ function TaskDetailView({ id }: { id: number }) {
 
 const when = (iso: string | null) => (iso === null ? "-" : <span title={dateTime(iso)}>{relativeTime(iso)}</span>);
 
+const SEND_OPTIONS = SEND_MODES.map((m) => ({ value: m, label: m }));
+
+/** "10:42:03" today, "Nov 3 10:42" otherwise. */
+function stamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  const day = d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${day} ${time.slice(0, 5)}`;
+}
+
+function workspaceChip(task: TaskDetail): string {
+  const w = task.workspace;
+  if (w.type === "root") return "project root";
+  const branch = w.branch ?? task.thread?.branch ?? null;
+  return branch === null ? `worktree from ${w.baseRef}` : `worktree ${branch}`;
+}
+
+const linkClass = "text-fg underline-offset-2 hover:underline";
+
+function ChainMeta({ chainId, position }: { chainId: number; position: number | null }) {
+  const chain = useChain(chainId);
+  return (
+    <>
+      {" · chain "}
+      <Link to={`/chains/${chainId}`} className={linkClass}>
+        {chain.data?.title ?? `#${chainId}`}
+      </Link>
+      {position === null ? null : ` step ${position}`}
+    </>
+  );
+}
+
 function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
+  const followupInput = useRef<HTMLTextAreaElement>(null);
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
   const duplicate = useMutation({
@@ -66,186 +103,260 @@ function TaskBody({ task }: { task: TaskDetail }) {
   });
   const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error;
 
+  const pending = task.thread?.pendingRequestCount ?? 0;
+  const waiting = task.state === "needs_input" || pending > 0;
+  const hasThread = task.t3ThreadId !== null;
+  const startable = canStart(task);
+  const stoppable = canStop(task);
+  const webUrl = task.t3WebUrl;
+  const phoneBar = webUrl !== null || hasThread || stoppable;
+
+  const focusFollowup = () => {
+    const el = followupInput.current;
+    if (el === null) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.focus({ preventScroll: true });
+  };
+
+  const openInT3 = (variant: "primary" | "secondary", className?: string) =>
+    webUrl === null ? null : (
+      <ExternalButton href={webUrl} variant={variant} {...(className === undefined ? {} : { className })}>
+        Open in T3 <IconExternal />
+      </ExternalButton>
+    );
+
+  const stopButton = (className?: string) => (
+    <Button busy={stop.isPending} onClick={() => stop.mutate()} className={className}>
+      Stop
+    </Button>
+  );
+
   return (
-    <>
+    <div className={cx(phoneBar && "pb-16 md:pb-0")}>
       <PageHeader
         title={task.title}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <TaskStateBadge state={task.state} />
-            <span>#{task.id}</span>
-            <Link to={`/projects/${task.projectId}`} className="hover:underline">
+        meta={
+          <>
+            <Link to={`/projects/${task.projectId}`} className={linkClass}>
               {task.projectTitle}
             </Link>
-            {task.chainId === null ? null : (
-              <Link to={`/chains/${task.chainId}`} className="hover:underline">
-                chain #{task.chainId}
-              </Link>
-            )}
-            {task.tags.map((t) => (
-              <Badge key={t} tone="violet">
-                {t}
-              </Badge>
-            ))}
-          </span>
-        }
-        actions={
-          <>
-            {canStart(task) ? (
-              <Button variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-                {task.state === "backlog" ? "Start" : "Restart"}
-              </Button>
-            ) : null}
-            {canStop(task) ? (
-              <Button variant="danger" busy={stop.isPending} onClick={() => stop.mutate()}>
-                Stop
-              </Button>
-            ) : null}
-            {task.t3WebUrl === null ? null : <ExternalButton href={task.t3WebUrl}>Open in T3</ExternalButton>}
-            <Button onClick={() => setEditing(true)}>Edit</Button>
-            <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
-              Duplicate
-            </Button>
-            <Button
-              variant="danger"
-              disabled={isActive(task)}
-              title={isActive(task) ? "Stop the task first" : undefined}
-              busy={remove.isPending}
-              onClick={() => {
-                if (window.confirm(`Delete task "${task.title}"?`)) remove.mutate();
-              }}
-            >
-              Delete
-            </Button>
+            {` / task ${task.id}`}
+            {task.chainId === null ? null : <ChainMeta chainId={task.chainId} position={task.chainPosition} />}
           </>
         }
       />
-      <div className="flex flex-col gap-4">
+      <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
+        <TaskStateBadge state={task.state} />
+        <Chip>{modelText(task.model, task.modelOptions)}</Chip>
+        <Chip>{task.runtimeMode}</Chip>
+        {task.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
+        <Chip>{workspaceChip(task)}</Chip>
+        {task.tags.map((t) => (
+          <Chip key={t}>#{t}</Chip>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-3.5">
+        {waiting ? (
+          <Alert tone="need" actions={webUrl === null ? undefined : openInT3("primary", "max-md:hidden")}>
+            {pending > 0 ? `T3 is waiting on ${pending} request${pending === 1 ? "" : "s"}` : "T3 is waiting on input"}
+          </Alert>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {startable ? (
+            <Button variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
+              {task.state === "backlog" ? "Start" : "Restart"}
+            </Button>
+          ) : null}
+          {waiting ? null : openInT3("secondary", "max-md:hidden")}
+          {hasThread ? (
+            <Button onClick={focusFollowup} className="max-md:hidden">
+              Follow-up
+            </Button>
+          ) : null}
+          {stoppable ? stopButton("max-md:hidden") : null}
+          <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
+            Duplicate
+          </Button>
+          <Button onClick={() => setEditing(true)}>Edit</Button>
+          <Button
+            variant="danger"
+            className="ml-auto"
+            disabled={isActive(task)}
+            title={isActive(task) ? "Stop the task first" : undefined}
+            busy={remove.isPending}
+            onClick={() => {
+              if (window.confirm(`Delete task "${task.title}"?`)) remove.mutate();
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+
         <ErrorText error={actionError} />
         {task.lastError === null ? null : (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          <Alert tone="bad">
             <span className="font-medium">Last error:</span> {task.lastError}
-          </div>
+          </Alert>
         )}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
-          <div className="flex min-w-0 flex-col gap-4">
-            <Card title="Prompt">
-              <pre className="max-h-96 overflow-auto font-mono text-sm whitespace-pre-wrap">{task.prompt}</pre>
-            </Card>
-            <Card title="Configuration">
-              <Details>
-                <Detail label="Provider">{task.providerInstanceId ?? "T3 default"}</Detail>
-                <Detail label="Model">{modelText(task.model, task.modelOptions)}</Detail>
-                <Detail label="Runtime">{task.runtimeMode}</Detail>
-                <Detail label="Interaction">{task.interactionMode}</Detail>
-                <Detail label="Workspace">{workspaceText(task.workspace)}</Detail>
-                <Detail label="Attempts">{task.launchAttempt}</Detail>
-                <Detail label="Created">{when(task.createdAt)}</Detail>
-                <Detail label="Launched">{when(task.launchedAt)}</Detail>
-                <Detail label="Finished">{when(task.finishedAt)}</Detail>
-                <Detail label="Settled">{when(task.settledAt)}</Detail>
-              </Details>
-            </Card>
-            <NotesCard task={task} />
-            {task.t3ThreadId === null ? null : <FollowupCard taskId={task.id} />}
+
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-3.5">
+            <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
+              <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
+                {task.prompt}
+              </pre>
+            </Panel>
+            {hasThread ? <FollowupPanel taskId={task.id} inputRef={followupInput} /> : null}
+            <TimelinePanel events={task.events} />
           </div>
-          <div className="flex min-w-0 flex-col gap-4">
-            <ThreadCard task={task} thread={task.thread} />
-            <TimelineCard task={task} />
+          <div className="flex min-w-0 flex-col gap-3.5">
+            <ThreadPanel task={task} thread={task.thread} />
+            <ConfigPanel task={task} />
+            <NotesPanel task={task} />
           </div>
         </div>
       </div>
+
+      {phoneBar ? (
+        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
+          {openInT3(waiting ? "primary" : "secondary", "flex-1")}
+          {hasThread ? (
+            <Button onClick={focusFollowup} className="flex-1">
+              Follow-up
+            </Button>
+          ) : null}
+          {stoppable ? stopButton("flex-1") : null}
+        </div>
+      ) : null}
+
       {editing ? <TaskFormModal task={task} onClose={() => setEditing(false)} /> : null}
-    </>
+    </div>
   );
 }
 
-function ThreadCard({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
+function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
   if (task.t3ThreadId === null) {
     return (
-      <Card title="Thread">
-        <Muted>No T3 thread yet.</Muted>
-      </Card>
+      <Panel title="Thread">
+        <Muted>No T3 thread yet. Start the task to launch one.</Muted>
+      </Panel>
+    );
+  }
+  const links: ReactNode[] = [];
+  if (task.t3WebUrl !== null) {
+    links.push(
+      <ExternalButton key="web" href={task.t3WebUrl} small>
+        Open in T3 <IconExternal />
+      </ExternalButton>,
+    );
+  }
+  if (task.t3AppUrl !== null) {
+    links.push(
+      <a key="app" href={task.t3AppUrl} className={buttonClass("secondary", true)}>
+        Open in app
+      </a>,
+      <CopyButton key="copy" text={task.t3AppUrl} label="Copy app link" />,
     );
   }
   return (
-    <Card
-      title="Thread"
-      actions={
-        task.t3AppUrl === null ? null : (
-          <>
-            <a href={task.t3AppUrl} className={buttonClass("secondary", true)}>
-              Open in app
-            </a>
-            <CopyButton text={task.t3AppUrl} label="Copy app link" />
-          </>
-        )
-      }
-    >
+    <Panel title="Thread" meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>
       <Details>
         {thread === null ? null : (
           <>
             <Detail label="Status">
               <ThreadStatusBadge status={thread.status} />
             </Detail>
+            <Detail label="Pending">
+              {thread.pendingRequestCount} request{thread.pendingRequestCount === 1 ? "" : "s"}
+            </Detail>
             <Detail label="Settled">
               {thread.settled ? (
                 <span>
-                  yes {thread.settledAt === null ? null : <span className="text-neutral-500">({when(thread.settledAt)})</span>}
+                  yes{thread.settledAt === null ? null : <span className="text-muted"> ({when(thread.settledAt)})</span>}
                 </span>
               ) : (
                 "no (settle in T3 to finish)"
               )}
             </Detail>
-            <Detail label="Pending requests">{thread.pendingRequestCount}</Detail>
             <Detail label="Model">{thread.model ?? "-"}</Detail>
             <Detail label="Branch">{thread.branch ?? "-"}</Detail>
-            <Detail label="Worktree">
-              <span className="font-mono text-xs">{thread.worktreePath ?? "-"}</span>
-            </Detail>
+            <Detail label="Worktree">{thread.worktreePath ?? "-"}</Detail>
             <Detail label="Synced">{when(thread.syncedAt)}</Detail>
           </>
         )}
         <Detail label="Thread id">
-          <span className="font-mono text-xs">{task.t3ThreadId}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate" title={task.t3ThreadId}>
+              {task.t3ThreadId}
+            </span>
+            <CopyButton text={task.t3ThreadId} label="Copy" />
+          </span>
         </Detail>
       </Details>
-    </Card>
+      {links.length === 0 ? null : <div className="mt-3 flex flex-wrap gap-1.5">{links}</div>}
+    </Panel>
   );
 }
 
-function TimelineCard({ task }: { task: TaskDetail }) {
+function ConfigPanel({ task }: { task: TaskDetail }) {
   return (
-    <Card title="Timeline">
-      {task.events.length === 0 ? (
-        <Muted>No events.</Muted>
+    <Panel title="Config">
+      <Details>
+        <Detail label="Provider">{task.providerInstanceId ?? "T3 default"}</Detail>
+        <Detail label="Model">{modelText(task.model, task.modelOptions)}</Detail>
+        <Detail label="Runtime">{task.runtimeMode}</Detail>
+        <Detail label="Interaction">{task.interactionMode}</Detail>
+        <Detail label="Workspace">{workspaceText(task.workspace)}</Detail>
+        <Detail label="Attempts">{task.launchAttempt}</Detail>
+        <Detail label="Created">{when(task.createdAt)}</Detail>
+        <Detail label="Launched">{when(task.launchedAt)}</Detail>
+        <Detail label="Finished">{when(task.finishedAt)}</Detail>
+        <Detail label="Settled">{when(task.settledAt)}</Detail>
+      </Details>
+    </Panel>
+  );
+}
+
+function TimelinePanel({ events }: { events: TaskEvent[] }) {
+  return (
+    <Panel title="Timeline" meta={`${events.length} event${events.length === 1 ? "" : "s"}`} flush>
+      {events.length === 0 ? (
+        <div className="p-3">
+          <Muted>No events yet. State changes appear here once the task moves.</Muted>
+        </div>
       ) : (
-        <ol className="flex flex-col gap-2 border-l border-neutral-200 pl-4 dark:border-neutral-800">
-          {task.events.map((e) => (
-            <li key={e.id} className="relative text-sm">
-              <span className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full bg-neutral-400" />
-              <div className="flex flex-wrap items-center gap-1.5">
-                {e.fromState === null ? null : (
+        <ol>
+          {events.map((e) => (
+            <li
+              key={e.id}
+              className="grid grid-cols-[auto_1fr] items-center gap-x-3 border-b border-line px-3 py-1.5 last:border-b-0 sm:grid-cols-[88px_1fr]"
+            >
+              <span className="font-mono text-[11.5px] text-muted tabular" title={dateTime(e.at)}>
+                {stamp(e.at)}
+              </span>
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {e.fromState === null || e.fromState === e.toState ? null : (
                   <>
                     <TaskStateBadge state={e.fromState} />
-                    <span className="text-neutral-400">→</span>
+                    <span className="text-muted">→</span>
                   </>
                 )}
                 <TaskStateBadge state={e.toState} />
-                <span className="text-xs text-neutral-500" title={dateTime(e.at)}>
-                  {relativeTime(e.at)}
-                </span>
-              </div>
-              {e.detail === "" ? null : <div className="text-xs text-neutral-500">{e.detail}</div>}
+                {e.detail === "" ? null : (
+                  <span className="min-w-0 font-mono text-[11.5px] break-words text-muted">{e.detail}</span>
+                )}
+              </span>
             </li>
           ))}
         </ol>
       )}
-    </Card>
+    </Panel>
   );
 }
 
-function NotesCard({ task }: { task: TaskDetail }) {
+function NotesPanel({ task }: { task: TaskDetail }) {
   const invalidate = useInvalidateWork();
   const [draft, setDraft] = useState<string | null>(null);
   const save = useMutation({
@@ -257,7 +368,7 @@ function NotesCard({ task }: { task: TaskDetail }) {
   });
 
   return (
-    <Card
+    <Panel
       title="Notes"
       actions={
         draft === null ? (
@@ -278,9 +389,9 @@ function NotesCard({ task }: { task: TaskDetail }) {
     >
       {draft === null ? (
         task.notes === "" ? (
-          <Muted>No notes.</Muted>
+          <Muted>No notes. Use Edit to jot context for later.</Muted>
         ) : (
-          <p className="text-sm whitespace-pre-wrap">{task.notes}</p>
+          <p className="text-[12.5px] whitespace-pre-wrap">{task.notes}</p>
         )
       ) : (
         <div className="flex flex-col gap-2">
@@ -288,11 +399,11 @@ function NotesCard({ task }: { task: TaskDetail }) {
           <ErrorText error={save.error} />
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }
 
-function FollowupCard({ taskId }: { taskId: number }) {
+function FollowupPanel({ taskId, inputRef }: { taskId: number; inputRef: Ref<HTMLTextAreaElement> }) {
   const invalidate = useInvalidateWork();
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<SendMode>("auto");
@@ -309,33 +420,31 @@ function FollowupCard({ taskId }: { taskId: number }) {
   };
 
   return (
-    <Card title="Follow-up">
-      <form onSubmit={submit} className="flex flex-col gap-3">
+    <Panel title="Follow-up">
+      <form onSubmit={submit} className="flex flex-col gap-2.5">
         <Textarea
-          rows={4}
+          ref={inputRef}
+          rows={3}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Message to send to the thread"
           aria-label="Follow-up message"
         />
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <Field label="Mode">
-            {(id) => (
-              <Select id={id} value={mode} onChange={(e) => setMode(pick(SEND_MODES, e.target.value) ?? mode)}>
-                {SEND_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-          <Button type="submit" variant="primary" busy={send.isPending} disabled={message.trim() === ""}>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
+          <Button
+            type="submit"
+            variant="primary"
+            small
+            className="ml-auto"
+            busy={send.isPending}
+            disabled={message.trim() === ""}
+          >
             Send
           </Button>
         </div>
         <ErrorText error={send.error} />
       </form>
-    </Card>
+    </Panel>
   );
 }

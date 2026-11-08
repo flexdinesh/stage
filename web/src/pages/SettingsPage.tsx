@@ -3,38 +3,43 @@ import { useState, type FormEvent } from "react";
 import { api } from "../api/client.ts";
 import { invalidateWork, keys, useT3Status } from "../api/queries.ts";
 import type { T3Status } from "../api/types.ts";
-import { Badge, Button, Card, Detail, Details, ErrorText, Field, Input, PageHeader, QueryState } from "../components/ui.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented } from "../components/ui.tsx";
+import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
 const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
 
 function StatusCard({ status }: { status: T3Status }) {
   return (
-    <Card title="T3 connection">
+    <Panel
+      title="T3 connection"
+      actions={
+        status.connected ? (
+          <Chip tone="ok" dot>
+            connected
+          </Chip>
+        ) : (
+          <Chip tone="bad" dot>
+            not connected
+          </Chip>
+        )
+      }
+    >
       <Details>
-        <Detail label="Status">
-          {status.connected ? <Badge tone="green">connected</Badge> : <Badge tone="red">not connected</Badge>}
-        </Detail>
-        <Detail label="T3 URL">
-          <span className="font-mono text-xs">{status.t3Url}</span>
-        </Detail>
-        <Detail label="Public URL">
-          <span className="font-mono text-xs">{status.publicUrl}</span>
-        </Detail>
+        <Detail label="T3 URL">{status.t3Url}</Detail>
+        <Detail label="Public URL">{status.publicUrl}</Detail>
         <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
-        <Detail label="Client id">
-          <span className="font-mono text-xs">{status.clientId ?? "-"}</span>
-        </Detail>
+        <Detail label="Client id">{status.clientId ?? "-"}</Detail>
         <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
         <Detail label="Admin token">
           {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured (pair manually)"}
         </Detail>
         <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
         <Detail label="Last error">
-          {status.lastError === null ? "-" : <span className="text-red-600 dark:text-red-400">{status.lastError}</span>}
+          {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
         </Detail>
       </Details>
-    </Card>
+    </Panel>
   );
 }
 
@@ -53,11 +58,11 @@ function PairCard() {
     if (code.trim() !== "") pair.mutate();
   };
   return (
-    <Card title="Pair manually">
+    <Panel title="Pair manually" meta="fallback">
       <form onSubmit={submit} className="flex flex-col gap-3">
-        <p className="text-sm text-neutral-500">
-          Fallback when auto-renew is unavailable: run <code className="font-mono">t3 pair</code> on the T3 host and paste the code.
-        </p>
+        <Muted>
+          Use when auto-renew is unavailable: run <code className="font-mono text-fg">t3 pair</code> on the T3 host and paste the code.
+        </Muted>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Pairing code" className="min-w-52 flex-1">
             {(id) => (
@@ -68,10 +73,10 @@ function PairCard() {
             Pair
           </Button>
         </div>
-        {pair.isSuccess ? <p className="text-sm text-green-700 dark:text-green-400">Paired.</p> : null}
+        {pair.isSuccess ? <Alert tone="plain">Paired.</Alert> : null}
         <ErrorText error={pair.error} />
       </form>
-    </Card>
+    </Panel>
   );
 }
 
@@ -88,24 +93,38 @@ function SyncCard() {
     },
   });
   return (
-    <Card title="Sync">
+    <Panel title="Sync" meta="every 5 min">
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-neutral-500">
-          Full sync of all T3 projects and threads runs every 5 minutes. Run it now to refresh history immediately.
-        </p>
+        <Muted>Full sync of all T3 projects and threads runs every 5 minutes. Run it now to refresh history immediately.</Muted>
         <div>
           <Button variant="primary" busy={sync.isPending} onClick={() => sync.mutate()}>
             Sync now
           </Button>
         </div>
         {sync.data === undefined ? null : (
-          <p className="text-sm text-green-700 dark:text-green-400">
-            Synced {sync.data.projects} projects, {sync.data.threads} threads at {dateTime(sync.data.finishedAt)}.
-          </p>
+          <Alert tone="plain">
+            Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
+            <span className="tabular font-mono">{sync.data.threads}</span> threads at{" "}
+            <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
+          </Alert>
         )}
         <ErrorText error={sync.error} />
       </div>
-    </Card>
+    </Panel>
+  );
+}
+
+const THEME_OPTIONS = THEMES.map((t) => ({ value: t, label: t }));
+
+function ThemeCard() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <Panel title="Theme">
+      <div className="flex flex-wrap items-center gap-3">
+        <Segmented label="Theme" options={THEME_OPTIONS} value={theme} onChange={setTheme} />
+        <Muted>{theme === "system" ? "Follows the OS light/dark setting." : `Always ${theme}.`}</Muted>
+      </div>
+    </Panel>
   );
 }
 
@@ -113,15 +132,16 @@ export function SettingsPage() {
   const status = useT3Status();
   return (
     <>
-      <PageHeader title="Settings" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="lg:row-span-2">
+      <PageHeader title="Settings" meta="T3 connection, sync, appearance" />
+      <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
+        <div className="lg:row-span-3">
           <QueryState isPending={status.isPending} error={status.error}>
             {status.data === undefined ? null : <StatusCard status={status.data} />}
           </QueryState>
         </div>
-        <PairCard />
         <SyncCard />
+        <PairCard />
+        <ThemeCard />
       </div>
     </>
   );

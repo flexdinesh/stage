@@ -6,8 +6,8 @@ import {
   type ModelOption,
   type RuntimeMode,
 } from "../api/types.ts";
-import { optionsText, pick } from "../lib/format.ts";
-import { Field, Muted, Select, errorText } from "./ui.tsx";
+import { optionsText } from "../lib/format.ts";
+import { Field, Muted, Segmented, Select, errorText } from "./ui.tsx";
 
 export interface ModelConfig {
   providerInstanceId: string | null;
@@ -15,6 +15,13 @@ export interface ModelConfig {
   modelOptions: ModelOption[];
   runtimeMode: RuntimeMode;
 }
+
+const RUNTIME_LABELS: Record<RuntimeMode, string> = {
+  "approval-required": "approval",
+  "auto-accept-edits": "auto-edits",
+  auto: "auto",
+  "full-access": "full-access",
+};
 
 const allowedModes = (p: CatalogProvider | undefined): readonly RuntimeMode[] => p?.runtimeModes ?? RUNTIME_MODES;
 
@@ -67,11 +74,12 @@ export function ModelFields({
   };
 
   const catalogError = errorText(catalog.error);
+  const modeList = modes.includes(value.runtimeMode) ? modes : [...modes, value.runtimeMode];
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {catalogError === null ? null : (
-        <p className="text-xs text-amber-700 sm:col-span-2 dark:text-amber-400">
+        <p className="col-span-full text-[12px] text-need-fg">
           Catalog unavailable ({catalogError}); model selection limited to current values.
         </p>
       )}
@@ -114,7 +122,7 @@ export function ModelFields({
         const current = value.modelOptions.find((o) => o.id === opt.id);
         const index = current === undefined ? -1 : opt.values.findIndex((v) => v === current.value);
         return (
-          <Field key={opt.id} label={opt.id}>
+          <Field key={opt.id} label={opt.id.replace(/([a-z])([A-Z])/g, "$1 $2")}>
             {(id) => (
               <Select
                 id={id}
@@ -135,26 +143,19 @@ export function ModelFields({
         );
       })}
       {model === undefined && value.modelOptions.length > 0 ? (
-        <div className="sm:col-span-2">
+        <div className="col-span-full">
           <Muted>Options (kept): {optionsText(value.modelOptions)}</Muted>
         </div>
       ) : null}
-      <Field label="Runtime mode">
-        {(id) => (
-          <Select
-            id={id}
-            disabled={disabled}
-            value={value.runtimeMode}
-            onChange={(e) => onChange({ ...value, runtimeMode: pick(RUNTIME_MODES, e.target.value) ?? value.runtimeMode })}
-          >
-            {(modes.includes(value.runtimeMode) ? modes : [...modes, value.runtimeMode]).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </Select>
-        )}
-      </Field>
+      <fieldset disabled={disabled} className="col-span-full min-w-0 disabled:opacity-55">
+        <legend className="label-caps mb-1.5">Runtime</legend>
+        <Segmented
+          label="Runtime mode"
+          options={modeList.map((m) => ({ value: m, label: RUNTIME_LABELS[m] }))}
+          value={value.runtimeMode}
+          onChange={(runtimeMode) => onChange({ ...value, runtimeMode })}
+        />
+      </fieldset>
     </div>
   );
 }

@@ -4,9 +4,12 @@ import { useNavigate } from "react-router";
 import { api } from "../api/client.ts";
 import { useChains, useInvalidateWork } from "../api/queries.ts";
 import { ChainList } from "../components/ChainList.tsx";
-import { Button, Card, ErrorText, Field, Input, PageHeader, QueryState } from "../components/ui.tsx";
+import { IconPlus } from "../components/icons.tsx";
+import { Button, Drawer, ErrorText, Field, Input, PageHeader, QueryState } from "../components/ui.tsx";
 
-function CreateChain() {
+const FORM_ID = "new-chain-form";
+
+function CreateChainDrawer({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [title, setTitle] = useState("");
@@ -22,36 +25,51 @@ function CreateChain() {
     if (title.trim() !== "") create.mutate();
   };
   return (
-    <Card title="New chain">
-      <form onSubmit={submit} className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Title" className="min-w-60 flex-1">
-            {(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} />}
-          </Field>
-          <Button type="submit" variant="primary" busy={create.isPending} disabled={title.trim() === ""}>
-            Create
+    <Drawer
+      title="New chain"
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="submit" form={FORM_ID} variant="primary" busy={create.isPending} disabled={title.trim() === ""}>
+            Create chain
           </Button>
-        </div>
-        <p className="text-xs text-neutral-500">
-          Chains run tasks in order. Each next step starts only after the previous thread is settled in T3.
-        </p>
+          <Button onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
+      <form id={FORM_ID} onSubmit={submit} className="flex flex-col gap-3">
+        <Field
+          label="Title"
+          hint="Chains run tasks in order. Each next step starts only after the previous thread is settled in T3."
+        >
+          {(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}
+        </Field>
         <ErrorText error={create.error} />
       </form>
-    </Card>
+    </Drawer>
   );
 }
 
 export function ChainsPage() {
   const chains = useChains();
+  const [creating, setCreating] = useState(false);
+  const list = chains.data?.chains ?? [];
+  const running = list.filter((c) => c.state === "running").length;
   return (
     <>
-      <PageHeader title="Chains" />
-      <div className="flex flex-col gap-5">
-        <CreateChain />
-        <QueryState isPending={chains.isPending} error={chains.error}>
-          <ChainList chains={chains.data?.chains ?? []} emptyText="No chains yet." />
-        </QueryState>
-      </div>
+      <PageHeader
+        title="Chains"
+        meta={chains.data === undefined ? "loading" : `${list.length} chains · ${running} running`}
+        actions={
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            <IconPlus /> New chain
+          </Button>
+        }
+      />
+      <QueryState isPending={chains.isPending} error={chains.error}>
+        <ChainList chains={list} emptyText="No chains yet. Create one, then add backlog tasks as steps." />
+      </QueryState>
+      {creating ? <CreateChainDrawer onClose={() => setCreating(false)} /> : null}
     </>
   );
 }

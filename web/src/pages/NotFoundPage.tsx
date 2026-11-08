@@ -1,12 +1,15 @@
-import { Link } from "react-router";
-import { PageHeader } from "../components/ui.tsx";
+import { Link, useLocation } from "react-router";
+import { IconBack } from "../components/icons.tsx";
+import { PageHeader, buttonClass } from "../components/ui.tsx";
 
 export function NotFoundPage() {
+  const { pathname } = useLocation();
   return (
     <>
-      <PageHeader title="Not found" />
-      <Link to="/" className="text-sm text-blue-600 hover:underline dark:text-blue-400">
-        Back to dashboard
+      <PageHeader title="Not found" meta={<span className="break-all">{pathname}</span>} />
+      <p className="mb-3 text-[13px] text-muted">Nothing lives at this address. It may have been deleted or the link is wrong.</p>
+      <Link to="/" className={buttonClass("secondary")}>
+        <IconBack /> Back to dashboard
       </Link>
     </>
   );

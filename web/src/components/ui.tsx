@@ -66,9 +66,11 @@ export function Badge({ tone = "gray", children }: { tone?: Tone; children: Reac
   );
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
+export function Kbd({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <kbd className="border border-line bg-panel px-1 font-mono text-[10.5px] leading-4 text-muted">{children}</kbd>
+    <kbd className={cx("border border-line bg-panel px-1 font-mono text-[10.5px] leading-4 text-muted", className)}>
+      {children}
+    </kbd>
   );
 }
 
@@ -131,8 +133,9 @@ export function ExternalButton({
 
 // ---- Form controls ----
 
-export const inputClass =
-  "h-8 border border-line-strong bg-surface px-2.5 text-[13px] text-fg transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_1px_var(--accent)] focus:outline-none disabled:opacity-55";
+const inputBase =
+  "border border-line-strong bg-surface px-2.5 text-[13px] text-fg transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_1px_var(--accent)] focus:outline-none disabled:opacity-55";
+export const inputClass = `h-8 ${inputBase}`;
 
 export function Input({ className, ...rest }: ComponentProps<"input">) {
   return <input className={cx(inputClass, "w-full", className)} {...rest} />;
@@ -150,8 +153,13 @@ export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
 const CHEVRON =
   "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238b92a3' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E\")] bg-[length:14px] bg-[right_8px_center] bg-no-repeat";
 
-export function Select({ className, ...rest }: ComponentProps<"select">) {
-  return <select className={cx(inputClass, "appearance-none pr-8", CHEVRON, className)} {...rest} />;
+export function Select({ className, small = false, ...rest }: ComponentProps<"select"> & { small?: boolean }) {
+  return (
+    <select
+      className={cx(inputBase, small ? "h-6 py-0 text-[12px]" : "h-8", "appearance-none pr-8", CHEVRON, className)}
+      {...rest}
+    />
+  );
 }
 
 /** Label + control. `children` receives the generated id for the control. */
@@ -457,12 +465,12 @@ export function Drawer({
       >
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
           <h2 className="text-[15px] font-semibold">{title}</h2>
-          <span className="ml-auto hidden md:inline">
-            <Kbd>Esc</Kbd>
-          </span>
-          <Button variant="ghost" small onClick={onClose} aria-label="Close" className="md:ml-0">
-            <IconClose />
-          </Button>
+          <div className="ml-auto flex items-center gap-3">
+            <Kbd className="max-md:hidden">Esc</Kbd>
+            <Button variant="ghost" small onClick={onClose} aria-label="Close">
+              <IconClose />
+            </Button>
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
         {footer === undefined ? null : (
@@ -473,6 +481,3 @@ export function Drawer({
     document.body,
   );
 }
-
-/** Legacy name: every modal is now a Drawer. */
-export const Modal = Drawer;
