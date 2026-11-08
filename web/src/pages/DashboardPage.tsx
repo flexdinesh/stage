@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useNeedsInputThreads, useProjects, useT3Status, useTasks } from "../api/queries.ts";
+import { useNeedsInputThreads, useProjects, useTasks } from "../api/queries.ts";
 import type { Task, TaskState } from "../api/types.ts";
-import { IconChevronDown, IconExternal } from "../components/icons.tsx";
+import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ExternalThreadRows, TaskRows } from "../components/TaskList.tsx";
-import { ErrorText, ExternalButton, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
 type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
 
@@ -96,16 +96,13 @@ const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_inpu
 const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.key === v)?.key ?? null;
 
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
-  const t3 = useT3Status();
-  const first = tasks[0];
-  if (first === undefined) return null;
-  const href = tasks.length === 1 ? first.t3WebUrl : (t3.data?.publicUrl ?? null);
+  // App links open one thread, so only a lone task gets one.
+  const href = tasks.length === 1 ? (tasks[0]?.t3DeepLink ?? null) : null;
   if (href === null) return null;
   return (
-    <ExternalButton href={href} small variant="ghost">
-      Open in T3
-      <IconExternal size={12} />
-    </ExternalButton>
+    <AppButton href={href} small variant="ghost">
+      Open in app
+    </AppButton>
   );
 }
 

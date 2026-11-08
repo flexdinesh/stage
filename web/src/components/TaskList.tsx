@@ -6,9 +6,9 @@ import { useInvalidateWork } from "../api/queries.ts";
 import type { Task, Thread } from "../api/types.ts";
 import { dateTime, modelText, relativeTime } from "../lib/format.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
-import { IconChainLink, IconExternal } from "./icons.tsx";
+import { IconChainLink } from "./icons.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Button, Chip, ErrorText, ExternalButton, Muted, cx } from "./ui.tsx";
+import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
 /** Standalone bordered task list. Inside a `Panel flush`, use `TaskRows` instead. */
 export function TaskList({ tasks, emptyText = "No tasks." }: { tasks: Task[]; emptyText?: string }) {
@@ -51,7 +51,7 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
   const showStart = canStart(task) && !isWaiting(task);
   const chip = linkChip(task);
   const needsInput = task.state === "needs_input";
-  const hasActions = showStart || task.t3WebUrl !== null || extra !== undefined;
+  const hasActions = showStart || task.t3DeepLink !== null || extra !== undefined;
 
   return (
     <div
@@ -110,11 +110,10 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
               {task.state === "backlog" ? "Start" : "Restart"}
             </Button>
           ) : null}
-          {task.t3WebUrl === null ? null : (
-            <ExternalButton small variant={needsInput ? "primary" : "secondary"} href={task.t3WebUrl}>
-              Open in T3
-              <IconExternal size={12} />
-            </ExternalButton>
+          {task.t3DeepLink === null ? null : (
+            <AppButton small variant={needsInput ? "primary" : "secondary"} href={task.t3DeepLink}>
+              Open in app
+            </AppButton>
           )}
           {extra}
         </div>
@@ -151,7 +150,7 @@ export function ExternalThreadRows({ threads }: { threads: Thread[] }) {
 }
 
 function ExternalThreadRow({ thread }: { thread: Thread }) {
-  const href = thread.t3WebUrl ?? thread.t3AppUrl;
+  const href = thread.t3DeepLink;
   const project = thread.projectTitle ?? thread.t3ProjectId;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-need px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2">
@@ -180,10 +179,9 @@ function ExternalThreadRow({ thread }: { thread: Thread }) {
 
       {href === null ? null : (
         <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
-          <ExternalButton small variant="primary" href={href}>
-            Open in T3
-            <IconExternal size={12} />
-          </ExternalButton>
+          <AppButton small variant="primary" href={href}>
+            Open in app
+          </AppButton>
         </div>
       )}
     </div>

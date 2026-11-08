@@ -88,7 +88,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           hint: t.projectTitle,
           badge: <TaskStateBadge state={t.state} />,
           run: go(`/tasks/${t.id}`),
-          t3Url: t.t3WebUrl,
+          t3Url: t.t3DeepLink,
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
@@ -101,7 +101,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             hint: `${th.projectTitle ?? th.t3ProjectId} · ${th.source}`,
             badge: <ThreadStatusBadge status={th.status} settled={th.settled} />,
             run: th.taskId === null ? go(`/history?q=${encodeURIComponent(th.title)}`) : go(`/tasks/${th.taskId}`),
-            t3Url: th.t3WebUrl,
+            t3Url: th.t3DeepLink,
           });
     }
     const actions: Item[] = [
@@ -138,7 +138,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       const item = items[active];
       if (item === undefined) return;
       if ((e.ctrlKey || e.metaKey) && typeof item.t3Url === "string") {
-        window.open(item.t3Url, "_blank", "noreferrer");
+        window.location.assign(item.t3Url);
         onClose();
       } else item.run();
     }

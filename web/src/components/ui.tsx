@@ -110,6 +110,27 @@ export function ExternalButton({
   );
 }
 
+/** Link to the T3 app's t3code:// scheme: same tab, so the OS hands it to the app instead of opening a blank tab. */
+export function AppButton({
+  href,
+  variant,
+  small,
+  className,
+  children,
+}: {
+  href: string;
+  variant?: Variant;
+  small?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <a href={href} className={cx(buttonClass(variant, small), className)}>
+      {children}
+    </a>
+  );
+}
+
 // ---- Form controls ----
 
 const inputBase =

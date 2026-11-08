@@ -235,6 +235,7 @@ type thread struct {
 	TaskID      *int64  `json:"taskId"`
 	T3WebURL    *string `json:"t3WebUrl"`
 	T3AppURL    *string `json:"t3AppUrl"`
+	T3DeepLink  *string `json:"t3DeepLink"`
 	ProviderID  *string `json:"providerInstanceId"`
 	Title       string  `json:"title"`
 	T3ProjectID string  `json:"t3ProjectId"`
@@ -371,6 +372,9 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 	if got.Thread == nil || got.Thread.Source != "app" || !got.Thread.Settled || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
 		t.Fatalf("thread %+v", got.Thread)
+	}
+	if got.Thread.T3DeepLink == nil || *got.Thread.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
+		t.Fatalf("thread deep link %v", got.Thread.T3DeepLink)
 	}
 	// Settled tasks are no longer polled.
 	tasks, _ := e.store.PollableTasks(context.Background(), true)

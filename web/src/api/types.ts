@@ -295,6 +295,8 @@ export interface Thread {
   taskId: number | null;
   t3WebUrl: string | null;
   t3AppUrl: string | null;
+  /** t3code://threads/<env>/<thread>: opens the thread in the T3 desktop/mobile app. */
+  t3DeepLink: string | null;
   createdAt: string;
   updatedAt: string;
   syncedAt: string;
