@@ -251,10 +251,12 @@ export function DashboardPage() {
             const g = block;
             const list = byGroup(g);
             const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
+            // self-baseline: flex baseline comes from the text, not the square/chevron (no baseline → bottom edge),
+            // so Panel's cap-trimmed h2 centers the caps.
             const label = (
-              <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2")}>
+              <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2 self-baseline")}>
                 <span aria-hidden className="size-1.5 bg-[var(--c)]" />
-                {g.title}
+                <span className="self-baseline">{g.title}</span>
               </span>
             );
             return (

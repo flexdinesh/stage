@@ -148,7 +148,7 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
       title={
         <span className="inline-flex items-center gap-1.5">
           <IconChainLink />
-          Run order
+          <span className="self-baseline">Run order</span>
         </span>
       }
       {...(stepText(task) === null ? {} : { meta: stepText(task) })}
