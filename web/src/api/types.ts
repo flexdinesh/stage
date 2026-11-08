@@ -274,6 +274,8 @@ export interface ThreadList {
   total: number;
 }
 
+export type SubagentsFilter = "include" | "exclude";
+
 export interface ThreadListQuery {
   project?: number;
   status?: ThreadStatus[];
@@ -283,6 +285,7 @@ export interface ThreadListQuery {
   q?: string;
   from?: string;
   to?: string;
+  subagents?: SubagentsFilter;
   limit?: number;
   offset?: number;
 }
@@ -383,4 +386,5 @@ export interface StatsQuery {
   from?: string;
   to?: string;
   tz?: string;
+  subagents?: SubagentsFilter;
 }

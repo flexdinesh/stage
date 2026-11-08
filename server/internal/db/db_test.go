@@ -409,3 +409,53 @@ func TestUpsertT3ProjectsKeepsLocalTitle(t *testing.T) {
 		t.Fatalf("after resync %+v", p)
 	}
 }
+
+func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
+	s, ctx := setup(t)
+	now := time.Now().UTC()
+	threads := []t3.Thread{
+		{ThreadID: "root-1", ProjectID: "proj-1", Title: "root", Status: t3.StatusCompleted, CreatedAt: now.Add(-2 * time.Minute)},
+		{ThreadID: "sub-1", ProjectID: "proj-1", Title: "sub", Status: t3.StatusRunning, CreatedAt: now.Add(-time.Minute),
+			ParentThreadID: "root-1", RelationshipToParent: "subagent"},
+	}
+	if err := s.UpsertThreads(ctx, threads); err != nil {
+		t.Fatal(err)
+	}
+
+	all, total, err := s.ListThreads(ctx, db.ThreadFilter{Limit: 10})
+	if err != nil || total != 2 || len(all) != 2 {
+		t.Fatalf("include: %d %d %v", total, len(all), err)
+	}
+	roots, total, err := s.ListThreads(ctx, db.ThreadFilter{Limit: 10, ExcludeSubagents: true})
+	if err != nil || total != 1 || len(roots) != 1 || roots[0].T3ThreadID != "root-1" {
+		t.Fatalf("exclude: %d %+v %v", total, roots, err)
+	}
+
+	from, to := now.Add(-time.Hour), now.Add(time.Hour)
+	sum := func(st db.Stats) (day, project, status int) {
+		for _, c := range st.ThreadsByDay {
+			day += c.Count
+		}
+		for _, c := range st.ThreadsByProject {
+			project += c.Count
+		}
+		for _, c := range st.ThreadsByStatus {
+			status += c.Count
+		}
+		return
+	}
+	st, err := s.Stats(ctx, from, to, "UTC", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, p, ss := sum(st); d != 2 || p != 2 || ss != 2 || len(st.ThreadsByStatus) != 2 {
+		t.Fatalf("stats include: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
+	}
+	st, err = s.Stats(ctx, from, to, "UTC", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, p, ss := sum(st); d != 1 || p != 1 || ss != 1 || st.ThreadsByStatus[0].Status != "completed" {
+		t.Fatalf("stats exclude: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
+	}
+}

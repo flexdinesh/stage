@@ -41,6 +41,9 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	if f.To, err = queryTime(q, "to", time.UTC); err != nil {
 		return err
 	}
+	if f.ExcludeSubagents, err = querySubagents(q); err != nil {
+		return err
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
@@ -279,7 +282,11 @@ func (s *server) stats(w http.ResponseWriter, r *http.Request) error {
 	} else if t != nil {
 		from = t.UTC()
 	}
-	st, err := s.Store.Stats(r.Context(), from, to, tz)
+	excludeSubagents, err := querySubagents(q)
+	if err != nil {
+		return err
+	}
+	st, err := s.Store.Stats(r.Context(), from, to, tz, excludeSubagents)
 	if err != nil {
 		return err
 	}

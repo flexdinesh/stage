@@ -1105,3 +1105,69 @@ func TestTemplates(t *testing.T) {
 }
 
 func timeAfter() <-chan time.Time { return time.After(10 * time.Millisecond) }
+
+func TestHistorySubagentsFilter(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now().UTC()
+	if err := e.store.UpsertThreads(context.Background(), []t3.Thread{
+		{ThreadID: "root-1", ProjectID: "proj-1", Title: "root", Status: t3.StatusCompleted, CreatedAt: now.Add(-2 * time.Minute)},
+		{ThreadID: "sub-1", ProjectID: "proj-1", Title: "sub", Status: t3.StatusRunning, CreatedAt: now.Add(-time.Minute),
+			ParentThreadID: "root-1", RelationshipToParent: "subagent"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var pg struct {
+		Threads []thread `json:"threads"`
+		Total   int      `json:"total"`
+	}
+	for path, want := range map[string]int{
+		"/api/threads":                                  2,
+		"/api/threads?subagents=include":                2,
+		"/api/threads?subagents=exclude":                1,
+		"/api/threads?subagents=exclude&status=running": 0,
+	} {
+		e.must("GET", path, nil, 200, &pg)
+		if pg.Total != want || len(pg.Threads) != want {
+			t.Fatalf("%s: total=%d len=%d want %d", path, pg.Total, len(pg.Threads), want)
+		}
+	}
+	e.must("GET", "/api/threads?subagents=exclude", nil, 200, &pg)
+	if pg.Threads[0].T3ThreadID != "root-1" {
+		t.Fatalf("exclude kept %+v", pg.Threads)
+	}
+	e.must("GET", "/api/threads?subagents=only", nil, 400, nil)
+
+	var st struct {
+		ThreadsByDay []struct {
+			Count int `json:"count"`
+		} `json:"threadsByDay"`
+		ThreadsByProject []struct {
+			Count int `json:"count"`
+		} `json:"threadsByProject"`
+		ThreadsByStatus []struct {
+			Status string `json:"status"`
+			Count  int    `json:"count"`
+		} `json:"threadsByStatus"`
+	}
+	for path, want := range map[string]int{
+		"/api/stats":                   2,
+		"/api/stats?subagents=include": 2,
+		"/api/stats?subagents=exclude": 1,
+	} {
+		e.must("GET", path, nil, 200, &st)
+		day, project, status := 0, 0, 0
+		for _, c := range st.ThreadsByDay {
+			day += c.Count
+		}
+		for _, c := range st.ThreadsByProject {
+			project += c.Count
+		}
+		for _, c := range st.ThreadsByStatus {
+			status += c.Count
+		}
+		if day != want || project != want || status != want {
+			t.Fatalf("%s: day=%d project=%d status=%d want %d", path, day, project, status, want)
+		}
+	}
+	e.must("GET", "/api/stats?subagents=bogus", nil, 400, nil)
+}

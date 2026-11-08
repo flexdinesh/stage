@@ -132,6 +132,7 @@ export const api = {
         q: q.q,
         from: q.from,
         to: q.to,
+        subagents: q.subagents,
         limit: q.limit,
         offset: q.offset,
       })}`,
@@ -148,7 +149,7 @@ export const api = {
   updateTemplate: (id: number, body: UpdateTemplateRequest) => apiFetch<Template>(`/templates/${id}`, patch(body)),
   deleteTemplate: (id: number) => apiSend(`/templates/${id}`, del),
 
-  stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz })}`),
+  stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz, subagents: q.subagents })}`),
 };
 
 export type ArchivedFilter = "true" | "false" | "all";

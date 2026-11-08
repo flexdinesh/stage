@@ -81,6 +81,19 @@ func queryBool(q url.Values, key string) (*bool, error) {
 	}
 }
 
+// querySubagents parses subagents=include|exclude (default include);
+// true = exclude subagent threads.
+func querySubagents(q url.Values) (bool, error) {
+	switch v := strings.TrimSpace(q.Get("subagents")); v {
+	case "", "include":
+		return false, nil
+	case "exclude":
+		return true, nil
+	default:
+		return false, db.Invalid("invalid subagents %q (want include|exclude)", v)
+	}
+}
+
 // queryTime parses an ISO date (midnight in loc) or RFC 3339 datetime
 // (datetime without zone = loc).
 func queryTime(q url.Values, key string, loc *time.Location) (*time.Time, error) {

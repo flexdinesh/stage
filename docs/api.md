@@ -282,7 +282,7 @@ New `backlog` task with the same project, title, prompt, model config, workspace
 `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 ### `GET /api/threads`
-Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `limit` (default 100, max 500), `offset` (default 0).
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
 
 ## Chains
@@ -358,7 +358,7 @@ Skip the current step: set it `cancelled` (event detail `"skipped"`), then inter
 ## Stats
 
 ### `GET /api/stats`
-Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz` (IANA zone for day buckets, default `UTC`). Thread counts use mirrored threads by `createdAt` in range; task counts are current totals (not range-filtered).
+Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz` (IANA zone for day buckets, default `UTC`), `subagents` (`include|exclude`, default `include`; `exclude` drops subagent threads from all thread counts). Thread counts use mirrored threads by `createdAt` in range; task counts are current totals (not range-filtered).
 200 `Stats`:
 ```json
 {
@@ -372,7 +372,7 @@ Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz`
   "needsInput": 1
 }
 ```
-`threadsByDay` ascending, days with zero omitted. `threadsByProject` count desc; `projectId` null and `title` = `t3ProjectId` when no app project. `needsInput` = tasks in `needs_input`. 400 bad `tz`.
+`threadsByDay` ascending, days with zero omitted. `threadsByProject` count desc; `projectId` null and `title` = `t3ProjectId` when no app project. `needsInput` = tasks in `needs_input`. 400 bad `tz` or `subagents`.
 
 ## State mapping (thread → task), pure function
 

@@ -39,8 +39,9 @@ type Stats struct {
 }
 
 // Stats: thread counts over mirrored threads with created_at in [from, to)
-// (day buckets in tz, a valid IANA zone); task counts are current totals.
-func (s *Store) Stats(ctx context.Context, from, to time.Time, tz string) (Stats, error) {
+// (day buckets in tz, a valid IANA zone); excludeSubagents keeps root threads
+// only. Task counts are current totals.
+func (s *Store) Stats(ctx context.Context, from, to time.Time, tz string, excludeSubagents bool) (Stats, error) {
 	st := Stats{From: from, To: to, TZ: tz,
 		ThreadsByDay: []DayCount{}, ThreadsByProject: []ProjectCount{},
 		ThreadsByStatus: []StatusCount{}, TasksByState: []StateCount{}}
@@ -48,7 +49,8 @@ func (s *Store) Stats(ctx context.Context, from, to time.Time, tz string) (Stats
 	rows, err := s.pool.Query(ctx, `
 SELECT to_char(date_trunc('day', created_at AT TIME ZONE $3), 'YYYY-MM-DD') AS day, count(*)
 FROM threads WHERE created_at >= $1 AND created_at < $2
-GROUP BY day ORDER BY day`, from, to, tz)
+  AND (NOT $4 OR parent_thread_id IS NULL)
+GROUP BY day ORDER BY day`, from, to, tz, excludeSubagents)
 	if err != nil {
 		return st, err
 	}
@@ -69,7 +71,8 @@ GROUP BY day ORDER BY day`, from, to, tz)
 SELECT p.id, th.t3_project_id, COALESCE(p.title, th.t3_project_id), count(*) AS n
 FROM threads th LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
 WHERE th.created_at >= $1 AND th.created_at < $2
-GROUP BY p.id, th.t3_project_id, p.title ORDER BY n DESC, th.t3_project_id`, from, to)
+  AND (NOT $3 OR th.parent_thread_id IS NULL)
+GROUP BY p.id, th.t3_project_id, p.title ORDER BY n DESC, th.t3_project_id`, from, to, excludeSubagents)
 	if err != nil {
 		return st, err
 	}
@@ -88,7 +91,8 @@ GROUP BY p.id, th.t3_project_id, p.title ORDER BY n DESC, th.t3_project_id`, fro
 
 	rows, err = s.pool.Query(ctx, `
 SELECT status, count(*) AS n FROM threads WHERE created_at >= $1 AND created_at < $2
-GROUP BY status ORDER BY n DESC, status`, from, to)
+  AND (NOT $3 OR parent_thread_id IS NULL)
+GROUP BY status ORDER BY n DESC, status`, from, to, excludeSubagents)
 	if err != nil {
 		return st, err
 	}
