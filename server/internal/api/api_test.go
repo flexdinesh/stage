@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strings"
 	gosync "sync"
 	"sync/atomic"
 	"testing"
@@ -1374,4 +1375,53 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		t.Fatalf("needsInput + q: %+v", pg)
 	}
 	e.must("GET", "/api/threads?needsInput=yes", nil, 400, nil)
+}
+
+func TestNotificationsInbox(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	thread := "ext-1"
+	var ids []int64
+	for i := range 3 {
+		id, err := e.store.InsertNotification(ctx, db.NewNotification{
+			Event: db.StateDone, T3ThreadID: &thread, Title: fmt.Sprintf("n%d", i), URL: "/history?q=x",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	type page struct {
+		Notifications []struct {
+			ID         int64   `json:"id"`
+			Event      string  `json:"event"`
+			Title      string  `json:"title"`
+			ReadAt     *string `json:"readAt"`
+			T3DeepLink *string `json:"t3DeepLink"`
+		} `json:"notifications"`
+		Unread     int    `json:"unread"`
+		NextBefore *int64 `json:"nextBefore"`
+	}
+	var pg page
+	e.must("GET", "/api/notifications?limit=2", nil, 200, &pg)
+	if len(pg.Notifications) != 2 || pg.Notifications[0].ID != ids[2] || pg.Unread != 3 ||
+		pg.NextBefore == nil || *pg.NextBefore != ids[1] {
+		t.Fatalf("first page %+v", pg)
+	}
+	if dl := pg.Notifications[0].T3DeepLink; dl == nil || !strings.HasPrefix(*dl, "t3code://threads/") {
+		t.Fatalf("deep link %v", dl)
+	}
+	e.must("GET", fmt.Sprintf("/api/notifications?limit=2&before=%d", *pg.NextBefore), nil, 200, &pg)
+	if len(pg.Notifications) != 1 || pg.Notifications[0].ID != ids[0] || pg.NextBefore != nil {
+		t.Fatalf("last page %+v", pg)
+	}
+
+	e.must("POST", "/api/notifications/read", map[string]any{}, 400, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"upTo": ids[1]}, 204, nil)
+	e.must("GET", "/api/notifications", nil, 200, &pg)
+	if pg.Unread != 1 || pg.Notifications[0].ReadAt != nil || pg.Notifications[1].ReadAt == nil {
+		t.Fatalf("after read %+v", pg)
+	}
+	e.must("GET", "/api/notifications?limit=0", nil, 400, nil)
+	e.must("GET", "/api/notifications?before=x", nil, 400, nil)
 }

@@ -184,7 +184,7 @@ func TestPayload(t *testing.T) {
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/history?q=Other", Tag: "thread-ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
-		got, err := n.payload(ctx, tc.e)
+		got, _, err := n.payload(ctx, tc.e)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -254,6 +254,41 @@ func TestSendPath(t *testing.T) {
 	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateFailed}})
 	if _, err := store.GetPushSubscription(ctx, endpoint); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("after 410: %v", err)
+	}
+}
+
+func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	task := seedTask(t, store, db.StateNeedsInput)
+	if err := store.UpsertThreads(ctx, []t3.Thread{
+		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", Status: t3.StatusCompleted, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetObservedState(ctx, "ext-1", db.StateDone); err != nil {
+		t.Fatal(err)
+	}
+
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+
+	got, err := store.ListNotifications(ctx, 10, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("notifications %d, want 2", len(got))
+	}
+	th, tk := got[0], got[1] // newest first
+	if tk.Event != db.StateNeedsInput || tk.TaskID == nil || *tk.TaskID != task.ID || tk.Title != "Say OK" ||
+		tk.ProjectTitle == nil || *tk.ProjectTitle != "t3-stage" || tk.URL != fmt.Sprintf("/tasks/%d", task.ID) ||
+		tk.CurrentState == nil || *tk.CurrentState != db.StateNeedsInput || tk.ReadAt != nil {
+		t.Fatalf("task notification %+v", tk)
+	}
+	if th.Event != db.StateDone || th.TaskID != nil || th.T3ThreadID == nil || *th.T3ThreadID != "ext-1" ||
+		th.Title != "External" || th.URL != "/history?q=External" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
+		t.Fatalf("thread notification %+v", th)
 	}
 }
 

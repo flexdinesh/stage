@@ -8,6 +8,7 @@ import type {
   FollowupRequest,
   Health,
   ModelDefaults,
+  NotificationPage,
   PairRequest,
   Preferences,
   Project,
@@ -167,6 +168,9 @@ export const api = {
   unsubscribePush: (body: PushEndpointBody) => apiSend("/push/subscriptions", { method: "DELETE", body }),
   testPush: (body: PushEndpointBody) => apiSend("/push/test", post(body)),
   badge: () => apiFetch<Badge>("/badge"),
+  notifications: (q: { limit?: number; before?: number | undefined } = {}) =>
+    apiFetch<NotificationPage>(`/notifications${toQuery({ limit: q.limit, before: q.before })}`),
+  markNotificationsRead: (upTo: number) => apiSend("/notifications/read", post({ upTo })),
 };
 
 export type ArchivedFilter = "true" | "false" | "all";

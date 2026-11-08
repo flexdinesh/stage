@@ -388,7 +388,37 @@ JSON, shown by the service worker:
 ```json
 { "title": "Needs input", "body": "Say OK · t3-stage", "url": "/tasks/7", "tag": "task-7", "badge": 2 }
 ```
-`tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`). `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise.
+`tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`); the service worker sets `renotify` so a replacement alerts again. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise.
+
+Service worker: when a window of the app is focused and visible on a Chromium browser, it skips the system notification (the app shows an in-app toast instead); other browsers (Safari, Firefox) always show it, since a push without a notification there can revoke the subscription. Either way it updates the app badge and posts `{ "type": "push" }` to every open window so the app refetches at once.
+
+## Notifications inbox
+
+Every notification the notifier sends is stored first (also when no browser is subscribed), so the app can show in-app toasts and an inbox. Entries older than 30 days are pruned hourly.
+
+`Notification`:
+```json
+{
+  "id": 12,
+  "event": "needs_input",
+  "taskId": 7,
+  "t3ThreadId": "thread-abc",
+  "title": "Say OK",
+  "projectTitle": "t3-stage",
+  "url": "/tasks/7",
+  "createdAt": "2026-11-08T10:00:00Z",
+  "readAt": null,
+  "currentState": "needs_input",
+  "t3DeepLink": "t3code://threads/env-1/thread-abc"
+}
+```
+`event`: `needs_input|done|failed`. `taskId` null for external threads (or once the task is deleted). `title` / `projectTitle` are snapshots at send time. `currentState` is live: the task's state, or for an external thread `settled` when settled, else its `observedState`; null when unknown.
+
+### `GET /api/notifications`
+Query: `limit` (default 50, max 200), `before` (id; only older entries). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. 400 bad `limit` / `before`.
+
+### `POST /api/notifications/read`
+Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. 204. 400 missing `upTo`.
 
 ## Notification rules
 

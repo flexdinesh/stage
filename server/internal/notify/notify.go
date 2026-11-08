@@ -131,10 +131,14 @@ func (n *Notifier) Run(ctx context.Context) {
 }
 
 func (n *Notifier) handle(ctx context.Context, e event) {
-	p, err := n.payload(ctx, e)
+	p, rec, err := n.payload(ctx, e)
 	if err != nil {
 		n.log.Warn("build notification", "err", err)
 		return
+	}
+	// Inbox first (also with no subscriptions); a failed insert still pushes.
+	if _, err := n.store.InsertNotification(ctx, rec); err != nil && ctx.Err() == nil {
+		n.log.Warn("record notification", "err", err)
 	}
 	subs, err := n.store.ListPushSubscriptions(ctx)
 	if err != nil {
@@ -154,18 +158,22 @@ var titles = map[db.TaskState]string{
 	db.StateFailed:     "Failed",
 }
 
-// payload builds the notification (lookups at send time).
-func (n *Notifier) payload(ctx context.Context, e event) (Payload, error) {
+// payload builds the push payload and its inbox record (lookups at send time).
+func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
 	var p Payload
+	var rec db.NewNotification
 	switch {
 	case e.task != nil:
 		t, err := n.store.GetTask(ctx, e.task.TaskID)
 		if err != nil {
-			return p, fmt.Errorf("task %d: %w", e.task.TaskID, err)
+			return p, rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
 		}
 		id := strconv.FormatInt(t.ID, 10)
 		p = Payload{Title: titles[e.task.To], Body: t.Title + " · " + t.ProjectTitle,
 			URL: "/tasks/" + id, Tag: "task-" + id}
+		project := t.ProjectTitle
+		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, T3ThreadID: t.T3ThreadID,
+			Title: t.Title, ProjectTitle: &project, URL: p.URL}
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID
@@ -175,19 +183,21 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, error) {
 				project = *th.ProjectTitle
 			}
 		} else if !errors.Is(err, db.ErrNotFound) {
-			return p, fmt.Errorf("thread %s: %w", c.ThreadID, err)
+			return p, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 		}
 		p = Payload{Title: titles[c.To], Body: title + " · " + project,
 			URL: "/history?q=" + url.QueryEscape(title), Tag: "thread-" + c.ThreadID}
+		threadID := c.ThreadID
+		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project, URL: p.URL}
 	default:
-		return p, errors.New("empty event")
+		return p, rec, errors.New("empty event")
 	}
 	badge, err := n.store.NeedsInputCount(ctx)
 	if err != nil {
-		return p, err
+		return p, rec, err
 	}
 	p.Badge = badge
-	return p, nil
+	return p, rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

@@ -436,3 +436,33 @@ export interface Badge {
   /** Tasks in needs_input + external threads needing input. */
   needsInput: number;
 }
+
+// ---- Notifications inbox ----
+
+/** States a notification is sent for. */
+export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed">;
+
+export interface Notification {
+  id: number;
+  event: NotificationEvent;
+  /** null for external threads (or once the task is deleted). */
+  taskId: number | null;
+  t3ThreadId: string | null;
+  /** Snapshot at send time. */
+  title: string;
+  projectTitle: string | null;
+  /** In-app path (task detail or filtered History). */
+  url: string;
+  createdAt: string;
+  readAt: string | null;
+  /** Live: the task's state, or the external thread's (`settled` when settled). null = unknown. */
+  currentState: TaskState | null;
+  t3DeepLink: string | null;
+}
+
+export interface NotificationPage {
+  notifications: Notification[];
+  unread: number;
+  /** `before` for the next (older) page; null when none. */
+  nextBefore: number | null;
+}

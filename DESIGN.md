@@ -242,7 +242,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 
 **The Two-Token Tone Rule.** Every tone sets a marker/border color and a text color. Borders mix the tone at 45-55% into transparent, fills at 8-14%; the need chip fills at 14% so yellow reads at a glance. Never invent a tone outside the six.
 
-**The One Yellow Edge Rule.** User-approved: a task row in needs input carries a 2px Waiting Yellow left edge and makes "Open in T3" primary. It is the only colored row edge in the system; every other row keeps a transparent 2px edge so titles align.
+**The One Yellow Edge Rule.** User-approved: a task row in needs input carries a 2px Waiting Yellow left edge and makes "Open in app" primary. It is the only colored row edge in the system; every other row keeps a transparent 2px edge so titles align. The same edge marks a needs-input toast and an inbox row whose task or thread is still waiting.
 
 ## Typography
 
@@ -354,6 +354,15 @@ Step cells joined by 1px Strong Hairline connectors, in the task detail Run orde
 ### Image dropzone
 The prompt (new/backlog task) and the follow-up box are drop targets: dragging files over them lays a dashed Ink-accent border and a 90% surface scrim with "Drop images to attach" in mono. Below, 56px square thumbnails (1px Strong Hairline, `object-cover`) wrap in a row; each has an 18px square remove button on its top-right corner, uploading thumbs dim to 60% under the busy spinner, failed ones take a Red border and a red line naming the file. A ghost "Add image" button (file picker) and a mono `n/8` count (or the accepted types when empty) close the block. Read-only strips (task detail Prompt panel, non-backlog edit) are the same thumbnails linking to the full image. With images in a follow-up the send-mode group dims (images go as one new message).
 
+### Notifications bell
+A secondary 32px button in the top bar (between search and the T3 chip on laptop; before search on phone) with an authored bell icon. Unread count sits inside as a mono chip: plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone, square.
+
+### Notifications drawer
+Right drawer (full-screen sheet on phone) listing the last 30 days, newest first, in ruled panels headed Today / Yesterday / Earlier (Label on Bench Gray). Rows reuse the task-row grid: event chip, title with a mono meta line (project, relative time, `still waiting` in need-fg, or `now <state>` once it moved on), and Open in app. Unread rows show a 6px Ink square before a 600-weight title; opening the drawer reads everything, but the markers stay until it closes. Load more pages older entries. The footer notes when push is off on this device.
+
+### Toast
+In-app notification while the app is visible: bottom-right stack, 360px wide on laptop; full width above the bottom tabs on phone. Flat (Strong Hairline border, Paper surface, no shadow), fades in over 150ms (no movement; none with reduced motion). Event chip and a ghost close on top, title (2 lines max), mono project and time, then View and Open in app. Needs-input toasts take the yellow edge and stay until acted on; done and failed dismiss after 8s, paused on hover or focus. At most three; older ones collapse into a mono "+n more · open notifications" strip that opens the drawer. Events that arrived while the app was hidden never toast; the bell count covers them. While the drawer is open, toasts are off.
+
 ### Command palette
 Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; grouped results under Label headers, matched text bolded, active result gets a 7% ink fill and a 2px inset ink bar; a Bench Gray footer lists keycaps.
 
@@ -370,7 +379,7 @@ Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; 
 - **Do** draw icons as authored 16px SVGs: 1.5 stroke, square caps, miter joins, currentColor.
 - **Do** open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.
 - **Do** keep motion to 150ms color, opacity and border transitions on state change.
-- **Do** give needs-input rows the 2px Waiting Yellow left edge and a primary Open in T3; it is the only colored row edge.
+- **Do** give needs-input rows (and still-waiting needs-input toasts and inbox rows) the 2px Waiting Yellow left edge and a primary Open in app; it is the only colored row edge.
 
 ### Don't:
 - **Don't** round any corner.
@@ -379,7 +388,7 @@ Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; 
 - **Don't** put an eyebrow or kicker above a heading.
 - **Don't** use a text glyph as an icon; draw an SVG. Keycap legends inside a Kbd are key names, not icons.
 - **Don't** lay lists out as card grids or shadowed tiles; one ruled panel per state.
-- **Don't** cast shadows from surfaces; only the floating command palette has one.
+- **Don't** cast shadows from surfaces; only the floating command palette has one. Toasts stay flat.
 - **Don't** use circles or dots as state markers; markers are squares.
 - **Don't** add colored left edges to any row other than needs input.
 - **Don't** add entrance animations or choreography.

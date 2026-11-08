@@ -210,11 +210,24 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* In-app notification toast: 150ms opacity fade in (no movement). */
+  @media (prefers-reduced-motion: no-preference) {
+    .toast-in {
+      animation: toast-in 150ms ease-out;
+    }
+  }
+
   /* Authored chevron on selects (per-theme --chevron). */
   .select-chevron {
     background-image: var(--chevron);
     background-size: 14px;
     background-position: right 8px center;
     background-repeat: no-repeat;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
   }
 }
