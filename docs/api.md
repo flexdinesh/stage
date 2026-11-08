@@ -246,7 +246,7 @@ Body `{ "message": string, "mode"?: SendMode, "attachmentIds"?: number[] }`. Wit
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
 
-Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). They then poll the thread once: the thread mirror is refreshed, but task state does not change for `backlog`, `cancelled` or `settled` tasks that have a follower (a settled task without one may reopen).
+Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). They then poll the thread once: the thread mirror is refreshed, but task state does not change for `backlog` tasks or `settled`/`cancelled` tasks that have a follower (one without may reopen).
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
@@ -440,9 +440,9 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 | 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
 | 9 | otherwise (idle, no runs) | unchanged (keep current state) |
 
-Applied only to tasks with a thread whose state is not `backlog` or `cancelled`, and not to `settled` tasks with a follower (it has been released). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
+Applied only to tasks with a thread whose state is not `backlog`, and not to `settled` or `cancelled` tasks with a follower (it has been released). T3 reports a cancelled turn (e.g. a denied permission) as thread status `cancelled` and the thread can run on, so a `cancelled` task without a follower reopens like a settled one. A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 
-Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final . A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted|cancelled` tasks updated in the last 10 minutes or whose thread mirror (full sync, every 5 min) shows the thread unsettled and active (`preparing|queued|starting|running|waiting` or pending requests); a `cancelled` task with a follower is excluded. `settled` is not polled. A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
 
 ## Link rules
 

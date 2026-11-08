@@ -107,11 +107,19 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 // follow-up restarted the thread). backlog, settled and cancelled (skip /
 // rollback) are final for polling.
 func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
+	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
+	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
+	// minutes after the last change, then whenever the thread mirror (full
+	// sync) shows it active again. A cancelled task with a follower has been
+	// released and stays cancelled.
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
   OR (t.state = 'done' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
-  OR (t.state IN ('failed', 'interrupted') AND t.updated_at > now() - interval '10 minutes'))
+  OR (t.state IN ('failed', 'interrupted', 'cancelled') AND NOT (t.state = 'cancelled' AND nx.id IS NOT NULL) AND (
+    t.updated_at > now() - interval '10 minutes'
+    OR (NOT th.settled AND (th.pending_request_count > 0
+      OR th.status IN ('preparing', 'queued', 'starting', 'running', 'waiting'))))))
 ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)
 }
