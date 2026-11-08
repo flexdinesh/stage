@@ -61,12 +61,13 @@ func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
 }
 
 type TaskFilter struct {
-	ProjectID *int64
-	States    []string
-	Tag       string
-	Q         string
-	From, To  *time.Time
-	ChainID   *int64
+	ProjectID   *int64
+	States      []string
+	Tag         string
+	Q           string
+	From, To    *time.Time
+	SettledFrom *time.Time // settled_at >= SettledFrom
+	ChainID     *int64
 }
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
@@ -93,6 +94,9 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	if f.ChainID != nil {
 		w.add("t.chain_id = " + w.arg(*f.ChainID))
 	}
+	if f.SettledFrom != nil {
+		w.add("t.settled_at >= " + w.arg(*f.SettledFrom))
+	}
 	rows, err := s.pool.Query(ctx, taskSelect+w.sql()+` ORDER BY t.updated_at DESC, t.id DESC`, w.args...)
 	return collectTasks(rows, err)
 }
@@ -104,7 +108,7 @@ func (s *Store) ChainSteps(ctx context.Context, chainID int64) ([]Task, error) {
 }
 
 // PollableTasks: tasks whose thread may still change state. Active tasks
-// always; completed tasks updated in the last hour always, older ones only
+// always; done tasks updated in the last hour always, older ones only
 // when includeStale (the poller passes it at most once a minute);
 // failed/interrupted only when touched in the last 10 minutes (e.g. a
 // follow-up restarted the thread). backlog, settled and cancelled (skip /
@@ -113,7 +117,7 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
-  OR (t.state = 'completed' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
+  OR (t.state = 'done' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
   OR (t.state IN ('failed', 'interrupted') AND t.updated_at > now() - interval '10 minutes'))
 ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)

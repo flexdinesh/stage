@@ -34,6 +34,9 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.To, err = queryTime(q, "to", time.UTC); err != nil {
 		return err
 	}
+	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
+		return err
+	}
 	ts, err := s.Store.ListTasks(r.Context(), f)
 	if err != nil {
 		return err

@@ -11,7 +11,7 @@ const STEP_TONE: Record<TaskState, ChipTone | null> = {
   launching: "run",
   running: "run",
   needs_input: "need",
-  completed: "done",
+  done: "done",
   settled: "ok",
   failed: "bad",
   interrupted: "bad",

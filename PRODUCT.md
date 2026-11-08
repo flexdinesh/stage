@@ -22,7 +22,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 
 ## Capabilities and Constraints
 - Projects mirror T3 projects 1:1; existing T3 projects import automatically.
-- Task states: backlog, launching, running, needs input, completed, settled, failed, interrupted, cancelled.
+- Task states: backlog, launching, running, needs input, done, settled, failed, interrupted, cancelled.
 - Task actions: start/restart, follow-up (auto/queue/steer/restart), stop, duplicate, delete, open in T3.
 - Chains: ordered tasks (may span projects), start/pause/resume/skip/reorder; failure pauses.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.

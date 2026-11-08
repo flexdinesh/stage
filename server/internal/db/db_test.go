@@ -89,7 +89,7 @@ func TestTransitionTask(t *testing.T) {
 		t.Fatalf("new task %+v", task)
 	}
 
-	res, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateRunning}, To: db.StateCompleted})
+	res, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateRunning}, To: db.StateDone})
 	if err != nil || res.Changed || res.From != db.StateBacklog {
 		t.Fatalf("guarded transition should not apply: %+v %v", res, err)
 	}
@@ -102,17 +102,17 @@ func TestTransitionTask(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.GetTask(ctx, task.ID)
 	if got.FinishedAt == nil || got.SettledAt != nil || got.LaunchedAt == nil || got.T3ThreadID == nil || *got.T3ThreadID != thread {
-		t.Fatalf("after completed: %+v", got)
+		t.Fatalf("after done: %+v", got)
 	}
 	finished := *got.FinishedAt
-	// needs_input then completed again: finishedAt keeps first entry.
+	// needs_input then done again: finishedAt keeps first entry.
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput})
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted})
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateSettled, Detail: "thread settled"})
 	got, _ = s.GetTask(ctx, task.ID)
 	if !got.FinishedAt.Equal(finished) || got.SettledAt == nil || got.State != db.StateSettled {
@@ -124,7 +124,7 @@ func TestTransitionTask(t *testing.T) {
 		t.Fatal("same-state transition must not apply")
 	}
 	events, _ := s.TaskEvents(ctx, task.ID)
-	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateCompleted, db.StateNeedsInput, db.StateCompleted, db.StateSettled}
+	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateDone, db.StateNeedsInput, db.StateDone, db.StateSettled}
 	if len(events) != len(want) {
 		t.Fatalf("events %d, want %d: %+v", len(events), len(want), events)
 	}
@@ -327,7 +327,7 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 		thread := fmt.Sprintf("thread-%d", i)
 		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread})
 		if name != "running" {
-			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted})
+			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 		}
 		ids[name] = task.ID
 	}

@@ -110,7 +110,7 @@ export const api = {
 
   tasks: (q: TaskListQuery = {}) =>
     apiFetch<TaskList>(
-      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, chain: q.chain })}`,
+      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, chain: q.chain, settledFrom: q.settledFrom })}`,
     ),
   task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
   createTask: (body: CreateTaskRequest) => apiFetch<Task>("/tasks", post(body)),

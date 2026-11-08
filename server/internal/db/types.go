@@ -16,7 +16,7 @@ const (
 	StateLaunching   TaskState = "launching"
 	StateRunning     TaskState = "running"
 	StateNeedsInput  TaskState = "needs_input"
-	StateCompleted   TaskState = "completed"
+	StateDone        TaskState = "done"
 	StateSettled     TaskState = "settled"
 	StateFailed      TaskState = "failed"
 	StateInterrupted TaskState = "interrupted"
@@ -24,7 +24,7 @@ const (
 )
 
 var TaskStates = []TaskState{
-	StateBacklog, StateLaunching, StateRunning, StateNeedsInput, StateCompleted,
+	StateBacklog, StateLaunching, StateRunning, StateNeedsInput, StateDone,
 	StateSettled, StateFailed, StateInterrupted, StateCancelled,
 }
 
@@ -33,7 +33,7 @@ func (s TaskState) Valid() bool { return slices.Contains(TaskStates, s) }
 // Finished: entering one of these sets finishedAt (first entry per attempt).
 func (s TaskState) Finished() bool {
 	switch s {
-	case StateCompleted, StateFailed, StateInterrupted, StateCancelled:
+	case StateDone, StateFailed, StateInterrupted, StateCancelled:
 		return true
 	}
 	return false

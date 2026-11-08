@@ -8,7 +8,7 @@ export const TASK_STATES = [
   "launching",
   "running",
   "needs_input",
-  "completed",
+  "done",
   "settled",
   "failed",
   "interrupted",
@@ -237,6 +237,8 @@ export interface TaskListQuery {
   from?: string;
   to?: string;
   chain?: number;
+  /** settledAt >= this (ISO date or datetime). */
+  settledFrom?: string;
 }
 
 // ---- Threads (history) ----

@@ -6,7 +6,7 @@ const TASK_TONES: Record<TaskState, ChipTone> = {
   launching: "run",
   running: "run",
   needs_input: "need",
-  completed: "done",
+  done: "done",
   settled: "ok",
   failed: "bad",
   interrupted: "bad",
@@ -18,7 +18,7 @@ const TASK_LABELS: Record<TaskState, string> = {
   launching: "launching",
   running: "running",
   needs_input: "needs input",
-  completed: "completed",
+  done: "done",
   settled: "settled",
   failed: "failed",
   interrupted: "interrupted",
@@ -43,6 +43,9 @@ const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
 
 export const taskStateLabel = (s: TaskState) => TASK_LABELS[s];
 
+/** T3 `completed` reads "done" (the run finished; settling happens in T3). */
+export const threadStatusLabel = (s: ThreadStatus) => (s === "completed" ? "done" : s.replace("_", " "));
+
 export const TaskStateBadge = ({ state }: { state: TaskState }) => (
   <Chip tone={TASK_TONES[state]} dot>
     {TASK_LABELS[state]}
@@ -55,8 +58,14 @@ export const ChainStateBadge = ({ state }: { state: ChainState }) => (
   </Chip>
 );
 
-export const ThreadStatusBadge = ({ status }: { status: ThreadStatus }) => (
-  <Chip tone={THREAD_TONES[status]} dot>
-    {status.replace("_", " ")}
-  </Chip>
-);
+/** A settled thread shows "settled" whatever its run status. */
+export const ThreadStatusBadge = ({ status, settled }: { status: ThreadStatus; settled: boolean }) =>
+  settled ? (
+    <Chip tone="ok" dot>
+      settled
+    </Chip>
+  ) : (
+    <Chip tone={THREAD_TONES[status]} dot>
+      {threadStatusLabel(status)}
+    </Chip>
+  );

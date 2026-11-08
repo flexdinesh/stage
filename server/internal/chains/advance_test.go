@@ -25,7 +25,7 @@ func TestAdvance(t *testing.T) {
 		{"running step1 launching -> wait", db.ChainRunning, steps(db.StateLaunching, db.StateBacklog), Action{}},
 		{"running step1 running -> wait", db.ChainRunning, steps(db.StateRunning, db.StateBacklog), Action{}},
 		{"running step1 needs_input -> wait", db.ChainRunning, steps(db.StateNeedsInput, db.StateBacklog), Action{}},
-		{"running step1 completed (unsettled) -> wait", db.ChainRunning, steps(db.StateCompleted, db.StateBacklog), Action{}},
+		{"running step1 completed (unsettled) -> wait", db.ChainRunning, steps(db.StateDone, db.StateBacklog), Action{}},
 		{"running step1 settled -> launch step2", db.ChainRunning, steps(db.StateSettled, db.StateBacklog), Action{ActionLaunch, 2}},
 		{"running step1 cancelled (skipped) -> launch step2", db.ChainRunning, steps(db.StateCancelled, db.StateBacklog), Action{ActionLaunch, 2}},
 		{"running step1 failed -> pause", db.ChainRunning, steps(db.StateFailed, db.StateBacklog), Action{ActionPause, 1}},
@@ -49,7 +49,7 @@ func TestAdvance(t *testing.T) {
 }
 
 func TestCurrentTaskID(t *testing.T) {
-	tasks := []db.Task{{ID: 10, State: db.StateSettled}, {ID: 11, State: db.StateCompleted}, {ID: 12, State: db.StateBacklog}}
+	tasks := []db.Task{{ID: 10, State: db.StateSettled}, {ID: 11, State: db.StateDone}, {ID: 12, State: db.StateBacklog}}
 	if got := CurrentTaskID(tasks); got == nil || *got != 11 {
 		t.Fatalf("got %v, want 11", got)
 	}

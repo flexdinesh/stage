@@ -232,8 +232,8 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 ### State
 - **Waiting Yellow** (`need`, text `need-fg`): needs input, paused chains, waiting threads. The marker and border are the bright yellow; text uses the darker `need-fg` because the bright yellow fails as text on white.
 - **Running Sky** (`run`): launching, running, queued, starting threads; running chains.
-- **Settle Teal** (`done`): completed and awaiting settle in T3.
-- **Settled Green** (`ok`): settled tasks, finished chains, T3 connected.
+- **Settle Teal** (`done`): done (run finished) and awaiting settle in T3; T3 threads labelled `completed` read "done".
+- **Settled Green** (`ok`): settled tasks and threads (a settled thread shows "settled" whatever its run status), finished chains, T3 connected.
 - **Fault Red** (`bad`): failed, interrupted, T3 offline, errors, danger buttons.
 - **Idle Gray** (`idle`): backlog, cancelled, idle, rolled back.
 
@@ -337,7 +337,7 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 - **Phone:** 56px bottom bar, five equal cells with a 16px icon over a 10.5px label; active cell gets a 2px Ink top border. Templates and Settings live in the More drawer.
 
 ### Stat strip (signature)
-One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels.
+One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
 
 ### Task row (signature)
 State chip, row title with a mono meta line (project, model, relative time, tags), optional chain chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.

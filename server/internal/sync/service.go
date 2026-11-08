@@ -52,7 +52,7 @@ type Service struct {
 	FullSyncEvery time.Duration
 	PollEvery     time.Duration
 	CatalogEvery  time.Duration
-	// StalePollEvery: completed tasks untouched for an hour are polled at
+	// StalePollEvery: done tasks untouched for an hour are polled at
 	// most this often.
 	StalePollEvery time.Duration
 	// LaunchAttemptTimeout bounds one t3_thread_launch call (a launch makes

@@ -266,7 +266,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
         {thread === null ? null : (
           <>
             <Detail label="Status">
-              <ThreadStatusBadge status={thread.status} />
+              <ThreadStatusBadge status={thread.status} settled={thread.settled} />
             </Detail>
             <Detail label="Pending">
               {thread.pendingRequestCount} request{thread.pendingRequestCount === 1 ? "" : "s"}

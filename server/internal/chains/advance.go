@@ -69,7 +69,7 @@ func Advance(state db.ChainState, steps []Step) Action {
 	case db.StateFailed, db.StateInterrupted:
 		return Action{Kind: ActionPause, TaskID: cur.TaskID}
 	}
-	// launching | running | needs_input | completed: wait for settle.
+	// launching | running | needs_input | done: wait for settle.
 	return Action{}
 }
 

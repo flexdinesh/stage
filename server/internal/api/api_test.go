@@ -333,8 +333,8 @@ func TestTaskLifecycle(t *testing.T) {
 	_ = e.fake.SetStatus(threadID, t3.StatusCompleted)
 	e.poll()
 	got := e.getTask(tk.ID)
-	if got.State != "completed" || got.FinishedAt == nil || got.SettledAt != nil {
-		t.Fatalf("completed %+v", got)
+	if got.State != "done" || got.FinishedAt == nil || got.SettledAt != nil {
+		t.Fatalf("done %+v", got)
 	}
 	_ = e.fake.Settle(threadID)
 	e.poll()
@@ -342,11 +342,23 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.State != "settled" || got.SettledAt == nil {
 		t.Fatalf("settled %+v", got)
 	}
+	var settledList struct {
+		Tasks []task `json:"tasks"`
+	}
+	e.must("GET", "/api/tasks?state=settled&settledFrom=2000-01-01", nil, 200, &settledList)
+	if len(settledList.Tasks) != 1 || settledList.Tasks[0].ID != tk.ID {
+		t.Fatalf("settledFrom past %+v", settledList.Tasks)
+	}
+	e.must("GET", "/api/tasks?state=settled&settledFrom=2999-01-01", nil, 200, &settledList)
+	if len(settledList.Tasks) != 0 {
+		t.Fatalf("settledFrom future %+v", settledList.Tasks)
+	}
+	e.must("GET", "/api/tasks?settledFrom=nope", nil, 400, nil)
 	var states []string
 	for _, ev := range got.Events {
 		states = append(states, ev.ToState)
 	}
-	want := []string{"backlog", "launching", "running", "needs_input", "completed", "settled"}
+	want := []string{"backlog", "launching", "running", "needs_input", "done", "settled"}
 	if !slices.Equal(states, want) {
 		t.Fatalf("events %v, want %v", states, want)
 	}
@@ -621,8 +633,8 @@ func TestChainAdvancesOnlyAfterSettle(t *testing.T) {
 	e.poll()
 	e.evaluate()
 	c = e.getChain(c.ID)
-	if c.Steps[0].State != "completed" || c.Steps[1].State != "backlog" || *c.CurrentTaskID != a.ID {
-		t.Fatalf("completed but unsettled must wait: %+v", c)
+	if c.Steps[0].State != "done" || c.Steps[1].State != "backlog" || *c.CurrentTaskID != a.ID {
+		t.Fatalf("done but unsettled must wait: %+v", c)
 	}
 
 	_ = e.fake.Settle(thread1)

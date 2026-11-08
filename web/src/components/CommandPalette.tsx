@@ -110,7 +110,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             group: "Threads",
             label: th.title,
             hint: `${th.projectTitle ?? th.t3ProjectId} · ${th.source}`,
-            badge: <ThreadStatusBadge status={th.status} />,
+            badge: <ThreadStatusBadge status={th.status} settled={th.settled} />,
             run: th.taskId === null ? go(`/history?q=${encodeURIComponent(th.title)}`) : go(`/tasks/${th.taskId}`),
             t3Url: th.t3WebUrl,
           });

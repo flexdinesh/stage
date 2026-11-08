@@ -1,12 +1,13 @@
+import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { useProjects, useT3Status, useTasks } from "../api/queries.ts";
 import type { Task, TaskState } from "../api/types.ts";
-import { IconExternal } from "../components/icons.tsx";
+import { IconChevronDown, IconExternal } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { ExternalButton, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
-type GroupKey = "needs" | "running" | "completed" | "failed" | "backlog";
+type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
 
 interface Group {
   key: GroupKey;
@@ -17,6 +18,8 @@ interface Group {
   states: TaskState[];
   empty: string;
   hideEmpty?: boolean;
+  /** Rendered collapsed until opened (or filtered to). */
+  collapsible?: boolean;
 }
 
 const GROUPS: Group[] = [
@@ -39,12 +42,12 @@ const GROUPS: Group[] = [
     empty: "Nothing running. Start a task from the backlog.",
   },
   {
-    key: "completed",
-    title: "Completed · awaiting settle in T3",
+    key: "done",
+    title: "Done · awaiting settle in T3",
     stat: "Awaiting settle",
     short: "settle",
     tone: "done",
-    states: ["completed"],
+    states: ["done"],
     empty: "Nothing to settle. Finished tasks wait here until settled in T3.",
   },
   {
@@ -66,9 +69,28 @@ const GROUPS: Group[] = [
     states: ["backlog"],
     empty: "Backlog is empty. Add one with New task.",
   },
+  {
+    key: "settled",
+    title: "Settled · last 7 days",
+    stat: "Settled",
+    short: "settled",
+    tone: "ok",
+    states: ["settled"],
+    empty: "Nothing settled in the last 7 days.",
+    collapsible: true,
+  },
 ];
 
-const ALL_STATES = GROUPS.flatMap((g) => g.states);
+// Settled tasks come from their own windowed query (SETTLED_DAYS); the rest are current totals.
+const LIVE_STATES = GROUPS.flatMap((g) => g.states).filter((s) => s !== "settled");
+const SETTLED_DAYS = 7;
+
+/** Start of the settled window, floored to the hour so the query key stays stable between renders. */
+function settledSince(): string {
+  const d = new Date(Date.now() - SETTLED_DAYS * 24 * 3600 * 1000);
+  d.setMinutes(0, 0, 0);
+  return d.toISOString();
+}
 const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_input"];
 
 const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.key === v)?.key ?? null;
@@ -167,11 +189,15 @@ export function DashboardPage() {
   const project = params.get("project") ?? "";
   const selected = parseGroup(params.get("state"));
   const projects = useProjects();
-  const tasks = useTasks({ state: ALL_STATES, ...(project === "" ? {} : { project: Number(project) }) });
-  const all = tasks.data?.tasks ?? [];
+  const projectQuery = project === "" ? {} : { project: Number(project) };
+  const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
+  const [since] = useState(settledSince);
+  const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
+  const [settledOpen, setSettledOpen] = useState(false);
+  const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
   const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
 
-  const counts: Record<GroupKey, number> = { needs: 0, running: 0, completed: 0, failed: 0, backlog: 0 };
+  const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, settled: 0 };
   for (const g of GROUPS) counts[g.key] = byGroup(g).length;
   const active = all.filter((t) => ACTIVE_STATES.includes(t.state)).length;
   const projectCount = projects.data?.projects.length;
@@ -212,7 +238,7 @@ export function DashboardPage() {
         {...(meta === "" ? {} : { meta })}
         actions={<ProjectSelect value={project} onChange={(v) => setParam("project", v)} />}
       />
-      <QueryState isPending={tasks.isPending} error={tasks.error}>
+      <QueryState isPending={tasks.isPending || settled.isPending} error={tasks.error ?? settled.error}>
         <StatStrip
           counts={counts}
           selected={selected}
@@ -223,15 +249,34 @@ export function DashboardPage() {
             if (Array.isArray(block)) return <EmptyGroups key={block.map((g) => g.key).join("-")} groups={block} />;
             const g = block;
             const list = byGroup(g);
+            const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
+            const label = (
+              <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2")}>
+                <span aria-hidden className="size-1.5 bg-[var(--c)]" />
+                {g.title}
+              </span>
+            );
             return (
               <Panel
                 key={g.key}
                 flush
+                collapsed={collapsed}
                 title={
-                  <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 bg-[var(--c)]" />
-                    {g.title}
-                  </span>
+                  g.collapsible === true && selected !== g.key ? (
+                    <button
+                      type="button"
+                      aria-expanded={!collapsed}
+                      onClick={() => setSettledOpen((v) => !v)}
+                      className="label-caps inline-flex items-center gap-1.5 text-fg"
+                    >
+                      <span aria-hidden className={cx("inline-flex transition-transform duration-150", collapsed && "-rotate-90")}>
+                        <IconChevronDown size={12} />
+                      </span>
+                      {label}
+                    </button>
+                  ) : (
+                    label
+                  )
                 }
                 meta={<span className="tabular">{list.length}</span>}
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}

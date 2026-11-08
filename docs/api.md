@@ -25,7 +25,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 | Name | Values |
 |---|---|
-| TaskState | `backlog` `launching` `running` `needs_input` `completed` `settled` `failed` `interrupted` `cancelled` |
+| TaskState | `backlog` `launching` `running` `needs_input` `done` `settled` `failed` `interrupted` `cancelled` (`done`: the run finished, not yet settled in T3; T3 calls this `completed`) |
 | ChainState | `idle` `running` `paused` `done` |
 | ThreadStatus (T3) | `idle` `preparing` `queued` `starting` `running` `waiting` `completed` `interrupted` `failed` `cancelled` `rolled_back` |
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
@@ -182,7 +182,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `chainPosition` is 1-based.
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
-- `finishedAt`: first entry into `completed|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
+- `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 
 `TaskEvent`:
 ```json
@@ -193,7 +193,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 `TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`.
 
 ### `GET /api/tasks`
-Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `chain` (chain id).
+Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`), `chain` (chain id).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -383,7 +383,7 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 | 1 | `settled == true` | `settled` |
 | 2 | `pendingRequestCount > 0` or `status == waiting` | `needs_input` |
 | 3 | `status in (preparing, queued, starting, running)` | `running` |
-| 4 | `status == completed` | `completed` |
+| 4 | `status == completed` | `done` |
 | 5 | `status == failed` | `failed` |
 | 6 | `status == interrupted` | `interrupted` |
 | 7 | `status in (cancelled, rolled_back)` | `cancelled` |
@@ -392,7 +392,7 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 
 Applied only to tasks with a thread whose state is not `backlog` or `cancelled`, and not to `settled` chain steps (the chain has moved past them). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 
-Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `completed` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
 
 ## Chain rules, pure function
 
@@ -401,7 +401,7 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 - Current step (`currentTaskId`) = first step not passed; none → chain becomes `done`.
 - Runner, chain `running`, by current step state:
   - `backlog` → launch it (new thread).
-  - `launching|running|needs_input|completed` → wait (a step is done only when settled in T3).
+  - `launching|running|needs_input|done` → wait (a step is done only when settled in T3).
   - `failed|interrupted` → set chain `paused`.
 - A step transition into `failed|interrupted|cancelled` (other than via skip) while the chain is `running` sets the chain `paused`.
 - A `paused` chain with no current step left (e.g. its last step skipped) becomes `done`.
