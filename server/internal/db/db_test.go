@@ -289,6 +289,32 @@ func TestUpsertT3ProjectsKeepsLocalTitle(t *testing.T) {
 	}
 }
 
+func TestProjectLastActivity(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "proj-1")
+	if p.LastActivityAt != nil {
+		t.Fatalf("new project activity %v", p.LastActivityAt)
+	}
+	created := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	settled := created.Add(3 * time.Hour)
+	if err := s.UpsertThreads(ctx, []t3.Thread{
+		{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour), Settled: true, SettledAt: &settled},
+		{ThreadID: "th-2", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(2 * time.Hour)},
+		{ThreadID: "th-x", ProjectID: "proj-other", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: settled.Add(time.Hour)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.GetProject(ctx, p.ID)
+	if err != nil || p.LastActivityAt == nil || !p.LastActivityAt.Equal(settled) {
+		t.Fatalf("thread activity: want settle %v, got %v %v", settled, p.LastActivityAt, err)
+	}
+	task := mustTask(t, s, ctx, p.ID, "a", nil)
+	ps, err := s.ListProjects(ctx, "false")
+	if err != nil || len(ps) != 1 || ps[0].LastActivityAt == nil || !ps[0].LastActivityAt.Equal(task.UpdatedAt) {
+		t.Fatalf("task activity: want %v, got %+v %v", task.UpdatedAt, ps, err)
+	}
+}
+
 func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
 	s, ctx := setup(t)
 	now := time.Now().UTC()

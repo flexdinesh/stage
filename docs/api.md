@@ -122,9 +122,12 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
   "source": "app",
   "archivedAt": null,
   "createdAt": "2026-11-08T10:00:00Z",
-  "updatedAt": "2026-11-08T10:00:00Z"
+  "updatedAt": "2026-11-08T10:00:00Z",
+  "lastActivityAt": "2026-11-08T11:30:00Z"
 }
 ```
+
+`lastActivityAt`: latest of the project's thread `updatedAt` / `settledAt` (incl. subagents) and task `updatedAt`; null when none.
 
 ### `GET /api/projects`
 Query: `archived` = `true` (only archived) | `false` (default, only active) | `all`.

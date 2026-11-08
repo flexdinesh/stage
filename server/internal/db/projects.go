@@ -8,11 +8,18 @@ import (
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
 
-const projectCols = `id, t3_project_id, title, workspace_root, source, archived_at, created_at, updated_at`
+// projectCols includes last_activity_at: latest thread update/settle or task
+// update in the project (NULL when none). Selects/returns from "projects".
+const projectCols = `id, t3_project_id, title, workspace_root, source, archived_at, created_at, updated_at,
+	(SELECT max(a) FROM (
+	   SELECT max(GREATEST(th.updated_at, th.settled_at)) FROM threads th WHERE th.t3_project_id = projects.t3_project_id
+	   UNION ALL
+	   SELECT max(tk.updated_at) FROM tasks tk WHERE tk.project_id = projects.id
+	 ) acts(a)) AS last_activity_at`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.T3ProjectID, &p.Title, &p.WorkspaceRoot, &p.Source, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.T3ProjectID, &p.Title, &p.WorkspaceRoot, &p.Source, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt)
 	return p, notFound(err)
 }
 
