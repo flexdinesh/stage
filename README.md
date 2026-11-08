@@ -1,18 +1,24 @@
 # t3-stage
 
-Task/stage manager for T3 Code: projects, tasks, and sequential chains on top of a local T3 install, plus a cross-project history of every T3 thread. Go + Postgres + React. Runs on the T3 host and binds `0.0.0.0:7380`. Talks to T3 only via its MCP endpoint (`T3_URL/mcp`).
+Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, and see history across all projects. Go + Postgres + React. Talks to T3 via its MCP endpoint (`T3_URL/mcp`).
 
-## Layout
+## Features
 
-- `server/`: Go backend (`cmd/t3stage`, `internal/{config,db,t3,sync,chains,api,webui}`). Serves the API and the embedded web UI.
-- `web/`: Vite + React + TypeScript + Tailwind SPA.
-- `docs/api.md`: REST contract (mirrored in `web/src/api/types.ts`).
+- **Projects**: 1:1 with T3 projects. Existing T3 projects import automatically.
+- **Tasks**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, notes. Save to backlog or start right away.
+- **Live status**: backlog → running → needs input → completed → settled (or failed / interrupted). Polled from T3 every 5s.
+- **Task actions**: start, follow-up, stop, duplicate, open in T3.
+- **Chains**: ordered tasks (can span projects). The next step starts when the previous thread is settled in T3. A failure pauses the chain. Controls: start, pause, resume, skip, reorder.
+- **Dashboard**: needs-input alert, plus running, completed and backlog across projects.
+- **History**: every T3 thread, including ones started outside this app. Filter by time window, project, status, provider and source; shows counts per project and per day.
+- **Templates**: reusable prompt + model presets.
+- **Settings**: T3 connection status, manual pairing, sync now.
 
-## Setup
+## Deploy
 
-Requirements: Docker with compose. For local dev also Go 1.27, Node, pnpm.
+Runs on the same machine as T3. Requires Docker with compose.
 
-1. One-time, on the T3 host, issue an admin session token (lets t3-stage mint and auto-renew its own OAuth token):
+1. On the T3 host, issue an admin token. t3-stage uses it to mint and auto-renew its own T3 access every 30 days:
 
    ```sh
    t3 auth session issue --ttl 3650d --label t3-stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
@@ -21,28 +27,19 @@ Requirements: Docker with compose. For local dev also Go 1.27, Node, pnpm.
 2. Configure:
 
    ```sh
-   cp .env.example .env
-   # paste the token into T3_ADMIN_TOKEN; adjust T3_URL / T3_PUBLIC_URL if needed
+   cp .env.example .env   # set T3_ADMIN_TOKEN; T3_PUBLIC_URL = T3 address used for "Open in T3" links
    ```
 
-   Without `T3_ADMIN_TOKEN`, pair manually from Settings with a code from `t3 pair`.
+3. Run:
 
-   `T3_FAKE=1` swaps in an in-memory fake T3 (no T3 server needed; for UI/dev only).
+   ```sh
+   docker compose up -d --build
+   ```
 
-## Run
+   UI at `http://<host>:7380`, bound to `0.0.0.0`. Postgres listens on `127.0.0.1:5439` and stores data in the `pgdata` volume.
 
-```sh
-docker compose up -d --build
-```
-
-App on `http://<host>:7380` (host networking). Postgres on `127.0.0.1:5439`, data in the `pgdata` volume.
+Update: `git pull && docker compose up -d --build`.
 
 ## Develop
 
-```sh
-make dev
-```
-
-Starts Postgres (compose), the Go server on `:7380` and the Vite dev server (proxies `/api` to `:7380`). Open the Vite URL it prints.
-
-Other targets: `make db`, `make build` (single binary at `bin/t3stage`), `make test`, `make up`, `make down`.
+`make dev` starts Postgres, the Go server on `:7380` and Vite, which proxies `/api` to the Go server. `T3_FAKE=1` swaps in a fake T3. Other targets: `make test`, `make build`, `make up`, `make down`. API contract: `docs/api.md`.
