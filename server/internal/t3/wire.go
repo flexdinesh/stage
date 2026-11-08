@@ -441,3 +441,12 @@ func WebThreadURL(publicURL, environmentID, threadID string) string {
 	}
 	return strings.TrimRight(publicURL, "/") + "/" + url.PathEscape(environmentID) + "/" + url.PathEscape(threadID)
 }
+
+// AppThreadURL is the T3 desktop/mobile app deep link for a thread:
+// t3code://threads/<environmentId>/<threadId>. "" if any part is missing.
+func AppThreadURL(environmentID, threadID string) string {
+	if environmentID == "" || threadID == "" {
+		return ""
+	}
+	return "t3code://threads/" + url.PathEscape(environmentID) + "/" + url.PathEscape(threadID)
+}

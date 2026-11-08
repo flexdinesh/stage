@@ -266,13 +266,15 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
       </ExternalButton>,
     );
   }
-  if (task.t3AppUrl !== null) {
+  if (task.t3DeepLink !== null) {
     links.push(
-      <a key="app" href={task.t3AppUrl} className={buttonClass("secondary", true)}>
+      <a key="app" href={task.t3DeepLink} className={buttonClass("secondary", true)}>
         Open in app
       </a>,
-      <CopyButton key="copy" text={task.t3AppUrl} label="Copy app link" />,
     );
+  }
+  if (task.t3AppUrl !== null) {
+    links.push(<CopyButton key="copy" text={task.t3AppUrl} label="Copy app link" />);
   }
   return (
     <Panel title="Thread" meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>

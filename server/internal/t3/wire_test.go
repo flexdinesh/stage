@@ -315,3 +315,15 @@ func TestWebThreadURL(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestAppThreadURL(t *testing.T) {
+	if got := AppThreadURL("env", "codex:t%1"); got != "t3code://threads/env/codex:t%251" {
+		t.Fatalf("got %q", got)
+	}
+	if got := AppThreadURL("", "t"); got != "" {
+		t.Fatalf("got %q", got)
+	}
+	if got := AppThreadURL("env", ""); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}

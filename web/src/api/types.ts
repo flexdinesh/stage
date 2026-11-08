@@ -183,6 +183,8 @@ export interface Task {
   lastError: string | null;
   t3WebUrl: string | null;
   t3AppUrl: string | null;
+  /** t3code://threads/<env>/<thread>: opens the thread in the T3 desktop/mobile app. */
+  t3DeepLink: string | null;
   launchedAt: string | null;
   finishedAt: string | null;
   settledAt: string | null;
