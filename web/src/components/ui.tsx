@@ -45,27 +45,6 @@ export function Chip({
   );
 }
 
-/** Legacy tone names, kept so older call sites map onto the state palette. */
-export type Tone = "gray" | "blue" | "amber" | "green" | "red" | "violet" | "teal";
-
-const LEGACY: Record<Tone, ChipTone> = {
-  gray: "idle",
-  blue: "run",
-  amber: "need",
-  green: "ok",
-  red: "bad",
-  violet: "plain",
-  teal: "done",
-};
-
-export function Badge({ tone = "gray", children }: { tone?: Tone; children: ReactNode }) {
-  return (
-    <Chip tone={LEGACY[tone]} dot={tone !== "violet"}>
-      {children}
-    </Chip>
-  );
-}
-
 export function Kbd({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <kbd className={cx("border border-line bg-panel px-1 font-mono text-[10.5px] leading-4 text-muted", className)}>
@@ -303,6 +282,7 @@ export function Panel({
   meta,
   actions,
   flush = false,
+  fill = false,
   className,
   children,
 }: {
@@ -310,12 +290,14 @@ export function Panel({
   meta?: ReactNode;
   actions?: ReactNode;
   flush?: boolean;
+  /** Body stretches to the panel height (e.g. a grid row set by a taller sibling). */
+  fill?: boolean;
   className?: string | undefined;
   children: ReactNode;
 }) {
   const hasHeader = title !== undefined || actions !== undefined || meta !== undefined;
   return (
-    <section className={cx("min-w-0 border border-line bg-surface", className)}>
+    <section className={cx("min-w-0 border border-line bg-surface", fill && "flex flex-col", className)}>
       {hasHeader ? (
         <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-panel px-3 py-1">
           {title === undefined ? null : <h2 className="label-caps text-fg">{title}</h2>}
@@ -323,27 +305,8 @@ export function Panel({
           {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
       ) : null}
-      <div className={flush ? undefined : "p-3"}>{children}</div>
+      <div className={cx(!flush && "p-3", fill && "flex flex-1 flex-col")}>{children}</div>
     </section>
-  );
-}
-
-/** Legacy name for Panel with a padded body. */
-export function Card({
-  title,
-  actions,
-  className,
-  children,
-}: {
-  title?: ReactNode;
-  actions?: ReactNode;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <Panel title={title} actions={actions} className={className}>
-      {children}
-    </Panel>
   );
 }
 

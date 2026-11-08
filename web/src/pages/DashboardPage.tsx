@@ -61,7 +61,7 @@ const GROUPS: Group[] = [
     key: "backlog",
     title: "Backlog",
     stat: "Backlog",
-    short: "queue",
+    short: "backlog",
     tone: "idle",
     states: ["backlog"],
     empty: "Backlog is empty. Add one with New task.",
@@ -87,6 +87,26 @@ function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   );
 }
 
+function EmptyGroups({ groups }: { groups: Group[] }) {
+  return (
+    <ul className="border border-line bg-surface md:grid md:grid-cols-[max-content_minmax(0,1fr)]">
+      {groups.map((g) => (
+        <li
+          key={g.key}
+          className="flex min-w-0 flex-col gap-0.5 border-b border-line px-3 py-2 last:border-b-0 md:col-span-2 md:grid md:grid-cols-subgrid md:items-baseline md:gap-x-6"
+        >
+          <span className="label-caps inline-flex items-center gap-2 text-fg">
+            <span aria-hidden className="size-1.5 bg-line-strong" />
+            {g.title}
+            <span className="tabular text-muted">0</span>
+          </span>
+          <span className="min-w-0 text-[12.5px] text-muted">{g.empty}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function StatStrip({
   counts,
   selected,
@@ -100,6 +120,7 @@ function StatStrip({
     <div role="group" aria-label="Filter by state" className="mb-4 flex border border-line bg-surface">
       {GROUPS.map((g) => {
         const on = selected === g.key;
+        const n = counts[g.key];
         return (
           <button
             key={g.key}
@@ -109,14 +130,17 @@ function StatStrip({
             onClick={() => onToggle(g.key)}
             className={cx(
               toneClass(g.tone),
-              "flex min-w-0 flex-1 items-center justify-center gap-1.5 border-r border-line px-2 py-1.5 whitespace-nowrap max-md:last-of-type:border-r-0 shadow-[inset_2px_0_var(--c)] transition-colors duration-150 md:flex-none md:justify-start md:gap-2 md:px-3",
-              on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)]" : "hover:bg-panel",
+              "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-md:last-of-type:border-r-0 transition-colors duration-150 md:flex-none md:flex-row md:justify-start md:gap-2 md:px-3",
+              on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "hover:bg-panel",
             )}
           >
-            <span className={cx("tabular text-[15px] font-bold", on ? "text-[var(--cf)]" : "text-fg")}>
-              {counts[g.key]}
+            <span className="flex items-center gap-1.5">
+              {n > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
+              <span className={cx("tabular text-[15px] font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>
+                {n}
+              </span>
             </span>
-            <span className="label-caps text-[9.5px] tracking-[0.04em] md:hidden">{g.short}</span>
+            <span className="label-caps text-[10.5px] md:hidden">{g.short}</span>
             <span className="label-caps hidden md:inline">{g.stat}</span>
           </button>
         );
@@ -161,6 +185,19 @@ export function DashboardPage() {
     });
   }
 
+  // Groups in order; consecutive empty groups (unfiltered view) collapse into one ruled list.
+  const blocks: (Group | Group[])[] = [];
+  for (const g of GROUPS) {
+    if (selected !== null && selected !== g.key) continue;
+    const empty = byGroup(g).length === 0;
+    if (selected === null && empty && g.hideEmpty === true) continue;
+    const prev = blocks.at(-1);
+    if (selected === null && empty) {
+      if (Array.isArray(prev)) prev.push(g);
+      else blocks.push([g]);
+    } else blocks.push(g);
+  }
+
   const meta = [
     projectCount === undefined ? null : `${projectCount} project${projectCount === 1 ? "" : "s"}`,
     tasks.data === undefined ? null : `${active} active`,
@@ -182,10 +219,10 @@ export function DashboardPage() {
           onToggle={(key) => setParam("state", selected === key ? null : key)}
         />
         <div className="flex flex-col gap-3.5">
-          {GROUPS.map((g) => {
-            if (selected !== null && selected !== g.key) return null;
+          {blocks.map((block) => {
+            if (Array.isArray(block)) return <EmptyGroups key={block.map((g) => g.key).join("-")} groups={block} />;
+            const g = block;
             const list = byGroup(g);
-            if (selected === null && g.hideEmpty === true && list.length === 0) return null;
             return (
               <Panel
                 key={g.key}

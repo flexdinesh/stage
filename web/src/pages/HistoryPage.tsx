@@ -352,7 +352,7 @@ function Summary({ stats, preset }: { stats: Stats; preset: Preset }) {
   const projects = stats.threadsByProject.slice(0, TOP_PROJECTS);
   return (
     <div className="grid grid-cols-1 gap-3.5 md:grid-cols-[1fr_300px]">
-      <Panel title="Threads per day" meta={`${total} in ${days.length}d`}>
+      <Panel fill title="Threads per day" meta={`${total} in ${days.length}d`}>
         <DayBars days={days} />
       </Panel>
       <Panel title="Per project" meta={preset}>
@@ -381,8 +381,8 @@ function DayBars({ days }: { days: Day[] }) {
   if (first === undefined || last === undefined) return <p className="text-[12.5px] text-muted">No threads in this window.</p>;
   const max = Math.max(...days.map((d) => d.count), 1);
   return (
-    <div>
-      <ul aria-label="Threads per day" className={cx("flex h-16 items-end", days.length > 60 ? "gap-0" : "gap-[3px]")}>
+    <div className="flex flex-1 flex-col">
+      <ul aria-label="Threads per day" className={cx("flex min-h-16 flex-1 items-end", days.length > 60 ? "gap-0" : "gap-[3px]")}>
         {days.map((d) => {
           const text = `${shortDay(d.date)}: ${d.count} thread${d.count === 1 ? "" : "s"}`;
           return (

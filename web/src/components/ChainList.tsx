@@ -58,7 +58,10 @@ export function ChainPipeline({ chain, size = "sm" }: { chain: Chain; size?: "sm
                   ? "border-dashed border-line-strong text-muted"
                   : cx(
                       toneClass(tone),
-                      "border-[color-mix(in_srgb,var(--c)_60%,transparent)] bg-[color-mix(in_srgb,var(--c)_14%,transparent)] text-[var(--cf)]",
+                      "border-[color-mix(in_srgb,var(--c)_55%,transparent)]",
+                      current || tone === "bad" || tone === "need"
+                        ? "bg-[color-mix(in_srgb,var(--c)_14%,transparent)] text-[var(--cf)]"
+                        : "text-fg",
                     ),
                 current && "outline outline-1 outline-offset-1 outline-fg",
                 lg ? "h-8 w-8 shrink-0 justify-center gap-1.5 md:w-auto md:flex-1 md:justify-start md:px-2" : "h-3.5 w-5",
@@ -66,6 +69,7 @@ export function ChainPipeline({ chain, size = "sm" }: { chain: Chain; size?: "sm
             >
               {lg ? (
                 <>
+                  {tone === null ? null : <span aria-hidden className="size-1.5 shrink-0 bg-[var(--c)] max-md:hidden" />}
                   <span className="font-mono text-[11.5px] tabular">{i + 1}</span>
                   <span className="hidden min-w-0 truncate text-[12.5px] font-medium md:inline">{s.title}</span>
                 </>

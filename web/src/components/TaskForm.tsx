@@ -187,7 +187,7 @@ export function TaskFormModal({
           <span className="hidden md:inline">Save to backlog</span>
         </Button>
       ) : null}
-      <span className="min-w-0 flex-1 text-right font-mono text-[11px] text-muted">
+      <span className="min-w-0 flex-1 text-right font-mono text-[11px] text-muted max-md:order-first max-md:basis-full max-md:text-left empty:hidden">
         {missing.length > 0 ? `required: ${missing.join(", ")}` : null}
       </span>
       <Button

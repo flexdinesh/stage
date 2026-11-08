@@ -5,8 +5,8 @@ import { api } from "../api/client.ts";
 import { useChain, useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
-import { IconExternal } from "../components/icons.tsx";
-import { TaskStateBadge, ThreadStatusBadge } from "../components/StateBadge.tsx";
+import { IconArrowRight, IconExternal } from "../components/icons.tsx";
+import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -338,10 +338,10 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
               </span>
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {e.fromState === null || e.fromState === e.toState ? null : (
-                  <>
-                    <TaskStateBadge state={e.fromState} />
-                    <span className="text-muted">→</span>
-                  </>
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-muted">
+                    {taskStateLabel(e.fromState)}
+                    <IconArrowRight size={12} label="to" />
+                  </span>
                 )}
                 <TaskStateBadge state={e.toState} />
                 {e.detail === "" ? null : (
