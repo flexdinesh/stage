@@ -122,6 +122,8 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
+// The launch may have reached T3, so the next start reuses the attempt's
+// clientRequestId and T3 returns that thread instead of creating a second.
 // Run it once at startup before the poller, link runner and HTTP server.
 func (s *Service) RecoverLaunching(ctx context.Context) {
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}})
@@ -129,10 +131,11 @@ func (s *Service) RecoverLaunching(ctx context.Context) {
 		s.log.Warn("recover launching tasks", "err", err)
 		return
 	}
-	msg := "launch interrupted by server restart"
+	msg := "launch interrupted by server restart; start again to resume it"
 	for _, t := range tasks {
 		if _, err := s.transition(ctx, db.Transition{
 			TaskID: t.ID, From: []db.TaskState{db.StateLaunching}, To: db.StateFailed, Detail: msg, LastError: &msg,
+			ReuseAttempt: true,
 		}); err != nil {
 			s.log.Warn("recover launching task", "task", t.ID, "err", err)
 		}
@@ -324,8 +327,11 @@ func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 }
 
 // launch: launching (attempt+1, or the same attempt when the previous launch
-// ended in a transport failure) → t3_thread_launch with clientRequestId
-// task-<id>-<attempt> → running with the new thread. A transport failure is
+// ended in a transport failure or restart) → t3_thread_launch with the
+// attempt's clientRequestId (task-<id>-<uuid>) → running with the new thread.
+// A thread in another project than the task's is a clientRequestId
+// collision (T3 deduped to someone else's launch): the task fails instead of
+// adopting it. A transport failure is
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
 // task.
@@ -349,14 +355,19 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, e
 		s.failLaunching(ctx, id, "launch aborted", err.Error(), nil, false)
 		return db.Task{}, err
 	}
-	in := launchInput(task, res.Attempt)
+	in := launchInput(task, res.RequestID)
 	in.Attachments, err = s.uploadImages(ctx, id)
 	var out t3.LaunchResult
+	collision := false
 	if err == nil {
 		out, err = s.launchThread(ctx, in)
 		if t3.IsTransportError(err) && ctx.Err() == nil {
 			s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
 			out, err = s.launchThread(ctx, in)
+		}
+		if err == nil && out.ProjectID != "" && out.ProjectID != task.T3ProjectID {
+			collision = true // definite: the next start needs a new clientRequestId
+			err = fmt.Errorf("clientRequestId %s collision: T3 returned existing thread %s in project %s", in.ClientRequestID, out.ThreadID, out.ProjectID)
 		}
 		if err != nil {
 			s.DiscardUploads(ctx, in.Attachments)
@@ -364,7 +375,7 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, e
 	}
 	if err != nil {
 		msg := err.Error()
-		s.failLaunching(ctx, id, "launch failed: "+msg, msg, nil, t3.IsTransportError(err))
+		s.failLaunching(ctx, id, "launch failed: "+msg, msg, nil, !collision && t3.IsTransportError(err))
 		task, gerr := s.store.GetTask(ctx, id)
 		if gerr != nil {
 			return db.Task{}, gerr
@@ -462,7 +473,7 @@ func (s *Service) failLaunching(ctx context.Context, id int64, detail, lastErr s
 	}
 }
 
-func launchInput(task db.Task, attempt int) t3.LaunchInput {
+func launchInput(task db.Task, requestID string) t3.LaunchInput {
 	in := t3.LaunchInput{
 		ProjectID:       task.T3ProjectID,
 		Title:           task.Title,
@@ -470,7 +481,7 @@ func launchInput(task db.Task, attempt int) t3.LaunchInput {
 		RuntimeMode:     t3.RuntimeMode(task.RuntimeMode),
 		InteractionMode: t3.InteractionMode(task.InteractionMode),
 		Workspace:       WorkspaceStrategy(task.Workspace),
-		ClientRequestID: fmt.Sprintf("task-%d-%d", task.ID, attempt),
+		ClientRequestID: requestID,
 	}
 	if task.ProviderInstanceID != nil && task.Model != nil {
 		in.ModelSelection = &t3.ModelSelection{

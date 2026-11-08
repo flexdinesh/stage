@@ -85,6 +85,9 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 	}
 	var errs []error
 	for _, id := range ids {
+		if ctx.Err() != nil {
+			break // shutting down: start no new launch (an in-flight one finishes)
+		}
 		r.log.Info("predecessor passed; launching follower", "task", id)
 		_, err := r.launcher.LaunchTask(ctx, id)
 		var conflict *db.ConflictError

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -537,5 +538,47 @@ INSERT INTO templates (name, prompt, model, interaction_mode) VALUES
 	}
 	if len(got) != 1 || got[0].Name != "keep" || got[0].Body != "review the diff" || got[0].ProjectID != nil {
 		t.Fatalf("migrated %+v", got)
+	}
+}
+
+func TestLaunchRequestIDMigration(t *testing.T) {
+	old := dbtest.OpenAt("t3stage_test_migrate_launch_request", 10)
+	defer old.Close()
+	if old.Pool == nil {
+		t.Skip(old.Skip)
+	}
+	pool := old.Pool
+	ctx := context.Background()
+	var projectID, launched, reused, fresh int64
+	if err := pool.QueryRow(ctx, `INSERT INTO projects (t3_project_id, title, workspace_root, source) VALUES ('tp', 'p', '/w/p', 'app') RETURNING id`).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	insert := `INSERT INTO tasks (project_id, title, prompt, launch_attempt, launch_reuse) VALUES ($1, 't', 'p', $2, $3) RETURNING id`
+	for _, c := range []struct {
+		id      *int64
+		attempt int
+		reuse   bool
+	}{{&launched, 2, false}, {&reused, 1, true}, {&fresh, 0, false}} {
+		if err := pool.QueryRow(ctx, insert, projectID, c.attempt, c.reuse).Scan(c.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	s := db.NewStore(pool)
+	// A pending reuse keeps the pre-migration clientRequestId (T3 may hold
+	// a thread for it).
+	res, err := s.TransitionTask(ctx, db.Transition{TaskID: reused, To: db.StateLaunching, BeginAttempt: true})
+	if err != nil || res.Attempt != 1 || res.RequestID != fmt.Sprintf("task-%d-1", reused) {
+		t.Fatalf("reused %+v, %v", res, err)
+	}
+	// Otherwise a new attempt gets a fresh task-<id>-<uuid>.
+	for id, attempt := range map[int64]int{launched: 3, fresh: 1} {
+		res, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true})
+		prefix := fmt.Sprintf("task-%d-", id)
+		if err != nil || res.Attempt != attempt || !strings.HasPrefix(res.RequestID, prefix) || len(res.RequestID) != len(prefix)+36 {
+			t.Fatalf("task %d %+v, %v", id, res, err)
+		}
 	}
 }

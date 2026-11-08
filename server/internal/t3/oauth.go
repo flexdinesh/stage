@@ -32,7 +32,9 @@ import (
 //     -> {access_token, token_type:"Bearer", expires_in, scope}. 30-day session.
 
 const (
-	oauthClientName = "t3-stage"
+	// DefaultClientName is the OAuth client_name; the pairing label is
+	// "<name> mcp". Options.ClientName overrides it (dev: "t3-stage dev").
+	DefaultClientName = "t3-stage"
 	// DefaultRedirectURI is registered with T3 but never served: the code is
 	// read from the decision response. T3 accepts http only on loopback.
 	DefaultRedirectURI = "http://127.0.0.1:7380/oauth/callback"
@@ -75,6 +77,7 @@ type oauthFlow struct {
 	http        *http.Client
 	baseURL     string // no trailing slash
 	redirectURI string
+	clientName  string // OAuth client_name; pairing label "<clientName> mcp"
 	now         func() time.Time
 }
 
@@ -137,7 +140,7 @@ func (f *oauthFlow) authorize(ctx context.Context, adminToken, pairingCode strin
 
 func (f *oauthFlow) register(ctx context.Context) (string, error) {
 	body := map[string]any{
-		"client_name":                oauthClientName,
+		"client_name":                f.clientName,
 		"redirect_uris":              []string{f.redirectURI},
 		"token_endpoint_auth_method": "none",
 	}
@@ -154,7 +157,7 @@ func (f *oauthFlow) register(ctx context.Context) (string, error) {
 }
 
 func (f *oauthFlow) mintPairingCode(ctx context.Context, adminToken string) (string, error) {
-	body := map[string]any{"label": "t3-stage mcp", "scopes": fullAccessScopes}
+	body := map[string]any{"label": f.clientName + " mcp", "scopes": fullAccessScopes}
 	var out struct {
 		Credential string `json:"credential"`
 	}

@@ -1,6 +1,6 @@
 // Package dbtest provisions throwaway Postgres databases for integration
-// tests against the compose db (127.0.0.1:5439). Override the admin URL with
-// TEST_DATABASE_URL.
+// tests against the dev db (compose.dev.yaml, 127.0.0.1:5440). Override the
+// admin URL with TEST_DATABASE_URL. It refuses the production server.
 package dbtest
 
 import (
@@ -8,16 +8,21 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 )
 
-const defaultAdminURL = "postgres://t3stage:t3stage@127.0.0.1:5439/t3stage?sslmode=disable"
+const defaultAdminURL = "postgres://t3stage:t3stage@127.0.0.1:5440/postgres?sslmode=disable"
+
+// namePrefix: Open only drops and creates databases with this prefix.
+const namePrefix = "t3stage_test_"
 
 // DB is a migrated test database (Pool nil + Skip set when unavailable).
 type DB struct {
@@ -36,6 +41,13 @@ func OpenAt(name string, version int64) *DB {
 	adminURL := os.Getenv("TEST_DATABASE_URL")
 	if adminURL == "" {
 		adminURL = defaultAdminURL
+	}
+	// Loud, not a skip: tests must never drop databases next to prod data.
+	if config.ProdDatabase(adminURL) {
+		panic(fmt.Sprintf("dbtest: refusing production database %s; use the dev db (`make db`, 5440)", redact(adminURL)))
+	}
+	if !strings.HasPrefix(name, namePrefix) {
+		panic(fmt.Sprintf("dbtest: database name %q must start with %q", name, namePrefix))
 	}
 	admin, err := pgx.Connect(ctx, adminURL)
 	if err != nil {

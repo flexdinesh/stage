@@ -1,3 +1,7 @@
+# Production stack. Dev and tests use compose.dev.yaml (separate project, port
+# and volume); nothing in development connects to this database.
+name: t3-stage
+
 services:
   db:
     image: postgres:17
@@ -18,6 +22,8 @@ services:
 
   app:
     build: .
+    # Above the app's 100s shutdown wait for in-flight launches.
+    stop_grace_period: 2m
     network_mode: host
     restart: unless-stopped
     env_file:

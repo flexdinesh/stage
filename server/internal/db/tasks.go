@@ -377,12 +377,12 @@ type Transition struct {
 	To     TaskState
 	Detail string
 
-	BeginAttempt bool    // launch start: attempt+1 (unless launch_reuse), clear thread/error/finished/settled/launch_reuse
+	BeginAttempt bool    // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse
 	ThreadID     *string // set t3_thread_id (+ launched_at)
 	LastError    *string // set last_error
 	// ReuseAttempt marks the attempt's launch outcome unknown (transport
-	// failure, no thread): the next BeginAttempt keeps the attempt number
-	// and so the clientRequestId.
+	// failure or restart mid-launch, no thread): the next BeginAttempt keeps
+	// the attempt number and the clientRequestId.
 	ReuseAttempt bool
 	// UnlinkWaiting ("Start now"): a backlog task still waiting on an
 	// unfinished predecessor (not settled|cancelled) is unlinked from it.
@@ -395,6 +395,9 @@ type TransitionResult struct {
 	Changed bool
 	From    TaskState
 	Attempt int
+	// RequestID is the attempt's clientRequestId (launch_request_id); ""
+	// before the first launch.
+	RequestID string
 }
 
 // TransitionTask applies t atomically: state, timestamps (finishedAt on first
@@ -402,8 +405,8 @@ type TransitionResult struct {
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT state, launch_attempt FROM tasks WHERE id = $1 FOR UPDATE`, t.TaskID).
-			Scan(&res.From, &res.Attempt)
+		err := tx.QueryRow(ctx, `SELECT state, launch_attempt, COALESCE(launch_request_id, '') FROM tasks WHERE id = $1 FOR UPDATE`, t.TaskID).
+			Scan(&res.From, &res.Attempt, &res.RequestID)
 		if err != nil {
 			return notFound(err)
 		}
@@ -414,6 +417,8 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 UPDATE tasks SET
   state = $2,
   launch_attempt = launch_attempt + CASE WHEN $3::boolean AND NOT launch_reuse THEN 1 ELSE 0 END,
+  launch_request_id = CASE WHEN $3::boolean AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
+                           THEN 'task-' || id || '-' || gen_random_uuid() ELSE launch_request_id END,
   launch_reuse = CASE WHEN $3::boolean THEN false WHEN $7::boolean THEN true
                       WHEN $4::text IS NOT NULL THEN false ELSE launch_reuse END,
   t3_thread_id = CASE WHEN $3::boolean THEN NULL WHEN $4::text IS NOT NULL THEN $4::text ELSE t3_thread_id END,
@@ -426,9 +431,9 @@ UPDATE tasks SET
       SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state IN ('settled', 'cancelled'))
     THEN NULL ELSE after_task_id END,
   updated_at = now()
-WHERE id = $1 RETURNING launch_attempt`,
+WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting,
-		).Scan(&res.Attempt)
+		).Scan(&res.Attempt, &res.RequestID)
 		if err != nil {
 			return err
 		}
