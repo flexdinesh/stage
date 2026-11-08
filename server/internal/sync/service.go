@@ -267,14 +267,15 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	return err
 }
 
-// frozen: the thread no longer drives the task state. backlog and cancelled
-// (rolled back) tasks, and settled tasks with a follower (it has been
-// released). Other settled tasks may reopen.
+// frozen: the thread no longer drives the task state. backlog tasks, and
+// settled or cancelled tasks with a follower (it has been released). Other
+// settled and cancelled tasks may reopen: T3 reports a cancelled turn (e.g. a
+// denied permission) as thread status cancelled, then the thread runs on.
 func frozen(t db.Task) bool {
 	switch t.State {
-	case db.StateBacklog, db.StateCancelled:
+	case db.StateBacklog:
 		return true
-	case db.StateSettled:
+	case db.StateSettled, db.StateCancelled:
 		return t.NextTaskID != nil
 	}
 	return false

@@ -813,6 +813,64 @@ func TestFollowupDoesNotReviveReleasedSettledTask(t *testing.T) {
 	}
 }
 
+func TestCancelledTaskReopens(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/one")
+	ctx := context.Background()
+
+	// A cancelled turn (e.g. denied permission) and the thread runs on.
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	threadA := *a.T3ThreadID
+	_ = e.fake.SetStatus(threadA, t3.StatusCancelled)
+	e.poll()
+	if got := e.getTask(a.ID); got.State != "cancelled" {
+		t.Fatalf("after cancel %s", got.State)
+	}
+	_ = e.fake.SetStatus(threadA, t3.StatusRunning)
+	e.poll()
+	if got := e.getTask(a.ID); got.State != "running" {
+		t.Fatalf("cancelled task did not reopen: %s", got.State)
+	}
+
+	// Long-cancelled task resumed in T3: full sync sees the thread active
+	// in the mirror and the next poll reopens it.
+	_ = e.fake.SetStatus(threadA, t3.StatusCancelled)
+	e.poll()
+	if _, err := testDB.Pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - interval '1 hour' WHERE id = $1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = e.fake.SetStatus(threadA, t3.StatusRunning)
+	e.poll()
+	if got := e.getTask(a.ID); got.State != "cancelled" {
+		t.Fatalf("stale cancelled task polled before the mirror changed: %s", got.State)
+	}
+	if _, err := e.sync.FullSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.poll()
+	if got := e.getTask(a.ID); got.State != "running" {
+		t.Fatalf("resumed thread did not reopen stale cancelled task: %s", got.State)
+	}
+
+	// Cancelled with a follower that already ran: released, stays cancelled.
+	b := e.task(p.ID, "b", map[string]any{"start": true})
+	c := e.task(p.ID, "c", map[string]any{"afterTaskId": b.ID})
+	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCancelled)
+	e.poll()
+	e.reconcile()
+	if got := e.getTask(c.ID); got.State != "running" {
+		t.Fatalf("follower %s", got.State)
+	}
+	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusRunning)
+	if _, err := e.sync.FullSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.poll()
+	if got := e.getTask(b.ID); got.State != "cancelled" {
+		t.Fatalf("released cancelled task reopened: %s", got.State)
+	}
+}
+
 func TestSyncHistoryAndStats(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
