@@ -139,11 +139,6 @@ export interface CreateProjectRequest {
   workspaceRoot: string;
 }
 
-export interface UpdateProjectRequest {
-  title?: string;
-  archived?: boolean;
-}
-
 // ---- Tasks ----
 
 /** An uploaded image (bytes at GET /api/attachments/:id). */

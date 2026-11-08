@@ -102,7 +102,7 @@ func (f *Fake) CreateProject(_ context.Context, in CreateProjectInput) (Project,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, p := range f.projects {
-		if p.WorkspaceRoot == in.WorkspaceRoot {
+		if p.WorkspaceRoot == in.WorkspaceRoot && p.DeletedAt == nil {
 			return Project{}, fmt.Errorf("workspace root already registered: %s", in.WorkspaceRoot)
 		}
 	}
@@ -310,6 +310,20 @@ func (f *Fake) Capabilities(context.Context) (Catalog, error) {
 func (f *Fake) AddProject(title, workspaceRoot string) Project {
 	p, _ := f.CreateProject(context.Background(), CreateProjectInput{Title: title, WorkspaceRoot: workspaceRoot})
 	return p
+}
+
+// SetProject mutates a T3-side project in place (title, archive, delete...).
+func (f *Fake) SetProject(projectID string, mutate func(*Project)) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.projects {
+		if f.projects[i].ID == projectID {
+			mutate(&f.projects[i])
+			f.projects[i].UpdatedAt = f.now()
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 // SetThread mutates a thread in place (status, settled, pending requests...).

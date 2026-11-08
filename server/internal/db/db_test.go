@@ -268,25 +268,80 @@ func TestUpsertThreadsKeepsDetailColumns(t *testing.T) {
 	}
 }
 
-func TestUpsertT3ProjectsKeepsLocalTitle(t *testing.T) {
+func TestUpsertT3ProjectsFollowsT3(t *testing.T) {
 	s, ctx := setup(t)
-	n, err := s.UpsertT3Projects(ctx, []t3.Project{
-		{ID: "p1", Title: "One", WorkspaceRoot: "/one"},
-		{ID: "p2", Title: "Gone", WorkspaceRoot: "/gone", DeletedAt: &time.Time{}},
-	})
-	if err != nil || n != 1 {
-		t.Fatalf("upsert %d %v", n, err)
+	upsert := func(ps ...t3.Project) int {
+		t.Helper()
+		n, err := s.UpsertT3Projects(ctx, ps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
-	p, err := s.ProjectByWorkspaceRoot(ctx, "/one")
-	if err != nil || p.Source != db.SourceT3 {
+	get := func(id int64) db.Project {
+		t.Helper()
+		p, err := s.GetProject(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	gone := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if n := upsert(
+		t3.Project{ID: "p1", Title: "main", WorkspaceRoot: "/one/main"},
+		t3.Project{ID: "p2", Title: "Gone", WorkspaceRoot: "/gone", DeletedAt: &gone},
+		t3.Project{ID: "p3", WorkspaceRoot: "/untitled"},
+	); n != 2 {
+		t.Fatalf("live count %d", n)
+	}
+	if _, err := s.ProjectByWorkspaceRoot(ctx, "/gone"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("never-mirrored deleted project inserted: %v", err)
+	}
+	untitled, err := s.ProjectByWorkspaceRoot(ctx, "/untitled")
+	if err != nil || untitled.Title != "/untitled" {
+		t.Fatalf("empty title fallback %+v %v", untitled, err)
+	}
+	p, err := s.ProjectByWorkspaceRoot(ctx, "/one/main")
+	if err != nil || p.Source != db.SourceT3 || p.Title != "main" || p.ArchivedAt != nil {
 		t.Fatalf("project %+v %v", p, err)
 	}
-	title := "Local"
-	_, _ = s.UpdateProject(ctx, p.ID, &title, nil)
-	_, _ = s.UpsertT3Projects(ctx, []t3.Project{{ID: "p1", Title: "One", WorkspaceRoot: "/one-moved"}})
-	p, _ = s.GetProject(ctx, p.ID)
-	if p.Title != "Local" || p.WorkspaceRoot != "/one-moved" {
-		t.Fatalf("after resync %+v", p)
+
+	// Unchanged resync keeps updated_at.
+	upsert(t3.Project{ID: "p1", Title: "main", WorkspaceRoot: "/one/main"})
+	if got := get(p.ID); !got.UpdatedAt.Equal(p.UpdatedAt) {
+		t.Fatalf("updated_at moved on no-op sync: %v -> %v", p.UpdatedAt, got.UpdatedAt)
+	}
+
+	// T3 rename, move and archive follow.
+	archived := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	upsert(t3.Project{ID: "p1", Title: "one", WorkspaceRoot: "/one-moved", ArchivedAt: &archived})
+	got := get(p.ID)
+	if got.Title != "one" || got.WorkspaceRoot != "/one-moved" || got.ArchivedAt == nil || !got.ArchivedAt.Equal(archived) {
+		t.Fatalf("after rename/archive %+v", got)
+	}
+	if !got.UpdatedAt.After(p.UpdatedAt) {
+		t.Fatalf("updated_at not bumped: %v", got.UpdatedAt)
+	}
+
+	// T3 unarchive follows.
+	upsert(t3.Project{ID: "p1", Title: "one", WorkspaceRoot: "/one-moved"})
+	if got := get(p.ID); got.ArchivedAt != nil {
+		t.Fatalf("after unarchive %+v", got)
+	}
+
+	// T3 delete: row stays, archived at deletedAt, root released.
+	upsert(t3.Project{ID: "p1", Title: "one", WorkspaceRoot: "/one-moved", DeletedAt: &gone})
+	got = get(p.ID)
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(gone) {
+		t.Fatalf("deleted not archived %+v", got)
+	}
+	if _, err := s.ProjectByWorkspaceRoot(ctx, "/one-moved"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("deleted project still claims root: %v", err)
+	}
+	// Resync of the deleted project keeps updated_at.
+	upsert(t3.Project{ID: "p1", Title: "one", WorkspaceRoot: "/one-moved", DeletedAt: &gone})
+	if again := get(p.ID); !again.UpdatedAt.Equal(got.UpdatedAt) {
+		t.Fatalf("updated_at moved on deleted no-op sync")
 	}
 }
 

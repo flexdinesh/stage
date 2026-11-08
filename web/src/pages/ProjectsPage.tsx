@@ -55,7 +55,7 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}
         </Field>
-        <Field label="Workspace path" hint="Links the T3 project at this path if one exists, otherwise creates it in T3.">
+        <Field label="Workspace path" hint="Links the T3 project at this path if one exists (T3 keeps its title), otherwise creates it in T3.">
           {(id) => (
             <Input
               id={id}
@@ -71,22 +71,6 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
     </Drawer>
   );
 }
-
-function ArchiveButton({ project }: { project: Project }) {
-  const qc = useQueryClient();
-  const archived = project.archivedAt !== null;
-  const toggle = useMutation({
-    mutationFn: () => api.updateProject(project.id, { archived: !archived }),
-    onSettled: () => qc.invalidateQueries({ queryKey: keys.projects }),
-  });
-  return (
-    <Button small variant="ghost" busy={toggle.isPending} onClick={() => toggle.mutate()} title={errorTitle(toggle.error)}>
-      {archived ? "Unarchive" : "Archive"}
-    </Button>
-  );
-}
-
-const errorTitle = (e: Error | null) => (e === null ? undefined : e.message);
 
 type Counts = { total: number; active: number };
 
@@ -178,7 +162,7 @@ export function ProjectsPage() {
               return (
                 <li
                   key={p.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px_96px]"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px]"
                 >
                   <div className="min-w-0">
                     <Link to={`/projects/${p.id}`} className="block truncate text-[13.5px] font-medium hover:underline">
@@ -204,9 +188,6 @@ export function ProjectsPage() {
                     {p.lastActivityAt === null ? null : (
                       <span title={`Last activity ${dateTime(p.lastActivityAt)}`}>active {relativeTime(p.lastActivityAt)}</span>
                     )}
-                  </div>
-                  <div className="justify-self-end">
-                    <ArchiveButton project={p} />
                   </div>
                 </li>
               );

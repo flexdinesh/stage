@@ -628,7 +628,8 @@ func TestProjects(t *testing.T) {
 	ext := e.fake.AddProject("External", "/w/ext")
 	var linked project
 	e.must("POST", "/api/projects", map[string]any{"title": " Mine ", "workspaceRoot": "/w/ext/"}, 201, &linked)
-	if linked.Source != "t3" || linked.T3ProjectID != ext.ID || linked.Title != "Mine" || linked.WorkspaceRoot != "/w/ext" {
+	// T3 owns the title: the requested one is ignored.
+	if linked.Source != "t3" || linked.T3ProjectID != ext.ID || linked.Title != "External" || linked.WorkspaceRoot != "/w/ext" {
 		t.Fatalf("linked %+v", linked)
 	}
 	app := e.project("/w/app")
@@ -638,12 +639,28 @@ func TestProjects(t *testing.T) {
 	if len(t3Projects) != 2 {
 		t.Fatalf("t3 projects %d", len(t3Projects))
 	}
+	// Projects are read-only here.
+	e.must("PATCH", fmt.Sprintf("/api/projects/%d", app.ID), map[string]any{"archived": true}, 404, nil)
 
-	var got project
-	e.must("PATCH", fmt.Sprintf("/api/projects/%d", app.ID), map[string]any{"archived": true}, 200, &got)
-	if got.ArchivedAt == nil {
-		t.Fatal("not archived")
+	// Archive and rename in T3 follow on sync.
+	sync := func() {
+		t.Helper()
+		if _, err := e.sync.FullSync(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
+	archivedAt := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if err := e.fake.SetProject(app.T3ProjectID, func(p *t3.Project) { p.ArchivedAt = &archivedAt; p.Title = "Renamed" }); err != nil {
+		t.Fatal(err)
+	}
+	sync()
+	var got project
+	e.must("GET", fmt.Sprintf("/api/projects/%d", app.ID), nil, 200, &got)
+	if got.ArchivedAt == nil || got.Title != "Renamed" {
+		t.Fatalf("after T3 archive/rename %+v", got)
+	}
+	// An archived app project still claims its root.
+	e.must("POST", "/api/projects", map[string]any{"title": "x", "workspaceRoot": "/w/app"}, 409, nil)
 	var list struct {
 		Projects []project `json:"projects"`
 	}
@@ -660,12 +677,31 @@ func TestProjects(t *testing.T) {
 		t.Fatalf("all %d", len(list.Projects))
 	}
 	e.must("GET", "/api/projects?archived=maybe", nil, 400, nil)
-	e.must("PATCH", fmt.Sprintf("/api/projects/%d", app.ID), map[string]any{"archived": false, "title": "Renamed"}, 200, &got)
-	if got.ArchivedAt != nil || got.Title != "Renamed" {
-		t.Fatalf("unarchive %+v", got)
+	if err := e.fake.SetProject(app.T3ProjectID, func(p *t3.Project) { p.ArchivedAt = nil }); err != nil {
+		t.Fatal(err)
 	}
+	sync()
 	e.must("GET", fmt.Sprintf("/api/projects/%d", app.ID), nil, 200, &got)
+	if got.ArchivedAt != nil || got.Title != "Renamed" {
+		t.Fatalf("after T3 unarchive %+v", got)
+	}
 	e.must("GET", "/api/projects/999", nil, 404, nil)
+
+	// T3 delete: row archived, root released; creating it again makes a new T3 project.
+	deletedAt := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	if err := e.fake.SetProject(ext.ID, func(p *t3.Project) { p.DeletedAt = &deletedAt }); err != nil {
+		t.Fatal(err)
+	}
+	sync()
+	e.must("GET", fmt.Sprintf("/api/projects/%d", linked.ID), nil, 200, &got)
+	if got.ArchivedAt == nil {
+		t.Fatalf("deleted not archived %+v", got)
+	}
+	var recreated project
+	e.must("POST", "/api/projects", map[string]any{"title": "Again", "workspaceRoot": "/w/ext"}, 201, &recreated)
+	if recreated.ID == linked.ID || recreated.T3ProjectID == ext.ID || recreated.Source != "app" || recreated.Title != "Again" {
+		t.Fatalf("recreated %+v (old %+v)", recreated, linked)
+	}
 }
 
 func TestLinkedTaskStartsOnlyAfterSettle(t *testing.T) {
