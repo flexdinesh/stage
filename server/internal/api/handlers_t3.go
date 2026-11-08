@@ -132,7 +132,8 @@ func normalizeRoot(root string) string {
 }
 
 // createProject: app project with the root → 409; T3 project with the root
-// (mirror, refreshed from T3 first) → link; else create in T3.
+// (mirror, refreshed from T3 first) → returned as mirrored (T3 owns title and
+// archive state; the requested title is ignored); else create in T3.
 func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		Title         string `json:"title"`
@@ -151,11 +152,7 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	case err == nil && existing.Source == db.SourceApp:
 		return db.Conflict("project for %s already exists", root)
 	case err == nil:
-		p, err := s.Store.LinkProject(ctx, existing.ID, title)
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusCreated, p)
+		writeJSON(w, http.StatusCreated, existing)
 		return nil
 	case !errors.Is(err, db.ErrNotFound):
 		return err
@@ -168,11 +165,7 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if existing, err := s.Store.ProjectByWorkspaceRoot(ctx, root); err == nil {
-		p, err := s.Store.LinkProject(ctx, existing.ID, title)
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusCreated, p)
+		writeJSON(w, http.StatusCreated, existing)
 		return nil
 	} else if !errors.Is(err, db.ErrNotFound) {
 		return err
@@ -180,6 +173,9 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	tp, err := s.T3.CreateProject(ctx, t3.CreateProjectInput{Title: title, WorkspaceRoot: root})
 	if err != nil {
 		return &db.T3Error{Err: err}
+	}
+	if tp.Title != "" {
+		title = tp.Title
 	}
 	p, err := s.Store.InsertProject(ctx, db.Project{
 		T3ProjectID: tp.ID, Title: title, WorkspaceRoot: root, Source: db.SourceApp,
@@ -197,32 +193,6 @@ func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	p, err := s.Store.GetProject(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, p)
-	return nil
-}
-
-func (s *server) updateProject(w http.ResponseWriter, r *http.Request) error {
-	id, err := pathID(r)
-	if err != nil {
-		return err
-	}
-	var body struct {
-		Title    db.Optional[string] `json:"title"`
-		Archived db.Optional[bool]   `json:"archived"`
-	}
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	if err := requiredText("title", &body.Title); err != nil {
-		return err
-	}
-	if body.Archived.Set && body.Archived.Null {
-		return db.Invalid("archived must be a boolean")
-	}
-	p, err := s.Store.UpdateProject(r.Context(), id, body.Title.Ptr(), body.Archived.Ptr())
 	if err != nil {
 		return err
 	}

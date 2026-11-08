@@ -78,7 +78,7 @@ Paste fallback: exchange a pairing code from `t3 pair` for a token.
 Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 502 pairing failed.
 
 ### `POST /api/sync`
-Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects). Synchronous.
+Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects; project title, root and archive state follow T3). Synchronous.
 200 `SyncResult`:
 ```json
 { "projects": 12, "threads": 776, "finishedAt": "2026-11-08T10:00:00Z" }
@@ -129,6 +129,8 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
 
 `lastActivityAt`: latest of the project's thread `updatedAt` / `settledAt` (incl. subagents) and task `updatedAt`; null when none.
 
+T3 is the source of truth: `title`, `workspaceRoot` and `archivedAt` follow T3 on every sync (empty T3 title → `workspaceRoot`). Projects are read-only here; rename/archive in T3. A project deleted in T3 stays (tasks reference it) and is archived (`archivedAt` = T3 `deletedAt` unless already archived).
+
 ### `GET /api/projects`
 Query: `archived` = `true` (only archived) | `false` (default, only active) | `all`.
 200 `{ "projects": Project[] }` ordered by `title`.
@@ -136,7 +138,7 @@ Query: `archived` = `true` (only archived) | `false` (default, only active) | `a
 ### `POST /api/projects`
 Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; absolute roots are path-cleaned, e.g. trailing `/` dropped).
 - An app project with the same `workspaceRoot` exists → 409.
-- A T3 project with the same `workspaceRoot` exists (already imported, or found after refreshing `t3_project_list`) → link it (`source: "t3"`): the existing row is unarchived and takes the requested `title`.
+- A T3 project with the same `workspaceRoot` exists (already imported, or found after refreshing `t3_project_list`) → return it as mirrored (`source: "t3"`): `title` and archive state stay T3's; the requested `title` is ignored. Projects deleted in T3 do not count: their root can be created again.
 - Otherwise create it in T3 (`t3_project_create`) → `source: "app"`.
 
 201 `Project`. 502 T3 error. 503 not connected.
@@ -144,9 +146,6 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ### `GET /api/projects/:id`
 200 `Project`. 404.
 
-### `PATCH /api/projects/:id`
-Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify T3).
-200 `Project`. 404.
 
 ## Tasks
 

@@ -55,9 +55,11 @@ func (s *Store) GetProject(ctx context.Context, id int64) (Project, error) {
 }
 
 // ProjectByWorkspaceRoot returns ErrNotFound when no project has the root.
+// Projects deleted in T3 do not claim their root.
 func (s *Store) ProjectByWorkspaceRoot(ctx context.Context, root string) (Project, error) {
 	return scanProject(s.pool.QueryRow(ctx,
-		`SELECT `+projectCols+` FROM projects WHERE workspace_root = $1 ORDER BY id LIMIT 1`, root))
+		`SELECT `+projectCols+` FROM projects
+		 WHERE workspace_root = $1 AND t3_deleted_at IS NULL ORDER BY id LIMIT 1`, root))
 }
 
 // InsertProject inserts an app-side project row; 409 on duplicate T3 id.
@@ -72,52 +74,51 @@ func (s *Store) InsertProject(ctx context.Context, p Project) (Project, error) {
 	return out, err
 }
 
-// LinkProject re-activates an imported project for a create request and
-// takes the requested title.
-func (s *Store) LinkProject(ctx context.Context, id int64, title string) (Project, error) {
-	return scanProject(s.pool.QueryRow(ctx,
-		`UPDATE projects SET title = $2, archived_at = NULL, updated_at = now()
-		 WHERE id = $1 RETURNING `+projectCols, id, title))
-}
-
-// UpdateProject applies a local-only patch.
-func (s *Store) UpdateProject(ctx context.Context, id int64, title *string, archived *bool) (Project, error) {
-	return scanProject(s.pool.QueryRow(ctx,
-		`UPDATE projects SET
-		   title = COALESCE($2, title),
-		   archived_at = CASE
-		     WHEN $3::boolean IS NULL THEN archived_at
-		     WHEN $3::boolean THEN COALESCE(archived_at, now())
-		     ELSE NULL END,
-		   updated_at = now()
-		 WHERE id = $1 RETURNING `+projectCols, id, title, archived))
-}
-
-// UpsertT3Projects mirrors T3 projects (source t3 when new). Existing rows
-// keep their local title/archive state; workspace root follows T3. Deleted
-// T3 projects are skipped.
+// UpsertT3Projects mirrors T3 projects (source t3 when new). T3 is the source
+// of truth: title, workspace root and archive state follow T3 on every sync.
+// A deleted T3 project is not inserted; an already mirrored one is marked
+// deleted and archived (rows stay, tasks reference them). Returns the count
+// of live T3 projects.
 func (s *Store) UpsertT3Projects(ctx context.Context, projects []t3.Project) (int, error) {
 	batch := &pgx.Batch{}
 	n := 0
 	for _, p := range projects {
-		if p.DeletedAt != nil || p.ID == "" {
+		if p.ID == "" {
 			continue
 		}
-		n++
 		title := p.Title
 		if title == "" {
 			title = p.WorkspaceRoot
 		}
+		if p.DeletedAt != nil {
+			batch.Queue(
+				`UPDATE projects SET
+				   title = $2,
+				   workspace_root = $3,
+				   archived_at = COALESCE(archived_at, $4),
+				   t3_deleted_at = $4,
+				   updated_at = CASE WHEN (title, workspace_root, archived_at, t3_deleted_at)
+				                          IS DISTINCT FROM ($2, $3, COALESCE(archived_at, $4), $4::timestamptz)
+				                     THEN now() ELSE updated_at END
+				 WHERE t3_project_id = $1`,
+				p.ID, title, p.WorkspaceRoot, p.DeletedAt)
+			continue
+		}
+		n++
 		batch.Queue(
 			`INSERT INTO projects (t3_project_id, title, workspace_root, source, archived_at)
 			 VALUES ($1, $2, $3, 't3', $4)
 			 ON CONFLICT (t3_project_id) DO UPDATE SET
+			   title = EXCLUDED.title,
 			   workspace_root = EXCLUDED.workspace_root,
-			   updated_at = CASE WHEN projects.workspace_root IS DISTINCT FROM EXCLUDED.workspace_root
+			   archived_at = EXCLUDED.archived_at,
+			   t3_deleted_at = NULL,
+			   updated_at = CASE WHEN (projects.title, projects.workspace_root, projects.archived_at, projects.t3_deleted_at)
+			                          IS DISTINCT FROM (EXCLUDED.title, EXCLUDED.workspace_root, EXCLUDED.archived_at, NULL::timestamptz)
 			                     THEN now() ELSE projects.updated_at END`,
 			p.ID, title, p.WorkspaceRoot, p.ArchivedAt)
 	}
-	if n == 0 {
+	if batch.Len() == 0 {
 		return 0, nil
 	}
 	if err := s.pool.SendBatch(ctx, batch).Close(); err != nil {

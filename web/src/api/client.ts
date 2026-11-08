@@ -28,7 +28,6 @@ import type {
   SnippetList,
   ThreadList,
   ThreadListQuery,
-  UpdateProjectRequest,
   UpdateTaskRequest,
   UpdateSnippetRequest,
 } from "./types.ts";
@@ -112,7 +111,6 @@ export const api = {
   projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
   project: (id: number) => apiFetch<Project>(`/projects/${id}`),
   createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
-  updateProject: (id: number, body: UpdateProjectRequest) => apiFetch<Project>(`/projects/${id}`, patch(body)),
 
   tasks: (q: TaskListQuery = {}) =>
     apiFetch<TaskList>(
