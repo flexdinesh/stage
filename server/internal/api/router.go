@@ -70,6 +70,10 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/stop", s.stopTask)
 	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
 
+	h("POST /api/uploads", s.uploadImage)
+	h("GET /api/attachments/{id}", s.getAttachment)
+	h("DELETE /api/attachments/{id}", s.deleteAttachment)
+
 	h("GET /api/threads", s.listThreads)
 
 	h("GET /api/templates", s.listTemplates)

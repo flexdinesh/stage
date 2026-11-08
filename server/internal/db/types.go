@@ -115,8 +115,9 @@ type Task struct {
 	SettledAt          *time.Time       `json:"settledAt"`
 	CreatedAt          time.Time        `json:"createdAt"`
 	UpdatedAt          time.Time        `json:"updatedAt"`
-	T3ProjectID        string           `json:"-"` // project's T3 id (for launch)
-	ThreadLink         *string          `json:"-"` // mirrored thread link
+	Attachments        []Attachment     `json:"attachments"` // images, upload order
+	T3ProjectID        string           `json:"-"`           // project's T3 id (for launch)
+	ThreadLink         *string          `json:"-"`           // mirrored thread link
 }
 
 type TaskEvent struct {

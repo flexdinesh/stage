@@ -144,6 +144,19 @@ export interface UpdateProjectRequest {
 
 // ---- Tasks ----
 
+/** An uploaded image (bytes at GET /api/attachments/:id). */
+export interface Attachment {
+  id: number;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/** Accepted image types and limits (server enforces the same). */
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export const MAX_IMAGES = 8;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
 export interface Task {
   id: number;
   projectId: number;
@@ -164,6 +177,8 @@ export interface Task {
   afterTaskId: number | null;
   /** The task that runs after this one. */
   nextTaskId: number | null;
+  /** Images sent with the prompt on every launch, upload order. */
+  attachments: Attachment[];
   launchAttempt: number;
   lastError: string | null;
   t3WebUrl: string | null;
@@ -209,6 +224,8 @@ export interface CreateTaskRequest {
   notes?: string;
   /** Run after this task (start is then ignored). */
   afterTaskId?: number | null;
+  /** Staged uploads to attach (max 8). */
+  attachmentIds?: number[];
   start?: boolean;
 }
 
@@ -226,11 +243,16 @@ export interface UpdateTaskRequest {
   notes?: string;
   /** null unlinks. */
   afterTaskId?: number | null;
+  /** Backlog only: the exact image set (task's own ids + staged uploads). */
+  attachmentIds?: number[];
 }
 
 export interface FollowupRequest {
   message: string;
+  /** Not allowed with attachmentIds. */
   mode?: SendMode;
+  /** Staged uploads to send with the message. */
+  attachmentIds?: number[];
 }
 
 export interface TaskListQuery {

@@ -6,6 +6,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 
 - **Projects**: 1:1 with T3 projects. Existing T3 projects import automatically.
 - **Tasks**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, notes. Save to backlog or start right away.
+- **Screenshots**: drop images on the prompt (or Add image; PNG, JPEG, GIF, WebP, up to 8 × 10 MB). They are sent to the T3 thread with the prompt on every launch; follow-ups can carry images too.
 - **Live status**: backlog → running → needs input → done → settled (or failed / interrupted). Polled from T3 every 5s.
 - **Task actions**: start, follow-up, stop, duplicate, open in T3.
 - **Run order**: link a task to run after another (while creating, viewing or editing it; can span projects). It starts when that thread is settled in T3; a failed predecessor keeps it waiting. Start now unlinks it and starts it immediately.

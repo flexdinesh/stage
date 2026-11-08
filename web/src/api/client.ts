@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   Catalog,
   CreateProjectRequest,
   CreateTaskRequest,
@@ -64,7 +65,9 @@ type RequestOptions = { method?: string; body?: unknown };
 async function request(path: string, init: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const req: RequestInit = { method: init.method ?? "GET", headers };
-  if (init.body !== undefined) {
+  if (init.body instanceof FormData) {
+    req.body = init.body; // fetch sets the multipart boundary
+  } else if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
     req.body = JSON.stringify(init.body);
   }
@@ -119,6 +122,13 @@ export const api = {
   stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
   duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
 
+  uploadImage: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiFetch<Attachment>("/uploads", post(form));
+  },
+  deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
+
   threads: (q: ThreadListQuery = {}) =>
     apiFetch<ThreadList>(
       `/threads${toQuery({
@@ -149,3 +159,6 @@ export const api = {
 };
 
 export type ArchivedFilter = "true" | "false" | "all";
+
+/** Image bytes URL (immutable; safe to cache). */
+export const attachmentUrl = (id: number) => `/api/attachments/${id}`;

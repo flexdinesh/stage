@@ -348,6 +348,9 @@ Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square m
 ### Run order pipeline
 Step cells joined by 1px Strong Hairline connectors, in the task detail Run order panel (top of the side column). Numbered, titled cells on laptop, numbers only on phone; the viewed task gets the Ink outline. Below it, "Runs after" and "Then runs" lines carry Unlink, and pickers link new steps. A waiting task's Start now arms a confirm ("unlink from #12 and start") before acting.
 
+### Image dropzone
+The prompt (new/backlog task) and the follow-up box are drop targets: dragging files over them lays a dashed Ink-accent border and a 90% surface scrim with "Drop images to attach" in mono. Below, 56px square thumbnails (1px Strong Hairline, `object-cover`) wrap in a row; each has an 18px square remove button on its top-right corner, uploading thumbs dim to 60% under the busy spinner, failed ones take a Red border and a red line naming the file. A ghost "Add image" button (file picker) and a mono `n/8` count (or the accepted types when empty) close the block. Read-only strips (task detail Prompt panel, non-backlog edit) are the same thumbnails linking to the full image. With images in a follow-up the send-mode group dims (images go as one new message).
+
 ### Command palette
 Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; grouped results under Label headers, matched text bolded, active result gets a 7% ink fill and a 2px inset ink bar; a Bench Gray footer lists keycaps.
 

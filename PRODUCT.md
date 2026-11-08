@@ -23,7 +23,8 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 ## Capabilities and Constraints
 - Projects mirror T3 projects 1:1; existing T3 projects import automatically.
 - Task states: backlog, launching, running, needs input, done, settled, failed, interrupted, cancelled.
-- Task actions: start/restart, follow-up (auto/queue/steer/restart), stop, duplicate, delete, open in T3.
+- Task actions: start/restart, follow-up (auto/queue/steer/restart, or with images), stop, duplicate, delete, open in T3.
+- Screenshots: images dropped on (or picked for) the prompt are sent with it on every launch; read-only once the task leaves backlog.
 - Run order: a task can run after one other task (linear, may span projects), set while creating, viewing or editing a task; it starts when that task settles; a failed predecessor keeps it waiting; Start now unlinks it.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
 - Templates for prompt + model presets. Settings: connection, pairing, sync now.

@@ -82,9 +82,10 @@ func run() error {
 	syncSvc.OnTransition = runner.OnTransition
 	// Before the poller, link runner and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	go func() { defer wg.Done(); runner.Run(ctx) }()
+	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(api.Deps{
@@ -109,4 +110,23 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// sweepStagedAttachments hourly deletes uploads never attached or sent
+// within 24h (abandoned new-task drafts and follow-ups).
+func sweepStagedAttachments(ctx context.Context, store *db.Store, log *slog.Logger) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if n, err := store.SweepStagedAttachments(ctx, 24*time.Hour); err != nil && ctx.Err() == nil {
+			log.Warn("sweep staged attachments", "err", err)
+		} else if n > 0 {
+			log.Info("swept staged attachments", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

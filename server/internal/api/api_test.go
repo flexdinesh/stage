@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -209,8 +210,16 @@ type task struct {
 		ToState   string  `json:"toState"`
 		Detail    string  `json:"detail"`
 	} `json:"events"`
-	Thread   *thread `json:"thread"`
-	Sequence []task  `json:"sequence"`
+	Thread      *thread      `json:"thread"`
+	Sequence    []task       `json:"sequence"`
+	Attachments []attachment `json:"attachments"`
+}
+
+type attachment struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	MimeType  string `json:"mimeType"`
+	SizeBytes int    `json:"sizeBytes"`
 }
 
 type thread struct {
@@ -1088,5 +1097,148 @@ func TestPreferences(t *testing.T) {
 	e.must("PUT", "/api/preferences/pinned", json.RawMessage("null"), 200, &p)
 	if p.Pinned != nil || p.LastUsed == nil {
 		t.Fatalf("cleared %+v", p)
+	}
+}
+
+// pngBytes is a valid 1x1 PNG (sniffs as image/png).
+var pngBytes = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+
+// upload posts data as multipart field "file"; returns status and body.
+func (e *env) upload(name string, data []byte) (int, attachment) {
+	e.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", name)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		e.t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/uploads", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	var a attachment
+	if rec.Code == 201 {
+		if err := json.Unmarshal(rec.Body.Bytes(), &a); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	return rec.Code, a
+}
+
+func (e *env) mustUpload(name string) attachment {
+	e.t.Helper()
+	code, a := e.upload(name, pngBytes)
+	if code != 201 {
+		e.t.Fatalf("upload %s: status %d", name, code)
+	}
+	return a
+}
+
+func TestUploadValidationAndServe(t *testing.T) {
+	e := newEnv(t)
+	a := e.mustUpload("../../shot.png")
+	if a.Name != "shot.png" || a.MimeType != "image/png" || a.SizeBytes != len(pngBytes) {
+		t.Fatalf("upload = %+v", a)
+	}
+	if code, _ := e.upload("x.png", []byte("<svg onload=alert(1)>")); code != 400 {
+		t.Fatalf("non-image upload: status %d, want 400", code)
+	}
+	big := append(append([]byte{}, pngBytes...), make([]byte, db.MaxAttachmentBytes)...)
+	if code, _ := e.upload("big.png", big); code != 400 {
+		t.Fatalf("oversize upload: status %d, want 400", code)
+	}
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/attachments/%d", a.ID), nil)
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != "image/png" || rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		!bytes.Equal(rec.Body.Bytes(), pngBytes) {
+		t.Fatalf("get attachment: %d %v", rec.Code, rec.Header())
+	}
+	e.must("DELETE", fmt.Sprintf("/api/attachments/%d", a.ID), nil, 204, nil)
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", a.ID), nil, 404, nil)
+}
+
+func TestTaskImagesLaunchAndEdit(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/img")
+	a1, a2, a3 := e.mustUpload("a.png"), e.mustUpload("b.png"), e.mustUpload("c.png")
+
+	tk := e.task(p.ID, "with images", map[string]any{"attachmentIds": []int64{a1.ID, a2.ID}})
+	if len(tk.Attachments) != 2 || tk.Attachments[0].ID != a1.ID || tk.Attachments[1].Name != "b.png" {
+		t.Fatalf("attachments = %+v", tk.Attachments)
+	}
+	// An attached image can't be reused by another task.
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "steal", "prompt": "x", "attachmentIds": []int64{a1.ID}}, 400, nil)
+	nine := make([]int64, 9)
+	for i := range nine {
+		nine[i] = int64(i + 1)
+	}
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "many", "prompt": "x", "attachmentIds": nine}, 400, nil)
+
+	// Backlog edit sets the exact set: drop a1, add a3.
+	var got task
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"attachmentIds": []int64{a2.ID, a3.ID}}, 200, &got)
+	if len(got.Attachments) != 2 || got.Attachments[0].ID != a2.ID || got.Attachments[1].ID != a3.ID {
+		t.Fatalf("after edit = %+v", got.Attachments)
+	}
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", a1.ID), nil, 404, nil)
+
+	// Duplicate copies images.
+	var dup task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", tk.ID), nil, 201, &dup)
+	if len(dup.Attachments) != 2 || dup.Attachments[0].ID == a2.ID || dup.Attachments[0].Name != "b.png" {
+		t.Fatalf("duplicate attachments = %+v", dup.Attachments)
+	}
+
+	// Launch uploads each image to T3 and passes them to t3_thread_launch.
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &got)
+	if got.State != "running" {
+		t.Fatalf("state %s (%v)", got.State, got.LastError)
+	}
+	if len(e.fake.Launched) != 1 || len(e.fake.Launched[0].Attachments) != 2 || e.fake.Launched[0].Attachments[0].Name != "b.png" ||
+		!bytes.Equal(e.fake.Uploads[0].Data, pngBytes) {
+		t.Fatalf("launched = %+v uploads = %d", e.fake.Launched, len(e.fake.Uploads))
+	}
+	// Read-only after backlog.
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"attachmentIds": []int64{}}, 409, nil)
+	e.must("DELETE", fmt.Sprintf("/api/attachments/%d", a2.ID), nil, 409, nil)
+
+	// A failed launch discards that launch's uploads; a retry uploads fresh ones.
+	e.t3.failLaunch.Store(true)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", dup.ID), nil, 502, nil)
+	if len(e.fake.Discarded) != 2 || e.fake.Discarded[0] != e.fake.Uploads[2].ID {
+		t.Fatalf("discarded = %v", e.fake.Discarded)
+	}
+	e.t3.failLaunch.Store(false)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", dup.ID), nil, 200, &got)
+	last := e.fake.Launched[len(e.fake.Launched)-1]
+	if len(last.Attachments) != 2 || last.Attachments[0].ID != e.fake.Uploads[4].ID {
+		t.Fatalf("retry attachments = %+v", last.Attachments)
+	}
+}
+
+func TestFollowupWithImages(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/fimg")
+	tk := e.task(p.ID, "f", map[string]any{"start": true})
+	img := e.mustUpload("followup.png")
+	path := fmt.Sprintf("/api/tasks/%d/followup", tk.ID)
+	e.must("POST", path, map[string]any{"message": "x", "mode": "steer", "attachmentIds": []int64{img.ID}}, 400, nil)
+	e.must("POST", path, map[string]any{"attachmentIds": []int64{999999}}, 400, nil)
+	e.must("POST", path, map[string]any{"message": "see this", "attachmentIds": []int64{img.ID}}, 200, nil)
+	if len(e.fake.SentAttachments) != 1 || e.fake.SentAttachments[0].Message != "see this" ||
+		len(e.fake.SentAttachments[0].Attachments) != 1 || e.fake.SentAttachments[0].Attachments[0].Name != "followup.png" {
+		t.Fatalf("sent = %+v", e.fake.SentAttachments)
+	}
+	// Sent images are deleted.
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", img.ID), nil, 404, nil)
+	if len(e.fake.Sent) != 0 {
+		t.Fatalf("plain send used: %+v", e.fake.Sent)
 	}
 }

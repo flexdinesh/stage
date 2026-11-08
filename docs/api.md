@@ -167,6 +167,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
   "t3ThreadId": "thread_abc",
   "afterTaskId": null,
   "nextTaskId": null,
+  "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
   "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
@@ -180,6 +181,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 ```
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `afterTaskId`: runs after that task (launches when it is settled or cancelled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
+- `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 
@@ -211,17 +213,18 @@ Body `CreateTaskRequest`:
   "tags": [],                    // optional
   "notes": "",                   // optional
   "afterTaskId": null,           // optional: run after this task (link rules)
+  "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
   "start": false                 // optional: true = Save & start (ignored when afterTaskId set)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400. 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8). 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId`.
-In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
+Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `attachmentIds`.
+In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
 200 `Task`. 404.
 
 ### `DELETE /api/tasks/:id`
@@ -230,11 +233,12 @@ In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (4
 ### `POST /api/tasks/:id/start`
 Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor that is not settled or cancelled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one.
+Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
 
 ### `POST /api/tasks/:id/followup`
-Body `{ "message": string, "mode"?: SendMode }`. Sends `t3_thread_send`. 409 when task has no thread.
-200 `Task`. 502 / 503.
+Body `{ "message": string, "mode"?: SendMode, "attachmentIds"?: number[] }`. Without images: `t3_thread_send` (message required). With `attachmentIds` (staged uploads, max 8): the images are uploaded to T3 and sent with the optional message as one new message (`t3_thread_send_attachments`); `mode` is not allowed (400). Sent images are deleted; on a T3 error they stay staged (no automatic retry). 409 when task has no thread.
+200 `Task`. 400. 502 / 503.
 
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
@@ -243,8 +247,21 @@ Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupt
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
-New `backlog` task with the same project, title, prompt, model config, workspace, tags, notes; not linked.
+New `backlog` task with the same project, title, prompt, images (copied), model config, workspace, tags, notes; not linked.
 201 `Task`. 404.
+
+## Images
+
+`Attachment`: `{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }`. Types: `image/png|jpeg|gif|webp` (sniffed from the bytes), max 10 MB each, max 8 per task or follow-up. Stored in Postgres. An upload is *staged* until a task create/update attaches it or a follow-up sends it; staged uploads older than 24h are deleted hourly.
+
+### `POST /api/uploads`
+Multipart form, field `file` (one image). 201 `Attachment` (staged). 400 not an accepted image type, empty, over 10 MB.
+
+### `GET /api/attachments/:id`
+200 raw image bytes (`Content-Type` = `mimeType`, immutable cache, `nosniff`). 404.
+
+### `DELETE /api/attachments/:id`
+Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the task has left backlog (images are read-only after launch).
 
 ## Threads (history)
 

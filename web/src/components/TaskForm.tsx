@@ -14,6 +14,7 @@ import {
 } from "../api/types.ts";
 import { parseTags } from "../lib/format.ts";
 import { isFinal, isFullyEditable } from "../lib/tasks.ts";
+import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
 import { TaskPicker, useLinkCandidates } from "./Sequence.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
@@ -138,6 +139,7 @@ function TaskFormDrawer({
   const templates = useTemplates();
   const invalidate = useInvalidateWork();
   const full = task === undefined || isFullyEditable(task);
+  const images = useImageSet(task?.attachments);
   const candidates = useLinkCandidates(task);
   // Runs after: new or backlog tasks. Then run: any task that can still gate (not settled/cancelled).
   const canLinkBefore = task === undefined || task.state === "backlog";
@@ -163,6 +165,7 @@ function TaskFormDrawer({
               workspace: toWorkspace(s),
               tags,
               notes: s.notes,
+              attachmentIds: images.ids,
             }
           : { title: s.title.trim(), tags, notes: s.notes };
         if (canLinkBefore && after !== task.afterTaskId) body.afterTaskId = after;
@@ -180,6 +183,7 @@ function TaskFormDrawer({
         workspace: toWorkspace(s),
         tags,
         notes: s.notes,
+        ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
         ...(after === null ? { start } : { afterTaskId: after }),
       };
       return api.createTask(body);
@@ -205,6 +209,8 @@ function TaskFormDrawer({
     s.title.trim() === "" && "title",
     s.prompt.trim() === "" && "prompt",
     s.workspaceType === "worktree" && s.baseRef.trim() === "" && "base ref",
+    images.uploading && "images still uploading",
+    images.failed && "remove failed images",
   ].filter((m) => m !== false);
 
   const submit = (start: boolean) => (e?: FormEvent) => {
@@ -301,15 +307,18 @@ function TaskFormDrawer({
           {(id) => <Input id={id} data-autofocus value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
         <Field label="Prompt">
-          {(id) => (
-            <Textarea
-              id={id}
-              rows={8}
-              disabled={!full}
-              value={s.prompt}
-              onChange={(e) => set({ prompt: e.target.value })}
-            />
-          )}
+          {(id) =>
+            full ? (
+              <ImageDropzone set={images} label="Prompt images">
+                <Textarea id={id} rows={8} value={s.prompt} onChange={(e) => set({ prompt: e.target.value })} />
+              </ImageDropzone>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Textarea id={id} rows={8} disabled value={s.prompt} />
+                <ImageStrip attachments={task?.attachments ?? []} label="Prompt images" />
+              </div>
+            )
+          }
         </Field>
         <ModelFields value={s.config} onChange={(config) => set({ config })} disabled={!full} />
         <fieldset disabled={!full} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">

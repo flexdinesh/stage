@@ -341,10 +341,17 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, e
 		return db.Task{}, err
 	}
 	in := launchInput(task, res.Attempt)
-	out, err := s.launchThread(ctx, in)
-	if t3.IsTransportError(err) && ctx.Err() == nil {
-		s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
+	in.Attachments, err = s.uploadImages(ctx, id)
+	var out t3.LaunchResult
+	if err == nil {
 		out, err = s.launchThread(ctx, in)
+		if t3.IsTransportError(err) && ctx.Err() == nil {
+			s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
+			out, err = s.launchThread(ctx, in)
+		}
+		if err != nil {
+			s.DiscardUploads(ctx, in.Attachments)
+		}
 	}
 	if err != nil {
 		msg := err.Error()
@@ -389,6 +396,42 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, e
 		}
 	}
 	return s.store.GetTask(ctx, id)
+}
+
+// uploadImages uploads a task's images to T3 (fresh pending uploads each
+// launch). On failure the ones already uploaded are discarded.
+func (s *Service) uploadImages(ctx context.Context, taskID int64) ([]t3.Attachment, error) {
+	images, err := s.store.TaskAttachments(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return s.UploadImages(ctx, images)
+}
+
+// UploadImages uploads images to T3 in order; on failure it discards the
+// ones already uploaded.
+func (s *Service) UploadImages(ctx context.Context, images []db.AttachmentData) ([]t3.Attachment, error) {
+	out := make([]t3.Attachment, 0, len(images))
+	for _, img := range images {
+		callCtx, cancel := context.WithTimeout(ctx, s.LaunchAttemptTimeout)
+		a, err := s.t3.UploadAttachment(callCtx, t3.UploadInput{Name: img.Name, MimeType: img.MimeType, Data: img.Data})
+		cancel()
+		if err != nil {
+			s.DiscardUploads(ctx, out)
+			return nil, fmt.Errorf("upload image %q: %w", img.Name, err)
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// DiscardUploads best-effort discards pending T3 uploads that were not sent.
+func (s *Service) DiscardUploads(ctx context.Context, atts []t3.Attachment) {
+	for _, a := range atts {
+		if err := s.t3.DiscardAttachment(ctx, a.ID); err != nil {
+			s.log.Warn("discard t3 upload", "attachment", a.ID, "err", err)
+		}
+	}
 }
 
 // launchThread is one t3_thread_launch call bounded by LaunchAttemptTimeout.

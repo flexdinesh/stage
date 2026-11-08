@@ -17,7 +17,9 @@ const taskSelect = `
 SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
   t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, t.created_at, t.updated_at, th.link
+  t.launched_at, t.finished_at, t.settled_at, t.created_at, t.updated_at, th.link,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN tasks nx ON nx.after_task_id = t.id
@@ -29,7 +31,7 @@ func scanTask(row pgx.Row) (Task, error) {
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
 		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.CreatedAt,
-		&t.UpdatedAt, &t.ThreadLink)
+		&t.UpdatedAt, &t.ThreadLink, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -145,12 +147,18 @@ type NewTask struct {
 	Workspace          Workspace
 	Tags               []string
 	Notes              string
-	AfterTaskID        *int64 // runs after this task (link rules: setAfter)
+	AfterTaskID        *int64  // runs after this task (link rules: setAfter)
+	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 }
 
 // CreateTask inserts a backlog task (+ creation event), linked to run after
 // AfterTaskID when set (setAfter rules; the whole insert fails otherwise).
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
+	return s.createTask(ctx, in, nil)
+}
+
+// createTask is CreateTask with extra run inside the insert transaction.
+func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx pgx.Tx, id int64) error) (Task, error) {
 	var id int64
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := projectExists(ctx, tx, in.ProjectID); err != nil {
@@ -168,6 +176,16 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
 		}
 		if in.AfterTaskID != nil {
 			if err := setAfter(ctx, tx, id, in.AfterTaskID); err != nil {
+				return err
+			}
+		}
+		if len(in.AttachmentIDs) > 0 {
+			if err := setAttachments(ctx, tx, id, in.AttachmentIDs); err != nil {
+				return err
+			}
+		}
+		if extra != nil {
+			if err := extra(tx, id); err != nil {
 				return err
 			}
 		}
@@ -204,13 +222,14 @@ type TaskPatch struct {
 	Workspace          Optional[Workspace]        `json:"workspace"`
 	Tags               Optional[[]string]         `json:"tags"`
 	Notes              Optional[string]           `json:"notes"`
-	AfterTaskID        Optional[int64]            `json:"afterTaskId"` // null unlinks
+	AfterTaskID        Optional[int64]            `json:"afterTaskId"`   // null unlinks
+	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 }
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
 	return p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
-		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set
+		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set
 }
 
 // UpdateTask applies a validated patch. Outside backlog only title, tags and
@@ -238,6 +257,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		}
 		if p.AfterTaskID.Set {
 			if err := setAfter(ctx, tx, id, p.AfterTaskID.Ptr()); err != nil {
+				return err
+			}
+		}
+		if p.AttachmentIDs.Set {
+			if err := setAttachments(ctx, tx, id, p.AttachmentIDs.V); err != nil {
 				return err
 			}
 		}
@@ -281,7 +305,7 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.Notes.Set {
 			set("notes", p.Notes.V)
 		}
-		if len(sets) == 0 && !p.AfterTaskID.Set {
+		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
 		sets = append(sets, "updated_at = now()")
@@ -321,18 +345,20 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	})
 }
 
-// DuplicateTask copies a task's config into a new backlog task (not linked).
+// DuplicateTask copies a task's config and images into a new backlog task
+// (not linked).
 func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	src, err := s.GetTask(ctx, id)
 	if err != nil {
 		return Task{}, err
 	}
-	return s.CreateTask(ctx, NewTask{
+	copyImages := func(tx pgx.Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
+	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
 		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: src.Workspace,
 		Tags: src.Tags, Notes: src.Notes,
-	})
+	}, copyImages)
 }
 
 // TouchTask bumps updated_at (re-arms polling of failed/interrupted tasks).

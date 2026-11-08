@@ -357,9 +357,15 @@ func TestToolArgumentsSent(t *testing.T) {
 		InteractionMode: InteractionPlan,
 		Workspace:       &WorkspaceStrategy{Type: WorkspaceWorktree, BaseRef: "origin/main", Branch: "feat", StartFromOrigin: &sfo},
 		ClientRequestID: "task-1-1",
+		Attachments:     []Attachment{{ID: "pending-9", Name: "a.png", MimeType: "image/png", SizeBytes: 3}},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if atts, _ := got("t3_thread_launch")["attachments"].([]any); len(atts) != 1 {
+		t.Fatalf("launch attachments = %v", got("t3_thread_launch")["attachments"])
+	} else if a0, _ := atts[0].(map[string]any); a0["id"] != "pending-9" || a0["type"] != "image" || a0["name"] != "a.png" {
+		t.Fatalf("launch attachment = %v", a0)
 	}
 	if res.ThreadID != "t1" || res.RunID != "" || res.Status != "" || len(res.ModelSelection.Options) != 1 {
 		t.Fatalf("launch result = %+v", res)
@@ -569,5 +575,59 @@ func TestIsTransportError(t *testing.T) {
 		if got := IsTransportError(tc.err); got != tc.want {
 			t.Errorf("IsTransportError(%v) = %v", tc.err, got)
 		}
+	}
+}
+
+func TestUploadAndSendAttachments(t *testing.T) {
+	f := newFakeT3(t)
+	var mu sync.Mutex
+	args := map[string]map[string]any{}
+	f.tool("t3_attachment_prepare_upload", func(a map[string]any) (*mcp.CallToolResult, error) {
+		mu.Lock()
+		args["prepare"] = a
+		mu.Unlock()
+		return structured(`{"attachmentId":"pending-1","relativeUrl":"/api/attachments/upload/tok1","expiresAt":1}`), nil
+	})
+	f.tool("t3_thread_send_attachments", func(a map[string]any) (*mcp.CallToolResult, error) {
+		mu.Lock()
+		args["send"] = a
+		mu.Unlock()
+		return structured(`{"threadId":"t1"}`), nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+
+	data := []byte("\x89PNG fake")
+	a, err := c.UploadAttachment(ctx, UploadInput{Name: "shot.png", MimeType: "image/png", Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != (Attachment{ID: "pending-1", Name: "shot.png", MimeType: "image/png", SizeBytes: len(data)}) {
+		t.Fatalf("attachment = %+v", a)
+	}
+	up, ok := f.uploads["tok1"]
+	if !ok || string(up.body) != string(data) || up.contentType != "image/png" || up.auth != "" {
+		t.Fatalf("upload = %+v (ok=%v)", up, ok)
+	}
+	mu.Lock()
+	pu, _ := args["prepare"]["upload"].(map[string]any)
+	mu.Unlock()
+	if pu["type"] != "image" || pu["name"] != "shot.png" || pu["mimeType"] != "image/png" || pu["sizeBytes"] != float64(len(data)) {
+		t.Fatalf("prepare args = %v", pu)
+	}
+
+	if err := c.SendAttachments(ctx, "t1", "see", []Attachment{a}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	sa := args["send"]
+	mu.Unlock()
+	atts, _ := sa["attachments"].([]any)
+	first, _ := atts[0].(map[string]any)
+	if sa["threadId"] != "t1" || sa["message"] != "see" || len(atts) != 1 || first["id"] != "pending-1" || first["type"] != "image" || first["sizeBytes"] != float64(len(data)) {
+		t.Fatalf("send args = %v", sa)
+	}
+	if err := c.SendAttachments(ctx, "t1", "x", nil); err == nil {
+		t.Fatal("send without attachments must fail")
 	}
 }

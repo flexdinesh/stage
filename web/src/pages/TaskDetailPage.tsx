@@ -7,6 +7,7 @@ import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread
 import { CopyButton } from "../components/CopyButton.tsx";
 import { IconArrowRight, IconExternal } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
+import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
@@ -213,9 +214,12 @@ function TaskBody({ task }: { task: TaskDetail }) {
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-3.5">
             <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
-              <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
-                {task.prompt}
-              </pre>
+              <div className="flex flex-col gap-3">
+                <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
+                  {task.prompt}
+                </pre>
+                <ImageStrip attachments={task.attachments} label="Prompt images" />
+              </div>
             </Panel>
             {hasThread ? <FollowupPanel taskId={task.id} inputRef={followupInput} /> : null}
             <TimelinePanel events={task.events} />
@@ -417,39 +421,47 @@ function FollowupPanel({ taskId, inputRef }: { taskId: number; inputRef: Ref<HTM
   const invalidate = useInvalidateWork();
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<SendMode>("auto");
+  const images = useImageSet();
+  const withImages = images.items.length > 0;
   const send = useMutation({
-    mutationFn: () => api.followupTask(taskId, { message, mode }),
+    // Images go as one new message (t3_thread_send_attachments); T3 takes no mode for them.
+    mutationFn: () =>
+      api.followupTask(taskId, withImages ? { message, attachmentIds: images.ids } : { message, mode }),
     onSuccess: async () => {
       setMessage("");
+      images.clear();
       await invalidate();
     },
   });
+  const ready = withImages ? !images.uploading && !images.failed : message.trim() !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (message.trim() !== "") send.mutate();
+    if (ready) send.mutate();
   };
 
   return (
     <Panel title="Follow-up">
       <form onSubmit={submit} className="flex flex-col gap-2.5">
-        <Textarea
-          ref={inputRef}
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Message to send to the thread"
-          aria-label="Follow-up message"
-        />
+        <ImageDropzone set={images} label="Follow-up images" disabled={send.isPending}>
+          <Textarea
+            ref={inputRef}
+            rows={3}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Message to send to the thread"
+            aria-label="Follow-up message"
+          />
+        </ImageDropzone>
         <div className="flex flex-wrap items-center gap-2.5">
-          <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
-          <Button
-            type="submit"
-            variant="primary"
-            small
-            className="ml-auto"
-            busy={send.isPending}
-            disabled={message.trim() === ""}
+          <fieldset
+            disabled={withImages}
+            title={withImages ? "Images send as a new message; mode doesn't apply" : undefined}
+            className="min-w-0 disabled:opacity-45"
           >
+            <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
+          </fieldset>
+          {withImages ? <span className="font-mono text-[11px] text-muted">sends as a new message</span> : null}
+          <Button type="submit" variant="primary" small className="ml-auto" busy={send.isPending} disabled={!ready}>
             Send
           </Button>
         </div>

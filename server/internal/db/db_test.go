@@ -451,3 +451,38 @@ func titlesOf(ts []db.Task) []string {
 	}
 	return out
 }
+
+func TestSweepStagedAttachments(t *testing.T) {
+	s, ctx := setup(t)
+	old, err := s.CreateAttachment(ctx, "old.png", "image/png", []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.CreateAttachment(ctx, "fresh.png", "image/png", []byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachedOld, err := s.CreateAttachment(ctx, "attached.png", "image/png", []byte{3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := mustProject(t, s, ctx, "p-sweep").ID
+	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p, Title: "t", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+		Workspace: db.Workspace{Type: "root"}, AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testDB.Pool.Exec(ctx, `UPDATE task_attachments SET created_at = now() - interval '25 hours' WHERE id = ANY($1)`,
+		[]int64{old.ID, attachedOld.ID}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.SweepStagedAttachments(ctx, 24*time.Hour)
+	if err != nil || n != 1 {
+		t.Fatalf("swept %d, %v; want 1", n, err)
+	}
+	for id, want := range map[int64]bool{old.ID: false, fresh.ID: true, attachedOld.ID: true} {
+		_, err := s.GetAttachment(ctx, id)
+		if (err == nil) != want {
+			t.Fatalf("attachment %d exists=%v, want %v", id, err == nil, want)
+		}
+	}
+}
