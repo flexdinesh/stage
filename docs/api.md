@@ -229,7 +229,8 @@ In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (4
 204. 409 when state is `launching|running|needs_input` (stop first). Removes it from its chain.
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. A `backlog` task in a chain is started only by the chain (409); `failed|interrupted|cancelled` chain steps may be restarted. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one.
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
 
 ### `POST /api/tasks/:id/followup`
@@ -239,7 +240,7 @@ Body `{ "message": string, "mode"?: SendMode }`. Sends `t3_thread_send`. 409 whe
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
 
-Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope).
+Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). They then poll the thread once: the thread mirror is refreshed, but task state does not change for `backlog`, `cancelled` (skipped) or `settled` chain-step tasks (a settled standalone task may reopen).
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
@@ -311,7 +312,7 @@ Body `{ "title": string, "steps"?: number[] }` (`steps` = existing `backlog` tas
 200 `Chain`. 404.
 
 ### `PATCH /api/chains/:id`
-Body `{ "title"?: string, "steps"?: number[] }`. `steps` is the full ordered list of task ids: add (must be `backlog`, not in another chain), remove (detached, `chainId` null), reorder. Non-`backlog` steps must stay in the list and keep their relative order (409 otherwise).
+Body `{ "title"?: string, "steps"?: number[] }`. `steps` is the full ordered list of task ids: add (must be `backlog`, not in another chain), remove (detached, `chainId` null), reorder. Non-`backlog` steps must stay in the list, keep their relative order and come before every `backlog` step (409 otherwise).
 200 `Chain`. 404. 409.
 
 ### `POST /api/chains/:id/start`
@@ -327,7 +328,7 @@ Body `{ "title"?: string, "steps"?: number[] }`. `steps` is the full ordered lis
 200 `Chain`.
 
 ### `POST /api/chains/:id/skip`
-Skip the current step: interrupt its thread if active, set it `cancelled` (event detail `"skipped"`). Chain state unchanged (a paused chain stays paused; a running chain advances). 409 when no current step.
+Skip the current step: set it `cancelled` (event detail `"skipped"`), then interrupt its thread if it was active (best effort: an interrupt failure is logged, not returned; the step stays `cancelled`). Chain state unchanged (a paused chain stays paused; a running chain advances). 409 when no current step.
 200 `Chain`.
 
 ## Templates
@@ -389,9 +390,9 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 | 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
 | 9 | otherwise (idle, no runs) | unchanged (keep current state) |
 
-Applied only to tasks with a thread whose state is not `backlog`. A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
+Applied only to tasks with a thread whose state is not `backlog` or `cancelled`, and not to `settled` chain steps (the chain has moved past them). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 
-Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input|completed`, plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `completed` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
 
 ## Chain rules, pure function
 

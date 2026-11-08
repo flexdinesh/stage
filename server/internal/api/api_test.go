@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	gosync "sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,17 +38,60 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// flakyT3 is the fake with switchable launch failures.
+// flakyT3 is the fake with switchable failures.
 type flakyT3 struct {
 	*t3.Fake
-	failLaunch atomic.Bool
+	failLaunch atomic.Bool // T3 tool error
+	// lostLaunches: the next N launches reach T3 but the response is lost
+	// (transport error).
+	lostLaunches  atomic.Int32
+	failInterrupt atomic.Bool
+	onInterrupt   func()
+
+	mu         gosync.Mutex
+	requestIDs []string // clientRequestId of every launch call
 }
 
 func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.LaunchResult, error) {
+	f.mu.Lock()
+	f.requestIDs = append(f.requestIDs, in.ClientRequestID)
+	f.mu.Unlock()
 	if f.failLaunch.Load() {
-		return t3.LaunchResult{}, errors.New("t3 exploded")
+		return t3.LaunchResult{}, &t3.ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: "t3 exploded"}
 	}
-	return f.Fake.LaunchThread(ctx, in)
+	res, err := f.Fake.LaunchThread(ctx, in)
+	if err == nil && f.takeLost() {
+		return t3.LaunchResult{}, errors.New("connection reset by peer")
+	}
+	return res, err
+}
+
+func (f *flakyT3) takeLost() bool {
+	for {
+		n := f.lostLaunches.Load()
+		if n <= 0 {
+			return false
+		}
+		if f.lostLaunches.CompareAndSwap(n, n-1) {
+			return true
+		}
+	}
+}
+
+func (f *flakyT3) launchRequestIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.requestIDs)
+}
+
+func (f *flakyT3) Interrupt(ctx context.Context, threadID string) error {
+	if f.onInterrupt != nil {
+		f.onInterrupt()
+	}
+	if f.failInterrupt.Load() {
+		return errors.New("interrupt transport failure")
+	}
+	return f.Fake.Interrupt(ctx, threadID)
 }
 
 type env struct {
@@ -313,7 +357,7 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatalf("thread %+v", got.Thread)
 	}
 	// Settled tasks are no longer polled.
-	tasks, _ := e.store.PollableTasks(context.Background())
+	tasks, _ := e.store.PollableTasks(context.Background(), true)
 	if len(tasks) != 0 {
 		t.Fatalf("pollable %d", len(tasks))
 	}
@@ -426,7 +470,7 @@ func TestLaunchFailure(t *testing.T) {
 	e.t3.failLaunch.Store(true)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 502, nil)
 	got := e.getTask(tk.ID)
-	if got.State != "failed" || got.LastError == nil || *got.LastError != "t3 exploded" || got.LaunchAttempt != 1 {
+	if got.State != "failed" || got.LastError == nil || *got.LastError != "t3 t3_thread_launch: invalid_request: t3 exploded" || got.LaunchAttempt != 1 {
 		t.Fatalf("after failed launch %+v", got)
 	}
 	// Save & start: still created (201) but failed.
@@ -444,6 +488,67 @@ func TestLaunchFailure(t *testing.T) {
 	ok := e.task(p.ID, "C", map[string]any{"start": true})
 	if ok.State != "running" {
 		t.Fatalf("save & start %+v", ok)
+	}
+}
+
+func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+
+	// Response lost once: retried with the same clientRequestId, one thread.
+	a := e.task(p.ID, "A", nil)
+	e.t3.lostLaunches.Store(1)
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
+	if started.State != "running" || started.LaunchAttempt != 1 || started.T3ThreadID == nil {
+		t.Fatalf("after one lost response %+v", started)
+	}
+	want := fmt.Sprintf("task-%d-1", a.ID)
+	if ids := e.t3.launchRequestIDs(); !slices.Equal(ids, []string{want, want}) {
+		t.Fatalf("request ids %v", ids)
+	}
+
+	// Lost twice: failed, and the next start reuses the attempt (T3 already
+	// has the thread for that clientRequestId).
+	b := e.task(p.ID, "B", nil)
+	e.t3.lostLaunches.Store(2)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 502, nil)
+	failed := e.getTask(b.ID)
+	if failed.State != "failed" || failed.LastError == nil || failed.LaunchAttempt != 1 || failed.T3ThreadID != nil {
+		t.Fatalf("after two lost responses %+v", failed)
+	}
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &started)
+	if started.State != "running" || started.LaunchAttempt != 1 {
+		t.Fatalf("restart %+v", started)
+	}
+	wantB := fmt.Sprintf("task-%d-1", b.ID)
+	ids := e.t3.launchRequestIDs()
+	if got := ids[2:]; !slices.Equal(got, []string{wantB, wantB, wantB}) {
+		t.Fatalf("request ids %v", ids)
+	}
+	page, _ := e.fake.ListThreads(context.Background(), t3.ListThreadsInput{AllProjects: true})
+	if page.Total != 2 {
+		t.Fatalf("threads %d, want 2 (no duplicate launch)", page.Total)
+	}
+	// After a successful launch, the next start is a new attempt.
+	_ = e.fake.SetStatus(*started.T3ThreadID, t3.StatusFailed)
+	e.poll()
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &started)
+	if started.LaunchAttempt != 2 {
+		t.Fatalf("new attempt %+v", started)
+	}
+}
+
+func TestRecoverLaunching(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+	a := e.task(p.ID, "A", nil)
+	if _, err := e.store.TransitionTask(context.Background(), db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.sync.RecoverLaunching(context.Background())
+	if got := e.getTask(a.ID); got.State != "failed" || got.LastError == nil {
+		t.Fatalf("after recover %+v", got)
 	}
 }
 
@@ -669,6 +774,103 @@ func TestChainPauseResumeSkip(t *testing.T) {
 	e.must("POST", "/api/chains", map[string]any{"title": "empty"}, 201, &empty)
 	e.must("POST", fmt.Sprintf("/api/chains/%d/start", empty.ID), nil, 409, nil)
 	e.must("GET", "/api/chains/999", nil, 404, nil)
+}
+
+func TestChainBacklogStepStartedOnlyByChain(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/one")
+	a := e.task(p.ID, "s1", nil)
+	b := e.task(p.ID, "s2", nil)
+	var c chain
+	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID}}, 201, &c)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 409, nil)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 409, nil)
+	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
+	if c.Steps[0].State != "running" || c.Steps[1].State != "backlog" {
+		t.Fatalf("started %+v", c)
+	}
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 409, nil)
+	// Documented recovery: restart a failed step, then resume.
+	_ = e.fake.SetStatus(*c.Steps[0].T3ThreadID, t3.StatusFailed)
+	e.poll()
+	var restarted task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &restarted)
+	if restarted.State != "running" || restarted.LaunchAttempt != 2 {
+		t.Fatalf("restart failed step %+v", restarted)
+	}
+	if got := e.getTask(b.ID); got.State != "backlog" {
+		t.Fatalf("step 2 %s", got.State)
+	}
+	// Reordering a backlog step ahead of the running step is refused.
+	e.must("PATCH", fmt.Sprintf("/api/chains/%d", c.ID), map[string]any{"steps": []int64{b.ID, a.ID}}, 409, nil)
+}
+
+func TestFollowupDoesNotReviveSkippedOrSettledSteps(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/one")
+	a := e.task(p.ID, "s1", nil)
+	b := e.task(p.ID, "s2", nil)
+	cTask := e.task(p.ID, "s3", nil)
+	var c chain
+	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID, cTask.ID}}, 201, &c)
+	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
+	threadA := *c.Steps[0].T3ThreadID
+	_ = e.fake.SetStatus(threadA, t3.StatusCompleted)
+	_ = e.fake.Settle(threadA)
+	e.poll()
+	e.evaluate()
+	c = e.getChain(c.ID)
+	threadB := *c.Steps[1].T3ThreadID
+
+	// Follow-up on the settled step reopens its T3 thread; the step stays settled.
+	_ = e.fake.SetThread(threadA, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
+	var got task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", a.ID), map[string]any{"message": "more"}, 200, &got)
+	if got.State != "settled" {
+		t.Fatalf("settled step after follow-up: %s", got.State)
+	}
+	if th := e.getTask(a.ID).Thread; th == nil || th.Status != "running" {
+		t.Fatalf("thread mirror not refreshed: %+v", th)
+	}
+
+	// Skip step 2 with a failing interrupt: the step is cancelled before the
+	// interrupt is sent, and the skip still succeeds.
+	e.t3.failInterrupt.Store(true)
+	var stateAtInterrupt string
+	e.t3.onInterrupt = func() {
+		if tk, err := e.store.GetTask(context.Background(), b.ID); err == nil {
+			stateAtInterrupt = string(tk.State)
+		}
+	}
+	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 200, &c)
+	e.t3.onInterrupt = nil
+	e.t3.failInterrupt.Store(false)
+	if stateAtInterrupt != "cancelled" {
+		t.Fatalf("state at interrupt %q, want cancelled", stateAtInterrupt)
+	}
+	if c.State != "running" || c.Steps[1].State != "cancelled" || c.Steps[2].State != "running" {
+		t.Fatalf("after skip %+v", c)
+	}
+	// Follow-up on the skipped step: stays cancelled, chain not paused.
+	_ = e.fake.SetStatus(threadB, t3.StatusInterrupted)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", b.ID), map[string]any{"message": "more"}, 200, &got)
+	if got.State != "cancelled" {
+		t.Fatalf("skipped step after follow-up: %s", got.State)
+	}
+	if c = e.getChain(c.ID); c.State != "running" {
+		t.Fatalf("chain %s", c.State)
+	}
+
+	// A settled standalone task still reopens on follow-up.
+	solo := e.task(p.ID, "solo", map[string]any{"start": true})
+	_ = e.fake.SetStatus(*solo.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*solo.T3ThreadID)
+	e.poll()
+	_ = e.fake.SetThread(*solo.T3ThreadID, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", solo.ID), map[string]any{"message": "more"}, 200, &got)
+	if got.State != "running" {
+		t.Fatalf("standalone settled task after follow-up: %s", got.State)
+	}
 }
 
 func TestSyncHistoryAndStats(t *testing.T) {

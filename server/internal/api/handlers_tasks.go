@@ -125,7 +125,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	if req.Start && req.ChainID == nil {
 		// Start errors after save: the task stays created (failed + lastError).
-		if _, err := s.Sync.LaunchTask(r.Context(), task.ID); err != nil {
+		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
 		}
 		if task, err = s.Store.GetTask(r.Context(), task.ID); err != nil {
@@ -237,7 +237,7 @@ func (s *server) startTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	task, err := s.Sync.LaunchTask(r.Context(), id)
+	task, err := s.Sync.StartTask(r.Context(), id)
 	if err != nil {
 		return err
 	}

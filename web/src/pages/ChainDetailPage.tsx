@@ -60,8 +60,8 @@ function ChainBody({ chain }: { chain: Chain }) {
   const stepButtons = (t: Task, i: number) => {
     const prev = steps[i - 1];
     const next = steps[i + 1];
-    // Server rule: non-backlog steps keep their relative order, so never swap two of them.
-    const canSwap = (other: Task | undefined) => other !== undefined && (t.state === "backlog" || other.state === "backlog");
+    // Server rule: non-backlog steps keep their order and precede every backlog step, so only backlog steps swap.
+    const canSwap = (other: Task | undefined) => other !== undefined && t.state === "backlog" && other.state === "backlog";
     return (
       <>
         <Button small variant="ghost" disabled={busy || !canSwap(prev)} onClick={() => setSteps.mutate(swap(ids, i, i - 1))} aria-label="Move up">

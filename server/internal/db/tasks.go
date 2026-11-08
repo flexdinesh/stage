@@ -103,16 +103,19 @@ func (s *Store) ChainSteps(ctx context.Context, chainID int64) ([]Task, error) {
 	return collectTasks(rows, err)
 }
 
-// PollableTasks: tasks whose thread may still change state. Active and
-// completed tasks always; failed/interrupted only when touched in the last
-// 10 minutes (e.g. a follow-up restarted the thread). backlog, settled and
-// cancelled (skip / rollback) are final for polling.
-func (s *Store) PollableTasks(ctx context.Context) ([]Task, error) {
+// PollableTasks: tasks whose thread may still change state. Active tasks
+// always; completed tasks updated in the last hour always, older ones only
+// when includeStale (the poller passes it at most once a minute);
+// failed/interrupted only when touched in the last 10 minutes (e.g. a
+// follow-up restarted the thread). backlog, settled and cancelled (skip /
+// rollback) are final for polling.
+func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
-  t.state IN ('launching', 'running', 'needs_input', 'completed')
+  t.state IN ('launching', 'running', 'needs_input')
+  OR (t.state = 'completed' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
   OR (t.state IN ('failed', 'interrupted') AND t.updated_at > now() - interval '10 minutes'))
-ORDER BY t.id`)
+ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)
 }
 
@@ -359,9 +362,16 @@ type Transition struct {
 	To     TaskState
 	Detail string
 
-	BeginAttempt bool    // launch start: attempt+1, clear thread/error/finished/settled
+	BeginAttempt bool    // launch start: attempt+1 (unless launch_reuse), clear thread/error/finished/settled/launch_reuse
 	ThreadID     *string // set t3_thread_id (+ launched_at)
 	LastError    *string // set last_error
+	// ReuseAttempt marks the attempt's launch outcome unknown (transport
+	// failure, no thread): the next BeginAttempt keeps the attempt number
+	// and so the clientRequestId.
+	ReuseAttempt bool
+	// StandaloneOnly refuses (Changed=false) a backlog task that belongs to
+	// a chain: only the chain runner launches backlog chain steps.
+	StandaloneOnly bool
 }
 
 // TransitionResult reports what happened. Changed=false: current state not
@@ -386,10 +396,15 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 		if (len(t.From) > 0 && !slices.Contains(t.From, res.From)) || (res.From == t.To && !t.BeginAttempt) {
 			return nil
 		}
+		if t.StandaloneOnly && res.From == StateBacklog && res.ChainID != nil {
+			return nil
+		}
 		err = tx.QueryRow(ctx, `
 UPDATE tasks SET
   state = $2,
-  launch_attempt = launch_attempt + CASE WHEN $3::boolean THEN 1 ELSE 0 END,
+  launch_attempt = launch_attempt + CASE WHEN $3::boolean AND NOT launch_reuse THEN 1 ELSE 0 END,
+  launch_reuse = CASE WHEN $3::boolean THEN false WHEN $7::boolean THEN true
+                      WHEN $4::text IS NOT NULL THEN false ELSE launch_reuse END,
   t3_thread_id = CASE WHEN $3::boolean THEN NULL WHEN $4::text IS NOT NULL THEN $4::text ELSE t3_thread_id END,
   launched_at = CASE WHEN $4::text IS NOT NULL THEN now() ELSE launched_at END,
   last_error = CASE WHEN $3::boolean THEN NULL WHEN $5::text IS NOT NULL THEN $5::text ELSE last_error END,
@@ -398,7 +413,7 @@ UPDATE tasks SET
   settled_at = CASE WHEN $3::boolean THEN NULL WHEN $2 = 'settled' THEN now() ELSE settled_at END,
   updated_at = now()
 WHERE id = $1 RETURNING launch_attempt`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(),
+			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt,
 		).Scan(&res.Attempt)
 		if err != nil {
 			return err

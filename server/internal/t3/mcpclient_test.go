@@ -3,6 +3,7 @@ package t3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -418,5 +420,154 @@ func TestListProjectsPagesToCompletion(t *testing.T) {
 	defer cursorsMu.Unlock()
 	if len(ps) != 2 || ps[0].ID != "a" || ps[1].ArchivedAt == nil || len(cursors) != 2 {
 		t.Fatalf("projects = %+v cursors = %v", ps, cursors)
+	}
+}
+
+func (c *MCPClient) currentSession() *mcp.ClientSession {
+	c.sessMu.Lock()
+	defer c.sessMu.Unlock()
+	return c.session
+}
+
+func TestRenewalKeepsSessionAndSendsNewToken(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	ctx := ctxT(t)
+	store := NewMemoryTokenStore()
+	f.addToken("old-valid")
+	_ = store.SaveToken(ctx, StoredToken{ClientID: "c", Token: "old-valid", ExpiresAt: time.Now().Add(20 * 24 * time.Hour)})
+	c := newTestClient(t, f, f.adminToken, store)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := c.currentSession()
+	// Enter the renew window and let Run's check renew.
+	c.mu.Lock()
+	c.tok.ExpiresAt = time.Now().Add(time.Hour)
+	c.mu.Unlock()
+	if err := c.refreshIfNeeded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	delete(f.tokens, "old-valid") // old token no longer accepted
+	f.mu.Unlock()
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after := c.currentSession(); after == nil || after != before {
+		t.Fatal("token renewal must not replace the MCP session")
+	}
+	if mint, _ := f.counts(); mint != 1 {
+		t.Fatalf("mint = %d, want 1 (new token sent per request, no 401)", mint)
+	}
+}
+
+func TestProtocolErrorKeepsSession(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := c.currentSession()
+	if _, err := c.CallRaw(ctx, "no_such_tool", map[string]any{}); err == nil {
+		t.Fatal("unknown tool must fail")
+	} else if IsTransportError(err) {
+		t.Fatalf("protocol error classified as transport: %v", err)
+	}
+	if after := c.currentSession(); after == nil || after != before {
+		t.Fatal("a tool/protocol error must not drop the shared session")
+	}
+}
+
+func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	var sends atomic.Int32
+	f.tool("t3_thread_send", func(map[string]any) (*mcp.CallToolResult, error) {
+		sends.Add(1)
+		return structured(`{"ok":true}`), nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	closeUnderneath := func() {
+		cs := c.currentSession()
+		if cs == nil {
+			t.Fatal("no session")
+		}
+		_ = cs.Close() // connection closed while still the client's session
+	}
+	closeUnderneath()
+	err := c.SendMessage(ctx, "th-1", "hi", SendAuto)
+	if !errors.Is(err, mcp.ErrConnectionClosed) || sends.Load() != 0 {
+		t.Fatalf("send on closed session: err=%v sends=%d (must not retry)", err, sends.Load())
+	}
+	if _, err := c.Capabilities(ctx); err != nil { // reconnects
+		t.Fatal(err)
+	}
+	closeUnderneath()
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatalf("idempotent call must reconnect and retry: %v", err)
+	}
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+		want bool
+	}{
+		{"t3_thread_read", nil, true},
+		{"t3_thread_list", nil, true},
+		{"t3_project_list", nil, true},
+		{"orchestrator_capabilities", nil, true},
+		{"t3_thread_launch", map[string]any{"clientRequestId": "task-1-1"}, true},
+		{"t3_thread_launch", map[string]any{}, false},
+		{"t3_thread_send", nil, false},
+		{"t3_thread_interrupt", nil, false},
+		{"t3_project_create", nil, false},
+	} {
+		if got := retrySafe(tc.tool, tc.args); got != tc.want {
+			t.Errorf("retrySafe(%s, %v) = %v", tc.tool, tc.args, got)
+		}
+	}
+}
+
+func TestStaleRejectionDoesNotMarkCurrentToken(t *testing.T) {
+	f := newFakeT3(t)
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	c.mu.Lock()
+	c.tok, c.loaded = StoredToken{Token: "new", ExpiresAt: time.Now().Add(20 * 24 * time.Hour)}, true
+	c.mu.Unlock()
+	c.markRejected("old")
+	if c.isRejected() {
+		t.Fatal("401 for a replaced token must not mark the current token rejected")
+	}
+	c.markRejected("new")
+	if !c.isRejected() {
+		t.Fatal("401 for the current token must mark it rejected")
+	}
+}
+
+func TestIsTransportError(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{ErrNotConnected, false},
+		{ErrNotFound, false},
+		{&ToolError{Tool: "t3_thread_launch", Message: "bad"}, false},
+		{fmt.Errorf("t3 x: %w", &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad"}), false},
+		{fmt.Errorf("t3 x: %w", &jsonrpc.Error{Code: errCodeTransportRejected, Message: "rejected"}), true},
+		{fmt.Errorf("t3 x: %w", mcp.ErrConnectionClosed), true},
+		{context.DeadlineExceeded, true},
+		{errors.New("connection reset by peer"), true},
+	} {
+		if got := IsTransportError(tc.err); got != tc.want {
+			t.Errorf("IsTransportError(%v) = %v", tc.err, got)
+		}
 	}
 }

@@ -222,20 +222,28 @@ func TestChainSteps(t *testing.T) {
 	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{c.ID, b.ID, a.ID}, true); !errors.As(err, &conflict) {
 		t.Fatalf("reorder locked steps: %v", err)
 	}
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, a.ID, c.ID}, true); err != nil {
-		t.Fatalf("moving backlog step around locked ones: %v", err)
+	// A backlog step must not precede a launched one (it would launch in
+	// parallel with c, or bypass c if c failed).
+	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, a.ID, c.ID}, true); !errors.As(err, &conflict) {
+		t.Fatalf("backlog step ahead of running step: %v", err)
+	}
+	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{a.ID, b.ID, c.ID}, true); !errors.As(err, &conflict) {
+		t.Fatalf("backlog step ahead of settled step: %v", err)
+	}
+	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, a.ID}, true); err != nil {
+		t.Fatalf("locked steps first: %v", err)
 	}
 	var invalid *db.InvalidError
 	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, b.ID}, true); !errors.As(err, &invalid) {
 		t.Fatalf("duplicate step: %v", err)
 	}
 	// Adding a non-backlog task is a conflict.
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, a.ID, c.ID, d.ID}, true); err != nil {
+	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, d.ID, a.ID}, true); err != nil {
 		t.Fatal(err)
 	}
 	e := mustTask(t, s, ctx, p.ID, "e", nil)
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: e.ID, To: db.StateFailed})
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, a.ID, c.ID, d.ID, e.ID}, true); !errors.As(err, &conflict) {
+	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, d.ID, a.ID, e.ID}, true); !errors.As(err, &conflict) {
 		t.Fatalf("add failed task: %v", err)
 	}
 
@@ -245,6 +253,103 @@ func TestChainSteps(t *testing.T) {
 	}
 	if _, _, err := s.SetChainState(ctx, 9999, []db.ChainState{db.ChainIdle}, db.ChainRunning); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("missing chain: %v", err)
+	}
+}
+
+func TestCompleteChain(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "proj-1")
+	a := mustTask(t, s, ctx, p.ID, "a", nil)
+	b := mustTask(t, s, ctx, p.ID, "b", nil)
+	chain, err := s.CreateChain(ctx, "ch", []int64{a.ID, b.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateSettled})
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: b.ID, To: db.StateCancelled})
+	if done, err := s.CompleteChain(ctx, chain.ID); err != nil || done {
+		t.Fatalf("idle chain must not complete: %v %v", done, err)
+	}
+	if _, _, err := s.SetChainState(ctx, chain.ID, []db.ChainState{db.ChainIdle}, db.ChainRunning); err != nil {
+		t.Fatal(err)
+	}
+	// A step added after the runner decided "done" keeps the chain open.
+	mustTask(t, s, ctx, p.ID, "late", &chain.ID)
+	if done, err := s.CompleteChain(ctx, chain.ID); err != nil || done {
+		t.Fatalf("chain with a backlog step must not complete: %v %v", done, err)
+	}
+	if got, _ := s.GetChain(ctx, chain.ID); got.State != db.ChainRunning {
+		t.Fatalf("state %s", got.State)
+	}
+}
+
+func TestTransitionLaunchGuards(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "proj-1")
+	step := mustTask(t, s, ctx, p.ID, "step", nil)
+	chain, err := s.CreateChain(ctx, "ch", []int64{step.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin := db.Transition{TaskID: step.ID, From: []db.TaskState{db.StateBacklog, db.StateFailed}, To: db.StateLaunching, BeginAttempt: true, StandaloneOnly: true}
+	res, err := s.TransitionTask(ctx, begin)
+	if err != nil || res.Changed || res.ChainID == nil || *res.ChainID != chain.ID {
+		t.Fatalf("standalone start of backlog chain step must not apply: %+v %v", res, err)
+	}
+	begin.StandaloneOnly = false // chain runner path
+	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 1 {
+		t.Fatalf("runner launch: %+v %v", res, err)
+	}
+	// Transport failure: outcome unknown, next start keeps attempt 1.
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: step.ID, To: db.StateFailed, ReuseAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	begin.StandaloneOnly = true // a failed chain step may be restarted manually
+	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 1 {
+		t.Fatalf("reuse attempt: %+v %v", res, err)
+	}
+	// Definite failure: next start is a new attempt.
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: step.ID, To: db.StateFailed}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 2 {
+		t.Fatalf("new attempt: %+v %v", res, err)
+	}
+}
+
+func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), context.Background()
+	p := mustProject(t, s, ctx, "proj-1")
+	ids := map[string]int64{}
+	for i, name := range []string{"running", "fresh", "stale"} {
+		task := mustTask(t, s, ctx, p.ID, name, nil)
+		thread := fmt.Sprintf("thread-%d", i)
+		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread})
+		if name != "running" {
+			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted})
+		}
+		ids[name] = task.ID
+	}
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - interval '2 hours', finished_at = now() - interval '2 hours' WHERE id = $1`, ids["stale"]); err != nil {
+		t.Fatal(err)
+	}
+	titles := func(includeStale bool) []string {
+		tasks, err := s.PollableTasks(ctx, includeStale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, task := range tasks {
+			out = append(out, task.Title)
+		}
+		return out
+	}
+	if got := fmt.Sprint(titles(false)); got != "[running fresh]" {
+		t.Fatalf("frequent poll %s", got)
+	}
+	if got := fmt.Sprint(titles(true)); got != "[running fresh stale]" {
+		t.Fatalf("stale poll %s", got)
 	}
 }
 

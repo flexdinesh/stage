@@ -134,10 +134,13 @@ func (r *Runner) evaluateLocked(ctx context.Context, chainID int64) error {
 		}
 		return err // T3 failure: task is failed and the hook paused the chain
 	case ActionDone:
-		if _, _, err := r.store.SetChainState(ctx, chainID, []db.ChainState{db.ChainRunning, db.ChainPaused}, db.ChainDone); err != nil {
+		done, err := r.store.CompleteChain(ctx, chainID)
+		if err != nil {
 			return err
 		}
-		r.log.Info("chain done", "chain", chainID)
+		if done {
+			r.log.Info("chain done", "chain", chainID)
+		}
 	case ActionPause:
 		if _, _, err := r.store.SetChainState(ctx, chainID, []db.ChainState{db.ChainRunning}, db.ChainPaused); err != nil {
 			return err
@@ -205,8 +208,11 @@ func (r *Runner) Resume(ctx context.Context, id int64) (db.Chain, error) {
 	return r.evaluateAndGet(ctx, id)
 }
 
-// Skip cancels the current step (interrupting its thread when active) with
-// detail "skipped". Chain state is unchanged; a running chain advances.
+// Skip cancels the current step with detail "skipped", then interrupts its
+// thread when it was active (best effort: a failed interrupt is logged; the
+// step stays cancelled). Cancelling first keeps the poller from mapping the
+// interrupt to interrupted (which would pause the chain). Chain state is
+// unchanged; a running chain advances.
 func (r *Runner) Skip(ctx context.Context, id int64) (db.Chain, error) {
 	r.mu.Lock()
 	chain, err := r.store.GetChain(ctx, id)
@@ -225,12 +231,6 @@ func (r *Runner) Skip(ctx context.Context, id int64) (db.Chain, error) {
 			task = t
 		}
 	}
-	if task.State.Active() && task.T3ThreadID != nil {
-		if err := r.t3.Interrupt(ctx, *task.T3ThreadID); err != nil {
-			r.mu.Unlock()
-			return db.Chain{}, &db.T3Error{Err: err}
-		}
-	}
 	res, err := r.store.TransitionTask(ctx, db.Transition{
 		TaskID: task.ID, From: []db.TaskState{task.State}, To: db.StateCancelled, Detail: SkipDetail,
 	})
@@ -242,6 +242,11 @@ func (r *Runner) Skip(ctx context.Context, id int64) (db.Chain, error) {
 		return db.Chain{}, db.Conflict("step %d changed state (now %s); retry", task.ID, res.From)
 	}
 	r.log.Info("chain step skipped", "chain", id, "task", task.ID)
+	if task.State.Active() && task.T3ThreadID != nil {
+		if err := r.t3.Interrupt(ctx, *task.T3ThreadID); err != nil {
+			r.log.Warn("interrupt skipped step", "chain", id, "task", task.ID, "thread", *task.T3ThreadID, "err", err)
+		}
+	}
 	return r.evaluateAndGet(ctx, id)
 }
 

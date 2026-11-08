@@ -121,8 +121,10 @@ func (s *Store) UpdateChain(ctx context.Context, id int64, title *string, steps 
 
 // setChainSteps replaces chain id's ordered steps. Added tasks must be
 // backlog and not in another chain; removed tasks must be backlog;
-// non-backlog steps keep their relative order. A done chain that gains a
-// not-yet-passed step goes back to idle.
+// non-backlog steps keep their relative order and precede every backlog
+// step (a backlog step ahead of a launched one would launch in parallel or
+// bypass a failed step). A done chain that gains a not-yet-passed step goes
+// back to idle.
 func setChainSteps(ctx context.Context, tx pgx.Tx, chainID int64, steps []int64) error {
 	seen := map[int64]bool{}
 	for _, id := range steps {
@@ -187,6 +189,9 @@ func setChainSteps(ctx context.Context, tx pgx.Tx, chainID int64, steps []int64)
 	if !slices.Equal(oldLocked, newLocked) {
 		return Conflict("non-backlog steps must keep their relative order")
 	}
+	if !slices.Equal(newLocked, steps[:len(newLocked)]) {
+		return Conflict("non-backlog steps must come before every backlog step")
+	}
 	for id := range inChain {
 		if !seen[id] {
 			if _, err := tx.Exec(ctx, `UPDATE tasks SET chain_id = NULL, chain_position = NULL, updated_at = now() WHERE id = $1`, id); err != nil {
@@ -207,6 +212,20 @@ UPDATE chains SET state = 'idle', updated_at = now()
 WHERE id = $1 AND state = 'done'
   AND EXISTS (SELECT 1 FROM tasks WHERE chain_id = $1 AND state NOT IN ('settled', 'cancelled'))`, chainID)
 	return err
+}
+
+// CompleteChain moves a running or paused chain to done iff every step is
+// settled or cancelled (checked atomically, so a step added or restarted
+// concurrently keeps the chain open).
+func (s *Store) CompleteChain(ctx context.Context, id int64) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+UPDATE chains SET state = 'done', updated_at = now()
+WHERE id = $1 AND state IN ('running', 'paused')
+  AND NOT EXISTS (SELECT 1 FROM tasks WHERE chain_id = $1 AND state NOT IN ('settled', 'cancelled'))`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // SetChainState moves a chain to `to` iff it is in one of `from`. Returns

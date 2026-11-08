@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -59,20 +59,17 @@ type MCPClient struct {
 
 	authMu sync.Mutex // serializes token acquisition
 
-	mu          sync.Mutex // guards fields below
-	tok         StoredToken
-	loaded      bool
-	lastErr     string
-	lastFailAt  time.Time
-	rejected    bool // T3 answered 401 to the current token
-	envID       string
-	envFailAt   time.Time
-	rejectedTok string
+	mu         sync.Mutex // guards fields below
+	tok        StoredToken
+	loaded     bool
+	lastErr    string
+	lastFailAt time.Time
+	rejected   bool // T3 answered 401 to the current token
+	envID      string
+	envFailAt  time.Time
 
 	sessMu  sync.Mutex
 	session *mcp.ClientSession
-
-	unauthorized atomic.Int64 // count of 401 responses from /mcp
 }
 
 var _ Client = (*MCPClient)(nil)
@@ -304,7 +301,9 @@ func (c *MCPClient) renewLocked(ctx context.Context) (StoredToken, error) {
 	return tok, nil
 }
 
-// adoptLocked persists a new token, clears errors and resets the session.
+// adoptLocked persists a new token and clears errors. The MCP session is
+// kept: authTransport sends the current token on every request and T3
+// authenticates each request, not the session.
 func (c *MCPClient) adoptLocked(ctx context.Context, tok StoredToken) error {
 	if err := c.opts.Store.SaveToken(ctx, tok); err != nil {
 		err = fmt.Errorf("t3: save token: %w", err)
@@ -323,7 +322,6 @@ func (c *MCPClient) adoptLocked(ctx context.Context, tok StoredToken) error {
 			c.log.Warn("t3 clear last error failed", "err", err)
 		}
 	}
-	c.Close() // reconnect with the new token
 	return nil
 }
 
@@ -411,10 +409,32 @@ func (c *MCPClient) noteEnvironment(env string) {
 
 // ---- MCP session ----
 
-// authTransport injects the current bearer token and counts 401s.
+// authTransport injects the current bearer token and reports 401s to the
+// call that sent the request (authRecord in the request context).
 type authTransport struct {
 	base http.RoundTripper
 	c    *MCPClient
+}
+
+// authRecord holds the token T3 answered 401 to during one call attempt.
+type authRecord struct {
+	mu       sync.Mutex
+	rejected string
+	seen     bool
+}
+
+type authRecordKey struct{}
+
+func (r *authRecord) note(tok string) {
+	r.mu.Lock()
+	r.rejected, r.seen = tok, true
+	r.mu.Unlock()
+}
+
+func (r *authRecord) get() (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rejected, r.seen
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -427,10 +447,9 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	resp, err := t.base.RoundTrip(r)
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
-		t.c.mu.Lock()
-		t.c.rejectedTok = tok
-		t.c.mu.Unlock()
-		t.c.unauthorized.Add(1)
+		if rec, ok := req.Context().Value(authRecordKey{}).(*authRecord); ok {
+			rec.note(tok)
+		}
 	}
 	return resp, err
 }
@@ -469,16 +488,21 @@ func (c *MCPClient) dropSession(cs *mcp.ClientSession) {
 }
 
 // call invokes a tool and decodes its result into out. On 401 it renews the
-// token once and retries; on a dropped session it reconnects and retries
-// once. Other transport errors drop the session (next call reconnects) but
-// are not retried, since the tool may have run.
+// token once and retries (T3 rejected the request before running the tool).
+// A JSON-RPC error (tool/protocol error, or a transient transport rejection
+// the SDK reports as one) leaves the shared session open. Any other error
+// means the session is broken: it is dropped (next call reconnects) and the
+// call is retried once only when that cannot run the tool twice: the
+// server lost the session (ErrSessionMissing: request refused), or the
+// connection closed and the tool is idempotent (retrySafe).
 func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, out any) error {
 	for attempt := 0; ; attempt++ {
-		before := c.unauthorized.Load()
-		cs, err := c.sessionFor(ctx)
+		rec := &authRecord{}
+		actx := context.WithValue(ctx, authRecordKey{}, rec)
+		cs, err := c.sessionFor(actx)
 		var res *mcp.CallToolResult
 		if err == nil {
-			res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+			res, err = cs.CallTool(actx, &mcp.CallToolParams{Name: tool, Arguments: args})
 		}
 		if err == nil {
 			c.clearRejected(ctx)
@@ -487,12 +511,9 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 		if errors.Is(err, ErrNotConnected) || ctx.Err() != nil {
 			return err
 		}
-		c.dropSession(cs)
-		if c.unauthorized.Load() != before {
-			c.mu.Lock()
-			rejected := c.rejectedTok
-			c.rejected = true
-			c.mu.Unlock()
+		if rejected, ok := rec.get(); ok {
+			c.dropSession(cs) // the SDK fails the connection on 401
+			c.markRejected(rejected)
 			if attempt == 0 {
 				if _, rerr := c.accessToken(ctx, rejected); rerr != nil {
 					return rerr
@@ -501,12 +522,64 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 			}
 			return fmt.Errorf("%w: t3 rejected the token", ErrNotConnected)
 		}
-		if attempt == 0 && (errors.Is(err, mcp.ErrConnectionClosed) || errors.Is(err, mcp.ErrSessionMissing)) {
+		var wire *jsonrpc.Error
+		if errors.As(err, &wire) {
+			return fmt.Errorf("t3 %s: %w", tool, err)
+		}
+		c.dropSession(cs)
+		if attempt == 0 && (errors.Is(err, mcp.ErrSessionMissing) ||
+			(errors.Is(err, mcp.ErrConnectionClosed) && retrySafe(tool, args))) {
 			continue
 		}
 		return fmt.Errorf("t3 %s: %w", tool, err)
 	}
 }
+
+// retrySafe reports whether running tool twice is harmless: reads, and
+// launches deduplicated by clientRequestId.
+func retrySafe(tool string, args map[string]any) bool {
+	switch tool {
+	case "t3_thread_read", "t3_thread_list", "t3_project_list", "orchestrator_capabilities":
+		return true
+	case "t3_thread_launch":
+		id, ok := args["clientRequestId"].(string)
+		return ok && id != ""
+	}
+	return false
+}
+
+// markRejected records a 401 against tok; ignored when tok is no longer the
+// current token (another call already replaced it).
+func (c *MCPClient) markRejected(tok string) {
+	c.mu.Lock()
+	if c.tok.Token == tok {
+		c.rejected = true
+	}
+	c.mu.Unlock()
+}
+
+// IsTransportError reports whether a Client call failed without a definite
+// answer from T3 (network failure, timeout, dropped session), so the tool
+// may or may not have run. T3 tool/protocol errors, ErrNotFound and
+// ErrNotConnected (nothing sent) are definite.
+func IsTransportError(err error) bool {
+	if err == nil || errors.Is(err, ErrNotConnected) || errors.Is(err, ErrNotFound) {
+		return false
+	}
+	var te *ToolError
+	if errors.As(err, &te) {
+		return false
+	}
+	var wire *jsonrpc.Error
+	if errors.As(err, &wire) {
+		return wire.Code == errCodeTransportRejected
+	}
+	return true
+}
+
+// errCodeTransportRejected is the go-sdk's JSON-RPC code for requests the
+// transport rejected (network failure, 429/502/503/504).
+const errCodeTransportRejected = -32005
 
 func (c *MCPClient) clearRejected(ctx context.Context) {
 	c.mu.Lock()

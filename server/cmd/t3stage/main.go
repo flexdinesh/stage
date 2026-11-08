@@ -80,6 +80,8 @@ func run() error {
 	syncSvc := t3sync.New(store, t3Client, logger)
 	runner := chains.NewRunner(store, syncSvc, t3Client, logger)
 	syncSvc.OnTransition = runner.OnTransition
+	// Before the poller, chain runner and HTTP server can touch launching tasks.
+	syncSvc.RecoverLaunching(ctx)
 	wg.Add(2)
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	go func() { defer wg.Done(); runner.Run(ctx) }()
