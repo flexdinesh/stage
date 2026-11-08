@@ -15,6 +15,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Templates**: reusable prompt + model presets.
 - **Model defaults**: new tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
 - **Settings**: T3 connection status, manual pairing, sync now.
+- **Notifications**: installable PWA with Web Push for needs input, done and failed, covering tasks and threads started directly in T3 (subagents excluded). The app icon badge counts what needs input.
 
 ## Deploy
 
@@ -41,6 +42,14 @@ Runs on the same machine as T3. Requires Docker with compose.
    UI at `http://<host>:7380`, bound to `0.0.0.0`. Postgres listens on `127.0.0.1:5439` and stores data in the `pgdata` volume.
 
 Update: `git pull && docker compose up -d --build`.
+
+## Install as an app (PWA) and notifications
+
+Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `APP_PUBLIC_URL` to that URL (it is also the VAPID subject). The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
+
+- iOS/iPadOS 16.4+: open the URL in Safari, Share → Add to Home Screen, open t3-stage from the Home Screen, then Settings → Notifications → Enable.
+- macOS: Safari → File → Add to Dock (or use the site in Safari/Chrome), then Settings → Notifications → Enable.
+- Settings → Notifications → Send test checks the device. The service worker registers only in production builds (`make build` / compose).
 
 ## Develop
 

@@ -12,6 +12,7 @@ export const keys = {
   templates: ["templates"],
   stats: ["stats"],
   preferences: ["preferences"],
+  badge: ["badge"],
 } as const;
 
 export const useT3Status = () => useQuery({ queryKey: keys.t3Status, queryFn: api.t3Status });
@@ -34,6 +35,13 @@ export const useTask = (id: number) => useQuery({ queryKey: [...keys.task, id], 
 export const useThreads = (q: ThreadListQuery) =>
   useQuery({ queryKey: [...keys.threads, q], queryFn: () => api.threads(q), placeholderData: keepPreviousData });
 
+/** External threads needing input (not task-owned; tasks come from useTasks). */
+export const useNeedsInputThreads = (project?: number) =>
+  useThreads(project === undefined ? { needsInput: true } : { needsInput: true, project });
+
+/** Tasks + external threads needing input (app badge, nav count). */
+export const useBadge = () => useQuery({ queryKey: keys.badge, queryFn: api.badge });
+
 export const useTemplates = () => useQuery({ queryKey: keys.templates, queryFn: api.templates });
 
 // Changes only on task create or pin; no polling.
@@ -46,7 +54,7 @@ export const useStats = (q: StatsQuery) =>
 /** Task mutations can change any task, thread, stat or prefill view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
-    [keys.tasks, keys.task, keys.threads, keys.stats, keys.preferences].map((queryKey) =>
+    [keys.tasks, keys.task, keys.threads, keys.stats, keys.preferences, keys.badge].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),
   ).then(() => undefined);

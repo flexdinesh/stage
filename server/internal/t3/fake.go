@@ -121,6 +121,9 @@ func (f *Fake) ListThreads(_ context.Context, in ListThreadsInput) (ThreadPage, 
 		if !in.AllProjects && t.ProjectID != in.ProjectID {
 			continue
 		}
+		if !in.IncludeSubagents && t.ParentThreadID != "" {
+			continue
+		}
 		if len(in.Statuses) > 0 && !slices.Contains(in.Statuses, t.Status) {
 			continue
 		}
@@ -320,6 +323,14 @@ func (f *Fake) SetThread(threadID string, mutate func(*ThreadDetail)) error {
 	mutate(t)
 	t.UpdatedAt = f.now()
 	return nil
+}
+
+// RemoveThread forgets a thread (T3 no longer knows it).
+func (f *Fake) RemoveThread(threadID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.threads, threadID)
+	f.order = slices.DeleteFunc(f.order, func(id string) bool { return id == threadID })
 }
 
 // SetStatus sets thread + latest run status; terminal statuses end the active run.

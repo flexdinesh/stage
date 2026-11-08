@@ -1,5 +1,6 @@
 import type {
   Attachment,
+  Badge,
   Catalog,
   CreateProjectRequest,
   CreateTaskRequest,
@@ -11,6 +12,9 @@ import type {
   Preferences,
   Project,
   ProjectList,
+  PushConfig,
+  PushEndpointBody,
+  PushSubscriptionBody,
   Stats,
   StatsQuery,
   SyncResult,
@@ -141,6 +145,7 @@ export const api = {
         from: q.from,
         to: q.to,
         subagents: q.subagents,
+        needsInput: q.needsInput,
         limit: q.limit,
         offset: q.offset,
       })}`,
@@ -156,6 +161,12 @@ export const api = {
   setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),
 
   stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz, subagents: q.subagents })}`),
+
+  pushConfig: () => apiFetch<PushConfig>("/push/config"),
+  subscribePush: (body: PushSubscriptionBody) => apiSend("/push/subscriptions", post(body)),
+  unsubscribePush: (body: PushEndpointBody) => apiSend("/push/subscriptions", { method: "DELETE", body }),
+  testPush: (body: PushEndpointBody) => apiSend("/push/test", post(body)),
+  badge: () => apiFetch<Badge>("/badge"),
 };
 
 export type ArchivedFilter = "true" | "false" | "all";

@@ -30,6 +30,14 @@ func Handler() http.Handler {
 		name := strings.TrimPrefix(r.URL.Path, "/")
 		if name != "" && name != "index.html" {
 			if info, err := fs.Stat(root, name); err == nil && !info.IsDir() {
+				switch name {
+				case "sw.js":
+					w.Header().Set("Cache-Control", "no-cache") // browsers must see SW updates
+				case "manifest.webmanifest":
+					w.Header().Set("Cache-Control", "no-cache")
+					// No mime.types in distroless; set explicitly.
+					w.Header().Set("Content-Type", "application/manifest+json")
+				}
 				files.ServeHTTP(w, r)
 				return
 			}

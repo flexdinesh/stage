@@ -38,7 +38,7 @@ type CatalogSnapshot struct {
 // ErrSyncRunning: a full sync is already in progress (409).
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
-// Service runs the T3 <-> Postgres loops. Set OnTransition before Run.
+// Service runs the T3 <-> Postgres loops. Set the hooks before Run.
 type Service struct {
 	store *db.Store
 	t3    t3.Client
@@ -47,6 +47,9 @@ type Service struct {
 	// OnTransition is called after every applied task transition (link
 	// runner hook). Must not block for long.
 	OnTransition func(ctx context.Context, c Change)
+	// OnThreadChange is called when an external thread changes into
+	// needs_input, done or failed (thread watcher). Must not block.
+	OnThreadChange func(ctx context.Context, c ThreadChange)
 
 	FullSyncEvery time.Duration
 	PollEvery     time.Duration
@@ -61,6 +64,9 @@ type Service struct {
 	syncing       atomic.Bool
 	catalog       atomic.Pointer[CatalogSnapshot]
 	lastStalePoll atomic.Int64 // unix nanos
+
+	started     time.Time   // threads first seen later notify only if created after this
+	watchSeeded atomic.Bool // first watcher pass done (it records silently)
 }
 
 func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
@@ -74,11 +80,13 @@ func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
 		CatalogEvery:         10 * time.Minute,
 		StalePollEvery:       time.Minute,
 		LaunchAttemptTimeout: 40 * time.Second,
+		started:              time.Now(),
 	}
 }
 
-// Run starts the full sync, active poller and catalog loops and blocks until
-// ctx is done. Errors are logged, never fatal. Call RecoverLaunching first.
+// Run starts the full sync, active poller, thread watcher and catalog loops
+// and blocks until ctx is done. Errors are logged, never fatal. Call
+// RecoverLaunching first.
 func (s *Service) Run(ctx context.Context) {
 	var wg gosync.WaitGroup
 	loop := func(name string, every time.Duration, fn func(context.Context) error) {
@@ -96,7 +104,7 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
-	wg.Add(3)
+	wg.Add(4)
 	go loop("full sync", s.FullSyncEvery, func(ctx context.Context) error {
 		_, err := s.FullSync(ctx)
 		if errors.Is(err, ErrSyncRunning) {
@@ -105,6 +113,7 @@ func (s *Service) Run(ctx context.Context) {
 		return err
 	})
 	go loop("poll", s.PollEvery, s.PollActive)
+	go loop("watch threads", s.PollEvery, s.WatchThreads)
 	go loop("catalog refresh", s.CatalogEvery, func(ctx context.Context) error {
 		_, err := s.RefreshCatalog(ctx)
 		return err

@@ -43,6 +43,13 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	if f.ExcludeSubagents, err = querySubagents(q); err != nil {
 		return err
 	}
+	switch v := strings.TrimSpace(q.Get("needsInput")); v {
+	case "":
+	case "1", "true":
+		f.NeedsInput = true
+	default:
+		return db.Invalid("invalid needsInput %q (want 1|true)", v)
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
