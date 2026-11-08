@@ -12,6 +12,8 @@ type taskJSON struct {
 	db.Task
 	T3WebURL *string `json:"t3WebUrl"`
 	T3AppURL *string `json:"t3AppUrl"`
+	// T3DeepLink opens the thread in the T3 desktop/mobile app.
+	T3DeepLink *string `json:"t3DeepLink"`
 }
 
 type threadJSON struct {
@@ -40,8 +42,20 @@ func (s *server) webURL(envID string, threadID *string) *string {
 	return &u
 }
 
+// deepLink = t3code://threads/<environmentId>/<threadId>.
+func deepLink(envID string, threadID *string) *string {
+	if threadID == nil {
+		return nil
+	}
+	u := t3.AppThreadURL(envID, *threadID)
+	if u == "" {
+		return nil
+	}
+	return &u
+}
+
 func (s *server) task(env string, t db.Task) taskJSON {
-	out := taskJSON{Task: t, T3WebURL: s.webURL(env, t.T3ThreadID)}
+	out := taskJSON{Task: t, T3WebURL: s.webURL(env, t.T3ThreadID), T3DeepLink: deepLink(env, t.T3ThreadID)}
 	if t.T3ThreadID != nil {
 		out.T3AppURL = t.ThreadLink
 	}

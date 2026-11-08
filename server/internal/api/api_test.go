@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"slices"
 	gosync "sync"
@@ -203,6 +204,7 @@ type task struct {
 	LastError     *string           `json:"lastError"`
 	T3WebURL      *string           `json:"t3WebUrl"`
 	T3AppURL      *string           `json:"t3AppUrl"`
+	T3DeepLink    *string           `json:"t3DeepLink"`
 	LaunchedAt    *string           `json:"launchedAt"`
 	FinishedAt    *string           `json:"finishedAt"`
 	SettledAt     *string           `json:"settledAt"`
@@ -304,6 +306,9 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 	if started.T3AppURL == nil || *started.T3AppURL != "t3-thread://fake-env/"+threadID {
 		t.Fatalf("app url %v", started.T3AppURL)
+	}
+	if started.T3DeepLink == nil || *started.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(threadID) {
+		t.Fatalf("deep link %v", started.T3DeepLink)
 	}
 	// Launch payload reached T3.
 	d, err := e.fake.ReadThread(context.Background(), threadID)
