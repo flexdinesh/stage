@@ -5,26 +5,25 @@ import { api } from "../api/client.ts";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
-import { IconArrowRight, IconExternal } from "../components/icons.tsx";
+import { IconArrowRight } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
+  AppButton,
   Button,
   Chip,
   Detail,
   Details,
   ErrorText,
-  ExternalButton,
   Muted,
   PageHeader,
   Panel,
   QueryState,
   Segmented,
   Textarea,
-  buttonClass,
   cx,
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
@@ -100,8 +99,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const blocked = isWaiting(task);
   const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
-  const webUrl = task.t3WebUrl;
-  const phoneBar = webUrl !== null || hasThread || stoppable;
+  const appUrl = task.t3DeepLink;
+  const phoneBar = appUrl !== null || hasThread || stoppable;
 
   const focusFollowup = () => {
     const el = followupInput.current;
@@ -110,11 +109,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
     el.focus({ preventScroll: true });
   };
 
-  const openInT3 = (variant: "primary" | "secondary", className?: string) =>
-    webUrl === null ? null : (
-      <ExternalButton href={webUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in T3 <IconExternal />
-      </ExternalButton>
+  const openInApp = (variant: "primary" | "secondary", className?: string) =>
+    appUrl === null ? null : (
+      <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
+        Open in app
+      </AppButton>
     );
 
   const stopButton = (className?: string) => (
@@ -158,7 +157,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       <div className="flex flex-col gap-3.5">
         {waiting ? (
-          <Alert tone="need" actions={webUrl === null ? undefined : openInT3("primary", "max-md:hidden")}>
+          <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
             {pending > 0 ? `T3 is waiting on ${pending} request${pending === 1 ? "" : "s"}` : "T3 is waiting on input"}
           </Alert>
         ) : null}
@@ -179,7 +178,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
               {task.state === "backlog" ? "Start" : "Restart"}
             </Button>
           ) : null}
-          {waiting ? null : openInT3("secondary", "max-md:hidden")}
+          {waiting ? null : openInApp("secondary", "max-md:hidden")}
           {hasThread ? (
             <Button onClick={focusFollowup} className="max-md:hidden">
               Follow-up
@@ -235,7 +234,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {phoneBar ? (
         <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {openInT3(waiting ? "primary" : "secondary", "flex-1")}
+          {openInApp(waiting ? "primary" : "secondary", "flex-1")}
           {hasThread ? (
             <Button onClick={focusFollowup} className="flex-1">
               Follow-up
@@ -259,22 +258,12 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
     );
   }
   const links: ReactNode[] = [];
-  if (task.t3WebUrl !== null) {
-    links.push(
-      <ExternalButton key="web" href={task.t3WebUrl} small>
-        Open in T3 <IconExternal />
-      </ExternalButton>,
-    );
-  }
   if (task.t3DeepLink !== null) {
     links.push(
-      <a key="app" href={task.t3DeepLink} className={buttonClass("secondary", true)}>
+      <AppButton key="app" href={task.t3DeepLink} small>
         Open in app
-      </a>,
+      </AppButton>,
     );
-  }
-  if (task.t3AppUrl !== null) {
-    links.push(<CopyButton key="copy" text={task.t3AppUrl} label="Copy app link" />);
   }
   return (
     <Panel title="Thread" meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>

@@ -519,14 +519,12 @@ function ThreadRow({ t }: { t: Thread }) {
 }
 
 function T3Link({ t }: { t: Thread }) {
-  if (t.t3WebUrl === null) return null;
+  if (t.t3DeepLink === null) return null;
   return (
     <a
-      href={t.t3WebUrl}
-      target="_blank"
-      rel="noreferrer"
-      title="Open in T3"
-      aria-label={`Open "${t.title}" in T3`}
+      href={t.t3DeepLink}
+      title="Open in app"
+      aria-label={`Open "${t.title}" in app`}
       className="inline-flex text-muted hover:text-fg"
     >
       <IconExternal size={14} />
