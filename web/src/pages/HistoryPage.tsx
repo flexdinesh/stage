@@ -1,5 +1,5 @@
-import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Link, Navigate, useSearchParams } from "react-router";
 import { useCatalog, useStats, useThreads } from "../api/queries.ts";
 import { THREAD_STATUSES, type Stats, type ThreadStatus, type SubagentsFilter, type Thread, type ThreadListQuery, type ThreadSource } from "../api/types.ts";
 import { IconExternal } from "../components/icons.tsx";
@@ -102,8 +102,49 @@ function useFilters() {
   };
 }
 
+// Last-used filters (search string without `page`), restored when /history is opened without params.
+const FILTERS_KEY = "t3stage-history-filters";
+
+function readStoredFilters(): string {
+  try {
+    return localStorage.getItem(FILTERS_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeFilters(params: URLSearchParams) {
+  const next = new URLSearchParams(params);
+  next.delete("page");
+  try {
+    localStorage.setItem(FILTERS_KEY, next.toString());
+  } catch {
+    // Storage unavailable (private mode): filters just won't be remembered.
+  }
+}
+
+/**
+ * Restores remembered filters once, on arrival without params, before the view mounts (so no query fires
+ * with the defaults first). Clearing every filter later leaves the URL empty without restoring again.
+ */
 export function HistoryPage() {
+  const [params] = useSearchParams();
+  const [restore, setRestore] = useState(() => (params.size === 0 ? readStoredFilters() : ""));
+  if (restore !== "") {
+    if (params.size === 0) return <Navigate replace to={{ search: `?${restore}` }} />;
+    setRestore("");
+    return null;
+  }
+  return <HistoryView />;
+}
+
+function HistoryView() {
   const f = useFilters();
+  const [params] = useSearchParams();
+  const search = params.toString();
+  useEffect(() => {
+    storeFilters(new URLSearchParams(search));
+  }, [search]);
   const [drawer, setDrawer] = useState(false);
   const { from, to } = range(f.preset, f.get("from"), f.get("to"));
 

@@ -58,7 +58,13 @@ export function TaskPicker({
   disabled?: boolean;
 }) {
   return (
-    <Select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+    <Select
+      id={id}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full min-w-0 truncate"
+    >
       <option value="">{none}</option>
       {options.map((t) => (
         <option key={t.id} value={String(t.id)}>
