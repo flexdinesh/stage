@@ -330,7 +330,7 @@ Compact, flat, and ink-led.
 - **Error / Disabled:** errors render as a red Alert below; disabled at 55% opacity. Labels sit above in the Label style.
 
 ### Segmented control
-Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall, matching buttons and inputs it sits beside; small (follow-up send mode) is 26px. Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter and the Dashboard view (list / by project).
+Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall, matching buttons and inputs it sits beside; small (follow-up send mode) is 26px. Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter.
 
 ### Navigation
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
@@ -339,11 +339,10 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 ### Stat strip (signature)
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
 
-### Project groups (Dashboard "by project" view)
-A header Segmented toggles the Dashboard between `list` (default) and `by project`, remembered per browser. By project, each state panel splits its rows under a 28px sub-header per project (Bench Gray at 55% over Paper, hairline below): a chevron button (`aria-expanded`) with the mono project name and Slate count, and a mono `project →` link right. Projects follow first-appearance order; external needs-input threads join their project. Each sub-header collapses independently per panel and the collapsed set is remembered. With a single project filtered, rows render ungrouped.
-
 ### Task row (signature)
 State chip, row title with a mono meta line (project, model, relative time, tags), optional run order chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.
+
+On the Dashboard (every state group, external needs-input threads included) the project gets its own column: laptop rows put a fixed 150px project cell right after the 118px state chip (mono 12px, Ink Text, medium weight, linked, truncated with the full name in `title`) so project names align down the whole page, and the project leaves the meta line. Phone rows print the project as a mono 12px Ink Text line above the title. The column stays when the Dashboard is filtered to one project; Project detail rows keep the project in the meta line.
 
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 12.5px text, actions right. `need` for waiting-on-you, `bad` for errors.
