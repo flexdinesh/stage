@@ -1,0 +1,307 @@
+// Package t3 is the boundary to T3 Code. Everything T3-specific (MCP over
+// streamable HTTP at T3_URL/mcp, OAuth auto-renew, tool result decoding) lives
+// behind the Client interface. The rest of the backend uses only these types.
+//
+// Field sources: t3code packages/contracts/src/orchestratorMcp.ts,
+// project.ts, model.ts, modelSelection.ts, orchestrationV2.ts (t3 0.1.7).
+package t3
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// Client is the T3 surface the backend consumes. Implementations must be safe
+// for concurrent use. Calls outside a T3 thread must pass projectId/threadId
+// explicitly (OAuth clients have no implicit thread).
+type Client interface {
+	// Status reports the current connection/auth state. Never fails.
+	Status(ctx context.Context) ConnectionStatus
+	// Pair exchanges a pairing code (from `t3 pair`) for a full-access
+	// mcp-client token and stores it (paste fallback for auto-renew).
+	Pair(ctx context.Context, code string) error
+	// ListProjects pages t3_project_list to completion.
+	ListProjects(ctx context.Context) ([]Project, error)
+	// CreateProject calls t3_project_create.
+	CreateProject(ctx context.Context, in CreateProjectInput) (Project, error)
+	// ListThreads calls t3_thread_list for one page.
+	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
+	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
+	ReadThread(ctx context.Context, threadID string) (ThreadDetail, error)
+	// LaunchThread calls t3_thread_launch. Idempotent per ClientRequestID.
+	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
+	// SendMessage calls t3_thread_send (follow-up).
+	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
+	// Interrupt calls t3_thread_interrupt with stop:true (Stop button semantics).
+	Interrupt(ctx context.Context, threadID string) error
+	// Capabilities calls orchestrator_capabilities. Returns all providers
+	// unfiltered; callers drop providers with non-empty Constraints.
+	Capabilities(ctx context.Context) (Catalog, error)
+}
+
+// TokenStore persists the OAuth mcp-client token. The db package implements
+// it against the single-row t3_connection table; the t3 client consumes it.
+type TokenStore interface {
+	LoadToken(ctx context.Context) (StoredToken, error) // zero value if none
+	SaveToken(ctx context.Context, tok StoredToken) error
+	SetLastError(ctx context.Context, msg string) error // "" clears
+}
+
+type StoredToken struct {
+	ClientID  string
+	Token     string
+	ExpiresAt time.Time
+}
+
+var (
+	ErrNotConnected = errors.New("t3: not connected")
+	ErrNotFound     = errors.New("t3: not found")
+)
+
+type ConnectionStatus struct {
+	Connected     bool
+	ClientID      string
+	ExpiresAt     *time.Time
+	LastError     string
+	EnvironmentID string // T3 environment id, used for web links; "" if unknown
+}
+
+// ThreadStatus is T3 OrchestratorMcpThreadStatus ("idle" + run statuses).
+// Run statuses (Run.Status, LaunchResult.Status) use the same values minus idle.
+type ThreadStatus string
+
+const (
+	StatusIdle        ThreadStatus = "idle"
+	StatusPreparing   ThreadStatus = "preparing"
+	StatusQueued      ThreadStatus = "queued"
+	StatusStarting    ThreadStatus = "starting"
+	StatusRunning     ThreadStatus = "running"
+	StatusWaiting     ThreadStatus = "waiting"
+	StatusCompleted   ThreadStatus = "completed"
+	StatusInterrupted ThreadStatus = "interrupted"
+	StatusFailed      ThreadStatus = "failed"
+	StatusCancelled   ThreadStatus = "cancelled"
+	StatusRolledBack  ThreadStatus = "rolled_back"
+)
+
+type RuntimeMode string
+
+const (
+	RuntimeApprovalRequired RuntimeMode = "approval-required"
+	RuntimeAutoAcceptEdits  RuntimeMode = "auto-accept-edits"
+	RuntimeAuto             RuntimeMode = "auto"
+	RuntimeFullAccess       RuntimeMode = "full-access"
+)
+
+type InteractionMode string
+
+const (
+	InteractionDefault InteractionMode = "default"
+	InteractionPlan    InteractionMode = "plan"
+)
+
+// SendMode is t3_thread_send `mode`. auto: start idle thread, steer running
+// turn, or queue. queue: new turn. steer: mid-turn update. restart: interrupt
+// and restart.
+type SendMode string
+
+const (
+	SendAuto    SendMode = "auto"
+	SendQueue   SendMode = "queue"
+	SendSteer   SendMode = "steer"
+	SendRestart SendMode = "restart"
+)
+
+type Project struct {
+	ID            string
+	Title         string
+	WorkspaceRoot string
+	ArchivedAt    *time.Time
+	DeletedAt     *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type CreateProjectInput struct {
+	Title         string
+	WorkspaceRoot string
+}
+
+type ListThreadsInput struct {
+	ProjectID        string // ignored when AllProjects
+	AllProjects      bool
+	Statuses         []ThreadStatus // max 10
+	TitleContains    string
+	Settled          *bool
+	IncludeSubagents bool
+	Cursor           *int // nil = first page
+	Limit            int  // 1..100; 0 = T3 default
+}
+
+type ThreadPage struct {
+	Threads    []Thread
+	NextCursor *int // nil = last page
+	Total      int
+}
+
+// Thread is a t3_thread_list item. Nullable T3 ids decode to "".
+type Thread struct {
+	ThreadID             string
+	ProjectID            string
+	Title                string
+	Link                 string // t3-thread:// or hosted link; may be ""
+	CreatedBy            string // user|agent|system
+	CreationSource       string // web|mobile|mcp|provider|server
+	Status               ThreadStatus
+	LatestRunID          string
+	ProviderInstanceID   string
+	Model                string
+	RuntimeMode          RuntimeMode
+	InteractionMode      InteractionMode
+	Settled              bool
+	SettledAt            *time.Time
+	Snoozed              bool
+	ParentThreadID       string
+	RelationshipToParent string // fork|subagent|""
+	ItemCount            int
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// ThreadDetail is t3_thread_read: thread + detail fields + recentRuns.
+type ThreadDetail struct {
+	Thread
+	ActiveRunID         string
+	Branch              string
+	WorktreePath        string
+	RunCount            int
+	PendingRequestCount int
+	Archived            bool
+	RecentRuns          []Run // newest first
+}
+
+type Run struct {
+	RunID              string
+	Ordinal            int
+	Status             ThreadStatus
+	ProviderInstanceID string
+	Model              string
+	RequestedAt        time.Time
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+}
+
+// ModelSelection is T3 ModelSelection wire form:
+// {"instanceId":"claude","model":"claude-haiku-5-5","options":[{"id":"effort","value":"low"}]}.
+// T3 also accepts options as a record {"effort":"low"}; we always send the array.
+type ModelSelection struct {
+	InstanceID string        `json:"instanceId"`
+	Model      string        `json:"model"`
+	Options    []ModelOption `json:"options,omitempty"`
+}
+
+// ModelOption is T3 ProviderOptionSelection {id, value: string|boolean}.
+type ModelOption struct {
+	ID    string      `json:"id"`
+	Value OptionValue `json:"value"`
+}
+
+// OptionValue is T3 ProviderOptionSelectionValue: a non-empty string or a boolean.
+type OptionValue struct {
+	Str    string
+	Bool   bool
+	IsBool bool
+}
+
+func StringValue(s string) OptionValue { return OptionValue{Str: s} }
+func BoolValue(b bool) OptionValue     { return OptionValue{Bool: b, IsBool: true} }
+
+func (v OptionValue) MarshalJSON() ([]byte, error) {
+	if v.IsBool {
+		return json.Marshal(v.Bool)
+	}
+	return json.Marshal(v.Str)
+}
+
+func (v *OptionValue) UnmarshalJSON(data []byte) error {
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		*v = BoolValue(b)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("option value must be string or boolean: %w", err)
+	}
+	*v = StringValue(s)
+	return nil
+}
+
+// WorkspaceType is t3_thread_launch workspaceStrategy.type.
+type WorkspaceType string
+
+const (
+	WorkspaceRoot             WorkspaceType = "root"              // project checkout (+ optional Branch)
+	WorkspaceExistingWorktree WorkspaceType = "existing_worktree" // requires WorktreePath
+	WorkspaceWorktree         WorkspaceType = "worktree"          // new checkout from BaseRef (required)
+)
+
+type WorkspaceStrategy struct {
+	Type            WorkspaceType
+	Branch          string
+	BaseRef         string // worktree only, e.g. "origin/main"
+	StartFromOrigin *bool  // worktree only
+	WorktreePath    string // existing_worktree only
+}
+
+type LaunchInput struct {
+	ProjectID       string // required (no implicit project outside a thread)
+	Title           string // required
+	Message         string // first prompt
+	ModelSelection  *ModelSelection
+	RuntimeMode     RuntimeMode     // "" = inherit
+	InteractionMode InteractionMode // "" = inherit
+	Workspace       *WorkspaceStrategy
+	ClientRequestID string // "task-<id>-<attempt>"
+}
+
+type LaunchResult struct {
+	ThreadID       string
+	Link           string
+	ProjectID      string
+	ModelSelection ModelSelection
+	RunID          string       // "" if null
+	Status         ThreadStatus // "" if null
+}
+
+// Catalog is orchestrator_capabilities.
+type Catalog struct {
+	Providers []Provider
+}
+
+type Provider struct {
+	ProviderInstanceID string
+	DriverKind         string
+	DisplayName        string
+	Models             []Model
+	RuntimeModes       []RuntimeMode // nil = not reported
+	CanRunChildTask    bool
+	Constraints        []string // non-empty = unusable for launches
+}
+
+type Model struct {
+	ID      string
+	Label   string // "" when T3 omits it (label == id)
+	Options []ModelOptionSpec
+}
+
+// ModelOptionSpec is OrchestratorMcpModelOption, e.g.
+// {"id":"effort","values":["low","medium","high"],"default":"medium"}.
+type ModelOptionSpec struct {
+	ID      string
+	Values  []OptionValue
+	Default *OptionValue
+}

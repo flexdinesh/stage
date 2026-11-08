@@ -1,0 +1,401 @@
+# t3-stage REST API
+
+Base path `/api`. JSON in and out (`Content-Type: application/json`). Field names camelCase. TypeScript mirror: `web/src/api/types.ts` (change both together).
+
+## Conventions
+
+- Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
+- IDs: app ids (`id`, `projectId`, `taskId`, `chainId`) are JSON numbers. T3 ids (`t3ProjectId`, `t3ThreadId`) are strings.
+- Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
+- PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
+- Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
+- `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
+- Errors: non-2xx responses have body `{ "error": string }`.
+
+| Status | Meaning |
+|---|---|
+| 400 | invalid body or query (bad enum, missing required field, bad JSON) |
+| 404 | resource not found |
+| 409 | conflict: action not allowed in current state, duplicate unique value |
+| 502 | T3 call failed (T3 error message in `error`) |
+| 503 | T3 not connected (no valid token) or DB unavailable |
+| 500 | unexpected |
+
+## Enums
+
+| Name | Values |
+|---|---|
+| TaskState | `backlog` `launching` `running` `needs_input` `completed` `settled` `failed` `interrupted` `cancelled` |
+| ChainState | `idle` `running` `paused` `done` |
+| ThreadStatus (T3) | `idle` `preparing` `queued` `starting` `running` `waiting` `completed` `interrupted` `failed` `cancelled` `rolled_back` |
+| RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
+| InteractionMode | `default` `plan` (default `default`) |
+| SendMode | `auto` `queue` `steer` `restart` (default `auto`) |
+| ProjectSource | `app` (created via t3-stage) `t3` (imported from T3) |
+| ThreadSource | `app` (thread belongs to a task) `t3` (any other thread) |
+
+## Shared shapes
+
+```jsonc
+// ModelOption: T3 ProviderOptionSelection
+{ "id": "effort", "value": "low" }          // value: string | boolean
+
+// Workspace
+{ "type": "root" }
+{ "type": "worktree", "baseRef": "origin/main", "branch": "feat-x" }   // branch: string | null (null = T3 picks)
+```
+
+`Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}`.
+
+## Health
+
+### `GET /api/health`
+200 / 503:
+```json
+{ "status": "ok", "db": "ok" }
+```
+
+## T3 connection, sync, catalog
+
+### `GET /api/t3/status`
+200 `T3Status`:
+```json
+{
+  "connected": true,
+  "t3Url": "http://127.0.0.1:3773",
+  "publicUrl": "http://controlbox:3773",
+  "environmentId": "env_123",
+  "clientId": "mcp_client_abc",
+  "tokenExpiresAt": "2026-12-08T10:00:00Z",
+  "adminTokenConfigured": true,
+  "lastError": null,
+  "lastFullSyncAt": "2026-11-08T10:00:00Z"
+}
+```
+`environmentId`, `clientId`, `tokenExpiresAt`, `lastError`, `lastFullSyncAt` are nullable.
+
+### `POST /api/t3/pair`
+Paste fallback: exchange a pairing code from `t3 pair` for a token.
+Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 502 pairing failed.
+
+### `POST /api/sync`
+Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects). Synchronous.
+200 `SyncResult`:
+```json
+{ "projects": 12, "threads": 776, "finishedAt": "2026-11-08T10:00:00Z" }
+```
+409 sync already running. 503 not connected. 502 T3 error.
+
+### `GET /api/catalog`
+Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with no T3 `constraints` are listed.
+200 `Catalog`:
+```json
+{
+  "providers": [
+    {
+      "providerInstanceId": "claude",
+      "driverKind": "claude",
+      "displayName": "Claude",
+      "models": [
+        {
+          "id": "claude-haiku-5-5",
+          "label": "Haiku 5.5",
+          "options": [{ "id": "effort", "values": ["low", "medium", "high"], "default": "medium" }]
+        }
+      ],
+      "runtimeModes": ["approval-required", "auto-accept-edits", "auto", "full-access"]
+    }
+  ],
+  "fetchedAt": "2026-11-08T10:00:00Z"
+}
+```
+`displayName` falls back to `providerInstanceId`; `label` falls back to `id`; `options` is `[]` when none; option `default` is nullable; `runtimeModes` is `null` when T3 does not report it. 503 not connected and no cache.
+
+## Projects
+
+`Project`:
+```json
+{
+  "id": 1,
+  "t3ProjectId": "proj_abc",
+  "title": "t3-stage",
+  "workspaceRoot": "/home/dee/workspace/t3-stage",
+  "source": "app",
+  "archivedAt": null,
+  "createdAt": "2026-11-08T10:00:00Z",
+  "updatedAt": "2026-11-08T10:00:00Z"
+}
+```
+
+### `GET /api/projects`
+Query: `archived` = `true` (only archived) | `false` (default, only active) | `all`.
+200 `{ "projects": Project[] }` ordered by `title`.
+
+### `POST /api/projects`
+Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed).
+- An app project with the same `workspaceRoot` exists → 409.
+- A T3 project with the same `workspaceRoot` exists → link it (`source: "t3"`).
+- Otherwise create it in T3 (`t3_project_create`) → `source: "app"`.
+
+201 `Project`. 502 T3 error. 503 not connected.
+
+### `GET /api/projects/:id`
+200 `Project`. 404.
+
+### `PATCH /api/projects/:id`
+Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify T3).
+200 `Project`. 404.
+
+## Tasks
+
+`Task`:
+```json
+{
+  "id": 7,
+  "projectId": 1,
+  "projectTitle": "t3-stage",
+  "title": "Say OK",
+  "prompt": "reply OK",
+  "providerInstanceId": "claude",
+  "model": "claude-haiku-5-5",
+  "modelOptions": [{ "id": "effort", "value": "low" }],
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "workspace": { "type": "root" },
+  "tags": ["smoke"],
+  "notes": "",
+  "state": "running",
+  "t3ThreadId": "thread_abc",
+  "chainId": null,
+  "chainPosition": null,
+  "launchAttempt": 1,
+  "lastError": null,
+  "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
+  "t3AppUrl": "t3-thread://...",
+  "launchedAt": "2026-11-08T10:00:00Z",
+  "finishedAt": null,
+  "settledAt": null,
+  "createdAt": "2026-11-08T09:59:00Z",
+  "updatedAt": "2026-11-08T10:00:00Z"
+}
+```
+- `providerInstanceId` / `model` null = T3 default. `modelOptions` default `[]`.
+- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` (null without thread).
+- `finishedAt`: first entry into `completed|failed|interrupted|cancelled`. `settledAt`: entry into `settled`.
+
+`TaskEvent`:
+```json
+{ "id": 3, "taskId": 7, "fromState": "launching", "toState": "running", "detail": "thread status running", "at": "2026-11-08T10:00:01Z" }
+```
+`fromState` null for the creation event.
+
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`.
+
+### `GET /api/tasks`
+Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `chain` (chain id).
+200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
+
+### `POST /api/tasks`
+Body `CreateTaskRequest`:
+```jsonc
+{
+  "projectId": 1,                // required
+  "title": "Say OK",             // required
+  "prompt": "reply OK",          // required
+  "providerInstanceId": "claude",// optional, null
+  "model": "claude-haiku-5-5",   // optional, null
+  "modelOptions": [{ "id": "effort", "value": "low" }],  // optional, default []
+  "runtimeMode": "full-access",  // optional
+  "interactionMode": "default",  // optional
+  "workspace": { "type": "root" },// optional
+  "tags": [],                    // optional
+  "notes": "",                   // optional
+  "chainId": null,               // optional: append as last step of chain
+  "start": false                 // optional: true = Save & start (ignored when chainId set)
+}
+```
+201 `Task` (state `backlog`, or `launching` when started). 400. 404 project/chain. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+
+### `GET /api/tasks/:id`
+200 `TaskDetail`. 404.
+
+### `PATCH /api/tasks/:id`
+Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes`.
+In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others).
+200 `Task`. 404.
+
+### `DELETE /api/tasks/:id`
+204. 409 when state is `launching|running|needs_input` (stop first). Removes it from its chain.
+
+### `POST /api/tasks/:id/start`
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409.
+200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
+
+### `POST /api/tasks/:id/followup`
+Body `{ "message": string, "mode"?: SendMode }`. Sends `t3_thread_send`. 409 when task has no thread.
+200 `Task`. 502 / 503.
+
+### `POST /api/tasks/:id/stop`
+`t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
+200 `Task`. 502 / 503.
+
+### `POST /api/tasks/:id/duplicate`
+New `backlog` task with the same project, title, prompt, model config, workspace, tags, notes; not in a chain.
+201 `Task`. 404.
+
+## Threads (history)
+
+`Thread` (T3 mirror row):
+```json
+{
+  "t3ThreadId": "thread_abc",
+  "t3ProjectId": "proj_abc",
+  "projectId": 1,
+  "projectTitle": "t3-stage",
+  "title": "Say OK",
+  "status": "completed",
+  "settled": false,
+  "settledAt": null,
+  "pendingRequestCount": 0,
+  "providerInstanceId": "claude",
+  "model": "claude-haiku-5-5",
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "branch": null,
+  "worktreePath": null,
+  "parentThreadId": null,
+  "relationship": null,
+  "creationSource": "mcp",
+  "source": "app",
+  "taskId": 7,
+  "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
+  "t3AppUrl": "t3-thread://...",
+  "createdAt": "2026-11-08T10:00:00Z",
+  "updatedAt": "2026-11-08T10:01:00Z",
+  "syncedAt": "2026-11-08T10:01:05Z"
+}
+```
+`projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
+
+### `GET /api/threads`
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `limit` (default 100, max 500), `offset` (default 0).
+200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
+
+## Chains
+
+`Chain`:
+```json
+{
+  "id": 2,
+  "title": "Refactor then test",
+  "state": "running",
+  "currentTaskId": 7,
+  "steps": [/* Task, ordered by chainPosition */],
+  "createdAt": "2026-11-08T10:00:00Z",
+  "updatedAt": "2026-11-08T10:00:00Z"
+}
+```
+`currentTaskId`: see chain rules; null when none.
+
+### `GET /api/chains`
+200 `{ "chains": Chain[] }` ordered by `updatedAt` desc.
+
+### `POST /api/chains`
+Body `{ "title": string, "steps"?: number[] }` (`steps` = existing `backlog` task ids not in another chain, in order).
+201 `Chain` (state `idle`). 400. 404 task. 409 task not eligible.
+
+### `GET /api/chains/:id`
+200 `Chain`. 404.
+
+### `PATCH /api/chains/:id`
+Body `{ "title"?: string, "steps"?: number[] }`. `steps` is the full ordered list of task ids: add (must be `backlog`, not in another chain), remove (detached, `chainId` null), reorder. Non-`backlog` steps must stay in the list and keep their relative order (409 otherwise).
+200 `Chain`. 404. 409.
+
+### `POST /api/chains/:id/start`
+`idle → running`; runner launches the current step. 409 if not `idle` or no steps.
+200 `Chain`.
+
+### `POST /api/chains/:id/pause`
+`running → paused`. Does not stop an active thread; only prevents launching the next step. 409 otherwise.
+200 `Chain`.
+
+### `POST /api/chains/:id/resume`
+`paused → running`. 409 if not `paused`, or if the current step is `failed|interrupted` (restart it with `POST /api/tasks/:id/start` or skip it).
+200 `Chain`.
+
+### `POST /api/chains/:id/skip`
+Skip the current step: interrupt its thread if active, set it `cancelled` (event detail `"skipped"`). Chain state unchanged (a paused chain stays paused; a running chain advances). 409 when no current step.
+200 `Chain`.
+
+## Templates
+
+`Template`:
+```json
+{
+  "id": 1,
+  "name": "Quick haiku",
+  "prompt": "",
+  "providerInstanceId": "claude",
+  "model": "claude-haiku-5-5",
+  "modelOptions": [{ "id": "effort", "value": "low" }],
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "createdAt": "2026-11-08T10:00:00Z",
+  "updatedAt": "2026-11-08T10:00:00Z"
+}
+```
+
+- `GET /api/templates` → 200 `{ "templates": Template[] }` ordered by `name`.
+- `POST /api/templates` body `{ "name": string, "prompt"?, "providerInstanceId"?, "model"?, "modelOptions"?, "runtimeMode"?, "interactionMode"? }` → 201 `Template`. 409 duplicate name.
+- `GET /api/templates/:id` → 200 `Template`. 404.
+- `PATCH /api/templates/:id` partial of the POST body → 200 `Template`. 404. 409 duplicate name.
+- `DELETE /api/templates/:id` → 204. 404.
+
+## Stats
+
+### `GET /api/stats`
+Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz` (IANA zone for day buckets, default `UTC`). Thread counts use mirrored threads by `createdAt` in range; task counts are current totals (not range-filtered).
+200 `Stats`:
+```json
+{
+  "from": "2026-10-09T10:00:00Z",
+  "to": "2026-11-08T10:00:00Z",
+  "tz": "UTC",
+  "threadsByDay": [{ "day": "2026-11-08", "count": 14 }],
+  "threadsByProject": [{ "projectId": 1, "t3ProjectId": "proj_abc", "title": "t3-stage", "count": 9 }],
+  "threadsByStatus": [{ "status": "completed", "count": 20 }],
+  "tasksByState": [{ "state": "running", "count": 2 }],
+  "needsInput": 1
+}
+```
+`threadsByDay` ascending, days with zero omitted. `threadsByProject` count desc; `projectId` null and `title` = `t3ProjectId` when no app project. `needsInput` = tasks in `needs_input`. 400 bad `tz`.
+
+## State mapping (thread → task), pure function
+
+Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the latest run status (`recentRuns[0].status`, may be absent). First matching rule wins:
+
+| # | Condition | Task state |
+|---|---|---|
+| 1 | `settled == true` | `settled` |
+| 2 | `pendingRequestCount > 0` or `status == waiting` | `needs_input` |
+| 3 | `status in (preparing, queued, starting, running)` | `running` |
+| 4 | `status == completed` | `completed` |
+| 5 | `status == failed` | `failed` |
+| 6 | `status == interrupted` | `interrupted` |
+| 7 | `status in (cancelled, rolled_back)` | `cancelled` |
+| 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
+| 9 | otherwise (idle, no runs) | unchanged (keep current state) |
+
+Applied only to tasks with a thread whose state is not `backlog`. A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
+
+## Chain rules, pure function
+
+- Steps = chain tasks ordered by `chainPosition`.
+- A step is passed when its state is `settled` or `cancelled`.
+- Current step (`currentTaskId`) = first step not passed; none → chain becomes `done`.
+- Runner, chain `running`, by current step state:
+  - `backlog` → launch it (new thread).
+  - `launching|running|needs_input|completed` → wait (a step is done only when settled in T3).
+  - `failed|interrupted` → set chain `paused`.
+- A step transition into `failed|interrupted|cancelled` (other than via skip) while the chain is `running` sets the chain `paused`.
+- Chains may span projects.
