@@ -1,7 +1,6 @@
 package api
 
 import (
-	"strings"
 	"time"
 
 	"github.com/flexdinesh/t3-stage/server/internal/chains"
@@ -38,12 +37,16 @@ type chainJSON struct {
 	UpdatedAt     time.Time     `json:"updatedAt"`
 }
 
-// webURL = T3_PUBLIC_URL/<environmentId>/<threadId>.
+// webURL = T3_PUBLIC_URL/<environmentId>/<threadId> (path-escaped: provider
+// thread ids contain ':' and '%').
 func (s *server) webURL(envID string, threadID *string) *string {
-	if envID == "" || threadID == nil || *threadID == "" {
+	if threadID == nil {
 		return nil
 	}
-	u := strings.TrimRight(s.Config.T3PublicURL, "/") + "/" + envID + "/" + *threadID
+	u := t3.WebThreadURL(s.Config.T3PublicURL, envID, *threadID)
+	if u == "" {
+		return nil
+	}
 	return &u
 }
 

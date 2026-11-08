@@ -177,7 +177,7 @@ function ThreadCard({ task, thread }: { task: TaskDetail; thread: Thread | null 
             <a href={task.t3AppUrl} className={buttonClass("secondary", true)}>
               Open in app
             </a>
-            <CopyButton text={task.t3AppUrl} label="Copy t3-thread link" />
+            <CopyButton text={task.t3AppUrl} label="Copy app link" />
           </>
         )
       }

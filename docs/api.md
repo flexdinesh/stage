@@ -171,7 +171,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
   "launchAttempt": 1,
   "lastError": null,
   "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
-  "t3AppUrl": "t3-thread://...",
+  "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
@@ -181,7 +181,7 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
 ```
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `chainPosition` is 1-based.
-- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` (null without thread).
+- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `completed|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 
 `TaskEvent`:
@@ -272,7 +272,7 @@ New `backlog` task with the same project, title, prompt, model config, workspace
   "source": "app",
   "taskId": 7,
   "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
-  "t3AppUrl": "t3-thread://...",
+  "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
   "createdAt": "2026-11-08T10:00:00Z",
   "updatedAt": "2026-11-08T10:01:00Z",
   "syncedAt": "2026-11-08T10:01:05Z"

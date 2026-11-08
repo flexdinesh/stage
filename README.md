@@ -4,7 +4,7 @@ Task/stage manager for T3 Code: projects, tasks, and sequential chains on top of
 
 ## Layout
 
-- `server/`: Go backend (`cmd/t3stage`, `internal/{config,db,t3,api,webui}`). Serves the API and the embedded web UI.
+- `server/`: Go backend (`cmd/t3stage`, `internal/{config,db,t3,sync,chains,api,webui}`). Serves the API and the embedded web UI.
 - `web/`: Vite + React + TypeScript + Tailwind SPA.
 - `docs/api.md`: REST contract (mirrored in `web/src/api/types.ts`).
 
@@ -15,7 +15,7 @@ Requirements: Docker with compose. For local dev also Go 1.27, Node, pnpm.
 1. One-time, on the T3 host, issue an admin session token (lets t3-stage mint and auto-renew its own OAuth token):
 
    ```sh
-   t3 auth session issue --ttl 3650d --label t3-stage --scope access:write --scope orchestration:read --scope orchestration:operate --token-only
+   t3 auth session issue --ttl 3650d --label t3-stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
    ```
 
 2. Configure:
@@ -26,6 +26,8 @@ Requirements: Docker with compose. For local dev also Go 1.27, Node, pnpm.
    ```
 
    Without `T3_ADMIN_TOKEN`, pair manually from Settings with a code from `t3 pair`.
+
+   `T3_FAKE=1` swaps in an in-memory fake T3 (no T3 server needed; for UI/dev only).
 
 ## Run
 

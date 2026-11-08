@@ -51,22 +51,31 @@ func run() error {
 	logger := slog.Default()
 	store := db.NewStore(pool)
 	var wg sync.WaitGroup
-	defer wg.Wait() // background loops exit once stop() cancels ctx
+	var closeT3 func()
+	defer func() {
+		wg.Wait() // background loops exit once stop() cancels ctx
+		if closeT3 != nil {
+			closeT3()
+		}
+	}()
 	defer stop()
 
-	// PHASE3: swap point. Use the real MCP client unless T3_FAKE=1:
-	//
-	//	if os.Getenv("T3_FAKE") != "1" {
-	//		mc := t3.NewMCPClient(t3.Options{
-	//			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL,
-	//			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
-	//		})
-	//		wg.Add(1)
-	//		go func() { defer wg.Done(); mc.Run(ctx) }()
-	//		t3Client = mc
-	//	}
-	var t3Client t3.Client = t3.NewFake()
-	logger.Info("using fake T3 client")
+	// T3_FAKE=1 forces the in-memory fake (dev/demo without a T3 server).
+	var t3Client t3.Client
+	if os.Getenv("T3_FAKE") == "1" {
+		t3Client = t3.NewFake()
+		logger.Info("using fake T3 client")
+	} else {
+		mc := t3.NewMCPClient(t3.Options{
+			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL,
+			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
+		})
+		closeT3 = mc.Close
+		wg.Add(1)
+		go func() { defer wg.Done(); mc.Run(ctx) }()
+		t3Client = mc
+		logger.Info("using T3 MCP client", "url", cfg.T3URL)
+	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
 	runner := chains.NewRunner(store, syncSvc, t3Client, logger)

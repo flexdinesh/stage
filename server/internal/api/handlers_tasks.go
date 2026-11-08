@@ -300,7 +300,8 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	return s.touchAndWrite(w, r, task.ID)
 }
 
-// touchAndWrite bumps updated_at (re-arms polling) and writes the task.
+// touchAndWrite bumps updated_at (re-arms polling), polls the thread once so
+// a short run is not missed between 5s poller ticks, and writes the task.
 func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64) error {
 	ctx := r.Context()
 	if err := s.Store.TouchTask(ctx, id); err != nil {
@@ -308,6 +309,11 @@ func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64)
 	}
 	task, err := s.Store.GetTask(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := s.Sync.PollTask(ctx, task); err != nil {
+		s.log.Warn("poll after thread action", "task", id, "err", err)
+	} else if task, err = s.Store.GetTask(ctx, id); err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, s.task(s.envID(ctx), task))
