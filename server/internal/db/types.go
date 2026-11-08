@@ -16,7 +16,7 @@ const (
 	StateLaunching   TaskState = "launching"
 	StateRunning     TaskState = "running"
 	StateNeedsInput  TaskState = "needs_input"
-	StateCompleted   TaskState = "completed"
+	StateDone        TaskState = "done"
 	StateSettled     TaskState = "settled"
 	StateFailed      TaskState = "failed"
 	StateInterrupted TaskState = "interrupted"
@@ -24,7 +24,7 @@ const (
 )
 
 var TaskStates = []TaskState{
-	StateBacklog, StateLaunching, StateRunning, StateNeedsInput, StateCompleted,
+	StateBacklog, StateLaunching, StateRunning, StateNeedsInput, StateDone,
 	StateSettled, StateFailed, StateInterrupted, StateCancelled,
 }
 
@@ -33,7 +33,7 @@ func (s TaskState) Valid() bool { return slices.Contains(TaskStates, s) }
 // Finished: entering one of these sets finishedAt (first entry per attempt).
 func (s TaskState) Finished() bool {
 	switch s {
-	case StateCompleted, StateFailed, StateInterrupted, StateCancelled:
+	case StateDone, StateFailed, StateInterrupted, StateCancelled:
 		return true
 	}
 	return false
@@ -47,16 +47,6 @@ func (s TaskState) Active() bool {
 	}
 	return false
 }
-
-// ChainState values.
-type ChainState string
-
-const (
-	ChainIdle    ChainState = "idle"
-	ChainRunning ChainState = "running"
-	ChainPaused  ChainState = "paused"
-	ChainDone    ChainState = "done"
-)
 
 const (
 	SourceApp = "app"
@@ -116,8 +106,8 @@ type Task struct {
 	Notes              string           `json:"notes"`
 	State              TaskState        `json:"state"`
 	T3ThreadID         *string          `json:"t3ThreadId"`
-	ChainID            *int64           `json:"chainId"`
-	ChainPosition      *int             `json:"chainPosition"`
+	AfterTaskID        *int64           `json:"afterTaskId"` // runs after this task (launches when it settles)
+	NextTaskID         *int64           `json:"nextTaskId"`  // the task that runs after this one
 	LaunchAttempt      int              `json:"launchAttempt"`
 	LastError          *string          `json:"lastError"`
 	LaunchedAt         *time.Time       `json:"launchedAt"`
@@ -125,8 +115,9 @@ type Task struct {
 	SettledAt          *time.Time       `json:"settledAt"`
 	CreatedAt          time.Time        `json:"createdAt"`
 	UpdatedAt          time.Time        `json:"updatedAt"`
-	T3ProjectID        string           `json:"-"` // project's T3 id (for launch)
-	ThreadLink         *string          `json:"-"` // mirrored thread link
+	Attachments        []Attachment     `json:"attachments"` // images, upload order
+	T3ProjectID        string           `json:"-"`           // project's T3 id (for launch)
+	ThreadLink         *string          `json:"-"`           // mirrored thread link
 }
 
 type TaskEvent struct {
@@ -164,15 +155,6 @@ type Thread struct {
 	UpdatedAt           time.Time  `json:"updatedAt"`
 	SyncedAt            time.Time  `json:"syncedAt"`
 	Link                *string    `json:"-"`
-}
-
-type Chain struct {
-	ID        int64      `json:"id"`
-	Title     string     `json:"title"`
-	State     ChainState `json:"state"`
-	Steps     []Task     `json:"steps"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 type Template struct {

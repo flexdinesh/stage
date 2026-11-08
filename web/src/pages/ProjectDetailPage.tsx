@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useChains, useProject, useTasks } from "../api/queries.ts";
+import { useProject, useTasks } from "../api/queries.ts";
 import { TASK_STATES } from "../api/types.ts";
-import { ChainList } from "../components/ChainList.tsx";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
@@ -21,9 +20,7 @@ function ProjectDetail({ id }: { id: number }) {
   const [stateFilter, setStateFilter] = useState("");
   const state = pick(TASK_STATES, stateFilter);
   const tasks = useTasks({ project: id, ...(state === undefined ? {} : { state: [state] }) });
-  const chains = useChains();
   const newTask = useNewTask();
-  const projectChains = (chains.data?.chains ?? []).filter((c) => c.steps.some((s) => s.projectId === id));
   const taskCount = tasks.data?.tasks.length;
 
   return (
@@ -72,13 +69,6 @@ function ProjectDetail({ id }: { id: number }) {
                 />
               </QueryState>
             </Panel>
-            <QueryState isPending={chains.isPending} error={chains.error}>
-              <ChainList
-                title="Chains with steps here"
-                chains={projectChains}
-                emptyText="No chains use this project. Add one of its backlog tasks to a chain."
-              />
-            </QueryState>
           </div>
         </>
       )}

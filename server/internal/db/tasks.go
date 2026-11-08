@@ -16,19 +16,22 @@ import (
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
-  t.state, t.t3_thread_id, t.chain_id, t.chain_position, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, t.created_at, t.updated_at, th.link
+  t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
+  t.launched_at, t.finished_at, t.settled_at, t.created_at, t.updated_at, th.link,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
+LEFT JOIN tasks nx ON nx.after_task_id = t.id
 LEFT JOIN threads th ON th.t3_thread_id = t.t3_thread_id`
 
 func scanTask(row pgx.Row) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.ChainID, &t.ChainPosition,
+		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.CreatedAt,
-		&t.UpdatedAt, &t.ThreadLink)
+		&t.UpdatedAt, &t.ThreadLink, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -61,12 +64,12 @@ func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
 }
 
 type TaskFilter struct {
-	ProjectID *int64
-	States    []string
-	Tag       string
-	Q         string
-	From, To  *time.Time
-	ChainID   *int64
+	ProjectID   *int64
+	States      []string
+	Tag         string
+	Q           string
+	From, To    *time.Time
+	SettledFrom *time.Time // settled_at >= SettledFrom
 }
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
@@ -90,21 +93,15 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	if f.To != nil {
 		w.add("t.created_at < " + w.arg(*f.To))
 	}
-	if f.ChainID != nil {
-		w.add("t.chain_id = " + w.arg(*f.ChainID))
+	if f.SettledFrom != nil {
+		w.add("t.settled_at >= " + w.arg(*f.SettledFrom))
 	}
 	rows, err := s.pool.Query(ctx, taskSelect+w.sql()+` ORDER BY t.updated_at DESC, t.id DESC`, w.args...)
 	return collectTasks(rows, err)
 }
 
-// ChainSteps returns a chain's tasks ordered by position.
-func (s *Store) ChainSteps(ctx context.Context, chainID int64) ([]Task, error) {
-	rows, err := s.pool.Query(ctx, taskSelect+` WHERE t.chain_id = $1 ORDER BY t.chain_position, t.id`, chainID)
-	return collectTasks(rows, err)
-}
-
 // PollableTasks: tasks whose thread may still change state. Active tasks
-// always; completed tasks updated in the last hour always, older ones only
+// always; done tasks updated in the last hour always, older ones only
 // when includeStale (the poller passes it at most once a minute);
 // failed/interrupted only when touched in the last 10 minutes (e.g. a
 // follow-up restarted the thread). backlog, settled and cancelled (skip /
@@ -113,7 +110,7 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
-  OR (t.state = 'completed' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
+  OR (t.state = 'done' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
   OR (t.state IN ('failed', 'interrupted') AND t.updated_at > now() - interval '10 minutes'))
 ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)
@@ -150,48 +147,47 @@ type NewTask struct {
 	Workspace          Workspace
 	Tags               []string
 	Notes              string
-	ChainID            *int64
+	AfterTaskID        *int64  // runs after this task (link rules: setAfter)
+	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 }
 
-// CreateTask inserts a backlog task (+ creation event). With ChainID it is
-// appended as the chain's last step; a done chain goes back to idle.
+// CreateTask inserts a backlog task (+ creation event), linked to run after
+// AfterTaskID when set (setAfter rules; the whole insert fails otherwise).
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
+	return s.createTask(ctx, in, nil)
+}
+
+// createTask is CreateTask with extra run inside the insert transaction.
+func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx pgx.Tx, id int64) error) (Task, error) {
 	var id int64
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 			return err
 		}
-		var pos *int
-		if in.ChainID != nil {
-			var state ChainState
-			err := tx.QueryRow(ctx, `SELECT state FROM chains WHERE id = $1 FOR UPDATE`, *in.ChainID).Scan(&state)
-			if err != nil {
-				return fmt.Errorf("chain: %w", notFound(err))
-			}
-			var next int
-			if err := tx.QueryRow(ctx,
-				`SELECT COALESCE(max(chain_position), 0) + 1 FROM tasks WHERE chain_id = $1`, *in.ChainID,
-			).Scan(&next); err != nil {
-				return err
-			}
-			pos = &next
-			if state == ChainDone {
-				if _, err := tx.Exec(ctx, `UPDATE chains SET state = 'idle', updated_at = now() WHERE id = $1`, *in.ChainID); err != nil {
-					return err
-				}
-			} else if _, err := tx.Exec(ctx, `UPDATE chains SET updated_at = now() WHERE id = $1`, *in.ChainID); err != nil {
-				return err
-			}
-		}
 		err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, chain_id, chain_position)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes, in.ChainID, pos,
+			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
 		).Scan(&id)
 		if err != nil {
 			return err
+		}
+		if in.AfterTaskID != nil {
+			if err := setAfter(ctx, tx, id, in.AfterTaskID); err != nil {
+				return err
+			}
+		}
+		if len(in.AttachmentIDs) > 0 {
+			if err := setAttachments(ctx, tx, id, in.AttachmentIDs); err != nil {
+				return err
+			}
+		}
+		if extra != nil {
+			if err := extra(tx, id); err != nil {
+				return err
+			}
 		}
 		_, err = tx.Exec(ctx,
 			`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id)
@@ -226,12 +222,14 @@ type TaskPatch struct {
 	Workspace          Optional[Workspace]        `json:"workspace"`
 	Tags               Optional[[]string]         `json:"tags"`
 	Notes              Optional[string]           `json:"notes"`
+	AfterTaskID        Optional[int64]            `json:"afterTaskId"`   // null unlinks
+	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 }
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
 	return p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
-		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set
+		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set
 }
 
 // UpdateTask applies a validated patch. Outside backlog only title, tags and
@@ -256,6 +254,16 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		}
 		if (provider == nil) != (model == nil) {
 			return Invalid("providerInstanceId and model must be set together")
+		}
+		if p.AfterTaskID.Set {
+			if err := setAfter(ctx, tx, id, p.AfterTaskID.Ptr()); err != nil {
+				return err
+			}
+		}
+		if p.AttachmentIDs.Set {
+			if err := setAttachments(ctx, tx, id, p.AttachmentIDs.V); err != nil {
+				return err
+			}
 		}
 		var w where
 		w.arg(id)
@@ -297,7 +305,7 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.Notes.Set {
 			set("notes", p.Notes.V)
 		}
-		if len(sets) == 0 {
+		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
 		sets = append(sets, "updated_at = now()")
@@ -310,40 +318,47 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 	return s.GetTask(ctx, id)
 }
 
-// DeleteTask removes a task unless a thread is active (Conflict).
+// DeleteTask removes a task unless a thread is active (Conflict). Its follower
+// is spliced onto its predecessor (A→X→B becomes A→B).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockLinks(ctx, tx); err != nil {
+			return err
+		}
 		var state TaskState
-		var chainID *int64
-		if err := tx.QueryRow(ctx, `SELECT state, chain_id FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state, &chainID); err != nil {
+		var after *int64
+		if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state, &after); err != nil {
 			return notFound(err)
 		}
 		if state.Active() {
 			return Conflict("task is %s: stop it first", state)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id); err != nil {
+		// Free the predecessor's follower slot before the follower takes it.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = NULL WHERE id = $1`, id); err != nil {
 			return err
 		}
-		if chainID != nil {
-			_, err := tx.Exec(ctx, `UPDATE chains SET updated_at = now() WHERE id = $1`, *chainID)
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = $2, updated_at = now() WHERE after_task_id = $1`, id, after); err != nil {
 			return err
 		}
-		return nil
+		_, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
+		return err
 	})
 }
 
-// DuplicateTask copies a task's config into a new backlog task (no chain).
+// DuplicateTask copies a task's config and images into a new backlog task
+// (not linked).
 func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	src, err := s.GetTask(ctx, id)
 	if err != nil {
 		return Task{}, err
 	}
-	return s.CreateTask(ctx, NewTask{
+	copyImages := func(tx pgx.Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
+	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
 		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: src.Workspace,
 		Tags: src.Tags, Notes: src.Notes,
-	})
+	}, copyImages)
 }
 
 // TouchTask bumps updated_at (re-arms polling of failed/interrupted tasks).
@@ -369,9 +384,9 @@ type Transition struct {
 	// failure, no thread): the next BeginAttempt keeps the attempt number
 	// and so the clientRequestId.
 	ReuseAttempt bool
-	// StandaloneOnly refuses (Changed=false) a backlog task that belongs to
-	// a chain: only the chain runner launches backlog chain steps.
-	StandaloneOnly bool
+	// UnlinkWaiting ("Start now"): a backlog task still waiting on an
+	// unfinished predecessor (not settled|cancelled) is unlinked from it.
+	UnlinkWaiting bool
 }
 
 // TransitionResult reports what happened. Changed=false: current state not
@@ -379,7 +394,6 @@ type Transition struct {
 type TransitionResult struct {
 	Changed bool
 	From    TaskState
-	ChainID *int64
 	Attempt int
 }
 
@@ -388,15 +402,12 @@ type TransitionResult struct {
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT state, chain_id, launch_attempt FROM tasks WHERE id = $1 FOR UPDATE`, t.TaskID).
-			Scan(&res.From, &res.ChainID, &res.Attempt)
+		err := tx.QueryRow(ctx, `SELECT state, launch_attempt FROM tasks WHERE id = $1 FOR UPDATE`, t.TaskID).
+			Scan(&res.From, &res.Attempt)
 		if err != nil {
 			return notFound(err)
 		}
 		if (len(t.From) > 0 && !slices.Contains(t.From, res.From)) || (res.From == t.To && !t.BeginAttempt) {
-			return nil
-		}
-		if t.StandaloneOnly && res.From == StateBacklog && res.ChainID != nil {
 			return nil
 		}
 		err = tx.QueryRow(ctx, `
@@ -411,9 +422,12 @@ UPDATE tasks SET
   finished_at = CASE WHEN $3::boolean THEN NULL
                      WHEN $6::boolean AND finished_at IS NULL THEN now() ELSE finished_at END,
   settled_at = CASE WHEN $3::boolean THEN NULL WHEN $2 = 'settled' THEN now() ELSE settled_at END,
+  after_task_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
+      SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state IN ('settled', 'cancelled'))
+    THEN NULL ELSE after_task_id END,
   updated_at = now()
 WHERE id = $1 RETURNING launch_attempt`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt,
+			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting,
 		).Scan(&res.Attempt)
 		if err != nil {
 			return err

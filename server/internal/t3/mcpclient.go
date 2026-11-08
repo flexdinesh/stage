@@ -29,6 +29,7 @@ const (
 	runBackoffMax  = 30 * time.Minute
 	oauthTimeout   = 30 * time.Second
 	envTimeout     = 3 * time.Second
+	uploadTimeout  = 2 * time.Minute
 	// mcpProtocolVersion: T3 0.1.7 serves only this version
 	// (apps/server/src/mcp/McpHttpServer.ts layerMcpTransport).
 	mcpProtocolVersion = "2025-06-18"
@@ -55,6 +56,7 @@ type MCPClient struct {
 	oauth *oauthFlow
 	mcpHC *http.Client
 	envHC *http.Client
+	upHC  *http.Client
 	now   func() time.Time
 
 	authMu sync.Mutex // serializes token acquisition
@@ -107,6 +109,9 @@ func NewMCPClient(opts Options) *MCPClient {
 	envHC := *base
 	envHC.Timeout = envTimeout
 	c.envHC = &envHC
+	upHC := *base
+	upHC.Timeout = uploadTimeout
+	c.upHC = &upHC
 	mcpHC := *base
 	mcpHC.Timeout = 0 // streamable responses may be SSE; bound by ctx instead
 	mcpHC.Transport = &authTransport{base: rt, c: c}
@@ -539,7 +544,8 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 // launches deduplicated by clientRequestId.
 func retrySafe(tool string, args map[string]any) bool {
 	switch tool {
-	case "t3_thread_read", "t3_thread_list", "t3_project_list", "orchestrator_capabilities":
+	case "t3_thread_read", "t3_thread_list", "t3_project_list", "orchestrator_capabilities",
+		"t3_attachment_prepare_upload": // a duplicate pending upload just expires
 		return true
 	case "t3_thread_launch":
 		id, ok := args["clientRequestId"].(string)

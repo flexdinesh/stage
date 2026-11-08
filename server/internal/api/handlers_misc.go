@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,96 +68,6 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"threads": out, "total": total})
 	return nil
-}
-
-// ---- chains ----
-
-func (s *server) listChains(w http.ResponseWriter, r *http.Request) error {
-	cs, err := s.Store.ListChains(r.Context())
-	if err != nil {
-		return err
-	}
-	env := s.envID(r.Context())
-	out := make([]chainJSON, len(cs))
-	for i, c := range cs {
-		out[i] = s.chain(env, c)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"chains": out})
-	return nil
-}
-
-func (s *server) createChain(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Title string  `json:"title"`
-		Steps []int64 `json:"steps"`
-	}
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	title := strings.TrimSpace(body.Title)
-	if title == "" {
-		return db.Invalid("title is required")
-	}
-	c, err := s.Store.CreateChain(r.Context(), title, body.Steps)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, s.chain(s.envID(r.Context()), c))
-	return nil
-}
-
-func (s *server) getChain(w http.ResponseWriter, r *http.Request) error {
-	id, err := pathID(r)
-	if err != nil {
-		return err
-	}
-	c, err := s.Store.GetChain(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, s.chain(s.envID(r.Context()), c))
-	return nil
-}
-
-func (s *server) updateChain(w http.ResponseWriter, r *http.Request) error {
-	id, err := pathID(r)
-	if err != nil {
-		return err
-	}
-	var body struct {
-		Title db.Optional[string]  `json:"title"`
-		Steps db.Optional[[]int64] `json:"steps"`
-	}
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	if err := requiredText("title", &body.Title); err != nil {
-		return err
-	}
-	if body.Steps.Set && body.Steps.Null {
-		return db.Invalid("steps must be an array")
-	}
-	c, err := s.Store.UpdateChain(r.Context(), id, body.Title.Ptr(), body.Steps.V, body.Steps.Set)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, s.chain(s.envID(r.Context()), c))
-	return nil
-}
-
-func (s *server) chainAction(fn func(context.Context, int64) (db.Chain, error)) func(http.ResponseWriter, *http.Request) error {
-	return func(w http.ResponseWriter, r *http.Request) error {
-		id, err := pathID(r)
-		if err != nil {
-			return err
-		}
-		c, err := fn(r.Context(), id)
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusOK, s.chain(s.envID(r.Context()), c))
-		return nil
-	}
 }
 
 // ---- templates ----

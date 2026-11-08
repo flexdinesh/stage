@@ -38,11 +38,11 @@ func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db
 	return p
 }
 
-func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, chainID *int64) db.Task {
+func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, after *int64) db.Task {
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{
 		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ChainID: chainID,
+		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, AfterTaskID: after,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestTransitionTask(t *testing.T) {
 		t.Fatalf("new task %+v", task)
 	}
 
-	res, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateRunning}, To: db.StateCompleted})
+	res, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateRunning}, To: db.StateDone})
 	if err != nil || res.Changed || res.From != db.StateBacklog {
 		t.Fatalf("guarded transition should not apply: %+v %v", res, err)
 	}
@@ -102,17 +102,17 @@ func TestTransitionTask(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.GetTask(ctx, task.ID)
 	if got.FinishedAt == nil || got.SettledAt != nil || got.LaunchedAt == nil || got.T3ThreadID == nil || *got.T3ThreadID != thread {
-		t.Fatalf("after completed: %+v", got)
+		t.Fatalf("after done: %+v", got)
 	}
 	finished := *got.FinishedAt
-	// needs_input then completed again: finishedAt keeps first entry.
+	// needs_input then done again: finishedAt keeps first entry.
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput})
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted})
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateSettled, Detail: "thread settled"})
 	got, _ = s.GetTask(ctx, task.ID)
 	if !got.FinishedAt.Equal(finished) || got.SettledAt == nil || got.State != db.StateSettled {
@@ -124,7 +124,7 @@ func TestTransitionTask(t *testing.T) {
 		t.Fatal("same-state transition must not apply")
 	}
 	events, _ := s.TaskEvents(ctx, task.ID)
-	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateCompleted, db.StateNeedsInput, db.StateCompleted, db.StateSettled}
+	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateDone, db.StateNeedsInput, db.StateDone, db.StateSettled}
 	if len(events) != len(want) {
 		t.Fatalf("events %d, want %d: %+v", len(events), len(want), events)
 	}
@@ -179,132 +179,19 @@ func TestUpdateTaskRestrictions(t *testing.T) {
 	}
 }
 
-func TestChainSteps(t *testing.T) {
-	s, ctx := setup(t)
-	p := mustProject(t, s, ctx, "proj-1")
-	a := mustTask(t, s, ctx, p.ID, "a", nil)
-	b := mustTask(t, s, ctx, p.ID, "b", nil)
-	c := mustTask(t, s, ctx, p.ID, "c", nil)
-
-	chain, err := s.CreateChain(ctx, "ch", []int64{a.ID, b.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chain.State != db.ChainIdle || len(chain.Steps) != 2 || chain.Steps[0].ID != a.ID {
-		t.Fatalf("chain %+v", chain)
-	}
-	var conflict *db.ConflictError
-	if _, err := s.CreateChain(ctx, "other", []int64{a.ID}); !errors.As(err, &conflict) {
-		t.Fatalf("task in another chain: %v", err)
-	}
-	// Appending via CreateTask lands last.
-	d := mustTask(t, s, ctx, p.ID, "d", &chain.ID)
-	if d.ChainPosition == nil || *d.ChainPosition != 3 {
-		t.Fatalf("appended position %v", d.ChainPosition)
-	}
-	// Reorder + add c + remove d.
-	chain, err = s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, a.ID}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := stepIDs(chain); fmt.Sprint(ids) != fmt.Sprint([]int64{b.ID, c.ID, a.ID}) {
-		t.Fatalf("steps %v", ids)
-	}
-	if got, _ := s.GetTask(ctx, d.ID); got.ChainID != nil {
-		t.Fatal("removed step still in chain")
-	}
-	// Non-backlog steps can't be removed or reordered relative to each other.
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: b.ID, To: db.StateSettled})
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: c.ID, To: db.StateRunning})
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{c.ID, a.ID}, true); !errors.As(err, &conflict) {
-		t.Fatalf("remove settled step: %v", err)
-	}
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{c.ID, b.ID, a.ID}, true); !errors.As(err, &conflict) {
-		t.Fatalf("reorder locked steps: %v", err)
-	}
-	// A backlog step must not precede a launched one (it would launch in
-	// parallel with c, or bypass c if c failed).
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, a.ID, c.ID}, true); !errors.As(err, &conflict) {
-		t.Fatalf("backlog step ahead of running step: %v", err)
-	}
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{a.ID, b.ID, c.ID}, true); !errors.As(err, &conflict) {
-		t.Fatalf("backlog step ahead of settled step: %v", err)
-	}
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, a.ID}, true); err != nil {
-		t.Fatalf("locked steps first: %v", err)
-	}
-	var invalid *db.InvalidError
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, b.ID}, true); !errors.As(err, &invalid) {
-		t.Fatalf("duplicate step: %v", err)
-	}
-	// Adding a non-backlog task is a conflict.
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, d.ID, a.ID}, true); err != nil {
-		t.Fatal(err)
-	}
-	e := mustTask(t, s, ctx, p.ID, "e", nil)
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: e.ID, To: db.StateFailed})
-	if _, err := s.UpdateChain(ctx, chain.ID, nil, []int64{b.ID, c.ID, d.ID, a.ID, e.ID}, true); !errors.As(err, &conflict) {
-		t.Fatalf("add failed task: %v", err)
-	}
-
-	changed, cur, err := s.SetChainState(ctx, chain.ID, []db.ChainState{db.ChainRunning}, db.ChainPaused)
-	if err != nil || changed || cur != db.ChainIdle {
-		t.Fatalf("guarded chain state: %v %v %v", changed, cur, err)
-	}
-	if _, _, err := s.SetChainState(ctx, 9999, []db.ChainState{db.ChainIdle}, db.ChainRunning); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("missing chain: %v", err)
-	}
-}
-
-func TestCompleteChain(t *testing.T) {
-	s, ctx := setup(t)
-	p := mustProject(t, s, ctx, "proj-1")
-	a := mustTask(t, s, ctx, p.ID, "a", nil)
-	b := mustTask(t, s, ctx, p.ID, "b", nil)
-	chain, err := s.CreateChain(ctx, "ch", []int64{a.ID, b.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateSettled})
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: b.ID, To: db.StateCancelled})
-	if done, err := s.CompleteChain(ctx, chain.ID); err != nil || done {
-		t.Fatalf("idle chain must not complete: %v %v", done, err)
-	}
-	if _, _, err := s.SetChainState(ctx, chain.ID, []db.ChainState{db.ChainIdle}, db.ChainRunning); err != nil {
-		t.Fatal(err)
-	}
-	// A step added after the runner decided "done" keeps the chain open.
-	mustTask(t, s, ctx, p.ID, "late", &chain.ID)
-	if done, err := s.CompleteChain(ctx, chain.ID); err != nil || done {
-		t.Fatalf("chain with a backlog step must not complete: %v %v", done, err)
-	}
-	if got, _ := s.GetChain(ctx, chain.ID); got.State != db.ChainRunning {
-		t.Fatalf("state %s", got.State)
-	}
-}
-
 func TestTransitionLaunchGuards(t *testing.T) {
 	s, ctx := setup(t)
 	p := mustProject(t, s, ctx, "proj-1")
 	step := mustTask(t, s, ctx, p.ID, "step", nil)
-	chain, err := s.CreateChain(ctx, "ch", []int64{step.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	begin := db.Transition{TaskID: step.ID, From: []db.TaskState{db.StateBacklog, db.StateFailed}, To: db.StateLaunching, BeginAttempt: true, StandaloneOnly: true}
+	begin := db.Transition{TaskID: step.ID, From: []db.TaskState{db.StateBacklog, db.StateFailed}, To: db.StateLaunching, BeginAttempt: true}
 	res, err := s.TransitionTask(ctx, begin)
-	if err != nil || res.Changed || res.ChainID == nil || *res.ChainID != chain.ID {
-		t.Fatalf("standalone start of backlog chain step must not apply: %+v %v", res, err)
-	}
-	begin.StandaloneOnly = false // chain runner path
-	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 1 {
+	if err != nil || !res.Changed || res.Attempt != 1 {
 		t.Fatalf("runner launch: %+v %v", res, err)
 	}
 	// Transport failure: outcome unknown, next start keeps attempt 1.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: step.ID, To: db.StateFailed, ReuseAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	begin.StandaloneOnly = true // a failed chain step may be restarted manually
 	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 1 {
 		t.Fatalf("reuse attempt: %+v %v", res, err)
 	}
@@ -327,7 +214,7 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 		thread := fmt.Sprintf("thread-%d", i)
 		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread})
 		if name != "running" {
-			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateCompleted})
+			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 		}
 		ids[name] = task.ID
 	}
@@ -351,14 +238,6 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 	if got := fmt.Sprint(titles(true)); got != "[running fresh stale]" {
 		t.Fatalf("stale poll %s", got)
 	}
-}
-
-func stepIDs(c db.Chain) []int64 {
-	out := make([]int64, len(c.Steps))
-	for i, s := range c.Steps {
-		out[i] = s.ID
-	}
-	return out
 }
 
 func TestUpsertThreadsKeepsDetailColumns(t *testing.T) {
@@ -457,5 +336,153 @@ func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
 	}
 	if d, p, ss := sum(st); d != 1 || p != 1 || ss != 1 || st.ThreadsByStatus[0].Status != "completed" {
 		t.Fatalf("stats exclude: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
+	}
+}
+
+func TestLinks(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "proj-1")
+	q := mustProject(t, s, ctx, "proj-2")
+	a := mustTask(t, s, ctx, p.ID, "a", nil)
+	b := mustTask(t, s, ctx, q.ID, "b", &a.ID) // links may span projects
+	if b.AfterTaskID == nil || *b.AfterTaskID != a.ID {
+		t.Fatalf("created link %+v", b)
+	}
+	if got, _ := s.GetTask(ctx, a.ID); got.NextTaskID == nil || *got.NextTaskID != b.ID {
+		t.Fatalf("next of a %+v", got)
+	}
+	var conflict *db.ConflictError
+	// a already has a follower: refuse.
+	c := mustTask(t, s, ctx, p.ID, "c", nil)
+	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: a.ID}}); !errors.As(err, &conflict) {
+		t.Fatalf("second follower: %v", err)
+	}
+	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access",
+		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, AfterTaskID: &a.ID}); !errors.As(err, &conflict) {
+		t.Fatalf("create with taken predecessor: %v", err)
+	}
+	// Cycle: a after b (b already runs after a).
+	if _, err := s.UpdateTask(ctx, a.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: b.ID}}); !errors.As(err, &conflict) {
+		t.Fatalf("cycle: %v", err)
+	}
+	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: c.ID}}); !errors.As(err, &conflict) {
+		t.Fatalf("self: %v", err)
+	}
+	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: 9999}}); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("missing predecessor: %v", err)
+	}
+	// c after b: a → b → c. Sequence is head first from any member.
+	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: b.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{a.ID, b.ID, c.ID} {
+		seq, err := s.Sequence(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(titlesOf(seq)); got != "[a b c]" {
+			t.Fatalf("sequence from %d: %s", id, got)
+		}
+	}
+	// Only a backlog task can be linked; a settled/cancelled predecessor is refused.
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning})
+	d := mustTask(t, s, ctx, p.ID, "d", nil)
+	if _, err := s.UpdateTask(ctx, a.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
+		t.Fatalf("link a running task: %v", err)
+	}
+	e := mustTask(t, s, ctx, p.ID, "e", nil)
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: d.ID, To: db.StateSettled})
+	if _, err := s.UpdateTask(ctx, e.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
+		t.Fatalf("settled predecessor: %v", err)
+	}
+	// Ready followers: b once a settles.
+	if ids, _ := s.ReadyFollowers(ctx); len(ids) != 0 {
+		t.Fatalf("ready before settle %v", ids)
+	}
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateSettled})
+	if ids, _ := s.ReadyFollowers(ctx); fmt.Sprint(ids) != fmt.Sprint([]int64{b.ID}) {
+		t.Fatalf("ready after settle %v", ids)
+	}
+	// Delete splices: a → b → c, delete b ⇒ a → c.
+	if err := s.DeleteTask(ctx, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil || *got.AfterTaskID != a.ID {
+		t.Fatalf("splice %+v", got)
+	}
+	// Unlink.
+	if got, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, Null: true}}); err != nil || got.AfterTaskID != nil {
+		t.Fatalf("unlink %+v %v", got, err)
+	}
+}
+
+func TestStartNowUnlinksWaitingTask(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "proj-1")
+	a := mustTask(t, s, ctx, p.ID, "a", nil)
+	b := mustTask(t, s, ctx, p.ID, "b", &a.ID)
+	c := mustTask(t, s, ctx, p.ID, "c", &b.ID)
+	begin := func(id int64, unlink bool) {
+		t.Helper()
+		if res, err := s.TransitionTask(ctx, db.Transition{TaskID: id, From: []db.TaskState{db.StateBacklog}, To: db.StateLaunching,
+			BeginAttempt: true, UnlinkWaiting: unlink}); err != nil || !res.Changed {
+			t.Fatalf("begin %d: %+v %v", id, res, err)
+		}
+	}
+	begin(b.ID, true) // a is unfinished: b is unlinked; c stays after b
+	if got, _ := s.GetTask(ctx, b.ID); got.AfterTaskID != nil {
+		t.Fatalf("b still linked %+v", got)
+	}
+	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil || *got.AfterTaskID != b.ID {
+		t.Fatalf("c lost its link %+v", got)
+	}
+	// A passed predecessor keeps the link (history), even on a manual start.
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: b.ID, To: db.StateSettled})
+	begin(c.ID, true)
+	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil {
+		t.Fatalf("c unlinked from settled predecessor %+v", got)
+	}
+}
+
+func titlesOf(ts []db.Task) []string {
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		out[i] = t.Title
+	}
+	return out
+}
+
+func TestSweepStagedAttachments(t *testing.T) {
+	s, ctx := setup(t)
+	old, err := s.CreateAttachment(ctx, "old.png", "image/png", []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.CreateAttachment(ctx, "fresh.png", "image/png", []byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachedOld, err := s.CreateAttachment(ctx, "attached.png", "image/png", []byte{3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := mustProject(t, s, ctx, "p-sweep").ID
+	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p, Title: "t", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+		Workspace: db.Workspace{Type: "root"}, AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testDB.Pool.Exec(ctx, `UPDATE task_attachments SET created_at = now() - interval '25 hours' WHERE id = ANY($1)`,
+		[]int64{old.ID, attachedOld.ID}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.SweepStagedAttachments(ctx, 24*time.Hour)
+	if err != nil || n != 1 {
+		t.Fatalf("swept %d, %v; want 1", n, err)
+	}
+	for id, want := range map[int64]bool{old.ID: false, fresh.ID: true, attachedOld.ID: true} {
+		_, err := s.GetAttachment(ctx, id)
+		if (err == nil) != want {
+			t.Fatalf("attachment %d exists=%v, want %v", id, err == nil, want)
+		}
 	}
 }

@@ -1,10 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useCatalog, useStats, useThreads } from "../api/queries.ts";
-import { THREAD_STATUSES, type Stats, type SubagentsFilter, type Thread, type ThreadListQuery, type ThreadSource } from "../api/types.ts";
+import { THREAD_STATUSES, type Stats, type ThreadStatus, type SubagentsFilter, type Thread, type ThreadListQuery, type ThreadSource } from "../api/types.ts";
 import { IconExternal } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { ThreadStatusBadge } from "../components/StateBadge.tsx";
+import { ThreadStatusBadge, threadStatusLabel } from "../components/StateBadge.tsx";
 import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Segmented, Select, cx } from "../components/ui.tsx";
 import { dateTime, localDateToIso, localMidnight, pick } from "../lib/format.ts";
 
@@ -56,6 +56,16 @@ function compactTime(iso: string): string {
 
 type Filters = ReturnType<typeof useFilters>;
 
+// "settled" is a filter of its own: badges show settled over the run status, so a status filter matches unsettled threads only.
+const STATUS_FILTERS = [...THREAD_STATUSES, "settled"] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
+
+function statusQuery(s: StatusFilter | undefined): { status?: ThreadStatus[]; settled?: boolean } {
+  if (s === undefined) return {};
+  if (s === "settled") return { settled: true };
+  return { status: [s], settled: false };
+}
+
 /** URL-param backed filter state. */
 function useFilters() {
   const [params, setParams] = useSearchParams();
@@ -73,7 +83,7 @@ function useFilters() {
   // A title search (e.g. from the command palette) defaults to all time so older threads are found.
   const defaultPreset: Preset = q === "" ? "7d" : "all";
   const preset = pick(PRESETS, get("preset")) ?? defaultPreset;
-  const status = pick(THREAD_STATUSES, get("status"));
+  const status = pick(STATUS_FILTERS, get("status"));
   const subagentsShown = get("subagents") === "shown";
   const subagents: SubagentsFilter = subagentsShown ? "include" : "exclude";
   return {
@@ -104,7 +114,7 @@ export function HistoryPage() {
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to }),
     ...(f.project === "" ? {} : { project: Number(f.project) }),
-    ...(f.status === undefined ? {} : { status: [f.status] }),
+    ...statusQuery(f.status),
     ...(f.provider === "" ? {} : { provider: f.provider }),
     ...(f.source === undefined ? {} : { source: f.source }),
     ...(f.q === "" ? {} : { q: f.q }),
@@ -220,9 +230,9 @@ function FilterControls({ f, labelled = false }: { f: Filters; labelled?: boolea
       {wrap("Status", (id) => (
         <Select id={id} className={cls} value={f.status ?? ""} onChange={(e) => f.update({ status: e.target.value })} aria-label="Status">
           <option value="">Any status</option>
-          {THREAD_STATUSES.map((s) => (
+          {STATUS_FILTERS.map((s) => (
             <option key={s} value={s}>
-              {s.replace("_", " ")}
+              {s === "settled" ? "settled" : threadStatusLabel(s)}
             </option>
           ))}
         </Select>
@@ -475,7 +485,7 @@ function ThreadRow({ t }: { t: Thread }) {
       </span>
       <span className="hidden min-w-0 truncate md:block">{project}</span>
       <span className="hidden md:block">
-        <ThreadStatusBadge status={t.status} />
+        <ThreadStatusBadge status={t.status} settled={t.settled} />
       </span>
       <span className="hidden min-w-0 truncate font-mono text-[11.5px] text-muted md:block" title={model}>
         {model}
@@ -492,7 +502,7 @@ function ThreadRow({ t }: { t: Thread }) {
             {title}
             {subagent}
           </span>
-          <ThreadStatusBadge status={t.status} />
+          <ThreadStatusBadge status={t.status} settled={t.settled} />
         </div>
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-mono text-[11px] text-muted">
           {when}

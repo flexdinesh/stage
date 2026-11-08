@@ -17,9 +17,6 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
 		return err
 	}
-	if f.ChainID, err = queryInt64(q, "chain"); err != nil {
-		return err
-	}
 	f.States = multi(q, "state")
 	for _, st := range f.States {
 		if err := validEnum("state", st, taskStateStrings()); err != nil {
@@ -32,6 +29,9 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if f.To, err = queryTime(q, "to", time.UTC); err != nil {
+		return err
+	}
+	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
 		return err
 	}
 	ts, err := s.Store.ListTasks(r.Context(), f)
@@ -54,7 +54,8 @@ type createTaskReq struct {
 	Workspace          *db.Workspace    `json:"workspace"`
 	Tags               []string         `json:"tags"`
 	Notes              *string          `json:"notes"`
-	ChainID            *int64           `json:"chainId"`
+	AfterTaskID        *int64           `json:"afterTaskId"`
+	AttachmentIDs      []int64          `json:"attachmentIds"`
 	Start              bool             `json:"start"`
 }
 
@@ -68,7 +69,11 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		InteractionMode:    "default",
 		Workspace:          db.Workspace{Type: "root"},
 		Tags:               cleanTags(req.Tags),
-		ChainID:            req.ChainID,
+		AfterTaskID:        req.AfterTaskID,
+		AttachmentIDs:      req.AttachmentIDs,
+	}
+	if err := attachmentIDs(req.AttachmentIDs); err != nil {
+		return in, err
 	}
 	if req.ProjectID == nil {
 		return in, db.Invalid("projectId is required")
@@ -123,7 +128,13 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if req.Start && req.ChainID == nil {
+	if err := s.Store.SetLastUsed(r.Context(), db.ModelDefaults{
+		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
+		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
+	}); err != nil {
+		s.log.Warn("record last-used model", "task", task.ID, "err", err)
+	}
+	if req.Start && req.AfterTaskID == nil {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
@@ -151,7 +162,11 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	env := s.envID(ctx)
-	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events}
+	seq, err := s.Store.Sequence(ctx, id)
+	if err != nil {
+		return err
+	}
+	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
 	if task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		switch {
@@ -212,6 +227,12 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if p.Notes.Set && p.Notes.Null {
 		p.Notes.V, p.Notes.Null = "", false
 	}
+	if p.AttachmentIDs.Set {
+		if err := attachmentIDs(p.AttachmentIDs.V); err != nil {
+			return err
+		}
+		p.AttachmentIDs.Null = false
+	}
 	task, err := s.Store.UpdateTask(r.Context(), id, p)
 	if err != nil {
 		return err
@@ -261,13 +282,21 @@ func (s *server) threadTask(r *http.Request) (db.Task, error) {
 	return task, nil
 }
 
+// followupTask sends a message (t3_thread_send) or, with attachmentIds
+// (staged uploads), the images and optional message
+// (t3_thread_send_attachments, no mode). Sent images are deleted; on failure
+// they stay staged so the user can resend.
 func (s *server) followupTask(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
-		Message string  `json:"message"`
-		Mode    *string `json:"mode"`
+		Message       string  `json:"message"`
+		Mode          *string `json:"mode"`
+		AttachmentIDs []int64 `json:"attachmentIds"`
 	}
 	if err := decode(r, &body); err != nil {
 		return err
+	}
+	if len(body.AttachmentIDs) > 0 {
+		return s.followupImages(w, r, body.Message, body.Mode, body.AttachmentIDs)
 	}
 	if strings.TrimSpace(body.Message) == "" {
 		return db.Invalid("message is required")
@@ -285,6 +314,36 @@ func (s *server) followupTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := s.T3.SendMessage(r.Context(), *task.T3ThreadID, body.Message, mode); err != nil {
 		return &db.T3Error{Err: err}
+	}
+	return s.touchAndWrite(w, r, task.ID)
+}
+
+func (s *server) followupImages(w http.ResponseWriter, r *http.Request, message string, mode *string, ids []int64) error {
+	if mode != nil {
+		return db.Invalid("mode is not supported with images")
+	}
+	if err := attachmentIDs(ids); err != nil {
+		return err
+	}
+	task, err := s.threadTask(r)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
+	images, err := s.Store.StagedAttachments(ctx, ids)
+	if err != nil {
+		return err
+	}
+	uploaded, err := s.Sync.UploadImages(ctx, images)
+	if err != nil {
+		return &db.T3Error{Err: err}
+	}
+	if err := s.T3.SendAttachments(ctx, *task.T3ThreadID, message, uploaded); err != nil {
+		s.Sync.DiscardUploads(ctx, uploaded)
+		return &db.T3Error{Err: err}
+	}
+	if err := s.Store.DeleteStagedAttachments(ctx, ids); err != nil {
+		s.log.Warn("delete sent follow-up images", "task", task.ID, "err", err)
 	}
 	return s.touchAndWrite(w, r, task.ID)
 }

@@ -1,10 +1,13 @@
 package t3
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 )
 
@@ -133,6 +136,9 @@ func (c *MCPClient) LaunchThread(ctx context.Context, in LaunchInput) (LaunchRes
 	if in.ClientRequestID != "" {
 		args["clientRequestId"] = in.ClientRequestID
 	}
+	if len(in.Attachments) > 0 {
+		args["attachments"] = attachmentsArg(in.Attachments)
+	}
 	var out wireLaunch
 	if err := c.call(ctx, "t3_thread_launch", args, &out); err != nil {
 		return LaunchResult{}, err
@@ -183,6 +189,65 @@ func (c *MCPClient) SendMessage(ctx context.Context, threadID, message string, m
 		args["mode"] = mode
 	}
 	return c.call(ctx, "t3_thread_send", args, nil)
+}
+
+func attachmentsArg(atts []Attachment) []map[string]any {
+	out := make([]map[string]any, 0, len(atts))
+	for _, a := range atts {
+		out = append(out, map[string]any{"type": "image", "id": a.ID, "name": a.Name, "mimeType": a.MimeType, "sizeBytes": a.SizeBytes})
+	}
+	return out
+}
+
+func (c *MCPClient) UploadAttachment(ctx context.Context, in UploadInput) (Attachment, error) {
+	if len(in.Data) == 0 || in.Name == "" || in.MimeType == "" {
+		return Attachment{}, errors.New("t3 upload: name, mimeType and data are required")
+	}
+	var prep struct {
+		AttachmentID string `json:"attachmentId"`
+		RelativeURL  string `json:"relativeUrl"`
+	}
+	args := map[string]any{"upload": map[string]any{"type": "image", "name": in.Name, "mimeType": in.MimeType, "sizeBytes": len(in.Data)}}
+	if err := c.call(ctx, "t3_attachment_prepare_upload", args, &prep); err != nil {
+		return Attachment{}, err
+	}
+	if prep.AttachmentID == "" || !strings.HasPrefix(prep.RelativeURL, "/") {
+		return Attachment{}, fmt.Errorf("t3 upload: unexpected prepare_upload result %+v", prep)
+	}
+	// The relativeUrl is signed; T3 needs no auth header for it.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.opts.BaseURL+prep.RelativeURL, bytes.NewReader(in.Data))
+	if err != nil {
+		return Attachment{}, err
+	}
+	req.Header.Set("Content-Type", in.MimeType)
+	resp, err := c.upHC.Do(req)
+	if err != nil {
+		return Attachment{}, fmt.Errorf("t3 upload: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return Attachment{}, fmt.Errorf("t3 upload: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return Attachment{ID: prep.AttachmentID, Name: in.Name, MimeType: in.MimeType, SizeBytes: len(in.Data)}, nil
+}
+
+func (c *MCPClient) DiscardAttachment(ctx context.Context, attachmentID string) error {
+	return c.call(ctx, "t3_attachment_discard", map[string]any{"attachmentId": attachmentID}, nil)
+}
+
+func (c *MCPClient) SendAttachments(ctx context.Context, threadID, message string, atts []Attachment) error {
+	if threadID == "" {
+		return ErrNotFound
+	}
+	if len(atts) == 0 || len(atts) > MaxAttachments {
+		return fmt.Errorf("t3 t3_thread_send_attachments: 1..%d attachments required", MaxAttachments)
+	}
+	args := map[string]any{"threadId": threadID, "attachments": attachmentsArg(atts)}
+	if strings.TrimSpace(message) != "" {
+		args["message"] = message
+	}
+	return c.call(ctx, "t3_thread_send_attachments", args, nil)
 }
 
 func (c *MCPClient) Interrupt(ctx context.Context, threadID string) error {

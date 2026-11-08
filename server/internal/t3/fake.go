@@ -23,6 +23,25 @@ type Fake struct {
 	Catalog     Catalog
 	Sent        []FakeSend
 	Interrupted []string // interrupted thread ids
+	// Uploads: every UploadAttachment, in order. Discarded: discarded ids.
+	Uploads   []FakeUpload
+	Discarded []string
+	// Launched: every LaunchThread input that created or deduplicated a thread.
+	Launched []LaunchInput
+	// SentAttachments: every SendAttachments call.
+	SentAttachments []FakeSendAttachments
+	// LaunchErr, when set, fails LaunchThread (tests).
+	LaunchErr error
+}
+
+type FakeUpload struct {
+	Attachment
+	Data []byte
+}
+
+type FakeSendAttachments struct {
+	ThreadID, Message string
+	Attachments       []Attachment
 }
 
 type FakeSend struct {
@@ -147,6 +166,18 @@ func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, er
 	if in.ProjectID == "" || strings.TrimSpace(in.Title) == "" {
 		return LaunchResult{}, errors.New("projectId and title are required")
 	}
+	if f.LaunchErr != nil {
+		return LaunchResult{}, f.LaunchErr
+	}
+	if len(in.Attachments) > MaxAttachments {
+		return LaunchResult{}, fmt.Errorf("at most %d attachments", MaxAttachments)
+	}
+	for _, a := range in.Attachments {
+		if !f.pending(a.ID) {
+			return LaunchResult{}, fmt.Errorf("unknown attachment %s", a.ID)
+		}
+	}
+	f.Launched = append(f.Launched, in)
 	if id, ok := f.launches[in.ClientRequestID]; ok && in.ClientRequestID != "" {
 		return launchResult(f.threads[id]), nil
 	}
@@ -206,6 +237,50 @@ func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode Sen
 	}
 	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode})
 	return nil
+}
+
+func (f *Fake) UploadAttachment(_ context.Context, in UploadInput) (Attachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(in.Data) == 0 || in.Name == "" || in.MimeType == "" {
+		return Attachment{}, errors.New("name, mimeType and data are required")
+	}
+	a := Attachment{ID: f.nextID("pending"), Name: in.Name, MimeType: in.MimeType, SizeBytes: len(in.Data)}
+	f.Uploads = append(f.Uploads, FakeUpload{Attachment: a, Data: slices.Clone(in.Data)})
+	return a, nil
+}
+
+func (f *Fake) DiscardAttachment(_ context.Context, attachmentID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Discarded = append(f.Discarded, attachmentID)
+	return nil
+}
+
+func (f *Fake) SendAttachments(_ context.Context, threadID, message string, atts []Attachment) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.threads[threadID]; !ok {
+		return ErrNotFound
+	}
+	if len(atts) == 0 || len(atts) > MaxAttachments {
+		return fmt.Errorf("1..%d attachments required", MaxAttachments)
+	}
+	for _, a := range atts {
+		if !f.pending(a.ID) {
+			return fmt.Errorf("unknown attachment %s", a.ID)
+		}
+	}
+	f.SentAttachments = append(f.SentAttachments, FakeSendAttachments{ThreadID: threadID, Message: message, Attachments: slices.Clone(atts)})
+	return nil
+}
+
+// pending: id was uploaded and not discarded. Caller holds mu.
+func (f *Fake) pending(id string) bool {
+	if slices.Contains(f.Discarded, id) {
+		return false
+	}
+	return slices.ContainsFunc(f.Uploads, func(u FakeUpload) bool { return u.ID == id })
 }
 
 func (f *Fake) Interrupt(_ context.Context, threadID string) error {

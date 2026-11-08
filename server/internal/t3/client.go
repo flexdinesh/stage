@@ -35,6 +35,15 @@ type Client interface {
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
 	// SendMessage calls t3_thread_send (follow-up).
 	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
+	// UploadAttachment calls t3_attachment_prepare_upload, then POSTs data to
+	// the returned signed relativeUrl on T3_URL. The pending id is usable in
+	// LaunchInput.Attachments or SendAttachments until it expires (~10 min).
+	UploadAttachment(ctx context.Context, in UploadInput) (Attachment, error)
+	// DiscardAttachment calls t3_attachment_discard (pending uploads only).
+	DiscardAttachment(ctx context.Context, attachmentID string) error
+	// SendAttachments calls t3_thread_send_attachments (1..8, no mode, no
+	// retry key).
+	SendAttachments(ctx context.Context, threadID, message string, atts []Attachment) error
 	// Interrupt calls t3_thread_interrupt with stop:true (Stop button semantics).
 	Interrupt(ctx context.Context, threadID string) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
@@ -257,10 +266,30 @@ type WorkspaceStrategy struct {
 	WorktreePath    string // existing_worktree only
 }
 
+// MaxAttachments is T3's per-message attachment limit.
+const MaxAttachments = 8
+
+// UploadInput is one image to upload (image/png|jpeg|gif|webp, <=10MB).
+type UploadInput struct {
+	Name     string
+	MimeType string
+	Data     []byte
+}
+
+// Attachment is an uploaded image as T3 messages reference it
+// ({type:"image", id, name, mimeType, sizeBytes}).
+type Attachment struct {
+	ID        string
+	Name      string
+	MimeType  string
+	SizeBytes int
+}
+
 type LaunchInput struct {
-	ProjectID       string // required (no implicit project outside a thread)
-	Title           string // required
-	Message         string // first prompt
+	ProjectID       string       // required (no implicit project outside a thread)
+	Title           string       // required
+	Message         string       // first prompt
+	Attachments     []Attachment // uploaded images (max 8)
 	ModelSelection  *ModelSelection
 	RuntimeMode     RuntimeMode     // "" = inherit
 	InteractionMode InteractionMode // "" = inherit

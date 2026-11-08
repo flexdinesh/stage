@@ -1,14 +1,14 @@
 import type {
+  Attachment,
   Catalog,
-  Chain,
-  ChainList,
-  CreateChainRequest,
   CreateProjectRequest,
   CreateTaskRequest,
   CreateTemplateRequest,
   FollowupRequest,
   Health,
+  ModelDefaults,
   PairRequest,
+  Preferences,
   Project,
   ProjectList,
   Stats,
@@ -23,7 +23,6 @@ import type {
   TemplateList,
   ThreadList,
   ThreadListQuery,
-  UpdateChainRequest,
   UpdateProjectRequest,
   UpdateTaskRequest,
   UpdateTemplateRequest,
@@ -66,7 +65,9 @@ type RequestOptions = { method?: string; body?: unknown };
 async function request(path: string, init: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const req: RequestInit = { method: init.method ?? "GET", headers };
-  if (init.body !== undefined) {
+  if (init.body instanceof FormData) {
+    req.body = init.body; // fetch sets the multipart boundary
+  } else if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
     req.body = JSON.stringify(init.body);
   }
@@ -110,7 +111,7 @@ export const api = {
 
   tasks: (q: TaskListQuery = {}) =>
     apiFetch<TaskList>(
-      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, chain: q.chain })}`,
+      `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom })}`,
     ),
   task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
   createTask: (body: CreateTaskRequest) => apiFetch<Task>("/tasks", post(body)),
@@ -120,6 +121,13 @@ export const api = {
   followupTask: (id: number, body: FollowupRequest) => apiFetch<Task>(`/tasks/${id}/followup`, post(body)),
   stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
   duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
+
+  uploadImage: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiFetch<Attachment>("/uploads", post(form));
+  },
+  deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
 
   threads: (q: ThreadListQuery = {}) =>
     apiFetch<ThreadList>(
@@ -138,19 +146,19 @@ export const api = {
       })}`,
     ),
 
-  chains: () => apiFetch<ChainList>("/chains"),
-  chain: (id: number) => apiFetch<Chain>(`/chains/${id}`),
-  createChain: (body: CreateChainRequest) => apiFetch<Chain>("/chains", post(body)),
-  updateChain: (id: number, body: UpdateChainRequest) => apiFetch<Chain>(`/chains/${id}`, patch(body)),
-  chainAction: (id: number, action: ChainAction) => apiFetch<Chain>(`/chains/${id}/${action}`, post()),
 
   templates: () => apiFetch<TemplateList>("/templates"),
   createTemplate: (body: CreateTemplateRequest) => apiFetch<Template>("/templates", post(body)),
   updateTemplate: (id: number, body: UpdateTemplateRequest) => apiFetch<Template>(`/templates/${id}`, patch(body)),
   deleteTemplate: (id: number) => apiSend(`/templates/${id}`, del),
 
+  preferences: () => apiFetch<Preferences>("/preferences"),
+  setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),
+
   stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz, subagents: q.subagents })}`),
 };
 
 export type ArchivedFilter = "true" | "false" | "all";
-export type ChainAction = "start" | "pause" | "resume" | "skip";
+
+/** Image bytes URL (immutable; safe to cache). */
+export const attachmentUrl = (id: number) => `/api/attachments/${id}`;

@@ -35,7 +35,7 @@ func runState(s t3.ThreadStatus) (db.TaskState, bool) {
 	case t3.StatusPreparing, t3.StatusQueued, t3.StatusStarting, t3.StatusRunning:
 		return db.StateRunning, true
 	case t3.StatusCompleted:
-		return db.StateCompleted, true
+		return db.StateDone, true
 	case t3.StatusFailed:
 		return db.StateFailed, true
 	case t3.StatusInterrupted:

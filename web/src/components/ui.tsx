@@ -283,6 +283,7 @@ export function Panel({
   actions,
   flush = false,
   fill = false,
+  collapsed = false,
   className,
   children,
 }: {
@@ -292,6 +293,8 @@ export function Panel({
   flush?: boolean;
   /** Body stretches to the panel height (e.g. a grid row set by a taller sibling). */
   fill?: boolean;
+  /** Header only; the body is not rendered. */
+  collapsed?: boolean;
   className?: string | undefined;
   children: ReactNode;
 }) {
@@ -299,13 +302,13 @@ export function Panel({
   return (
     <section className={cx("min-w-0 border border-line bg-surface", fill && "flex flex-col", className)}>
       {hasHeader ? (
-        <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-panel px-3 py-1">
+        <div className={cx("flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", !collapsed && "border-b border-line")}>
           {title === undefined ? null : <h2 className="label-caps text-fg">{title}</h2>}
           {meta === undefined ? null : <span className="font-mono text-[11px] text-muted">{meta}</span>}
           {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
       ) : null}
-      <div className={cx(!flush && "p-3", fill && "flex flex-1 flex-col")}>{children}</div>
+      {collapsed ? null : <div className={cx(!flush && "p-3", fill && "flex flex-1 flex-col")}>{children}</div>}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -37,8 +38,15 @@ type fakeT3 struct {
 	mcpAuthHeaders []string
 	expiresIn      int
 
+	uploads map[string]fakeUpload // upload token -> body
+
 	tools   map[string]mcp.ToolHandler
 	handler atomic.Pointer[mcp.StreamableHTTPHandler]
+}
+
+type fakeUpload struct {
+	contentType, auth string
+	body              []byte
 }
 
 type pendingCode struct {
@@ -56,6 +64,7 @@ func newFakeT3(t *testing.T) *fakeT3 {
 		pendingCodes: map[string]pendingCode{},
 		tokens:       map[string]bool{},
 		tools:        map[string]mcp.ToolHandler{},
+		uploads:      map[string]fakeUpload{},
 		expiresIn:    30 * 24 * 3600,
 	}
 	mux := http.NewServeMux()
@@ -65,6 +74,13 @@ func newFakeT3(t *testing.T) *fakeT3 {
 	mux.HandleFunc("POST /oauth/mcp/token", f.token)
 	mux.HandleFunc("GET /.well-known/t3/environment", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"environmentId": "env-fake", "label": "fake"})
+	})
+	mux.HandleFunc("POST /api/attachments/upload/{token}", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.uploads[r.PathValue("token")] = fakeUpload{contentType: r.Header.Get("Content-Type"), auth: r.Header.Get("Authorization"), body: body}
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/mcp", f.mcp)
 	f.srv = httptest.NewServer(mux)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,10 +19,10 @@ import (
 	"time"
 
 	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/t3-stage/server/internal/links"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
@@ -100,7 +101,7 @@ type env struct {
 	fake   *t3.Fake
 	t3     *flakyT3
 	sync   *t3sync.Service
-	runner *chains.Runner
+	runner *links.Runner
 	store  *db.Store
 }
 
@@ -113,11 +114,11 @@ func newEnv(t *testing.T) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, client, log)
-	runner := chains.NewRunner(store, svc, client, log)
+	runner := links.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, T3: client, Sync: svc, Chains: runner, Logger: log,
+		Store:  store, T3: client, Sync: svc, Logger: log,
 	})
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
@@ -166,9 +167,9 @@ func (e *env) poll() {
 	}
 }
 
-func (e *env) evaluate() {
+func (e *env) reconcile() {
 	e.t.Helper()
-	if err := e.runner.EvaluateAll(context.Background()); err != nil {
+	if err := e.runner.Reconcile(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -194,7 +195,8 @@ type task struct {
 	Tags          []string          `json:"tags"`
 	State         string            `json:"state"`
 	T3ThreadID    *string           `json:"t3ThreadId"`
-	ChainID       *int64            `json:"chainId"`
+	AfterTaskID   *int64            `json:"afterTaskId"`
+	NextTaskID    *int64            `json:"nextTaskId"`
 	LaunchAttempt int               `json:"launchAttempt"`
 	LastError     *string           `json:"lastError"`
 	T3WebURL      *string           `json:"t3WebUrl"`
@@ -208,7 +210,16 @@ type task struct {
 		ToState   string  `json:"toState"`
 		Detail    string  `json:"detail"`
 	} `json:"events"`
-	Thread *thread `json:"thread"`
+	Thread      *thread      `json:"thread"`
+	Sequence    []task       `json:"sequence"`
+	Attachments []attachment `json:"attachments"`
+}
+
+type attachment struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	MimeType  string `json:"mimeType"`
+	SizeBytes int    `json:"sizeBytes"`
 }
 
 type thread struct {
@@ -223,13 +234,6 @@ type thread struct {
 	ProviderID  *string `json:"providerInstanceId"`
 	Title       string  `json:"title"`
 	T3ProjectID string  `json:"t3ProjectId"`
-}
-
-type chain struct {
-	ID            int64  `json:"id"`
-	State         string `json:"state"`
-	CurrentTaskID *int64 `json:"currentTaskId"`
-	Steps         []task `json:"steps"`
 }
 
 func (e *env) project(root string) project {
@@ -254,13 +258,6 @@ func (e *env) getTask(id int64) task {
 	e.t.Helper()
 	var out task
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", id), nil, 200, &out)
-	return out
-}
-
-func (e *env) getChain(id int64) chain {
-	e.t.Helper()
-	var out chain
-	e.must("GET", fmt.Sprintf("/api/chains/%d", id), nil, 200, &out)
 	return out
 }
 
@@ -333,8 +330,8 @@ func TestTaskLifecycle(t *testing.T) {
 	_ = e.fake.SetStatus(threadID, t3.StatusCompleted)
 	e.poll()
 	got := e.getTask(tk.ID)
-	if got.State != "completed" || got.FinishedAt == nil || got.SettledAt != nil {
-		t.Fatalf("completed %+v", got)
+	if got.State != "done" || got.FinishedAt == nil || got.SettledAt != nil {
+		t.Fatalf("done %+v", got)
 	}
 	_ = e.fake.Settle(threadID)
 	e.poll()
@@ -342,11 +339,23 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.State != "settled" || got.SettledAt == nil {
 		t.Fatalf("settled %+v", got)
 	}
+	var settledList struct {
+		Tasks []task `json:"tasks"`
+	}
+	e.must("GET", "/api/tasks?state=settled&settledFrom=2000-01-01", nil, 200, &settledList)
+	if len(settledList.Tasks) != 1 || settledList.Tasks[0].ID != tk.ID {
+		t.Fatalf("settledFrom past %+v", settledList.Tasks)
+	}
+	e.must("GET", "/api/tasks?state=settled&settledFrom=2999-01-01", nil, 200, &settledList)
+	if len(settledList.Tasks) != 0 {
+		t.Fatalf("settledFrom future %+v", settledList.Tasks)
+	}
+	e.must("GET", "/api/tasks?settledFrom=nope", nil, 400, nil)
 	var states []string
 	for _, ev := range got.Events {
 		states = append(states, ev.ToState)
 	}
-	want := []string{"backlog", "launching", "running", "needs_input", "completed", "settled"}
+	want := []string{"backlog", "launching", "running", "needs_input", "done", "settled"}
 	if !slices.Equal(states, want) {
 		t.Fatalf("events %v, want %v", states, want)
 	}
@@ -428,7 +437,7 @@ func TestTaskActions(t *testing.T) {
 
 	var dup task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", tk.ID), nil, 201, &dup)
-	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.T3ThreadID != nil || dup.ChainID != nil {
+	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.T3ThreadID != nil || dup.AfterTaskID != nil {
 		t.Fatalf("duplicate %+v", dup)
 	}
 	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", dup.ID), nil, 204, nil)
@@ -597,82 +606,53 @@ func TestProjects(t *testing.T) {
 	e.must("GET", "/api/projects/999", nil, 404, nil)
 }
 
-func TestChainAdvancesOnlyAfterSettle(t *testing.T) {
+func TestLinkedTaskStartsOnlyAfterSettle(t *testing.T) {
 	e := newEnv(t)
 	p1 := e.project("/w/one")
 	p2 := e.project("/w/two")
-	a := e.task(p1.ID, "step 1", nil)
-	b := e.task(p2.ID, "step 2", nil) // cross-project
-
-	var c chain
-	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID}}, 201, &c)
-	if c.State != "idle" || c.CurrentTaskID == nil || *c.CurrentTaskID != a.ID || len(c.Steps) != 2 {
-		t.Fatalf("created %+v", c)
+	a := e.task(p1.ID, "step 1", map[string]any{"start": true})
+	b := e.task(p2.ID, "step 2", map[string]any{"afterTaskId": a.ID, "start": true}) // start ignored when linked
+	if b.State != "backlog" || b.AfterTaskID == nil || *b.AfterTaskID != a.ID {
+		t.Fatalf("linked %+v", b)
 	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/resume", c.ID), nil, 409, nil)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
-	if c.State != "running" || c.Steps[0].State != "running" || c.Steps[1].State != "backlog" {
-		t.Fatalf("started %+v", c)
+	if got := e.getTask(a.ID); got.NextTaskID == nil || *got.NextTaskID != b.ID || len(got.Sequence) != 2 ||
+		got.Sequence[0].ID != a.ID || got.Sequence[1].ID != b.ID {
+		t.Fatalf("a %+v", got)
 	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 409, nil)
-	thread1 := *c.Steps[0].T3ThreadID
+	thread1 := *a.T3ThreadID
 
 	_ = e.fake.SetStatus(thread1, t3.StatusCompleted)
 	e.poll()
-	e.evaluate()
-	c = e.getChain(c.ID)
-	if c.Steps[0].State != "completed" || c.Steps[1].State != "backlog" || *c.CurrentTaskID != a.ID {
-		t.Fatalf("completed but unsettled must wait: %+v", c)
+	e.reconcile()
+	if got := e.getTask(b.ID); got.State != "backlog" {
+		t.Fatalf("done but unsettled must wait: %+v", got)
 	}
 
 	_ = e.fake.Settle(thread1)
 	e.poll()
-	e.evaluate()
-	c = e.getChain(c.ID)
-	if c.Steps[0].State != "settled" || c.Steps[1].State != "running" || *c.CurrentTaskID != b.ID {
-		t.Fatalf("after settle step 2 must run: %+v", c)
+	e.reconcile()
+	got := e.getTask(b.ID)
+	if got.State != "running" || got.T3ThreadID == nil || *got.T3ThreadID == thread1 || got.AfterTaskID == nil {
+		t.Fatalf("after settle step 2 must run in a new thread, keeping its link: %+v", got)
 	}
-	thread2 := *c.Steps[1].T3ThreadID
-	if thread2 == thread1 {
-		t.Fatal("chain step must get a new thread")
-	}
-	d, _ := e.fake.ReadThread(context.Background(), thread2)
+	d, _ := e.fake.ReadThread(context.Background(), *got.T3ThreadID)
 	if d.ProjectID != p2.T3ProjectID {
 		t.Fatalf("step 2 launched in %s, want %s", d.ProjectID, p2.T3ProjectID)
 	}
-	_ = e.fake.SetStatus(thread2, t3.StatusCompleted)
-	_ = e.fake.Settle(thread2)
-	e.poll()
-	e.evaluate()
-	c = e.getChain(c.ID)
-	if c.State != "done" || c.CurrentTaskID != nil {
-		t.Fatalf("chain done %+v", c)
-	}
-	var list struct {
-		Chains []chain `json:"chains"`
-	}
-	e.must("GET", "/api/chains", nil, 200, &list)
-	if len(list.Chains) != 1 || len(list.Chains[0].Steps) != 2 {
-		t.Fatalf("list %+v", list)
-	}
 }
 
-func TestChainRunLoopProcessesKicks(t *testing.T) {
+func TestLinkRunLoopProcessesKicks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
-	a := e.task(p.ID, "s1", nil)
-	b := e.task(p.ID, "s2", nil)
-	var c chain
-	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID}}, 201, &c)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
+	a := e.task(p.ID, "s1", map[string]any{"start": true})
+	b := e.task(p.ID, "s2", map[string]any{"afterTaskId": a.ID})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { e.runner.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	thread1 := *c.Steps[0].T3ThreadID
-	_ = e.fake.SetStatus(thread1, t3.StatusCompleted)
-	_ = e.fake.Settle(thread1)
+	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.T3ThreadID)
 	e.poll() // transition hook kicks the runner loop
 	for range 200 {
 		if got := e.getTask(b.ID); got.State == "running" {
@@ -686,182 +666,80 @@ func TestChainRunLoopProcessesKicks(t *testing.T) {
 	t.Fatalf("runner loop did not launch step 2: %+v", e.getTask(b.ID))
 }
 
-func TestChainPauseResumeSkip(t *testing.T) {
+func TestLinkRulesAndStartNow(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
-	a := e.task(p.ID, "s1", nil)
-	b := e.task(p.ID, "s2", nil)
-	cTask := e.task(p.ID, "s3", nil)
-	var c chain
-	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID}}, 201, &c)
-	// Append via create.
-	appended := e.task(p.ID, "s4", map[string]any{"chainId": c.ID, "start": true})
-	if appended.ChainID == nil || appended.State != "backlog" {
-		t.Fatalf("appended %+v (start must be ignored with chainId)", appended)
-	}
-	// Reorder/add/remove via PATCH while idle.
-	e.must("PATCH", fmt.Sprintf("/api/chains/%d", c.ID), map[string]any{"steps": []int64{a.ID, b.ID, cTask.ID}}, 200, &c)
-	if len(c.Steps) != 3 || c.Steps[2].ID != cTask.ID {
-		t.Fatalf("patched %+v", c)
-	}
-	if got := e.getTask(appended.ID); got.ChainID != nil {
-		t.Fatal("removed step still chained")
-	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/pause", c.ID), nil, 409, nil)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
-	thread1 := *c.Steps[0].T3ThreadID
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	b := e.task(p.ID, "b", nil)
+	c := e.task(p.ID, "c", nil)
 
-	// Step failure pauses the chain.
-	_ = e.fake.SetStatus(thread1, t3.StatusFailed)
+	// "Then run" from a = link b after a.
+	var got task
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", b.ID), map[string]any{"afterTaskId": a.ID}, 200, &got)
+	if got.AfterTaskID == nil || *got.AfterTaskID != a.ID {
+		t.Fatalf("linked %+v", got)
+	}
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", c.ID), map[string]any{"afterTaskId": a.ID}, 409, nil) // a taken
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", a.ID), map[string]any{"afterTaskId": c.ID}, 409, nil) // a not backlog
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", c.ID), map[string]any{"afterTaskId": 999}, 404, nil)  // missing
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "afterTaskId": a.ID}, 409, nil)
+
+	// A failed predecessor leaves its follower waiting.
+	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusFailed)
 	e.poll()
-	c = e.getChain(c.ID)
-	if c.State != "paused" || c.Steps[0].State != "failed" {
-		t.Fatalf("failure must pause: %+v", c)
+	e.reconcile()
+	if got = e.getTask(b.ID); got.State != "backlog" {
+		t.Fatalf("follower of failed task %+v", got)
 	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/resume", c.ID), nil, 409, nil)
 
-	// Skip the failed step: cancelled (detail skipped), chain stays paused.
-	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 200, &c)
-	if c.State != "paused" || c.Steps[0].State != "cancelled" || c.Steps[1].State != "backlog" || *c.CurrentTaskID != b.ID {
-		t.Fatalf("after skip %+v", c)
+	// Start now: b is unlinked from the unfinished a and launched.
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &got)
+	if got.State != "running" || got.AfterTaskID != nil {
+		t.Fatalf("start now %+v", got)
 	}
-	skipped := e.getTask(a.ID)
-	if last := skipped.Events[len(skipped.Events)-1]; last.Detail != "skipped" || last.ToState != "cancelled" {
-		t.Fatalf("skip event %+v", last)
+	if got = e.getTask(a.ID); got.NextTaskID != nil {
+		t.Fatalf("a still has a follower %+v", got)
 	}
-	e.must("PATCH", fmt.Sprintf("/api/chains/%d", c.ID), map[string]any{"steps": []int64{b.ID, cTask.ID}}, 409, nil)
 
-	// Resume launches step 2.
-	e.must("POST", fmt.Sprintf("/api/chains/%d/resume", c.ID), nil, 200, &c)
-	if c.State != "running" || c.Steps[1].State != "running" {
-		t.Fatalf("after resume %+v", c)
+	// Unlink with null; delete splices.
+	d := e.task(p.ID, "d", map[string]any{"afterTaskId": c.ID})
+	f := e.task(p.ID, "f", map[string]any{"afterTaskId": d.ID})
+	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", d.ID), nil, 204, nil)
+	if got = e.getTask(f.ID); got.AfterTaskID == nil || *got.AfterTaskID != c.ID {
+		t.Fatalf("splice %+v", got)
 	}
-	thread2 := *c.Steps[1].T3ThreadID
-
-	// Pause does not stop the active thread.
-	e.must("POST", fmt.Sprintf("/api/chains/%d/pause", c.ID), nil, 200, &c)
-	if c.State != "paused" || slices.Contains(e.fake.Interrupted, thread2) {
-		t.Fatalf("pause %+v", c)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", f.ID), map[string]any{"afterTaskId": nil}, 200, &got)
+	if got.AfterTaskID != nil {
+		t.Fatalf("unlink %+v", got)
 	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/pause", c.ID), nil, 409, nil)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/resume", c.ID), nil, 200, &c)
-
-	// Skip an active step on a running chain: interrupt + advance; the
-	// cancelled step is not re-polled into interrupted.
-	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 200, &c)
-	if !slices.Contains(e.fake.Interrupted, thread2) {
-		t.Fatal("skip must interrupt the active thread")
-	}
-	if c.State != "running" || c.Steps[1].State != "cancelled" || c.Steps[2].State != "running" {
-		t.Fatalf("skip running %+v", c)
-	}
-	e.poll()
-	if got := e.getTask(b.ID); got.State != "cancelled" {
-		t.Fatalf("skipped step re-polled to %s", got.State)
-	}
-	// Skip last step → no current step → done.
-	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 200, &c)
-	if c.State != "done" || c.CurrentTaskID != nil {
-		t.Fatalf("skip last %+v", c)
-	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 409, nil)
-
-	// Validation.
-	e.must("POST", "/api/chains", map[string]any{"title": ""}, 400, nil)
-	e.must("POST", "/api/chains", map[string]any{"title": "x", "steps": []int64{a.ID}}, 409, nil) // in another chain
-	e.must("POST", "/api/chains", map[string]any{"title": "x", "steps": []int64{999}}, 404, nil)
-	var empty chain
-	e.must("POST", "/api/chains", map[string]any{"title": "empty"}, 201, &empty)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", empty.ID), nil, 409, nil)
-	e.must("GET", "/api/chains/999", nil, 404, nil)
 }
 
-func TestChainBacklogStepStartedOnlyByChain(t *testing.T) {
+func TestFollowupDoesNotReviveReleasedSettledTask(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
-	a := e.task(p.ID, "s1", nil)
-	b := e.task(p.ID, "s2", nil)
-	var c chain
-	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID}}, 201, &c)
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 409, nil)
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 409, nil)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
-	if c.Steps[0].State != "running" || c.Steps[1].State != "backlog" {
-		t.Fatalf("started %+v", c)
-	}
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 409, nil)
-	// Documented recovery: restart a failed step, then resume.
-	_ = e.fake.SetStatus(*c.Steps[0].T3ThreadID, t3.StatusFailed)
-	e.poll()
-	var restarted task
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &restarted)
-	if restarted.State != "running" || restarted.LaunchAttempt != 2 {
-		t.Fatalf("restart failed step %+v", restarted)
-	}
-	if got := e.getTask(b.ID); got.State != "backlog" {
-		t.Fatalf("step 2 %s", got.State)
-	}
-	// Reordering a backlog step ahead of the running step is refused.
-	e.must("PATCH", fmt.Sprintf("/api/chains/%d", c.ID), map[string]any{"steps": []int64{b.ID, a.ID}}, 409, nil)
-}
-
-func TestFollowupDoesNotReviveSkippedOrSettledSteps(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/one")
-	a := e.task(p.ID, "s1", nil)
-	b := e.task(p.ID, "s2", nil)
-	cTask := e.task(p.ID, "s3", nil)
-	var c chain
-	e.must("POST", "/api/chains", map[string]any{"title": "ch", "steps": []int64{a.ID, b.ID, cTask.ID}}, 201, &c)
-	e.must("POST", fmt.Sprintf("/api/chains/%d/start", c.ID), nil, 200, &c)
-	threadA := *c.Steps[0].T3ThreadID
+	a := e.task(p.ID, "s1", map[string]any{"start": true})
+	b := e.task(p.ID, "s2", map[string]any{"afterTaskId": a.ID})
+	threadA := *a.T3ThreadID
 	_ = e.fake.SetStatus(threadA, t3.StatusCompleted)
 	_ = e.fake.Settle(threadA)
 	e.poll()
-	e.evaluate()
-	c = e.getChain(c.ID)
-	threadB := *c.Steps[1].T3ThreadID
+	e.reconcile()
+	if got := e.getTask(b.ID); got.State != "running" {
+		t.Fatalf("follower %+v", got)
+	}
 
-	// Follow-up on the settled step reopens its T3 thread; the step stays settled.
+	// Follow-up on the settled task whose follower already ran: stays settled.
 	_ = e.fake.SetThread(threadA, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
 	var got task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", a.ID), map[string]any{"message": "more"}, 200, &got)
 	if got.State != "settled" {
-		t.Fatalf("settled step after follow-up: %s", got.State)
+		t.Fatalf("settled task after follow-up: %s", got.State)
 	}
 	if th := e.getTask(a.ID).Thread; th == nil || th.Status != "running" {
 		t.Fatalf("thread mirror not refreshed: %+v", th)
 	}
 
-	// Skip step 2 with a failing interrupt: the step is cancelled before the
-	// interrupt is sent, and the skip still succeeds.
-	e.t3.failInterrupt.Store(true)
-	var stateAtInterrupt string
-	e.t3.onInterrupt = func() {
-		if tk, err := e.store.GetTask(context.Background(), b.ID); err == nil {
-			stateAtInterrupt = string(tk.State)
-		}
-	}
-	e.must("POST", fmt.Sprintf("/api/chains/%d/skip", c.ID), nil, 200, &c)
-	e.t3.onInterrupt = nil
-	e.t3.failInterrupt.Store(false)
-	if stateAtInterrupt != "cancelled" {
-		t.Fatalf("state at interrupt %q, want cancelled", stateAtInterrupt)
-	}
-	if c.State != "running" || c.Steps[1].State != "cancelled" || c.Steps[2].State != "running" {
-		t.Fatalf("after skip %+v", c)
-	}
-	// Follow-up on the skipped step: stays cancelled, chain not paused.
-	_ = e.fake.SetStatus(threadB, t3.StatusInterrupted)
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", b.ID), map[string]any{"message": "more"}, 200, &got)
-	if got.State != "cancelled" {
-		t.Fatalf("skipped step after follow-up: %s", got.State)
-	}
-	if c = e.getChain(c.ID); c.State != "running" {
-		t.Fatalf("chain %s", c.State)
-	}
-
-	// A settled standalone task still reopens on follow-up.
+	// A settled unlinked task still reopens on follow-up.
 	solo := e.task(p.ID, "solo", map[string]any{"start": true})
 	_ = e.fake.SetStatus(*solo.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*solo.T3ThreadID)
@@ -1170,4 +1048,197 @@ func TestHistorySubagentsFilter(t *testing.T) {
 		}
 	}
 	e.must("GET", "/api/stats?subagents=bogus", nil, 400, nil)
+}
+
+func TestPreferences(t *testing.T) {
+	e := newEnv(t)
+	type defaults struct {
+		ProviderInstanceID *string `json:"providerInstanceId"`
+		Model              *string `json:"model"`
+		ModelOptions       []struct {
+			ID    string `json:"id"`
+			Value any    `json:"value"`
+		} `json:"modelOptions"`
+		RuntimeMode     string `json:"runtimeMode"`
+		InteractionMode string `json:"interactionMode"`
+	}
+	type prefs struct {
+		Pinned   *defaults `json:"pinned"`
+		LastUsed *defaults `json:"lastUsed"`
+	}
+	var p prefs
+	e.must("GET", "/api/preferences", nil, 200, &p)
+	if p.Pinned != nil || p.LastUsed != nil {
+		t.Fatalf("fresh %+v", p)
+	}
+
+	// Creating a task records its model config as last used.
+	pr := e.project("/w/prefs")
+	e.task(pr.ID, "A", map[string]any{
+		"providerInstanceId": "codex", "model": "gpt-6", "modelOptions": []map[string]any{{"id": "effort", "value": "high"}},
+		"runtimeMode": "auto", "interactionMode": "plan",
+	})
+	e.must("GET", "/api/preferences", nil, 200, &p)
+	lu := p.LastUsed
+	if lu == nil || *lu.ProviderInstanceID != "codex" || *lu.Model != "gpt-6" || lu.RuntimeMode != "auto" ||
+		lu.InteractionMode != "plan" || len(lu.ModelOptions) != 1 || lu.ModelOptions[0].Value != "high" || p.Pinned != nil {
+		t.Fatalf("last used %+v", p)
+	}
+
+	// Pin, validate, clear.
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"providerInstanceId": "claude", "model": "claude-haiku-5-5"}, 200, &p)
+	if p.Pinned == nil || *p.Pinned.Model != "claude-haiku-5-5" || p.Pinned.RuntimeMode != "full-access" ||
+		p.Pinned.InteractionMode != "default" || p.Pinned.ModelOptions == nil || p.LastUsed == nil {
+		t.Fatalf("pinned %+v", p)
+	}
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"model": "x"}, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"runtimeMode": "yolo"}, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", nil, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", json.RawMessage("null"), 200, &p)
+	if p.Pinned != nil || p.LastUsed == nil {
+		t.Fatalf("cleared %+v", p)
+	}
+}
+
+// pngBytes is a valid 1x1 PNG (sniffs as image/png).
+var pngBytes = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+
+// upload posts data as multipart field "file"; returns status and body.
+func (e *env) upload(name string, data []byte) (int, attachment) {
+	e.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", name)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		e.t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/uploads", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	var a attachment
+	if rec.Code == 201 {
+		if err := json.Unmarshal(rec.Body.Bytes(), &a); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	return rec.Code, a
+}
+
+func (e *env) mustUpload(name string) attachment {
+	e.t.Helper()
+	code, a := e.upload(name, pngBytes)
+	if code != 201 {
+		e.t.Fatalf("upload %s: status %d", name, code)
+	}
+	return a
+}
+
+func TestUploadValidationAndServe(t *testing.T) {
+	e := newEnv(t)
+	a := e.mustUpload("../../shot.png")
+	if a.Name != "shot.png" || a.MimeType != "image/png" || a.SizeBytes != len(pngBytes) {
+		t.Fatalf("upload = %+v", a)
+	}
+	if code, _ := e.upload("x.png", []byte("<svg onload=alert(1)>")); code != 400 {
+		t.Fatalf("non-image upload: status %d, want 400", code)
+	}
+	big := append(append([]byte{}, pngBytes...), make([]byte, db.MaxAttachmentBytes)...)
+	if code, _ := e.upload("big.png", big); code != 400 {
+		t.Fatalf("oversize upload: status %d, want 400", code)
+	}
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/attachments/%d", a.ID), nil)
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != "image/png" || rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		!bytes.Equal(rec.Body.Bytes(), pngBytes) {
+		t.Fatalf("get attachment: %d %v", rec.Code, rec.Header())
+	}
+	e.must("DELETE", fmt.Sprintf("/api/attachments/%d", a.ID), nil, 204, nil)
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", a.ID), nil, 404, nil)
+}
+
+func TestTaskImagesLaunchAndEdit(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/img")
+	a1, a2, a3 := e.mustUpload("a.png"), e.mustUpload("b.png"), e.mustUpload("c.png")
+
+	tk := e.task(p.ID, "with images", map[string]any{"attachmentIds": []int64{a1.ID, a2.ID}})
+	if len(tk.Attachments) != 2 || tk.Attachments[0].ID != a1.ID || tk.Attachments[1].Name != "b.png" {
+		t.Fatalf("attachments = %+v", tk.Attachments)
+	}
+	// An attached image can't be reused by another task.
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "steal", "prompt": "x", "attachmentIds": []int64{a1.ID}}, 400, nil)
+	nine := make([]int64, 9)
+	for i := range nine {
+		nine[i] = int64(i + 1)
+	}
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "many", "prompt": "x", "attachmentIds": nine}, 400, nil)
+
+	// Backlog edit sets the exact set: drop a1, add a3.
+	var got task
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"attachmentIds": []int64{a2.ID, a3.ID}}, 200, &got)
+	if len(got.Attachments) != 2 || got.Attachments[0].ID != a2.ID || got.Attachments[1].ID != a3.ID {
+		t.Fatalf("after edit = %+v", got.Attachments)
+	}
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", a1.ID), nil, 404, nil)
+
+	// Duplicate copies images.
+	var dup task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", tk.ID), nil, 201, &dup)
+	if len(dup.Attachments) != 2 || dup.Attachments[0].ID == a2.ID || dup.Attachments[0].Name != "b.png" {
+		t.Fatalf("duplicate attachments = %+v", dup.Attachments)
+	}
+
+	// Launch uploads each image to T3 and passes them to t3_thread_launch.
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &got)
+	if got.State != "running" {
+		t.Fatalf("state %s (%v)", got.State, got.LastError)
+	}
+	if len(e.fake.Launched) != 1 || len(e.fake.Launched[0].Attachments) != 2 || e.fake.Launched[0].Attachments[0].Name != "b.png" ||
+		!bytes.Equal(e.fake.Uploads[0].Data, pngBytes) {
+		t.Fatalf("launched = %+v uploads = %d", e.fake.Launched, len(e.fake.Uploads))
+	}
+	// Read-only after backlog.
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"attachmentIds": []int64{}}, 409, nil)
+	e.must("DELETE", fmt.Sprintf("/api/attachments/%d", a2.ID), nil, 409, nil)
+
+	// A failed launch discards that launch's uploads; a retry uploads fresh ones.
+	e.t3.failLaunch.Store(true)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", dup.ID), nil, 502, nil)
+	if len(e.fake.Discarded) != 2 || e.fake.Discarded[0] != e.fake.Uploads[2].ID {
+		t.Fatalf("discarded = %v", e.fake.Discarded)
+	}
+	e.t3.failLaunch.Store(false)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", dup.ID), nil, 200, &got)
+	last := e.fake.Launched[len(e.fake.Launched)-1]
+	if len(last.Attachments) != 2 || last.Attachments[0].ID != e.fake.Uploads[4].ID {
+		t.Fatalf("retry attachments = %+v", last.Attachments)
+	}
+}
+
+func TestFollowupWithImages(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/fimg")
+	tk := e.task(p.ID, "f", map[string]any{"start": true})
+	img := e.mustUpload("followup.png")
+	path := fmt.Sprintf("/api/tasks/%d/followup", tk.ID)
+	e.must("POST", path, map[string]any{"message": "x", "mode": "steer", "attachmentIds": []int64{img.ID}}, 400, nil)
+	e.must("POST", path, map[string]any{"attachmentIds": []int64{999999}}, 400, nil)
+	e.must("POST", path, map[string]any{"message": "see this", "attachmentIds": []int64{img.ID}}, 200, nil)
+	if len(e.fake.SentAttachments) != 1 || e.fake.SentAttachments[0].Message != "see this" ||
+		len(e.fake.SentAttachments[0].Attachments) != 1 || e.fake.SentAttachments[0].Attachments[0].Name != "followup.png" {
+		t.Fatalf("sent = %+v", e.fake.SentAttachments)
+	}
+	// Sent images are deleted.
+	e.must("GET", fmt.Sprintf("/api/attachments/%d", img.ID), nil, 404, nil)
+	if len(e.fake.Sent) != 0 {
+		t.Fatalf("plain send used: %+v", e.fake.Sent)
+	}
 }

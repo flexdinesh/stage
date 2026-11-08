@@ -41,7 +41,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// App errors shared by db, sync, chains and api (api maps them to statuses).
+// App errors shared by db, sync, links and api (api maps them to statuses).
 var ErrNotFound = errors.New("not found")
 
 // ConflictError: action not allowed in current state / duplicate (409).

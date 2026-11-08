@@ -36,9 +36,9 @@ export const IconProjects = (p: IconProps) => (
   </Svg>
 );
 
-export const IconChains = (p: IconProps) => (
+export const IconTemplates = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M2 6h4v4H2zM10 6h4v4h-4zM6 8h4" />
+    <path d="M3.5 2h9v12h-9zM6 5.5h4M6 8h4M6 10.5h2.5" />
   </Svg>
 );
 
@@ -125,5 +125,12 @@ export const IconSync = (p: IconProps) => (
 export const IconChainLink = (p: IconProps) => (
   <Svg {...p} size={p.size ?? 12}>
     <path d="M6.5 9.5l3-3M5 7.5L3.5 9a2.1 2.1 0 0 0 3 3L8 10.5M11 8.5L12.5 7a2.1 2.1 0 0 0-3-3L8 5.5" />
+  </Svg>
+);
+
+export const IconImage = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 2.5h11v11h-11zM2.5 11l3.5-3.5 3 3 1.5-1.5 3 3" />
+    <path d="M10 5.5h1v1h-1z" />
   </Svg>
 );

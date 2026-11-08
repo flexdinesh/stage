@@ -13,9 +13,9 @@ import (
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
 	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/t3-stage/server/internal/links"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 	"github.com/flexdinesh/t3-stage/server/internal/webui"
@@ -78,17 +78,18 @@ func run() error {
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
-	runner := chains.NewRunner(store, syncSvc, t3Client, logger)
+	runner := links.NewRunner(store, syncSvc, logger)
 	syncSvc.OnTransition = runner.OnTransition
-	// Before the poller, chain runner and HTTP server can touch launching tasks.
+	// Before the poller, link runner and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	go func() { defer wg.Done(); runner.Run(ctx) }()
+	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(api.Deps{
-		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Chains: runner, Logger: logger,
+		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Logger: logger,
 	}))
 	mux.Handle("/", webui.Handler())
 
@@ -109,4 +110,23 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// sweepStagedAttachments hourly deletes uploads never attached or sent
+// within 24h (abandoned new-task drafts and follow-ups).
+func sweepStagedAttachments(ctx context.Context, store *db.Store, log *slog.Logger) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if n, err := store.SweepStagedAttachments(ctx, 24*time.Hour); err != nil && ctx.Err() == nil {
+			log.Warn("sweep staged attachments", "err", err)
+		} else if n > 0 {
+			log.Info("swept staged attachments", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

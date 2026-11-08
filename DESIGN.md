@@ -226,14 +226,14 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 - **Ink Text** (`fg` / `fg-dark`): all primary text and row titles.
 - **Slate** (`muted` / `muted-dark`): metadata, labels, placeholders, empty-state copy, inactive tabs.
 - **Hairline** (`line` / `line-dark`): row separators, panel borders, bar borders.
-- **Strong Hairline** (`line-strong` / `line-strong-dark`): control outlines (inputs, secondary buttons, segmented groups, search trigger), drawer edge, chain connectors, dashed backlog steps.
+- **Strong Hairline** (`line-strong` / `line-strong-dark`): control outlines (inputs, secondary buttons, segmented groups, search trigger), drawer edge, run order connectors, dashed backlog steps.
 - **Scrim** (`scrim` / `scrim-dark`): behind drawers, sheets and the palette.
 
 ### State
-- **Waiting Yellow** (`need`, text `need-fg`): needs input, paused chains, waiting threads. The marker and border are the bright yellow; text uses the darker `need-fg` because the bright yellow fails as text on white.
-- **Running Sky** (`run`): launching, running, queued, starting threads; running chains.
-- **Settle Teal** (`done`): completed and awaiting settle in T3.
-- **Settled Green** (`ok`): settled tasks, finished chains, T3 connected.
+- **Waiting Yellow** (`need`, text `need-fg`): needs input, waiting threads. The marker and border are the bright yellow; text uses the darker `need-fg` because the bright yellow fails as text on white.
+- **Running Sky** (`run`): launching, running, queued, starting threads.
+- **Settle Teal** (`done`): done (run finished) and awaiting settle in T3; T3 threads labelled `completed` read "done".
+- **Settled Green** (`ok`): settled tasks and threads (a settled thread shows "settled" whatever its run status), T3 connected.
 - **Fault Red** (`bad`): failed, interrupted, T3 offline, errors, danger buttons.
 - **Idle Gray** (`idle`): backlog, cancelled, idle, rolled back.
 
@@ -255,7 +255,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 ### Hierarchy
 - **Headline** (700, 22px, 24px from 640px up, 1.25, -0.025em): the page H1 only. Balanced wrapping, breaks long task titles.
 - **Title** (600, 15px): drawer and sheet titles.
-- **Row Title** (500, 13.5px): task, chain and thread titles in rows; underline on hover.
+- **Row Title** (500, 13.5px): task and thread titles in rows; underline on hover.
 - **Body** (400, 13.5px, 1.45, -0.005em): base text, inputs at 13px.
 - **Body Small** (400, 12.5px): alerts, details, empty states, button labels (500).
 - **Stat** (700, 15px, tabular): stat strip counts.
@@ -269,11 +269,11 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 
 ## Layout
 
-A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts and a 56px five-cell bottom tab bar (Stage, Projects, Chains, History, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding for it.
+A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts and a 56px five-cell bottom tab bar (Stage, Projects, History, Templates, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding for it.
 
 Pages stack: PageHeader (H1, `//` meta line, actions right-aligned, 16px below), then panels separated by 14px. The Dashboard puts a one-row stat strip (16px below the header) above the state groups in fixed order: Needs input, Running, Completed, Failed, Backlog. Consecutive empty groups collapse into one ruled list with the label left and the empty sentence right. Detail pages split at 1024px into a fluid main column and a 340px side column (300px on History).
 
-Rows are grids: 118px state column, fluid title, optional chain chip, right-aligned actions on laptop; on phone the title leads, the state chip floats right and actions wrap below. Spacing steps are 4, 8, 10, 12, 14, 16, 24px.
+Rows are grids: 118px state column, fluid title, optional run order chip ("after #12" or "then #14"), right-aligned actions on laptop; on phone the title leads, the state chip floats right and actions wrap below. Spacing steps are 4, 8, 10, 12, 14, 16, 24px.
 
 ### Named Rules
 **The Ruled List Rule.** One bordered panel per state or concern, rows separated by hairlines. Never a grid of cards.
@@ -295,7 +295,7 @@ Flat. Depth comes from tone and line, not shadow: a Bench Gray header bar over a
 
 ## Shapes
 
-Every corner is square (0px): buttons, inputs, chips, panels, drawers, keycaps, skeleton bars, the busy spinner, and state markers. Borders are always 1px; the only 2px strokes are the active-tab underline, the stat selection bar, the focus outline and the needs-input row edge. State markers are 6px squares (7px in alerts, 8px on the phone tab); the brand mark is a 10px ink square. Chain steps are bordered cells joined by 1px connectors; unstarted steps use a dashed border, the current step adds a 1px Ink Text outline offset 1px.
+Every corner is square (0px): buttons, inputs, chips, panels, drawers, keycaps, skeleton bars, the busy spinner, and state markers. Borders are always 1px; the only 2px strokes are the active-tab underline, the stat selection bar, the focus outline and the needs-input row edge. State markers are 6px squares (7px in alerts, 8px on the phone tab); the brand mark is a 10px ink square. Run order steps are bordered cells joined by 1px connectors; unstarted steps use a dashed border, the current step adds a 1px Ink Text outline offset 1px.
 
 Icons are authored 16px SVGs on a 16-unit grid: 1.5 stroke, square caps, miter joins, currentColor, so they share the sharp geometry of the grid.
 
@@ -315,7 +315,7 @@ Compact, flat, and ink-led.
 
 ### Chips
 - **Style:** inline mono label (11.5px, 18px line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
-- **State:** task, chain and thread states map onto the six tones; plain chips (Slate border, Ink Text) carry model, runtime, workspace, tags and the chain link.
+- **State:** task and thread states map onto the six tones; plain chips (Slate border, Ink Text) carry model, runtime, workspace, tags and the run order link.
 
 ### Cards / Containers (Panel)
 - **Corner Style:** square.
@@ -337,16 +337,19 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 - **Phone:** 56px bottom bar, five equal cells with a 16px icon over a 10.5px label; active cell gets a 2px Ink top border. Templates and Settings live in the More drawer.
 
 ### Stat strip (signature)
-One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels.
+One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
 
 ### Task row (signature)
-State chip, row title with a mono meta line (project, model, relative time, tags), optional chain chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.
+State chip, row title with a mono meta line (project, model, relative time, tags), optional run order chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.
 
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 12.5px text, actions right. `need` for waiting-on-you, `bad` for errors.
 
-### Chain pipeline
-Step cells joined by 1px Strong Hairline connectors. Large size shows numbered, titled cells (numbers only on phone); small size is a strip of 20x14px tone-bordered cells in chain rows.
+### Run order pipeline
+Step cells joined by 1px Strong Hairline connectors, in the task detail Run order panel (top of the side column). Numbered, titled cells on laptop, numbers only on phone; the viewed task gets the Ink outline. Below it, "Runs after" and "Then runs" lines carry Unlink, and pickers link new steps. A waiting task's Start now arms a confirm ("unlink from #12 and start") before acting.
+
+### Image dropzone
+The prompt (new/backlog task) and the follow-up box are drop targets: dragging files over them lays a dashed Ink-accent border and a 90% surface scrim with "Drop images to attach" in mono. Below, 56px square thumbnails (1px Strong Hairline, `object-cover`) wrap in a row; each has an 18px square remove button on its top-right corner, uploading thumbs dim to 60% under the busy spinner, failed ones take a Red border and a red line naming the file. A ghost "Add image" button (file picker) and a mono `n/8` count (or the accepted types when empty) close the block. Read-only strips (task detail Prompt panel, non-backlog edit) are the same thumbnails linking to the full image. With images in a follow-up the send-mode group dims (images go as one new message).
 
 ### Command palette
 Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; grouped results under Label headers, matched text bolded, active result gets a 7% ink fill and a 2px inset ink bar; a Bench Gray footer lists keycaps.

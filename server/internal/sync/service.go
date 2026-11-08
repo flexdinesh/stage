@@ -16,11 +16,10 @@ import (
 
 // Change is a task state transition the service applied.
 type Change struct {
-	TaskID  int64
-	ChainID *int64
-	From    db.TaskState
-	To      db.TaskState
-	Detail  string
+	TaskID int64
+	From   db.TaskState
+	To     db.TaskState
+	Detail string
 }
 
 // Result is a full sync summary (POST /api/sync).
@@ -45,14 +44,14 @@ type Service struct {
 	t3    t3.Client
 	log   *slog.Logger
 
-	// OnTransition is called after every applied task transition (chain
+	// OnTransition is called after every applied task transition (link
 	// runner hook). Must not block for long.
 	OnTransition func(ctx context.Context, c Change)
 
 	FullSyncEvery time.Duration
 	PollEvery     time.Duration
 	CatalogEvery  time.Duration
-	// StalePollEvery: completed tasks untouched for an hour are polled at
+	// StalePollEvery: done tasks untouched for an hour are polled at
 	// most this often.
 	StalePollEvery time.Duration
 	// LaunchAttemptTimeout bounds one t3_thread_launch call (a launch makes
@@ -114,7 +113,7 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
-// Run it once at startup before the poller, chain runner and HTTP server.
+// Run it once at startup before the poller, link runner and HTTP server.
 func (s *Service) RecoverLaunching(ctx context.Context) {
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}})
 	if err != nil {
@@ -138,7 +137,7 @@ func (s *Service) transition(ctx context.Context, t db.Transition) (db.Transitio
 	}
 	s.log.Info("task transition", "task", t.TaskID, "from", res.From, "to", t.To, "detail", t.Detail)
 	if s.OnTransition != nil {
-		s.OnTransition(ctx, Change{TaskID: t.TaskID, ChainID: res.ChainID, From: res.From, To: t.To, Detail: t.Detail})
+		s.OnTransition(ctx, Change{TaskID: t.TaskID, From: res.From, To: t.To, Detail: t.Detail})
 	}
 	return res, nil
 }
@@ -257,14 +256,14 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 }
 
 // frozen: the thread no longer drives the task state. backlog and cancelled
-// (skipped / rolled back) tasks, and settled chain steps (the chain has
-// moved past them). Settled standalone tasks may reopen.
+// (rolled back) tasks, and settled tasks with a follower (it has been
+// released). Other settled tasks may reopen.
 func frozen(t db.Task) bool {
 	switch t.State {
 	case db.StateBacklog, db.StateCancelled:
 		return true
 	case db.StateSettled:
-		return t.ChainID != nil
+		return t.NextTaskID != nil
 	}
 	return false
 }
@@ -303,14 +302,14 @@ func (s *Service) Catalog(ctx context.Context) (*CatalogSnapshot, error) {
 
 var launchable = []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}
 
-// StartTask is a manual start (POST /api/tasks/:id/start): LaunchTask, but
-// a backlog chain step is refused (409); only the chain runner launches
-// those. failed/interrupted/cancelled chain steps may be restarted.
+// StartTask is a manual start (POST /api/tasks/:id/start), "Start now": a
+// backlog task still waiting on an unfinished predecessor is unlinked from
+// it, then launched. Its own follower stays linked.
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, true)
 }
 
-// LaunchTask starts a task in T3 (chain runner path; no chain guard).
+// LaunchTask starts a task in T3 (link runner path; keeps links).
 func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, false)
 }
@@ -321,22 +320,19 @@ func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
 // task.
-func (s *Service) launch(ctx context.Context, id int64, standalone bool) (db.Task, error) {
+func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, error) {
 	// The launch must finish (or fail) even if the HTTP client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 
 	res, err := s.transition(ctx, db.Transition{
 		TaskID: id, From: launchable, To: db.StateLaunching, Detail: "launch requested", BeginAttempt: true,
-		StandaloneOnly: standalone,
+		UnlinkWaiting: manual,
 	})
 	if err != nil {
 		return db.Task{}, err
 	}
 	if !res.Changed {
-		if res.From == db.StateBacklog && res.ChainID != nil {
-			return db.Task{}, db.Conflict("task is a backlog step of chain %d; the chain launches it", *res.ChainID)
-		}
 		return db.Task{}, db.Conflict("task is %s; start is allowed from backlog, failed, interrupted or cancelled", res.From)
 	}
 	task, err := s.store.GetTask(ctx, id)
@@ -345,10 +341,17 @@ func (s *Service) launch(ctx context.Context, id int64, standalone bool) (db.Tas
 		return db.Task{}, err
 	}
 	in := launchInput(task, res.Attempt)
-	out, err := s.launchThread(ctx, in)
-	if t3.IsTransportError(err) && ctx.Err() == nil {
-		s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
+	in.Attachments, err = s.uploadImages(ctx, id)
+	var out t3.LaunchResult
+	if err == nil {
 		out, err = s.launchThread(ctx, in)
+		if t3.IsTransportError(err) && ctx.Err() == nil {
+			s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
+			out, err = s.launchThread(ctx, in)
+		}
+		if err != nil {
+			s.DiscardUploads(ctx, in.Attachments)
+		}
 	}
 	if err != nil {
 		msg := err.Error()
@@ -393,6 +396,42 @@ func (s *Service) launch(ctx context.Context, id int64, standalone bool) (db.Tas
 		}
 	}
 	return s.store.GetTask(ctx, id)
+}
+
+// uploadImages uploads a task's images to T3 (fresh pending uploads each
+// launch). On failure the ones already uploaded are discarded.
+func (s *Service) uploadImages(ctx context.Context, taskID int64) ([]t3.Attachment, error) {
+	images, err := s.store.TaskAttachments(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return s.UploadImages(ctx, images)
+}
+
+// UploadImages uploads images to T3 in order; on failure it discards the
+// ones already uploaded.
+func (s *Service) UploadImages(ctx context.Context, images []db.AttachmentData) ([]t3.Attachment, error) {
+	out := make([]t3.Attachment, 0, len(images))
+	for _, img := range images {
+		callCtx, cancel := context.WithTimeout(ctx, s.LaunchAttemptTimeout)
+		a, err := s.t3.UploadAttachment(callCtx, t3.UploadInput{Name: img.Name, MimeType: img.MimeType, Data: img.Data})
+		cancel()
+		if err != nil {
+			s.DiscardUploads(ctx, out)
+			return nil, fmt.Errorf("upload image %q: %w", img.Name, err)
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// DiscardUploads best-effort discards pending T3 uploads that were not sent.
+func (s *Service) DiscardUploads(ctx context.Context, atts []t3.Attachment) {
+	for _, a := range atts {
+		if err := s.t3.DiscardAttachment(ctx, a.ID); err != nil {
+			s.log.Warn("discard t3 upload", "attachment", a.ID, "err", err)
+		}
+	}
 }
 
 // launchThread is one t3_thread_launch call bounded by LaunchAttemptTimeout.

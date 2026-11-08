@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
@@ -20,7 +19,6 @@ type Deps struct {
 	Store  *db.Store
 	T3     t3.Client
 	Sync   *t3sync.Service
-	Chains *chains.Runner
 	Logger *slog.Logger
 }
 
@@ -72,16 +70,11 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/stop", s.stopTask)
 	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
 
-	h("GET /api/threads", s.listThreads)
+	h("POST /api/uploads", s.uploadImage)
+	h("GET /api/attachments/{id}", s.getAttachment)
+	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
-	h("GET /api/chains", s.listChains)
-	h("POST /api/chains", s.createChain)
-	h("GET /api/chains/{id}", s.getChain)
-	h("PATCH /api/chains/{id}", s.updateChain)
-	h("POST /api/chains/{id}/start", s.chainAction(s.Chains.Start))
-	h("POST /api/chains/{id}/pause", s.chainAction(s.Chains.Pause))
-	h("POST /api/chains/{id}/resume", s.chainAction(s.Chains.Resume))
-	h("POST /api/chains/{id}/skip", s.chainAction(s.Chains.Skip))
+	h("GET /api/threads", s.listThreads)
 
 	h("GET /api/templates", s.listTemplates)
 	h("POST /api/templates", s.createTemplate)
@@ -90,6 +83,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/templates/{id}", s.deleteTemplate)
 
 	h("GET /api/stats", s.stats)
+
+	h("GET /api/preferences", s.getPreferences)
+	h("PUT /api/preferences/pinned", s.putPinned)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

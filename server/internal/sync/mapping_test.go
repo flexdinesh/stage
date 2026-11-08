@@ -17,8 +17,8 @@ func TestMapThreadState(t *testing.T) {
 		latestRun t3.ThreadStatus
 		want      db.TaskState
 	}{
-		{"settled wins over everything", db.StateCompleted, t3.StatusRunning, true, 2, t3.StatusRunning, db.StateSettled},
-		{"settled while idle", db.StateCompleted, t3.StatusIdle, true, 0, "", db.StateSettled},
+		{"settled wins over everything", db.StateDone, t3.StatusRunning, true, 2, t3.StatusRunning, db.StateSettled},
+		{"settled while idle", db.StateDone, t3.StatusIdle, true, 0, "", db.StateSettled},
 		{"pending requests -> needs_input", db.StateRunning, t3.StatusRunning, false, 1, t3.StatusRunning, db.StateNeedsInput},
 		{"waiting -> needs_input", db.StateRunning, t3.StatusWaiting, false, 0, t3.StatusWaiting, db.StateNeedsInput},
 		{"pending beats completed", db.StateRunning, t3.StatusCompleted, false, 1, t3.StatusCompleted, db.StateNeedsInput},
@@ -26,18 +26,18 @@ func TestMapThreadState(t *testing.T) {
 		{"queued -> running", db.StateLaunching, t3.StatusQueued, false, 0, "", db.StateRunning},
 		{"starting -> running", db.StateLaunching, t3.StatusStarting, false, 0, "", db.StateRunning},
 		{"running -> running", db.StateNeedsInput, t3.StatusRunning, false, 0, "", db.StateRunning},
-		{"completed", db.StateRunning, t3.StatusCompleted, false, 0, "", db.StateCompleted},
+		{"completed -> done", db.StateRunning, t3.StatusCompleted, false, 0, "", db.StateDone},
 		{"failed", db.StateRunning, t3.StatusFailed, false, 0, "", db.StateFailed},
 		{"interrupted", db.StateRunning, t3.StatusInterrupted, false, 0, "", db.StateInterrupted},
 		{"cancelled", db.StateRunning, t3.StatusCancelled, false, 0, "", db.StateCancelled},
 		{"rolled_back -> cancelled", db.StateRunning, t3.StatusRolledBack, false, 0, "", db.StateCancelled},
-		{"idle with latest run completed -> completed", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusCompleted, db.StateCompleted},
+		{"idle with latest run completed -> done", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusCompleted, db.StateDone},
 		{"idle with latest run running -> running", db.StateLaunching, t3.StatusIdle, false, 0, t3.StatusRunning, db.StateRunning},
 		{"idle with latest run failed -> failed", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusFailed, db.StateFailed},
 		{"idle with latest run interrupted", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusInterrupted, db.StateInterrupted},
 		{"idle with latest run rolled_back", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusRolledBack, db.StateCancelled},
 		{"idle no runs keeps state", db.StateRunning, t3.StatusIdle, false, 0, "", db.StateRunning},
-		{"idle no runs keeps completed", db.StateCompleted, t3.StatusIdle, false, 0, "", db.StateCompleted},
+		{"idle no runs keeps done", db.StateDone, t3.StatusIdle, false, 0, "", db.StateDone},
 		{"idle with latest run waiting keeps state", db.StateRunning, t3.StatusIdle, false, 0, t3.StatusWaiting, db.StateRunning},
 		{"unknown status keeps state", db.StateRunning, t3.ThreadStatus("weird"), false, 0, t3.StatusCompleted, db.StateRunning},
 	}
@@ -57,8 +57,8 @@ func TestMapDetailUsesNewestRun(t *testing.T) {
 		Thread:     t3.Thread{Status: t3.StatusIdle},
 		RecentRuns: []t3.Run{{Status: t3.StatusCompleted}, {Status: t3.StatusFailed}},
 	}
-	if got := mapDetail(db.StateRunning, d); got != db.StateCompleted {
-		t.Fatalf("got %s, want completed", got)
+	if got := mapDetail(db.StateRunning, d); got != db.StateDone {
+		t.Fatalf("got %s, want done", got)
 	}
 }
 

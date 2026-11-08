@@ -8,16 +8,13 @@ export const TASK_STATES = [
   "launching",
   "running",
   "needs_input",
-  "completed",
+  "done",
   "settled",
   "failed",
   "interrupted",
   "cancelled",
 ] as const;
 export type TaskState = (typeof TASK_STATES)[number];
-
-export const CHAIN_STATES = ["idle", "running", "paused", "done"] as const;
-export type ChainState = (typeof CHAIN_STATES)[number];
 
 export const THREAD_STATUSES = [
   "idle",
@@ -147,6 +144,19 @@ export interface UpdateProjectRequest {
 
 // ---- Tasks ----
 
+/** An uploaded image (bytes at GET /api/attachments/:id). */
+export interface Attachment {
+  id: number;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/** Accepted image types and limits (server enforces the same). */
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export const MAX_IMAGES = 8;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
 export interface Task {
   id: number;
   projectId: number;
@@ -163,8 +173,12 @@ export interface Task {
   notes: string;
   state: TaskState;
   t3ThreadId: string | null;
-  chainId: number | null;
-  chainPosition: number | null;
+  /** Runs after this task (launches when it settles). */
+  afterTaskId: number | null;
+  /** The task that runs after this one. */
+  nextTaskId: number | null;
+  /** Images sent with the prompt on every launch, upload order. */
+  attachments: Attachment[];
   launchAttempt: number;
   lastError: string | null;
   t3WebUrl: string | null;
@@ -188,6 +202,8 @@ export interface TaskEvent {
 export interface TaskDetail extends Task {
   events: TaskEvent[];
   thread: Thread | null;
+  /** Linked run order containing this task, head first (just this task when unlinked). */
+  sequence: Task[];
 }
 
 export interface TaskList {
@@ -206,7 +222,10 @@ export interface CreateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
-  chainId?: number | null;
+  /** Run after this task (start is then ignored). */
+  afterTaskId?: number | null;
+  /** Staged uploads to attach (max 8). */
+  attachmentIds?: number[];
   start?: boolean;
 }
 
@@ -222,11 +241,18 @@ export interface UpdateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
+  /** null unlinks. */
+  afterTaskId?: number | null;
+  /** Backlog only: the exact image set (task's own ids + staged uploads). */
+  attachmentIds?: number[];
 }
 
 export interface FollowupRequest {
   message: string;
+  /** Not allowed with attachmentIds. */
   mode?: SendMode;
+  /** Staged uploads to send with the message. */
+  attachmentIds?: number[];
 }
 
 export interface TaskListQuery {
@@ -236,7 +262,8 @@ export interface TaskListQuery {
   q?: string;
   from?: string;
   to?: string;
-  chain?: number;
+  /** settledAt >= this (ISO date or datetime). */
+  settledFrom?: string;
 }
 
 // ---- Threads (history) ----
@@ -288,32 +315,6 @@ export interface ThreadListQuery {
   subagents?: SubagentsFilter;
   limit?: number;
   offset?: number;
-}
-
-// ---- Chains ----
-
-export interface Chain {
-  id: number;
-  title: string;
-  state: ChainState;
-  currentTaskId: number | null;
-  steps: Task[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ChainList {
-  chains: Chain[];
-}
-
-export interface CreateChainRequest {
-  title: string;
-  steps?: number[];
-}
-
-export interface UpdateChainRequest {
-  title?: string;
-  steps?: number[];
 }
 
 // ---- Templates ----
@@ -387,4 +388,21 @@ export interface StatsQuery {
   to?: string;
   tz?: string;
   subagents?: SubagentsFilter;
+}
+
+// ---- Preferences ----
+
+/** New-task model preset. providerInstanceId/model null = T3 default. */
+export interface ModelDefaults {
+  providerInstanceId: string | null;
+  model: string | null;
+  modelOptions: ModelOption[];
+  runtimeMode: RuntimeMode;
+  interactionMode: InteractionMode;
+}
+
+/** New task prefills from `pinned`, else `lastUsed` (the latest created task). */
+export interface Preferences {
+  pinned: ModelDefaults | null;
+  lastUsed: ModelDefaults | null;
 }

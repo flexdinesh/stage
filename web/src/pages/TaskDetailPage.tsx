@@ -2,11 +2,13 @@ import { useMutation } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
-import { useChain, useInvalidateWork, useTask } from "../api/queries.ts";
+import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { IconArrowRight, IconExternal } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
+import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
+import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -27,7 +29,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
-import { canStart, canStop, isActive } from "../lib/tasks.ts";
+import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -67,19 +69,6 @@ function workspaceChip(task: TaskDetail): string {
 
 const linkClass = "text-fg underline-offset-2 hover:underline";
 
-function ChainMeta({ chainId, position }: { chainId: number; position: number | null }) {
-  const chain = useChain(chainId);
-  return (
-    <>
-      {" · chain "}
-      <Link to={`/chains/${chainId}`} className={linkClass}>
-        {chain.data?.title ?? `#${chainId}`}
-      </Link>
-      {position === null ? null : ` step ${position}`}
-    </>
-  );
-}
-
 function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
@@ -107,6 +96,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const waiting = task.state === "needs_input" || pending > 0;
   const hasThread = task.t3ThreadId !== null;
   const startable = canStart(task);
+  // Waiting on a predecessor: Start now unlinks it, so it takes a second click to confirm.
+  const blocked = isWaiting(task);
+  const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
   const webUrl = task.t3WebUrl;
   const phoneBar = webUrl !== null || hasThread || stoppable;
@@ -141,7 +133,15 @@ function TaskBody({ task }: { task: TaskDetail }) {
               {task.projectTitle}
             </Link>
             {` / task ${task.id}`}
-            {task.chainId === null ? null : <ChainMeta chainId={task.chainId} position={task.chainPosition} />}
+            {stepText(task) === null ? null : ` · ${stepText(task)}`}
+            {task.afterTaskId === null || !isWaiting(task) ? null : (
+              <>
+                {" · waits for "}
+                <Link to={`/tasks/${task.afterTaskId}`} className={linkClass}>
+                  #{task.afterTaskId}
+                </Link>
+              </>
+            )}
           </>
         }
       />
@@ -164,7 +164,17 @@ function TaskBody({ task }: { task: TaskDetail }) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          {startable ? (
+          {startable && blocked ? (
+            <Button
+              variant={armed ? "primary" : "secondary"}
+              busy={start.isPending}
+              title={`Unlinks it from #${task.afterTaskId ?? ""} and starts it now`}
+              onClick={() => (armed ? start.mutate() : setArmed(true))}
+              onBlur={() => setArmed(false)}
+            >
+              {armed ? `Confirm: unlink from #${task.afterTaskId ?? ""} and start` : "Start now"}
+            </Button>
+          ) : startable ? (
             <Button variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
               {task.state === "backlog" ? "Start" : "Restart"}
             </Button>
@@ -204,14 +214,18 @@ function TaskBody({ task }: { task: TaskDetail }) {
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-3.5">
             <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
-              <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
-                {task.prompt}
-              </pre>
+              <div className="flex flex-col gap-3">
+                <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
+                  {task.prompt}
+                </pre>
+                <ImageStrip attachments={task.attachments} label="Prompt images" />
+              </div>
             </Panel>
             {hasThread ? <FollowupPanel taskId={task.id} inputRef={followupInput} /> : null}
             <TimelinePanel events={task.events} />
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
+            <SequencePanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
             <NotesPanel task={task} />
@@ -266,7 +280,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
         {thread === null ? null : (
           <>
             <Detail label="Status">
-              <ThreadStatusBadge status={thread.status} />
+              <ThreadStatusBadge status={thread.status} settled={thread.settled} />
             </Detail>
             <Detail label="Pending">
               {thread.pendingRequestCount} request{thread.pendingRequestCount === 1 ? "" : "s"}
@@ -407,39 +421,47 @@ function FollowupPanel({ taskId, inputRef }: { taskId: number; inputRef: Ref<HTM
   const invalidate = useInvalidateWork();
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<SendMode>("auto");
+  const images = useImageSet();
+  const withImages = images.items.length > 0;
   const send = useMutation({
-    mutationFn: () => api.followupTask(taskId, { message, mode }),
+    // Images go as one new message (t3_thread_send_attachments); T3 takes no mode for them.
+    mutationFn: () =>
+      api.followupTask(taskId, withImages ? { message, attachmentIds: images.ids } : { message, mode }),
     onSuccess: async () => {
       setMessage("");
+      images.clear();
       await invalidate();
     },
   });
+  const ready = withImages ? !images.uploading && !images.failed : message.trim() !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (message.trim() !== "") send.mutate();
+    if (ready) send.mutate();
   };
 
   return (
     <Panel title="Follow-up">
       <form onSubmit={submit} className="flex flex-col gap-2.5">
-        <Textarea
-          ref={inputRef}
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Message to send to the thread"
-          aria-label="Follow-up message"
-        />
+        <ImageDropzone set={images} label="Follow-up images" disabled={send.isPending}>
+          <Textarea
+            ref={inputRef}
+            rows={3}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Message to send to the thread"
+            aria-label="Follow-up message"
+          />
+        </ImageDropzone>
         <div className="flex flex-wrap items-center gap-2.5">
-          <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
-          <Button
-            type="submit"
-            variant="primary"
-            small
-            className="ml-auto"
-            busy={send.isPending}
-            disabled={message.trim() === ""}
+          <fieldset
+            disabled={withImages}
+            title={withImages ? "Images send as a new message; mode doesn't apply" : undefined}
+            className="min-w-0 disabled:opacity-45"
           >
+            <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
+          </fieldset>
+          {withImages ? <span className="font-mono text-[11px] text-muted">sends as a new message</span> : null}
+          <Button type="submit" variant="primary" small className="ml-auto" busy={send.isPending} disabled={!ready}>
             Send
           </Button>
         </div>
