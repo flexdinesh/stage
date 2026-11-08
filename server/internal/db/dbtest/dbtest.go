@@ -27,7 +27,10 @@ type DB struct {
 
 // Open (re)creates database `name`, migrates it and returns a pool. Call
 // from TestMain; when Postgres is unreachable Skip explains why.
-func Open(name string) *DB {
+func Open(name string) *DB { return OpenAt(name, 0) }
+
+// OpenAt is Open migrated only up to version (0 = latest).
+func OpenAt(name string, version int64) *DB {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	adminURL := os.Getenv("TEST_DATABASE_URL")
@@ -55,7 +58,7 @@ func Open(name string) *DB {
 	if err != nil {
 		return &DB{Skip: err.Error()}
 	}
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := db.MigrateTo(ctx, pool, version); err != nil {
 		pool.Close()
 		return &DB{Skip: "migrate: " + err.Error()}
 	}
@@ -71,7 +74,7 @@ func (d *DB) Reset(t *testing.T) *pgxpool.Pool {
 	}
 	ctx := context.Background()
 	_, err := d.Pool.Exec(ctx, `
-TRUNCATE task_attachments, task_events, tasks, templates, threads, projects, t3_connection, preferences,
+TRUNCATE task_attachments, task_events, tasks, snippets, threads, projects, t3_connection, preferences,
   push_subscriptions, push_vapid RESTART IDENTITY CASCADE;
 INSERT INTO t3_connection (id) VALUES (1);
 INSERT INTO preferences (id) VALUES (1);`)

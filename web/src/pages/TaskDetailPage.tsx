@@ -9,6 +9,7 @@ import { IconArrowRight } from "../components/icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
+import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -23,7 +24,6 @@ import {
   Panel,
   QueryState,
   Segmented,
-  Textarea,
   cx,
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
@@ -220,7 +220,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
               </div>
             </Panel>
-            {hasThread ? <FollowupPanel taskId={task.id} inputRef={followupInput} /> : null}
+            {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
             <TimelinePanel events={task.events} />
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
@@ -400,7 +400,7 @@ function NotesPanel({ task }: { task: TaskDetail }) {
         )
       ) : (
         <div className="flex flex-col gap-2">
-          <Textarea rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus aria-label="Notes" />
+          <SnippetTextarea rows={4} value={draft} onValueChange={setDraft} projectId={task.projectId} autoFocus aria-label="Notes" />
           <ErrorText error={save.error} />
         </div>
       )}
@@ -408,7 +408,15 @@ function NotesPanel({ task }: { task: TaskDetail }) {
   );
 }
 
-function FollowupPanel({ taskId, inputRef }: { taskId: number; inputRef: Ref<HTMLTextAreaElement> }) {
+function FollowupPanel({
+  taskId,
+  projectId,
+  inputRef,
+}: {
+  taskId: number;
+  projectId: number;
+  inputRef: Ref<HTMLTextAreaElement>;
+}) {
   const invalidate = useInvalidateWork();
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<SendMode>("auto");
@@ -434,11 +442,12 @@ function FollowupPanel({ taskId, inputRef }: { taskId: number; inputRef: Ref<HTM
     <Panel title="Follow-up">
       <form onSubmit={submit} className="flex flex-col gap-2.5">
         <ImageDropzone set={images} label="Follow-up images" disabled={send.isPending}>
-          <Textarea
+          <SnippetTextarea
             ref={inputRef}
             rows={3}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onValueChange={setMessage}
+            projectId={projectId}
             placeholder="Message to send to the thread"
             aria-label="Follow-up message"
           />

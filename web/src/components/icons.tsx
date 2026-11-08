@@ -36,7 +36,7 @@ export const IconProjects = (p: IconProps) => (
   </Svg>
 );
 
-export const IconTemplates = (p: IconProps) => (
+export const IconSnippets = (p: IconProps) => (
   <Svg {...p}>
     <path d="M3.5 2h9v12h-9zM6 5.5h4M6 8h4M6 10.5h2.5" />
   </Svg>

@@ -12,7 +12,7 @@ import {
   IconSearch,
   IconStage,
   IconSun,
-  IconTemplates,
+  IconSnippets,
   IconThemeSystem,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
@@ -23,7 +23,7 @@ const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
   { to: "/history", label: "History" },
-  { to: "/templates", label: "Templates" },
+  { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
@@ -31,7 +31,7 @@ const TABS = [
   { to: "/", label: "Stage", icon: <IconStage /> },
   { to: "/projects", label: "Projects", icon: <IconProjects /> },
   { to: "/history", label: "History", icon: <IconHistory /> },
-  { to: "/templates", label: "Templates", icon: <IconTemplates /> },
+  { to: "/snippets", label: "Snippets", icon: <IconSnippets /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {

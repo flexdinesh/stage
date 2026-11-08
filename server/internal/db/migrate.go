@@ -17,6 +17,11 @@ var migrations embed.FS
 
 // Migrate applies all pending goose migrations.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return MigrateTo(ctx, pool, 0)
+}
+
+// MigrateTo applies pending migrations up to version (0 = latest).
+func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 	fsys, err := fs.Sub(migrations, "migrations")
 	if err != nil {
 		return err
@@ -27,7 +32,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("goose provider: %w", err)
 	}
-	if _, err := provider.Up(ctx); err != nil {
+	if version == 0 {
+		_, err = provider.Up(ctx)
+	} else {
+		_, err = provider.UpTo(ctx, version)
+	}
+	if err != nil {
 		return fmt.Errorf("migrate up: %w", err)
 	}
 	return nil
