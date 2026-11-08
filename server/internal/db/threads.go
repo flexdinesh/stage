@@ -118,8 +118,10 @@ type ThreadFilter struct {
 	From, To  *time.Time
 	// ExcludeSubagents keeps root threads only (parent_thread_id IS NULL).
 	ExcludeSubagents bool
-	Limit            int
-	Offset           int
+	// NeedsInput keeps external threads needing input (see NeedsInputCount).
+	NeedsInput bool
+	Limit      int
+	Offset     int
 }
 
 // ListThreads returns a page of mirrored threads (createdAt desc) and the
@@ -155,6 +157,9 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 	}
 	if f.ExcludeSubagents {
 		w.add("th.parent_thread_id IS NULL")
+	}
+	if f.NeedsInput {
+		w.add(externalNeedsInput)
 	}
 	var total int
 	countSQL := `SELECT count(*) FROM threads th

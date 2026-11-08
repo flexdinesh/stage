@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
-import { useT3Status, useTasks } from "../api/queries.ts";
+import { useBadge, useT3Status } from "../api/queries.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import {
@@ -73,7 +73,7 @@ function ThemeButton() {
 function NeedsCount({ n }: { n: number }) {
   if (n === 0) return null;
   return (
-    <span title="Tasks needing input" className="chip tone-need px-1.5 text-[11px] leading-4">
+    <span title="Tasks and threads needing input" className="chip tone-need px-1.5 text-[11px] leading-4">
       {n}
     </span>
   );
@@ -84,8 +84,18 @@ function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** Mirrors the needs-input count on the installed app icon (where the Badging API exists). */
+function useAppBadge(count: number | undefined) {
+  useEffect(() => {
+    if (count === undefined || !("setAppBadge" in navigator)) return;
+    (count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge()).catch(() => undefined);
+  }, [count]);
+}
+
 function Shell() {
-  const needsInput = useTasks({ state: ["needs_input"] }).data?.tasks.length ?? 0;
+  const badge = useBadge().data?.needsInput;
+  useAppBadge(badge);
+  const needsInput = badge ?? 0;
   const newTask = useNewTask();
   const { theme, setTheme } = useTheme();
   const [palette, setPalette] = useState(false);

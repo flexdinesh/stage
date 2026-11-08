@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/t3-stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
@@ -19,6 +20,7 @@ type Deps struct {
 	Store  *db.Store
 	T3     t3.Client
 	Sync   *t3sync.Service
+	Push   *notify.Notifier
 	Logger *slog.Logger
 }
 
@@ -87,6 +89,12 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/preferences", s.getPreferences)
 	h("PUT /api/preferences/pinned", s.putPinned)
 
+	h("GET /api/push/config", s.pushConfig)
+	h("POST /api/push/subscriptions", s.subscribePush)
+	h("DELETE /api/push/subscriptions", s.unsubscribePush)
+	h("POST /api/push/test", s.testPush)
+	h("GET /api/badge", s.badge)
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -112,6 +120,7 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		invalid  *db.InvalidError
 		conflict *db.ConflictError
 		t3Err    *db.T3Error
+		pushErr  *notify.PushError
 	)
 	switch {
 	case errors.Is(err, t3.ErrNotConnected):
@@ -124,6 +133,8 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, conflict.Msg)
 	case errors.As(err, &t3Err):
 		writeError(w, http.StatusBadGateway, t3Err.Error())
+	case errors.As(err, &pushErr):
+		writeError(w, http.StatusBadGateway, pushErr.Msg)
 	default:
 		s.log.Error("api error", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

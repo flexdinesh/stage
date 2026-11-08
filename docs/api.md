@@ -298,7 +298,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 ### `GET /api/threads`
-Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `limit` (default 100, max 500), `offset` (default 0).
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
 
 ## Templates
@@ -360,6 +360,38 @@ Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz`
 }
 ```
 `threadsByDay` ascending, days with zero omitted. `threadsByProject` count desc; `projectId` null and `title` = `t3ProjectId` when no app project. `needsInput` = tasks in `needs_input`. 400 bad `tz` or `subagents`.
+
+## Notifications (Web Push)
+
+The server sends Web Push (VAPID, RFC 8291 aes128gcm) to every subscribed browser. The VAPID key pair is generated on first start and stored in Postgres; the VAPID subject is `APP_PUBLIC_URL`.
+
+### `GET /api/push/config`
+200 `{ "publicKey": string }` (VAPID public key, base64url, uncompressed P-256 point; the browser's `applicationServerKey`).
+
+### `POST /api/push/subscriptions`
+Body: browser `PushSubscription.toJSON()` subset `{ "endpoint": string, "keys": { "p256dh": string, "auth": string } }`. Upsert by `endpoint` (keys and user agent refreshed). 204. 400 missing field or non-https endpoint.
+
+### `DELETE /api/push/subscriptions`
+Body `{ "endpoint": string }`. 204 (also when unknown). 400 missing endpoint.
+
+### `POST /api/push/test`
+Body `{ "endpoint": string }`. Sends a test notification to that subscription synchronously. 204. 404 unknown endpoint. 502 push service rejected it (`error` = status and body); a 404/410 from the push service also deletes the subscription.
+
+### `GET /api/badge`
+200 `{ "needsInput": number }`: tasks in `needs_input` + external threads needing input (see below).
+
+### Push payload
+JSON, shown by the service worker:
+```json
+{ "title": "Needs input", "body": "Say OK · t3-stage", "url": "/tasks/7", "tag": "task-7", "badge": 2 }
+```
+`tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`). `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise.
+
+## Notification rules
+
+- Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies; `url` = `/tasks/<id>`. Other states (incl. `interrupted`) do not. Links add no events of their own.
+- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/history?q=<title>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently.
+- External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
 
 ## State mapping (thread → task), pure function
 

@@ -313,6 +313,8 @@ export interface ThreadListQuery {
   from?: string;
   to?: string;
   subagents?: SubagentsFilter;
+  /** Only external threads needing input (the ones the badge counts). */
+  needsInput?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -405,4 +407,26 @@ export interface ModelDefaults {
 export interface Preferences {
   pinned: ModelDefaults | null;
   lastUsed: ModelDefaults | null;
+}
+
+// ---- Notifications (Web Push) ----
+
+export interface PushConfig {
+  /** VAPID public key, base64url (the browser's applicationServerKey). */
+  publicKey: string;
+}
+
+/** `PushSubscription.toJSON()` subset. */
+export interface PushSubscriptionBody {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+export interface PushEndpointBody {
+  endpoint: string;
+}
+
+export interface Badge {
+  /** Tasks in needs_input + external threads needing input. */
+  needsInput: number;
 }

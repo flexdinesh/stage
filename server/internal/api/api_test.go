@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/t3-stage/server/internal/links"
+	"github.com/flexdinesh/t3-stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
@@ -118,7 +120,7 @@ func newEnv(t *testing.T) *env {
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, T3: client, Sync: svc, Logger: log,
+		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://t3stage.test", log), Logger: log,
 	})
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
@@ -1241,4 +1243,126 @@ func TestFollowupWithImages(t *testing.T) {
 	if len(e.fake.Sent) != 0 {
 		t.Fatalf("plain send used: %+v", e.fake.Sent)
 	}
+}
+
+func TestPushSubscriptionsAndConfig(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	var cfg struct {
+		PublicKey string `json:"publicKey"`
+	}
+	e.must("GET", "/api/push/config", nil, 200, &cfg)
+	key, err := base64.RawURLEncoding.DecodeString(cfg.PublicKey)
+	if err != nil || len(key) != 65 || key[0] != 4 {
+		t.Fatalf("publicKey %q: not an uncompressed P-256 point (%v)", cfg.PublicKey, err)
+	}
+	first := cfg.PublicKey
+	e.must("GET", "/api/push/config", nil, 200, &cfg)
+	if cfg.PublicKey != first {
+		t.Fatal("VAPID key changed between calls")
+	}
+
+	const endpoint = "https://push.example.com/send/abc"
+	sub := func(endpoint, p256dh, auth string) map[string]any {
+		return map[string]any{"endpoint": endpoint, "keys": map[string]string{"p256dh": p256dh, "auth": auth}}
+	}
+	e.must("POST", "/api/push/subscriptions", sub("", "k", "a"), 400, nil)
+	e.must("POST", "/api/push/subscriptions", sub("http://push.example.com/x", "k", "a"), 400, nil)
+	e.must("POST", "/api/push/subscriptions", sub(endpoint, "", "a"), 400, nil)
+	e.must("POST", "/api/push/subscriptions", sub(endpoint, "k", ""), 400, nil)
+
+	post := func(body any, ua string) int {
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest("POST", "/api/push/subscriptions", bytes.NewReader(b))
+		req.Header.Set("User-Agent", ua)
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := post(sub(endpoint, "k1", "a1"), "Firefox"); code != 204 {
+		t.Fatalf("subscribe: %d", code)
+	}
+	if code := post(sub(endpoint, "k2", "a2"), "Safari"); code != 204 {
+		t.Fatalf("resubscribe: %d", code)
+	}
+	subs, err := e.store.ListPushSubscriptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs) != 1 || subs[0].P256dh != "k2" || subs[0].Auth != "a2" || subs[0].UserAgent != "Safari" {
+		t.Fatalf("upsert by endpoint: %+v", subs)
+	}
+
+	e.must("POST", "/api/push/test", map[string]string{"endpoint": "https://push.example.com/unknown"}, 404, nil)
+	e.must("POST", "/api/push/test", map[string]string{}, 400, nil)
+
+	e.must("DELETE", "/api/push/subscriptions", map[string]string{}, 400, nil)
+	e.must("DELETE", "/api/push/subscriptions", map[string]string{"endpoint": endpoint}, 204, nil)
+	e.must("DELETE", "/api/push/subscriptions", map[string]string{"endpoint": endpoint}, 204, nil)
+	if subs, _ := e.store.ListPushSubscriptions(ctx); len(subs) != 0 {
+		t.Fatalf("after delete: %+v", subs)
+	}
+}
+
+func TestBadgeAndNeedsInputThreads(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.project("/w/badge")
+
+	// Task in needs_input; its thread also observed needs_input (task-owned: not counted twice).
+	tk := e.task(p.ID, "needs me", nil)
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
+	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+	e.poll()
+	if got := e.getTask(tk.ID); got.State != "needs_input" {
+		t.Fatalf("task state %s", got.State)
+	}
+
+	now := time.Now().UTC()
+	if err := e.store.UpsertThreads(ctx, []t3.Thread{
+		{ThreadID: "ext-wait", ProjectID: p.T3ProjectID, Title: "external", Status: t3.StatusWaiting, CreatedAt: now},
+		{ThreadID: "ext-sub", ProjectID: p.T3ProjectID, Title: "sub", Status: t3.StatusWaiting, CreatedAt: now,
+			ParentThreadID: "ext-wait", RelationshipToParent: "subagent"},
+		{ThreadID: "ext-fork", ProjectID: p.T3ProjectID, Title: "fork", Status: t3.StatusWaiting, CreatedAt: now.Add(-time.Minute),
+			ParentThreadID: "ext-wait", RelationshipToParent: "fork"},
+		{ThreadID: "ext-settled", ProjectID: p.T3ProjectID, Title: "settled", Status: t3.StatusWaiting, Settled: true, CreatedAt: now},
+		{ThreadID: "ext-running", ProjectID: p.T3ProjectID, Title: "running", Status: t3.StatusRunning, CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for id, st := range map[string]db.TaskState{
+		"ext-wait": db.StateNeedsInput, "ext-sub": db.StateNeedsInput, "ext-fork": db.StateNeedsInput, "ext-settled": db.StateNeedsInput,
+		"ext-running": db.StateRunning, *started.T3ThreadID: db.StateNeedsInput,
+	} {
+		if err := e.store.SetObservedState(ctx, id, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var badge struct {
+		NeedsInput int `json:"needsInput"`
+	}
+	e.must("GET", "/api/badge", nil, 200, &badge)
+	if badge.NeedsInput != 3 {
+		t.Fatalf("badge %d, want 3 (task + external thread + fork)", badge.NeedsInput)
+	}
+
+	var pg struct {
+		Threads []thread `json:"threads"`
+		Total   int      `json:"total"`
+	}
+	for _, path := range []string{"/api/threads?needsInput=1", "/api/threads?needsInput=true"} {
+		e.must("GET", path, nil, 200, &pg)
+		if pg.Total != 2 || len(pg.Threads) != 2 || pg.Threads[0].T3ThreadID != "ext-wait" || pg.Threads[1].T3ThreadID != "ext-fork" {
+			t.Fatalf("%s: %+v", path, pg)
+		}
+	}
+	e.must("GET", "/api/threads?needsInput=1&q=nomatch", nil, 200, &pg)
+	if pg.Total != 0 {
+		t.Fatalf("needsInput + q: %+v", pg)
+	}
+	e.must("GET", "/api/threads?needsInput=yes", nil, 400, nil)
 }

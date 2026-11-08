@@ -1,10 +1,11 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api } from "../api/client.ts";
 import { invalidateWork, keys, usePreferences, useT3Status } from "../api/queries.ts";
 import { INTERACTION_MODES, type InteractionMode, type ModelDefaults, type Preferences, type T3Status } from "../api/types.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented } from "../components/ui.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, type ChipTone } from "../components/ui.tsx";
+import { disablePush, enablePush, getPushState, sendTestPush, type PushState } from "../lib/push.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
@@ -185,6 +186,68 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
   );
 }
 
+const PUSH_KEY = ["pushState"];
+
+const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
+  unsupported: { tone: "idle", label: "unsupported" },
+  "ios-install": { tone: "idle", label: "install first" },
+  blocked: { tone: "bad", label: "blocked" },
+  off: { tone: "idle", label: "off" },
+  on: { tone: "ok", label: "on" },
+};
+
+function NotificationsCard() {
+  const qc = useQueryClient();
+  // Browser state, not server state: no polling; rechecked on focus (permission may change in system settings).
+  const state = useQuery({ queryKey: PUSH_KEY, queryFn: getPushState, refetchInterval: false });
+  const refresh = () => qc.invalidateQueries({ queryKey: PUSH_KEY });
+  const enable = useMutation({ mutationFn: enablePush, onSettled: refresh });
+  const disable = useMutation({ mutationFn: disablePush, onSettled: refresh });
+  const test = useMutation({ mutationFn: sendTestPush, onSettled: refresh });
+  const busy = enable.isPending || disable.isPending || test.isPending;
+  const chip = state.data === undefined ? null : PUSH_CHIP[state.data];
+  return (
+    <Panel
+      title="Notifications"
+      {...(chip === null ? {} : { actions: <Chip tone={chip.tone} dot>{chip.label}</Chip> })}
+    >
+      <div className="flex flex-col gap-3">
+        <Muted>Push notifications to this device when a task or external thread needs input, is done, or failed.</Muted>
+        <QueryState isPending={state.isPending} error={state.error}>
+          {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
+          {state.data === "ios-install" ? (
+            <Alert tone="plain">
+              Add to Home Screen first: Share → Add to Home Screen, then open t3-stage from the Home Screen.
+            </Alert>
+          ) : null}
+          {state.data === "blocked" ? (
+            <Alert tone="plain">Notifications are blocked for this site. Allow them in the browser or system settings, then reload.</Alert>
+          ) : null}
+          {state.data === "off" ? (
+            <div>
+              <Button variant="primary" busy={enable.isPending} disabled={busy} onClick={() => enable.mutate()}>
+                Enable notifications
+              </Button>
+            </div>
+          ) : null}
+          {state.data === "on" ? (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" busy={test.isPending} disabled={busy} onClick={() => test.mutate()}>
+                Send test
+              </Button>
+              <Button busy={disable.isPending} disabled={busy} onClick={() => disable.mutate()}>
+                Disable
+              </Button>
+            </div>
+          ) : null}
+        </QueryState>
+        {test.isSuccess ? <Alert tone="plain">Test notification sent.</Alert> : null}
+        <ErrorText error={enable.error ?? disable.error ?? test.error} />
+      </div>
+    </Panel>
+  );
+}
+
 const THEME_OPTIONS = THEMES.map((t) => ({ value: t, label: t }));
 
 function ThemeCard() {
@@ -203,9 +266,9 @@ export function SettingsPage() {
   const status = useT3Status();
   return (
     <>
-      <PageHeader title="Settings" meta="T3 connection, sync, defaults, appearance" />
+      <PageHeader title="Settings" meta="T3 connection, sync, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
-        <div className="lg:row-span-4">
+        <div className="lg:row-span-5">
           <QueryState isPending={status.isPending} error={status.error}>
             {status.data === undefined ? null : <StatusCard status={status.data} />}
           </QueryState>
@@ -213,6 +276,7 @@ export function SettingsPage() {
         <SyncCard />
         <DefaultModelCard />
         <PairCard />
+        <NotificationsCard />
         <ThemeCard />
       </div>
     </>

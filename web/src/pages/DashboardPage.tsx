@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useProjects, useT3Status, useTasks } from "../api/queries.ts";
+import { useNeedsInputThreads, useProjects, useT3Status, useTasks } from "../api/queries.ts";
 import type { Task, TaskState } from "../api/types.ts";
 import { IconChevronDown, IconExternal } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { TaskRows } from "../components/TaskList.tsx";
-import { ExternalButton, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { ExternalThreadRows, TaskRows } from "../components/TaskList.tsx";
+import { ErrorText, ExternalButton, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
 type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
 
@@ -30,7 +30,7 @@ const GROUPS: Group[] = [
     short: "need",
     tone: "need",
     states: ["needs_input"],
-    empty: "Nothing waiting on you. Tasks that ask a question land here.",
+    empty: "Nothing waiting on you. Tasks and threads that ask a question land here.",
   },
   {
     key: "running",
@@ -191,14 +191,18 @@ export function DashboardPage() {
   const projects = useProjects();
   const projectQuery = project === "" ? {} : { project: Number(project) };
   const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
+  // External threads needing input join the Needs input group (count and rows) but never block the page.
+  const needThreads = useNeedsInputThreads(project === "" ? undefined : Number(project));
+  const externalNeeds = needThreads.data?.threads ?? [];
   const [since] = useState(settledSince);
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
   const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
+  const groupCount = (g: Group) => byGroup(g).length + (g.key === "needs" ? externalNeeds.length : 0);
 
   const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, settled: 0 };
-  for (const g of GROUPS) counts[g.key] = byGroup(g).length;
+  for (const g of GROUPS) counts[g.key] = groupCount(g);
   const active = all.filter((t) => ACTIVE_STATES.includes(t.state)).length;
   const projectCount = projects.data?.projects.length;
 
@@ -215,7 +219,7 @@ export function DashboardPage() {
   const blocks: (Group | Group[])[] = [];
   for (const g of GROUPS) {
     if (selected !== null && selected !== g.key) continue;
-    const empty = byGroup(g).length === 0;
+    const empty = groupCount(g) === 0;
     if (selected === null && empty && g.hideEmpty === true) continue;
     const prev = blocks.at(-1);
     if (selected === null && empty) {
@@ -278,10 +282,26 @@ export function DashboardPage() {
                     label
                   )
                 }
-                meta={<span className="tabular">{list.length}</span>}
+                meta={<span className="tabular">{groupCount(g)}</span>}
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
-                <TaskRows tasks={list} emptyText={g.empty} />
+                {g.key === "needs" && externalNeeds.length > 0 ? (
+                  <>
+                    {list.length > 0 ? (
+                      <div className="border-b border-line">
+                        <TaskRows tasks={list} />
+                      </div>
+                    ) : null}
+                    <ExternalThreadRows threads={externalNeeds} />
+                  </>
+                ) : (
+                  <TaskRows tasks={list} emptyText={g.empty} />
+                )}
+                {g.key === "needs" && needThreads.error !== null ? (
+                  <div className="border-t border-line p-3">
+                    <ErrorText error={needThreads.error} />
+                  </div>
+                ) : null}
               </Panel>
             );
           })}

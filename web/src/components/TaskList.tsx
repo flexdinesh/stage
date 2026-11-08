@@ -1,9 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { api } from "../api/client.ts";
+import { api, toQuery } from "../api/client.ts";
 import { useInvalidateWork } from "../api/queries.ts";
-import type { Task } from "../api/types.ts";
+import type { Task, Thread } from "../api/types.ts";
 import { dateTime, modelText, relativeTime } from "../lib/format.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
 import { IconChainLink, IconExternal } from "./icons.tsx";
@@ -131,6 +131,59 @@ export function TaskRow({ task, extra }: { task: Task; extra?: ReactNode }) {
       {start.error === null ? null : (
         <div className="order-6 col-span-2 md:col-span-3 md:col-start-2">
           <ErrorText error={start.error} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** External (non-task) threads needing input, styled as needs-input TaskRows. Title opens History filtered to it. */
+export function ExternalThreadRows({ threads }: { threads: Thread[] }) {
+  return (
+    <ul>
+      {threads.map((t) => (
+        <li key={t.t3ThreadId} className="border-b border-line last:border-b-0">
+          <ExternalThreadRow thread={t} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ExternalThreadRow({ thread }: { thread: Thread }) {
+  const href = thread.t3WebUrl ?? thread.t3AppUrl;
+  const project = thread.projectTitle ?? thread.t3ProjectId;
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-need px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2">
+      <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
+        <TaskStateBadge state="needs_input" />
+      </div>
+
+      <div className="order-1 min-w-0 md:order-2">
+        <Link to={`/history${toQuery({ q: thread.title })}`} className="text-[13.5px] font-medium break-words hover:underline">
+          {thread.title}
+        </Link>
+        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
+          {thread.projectId === null ? (
+            <span>{project}</span>
+          ) : (
+            <Link to={`/projects/${thread.projectId}`} className="hover:text-fg hover:underline">
+              {project}
+            </Link>
+          )}
+          <span title={dateTime(thread.updatedAt)} className="tabular">
+            {relativeTime(thread.updatedAt)}
+          </span>
+          <span>external thread</span>
+        </div>
+      </div>
+
+      {href === null ? null : (
+        <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
+          <ExternalButton small variant="primary" href={href}>
+            Open in T3
+            <IconExternal size={12} />
+          </ExternalButton>
         </div>
       )}
     </div>
