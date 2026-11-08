@@ -91,6 +91,9 @@ func NewRouter(deps Deps) http.Handler {
 
 	h("GET /api/stats", s.stats)
 
+	h("GET /api/preferences", s.getPreferences)
+	h("PUT /api/preferences/pinned", s.putPinned)
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})

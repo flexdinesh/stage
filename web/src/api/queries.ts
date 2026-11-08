@@ -13,6 +13,7 @@ export const keys = {
   chain: ["chain"],
   templates: ["templates"],
   stats: ["stats"],
+  preferences: ["preferences"],
 } as const;
 
 export const useT3Status = () => useQuery({ queryKey: keys.t3Status, queryFn: api.t3Status });
@@ -41,13 +42,17 @@ export const useChain = (id: number) => useQuery({ queryKey: [...keys.chain, id]
 
 export const useTemplates = () => useQuery({ queryKey: keys.templates, queryFn: api.templates });
 
+// Changes only on task create or pin; no polling.
+export const usePreferences = () =>
+  useQuery({ queryKey: keys.preferences, queryFn: api.preferences, refetchInterval: false, staleTime: 30_000 });
+
 export const useStats = (q: StatsQuery) =>
   useQuery({ queryKey: [...keys.stats, q], queryFn: () => api.stats(q), placeholderData: keepPreviousData });
 
 /** Task/chain mutations can change any task, chain, thread or stat view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
-    [keys.tasks, keys.task, keys.chains, keys.chain, keys.threads, keys.stats].map((queryKey) =>
+    [keys.tasks, keys.task, keys.chains, keys.chain, keys.threads, keys.stats, keys.preferences].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),
   ).then(() => undefined);

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
+import { usePreferences } from "../api/queries.ts";
 import { TaskFormModal } from "./TaskForm.tsx";
 
 type Open = (defaultProjectId?: number) => void;
@@ -10,6 +11,8 @@ const NewTaskContext = createContext<Open>(() => {});
 export function NewTaskProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ projectId: number | undefined } | null>(null);
   const navigate = useNavigate();
+  // Warm the model-defaults cache so the drawer opens prefilled without a loading step.
+  usePreferences();
   const open = useCallback<Open>((projectId) => setState({ projectId }), []);
   const value = useMemo(() => open, [open]);
   return (

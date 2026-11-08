@@ -390,3 +390,20 @@ export interface StatsQuery {
   tz?: string;
   subagents?: SubagentsFilter;
 }
+
+// ---- Preferences ----
+
+/** New-task model preset. providerInstanceId/model null = T3 default. */
+export interface ModelDefaults {
+  providerInstanceId: string | null;
+  model: string | null;
+  modelOptions: ModelOption[];
+  runtimeMode: RuntimeMode;
+  interactionMode: InteractionMode;
+}
+
+/** New task prefills from `pinned`, else `lastUsed` (the latest created task). */
+export interface Preferences {
+  pinned: ModelDefaults | null;
+  lastUsed: ModelDefaults | null;
+}

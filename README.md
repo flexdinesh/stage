@@ -12,6 +12,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Dashboard**: needs-input alert, plus running, done (awaiting settle), backlog and settled (last 7 days) across projects.
 - **History**: every T3 thread, including ones started outside this app. Filter by time window, project, status, provider and source; shows counts per project and per day.
 - **Templates**: reusable prompt + model presets.
+- **Model defaults**: new tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
 - **Settings**: T3 connection status, manual pairing, sync now.
 
 ## Deploy

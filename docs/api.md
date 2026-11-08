@@ -355,6 +355,23 @@ Skip the current step: set it `cancelled` (event detail `"skipped"`), then inter
 - `PATCH /api/templates/:id` partial of the POST body → 200 `Template`. 404. 409 duplicate name.
 - `DELETE /api/templates/:id` → 204. 404.
 
+## Preferences
+
+New-task model defaults. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`). A template still overrides the prefill.
+
+`ModelDefaults`:
+```json
+{ "providerInstanceId": "claude", "model": "claude-haiku-5-5", "modelOptions": [{ "id": "effort", "value": "low" }], "runtimeMode": "full-access", "interactionMode": "default" }
+```
+`providerInstanceId` / `model` null = T3 default (set together).
+
+### `GET /api/preferences`
+200 `{ "pinned": ModelDefaults | null, "lastUsed": ModelDefaults | null }`. `lastUsed` is written by every `POST /api/tasks` (its model fields).
+
+### `PUT /api/preferences/pinned`
+Body: `ModelDefaults` (pin; `runtimeMode` / `interactionMode` default to `full-access` / `default` when empty) or `null` (unpin). Empty body 400.
+200 `Preferences`. 400 invalid enum or provider/model not set together.
+
 ## Stats
 
 ### `GET /api/stats`

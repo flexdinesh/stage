@@ -1,11 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { api } from "../api/client.ts";
-import { useInvalidateWork, useProjects, useTemplates } from "../api/queries.ts";
+import { usePreferences, useInvalidateWork, useProjects, useTemplates } from "../api/queries.ts";
 import {
   INTERACTION_MODES,
   type CreateTaskRequest,
   type InteractionMode,
+  type ModelDefaults,
+  type Preferences,
   type Task,
   type UpdateTaskRequest,
   type Workspace,
@@ -14,7 +16,7 @@ import { parseTags } from "../lib/format.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Segmented, Select, Textarea } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea } from "./ui.tsx";
 
 interface FormState {
   projectId: string;
@@ -29,14 +31,31 @@ interface FormState {
   notes: string;
 }
 
-function initialState(task: Task | undefined, defaultProjectId: number | undefined): FormState {
+type DefaultsSource = "pinned" | "last used";
+
+/** New-task model prefill: pinned default, else the last created task's config. */
+function pickDefaults(p: Preferences | undefined): { defaults: ModelDefaults; source: DefaultsSource } | null {
+  if (p?.pinned != null) return { defaults: p.pinned, source: "pinned" };
+  if (p?.lastUsed != null) return { defaults: p.lastUsed, source: "last used" };
+  return null;
+}
+
+function initialState(task: Task | undefined, defaultProjectId: number | undefined, defaults: ModelDefaults | undefined): FormState {
   if (task === undefined) {
     return {
       projectId: defaultProjectId === undefined ? "" : String(defaultProjectId),
       title: "",
       prompt: "",
-      config: { providerInstanceId: null, model: null, modelOptions: [], runtimeMode: "full-access" },
-      interactionMode: "default",
+      config:
+        defaults === undefined
+          ? { providerInstanceId: null, model: null, modelOptions: [], runtimeMode: "full-access" }
+          : {
+              providerInstanceId: defaults.providerInstanceId,
+              model: defaults.model,
+              modelOptions: defaults.modelOptions,
+              runtimeMode: defaults.runtimeMode,
+            },
+      interactionMode: defaults?.interactionMode ?? "default",
       workspaceType: "root",
       baseRef: "origin/main",
       branch: "",
@@ -76,21 +95,37 @@ function toWorkspace(s: FormState): Workspace {
   return { type: "worktree", baseRef: s.baseRef.trim(), branch: branch === "" ? null : branch };
 }
 
-/** Create (no `task`) or edit (`task`) form in a drawer. `chainId` appends the new task to that chain. */
-export function TaskFormModal({
-  task,
-  defaultProjectId,
-  chainId,
-  onClose,
-  onSaved,
-}: {
+interface TaskFormProps {
   task?: Task;
   defaultProjectId?: number;
   chainId?: number;
   onClose: () => void;
   onSaved?: (task: Task) => void;
-}) {
-  const [s, setS] = useState(() => initialState(task, defaultProjectId));
+}
+
+/** Create (no `task`) or edit (`task`) form in a drawer. `chainId` appends the new task to that chain. A new task waits for preferences (usually cached) to prefill its model config. */
+export function TaskFormModal(props: TaskFormProps) {
+  const prefs = usePreferences();
+  if (props.task !== undefined) return <TaskFormDrawer {...props} prefill={null} />;
+  if (prefs.isPending) {
+    return (
+      <Drawer title={props.chainId === undefined ? "New task" : "New chain step"} onClose={props.onClose} wide>
+        <Muted>Loading defaults…</Muted>
+      </Drawer>
+    );
+  }
+  return <TaskFormDrawer {...props} prefill={pickDefaults(prefs.data)} />;
+}
+
+function TaskFormDrawer({
+  task,
+  defaultProjectId,
+  chainId,
+  onClose,
+  onSaved,
+  prefill,
+}: TaskFormProps & { prefill: { defaults: ModelDefaults; source: DefaultsSource } | null }) {
+  const [s, setS] = useState(() => initialState(task, defaultProjectId, prefill?.defaults));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
   const templates = useTemplates();
@@ -283,6 +318,13 @@ export function TaskFormModal({
             </>
           ) : null}
         </fieldset>
+        {prefill === null ? null : (
+          <p className="-mt-1.5 font-mono text-[11px] text-muted">
+            {prefill.source === "pinned"
+              ? "model and mode prefilled from your pinned default (Settings)"
+              : "model and mode prefilled from your last task · pin a default in Settings"}
+          </p>
+        )}
         <Field
           label="Tags"
           hint={

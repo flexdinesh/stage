@@ -8,7 +8,9 @@ import type {
   CreateTemplateRequest,
   FollowupRequest,
   Health,
+  ModelDefaults,
   PairRequest,
+  Preferences,
   Project,
   ProjectList,
   Stats,
@@ -148,6 +150,9 @@ export const api = {
   createTemplate: (body: CreateTemplateRequest) => apiFetch<Template>("/templates", post(body)),
   updateTemplate: (id: number, body: UpdateTemplateRequest) => apiFetch<Template>(`/templates/${id}`, patch(body)),
   deleteTemplate: (id: number) => apiSend(`/templates/${id}`, del),
+
+  preferences: () => apiFetch<Preferences>("/preferences"),
+  setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),
 
   stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz, subagents: q.subagents })}`),
 };

@@ -126,6 +126,12 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := s.Store.SetLastUsed(r.Context(), db.ModelDefaults{
+		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
+		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
+	}); err != nil {
+		s.log.Warn("record last-used model", "task", task.ID, "err", err)
+	}
 	if req.Start && req.ChainID == nil {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {

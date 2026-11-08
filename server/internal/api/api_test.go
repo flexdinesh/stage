@@ -1183,3 +1183,53 @@ func TestHistorySubagentsFilter(t *testing.T) {
 	}
 	e.must("GET", "/api/stats?subagents=bogus", nil, 400, nil)
 }
+
+func TestPreferences(t *testing.T) {
+	e := newEnv(t)
+	type defaults struct {
+		ProviderInstanceID *string `json:"providerInstanceId"`
+		Model              *string `json:"model"`
+		ModelOptions       []struct {
+			ID    string `json:"id"`
+			Value any    `json:"value"`
+		} `json:"modelOptions"`
+		RuntimeMode     string `json:"runtimeMode"`
+		InteractionMode string `json:"interactionMode"`
+	}
+	type prefs struct {
+		Pinned   *defaults `json:"pinned"`
+		LastUsed *defaults `json:"lastUsed"`
+	}
+	var p prefs
+	e.must("GET", "/api/preferences", nil, 200, &p)
+	if p.Pinned != nil || p.LastUsed != nil {
+		t.Fatalf("fresh %+v", p)
+	}
+
+	// Creating a task records its model config as last used.
+	pr := e.project("/w/prefs")
+	e.task(pr.ID, "A", map[string]any{
+		"providerInstanceId": "codex", "model": "gpt-6", "modelOptions": []map[string]any{{"id": "effort", "value": "high"}},
+		"runtimeMode": "auto", "interactionMode": "plan",
+	})
+	e.must("GET", "/api/preferences", nil, 200, &p)
+	lu := p.LastUsed
+	if lu == nil || *lu.ProviderInstanceID != "codex" || *lu.Model != "gpt-6" || lu.RuntimeMode != "auto" ||
+		lu.InteractionMode != "plan" || len(lu.ModelOptions) != 1 || lu.ModelOptions[0].Value != "high" || p.Pinned != nil {
+		t.Fatalf("last used %+v", p)
+	}
+
+	// Pin, validate, clear.
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"providerInstanceId": "claude", "model": "claude-haiku-5-5"}, 200, &p)
+	if p.Pinned == nil || *p.Pinned.Model != "claude-haiku-5-5" || p.Pinned.RuntimeMode != "full-access" ||
+		p.Pinned.InteractionMode != "default" || p.Pinned.ModelOptions == nil || p.LastUsed == nil {
+		t.Fatalf("pinned %+v", p)
+	}
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"model": "x"}, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"runtimeMode": "yolo"}, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", nil, 400, nil)
+	e.must("PUT", "/api/preferences/pinned", json.RawMessage("null"), 200, &p)
+	if p.Pinned != nil || p.LastUsed == nil {
+		t.Fatalf("cleared %+v", p)
+	}
+}
