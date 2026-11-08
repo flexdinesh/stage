@@ -68,7 +68,7 @@ func run() error {
 		logger.Info("using fake T3 client")
 	} else {
 		mc := t3.NewMCPClient(t3.Options{
-			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL,
+			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL, ClientName: cfg.T3ClientName,
 			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
 		})
 		closeT3 = mc.Close
@@ -113,7 +113,10 @@ func run() error {
 		return err
 	case <-ctx.Done():
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Let in-flight launches (bounded at 90s) record their thread: a kill
+	// mid-launch leaves the task failed with the outcome unknown. compose
+	// stop_grace_period must exceed this.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

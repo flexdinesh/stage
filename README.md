@@ -53,4 +53,10 @@ Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cer
 
 ## Develop
 
-`make dev` starts Postgres, the Go server on `:7380` and Vite, which proxies `/api` to the Go server. `T3_FAKE=1` swaps in a fake T3. Other targets: `make test`, `make build`, `make up`, `make down`. API contract: `docs/api.md`.
+Development never touches production. Dev and tests run on their own Postgres (`compose.dev.yaml`, `127.0.0.1:5440`, volume `t3-stage-dev_pgdata`). The prod stack is `compose.yaml` (`5439`), and only `make up` / `make down` touch it.
+
+- `make dev`: dev Postgres, a database per branch (`t3stage_dev_<branch>`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`t3-stage dev`; prod is `t3-stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `DATABASE_URL` itself.
+- `make test`: Go tests in throwaway `t3stage_test_*` databases on the dev Postgres, plus web typecheck/lint.
+- `make dev-down` stops the dev Postgres. Other targets: `make build`, `make up`, `make down`. API contract: `docs/api.md`.
+
+Guards: with `APP_ENV=dev` (set by `make dev`) the server refuses the prod database (port `5439` or name `t3stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

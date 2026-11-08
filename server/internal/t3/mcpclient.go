@@ -45,6 +45,9 @@ type Options struct {
 	Logger     *slog.Logger // nil = slog.Default()
 	// RedirectURI registered with T3; never served. "" = DefaultRedirectURI.
 	RedirectURI string
+	// ClientName identifies this app's session in T3 (OAuth client_name,
+	// pairing label "<name> mcp"). "" = DefaultClientName.
+	ClientName string
 }
 
 // MCPClient is the real Client over T3's HTTP MCP endpoint. It keeps a
@@ -98,6 +101,9 @@ func NewMCPClient(opts Options) *MCPClient {
 	if rt == nil {
 		rt = http.DefaultTransport
 	}
+	if opts.ClientName == "" {
+		opts.ClientName = DefaultClientName
+	}
 	c := &MCPClient{opts: opts, log: log, now: time.Now}
 	oauthHC := *base
 	if oauthHC.Timeout == 0 {
@@ -105,7 +111,7 @@ func NewMCPClient(opts Options) *MCPClient {
 	}
 	// OAuth responses are JSON; T3 redirects are read, never followed.
 	oauthHC.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	c.oauth = &oauthFlow{http: &oauthHC, baseURL: opts.BaseURL, redirectURI: opts.RedirectURI, now: c.now}
+	c.oauth = &oauthFlow{http: &oauthHC, baseURL: opts.BaseURL, redirectURI: opts.RedirectURI, clientName: opts.ClientName, now: c.now}
 	envHC := *base
 	envHC.Timeout = envTimeout
 	c.envHC = &envHC

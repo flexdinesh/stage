@@ -52,6 +52,9 @@ type flakyT3 struct {
 	lostLaunches  atomic.Int32
 	failInterrupt atomic.Bool
 	onInterrupt   func()
+	// foreignProject: the next launch answers with a thread in this project
+	// (T3 deduped the clientRequestId to another client's launch).
+	foreignProject atomic.Pointer[string]
 
 	mu         gosync.Mutex
 	requestIDs []string // clientRequestId of every launch call
@@ -65,6 +68,9 @@ func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.Launc
 		return t3.LaunchResult{}, &t3.ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: "t3 exploded"}
 	}
 	res, err := f.Fake.LaunchThread(ctx, in)
+	if p := f.foreignProject.Swap(nil); err == nil && p != nil {
+		res.ProjectID = *p
+	}
 	if err == nil && f.takeLost() {
 		return t3.LaunchResult{}, errors.New("connection reset by peer")
 	}
@@ -524,8 +530,8 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	if started.State != "running" || started.LaunchAttempt != 1 || started.T3ThreadID == nil {
 		t.Fatalf("after one lost response %+v", started)
 	}
-	want := fmt.Sprintf("task-%d-1", a.ID)
-	if ids := e.t3.launchRequestIDs(); !slices.Equal(ids, []string{want, want}) {
+	want := e.t3.launchRequestIDs()[0]
+	if ids := e.t3.launchRequestIDs(); !slices.Equal(ids, []string{want, want}) || !validRequestID(a.ID, want) {
 		t.Fatalf("request ids %v", ids)
 	}
 
@@ -542,9 +548,9 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	if started.State != "running" || started.LaunchAttempt != 1 {
 		t.Fatalf("restart %+v", started)
 	}
-	wantB := fmt.Sprintf("task-%d-1", b.ID)
 	ids := e.t3.launchRequestIDs()
-	if got := ids[2:]; !slices.Equal(got, []string{wantB, wantB, wantB}) {
+	wantB := ids[2]
+	if got := ids[2:]; !slices.Equal(got, []string{wantB, wantB, wantB}) || !validRequestID(b.ID, wantB) || wantB == want {
 		t.Fatalf("request ids %v", ids)
 	}
 	page, _ := e.fake.ListThreads(context.Background(), t3.ListThreadsInput{AllProjects: true})
@@ -558,6 +564,35 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	if started.LaunchAttempt != 2 {
 		t.Fatalf("new attempt %+v", started)
 	}
+	if ids := e.t3.launchRequestIDs(); ids[len(ids)-1] == wantB || !validRequestID(b.ID, ids[len(ids)-1]) {
+		t.Fatalf("new attempt reused clientRequestId %v", ids)
+	}
+}
+
+// validRequestID: "task-<id>-<uuid>", unique per attempt and database.
+func validRequestID(taskID int64, id string) bool {
+	rest, ok := strings.CutPrefix(id, fmt.Sprintf("task-%d-", taskID))
+	return ok && len(rest) == 36 && strings.Count(rest, "-") == 4
+}
+
+func TestLaunchClientRequestIDCollision(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+	a := e.task(p.ID, "A", nil)
+	other := "proj-elsewhere"
+	e.t3.foreignProject.Store(&other)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 502, nil)
+	got := e.getTask(a.ID)
+	if got.State != "failed" || got.T3ThreadID != nil || got.LastError == nil || !strings.Contains(*got.LastError, "collision") {
+		t.Fatalf("collision adopted %+v", got)
+	}
+	// The next start is a new attempt with a fresh clientRequestId.
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
+	ids := e.t3.launchRequestIDs()
+	if started.State != "running" || started.LaunchAttempt != 2 || ids[0] == ids[1] {
+		t.Fatalf("after collision %+v ids %v", started, ids)
+	}
 }
 
 func TestRecoverLaunching(t *testing.T) {
@@ -570,6 +605,21 @@ func TestRecoverLaunching(t *testing.T) {
 	e.sync.RecoverLaunching(context.Background())
 	if got := e.getTask(a.ID); got.State != "failed" || got.LastError == nil {
 		t.Fatalf("after recover %+v", got)
+	}
+	// The killed launch may have reached T3: the next start reuses its
+	// attempt and clientRequestId.
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
+	ids := e.t3.launchRequestIDs()
+	if started.State != "running" || started.LaunchAttempt != 1 || len(ids) != 1 || !validRequestID(a.ID, ids[0]) {
+		t.Fatalf("restart after recover %+v ids %v", started, ids)
+	}
+	var reqID string
+	if err := testDB.Pool.QueryRow(context.Background(), `SELECT launch_request_id FROM tasks WHERE id = $1`, a.ID).Scan(&reqID); err != nil {
+		t.Fatal(err)
+	}
+	if reqID != ids[0] {
+		t.Fatalf("launch_request_id %q, launched with %q", reqID, ids[0])
 	}
 }
 

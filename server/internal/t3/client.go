@@ -294,7 +294,7 @@ type LaunchInput struct {
 	RuntimeMode     RuntimeMode     // "" = inherit
 	InteractionMode InteractionMode // "" = inherit
 	Workspace       *WorkspaceStrategy
-	ClientRequestID string // "task-<id>-<attempt>"
+	ClientRequestID string // "task-<id>-<uuid>"
 }
 
 type LaunchResult struct {

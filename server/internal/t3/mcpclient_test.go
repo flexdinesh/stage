@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +18,7 @@ import (
 
 func newTestClient(t *testing.T, f *fakeT3, admin string, store *MemoryTokenStore) *MCPClient {
 	t.Helper()
-	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://controlbox:3773", Store: store, Logger: slog.New(slog.DiscardHandler)})
+	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://controlbox:3773", Store: store, Logger: slog.New(slog.DiscardHandler), ClientName: DefaultClientName})
 	t.Cleanup(c.Close)
 	return c
 }
@@ -75,7 +76,11 @@ func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
 
 	f.mu.Lock()
 	dec, form, auth := f.lastDecision, f.lastTokenForm, f.mcpAuthHeaders
+	names, labels := f.clientNames, f.pairingLabels
 	f.mu.Unlock()
+	if !slices.Equal(names, []string{"t3-stage"}) || !slices.Equal(labels, []string{"t3-stage mcp"}) {
+		t.Fatalf("client names %v, pairing labels %v", names, labels)
+	}
 	d, _ := dec["decision"].(map[string]any)
 	if d["_tag"] != "pairing-code" || d["access"] != "full-access" || !strings.HasPrefix(d["code"].(string), "PAIR-") {
 		t.Fatalf("decision = %v", d)
@@ -629,5 +634,21 @@ func TestUploadAndSendAttachments(t *testing.T) {
 	}
 	if err := c.SendAttachments(ctx, "t1", "x", nil); err == nil {
 		t.Fatal("send without attachments must fail")
+	}
+}
+
+func TestClientNameLabelsSession(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	c := NewMCPClient(Options{BaseURL: f.url(), AdminToken: f.adminToken, Store: NewMemoryTokenStore(), Logger: slog.New(slog.DiscardHandler), ClientName: "t3-stage dev"})
+	t.Cleanup(c.Close)
+	if _, err := c.Capabilities(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	names, labels := f.clientNames, f.pairingLabels
+	f.mu.Unlock()
+	if !slices.Equal(names, []string{"t3-stage dev"}) || !slices.Equal(labels, []string{"t3-stage dev mcp"}) {
+		t.Fatalf("client names %v, pairing labels %v", names, labels)
 	}
 }

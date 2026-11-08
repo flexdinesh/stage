@@ -1,5 +1,6 @@
 .scratch/
 .env
+.env.dev
 web/node_modules
 web/dist
 server/internal/webui/dist/*

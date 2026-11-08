@@ -37,6 +37,8 @@ type fakeT3 struct {
 	lastTokenForm  url.Values
 	mcpAuthHeaders []string
 	expiresIn      int
+	clientNames    []string // register client_name per call
+	pairingLabels  []string // pairing-token label per call
 
 	uploads map[string]fakeUpload // upload token -> body
 
@@ -162,6 +164,7 @@ func (f *fakeT3) register(w http.ResponseWriter, r *http.Request) {
 	f.seq++
 	id := fmt.Sprintf("client-%d.sig", f.seq)
 	f.registered[id] = body.RedirectURIs[0]
+	f.clientNames = append(f.clientNames, body.ClientName)
 	f.mu.Unlock()
 	writeJSON(w, 201, map[string]any{
 		"client_id": id, "client_name": body.ClientName, "redirect_uris": body.RedirectURIs,
@@ -190,6 +193,7 @@ func (f *fakeT3) pairingToken(w http.ResponseWriter, r *http.Request) {
 	f.seq++
 	code := fmt.Sprintf("PAIR-%d", f.seq)
 	f.pairingCodes[code] = body.Scopes
+	f.pairingLabels = append(f.pairingLabels, body.Label)
 	f.mu.Unlock()
 	writeJSON(w, 200, map[string]any{"id": "link-1", "credential": code, "label": body.Label, "expiresAt": "2030-01-01T00:00:00.000Z"})
 }
