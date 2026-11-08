@@ -45,7 +45,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 { "type": "worktree", "baseRef": "origin/main", "branch": "feat-x" }   // branch: string | null (null = T3 picks)
 ```
 
-`Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}`.
+`Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}` (remote = `origin` or `upstream`; `feature/x` is treated as local).
 
 ## Health
 
@@ -132,9 +132,9 @@ Query: `archived` = `true` (only archived) | `false` (default, only active) | `a
 200 `{ "projects": Project[] }` ordered by `title`.
 
 ### `POST /api/projects`
-Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed).
+Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; absolute roots are path-cleaned, e.g. trailing `/` dropped).
 - An app project with the same `workspaceRoot` exists → 409.
-- A T3 project with the same `workspaceRoot` exists → link it (`source: "t3"`).
+- A T3 project with the same `workspaceRoot` exists (already imported, or found after refreshing `t3_project_list`) → link it (`source: "t3"`): the existing row is unarchived and takes the requested `title`.
 - Otherwise create it in T3 (`t3_project_create`) → `source: "app"`.
 
 201 `Project`. 502 T3 error. 503 not connected.
@@ -179,9 +179,10 @@ Body: `{ "title"?: string, "archived"?: boolean }`. Local only (does not modify 
   "updatedAt": "2026-11-08T10:00:00Z"
 }
 ```
-- `providerInstanceId` / `model` null = T3 default. `modelOptions` default `[]`.
+- `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
+- `chainPosition` is 1-based.
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` (null without thread).
-- `finishedAt`: first entry into `completed|failed|interrupted|cancelled`. `settledAt`: entry into `settled`.
+- `finishedAt`: first entry into `completed|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 
 `TaskEvent`:
 ```json
@@ -228,7 +229,7 @@ In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (4
 204. 409 when state is `launching|running|needs_input` (stop first). Removes it from its chain.
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409.
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<attempt>"`, new attempt and new thread each start). Allowed from `backlog|failed|interrupted|cancelled`; else 409. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
 
 ### `POST /api/tasks/:id/followup`
@@ -237,6 +238,8 @@ Body `{ "message": string, "mode"?: SendMode }`. Sends `t3_thread_send`. 409 whe
 
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
+
+Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope).
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
@@ -388,6 +391,8 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 
 Applied only to tasks with a thread whose state is not `backlog`. A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 
+Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input|completed`, plus `failed|interrupted` tasks updated in the last 10 minutes. `settled` and `cancelled` are final (a skipped step is never re-polled into `interrupted`). A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+
 ## Chain rules, pure function
 
 - Steps = chain tasks ordered by `chainPosition`.
@@ -398,4 +403,6 @@ Applied only to tasks with a thread whose state is not `backlog`. A change write
   - `launching|running|needs_input|completed` → wait (a step is done only when settled in T3).
   - `failed|interrupted` → set chain `paused`.
 - A step transition into `failed|interrupted|cancelled` (other than via skip) while the chain is `running` sets the chain `paused`.
+- A `paused` chain with no current step left (e.g. its last step skipped) becomes `done`.
+- Adding a not-yet-passed step to a `done` chain (`PATCH` steps or `POST /api/tasks` with `chainId`) sets it back to `idle`.
 - Chains may span projects.

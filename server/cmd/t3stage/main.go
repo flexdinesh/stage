@@ -7,14 +7,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
 	"github.com/flexdinesh/t3-stage/server/internal/api"
+	"github.com/flexdinesh/t3-stage/server/internal/chains"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
+	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 	"github.com/flexdinesh/t3-stage/server/internal/webui"
 )
@@ -34,7 +36,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -46,15 +48,37 @@ func run() error {
 		return err
 	}
 
-	// WIRING (integration): replace the fake with the real MCP client from
-	// internal/t3 (needs cfg + a db-backed t3.TokenStore).
-	var t3Client t3.Client = t3.NewFake()
+	logger := slog.Default()
+	store := db.NewStore(pool)
+	var wg sync.WaitGroup
+	defer wg.Wait() // background loops exit once stop() cancels ctx
+	defer stop()
 
-	// WIRING (integration): start background loops here (active poller 5s,
-	// full sync 5m, catalog refresh 10m, chain runner), all bound to ctx.
+	// PHASE3: swap point. Use the real MCP client unless T3_FAKE=1:
+	//
+	//	if os.Getenv("T3_FAKE") != "1" {
+	//		mc := t3.NewMCPClient(t3.Options{
+	//			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL,
+	//			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
+	//		})
+	//		wg.Add(1)
+	//		go func() { defer wg.Done(); mc.Run(ctx) }()
+	//		t3Client = mc
+	//	}
+	var t3Client t3.Client = t3.NewFake()
+	logger.Info("using fake T3 client")
+
+	syncSvc := t3sync.New(store, t3Client, logger)
+	runner := chains.NewRunner(store, syncSvc, t3Client, logger)
+	syncSvc.OnTransition = runner.OnTransition
+	wg.Add(2)
+	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
+	go func() { defer wg.Done(); runner.Run(ctx) }()
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.NewRouter(api.Deps{Config: cfg, Pool: pool, T3: t3Client}))
+	mux.Handle("/api/", api.NewRouter(api.Deps{
+		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Chains: runner, Logger: logger,
+	}))
 	mux.Handle("/", webui.Handler())
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: mux, ReadHeaderTimeout: 10 * time.Second}

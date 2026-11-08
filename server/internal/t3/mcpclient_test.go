@@ -1,0 +1,422 @@
+package t3
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func newTestClient(t *testing.T, f *fakeT3, admin string, store *MemoryTokenStore) *MCPClient {
+	t.Helper()
+	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://controlbox:3773", Store: store, Logger: slog.New(slog.DiscardHandler)})
+	t.Cleanup(c.Close)
+	return c
+}
+
+func ctxT(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func capabilitiesTool(f *fakeT3) {
+	f.tool("orchestrator_capabilities", func(map[string]any) (*mcp.CallToolResult, error) {
+		return structured(`{"providers":[]}`), nil
+	})
+}
+
+func TestS256MatchesRFC7636(t *testing.T) {
+	// RFC 7636 Appendix B.
+	if got := s256("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"); got != "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" {
+		t.Fatalf("s256 = %q", got)
+	}
+	v, ch, err := pkce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v) < 43 || len(v) > 128 || len(ch) != 43 || s256(v) != ch {
+		t.Fatalf("bad pkce pair: verifier %d chars, challenge %q", len(v), ch)
+	}
+	if strings.ContainsAny(v+ch, "+/=") {
+		t.Fatal("pkce values must be base64url without padding")
+	}
+}
+
+func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	store := NewMemoryTokenStore()
+	c := newTestClient(t, f, f.adminToken, store)
+	ctx := ctxT(t)
+
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mint, tokens := f.counts()
+	if mint != 1 || tokens != 1 {
+		t.Fatalf("mint=%d token=%d, want 1/1", mint, tokens)
+	}
+	saved, _ := store.LoadToken(ctx)
+	if !strings.HasPrefix(saved.Token, "access-") || saved.ClientID == "" {
+		t.Fatalf("token not saved: %+v", saved)
+	}
+	if d := time.Until(saved.ExpiresAt); d < 29*24*time.Hour || d > 31*24*time.Hour {
+		t.Fatalf("expiresAt %v not ~30 days out", saved.ExpiresAt)
+	}
+
+	f.mu.Lock()
+	dec, form, auth := f.lastDecision, f.lastTokenForm, f.mcpAuthHeaders
+	f.mu.Unlock()
+	d, _ := dec["decision"].(map[string]any)
+	if d["_tag"] != "pairing-code" || d["access"] != "full-access" || !strings.HasPrefix(d["code"].(string), "PAIR-") {
+		t.Fatalf("decision = %v", d)
+	}
+	a, _ := dec["authorization"].(map[string]any)
+	if a["redirect_uri"] != DefaultRedirectURI || a["code_challenge_method"] != "S256" || a["resource"] != f.url()+"/mcp" || a["state"] == "" {
+		t.Fatalf("authorization = %v", a)
+	}
+	if form.Get("redirect_uri") != DefaultRedirectURI || form.Get("resource") != f.url()+"/mcp" || form.Get("client_id") != a["client_id"] {
+		t.Fatalf("token form = %v", form)
+	}
+	if s256(form.Get("code_verifier")) != a["code_challenge"] {
+		t.Fatal("verifier does not match challenge")
+	}
+	if len(auth) == 0 || auth[0] != "Bearer "+saved.Token {
+		t.Fatalf("mcp auth header = %v", auth)
+	}
+
+	st := c.Status(ctx)
+	if !st.Connected || st.ClientID != saved.ClientID || st.ExpiresAt == nil || st.EnvironmentID != "env-fake" || st.LastError != "" {
+		t.Fatalf("status = %+v", st)
+	}
+	if got := c.WebURL(ctx, "thread-1"); got != "http://controlbox:3773/env-fake/thread-1" {
+		t.Fatalf("web url = %q", got)
+	}
+}
+
+func TestPairUsesUserCodeWithoutAdmin(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	f.addUserPairingCode("USER-CODE")
+	store := NewMemoryTokenStore()
+	c := newTestClient(t, f, "", store)
+	ctx := ctxT(t)
+
+	if _, err := c.Capabilities(ctx); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("before pair: err = %v, want ErrNotConnected", err)
+	}
+	if err := c.Pair(ctx, "  USER-CODE "); err != nil {
+		t.Fatal(err)
+	}
+	if mint, _ := f.counts(); mint != 0 {
+		t.Fatalf("pair minted %d codes", mint)
+	}
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Pair(ctx, "USER-CODE"); err == nil || !strings.Contains(err.Error(), "unknown or already used") {
+		t.Fatalf("reused code: err = %v", err)
+	}
+	if err := c.Pair(ctx, " "); err == nil {
+		t.Fatal("empty code accepted")
+	}
+}
+
+func TestMintFailureIsReportedAndRecorded(t *testing.T) {
+	f := newFakeT3(t)
+	f.adminScopes = []string{"access:write", "orchestration:read", "orchestration:operate"}
+	capabilitiesTool(f)
+	store := NewMemoryTokenStore()
+	c := newTestClient(t, f, f.adminToken, store)
+	ctx := ctxT(t)
+
+	_, err := c.Capabilities(ctx)
+	if !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("err = %v, want ErrNotConnected", err)
+	}
+	if !strings.Contains(err.Error(), "pairing-token") || !strings.Contains(err.Error(), "settings:write") {
+		t.Fatalf("err lacks detail: %v", err)
+	}
+	if !strings.Contains(store.LastError(), "insufficient_scope") {
+		t.Fatalf("store last error = %q", store.LastError())
+	}
+	if st := c.Status(ctx); st.Connected || st.LastError == "" {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestRenewsOnlyInsideWindow(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	ctx := ctxT(t)
+
+	// 20 days left: valid, outside window -> no renewal. Register token with fake.
+	store := NewMemoryTokenStore()
+	f.addToken("old-valid")
+	_ = store.SaveToken(ctx, StoredToken{ClientID: "c", Token: "old-valid", ExpiresAt: time.Now().Add(20 * 24 * time.Hour)})
+	c := newTestClient(t, f, f.adminToken, store)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mint, _ := f.counts(); mint != 0 {
+		t.Fatalf("renewed outside window (mint=%d)", mint)
+	}
+
+	// 4 days left: inside window -> renewed lazily on the call.
+	store2 := NewMemoryTokenStore()
+	f.addToken("old-near")
+	_ = store2.SaveToken(ctx, StoredToken{ClientID: "c", Token: "old-near", ExpiresAt: time.Now().Add(4 * 24 * time.Hour)})
+	c2 := newTestClient(t, f, f.adminToken, store2)
+	if _, err := c2.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := store2.LoadToken(ctx)
+	if tok.Token == "old-near" || time.Until(tok.ExpiresAt) < 29*24*time.Hour {
+		t.Fatalf("not renewed: %+v", tok)
+	}
+}
+
+func TestRenewFailureKeepsValidToken(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	ctx := ctxT(t)
+	store := NewMemoryTokenStore()
+	f.addToken("old-near")
+	_ = store.SaveToken(ctx, StoredToken{Token: "old-near", ExpiresAt: time.Now().Add(2 * 24 * time.Hour)})
+	c := newTestClient(t, f, "wrong-admin", store)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatalf("call should use still-valid token: %v", err)
+	}
+	if store.LastError() == "" {
+		t.Fatal("renewal failure not recorded")
+	}
+	if st := c.Status(ctx); !st.Connected {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestUnauthorizedRenewsOnceAndRetries(t *testing.T) {
+	f := newFakeT3(t)
+	var callsN atomic.Int32
+	f.tool("orchestrator_capabilities", func(map[string]any) (*mcp.CallToolResult, error) {
+		callsN.Add(1)
+		return structured(`{"providers":[{"providerInstanceId":"claude","driverKind":"claude","displayName":null,"models":[],"canRunChildTask":true,"canRunCrossProviderChildTask":true,"constraints":[]}]}`), nil
+	})
+	ctx := ctxT(t)
+	store := NewMemoryTokenStore()
+	// Valid-looking token T3 does not know (e.g. revoked): first request 401s.
+	_ = store.SaveToken(ctx, StoredToken{Token: "revoked", ExpiresAt: time.Now().Add(20 * 24 * time.Hour)})
+	c := newTestClient(t, f, f.adminToken, store)
+
+	cat, err := c.Capabilities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := callsN.Load(); len(cat.Providers) != 1 || calls != 1 {
+		t.Fatalf("providers=%d calls=%d", len(cat.Providers), calls)
+	}
+	if mint, _ := f.counts(); mint != 1 {
+		t.Fatalf("mint = %d, want 1", mint)
+	}
+
+	// Token revoked mid-session: next call 401s, renews, retries.
+	f.revokeAll()
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mint, _ := f.counts(); mint != 2 || callsN.Load() != 2 {
+		t.Fatalf("mint=%d calls=%d, want 2/2", mint, callsN.Load())
+	}
+	if st := c.Status(ctx); !st.Connected {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestUnauthorizedWithoutAdminIsNotConnected(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	ctx := ctxT(t)
+	store := NewMemoryTokenStore()
+	_ = store.SaveToken(ctx, StoredToken{Token: "revoked", ExpiresAt: time.Now().Add(20 * 24 * time.Hour)})
+	c := newTestClient(t, f, "", store)
+	if _, err := c.Capabilities(ctx); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("err = %v, want ErrNotConnected", err)
+	}
+	if st := c.Status(ctx); st.Connected {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestReconnectsWhenSessionDropped(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.resetMCP() // server forgets the session -> 404 -> ErrSessionMissing
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatalf("after session drop: %v", err)
+	}
+	if mint, _ := f.counts(); mint != 1 {
+		t.Fatalf("reconnect should not re-authorize (mint=%d)", mint)
+	}
+}
+
+func TestRunRenewsInBackground(t *testing.T) {
+	f := newFakeT3(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := NewMemoryTokenStore()
+	_ = store.SaveToken(ctx, StoredToken{Token: "near", ExpiresAt: time.Now().Add(time.Hour)})
+	c := newTestClient(t, f, f.adminToken, store)
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for store.Saves() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("Run did not renew")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop")
+	}
+}
+
+func TestToolErrorMapsNotFound(t *testing.T) {
+	f := newFakeT3(t)
+	f.tool("t3_thread_read", func(args map[string]any) (*mcp.CallToolResult, error) {
+		if args["limit"] != float64(1) || args["runLimit"] != float64(1) || args["maxCharsPerItem"] == nil {
+			return structured(`{"bad":"args"}`), nil
+		}
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+			Text: `{"_tag":"OrchestratorMcpFailure","code":"thread_not_found","message":"Thread x is no longer available."}`,
+		}}}, nil
+	})
+	f.tool("t3_thread_send", func(map[string]any) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+			Text: `{"_tag":"OrchestratorMcpFailure","code":"thread_not_sendable","message":"Thread is archived."}`,
+		}}}, nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+	_, err := c.ReadThread(ctx, "x")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	err = c.SendMessage(ctx, "x", "hi", SendAuto)
+	var te *ToolError
+	if !errors.As(err, &te) || te.Code != "thread_not_sendable" || errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestToolArgumentsSent(t *testing.T) {
+	f := newFakeT3(t)
+	var gotMu sync.Mutex
+	gotMap := map[string]map[string]any{}
+	got := func(name string) map[string]any {
+		gotMu.Lock()
+		defer gotMu.Unlock()
+		return gotMap[name]
+	}
+	record := func(name, result string) {
+		f.tool(name, func(args map[string]any) (*mcp.CallToolResult, error) {
+			gotMu.Lock()
+			gotMap[name] = args
+			gotMu.Unlock()
+			return structured(result), nil
+		})
+	}
+	record("t3_thread_launch", `{"threadId":"t1","link":"https://app.t3.codes/threads/env-a/t1","projectId":"p1","modelSelection":{"instanceId":"claude","model":"m","options":[{"id":"effort","value":"low"}]},"runId":null,"status":null}`)
+	record("t3_thread_interrupt", `{"threadId":"t1","runId":null,"status":"no_active_run"}`)
+	record("t3_thread_list", `{"projectId":null,"currentThreadId":null,"threads":[],"nextCursor":null,"total":0}`)
+	record("t3_project_create", `{"id":"p9","title":"X","workspaceRoot":"/x","defaultModelSelection":null,"scripts":[],"createdAt":"2026-11-08T00:00:00.000Z","updatedAt":"2026-11-08T00:00:00.000Z","deletedAt":null}`)
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+
+	sfo := true
+	res, err := c.LaunchThread(ctx, LaunchInput{
+		ProjectID: "p1", Title: " T ", Message: "do it",
+		ModelSelection:  &ModelSelection{InstanceID: "claude", Model: "m", Options: []ModelOption{{ID: "effort", Value: StringValue("low")}}},
+		RuntimeMode:     RuntimeFullAccess,
+		InteractionMode: InteractionPlan,
+		Workspace:       &WorkspaceStrategy{Type: WorkspaceWorktree, BaseRef: "origin/main", Branch: "feat", StartFromOrigin: &sfo},
+		ClientRequestID: "task-1-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ThreadID != "t1" || res.RunID != "" || res.Status != "" || len(res.ModelSelection.Options) != 1 {
+		t.Fatalf("launch result = %+v", res)
+	}
+	la := got("t3_thread_launch")
+	ws, _ := la["workspaceStrategy"].(map[string]any)
+	ms, _ := la["modelSelection"].(map[string]any)
+	if la["title"] != "T" || la["clientRequestId"] != "task-1-1" || la["runtimeMode"] != "full-access" || la["interactionMode"] != "plan" ||
+		ws["type"] != "worktree" || ws["baseRef"] != "origin/main" || ws["branch"] != "feat" || ws["startFromOrigin"] != true ||
+		ms["instanceId"] != "claude" {
+		t.Fatalf("launch args = %v", la)
+	}
+	if st := c.Status(ctx); st.EnvironmentID == "" {
+		t.Fatal("environment id unknown")
+	}
+
+	if err := c.Interrupt(ctx, "t1"); err != nil {
+		t.Fatal(err)
+	}
+	if ia := got("t3_thread_interrupt"); ia["threadId"] != "t1" || ia["stop"] != true {
+		t.Fatalf("interrupt args = %v", ia)
+	}
+
+	cursor := 100
+	if _, err := c.ListThreads(ctx, ListThreadsInput{AllProjects: true, ProjectID: "ignored", Cursor: &cursor, Limit: 500}); err != nil {
+		t.Fatal(err)
+	}
+	ta := got("t3_thread_list")
+	if ta["allProjects"] != true || ta["projectId"] != nil || ta["cursor"] != float64(100) || ta["limit"] != float64(100) || ta["includeSubagents"] != false {
+		t.Fatalf("list args = %v", ta)
+	}
+
+	p, err := c.CreateProject(ctx, CreateProjectInput{Title: "X", WorkspaceRoot: "/x"})
+	if err != nil || p.ID != "p9" || p.DeletedAt != nil {
+		t.Fatalf("create = %+v, %v", p, err)
+	}
+}
+
+func TestListProjectsPagesToCompletion(t *testing.T) {
+	f := newFakeT3(t)
+	var cursorsMu sync.Mutex
+	var cursors []any
+	f.tool("t3_project_list", func(args map[string]any) (*mcp.CallToolResult, error) {
+		cursorsMu.Lock()
+		cursors = append(cursors, args["cursor"])
+		cursorsMu.Unlock()
+		if args["cursor"] == float64(0) {
+			return structured(`{"projects":[{"id":"a","title":"A","workspaceRoot":"/a","createdAt":"2026-10-20T11:40:19.565Z","updatedAt":"2026-10-20T11:40:19.565Z","deletedAt":null,"archivedAt":null}],"nextCursor":1}`), nil
+		}
+		return structured(`{"projects":[{"id":"b","title":"B","workspaceRoot":"/b","createdAt":"2026-10-20T11:40:19.565Z","updatedAt":"2026-10-20T11:40:19.565Z","deletedAt":null,"archivedAt":"2026-11-06T05:05:33.809Z"}],"nextCursor":null}`), nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ps, err := c.ListProjects(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursorsMu.Lock()
+	defer cursorsMu.Unlock()
+	if len(ps) != 2 || ps[0].ID != "a" || ps[1].ArchivedAt == nil || len(cursors) != 2 {
+		t.Fatalf("projects = %+v cursors = %v", ps, cursors)
+	}
+}

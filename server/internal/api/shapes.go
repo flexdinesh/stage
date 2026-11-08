@@ -1,0 +1,135 @@
+package api
+
+import (
+	"strings"
+	"time"
+
+	"github.com/flexdinesh/t3-stage/server/internal/chains"
+	"github.com/flexdinesh/t3-stage/server/internal/db"
+	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
+	"github.com/flexdinesh/t3-stage/server/internal/t3"
+)
+
+type taskJSON struct {
+	db.Task
+	T3WebURL *string `json:"t3WebUrl"`
+	T3AppURL *string `json:"t3AppUrl"`
+}
+
+type threadJSON struct {
+	db.Thread
+	T3WebURL *string `json:"t3WebUrl"`
+	T3AppURL *string `json:"t3AppUrl"`
+}
+
+type taskDetailJSON struct {
+	taskJSON
+	Events []db.TaskEvent `json:"events"`
+	Thread *threadJSON    `json:"thread"`
+}
+
+type chainJSON struct {
+	ID            int64         `json:"id"`
+	Title         string        `json:"title"`
+	State         db.ChainState `json:"state"`
+	CurrentTaskID *int64        `json:"currentTaskId"`
+	Steps         []taskJSON    `json:"steps"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
+}
+
+// webURL = T3_PUBLIC_URL/<environmentId>/<threadId>.
+func (s *server) webURL(envID string, threadID *string) *string {
+	if envID == "" || threadID == nil || *threadID == "" {
+		return nil
+	}
+	u := strings.TrimRight(s.Config.T3PublicURL, "/") + "/" + envID + "/" + *threadID
+	return &u
+}
+
+func (s *server) task(env string, t db.Task) taskJSON {
+	out := taskJSON{Task: t, T3WebURL: s.webURL(env, t.T3ThreadID)}
+	if t.T3ThreadID != nil {
+		out.T3AppURL = t.ThreadLink
+	}
+	return out
+}
+
+func (s *server) tasks(env string, ts []db.Task) []taskJSON {
+	out := make([]taskJSON, len(ts))
+	for i, t := range ts {
+		out[i] = s.task(env, t)
+	}
+	return out
+}
+
+func (s *server) thread(env string, t db.Thread) threadJSON {
+	id := t.T3ThreadID
+	return threadJSON{Thread: t, T3WebURL: s.webURL(env, &id), T3AppURL: t.Link}
+}
+
+func (s *server) chain(env string, c db.Chain) chainJSON {
+	return chainJSON{
+		ID: c.ID, Title: c.Title, State: c.State, CurrentTaskID: chains.CurrentTaskID(c.Steps),
+		Steps: s.tasks(env, c.Steps), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+}
+
+type catalogOptionJSON struct {
+	ID      string           `json:"id"`
+	Values  []t3.OptionValue `json:"values"`
+	Default *t3.OptionValue  `json:"default"`
+}
+
+type catalogModelJSON struct {
+	ID      string              `json:"id"`
+	Label   string              `json:"label"`
+	Options []catalogOptionJSON `json:"options"`
+}
+
+type catalogProviderJSON struct {
+	ProviderInstanceID string             `json:"providerInstanceId"`
+	DriverKind         string             `json:"driverKind"`
+	DisplayName        string             `json:"displayName"`
+	Models             []catalogModelJSON `json:"models"`
+	RuntimeModes       []t3.RuntimeMode   `json:"runtimeModes"`
+}
+
+type catalogJSON struct {
+	Providers []catalogProviderJSON `json:"providers"`
+	FetchedAt *time.Time            `json:"fetchedAt"`
+}
+
+// catalogShape drops providers with constraints and applies fallbacks.
+func catalogShape(snap *t3sync.CatalogSnapshot) catalogJSON {
+	fetched := snap.FetchedAt
+	out := catalogJSON{Providers: []catalogProviderJSON{}, FetchedAt: &fetched}
+	for _, p := range snap.Catalog.Providers {
+		if len(p.Constraints) > 0 {
+			continue
+		}
+		cp := catalogProviderJSON{
+			ProviderInstanceID: p.ProviderInstanceID, DriverKind: p.DriverKind, DisplayName: p.DisplayName,
+			Models: []catalogModelJSON{}, RuntimeModes: p.RuntimeModes,
+		}
+		if cp.DisplayName == "" {
+			cp.DisplayName = p.ProviderInstanceID
+		}
+		for _, m := range p.Models {
+			cm := catalogModelJSON{ID: m.ID, Label: m.Label, Options: []catalogOptionJSON{}}
+			if cm.Label == "" {
+				cm.Label = m.ID
+			}
+			for _, o := range m.Options {
+				vals := o.Values
+				if vals == nil {
+					vals = []t3.OptionValue{}
+				}
+				cm.Options = append(cm.Options, catalogOptionJSON{ID: o.ID, Values: vals, Default: o.Default})
+			}
+			cp.Models = append(cp.Models, cm)
+		}
+		out.Providers = append(out.Providers, cp)
+	}
+	return out
+}
