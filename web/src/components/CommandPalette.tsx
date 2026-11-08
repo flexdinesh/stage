@@ -24,7 +24,7 @@ const PAGES: [string, string][] = [
   ["Dashboard", "/"],
   ["Projects", "/projects"],
   ["History", "/history"],
-  ["Templates", "/templates"],
+  ["Snippets", "/snippets"],
   ["Settings", "/settings"],
 ];
 

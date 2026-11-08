@@ -9,7 +9,7 @@ export const keys = {
   tasks: ["tasks"],
   task: ["task"],
   threads: ["threads"],
-  templates: ["templates"],
+  snippets: ["snippets"],
   stats: ["stats"],
   preferences: ["preferences"],
   badge: ["badge"],
@@ -59,7 +59,7 @@ export const useNotificationInbox = () =>
     getNextPageParam: (last) => last.nextBefore ?? undefined,
   });
 
-export const useTemplates = () => useQuery({ queryKey: keys.templates, queryFn: api.templates });
+export const useSnippets = () => useQuery({ queryKey: keys.snippets, queryFn: api.snippets });
 
 // Changes only on task create or pin; no polling.
 export const usePreferences = () =>

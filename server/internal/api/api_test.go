@@ -955,43 +955,54 @@ func TestCatalogAndPair(t *testing.T) {
 	e.must("POST", "/api/t3/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
 }
 
-func TestTemplates(t *testing.T) {
+func TestSnippets(t *testing.T) {
 	e := newEnv(t)
-	type tmpl struct {
-		ID                 int64   `json:"id"`
-		Name               string  `json:"name"`
-		Prompt             string  `json:"prompt"`
-		ProviderInstanceID *string `json:"providerInstanceId"`
-		ModelOptions       []any   `json:"modelOptions"`
-		RuntimeMode        string  `json:"runtimeMode"`
-		InteractionMode    string  `json:"interactionMode"`
+	type snippet struct {
+		ID        int64  `json:"id"`
+		Name      string `json:"name"`
+		Body      string `json:"body"`
+		ProjectID *int64 `json:"projectId"`
 	}
-	var a tmpl
-	e.must("POST", "/api/templates", map[string]any{"name": "Quick", "providerInstanceId": "claude", "model": "claude-haiku-5-5"}, 201, &a)
-	if a.RuntimeMode != "full-access" || a.InteractionMode != "default" || a.ModelOptions == nil || a.ProviderInstanceID == nil {
-		t.Fatalf("template %+v", a)
+	proj := e.project("/w/snip")
+	var a snippet
+	e.must("POST", "/api/snippets", map[string]any{"name": " Quick ", "body": "do the thing"}, 201, &a)
+	if a.Name != "Quick" || a.Body != "do the thing" || a.ProjectID != nil {
+		t.Fatalf("snippet %+v", a)
 	}
-	e.must("POST", "/api/templates", map[string]any{"name": "Quick"}, 409, nil)
-	e.must("POST", "/api/templates", map[string]any{}, 400, nil)
-	e.must("POST", "/api/templates", map[string]any{"name": "x", "interactionMode": "chat"}, 400, nil)
-	var b tmpl
-	e.must("POST", "/api/templates", map[string]any{"name": "Another", "interactionMode": "plan"}, 201, &b)
-	e.must("PATCH", fmt.Sprintf("/api/templates/%d", b.ID), map[string]any{"name": "Quick"}, 409, nil)
-	e.must("PATCH", fmt.Sprintf("/api/templates/%d", a.ID), map[string]any{"prompt": "hi", "providerInstanceId": nil}, 200, &a)
-	if a.Prompt != "hi" || a.ProviderInstanceID != nil || a.Name != "Quick" {
+	e.must("POST", "/api/snippets", map[string]any{"name": "Quick", "body": "x"}, 409, nil)
+	e.must("POST", "/api/snippets", map[string]any{}, 400, nil)
+	e.must("POST", "/api/snippets", map[string]any{"name": "x"}, 400, nil)
+	e.must("POST", "/api/snippets", map[string]any{"name": "x", "body": "  "}, 400, nil)
+	e.must("POST", "/api/snippets", map[string]any{"name": "x", "body": "b", "projectId": 999999}, 400, nil)
+	var b snippet
+	e.must("POST", "/api/snippets", map[string]any{"name": "Another", "body": "b", "projectId": proj.ID}, 201, &b)
+	if b.ProjectID == nil || *b.ProjectID != proj.ID {
+		t.Fatalf("scoped %+v", b)
+	}
+	e.must("PATCH", fmt.Sprintf("/api/snippets/%d", b.ID), map[string]any{"name": "Quick"}, 409, nil)
+	e.must("PATCH", fmt.Sprintf("/api/snippets/%d", b.ID), map[string]any{"body": ""}, 400, nil)
+	e.must("PATCH", fmt.Sprintf("/api/snippets/%d", b.ID), map[string]any{"projectId": 999999}, 400, nil)
+	e.must("PATCH", fmt.Sprintf("/api/snippets/%d", a.ID), map[string]any{"body": "hi", "projectId": proj.ID}, 200, &a)
+	if a.Body != "hi" || a.ProjectID == nil || a.Name != "Quick" {
 		t.Fatalf("patched %+v", a)
 	}
-	var list struct {
-		Templates []tmpl `json:"templates"`
+	e.must("PATCH", fmt.Sprintf("/api/snippets/%d", a.ID), map[string]any{"projectId": nil}, 200, &a)
+	if a.ProjectID != nil {
+		t.Fatalf("unscoped %+v", a)
 	}
-	e.must("GET", "/api/templates", nil, 200, &list)
-	if len(list.Templates) != 2 || list.Templates[0].Name != "Another" {
+	var list struct {
+		Snippets []snippet `json:"snippets"`
+	}
+	e.must("GET", "/api/snippets", nil, 200, &list)
+	// Global first, then project-scoped.
+	if len(list.Snippets) != 2 || list.Snippets[0].Name != "Quick" || list.Snippets[1].Name != "Another" {
 		t.Fatalf("list %+v", list)
 	}
-	e.must("GET", fmt.Sprintf("/api/templates/%d", a.ID), nil, 200, nil)
-	e.must("DELETE", fmt.Sprintf("/api/templates/%d", a.ID), nil, 204, nil)
-	e.must("DELETE", fmt.Sprintf("/api/templates/%d", a.ID), nil, 404, nil)
-	e.must("GET", fmt.Sprintf("/api/templates/%d", a.ID), nil, 404, nil)
+	e.must("GET", fmt.Sprintf("/api/snippets/%d", a.ID), nil, 200, nil)
+	e.must("DELETE", fmt.Sprintf("/api/snippets/%d", a.ID), nil, 204, nil)
+	e.must("DELETE", fmt.Sprintf("/api/snippets/%d", a.ID), nil, 404, nil)
+	e.must("GET", fmt.Sprintf("/api/snippets/%d", a.ID), nil, 404, nil)
+	e.must("GET", "/api/templates", nil, 404, nil)
 }
 
 func timeAfter() <-chan time.Time { return time.After(10 * time.Millisecond) }

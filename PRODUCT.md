@@ -27,7 +27,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Screenshots: images dropped on (or picked for) the prompt are sent with it on every launch; read-only once the task leaves backlog.
 - Run order: a task can run after one other task (linear, may span projects), set while creating, viewing or editing a task; it starts when that task settles; a failed predecessor keeps it waiting; Start now unlinks it.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
-- Templates for prompt + model presets. Settings: connection, pairing, sync now.
+- Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now.
 
 ## Brand Commitments
 - Name: t3-stage (lowercase).

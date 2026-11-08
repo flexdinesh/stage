@@ -159,17 +159,14 @@ type Thread struct {
 	Link                *string    `json:"-"`
 }
 
-type Template struct {
-	ID                 int64            `json:"id"`
-	Name               string           `json:"name"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId"`
-	Model              *string          `json:"model"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode        string           `json:"runtimeMode"`
-	InteractionMode    string           `json:"interactionMode"`
-	CreatedAt          time.Time        `json:"createdAt"`
-	UpdatedAt          time.Time        `json:"updatedAt"`
+// Snippet is reusable prompt text; ProjectID nil = global.
+type Snippet struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Body      string    `json:"body"`
+	ProjectID *int64    `json:"projectId"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func nonNilOptions(o []t3.ModelOption) []t3.ModelOption {

@@ -4,7 +4,7 @@ import type {
   Catalog,
   CreateProjectRequest,
   CreateTaskRequest,
-  CreateTemplateRequest,
+  CreateSnippetRequest,
   FollowupRequest,
   Health,
   ModelDefaults,
@@ -24,13 +24,13 @@ import type {
   TaskDetail,
   TaskList,
   TaskListQuery,
-  Template,
-  TemplateList,
+  Snippet,
+  SnippetList,
   ThreadList,
   ThreadListQuery,
   UpdateProjectRequest,
   UpdateTaskRequest,
-  UpdateTemplateRequest,
+  UpdateSnippetRequest,
 } from "./types.ts";
 
 /** Non-2xx API response; `message` is the server's `{ error }` text. */
@@ -153,10 +153,10 @@ export const api = {
     ),
 
 
-  templates: () => apiFetch<TemplateList>("/templates"),
-  createTemplate: (body: CreateTemplateRequest) => apiFetch<Template>("/templates", post(body)),
-  updateTemplate: (id: number, body: UpdateTemplateRequest) => apiFetch<Template>(`/templates/${id}`, patch(body)),
-  deleteTemplate: (id: number) => apiSend(`/templates/${id}`, del),
+  snippets: () => apiFetch<SnippetList>("/snippets"),
+  createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),
+  updateSnippet: (id: number, body: UpdateSnippetRequest) => apiFetch<Snippet>(`/snippets/${id}`, patch(body)),
+  deleteSnippet: (id: number) => apiSend(`/snippets/${id}`, del),
 
   preferences: () => apiFetch<Preferences>("/preferences"),
   setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),

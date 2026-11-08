@@ -77,97 +77,88 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ---- templates ----
+// ---- snippets ----
 
-func validateTemplate(p *db.TemplatePatch, create bool) error {
+func validateSnippet(p *db.SnippetPatch, create bool) error {
 	if create && !p.Name.Set {
 		return db.Invalid("name is required")
+	}
+	if create && !p.Body.Set {
+		return db.Invalid("body is required")
 	}
 	if err := requiredText("name", &p.Name); err != nil {
 		return err
 	}
-	if p.Prompt.Set && p.Prompt.Null {
-		p.Prompt.V, p.Prompt.Null = "", false
+	if p.Body.Set && (p.Body.Null || strings.TrimSpace(p.Body.V) == "") {
+		return db.Invalid("body must be a non-empty string")
 	}
-	nullableText(&p.ProviderInstanceID)
-	nullableText(&p.Model)
-	if p.ModelOptions.Set {
-		opts, err := validateOptions(p.ModelOptions.V)
-		if err != nil {
-			return err
-		}
-		p.ModelOptions.V, p.ModelOptions.Null = opts, false
-	}
-	if err := enumField("runtimeMode", &p.RuntimeMode, db.RuntimeModes); err != nil {
-		return err
-	}
-	return enumField("interactionMode", &p.InteractionMode, db.InteractionModes)
-}
-
-func (s *server) listTemplates(w http.ResponseWriter, r *http.Request) error {
-	ts, err := s.Store.ListTemplates(r.Context())
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"templates": ts})
 	return nil
 }
 
-func (s *server) createTemplate(w http.ResponseWriter, r *http.Request) error {
-	var p db.TemplatePatch
+func (s *server) listSnippets(w http.ResponseWriter, r *http.Request) error {
+	sns, err := s.Store.ListSnippets(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"snippets": sns})
+	return nil
+}
+
+func (s *server) createSnippet(w http.ResponseWriter, r *http.Request) error {
+	var p db.SnippetPatch
 	if err := decode(r, &p); err != nil {
 		return err
 	}
-	if err := validateTemplate(&p, true); err != nil {
+	if err := validateSnippet(&p, true); err != nil {
 		return err
 	}
-	t, err := s.Store.CreateTemplate(r.Context(), p)
+	sn, err := s.Store.CreateSnippet(r.Context(), p)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, t)
+	writeJSON(w, http.StatusCreated, sn)
 	return nil
 }
 
-func (s *server) getTemplate(w http.ResponseWriter, r *http.Request) error {
+func (s *server) getSnippet(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {
 		return err
 	}
-	t, err := s.Store.GetTemplate(r.Context(), id)
+	sn, err := s.Store.GetSnippet(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, t)
+	writeJSON(w, http.StatusOK, sn)
 	return nil
 }
 
-func (s *server) updateTemplate(w http.ResponseWriter, r *http.Request) error {
+func (s *server) updateSnippet(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {
 		return err
 	}
-	var p db.TemplatePatch
+	var p db.SnippetPatch
 	if err := decode(r, &p); err != nil {
 		return err
 	}
-	if err := validateTemplate(&p, false); err != nil {
+	if err := validateSnippet(&p, false); err != nil {
 		return err
 	}
-	t, err := s.Store.UpdateTemplate(r.Context(), id, p)
+	sn, err := s.Store.UpdateSnippet(r.Context(), id, p)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, t)
+	writeJSON(w, http.StatusOK, sn)
 	return nil
 }
 
-func (s *server) deleteTemplate(w http.ResponseWriter, r *http.Request) error {
+func (s *server) deleteSnippet(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.DeleteTemplate(r.Context(), id); err != nil {
+	if err := s.Store.DeleteSnippet(r.Context(), id); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

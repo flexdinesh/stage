@@ -304,33 +304,31 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
 
-## Templates
+## Snippets
 
-`Template`:
+Reusable prompt text, inserted into prompts, follow-ups and notes by typing `/` in the web app. `projectId` null = global (shown in every project); set = only in that project's tasks.
+
+`Snippet`:
 ```json
 {
   "id": 1,
-  "name": "Quick haiku",
-  "prompt": "",
-  "providerInstanceId": "claude",
-  "model": "claude-haiku-5-5",
-  "modelOptions": [{ "id": "effort", "value": "low" }],
-  "runtimeMode": "full-access",
-  "interactionMode": "default",
+  "name": "plan-first",
+  "body": "Before editing, write a plan and wait for approval.",
+  "projectId": null,
   "createdAt": "2026-11-08T10:00:00Z",
   "updatedAt": "2026-11-08T10:00:00Z"
 }
 ```
 
-- `GET /api/templates` → 200 `{ "templates": Template[] }` ordered by `name`.
-- `POST /api/templates` body `{ "name": string, "prompt"?, "providerInstanceId"?, "model"?, "modelOptions"?, "runtimeMode"?, "interactionMode"? }` → 201 `Template`. 409 duplicate name.
-- `GET /api/templates/:id` → 200 `Template`. 404.
-- `PATCH /api/templates/:id` partial of the POST body → 200 `Template`. 404. 409 duplicate name.
-- `DELETE /api/templates/:id` → 204. 404.
+- `GET /api/snippets` → 200 `{ "snippets": Snippet[] }`: global first, then by project title, then `name`.
+- `POST /api/snippets` body `{ "name": string, "body": string, "projectId"?: number|null }` → 201 `Snippet`. 400 blank name/body or unknown `projectId`. 409 duplicate name (names are unique across all scopes).
+- `GET /api/snippets/:id` → 200 `Snippet`. 404.
+- `PATCH /api/snippets/:id` partial of the POST body → 200 `Snippet`. 400, 404, 409 as above.
+- `DELETE /api/snippets/:id` → 204. 404.
 
 ## Preferences
 
-New-task model defaults. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`). A template still overrides the prefill.
+New-task model defaults. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`).
 
 `ModelDefaults`:
 ```json

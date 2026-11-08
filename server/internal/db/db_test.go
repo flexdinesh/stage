@@ -512,3 +512,30 @@ func TestSweepStagedAttachments(t *testing.T) {
 		}
 	}
 }
+
+func TestSnippetsMigration(t *testing.T) {
+	old := dbtest.OpenAt("t3stage_test_migrate_snippets", 9)
+	defer old.Close()
+	if old.Pool == nil {
+		t.Skip(old.Skip)
+	}
+	pool := old.Pool
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+INSERT INTO templates (name, prompt, model, interaction_mode) VALUES
+  ('keep', 'review the diff', 'm1', 'plan'),
+  ('preset-only', '', 'm2', 'default')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.NewStore(pool).ListSnippets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "keep" || got[0].Body != "review the diff" || got[0].ProjectID != nil {
+		t.Fatalf("migrated %+v", got)
+	}
+}

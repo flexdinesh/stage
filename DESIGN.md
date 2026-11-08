@@ -269,7 +269,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 
 ## Layout
 
-A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts and a 56px five-cell bottom tab bar (Stage, Projects, History, Templates, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding for it.
+A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts and a 56px five-cell bottom tab bar (Stage, Projects, History, Snippets, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding for it.
 
 Pages stack: PageHeader (H1, `//` meta line, actions right-aligned, 16px below), then panels separated by 14px. The Dashboard puts a one-row stat strip (16px below the header) above the state groups in fixed order: Needs input, Running, Completed, Failed, Backlog. Consecutive empty groups collapse into one ruled list with the label left and the empty sentence right. Detail pages split at 1024px into a fluid main column and a 340px side column (300px on History).
 
@@ -334,7 +334,7 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 
 ### Navigation
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
-- **Phone:** 56px bottom bar, five equal cells with a 16px icon over a 10.5px label; active cell gets a 2px Ink top border. Templates and Settings live in the More drawer.
+- **Phone:** 56px bottom bar, five equal cells with a 16px icon over a 10.5px label; active cell gets a 2px Ink top border. Settings lives in the More drawer.
 
 ### Stat strip (signature)
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
@@ -361,6 +361,12 @@ Right drawer (full-screen sheet on phone) listing the last 30 days, newest first
 
 ### Toast
 In-app notification while the app is visible: bottom-right stack, 360px wide on laptop; full width above the bottom tabs on phone. Flat (Strong Hairline border, Paper surface, no shadow), fades in over 150ms (no movement; none with reduced motion). Event chip and a ghost close on top, title (2 lines max), mono project and time, then View and Open in app. Needs-input toasts take the yellow edge and stay until acted on; done and failed dismiss after 8s, paused on hover or focus. At most three; older ones collapse into a mono "+n more · open notifications" strip that opens the drawer. Events that arrived while the app was hidden never toast; the bell count covers them. While the drawer is open, toasts are off.
+
+### Snippet row
+On the Snippets page, one panel per scope (Global first, then each project with snippets), with an "Expand all / Collapse all" ghost action in the header. Each row: a 20px chevron button (`aria-expanded`, rotated -90° when collapsed), the name as Row Title, and a 2-line mono Slate preview. Expanded, the full body prints at 12.5px mono with whitespace kept, followed by a small Copy button. Edit and Delete sit right on laptop and wrap below on phone.
+
+### Snippet picker
+Typing `/` at a word start (or `template:`) in the task prompt, follow-up or notes opens a list of matching snippets. Matches are global plus the task's project. On laptop it sits under the caret, 360px wide, and flips above near the viewport bottom; on phone it spans the textarea width. Flat (Strong Hairline border, Paper, no shadow), a 28px Bench Gray header ("SNIPPETS" Label plus count), rows with the name at 13px, a plain scope chip right and a 1-line mono preview. The active row gets the palette's 7% ink fill and 2px inset ink bar, and the footer shows keycaps (↑↓ move, ↵ insert, Esc close) on laptop. Enter or Tab inserts the snippet in place of the token and keeps native undo; Esc closes it until the token ends.
 
 ### Command palette
 Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; grouped results under Label headers, matched text bolded, active result gets a 7% ink fill and a 2px inset ink bar; a Bench Gray footer lists keycaps.

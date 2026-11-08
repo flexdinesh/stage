@@ -7,7 +7,7 @@ import { ProjectDetailPage } from "./pages/ProjectDetailPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
-import { TemplatesPage } from "./pages/TemplatesPage.tsx";
+import { SnippetsPage } from "./pages/SnippetsPage.tsx";
 
 export const router = createBrowserRouter([
   {
@@ -19,7 +19,7 @@ export const router = createBrowserRouter([
       { path: "projects/:id", element: <ProjectDetailPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
       { path: "history", element: <HistoryPage /> },
-      { path: "templates", element: <TemplatesPage /> },
+      { path: "snippets", element: <SnippetsPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

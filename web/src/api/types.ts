@@ -325,36 +325,29 @@ export interface ThreadListQuery {
   offset?: number;
 }
 
-// ---- Templates ----
+// ---- Snippets ----
 
-export interface Template {
+/** Reusable prompt text; `projectId` null = global (shown in every project). */
+export interface Snippet {
   id: number;
   name: string;
-  prompt: string;
-  providerInstanceId: string | null;
-  model: string | null;
-  modelOptions: ModelOption[];
-  runtimeMode: RuntimeMode;
-  interactionMode: InteractionMode;
+  body: string;
+  projectId: number | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface TemplateList {
-  templates: Template[];
+export interface SnippetList {
+  snippets: Snippet[];
 }
 
-export interface CreateTemplateRequest {
+export interface CreateSnippetRequest {
   name: string;
-  prompt?: string;
-  providerInstanceId?: string | null;
-  model?: string | null;
-  modelOptions?: ModelOption[];
-  runtimeMode?: RuntimeMode;
-  interactionMode?: InteractionMode;
+  body: string;
+  projectId?: number | null;
 }
 
-export type UpdateTemplateRequest = Partial<CreateTemplateRequest>;
+export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
 
 // ---- Stats ----
 

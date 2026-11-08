@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { api } from "../api/client.ts";
-import { usePreferences, useInvalidateWork, useProjects, useTemplates } from "../api/queries.ts";
+import { usePreferences, useInvalidateWork, useProjects } from "../api/queries.ts";
 import {
   INTERACTION_MODES,
   type CreateTaskRequest,
@@ -17,6 +17,7 @@ import { isFinal, isFullyEditable } from "../lib/tasks.ts";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
 import { TaskPicker, useLinkCandidates } from "./Sequence.tsx";
+import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea } from "./ui.tsx";
 
@@ -136,7 +137,6 @@ function TaskFormDrawer({
   const [s, setS] = useState(() => initialState(task, defaultProjectId, prefill?.defaults));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
-  const templates = useTemplates();
   const invalidate = useInvalidateWork();
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments);
@@ -147,6 +147,7 @@ function TaskFormDrawer({
   const after = s.afterTaskId === "" ? null : Number(s.afterTaskId);
   // A new task linked to run after another is saved waiting; it starts when that one settles.
   const queued = task === undefined && after !== null;
+  const snippetProject = s.projectId === "" ? null : Number(s.projectId);
 
   const save = useMutation({
     mutationFn: (start: boolean): Promise<Task> => {
@@ -218,21 +219,6 @@ function TaskFormDrawer({
     if (missing.length === 0) save.mutate(start);
   };
 
-  const applyTemplate = (id: string) => {
-    const t = templates.data?.templates.find((x) => String(x.id) === id);
-    if (t === undefined) return;
-    set({
-      prompt: t.prompt === "" ? s.prompt : t.prompt,
-      interactionMode: t.interactionMode,
-      config: {
-        providerInstanceId: t.providerInstanceId,
-        model: t.model,
-        modelOptions: t.modelOptions,
-        runtimeMode: t.runtimeMode,
-      },
-    });
-  };
-
   const title = task === undefined ? "New task" : `Edit task #${task.id}`;
   const blocked = missing.length > 0 || save.isPending;
 
@@ -288,29 +274,21 @@ function TaskFormDrawer({
               </Select>
             )}
           </Field>
-          {full ? (
-            <Field label="Template">
-              {(id) => (
-                <Select id={id} value="" onChange={(e) => applyTemplate(e.target.value)}>
-                  <option value="">Prefill from template…</option>
-                  {(templates.data?.templates ?? []).map((t) => (
-                    <option key={t.id} value={String(t.id)}>
-                      {t.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
-          ) : null}
         </div>
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
-        <Field label="Prompt">
+        <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
           {(id) =>
             full ? (
               <ImageDropzone set={images} label="Prompt images">
-                <Textarea id={id} rows={8} value={s.prompt} onChange={(e) => set({ prompt: e.target.value })} />
+                <SnippetTextarea
+                  id={id}
+                  rows={8}
+                  value={s.prompt}
+                  onValueChange={(prompt) => set({ prompt })}
+                  projectId={snippetProject}
+                />
               </ImageDropzone>
             ) : (
               <div className="flex flex-col gap-2">
@@ -405,7 +383,9 @@ function TaskFormDrawer({
           {(id) => <Input id={id} value={s.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="smoke, refactor" />}
         </Field>
         <Field label="Notes">
-          {(id) => <Textarea id={id} rows={3} value={s.notes} onChange={(e) => set({ notes: e.target.value })} />}
+          {(id) => (
+            <SnippetTextarea id={id} rows={3} value={s.notes} onValueChange={(notes) => set({ notes })} projectId={snippetProject} />
+          )}
         </Field>
         <ErrorText error={save.error} />
       </form>
