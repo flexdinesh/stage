@@ -126,6 +126,8 @@ export interface Project {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Latest thread update/settle or task update; null when none. */
+  lastActivityAt: string | null;
 }
 
 export interface ProjectList {

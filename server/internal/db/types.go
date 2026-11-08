@@ -67,6 +67,8 @@ type Project struct {
 	ArchivedAt    *time.Time `json:"archivedAt"`
 	CreatedAt     time.Time  `json:"createdAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+	// LastActivityAt: latest thread update/settle or task update; nil when none.
+	LastActivityAt *time.Time `json:"lastActivityAt"`
 }
 
 // Workspace is the task workspace config (jsonb).

@@ -17,6 +17,7 @@ import {
   QueryState,
   Segmented,
 } from "../components/ui.tsx";
+import { dateTime, relativeTime } from "../lib/format.ts";
 
 const FORM_ID = "new-project-form";
 
@@ -100,6 +101,36 @@ function countByProject(tasks: Task[]): Map<number, Counts> {
   return out;
 }
 
+const SORT_OPTIONS = [
+  { value: "name", label: "name" },
+  { value: "recent", label: "recent" },
+] as const;
+type Sort = (typeof SORT_OPTIONS)[number]["value"];
+
+const SORT_KEY = "t3stage-projects-sort";
+
+function readSort(): Sort {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    return SORT_OPTIONS.find((o) => o.value === v)?.value ?? "name";
+  } catch {
+    return "name";
+  }
+}
+
+function saveSort(sort: Sort): void {
+  try {
+    localStorage.setItem(SORT_KEY, sort);
+  } catch {
+    // Storage unavailable (private mode): sort still applies for this page view.
+  }
+}
+
+const activityMs = (p: Project) => (p.lastActivityAt === null ? 0 : new Date(p.lastActivityAt).getTime());
+
+/** Most recent activity first; projects without activity last, by name (server order, stable sort). */
+const byRecent = (projects: Project[]) => projects.toSorted((a, b) => activityMs(b) - activityMs(a));
+
 const ARCHIVED_OPTIONS = [
   { value: "active", label: "active" },
   { value: "all", label: "incl. archived" },
@@ -107,10 +138,16 @@ const ARCHIVED_OPTIONS = [
 
 export function ProjectsPage() {
   const [filter, setFilter] = useState<"active" | "all">("active");
+  const [sort, setSort] = useState<Sort>(readSort);
   const [creating, setCreating] = useState(false);
   const projects = useProjects(filter === "all" ? "all" : "false");
   const tasks = useTasks();
-  const list = projects.data?.projects ?? [];
+  const fetched = projects.data?.projects ?? [];
+  const list = sort === "recent" ? byRecent(fetched) : fetched;
+  const changeSort = (next: Sort) => {
+    setSort(next);
+    saveSort(next);
+  };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
 
   return (
@@ -120,6 +157,7 @@ export function ProjectsPage() {
         meta={`${projects.data === undefined ? "…" : list.length} projects · archived ${filter === "all" ? "shown" : "hidden"}`}
         actions={
           <>
+            <Segmented small label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
             <Segmented small label="Archived filter" options={ARCHIVED_OPTIONS} value={filter} onChange={setFilter} />
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
@@ -154,14 +192,19 @@ export function ProjectsPage() {
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
                     <Chip title={p.source === "app" ? "Created here" : "Imported from T3"}>{p.source === "app" ? "app" : "t3"}</Chip>
                   </div>
-                  <span className="font-mono text-[11.5px] text-muted tabular">
-                    {counts === null ? null : (
-                      <>
-                        {c.total} {c.total === 1 ? "task" : "tasks"}
-                        {c.active === 0 ? null : <span className="text-fg"> · {c.active} active</span>}
-                      </>
+                  <div className="flex flex-col font-mono text-[11.5px] text-muted tabular">
+                    <span>
+                      {counts === null ? null : (
+                        <>
+                          {c.total} {c.total === 1 ? "task" : "tasks"}
+                          {c.active === 0 ? null : <span className="text-fg"> · {c.active} active</span>}
+                        </>
+                      )}
+                    </span>
+                    {p.lastActivityAt === null ? null : (
+                      <span title={`Last activity ${dateTime(p.lastActivityAt)}`}>active {relativeTime(p.lastActivityAt)}</span>
                     )}
-                  </span>
+                  </div>
                   <div className="justify-self-end">
                     <ArchiveButton project={p} />
                   </div>
