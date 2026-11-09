@@ -17,6 +17,7 @@ import {
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh } from "./Notifications.tsx";
+import { PullToReload } from "./PullToReload.tsx";
 import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
 
 const NAV = [
@@ -190,6 +191,8 @@ function Shell() {
           </Button>
         </div>
       </header>
+
+      <PullToReload key={location.key} />
 
       <main className="mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:px-6 md:pt-6 md:pb-10">
         <Outlet />

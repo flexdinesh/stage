@@ -148,6 +148,8 @@
 @layer base {
   html {
     background: var(--bg);
+    /* The app owns vertical pull-to-reload; horizontal history gestures stay native. */
+    overscroll-behavior-y: none;
   }
   body {
     background: var(--bg);

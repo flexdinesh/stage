@@ -36,10 +36,10 @@ build:
 	cp -r web/dist/. server/internal/webui/dist/
 	cd server && CGO_ENABLED=0 go build -o ../bin/t3stage ./cmd/t3stage
 
-## test: Go tests (dev Postgres) + web typecheck/lint
+## test: Go tests (dev Postgres) + web tests/typecheck/lint
 test: db
 	cd server && go vet ./... && go test ./...
-	cd web && pnpm typecheck && pnpm lint
+	cd web && pnpm test && pnpm typecheck && pnpm lint
 
 ## up: build and run the production stack in compose
 up:
