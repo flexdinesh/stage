@@ -243,7 +243,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
             >
               <div className="flex h-7 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
                 <span className="label-caps text-fg">Snippets</span>
-                <span className="font-mono text-[11px] text-muted">{matches.length}</span>
+                <span className="font-mono text-meta-sm text-muted">{matches.length}</span>
               </div>
               <div id={listId} role="listbox" aria-label="Snippets" className="min-h-0 flex-1 overflow-y-auto py-1">
                 {matches.map((s, i) => (
@@ -261,16 +261,16 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate text-[13px] text-fg">{s.name}</span>
+                      <span className="min-w-0 truncate text-ui text-fg">{s.name}</span>
                       <Chip className="ml-auto max-w-[45%] shrink-0 truncate">
                         {s.projectId === null ? "global" : (projectTitle.get(s.projectId) ?? `project ${s.projectId}`)}
                       </Chip>
                     </span>
-                    <span className="truncate font-mono text-[11.5px] text-muted">{s.body}</span>
+                    <span className="truncate font-mono text-meta text-muted">{s.body}</span>
                   </div>
                 ))}
               </div>
-              <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-[11px] text-muted md:flex">
+              <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
                 <span>
                   <Kbd>↑↓</Kbd> move
                 </span>

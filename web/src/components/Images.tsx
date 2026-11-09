@@ -179,7 +179,7 @@ export function ImageDropzone({
       >
         {children}
         {dragging ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center border border-dashed border-accent bg-surface/90 font-mono text-[12px] text-fg">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center border border-dashed border-accent bg-surface/90 font-mono text-detail text-fg">
             {full ? `${MAX_IMAGES} images max` : "Drop images to attach"}
           </div>
         ) : null}
@@ -235,15 +235,15 @@ export function ImageDropzone({
           <IconImage size={12} />
           Add image
         </Button>
-        <span className="font-mono text-[11px] text-muted">
+        <span className="font-mono text-meta-sm text-muted">
           {set.items.length === 0 ? "or drop PNG, JPEG, GIF, WebP · 10 MB each" : `${set.items.length}/${MAX_IMAGES}`}
         </span>
       </div>
-      {set.notice === null ? null : <p className="text-[11.5px] text-bad">{set.notice}</p>}
+      {set.notice === null ? null : <p className="text-meta text-bad">{set.notice}</p>}
       {set.items
         .filter((it) => it.error !== null)
         .map((it) => (
-          <p key={it.key} className="text-[11.5px] text-bad">
+          <p key={it.key} className="text-meta text-bad">
             {it.name}: {it.error}
           </p>
         ))}

@@ -79,7 +79,7 @@ export function ModelFields({
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {catalogError === null ? null : (
-        <p className="col-span-full text-[12px] text-need-fg">
+        <p className="col-span-full text-detail text-need-fg">
           Catalog unavailable ({catalogError}); model selection limited to current values.
         </p>
       )}

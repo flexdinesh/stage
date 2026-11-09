@@ -27,11 +27,14 @@ const NAV = [
   { to: "/settings", label: "Settings" },
 ] as const;
 
+/** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
+const TAB_ICON = 22;
+
 const TABS = [
-  { to: "/", label: "Stage", icon: <IconStage /> },
-  { to: "/projects", label: "Projects", icon: <IconProjects /> },
-  { to: "/history", label: "History", icon: <IconHistory /> },
-  { to: "/snippets", label: "Snippets", icon: <IconSnippets /> },
+  { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
+  { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
+  { to: "/history", label: "History", icon: <IconHistory size={TAB_ICON} /> },
+  { to: "/snippets", label: "Snippets", icon: <IconSnippets size={TAB_ICON} /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {
@@ -74,7 +77,7 @@ function ThemeButton() {
 function NeedsCount({ n }: { n: number }) {
   if (n === 0) return null;
   return (
-    <span title="Tasks and threads needing input" className="chip tone-need px-1.5 text-[11px] leading-4">
+    <span title="Tasks and threads needing input" className="chip tone-need px-1.5 text-meta-sm leading-4">
       {n}
     </span>
   );
@@ -142,7 +145,7 @@ function Shell() {
               end={item.to === "/"}
               className={({ isActive }) =>
                 cx(
-                  "flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-[13px] transition-colors duration-150",
+                  "flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-ui transition-colors duration-150",
                   isActive ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
                 )
               }
@@ -156,7 +159,7 @@ function Shell() {
           <button
             type="button"
             onClick={() => setPalette(true)}
-            className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-[12.5px] whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
+            className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
             <span className="hidden lg:inline">Search tasks, threads</span>
@@ -173,29 +176,29 @@ function Shell() {
       </header>
 
       {/* Phone top bar */}
-      <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-line bg-bg px-3.5 md:hidden">
+      <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] md:hidden">
         <Mark />
         <div className="ml-auto flex items-center gap-2">
           <ConnectionChip compact />
-          <NotificationsBell onOpen={openInbox} compact />
-          <Button variant="secondary" small onClick={() => setPalette(true)} aria-label="Search" className="h-8 w-8 px-0">
-            <IconSearch size={15} />
+          <NotificationsBell onOpen={openInbox} />
+          <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 px-0">
+            <IconSearch size={16} />
           </Button>
-          <Button variant="primary" small onClick={() => newTask()} className="h-8">
-            <IconPlus size={13} />
+          <Button variant="primary" onClick={() => newTask()}>
+            <IconPlus size={14} />
             Task
           </Button>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1240px] px-3 pt-4 pb-24 md:px-6 md:pt-6 md:pb-10">
+      <main className="mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:px-6 md:pt-6 md:pb-10">
         <Outlet />
       </main>
 
       {/* Phone bottom tabs */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 grid h-14 grid-cols-5 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-5 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:hidden"
       >
         {TABS.map((t) => (
           <NavLink
@@ -204,7 +207,7 @@ function Shell() {
             end={t.to === "/"}
             className={({ isActive }) =>
               cx(
-                "relative -mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-[10.5px]",
+                "relative -mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-tab",
                 isActive ? "border-accent text-fg" : "border-transparent text-muted",
               )
             }
@@ -212,7 +215,7 @@ function Shell() {
             {t.icon}
             {t.label}
             {t.to === "/" && needsInput > 0 ? (
-              <span className="absolute top-1.5 left-[calc(50%+6px)] size-2 bg-need" aria-label={`${needsInput} need input`} />
+              <span className="absolute top-2 left-[calc(50%+8px)] size-2 bg-need" aria-label={`${needsInput} need input`} />
             ) : null}
           </NavLink>
         ))}
@@ -220,11 +223,11 @@ function Shell() {
           type="button"
           onClick={() => setMore(true)}
           className={cx(
-            "-mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-[10.5px]",
+            "-mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-tab",
             moreActive ? "border-accent text-fg" : "border-transparent text-muted",
           )}
         >
-          <IconMore />
+          <IconMore size={TAB_ICON} />
           More
         </button>
       </nav>
@@ -239,7 +242,7 @@ function Shell() {
                   to={item.to}
                   onClick={() => setMore(false)}
                   className={({ isActive }) =>
-                    cx("border-b border-line px-3 py-3 text-[14px] last:border-b-0", isActive && "bg-panel font-medium")
+                    cx("border-b border-line px-3 py-3 text-body last:border-b-0", isActive && "bg-panel font-medium")
                   }
                 >
                   {item.label}

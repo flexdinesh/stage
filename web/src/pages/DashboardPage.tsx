@@ -119,7 +119,7 @@ function EmptyGroups({ groups }: { groups: Group[] }) {
             {g.title}
             <span className="tabular text-muted">0</span>
           </span>
-          <span className="min-w-0 text-[12.5px] text-muted">{g.empty}</span>
+          <span className="min-w-0 text-small text-muted">{g.empty}</span>
         </li>
       ))}
     </ul>
@@ -155,23 +155,23 @@ function StatStrip({
           >
             <span className="flex items-center gap-1.5">
               {n > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
-              <span className={cx("tabular text-[15px] font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>
+              <span className={cx("tabular text-title font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>
                 {n}
               </span>
             </span>
-            <span className="label-caps text-[10.5px] md:hidden">{g.short}</span>
+            <span className="label-caps text-label md:hidden">{g.short}</span>
             <span className="label-caps hidden md:inline">{g.stat}</span>
           </button>
         );
       })}
       <div className="hidden flex-1 items-center justify-end px-3 md:flex">
         {selected === null ? (
-          <span className="font-mono text-[11px] text-muted">click a count to filter</span>
+          <span className="font-mono text-meta-sm text-muted">click a count to filter</span>
         ) : (
           <button
             type="button"
             onClick={() => onToggle(selected)}
-            className="font-mono text-[11px] text-muted underline-offset-3 hover:text-fg hover:underline"
+            className="font-mono text-meta-sm text-muted underline-offset-3 hover:text-fg hover:underline"
           >
             clear filter
           </button>

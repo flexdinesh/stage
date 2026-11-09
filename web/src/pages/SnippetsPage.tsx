@@ -149,19 +149,19 @@ function SnippetRow({
             </span>
           </button>
           <div className="min-w-0 flex-1">
-            <button type="button" onClick={onToggle} className="text-left text-[13.5px] font-medium break-words hover:underline">
+            <button type="button" onClick={onToggle} className="text-left text-body font-medium break-words hover:underline">
               {s.name}
             </button>
             {expanded ? (
               <div id={bodyId} className="mt-1.5 flex flex-col items-start gap-2">
-                <pre className="w-full font-mono text-[12.5px] leading-relaxed break-words whitespace-pre-wrap">{s.body}</pre>
+                <pre className="w-full font-mono text-small leading-relaxed break-words whitespace-pre-wrap">{s.body}</pre>
                 <CopyButton text={s.body} label="Copy" />
               </div>
             ) : (
               <p
                 id={bodyId}
                 onClick={onToggle}
-                className="mt-0.5 line-clamp-2 cursor-pointer font-mono text-[11.5px] break-words whitespace-pre-wrap text-muted"
+                className="mt-0.5 line-clamp-2 cursor-pointer font-mono text-meta break-words whitespace-pre-wrap text-muted"
               >
                 {s.body}
               </p>

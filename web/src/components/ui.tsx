@@ -47,7 +47,7 @@ export function Chip({
 
 export function Kbd({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <kbd className={cx("border border-line bg-panel px-1 font-mono text-[10.5px] leading-4 text-muted", className)}>
+    <kbd className={cx("border border-line bg-panel px-1 font-mono text-label leading-4 text-muted", className)}>
       {children}
     </kbd>
   );
@@ -67,7 +67,7 @@ const VARIANTS: Record<Variant, string> = {
 export function buttonClass(variant: Variant = "secondary", small = false): string {
   return cx(
     "inline-flex items-center justify-center gap-1.5 whitespace-nowrap border font-medium transition-[background-color,opacity,color] duration-150 disabled:pointer-events-none disabled:opacity-45",
-    small ? "h-6 px-2 text-[11.5px]" : "h-8 px-3 text-[12.5px]",
+    small ? "h-8 px-2.5 text-meta md:h-6 md:px-2" : "h-10 px-3.5 text-small md:h-8 md:px-3",
     VARIANTS[variant],
   );
 }
@@ -134,8 +134,8 @@ export function AppButton({
 // ---- Form controls ----
 
 const inputBase =
-  "border border-line-strong bg-surface px-2.5 text-[13px] text-fg transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_1px_var(--accent)] focus:outline-none disabled:opacity-55";
-export const inputClass = `h-8 ${inputBase}`;
+  "border border-line-strong bg-surface px-2.5 text-input text-fg transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_1px_var(--accent)] focus:outline-none disabled:opacity-55";
+export const inputClass = `h-10 md:h-8 ${inputBase}`;
 
 export function Input({ className, ...rest }: ComponentProps<"input">) {
   return <input className={cx(inputClass, "w-full", className)} {...rest} />;
@@ -144,7 +144,7 @@ export function Input({ className, ...rest }: ComponentProps<"input">) {
 export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
   return (
     <textarea
-      className={cx(inputClass, "h-auto w-full py-2 font-mono text-[12.5px] leading-relaxed", className)}
+      className={cx(inputClass, "h-auto w-full py-2 font-mono text-input-mono leading-relaxed", className)}
       {...rest}
     />
   );
@@ -153,7 +153,7 @@ export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
 export function Select({ className, small = false, ...rest }: ComponentProps<"select"> & { small?: boolean }) {
   return (
     <select
-      className={cx(inputBase, small ? "h-6 py-0 text-[12px]" : "h-8", "select-chevron appearance-none pr-8", className)}
+      className={cx(inputBase, small ? "h-8 py-0 text-input-sm md:h-6" : "h-10 md:h-8", "select-chevron appearance-none pr-8", className)}
       {...rest}
     />
   );
@@ -178,7 +178,7 @@ export function Field({
         {label}
       </label>
       {children(id)}
-      {hint === undefined ? null : <p className="text-[11.5px] text-muted">{hint}</p>}
+      {hint === undefined ? null : <p className="text-meta text-muted">{hint}</p>}
     </div>
   );
 }
@@ -207,7 +207,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cx(
             "border-r border-line-strong font-mono whitespace-nowrap transition-colors duration-150 last:border-r-0",
-            small ? "h-6 px-2 text-[11px]" : "h-[30px] px-2.5 text-[12px]",
+            small ? "h-8 px-2.5 text-meta-sm md:h-6 md:px-2" : "h-[38px] px-3 text-detail md:h-[30px] md:px-2.5",
             o.value === value ? "bg-accent text-on-accent" : "text-muted hover:bg-panel hover:text-fg",
           )}
         >
@@ -242,7 +242,7 @@ export function Alert({
       role={tone === "bad" ? "alert" : undefined}
       className={cx(
         TONE_CLASS[tone],
-        "flex flex-wrap items-center gap-x-3 gap-y-2 border border-[color-mix(in_srgb,var(--c)_50%,transparent)] bg-[color-mix(in_srgb,var(--c)_9%,var(--surface))] px-3 py-2 text-[12.5px]",
+        "flex flex-wrap items-center gap-x-3 gap-y-2 border border-[color-mix(in_srgb,var(--c)_50%,transparent)] bg-[color-mix(in_srgb,var(--c)_9%,var(--surface))] px-3 py-2 text-small",
       )}
     >
       <span className="size-[7px] shrink-0 bg-[var(--c)]" />
@@ -259,7 +259,7 @@ export function ErrorText({ error }: { error: unknown }) {
 }
 
 export function Muted({ children }: { children: ReactNode }) {
-  return <p className="text-[12.5px] text-muted">{children}</p>;
+  return <p className="text-small text-muted">{children}</p>;
 }
 
 function Skeleton() {
@@ -322,7 +322,7 @@ export function Panel({
       {hasHeader ? (
         <div className={cx("flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", !collapsed && "border-b border-line")}>
           {title === undefined ? null : <h2 className="label-caps text-fg [text-box:trim-both_cap_alphabetic]">{title}</h2>}
-          {meta === undefined ? null : <span className="block font-mono text-[11px] text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
+          {meta === undefined ? null : <span className="block font-mono text-meta-sm text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
           {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
       ) : null}
@@ -347,11 +347,11 @@ export function PageHeader({
   return (
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-[22px] leading-tight font-bold tracking-[-0.025em] break-words text-balance sm:text-[24px]">
+        <h1 className="text-headline leading-tight font-bold tracking-[-0.025em] break-words text-balance">
           {title}
         </h1>
         {line === undefined ? null : (
-          <div className="mt-1 font-mono text-[12px] text-muted">
+          <div className="mt-1 font-mono text-detail text-muted">
             <span className="font-bold text-fg">{"//"}</span> {line}
           </div>
         )}
@@ -363,14 +363,14 @@ export function PageHeader({
 
 /** Definition list grid; children are `<Detail>` rows. */
 export function Details({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[12.5px]">{children}</dl>;
+  return <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-small">{children}</dl>;
 }
 
 export function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted">{label}</dt>
-      <dd className="min-w-0 font-mono text-[12px] break-words">{children}</dd>
+      <dd className="min-w-0 font-mono text-detail break-words">{children}</dd>
     </>
   );
 }
@@ -447,8 +447,8 @@ export function Drawer({
           wide ? "md:max-w-[680px]" : "md:max-w-[580px]",
         )}
       >
-        <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
-          <h2 className="text-[15px] font-semibold">{title}</h2>
+        <div className="flex h-[calc(3.25rem+env(safe-area-inset-top))] shrink-0 items-center gap-3 border-b border-line pt-[env(safe-area-inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] md:h-12 md:pt-0 md:pr-4 md:pl-4">
+          <h2 className="text-title font-semibold">{title}</h2>
           <div className="ml-auto flex items-center gap-3">
             <Kbd className="max-md:hidden">Esc</Kbd>
             <Button variant="ghost" small onClick={onClose} aria-label="Close">
@@ -456,9 +456,18 @@ export function Drawer({
             </Button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div
+          className={cx(
+            "min-h-0 flex-1 overflow-y-auto p-4 max-md:pr-[max(1rem,env(safe-area-inset-right))] max-md:pl-[max(1rem,env(safe-area-inset-left))]",
+            footer === undefined && "max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]",
+          )}
+        >
+          {children}
+        </div>
         {footer === undefined ? null : (
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-panel px-4 py-3">{footer}</div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-panel px-4 py-3 max-md:pr-[max(1rem,env(safe-area-inset-right))] max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-md:pl-[max(1rem,env(safe-area-inset-left))]">
+            {footer}
+          </div>
         )}
       </div>
     </div>,
