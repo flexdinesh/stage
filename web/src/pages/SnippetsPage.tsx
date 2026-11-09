@@ -5,7 +5,8 @@ import { keys, useProjects, useSnippets } from "../api/queries.ts";
 import type { CreateSnippetRequest, Project, Snippet } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { IconChevronDown } from "../components/icons.tsx";
-import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Select, Textarea, cx } from "../components/ui.tsx";
+import { ProjectCombobox } from "../components/ProjectSelect.tsx";
+import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Textarea, cx } from "../components/ui.tsx";
 
 type Editing = { mode: "create" } | { mode: "edit"; snippet: Snippet };
 
@@ -241,14 +242,7 @@ function SnippetFormDrawer({ snippet, projects, onClose }: { snippet?: Snippet; 
           </Field>
           <Field label="Project" hint="Global snippets show in every project.">
             {(id) => (
-              <Select id={id} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                <option value="">Global</option>
-                {options.map((p) => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.archivedAt === null ? p.title : `${p.title} (archived)`}
-                  </option>
-                ))}
-              </Select>
+              <ProjectCombobox id={id} projects={options} value={projectId} onChange={setProjectId} pinned="Global" />
             )}
           </Field>
         </div>
