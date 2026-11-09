@@ -1,12 +1,12 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
 import { keys, latestNotificationsKey, useNotificationHistory, useNotificationInbox, useNotifications } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
-import { closeSystemNotifications, getPushState } from "../lib/push.ts";
+import { closeSystemNotifications, getPushState, syncSystemNotifications } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, toneClass } from "./ui.tsx";
@@ -38,6 +38,44 @@ export function usePushRefresh() {
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, [qc]);
+}
+
+/**
+ * Cross-device clear: closes system notifications for groups viewed on any
+ * device, on load, when the app becomes visible, and on every push.
+ */
+export function useSystemNotificationSync() {
+  useEffect(() => {
+    void syncSystemNotifications();
+    function onVisible() {
+      if (document.visibilityState === "visible") void syncSystemNotifications();
+    }
+    function onMessage(e: MessageEvent<unknown>) {
+      const data = e.data;
+      if (typeof data === "object" && data !== null && "type" in data && data.type === "push") void syncSystemNotifications();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    const sw = "serviceWorker" in navigator ? navigator.serviceWorker : null;
+    sw?.addEventListener("message", onMessage);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      sw?.removeEventListener("message", onMessage);
+    };
+  }, []);
+}
+
+/** Marks notification groups read (viewed here); other devices close their system notifications on their next sync. */
+export function useMarkNotificationGroupsRead() {
+  const qc = useQueryClient();
+  return useCallback(
+    (groups: string[]) => {
+      api
+        .markNotificationGroupsRead(groups)
+        .then(() => qc.invalidateQueries({ queryKey: keys.notifications }))
+        .catch(() => undefined);
+    },
+    [qc],
+  );
 }
 
 // ---- Bell ----

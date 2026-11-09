@@ -97,6 +97,32 @@ async function onPush(p: Payload): Promise<void> {
     tasks.push(showReplacing(p.title, options, p.tag));
   }
   await Promise.all(tasks);
+  // Only after showing: iOS revokes the subscription unless a push shows a notification promptly.
+  await closeViewed();
+}
+
+/**
+ * Cross-device clear (docs/api.md "Clear on view"): closes task/thread
+ * notifications whose group has no unread entry, i.e. was viewed on any device.
+ * Same rule as staleTags in lib/push.ts. Best effort; WebKit ignores close() on
+ * notifications younger than ~30s, so a later push or app open retries.
+ */
+async function closeViewed(): Promise<void> {
+  try {
+    const shown = await self.registration.getNotifications();
+    if (shown.length === 0) return;
+    const res = await fetch("/api/notifications/unread-tags", { cache: "no-store" });
+    if (!res.ok) return;
+    const raw: unknown = await res.json();
+    if (typeof raw !== "object" || raw === null || !("tags" in raw) || !Array.isArray(raw.tags)) return;
+    const unread = new Set(raw.tags.filter((t: unknown): t is string => typeof t === "string"));
+    for (const n of shown) {
+      const tag = tagOf(n);
+      if (tag !== null && (tag.startsWith("task-") || tag.startsWith("thread-")) && !unread.has(tag)) n.close();
+    }
+  } catch {
+    // Offline or unsupported; the next sync retries.
+  }
 }
 
 /** Tag of a notification: its own, else the copy in data (iOS drops tag). */

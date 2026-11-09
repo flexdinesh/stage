@@ -519,3 +519,8 @@ export interface NotificationGroupPage {
   latestId: number;
   nextCursor: string | null;
 }
+
+/** Push tags (`task-<id>`, `thread-<id>`) of groups with unread notifications. */
+export interface UnreadNotificationTags {
+  tags: string[];
+}

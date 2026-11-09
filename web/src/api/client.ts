@@ -33,6 +33,7 @@ import type {
   SnippetList,
   ThreadList,
   ThreadListQuery,
+  UnreadNotificationTags,
   UpdateTaskRequest,
   UpdateSnippetRequest,
 } from "./types.ts";
@@ -191,6 +192,8 @@ export const api = {
   notificationGroups: (q: { limit?: number; cursor?: string | undefined } = {}) =>
     apiFetch<NotificationGroupPage>(`/notifications/groups${toQuery({ limit: q.limit, cursor: q.cursor })}`),
   markNotificationsRead: (upTo: number) => apiSend("/notifications/read", post({ upTo })),
+  markNotificationGroupsRead: (groups: string[]) => apiSend("/notifications/read", post({ groups })),
+  unreadNotificationTags: () => apiFetch<UnreadNotificationTags>("/notifications/unread-tags"),
 };
 
 export type ArchivedFilter = "true" | "false" | "all";

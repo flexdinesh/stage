@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -164,6 +165,35 @@ func (s *Store) UnreadNotificationCount(ctx context.Context) (int, error) {
 func (s *Store) MarkNotificationsRead(ctx context.Context, upTo int64) error {
 	_, err := s.pool.Exec(ctx, `UPDATE notifications SET read_at = now() WHERE read_at IS NULL AND id <= $1`, upTo)
 	return err
+}
+
+// MarkNotificationGroupsRead marks every unread entry in the given groups read.
+func (s *Store) MarkNotificationGroupsRead(ctx context.Context, groupKeys []string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE notifications n SET read_at = now()
+WHERE n.read_at IS NULL AND (`+notificationKeySQL+`) = ANY($1)`, groupKeys)
+	return err
+}
+
+// UnreadNotificationTags returns the push tags (`task-<id>`, `thread-<id>`) of
+// groups with unread entries. Identity-less groups have no tag.
+func (s *Store) UnreadNotificationTags(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT `+notificationKeySQL+` FROM notifications n
+WHERE n.read_at IS NULL ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tags := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "thread") {
+			tags = append(tags, kind+"-"+id)
+		}
+	}
+	return tags, rows.Err()
 }
 
 // PruneNotifications deletes entries older than age.

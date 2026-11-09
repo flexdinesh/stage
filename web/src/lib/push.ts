@@ -54,6 +54,40 @@ export async function closeSystemNotifications(tag?: string): Promise<void> {
   }
 }
 
+/**
+ * Shown tags to close: task/thread tags whose group has no unread notification
+ * (viewed on any device). Other tags (e.g. `test`) and untagged ones stay.
+ */
+export function staleTags(shown: readonly (string | null)[], unread: ReadonlySet<string>): Set<string> {
+  const stale = new Set<string>();
+  for (const tag of shown) {
+    if (tag !== null && (tag.startsWith("task-") || tag.startsWith("thread-")) && !unread.has(tag)) stale.add(tag);
+  }
+  return stale;
+}
+
+/**
+ * Closes system notifications for groups already viewed on any device. Best
+ * effort; WebKit ignores close() on notifications younger than ~30s, so a later
+ * sync retries.
+ */
+export async function syncSystemNotifications(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await registration();
+    if (reg === null) return;
+    const shown = await reg.getNotifications();
+    if (shown.length === 0) return;
+    const stale = staleTags(shown.map(tagOf), new Set((await api.unreadNotificationTags()).tags));
+    for (const n of shown) {
+      const tag = tagOf(n);
+      if (tag !== null && stale.has(tag)) n.close();
+    }
+  } catch {
+    // Offline, unsupported or no permission; the next sync retries.
+  }
+}
+
 async function currentSubscription(): Promise<PushSubscription | null> {
   const reg = await registration();
   return reg === null ? null : reg.pushManager.getSubscription();

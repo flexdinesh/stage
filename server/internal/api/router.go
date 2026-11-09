@@ -101,6 +101,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/notifications", s.listNotifications)
 	h("GET /api/notifications/groups", s.listNotificationGroups)
 	h("POST /api/notifications/read", s.readNotifications)
+	h("GET /api/notifications/unread-tags", s.unreadNotificationTags)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

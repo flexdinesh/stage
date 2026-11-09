@@ -4,6 +4,7 @@ import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
 import { RunOrderPanel } from "../components/Continuations.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
 import { Alert, Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
@@ -20,10 +21,14 @@ export function SessionDetailPage() {
 function SessionDetail({ data }: { data: ThreadDetail }) {
   const { thread, children, continuations, task } = data;
   const taskId = task?.id;
+  // Viewing clears system notifications here and marks their groups read, so
+  // other devices close theirs on their next sync.
+  const markViewed = useMarkNotificationGroupsRead();
   useEffect(() => {
     void closeSystemNotifications(`thread-${thread.t3ThreadId}`);
     if (taskId !== undefined) void closeSystemNotifications(`task-${taskId}`);
-  }, [thread.t3ThreadId, taskId]);
+    markViewed(taskId === undefined ? [`thread:${thread.t3ThreadId}`] : [`thread:${thread.t3ThreadId}`, `task:${taskId}`]);
+  }, [thread.t3ThreadId, taskId, markViewed]);
   return <>
     <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
     <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
