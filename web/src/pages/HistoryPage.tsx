@@ -1,3 +1,4 @@
+import { sessionPath } from "../lib/sessions.ts";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { useCatalog, useStats, useThreads } from "../api/queries.ts";
@@ -488,14 +489,7 @@ function ThreadList({ data }: { data: Thread[] }) {
 }
 
 function ThreadRow({ t }: { t: Thread }) {
-  const title =
-    t.taskId === null ? (
-      <span className="font-medium">{t.title}</span>
-    ) : (
-      <Link to={`/tasks/${t.taskId}`} className="font-medium hover:underline">
-        {t.title}
-      </Link>
-    );
+  const title = <Link to={sessionPath(t.t3ThreadId)} className="font-medium hover:underline">{t.title}</Link>;
   const project =
     t.projectId === null ? (
       <span className="font-mono text-meta text-muted">{t.t3ProjectId}</span>

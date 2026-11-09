@@ -78,7 +78,7 @@ Paste fallback: exchange a pairing code from `t3 pair` for a token.
 Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 502 pairing failed.
 
 ### `POST /api/sync`
-Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects; project title, root and archive state follow T3). Synchronous.
+Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects; project title, root and archive state follow T3). Also reads top-level session details to populate normalized state and run metadata independently of legacy task state. Synchronous.
 200 `SyncResult`:
 ```json
 { "projects": 12, "threads": 776, "finishedAt": "2026-11-08T10:00:00Z" }
@@ -300,8 +300,70 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 ### `GET /api/threads`
-Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
-200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `state` (repeatable normalized TaskState), `active` (`1|true`: unarchived, unsettled running/needs-input sessions across origins, no implicit date cutoff), `sort` (`activity`: updatedAt desc; omitted: createdAt desc), `parent` (direct children of this T3 thread ID), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
+200 `{ "threads": Thread[], "total": number }`; `total` = matches before limit/offset. Thread also includes `state`, `archived`, `activeRunId` and `latestRunId`. Session state follows live thread metadata independently of a legacy task's frozen state. Pending input, active runs and failed/interrupted/cancelled runs outrank a stale settled flag.
+
+### `GET /api/threads/:id`
+
+200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null }`. Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
+
+## Queued continuations
+
+A continuation sends a saved prompt into an existing top-level, unarchived session. It never launches a replacement thread, steers or interrupts current work. Saving and resuming only check readiness; the background runner owns delivery.
+
+`Continuation`:
+```jsonc
+{
+  "id": 1,
+  "afterThreadId": "thread-a",
+  "targetThreadId": "thread-b",
+  "previousContinuationId": null,
+  "prompt": "Update the client against the finalized API.",
+  "state": "waiting",
+  "waitReasons": ["predecessor_unsettled", "target_running"],
+  "lastError": null,
+  "runId": null,
+  "messageId": null,
+  "createdAt": "2026-11-10T00:00:00Z",
+  "updatedAt": "2026-11-10T00:00:00Z",
+  "sentAt": null,
+  "settledAt": null,
+  "afterThread": {}, // Thread
+  "targetThread": {} // Thread
+}
+```
+
+States: `waiting|paused|blocked|sending|running|awaiting_settle|settled|cancelled|uncertain`.
+
+Wait reasons: `predecessor_unsettled|target_running|target_needs_input|predecessor_failed|target_failed|upstream_pending|upstream_cancelled|thread_missing|t3_offline|delivery_uncertain|legacy_conflict`.
+
+- `GET /api/continuations` -> `{ "continuations": Continuation[] }`. Optional `thread=<id>` includes related orders, predecessor first, retaining history.
+- `POST /api/continuations` body `{ "afterThreadId": string, "targetThreadId": string, "prompt": string }` -> 201 `Continuation`. Required nonblank IDs/prompt. Prompt whitespace preserved. No send on save.
+- `PATCH /api/continuations/:id` body `{ "prompt": string }` -> 200 `Continuation`.
+- `POST /api/continuations/:id/pause|resume|cancel` -> 200 `Continuation`. Resume rechecks conditions. Cancel retains the link and blocks downstream steps, including after restart; it does not splice the order.
+- Invalid input: 400. Missing resource: 404. Child/archived session, self-link, cycle, occupied live order, conflicting legacy task order or mutation after delivery claim: 409.
+
+### Release and delivery
+
+The predecessor must be explicitly settled in T3. The target must have finished with no active run or pending input. Failure, interruption or cancellation blocks either endpoint even if its settled flag remains set. New work in the target keeps the continuation waiting. Recover in T3 before resuming. Existing backlog task links retain their documented behavior; unlink conflicting task order before creating a continuation.
+
+For A -> B -> C, the second continuation references the first continuation. B's original run or old settlement cannot release C. The delivered run must finish successfully, followed by a settlement recorded after that delivery. Pausing and cancellation never stop the T3 session itself.
+
+The send preserves the saved prompt verbatim and appends:
+```text
+
+
+---
+Prerequisite session
+Title: <A title>
+Thread ID: <A T3 thread ID>
+T3: <canonical link, omitted when unavailable>
+```
+Canonical link order: configured T3 web URL, T3's returned link, app deep link. No transcript or final response is copied.
+
+The runner refreshes all chain participants, including finished/settled sessions, then checks both endpoints before claiming delivery. A database claim persists the exact delivery prompt and unique request ID before `t3_thread_send` with `mode: queue`. Resulting message/run IDs track the continuation. Concurrent reconciles cannot claim the same continuation. There is no blind retry: a transport failure, missing receipt or expired claim becomes `uncertain`; review the target in T3. Resume cannot resend an uncertain/claimed continuation. If a delivered run falls outside T3's bounded recent-run history before completion was observed, block for review rather than infer success.
+
+Session and continuation states are independent. Current runs may still edit concurrently; this orders future prompts. MCP does not expose every background wait, and readiness reads across sessions are not atomic. Queue mode prevents steering when the target starts again between read and send.
 
 ## Snippets
 
@@ -431,7 +493,7 @@ Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. 204.
 ## Notification rules
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies; `url` = `/tasks/<id>`. Other states (incl. `interrupted`) do not. Links add no events of their own.
-- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/history?q=<title>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently.
+- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/sessions/<encoded-thread-id>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
 - External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
 - External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
 

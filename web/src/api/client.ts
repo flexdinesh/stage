@@ -1,5 +1,9 @@
 import type {
   Attachment,
+  Continuation,
+  ContinuationList,
+  CreateContinuationRequest,
+  ThreadDetail,
   Badge,
   Catalog,
   CreateProjectRequest,
@@ -47,10 +51,14 @@ export class ApiError extends Error {
 type QueryValue = string | number | boolean | readonly (string | number)[] | undefined;
 
 /** Builds `?a=1&b=x,y`, skipping undefined and empty values. Arrays join with commas. */
-export function toQuery(params: Record<string, QueryValue>): string {
+export function toQuery(params: Record<string, QueryValue>, repeatable: readonly string[] = []): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined) continue;
+    if (Array.isArray(value) && repeatable.includes(key)) {
+      for (const item of value) search.append(key, String(item));
+      continue;
+    }
     const text = Array.isArray(value) ? value.join(",") : String(value);
     if (text !== "") search.set(key, text);
   }
@@ -136,6 +144,10 @@ export const api = {
   threads: (q: ThreadListQuery = {}) =>
     apiFetch<ThreadList>(
       `/threads${toQuery({
+        active: q.active === true ? 1 : undefined,
+        sort: q.sort,
+        parent: q.parent,
+        state: q.state,
         project: q.project,
         status: q.status,
         settled: q.settled,
@@ -149,9 +161,15 @@ export const api = {
         running: q.running,
         limit: q.limit,
         offset: q.offset,
-      })}`,
+      }, ["state"])}`,
     ),
 
+  thread: (id: string) => apiFetch<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+  continuations: (thread?: string) => apiFetch<ContinuationList>(`/continuations${toQuery({ thread })}`),
+  createContinuation: (body: CreateContinuationRequest) => apiFetch<Continuation>("/continuations", post(body)),
+  updateContinuation: (id: number, prompt: string) => apiFetch<Continuation>(`/continuations/${id}`, patch({ prompt })),
+  continuationAction: (id: number, action: "pause" | "resume" | "cancel") =>
+    apiFetch<Continuation>(`/continuations/${id}/${action}`, post()),
 
   snippets: () => apiFetch<SnippetList>("/snippets"),
   createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),

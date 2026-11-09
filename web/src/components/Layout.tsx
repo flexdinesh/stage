@@ -23,7 +23,7 @@ import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
 const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
-  { to: "/history", label: "History" },
+  { to: "/sessions", label: "Sessions" },
   { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
@@ -34,7 +34,7 @@ const TAB_ICON = 22;
 const TABS = [
   { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
   { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
-  { to: "/history", label: "History", icon: <IconHistory size={TAB_ICON} /> },
+  { to: "/sessions", label: "Sessions", icon: <IconHistory size={TAB_ICON} /> },
   { to: "/snippets", label: "Snippets", icon: <IconSnippets size={TAB_ICON} /> },
 ] as const;
 
@@ -129,7 +129,7 @@ function Shell() {
     return () => document.removeEventListener("keydown", onKey);
   }, [newTask]);
 
-  const moreActive = ["/settings"].some((p) => location.pathname.startsWith(p));
+  const moreActive = ["/settings", "/history"].some((p) => location.pathname.startsWith(p));
 
   return (
     <div className="min-h-screen bg-bg text-fg">
@@ -239,7 +239,7 @@ function Shell() {
         <Drawer title="More" onClose={() => setMore(false)}>
           <div className="flex flex-col gap-5">
             <nav className="flex flex-col border border-line" aria-label="More">
-              {NAV.slice(4).map((item) => (
+              {[{ to: "/history", label: "History" }, ...NAV.slice(4)].map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}

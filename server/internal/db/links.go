@@ -41,6 +41,9 @@ func setAfter(ctx context.Context, tx pgx.Tx, id int64, after *int64) error {
 	if *after == id {
 		return Conflict("a task cannot run after itself")
 	}
+	if err := continuationConflict(ctx, tx, []int64{id, *after}); err != nil {
+		return err
+	}
 	var predState TaskState
 	var follower *int64
 	err := tx.QueryRow(ctx,

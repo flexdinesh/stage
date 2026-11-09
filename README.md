@@ -10,6 +10,8 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Live status**: backlog → running → needs input → done → settled (or failed / interrupted). Polled from T3 every 5s.
 - **Task actions**: start, follow-up, stop, duplicate, open in T3.
 - **Run order**: link a task to run after another (while creating, viewing or editing it; can span projects). It starts when that thread is settled in T3; a failed predecessor keeps it waiting. Start now unlinks it and starts it immediately.
+- **Sessions**: browse Active or All sessions across projects, regardless of where they started. Active has no creation-date cutoff. Open local session details, inspect child sessions, or jump to T3. History remains available from Sessions.
+- **Queued continuations**: open session A, choose an existing top-level session B, and save a prompt. Both current runs continue untouched. Delivery waits for A to settle explicitly and B to finish with no pending input. Linear chains track the delivered continuation run before releasing the next step. Failed, interrupted, or cancelled sessions block delivery; uncertain sends are held for review rather than retried. Edit, pause, resume, or cancel before delivery is claimed. The saved prompt includes A's reference, without copying its transcript.
 - **Dashboard**: needs-input alert, plus running, done (awaiting settle), backlog and settled (last 7 days) across projects. External T3 threads (not tasks) show under needs input and running.
 - **History**: every T3 thread, including ones started outside this app. Filter by time window, project, status, provider and source; shows counts per project and per day.
 - **Snippets**: reusable prompt text, global or per project. Type `/` in a task prompt, follow-up or notes to pick one and insert it.
@@ -56,7 +58,8 @@ Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cer
 Development never touches production. Dev and tests run on their own Postgres (`compose.dev.yaml`, `127.0.0.1:5440`, volume `t3-stage-dev_pgdata`). The prod stack is `compose.yaml` (`5439`), and only `make up` / `make down` touch it.
 
 - `make dev`: dev Postgres, a database per branch (`t3stage_dev_<branch>`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`t3-stage dev`; prod is `t3-stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `DATABASE_URL` itself.
-- `make test`: Go tests in throwaway `t3stage_test_*` databases on the dev Postgres, plus web typecheck/lint.
+- `make test`: Go tests in throwaway `t3stage_test_*` databases on the dev Postgres, web typecheck/lint, and session semantic/API contract tests.
+- `node --test web/tests/sessions.test.mjs`: session eligibility, continuation editing/delivery preview, URL encoding and HTTP contract tests.
 - `make dev-down` stops the dev Postgres. Other targets: `make build`, `make up`, `make down`. API contract: `docs/api.md`.
 
 Guards: with `APP_ENV=dev` (set by `make dev`) the server refuses the prod database (port `5439` or name `t3stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

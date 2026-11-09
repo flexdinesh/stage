@@ -139,6 +139,10 @@ type Thread struct {
 	ProjectTitle        *string    `json:"projectTitle"`
 	Title               string     `json:"title"`
 	Status              string     `json:"status"`
+	State               TaskState  `json:"state"`
+	Archived            bool       `json:"archived"`
+	ActiveRunID         *string    `json:"activeRunId"`
+	LatestRunID         *string    `json:"latestRunId"`
 	Settled             bool       `json:"settled"`
 	SettledAt           *time.Time `json:"settledAt"`
 	PendingRequestCount int        `json:"pendingRequestCount"`

@@ -6,10 +6,10 @@ related_targets: []
 ---
 
 ## Scope
-Whole t3-stage web app (web/src): Dashboard, Projects, Project detail, Task detail (with Run order panel), History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
+Whole t3-stage web app (web/src): Dashboard, Projects, Project detail, Task detail (with Run order panel), Sessions, Session detail (with continuation Run order and child inspection), History, Templates, Settings, New task and Queue continuation drawers, Ctrl K palette. Mode: Operate.
 
 ## Audience and task
-Owner, on laptop and phone, queueing T3 tasks, catching needs-input, watching running/completed work, browsing history.
+Owner, on laptop and phone, queueing T3 tasks and continuations of existing sessions, catching needs-input, watching running/completed work from every starting point, browsing history. Session state remains independent from a waiting continuation; run-order entries explain each condition before delivery.
 
 ## Direction contract
 THESIS: A workbench, not a dashboard of cards: one dense, ruled list per state where color appears only when a task's state earns it. Refuses the rounded-card SaaS dashboard and the neon-terminal costume.

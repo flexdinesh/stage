@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { api, toQuery } from "../api/client.ts";
+import { api } from "../api/client.ts";
 import { useInvalidateWork } from "../api/queries.ts";
 import type { Task, Thread } from "../api/types.ts";
 import { dateTime, modelText, relativeTime } from "../lib/format.ts";
+import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
 import { IconChainLink } from "./icons.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
@@ -219,7 +220,7 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
 
       <div className="order-1 min-w-0 md:order-2">
         <ProjectName projectId={thread.projectId} title={project} className="mb-0.5 block break-words md:hidden" />
-        <Link to={`/history${toQuery({ q: thread.title })}`} className="text-body font-medium break-words hover:underline">
+        <Link to={sessionPath(thread.t3ThreadId)} className="text-body font-medium break-words hover:underline">
           {thread.title}
         </Link>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">

@@ -90,6 +90,11 @@ func (s *Service) WatchThreads(ctx context.Context) error {
 		}
 		o := obs[id]
 		if o.TaskOwned {
+			// Legacy task state can be frozen after a follower is released.
+			// Its session mirror must still reflect external restarts/input.
+			if _, err := s.readSession(ctx, id); err != nil && !errors.Is(err, t3.ErrNotFound) {
+				s.log.Warn("refresh task session", "thread", id, "err", err)
+			}
 			continue
 		}
 		if err := s.watchThread(ctx, id, o.ObservedState, silent); err != nil {

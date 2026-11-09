@@ -79,6 +79,7 @@ func run() error {
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
+	syncSvc.SetPublicURL(cfg.T3PublicURL)
 	runner := links.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// Hooks only queue work; set before RecoverLaunching emits transitions.

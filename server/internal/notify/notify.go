@@ -173,6 +173,9 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		id := strconv.FormatInt(t.ID, 10)
 		p = Payload{Title: titles[e.task.To], Body: t.Title + " · " + t.ProjectTitle,
 			URL: "/tasks/" + id, Tag: "task-" + id}
+		if t.T3ThreadID != nil {
+			p.URL = "/sessions/" + url.PathEscape(*t.T3ThreadID)
+		}
 		project := t.ProjectTitle
 		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, T3ThreadID: t.T3ThreadID,
 			Title: t.Title, ProjectTitle: &project, URL: p.URL}
@@ -188,7 +191,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 			return p, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 		}
 		p = Payload{Title: titles[c.To], Body: title + " · " + project,
-			URL: "/history?q=" + url.QueryEscape(title), Tag: "thread-" + c.ThreadID}
+			URL: "/sessions/" + url.PathEscape(c.ThreadID), Tag: "thread-" + c.ThreadID}
 		threadID := c.ThreadID
 		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project, URL: p.URL}
 	default:

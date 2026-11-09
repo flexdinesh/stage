@@ -67,6 +67,7 @@ type Service struct {
 
 	started     time.Time   // threads first seen later notify only if created after this
 	watchSeeded atomic.Bool // first watcher pass done (it records silently)
+	publicURL   string
 }
 
 func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
@@ -104,7 +105,7 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
-	wg.Add(4)
+	wg.Add(5)
 	go loop("full sync", s.FullSyncEvery, func(ctx context.Context) error {
 		_, err := s.FullSync(ctx)
 		if errors.Is(err, ErrSyncRunning) {
@@ -114,12 +115,16 @@ func (s *Service) Run(ctx context.Context) {
 	})
 	go loop("poll", s.PollEvery, s.PollActive)
 	go loop("watch threads", s.PollEvery, s.WatchThreads)
+	go loop("continuations", s.PollEvery, s.ReconcileContinuations)
 	go loop("catalog refresh", s.CatalogEvery, func(ctx context.Context) error {
 		_, err := s.RefreshCatalog(ctx)
 		return err
 	})
 	wg.Wait()
 }
+
+// SetPublicURL configures canonical links in continuation envelopes before Run.
+func (s *Service) SetPublicURL(url string) { s.publicURL = url }
 
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
 // The launch may have reached T3, so the next start reuses the attempt's
@@ -188,6 +193,16 @@ func (s *Service) FullSync(ctx context.Context) (Result, error) {
 		}
 		if err := s.store.UpsertThreads(ctx, res.Threads); err != nil {
 			return Result{}, fmt.Errorf("upsert threads: %w", err)
+		}
+		// List rows omit pending requests and active run metadata. Read root
+		// detail as well, including old, settled and task-owned sessions.
+		for _, thread := range res.Threads {
+			if thread.ParentThreadID != "" {
+				continue
+			}
+			if _, err := s.readSession(ctx, thread.ThreadID); err != nil && !errors.Is(err, t3.ErrNotFound) {
+				return Result{}, t3Err(fmt.Errorf("read session: %w", err))
+			}
 		}
 		nThreads += len(res.Threads)
 		if res.NextCursor == nil || len(res.Threads) == 0 || (cursor != nil && *res.NextCursor <= *cursor) {

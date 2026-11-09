@@ -15,6 +15,32 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	f := db.ThreadFilter{Limit: 100}
 	var err error
+	f.States = multi(q, "state")
+	for _, state := range f.States {
+		if !db.TaskState(state).Valid() {
+			return db.Invalid("invalid state %q", state)
+		}
+	}
+	if parent, ok := q["parent"]; ok {
+		if len(parent) != 1 || parent[0] == "" {
+			return db.Invalid("parent is required")
+		}
+		f.Parent = &parent[0]
+	}
+	switch sort := q.Get("sort"); sort {
+	case "":
+	case "activity":
+		f.SortActivity = true
+	default:
+		return db.Invalid("invalid sort %q", sort)
+	}
+	switch active := q.Get("active"); active {
+	case "":
+	case "1", "true":
+		f.Active = true
+	default:
+		return db.Invalid("invalid active %q", active)
+	}
 	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
 		return err
 	}

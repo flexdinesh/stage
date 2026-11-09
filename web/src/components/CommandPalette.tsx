@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { api } from "../api/client.ts";
 import { keys, useInvalidateWork, useProjects, useTasks } from "../api/queries.ts";
+import { sessionPath } from "../lib/sessions.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { IconSearch } from "./icons.tsx";
 import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
@@ -23,6 +24,7 @@ interface Item {
 const PAGES: [string, string][] = [
   ["Dashboard", "/"],
   ["Projects", "/projects"],
+  ["Sessions", "/sessions"],
   ["History", "/history"],
   ["Snippets", "/snippets"],
   ["Settings", "/settings"],
@@ -87,7 +89,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           label: t.title,
           hint: t.projectTitle,
           badge: <TaskStateBadge state={t.state} />,
-          run: go(`/tasks/${t.id}`),
+          run: go(t.t3ThreadId === null ? `/tasks/${t.id}` : sessionPath(t.t3ThreadId)),
           t3Url: t.t3DeepLink,
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
@@ -96,11 +98,11 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         for (const th of (threads.data?.threads ?? []).filter((hit) => !taskThreadIds.has(hit.t3ThreadId)))
           out.push({
             key: `thread-${th.t3ThreadId}`,
-            group: "Threads",
+            group: "Sessions",
             label: th.title,
             hint: `${th.projectTitle ?? th.t3ProjectId} · ${th.source}`,
             badge: <ThreadStatusBadge status={th.status} settled={th.settled} />,
-            run: th.taskId === null ? go(`/history?q=${encodeURIComponent(th.title)}`) : go(`/tasks/${th.taskId}`),
+            run: go(sessionPath(th.t3ThreadId)),
             t3Url: th.t3DeepLink,
           });
     }

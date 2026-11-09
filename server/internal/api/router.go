@@ -76,6 +76,11 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
 	h("GET /api/threads", s.listThreads)
+	h("GET /api/threads/{id}", s.getThread)
+	h("GET /api/continuations", s.listContinuations)
+	h("POST /api/continuations", s.createContinuation)
+	h("PATCH /api/continuations/{id}", s.updateContinuation)
+	h("POST /api/continuations/{id}/{action}", s.continuationAction)
 
 	h("GET /api/snippets", s.listSnippets)
 	h("POST /api/snippets", s.createSnippet)
