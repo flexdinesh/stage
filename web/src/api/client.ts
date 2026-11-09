@@ -8,6 +8,7 @@ import type {
   FollowupRequest,
   Health,
   ModelDefaults,
+  NotificationGroupPage,
   NotificationPage,
   PairRequest,
   Preferences,
@@ -167,8 +168,10 @@ export const api = {
   unsubscribePush: (body: PushEndpointBody) => apiSend("/push/subscriptions", { method: "DELETE", body }),
   testPush: (body: PushEndpointBody) => apiSend("/push/test", post(body)),
   badge: () => apiFetch<Badge>("/badge"),
-  notifications: (q: { limit?: number; before?: number | undefined } = {}) =>
-    apiFetch<NotificationPage>(`/notifications${toQuery({ limit: q.limit, before: q.before })}`),
+  notifications: (q: { limit?: number; before?: number | undefined; group?: string } = {}) =>
+    apiFetch<NotificationPage>(`/notifications${toQuery({ limit: q.limit, before: q.before, group: q.group })}`),
+  notificationGroups: (q: { limit?: number; cursor?: string | undefined } = {}) =>
+    apiFetch<NotificationGroupPage>(`/notifications/groups${toQuery({ limit: q.limit, cursor: q.cursor })}`),
   markNotificationsRead: (upTo: number) => apiSend("/notifications/read", post({ upTo })),
 };
 

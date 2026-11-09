@@ -1,14 +1,14 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
-import { keys, latestNotificationsKey, useNotificationInbox, useNotifications } from "../api/queries.ts";
-import type { Notification, NotificationPage } from "../api/types.ts";
+import { keys, latestNotificationsKey, useNotificationHistory, useNotificationInbox, useNotifications } from "../api/queries.ts";
+import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { closeSystemNotifications, getPushState } from "../lib/push.ts";
-import { IconBell, IconClose } from "./icons.tsx";
-import { TaskStateBadge, taskStateLabel } from "./StateBadge.tsx";
-import { AppButton, Button, Drawer, ErrorText, Muted, QueryState, cx } from "./ui.tsx";
+import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
+import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
+import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, toneClass } from "./ui.tsx";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -214,21 +214,23 @@ function ToastView({ n, onDismiss }: { n: Notification; onDismiss: () => void })
 
 // ---- Drawer ----
 
-type Group = { label: string; items: Notification[] };
+type Group = { label: string; items: NotificationGroup[] };
 
-function groupByDay(items: Notification[], now: Date = new Date()): Group[] {
+function groupByDay(items: NotificationGroup[], now: Date = new Date()): Group[] {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const groups: Group[] = [
-    { label: "Today", items: [] },
-    { label: "Yesterday", items: [] },
+    { label: "Needs input", items: [] },
+    { label: "Recent · Today", items: [] },
+    { label: "Recent · Yesterday", items: [] },
     { label: "Earlier", items: [] },
   ];
   for (const n of items) {
     const t = new Date(n.createdAt).getTime();
-    const g = t >= today.getTime() ? groups[0] : t >= yesterday.getTime() ? groups[1] : groups[2];
+    const index = n.currentState === "needs_input" ? 0 : t >= today.getTime() ? 1 : t >= yesterday.getTime() ? 2 : 3;
+    const g = groups[index];
     g?.items.push(n);
   }
   return groups.filter((g) => g.items.length > 0);
@@ -237,7 +239,7 @@ function groupByDay(items: Notification[], now: Date = new Date()): Group[] {
 const PUSH_KEY = ["pushState"];
 
 /**
- * Opening reads everything shown: unread markers stay (from a snapshot) until
+ * Opening reads the inbox: unread markers stay (from a snapshot) until
  * the drawer closes; anything that arrives while open is read on close.
  */
 export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
@@ -245,7 +247,8 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const inbox = useNotificationInbox();
   const push = useQuery({ queryKey: PUSH_KEY, queryFn: getPushState, refetchInterval: false });
   // Snapshot at open: which rows were unread, and the newest id then.
-  const [opened, setOpened] = useState<{ unread: ReadonlySet<number>; topId: number; markRead: boolean } | null>(null);
+  const [opened, setOpened] = useState<{ unread: ReadonlySet<string>; topId: number; markRead: boolean } | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const read = useMutation({
     mutationFn: api.markNotificationsRead,
     onSettled: () => qc.invalidateQueries({ queryKey: keys.notifications }),
@@ -257,11 +260,19 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     void closeSystemNotifications();
   }, []);
 
-  const items =inbox.data?.pages.flatMap((p) => p.notifications) ?? [];
+  // A live state change can move a group across a page boundary. The newest
+  // page wins; never render the same task twice after loading older pages.
+  const byKey = new Map<string, NotificationGroup>();
+  for (const page of inbox.data?.pages ?? []) {
+    for (const group of page.groups) if (!byKey.has(group.key)) byKey.set(group.key, group);
+  }
+  const items = [...byKey.values()].toSorted((a, b) =>
+    Number(b.currentState === "needs_input") - Number(a.currentState === "needs_input") || b.id - a.id,
+  );
   const firstPage = inbox.data?.pages[0];
-  if (firstPage !== undefined && opened === null) {
-    const unread = new Set(firstPage.notifications.filter((n) => n.readAt === null).map((n) => n.id));
-    setOpened({ unread, topId: firstPage.notifications[0]?.id ?? 0, markRead: firstPage.unread > 0 });
+  if (firstPage !== undefined && opened === null && !inbox.isFetching && inbox.error === null) {
+    const unread = new Set(items.filter((n) => n.unreadCount > 0).map((n) => n.key));
+    setOpened({ unread, topId: firstPage.latestId, markRead: firstPage.unread > 0 });
   }
   useEffect(() => {
     if (opened?.markRead === true && opened.topId > 0) readMutate(opened.topId);
@@ -270,7 +281,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   // On close: read whatever arrived while open.
   const close = useRef({ newest: 0, topId: Number.MAX_SAFE_INTEGER });
   useEffect(() => {
-    close.current = { newest: items[0]?.id ?? 0, topId: opened?.topId ?? Number.MAX_SAFE_INTEGER };
+    close.current = { newest: firstPage?.latestId ?? 0, topId: opened?.topId ?? Number.MAX_SAFE_INTEGER };
   });
   useEffect(
     () => () => {
@@ -284,8 +295,16 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     [qc],
   );
 
-  const isUnread = (n: Notification) =>
-    opened !== null && (opened.unread.has(n.id) || (n.readAt === null && n.id > opened.topId));
+  const isUnread = (n: NotificationGroup) =>
+    opened !== null && (opened.unread.has(n.key) || (n.unreadCount > 0 && n.id > opened.topId));
+
+  const toggleHistory = (key: string) =>
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const footer =
     push.data === undefined || push.data === "on" ? null : (
@@ -299,18 +318,27 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
-      <QueryState isPending={inbox.isPending} error={inbox.error}>
+      <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
         {items.length === 0 ? (
           <Muted>No notifications in the last 30 days. Needs input, done and failed events land here.</Muted>
         ) : (
           <div className="flex flex-col gap-3.5">
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
-                <h3 className="label-caps flex h-8 items-center border-b border-line bg-panel px-3 text-fg">{g.label}</h3>
+                <h3 className="label-caps flex min-h-8 items-center justify-between gap-3 border-b border-line bg-panel px-3 py-1 text-fg">
+                  {g.label}
+                  <span className="tabular text-muted">{g.items.length}</span>
+                </h3>
                 <ul>
                   {g.items.map((n) => (
-                    <li key={n.id} className="border-b border-line last:border-b-0">
-                      <NotificationRow n={n} unread={isUnread(n)} onNavigate={onClose} />
+                    <li key={n.key} className="border-b border-line last:border-b-0">
+                      <NotificationRow
+                        n={n}
+                        unread={isUnread(n)}
+                        expanded={expanded.has(n.key)}
+                        onToggle={() => toggleHistory(n.key)}
+                        onNavigate={onClose}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -318,59 +346,140 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
             ))}
             {inbox.hasNextPage ? (
               <Button className="self-start" busy={inbox.isFetchingNextPage} onClick={() => void inbox.fetchNextPage()}>
-                Load more
+                {inbox.isFetchNextPageError ? "Try loading more again" : "Load more"}
               </Button>
             ) : null}
           </div>
         )}
       </QueryState>
+      {inbox.error === null ? null : (
+        <div className="mt-3 flex flex-col items-start gap-2">
+          {items.length === 0 ? null : <ErrorText error={inbox.error} />}
+          <Button small busy={inbox.isFetching} onClick={() => void inbox.refetch()}>
+            Retry notifications
+          </Button>
+        </div>
+      )}
       {read.error === null ? null : <ErrorText error={read.error} />}
     </Drawer>
   );
 }
 
-function NotificationRow({ n, unread, onNavigate }: { n: Notification; unread: boolean; onNavigate: () => void }) {
-  const waiting = stillWaiting(n);
+function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
+  n: NotificationGroup;
+  unread: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+}) {
+  const historyId = useId();
+  const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
   const changed = n.currentState !== null && n.currentState !== n.event;
   return (
-    <div
-      className={cx(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2",
-        waiting ? "border-l-need" : "border-l-transparent",
-      )}
-    >
-      <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
-        <TaskStateBadge state={n.event} />
-      </div>
-
-      <div className="order-1 min-w-0 md:order-2">
-        <div className="flex items-baseline gap-2">
-          {unread ? <span className="size-1.5 shrink-0 translate-y-[-1px] bg-fg" aria-label="Unread" /> : null}
+    <div className={cx("border-l-2 px-3 py-2.5", waiting ? "border-l-need" : "border-l-transparent")}>
+      <div className="flex items-start justify-between gap-2.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          {unread ? <span className="size-1.5 shrink-0 translate-y-[-1px] bg-fg" role="img" aria-label="Unread" /> : null}
           <Link
             to={n.url}
             onClick={onNavigate}
-            className={cx("text-body break-words hover:underline", unread ? "font-semibold" : "font-medium")}
+            className={cx("min-w-0 text-body break-words hover:underline", unread ? "font-semibold" : "font-medium")}
           >
             {n.title}
           </Link>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
-          {project === "" ? null : <span>{project}</span>}
-          <span title={dateTime(n.createdAt)} className="tabular">
-            {relativeTime(n.createdAt)}
-          </span>
-          {waiting ? <span className="text-need-fg">still waiting</span> : null}
-          {changed && n.currentState !== null ? <span>now {taskStateLabel(n.currentState)}</span> : null}
+        <div className="shrink-0">
+          {n.currentState === null ? <Chip className="text-muted">unavailable</Chip> : <TaskStateBadge state={n.currentState} />}
         </div>
       </div>
-
-      {n.t3DeepLink === null ? null : (
-        <div className="order-3 col-span-2 flex items-center gap-1.5 md:col-span-1 md:justify-end">
+      <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
+        {project === "" ? null : <span>{project}</span>}
+        <span title={dateTime(n.createdAt)} className="tabular">
+          latest notification {relativeTime(n.createdAt)}
+        </span>
+      </div>
+      {changed || n.currentState === null ? (
+        <p className="mt-1 text-small text-muted">
+          {n.currentState === null ? "Current status unavailable. " : ""}Last notification: <NotificationEventLabel event={n.event} />
+        </p>
+      ) : null}
+      <div className="mt-1.5 flex items-start justify-between gap-2.5">
+        <Button
+          small
+          variant="ghost"
+          className="-ml-2 gap-1"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={historyId}
+          aria-label={`${expanded ? "Hide" : "Show"} notification history for ${n.title}`}
+        >
+          <span className={cx("inline-flex", !expanded && "-rotate-90")}>
+            <IconChevronDown size={14} />
+          </span>
+          <span className="font-mono">{n.eventCount} {n.eventCount === 1 ? "update" : "updates"}</span>
+        </Button>
+        {n.t3DeepLink === null ? null : (
           <AppButton small variant={waiting ? "primary" : "secondary"} href={n.t3DeepLink}>
             Open in app
           </AppButton>
-        </div>
+        )}
+      </div>
+      <div id={historyId} hidden={!expanded}>
+        {expanded ? <NotificationHistory groupKey={n.key} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function NotificationEventLabel({ event }: { event: NotificationEvent }) {
+  return (
+    <span className={cx(toneClass(taskStateTone(event)), "font-mono text-meta text-[var(--cf)]")}>
+      {taskStateLabel(event)}
+    </span>
+  );
+}
+
+function NotificationHistory({ groupKey }: { groupKey: string }) {
+  const history = useNotificationHistory(groupKey);
+  const events = history.data?.pages.flatMap((page) => page.notifications) ?? [];
+  const unique = [...new Map(events.map((event) => [event.id, event])).values()];
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <QueryState isPending={history.isPending} error={unique.length === 0 ? history.error : null}>
+        {unique.length === 0 ? <Muted>No notifications in the last 30 days.</Muted> : (
+          <ol aria-label="Notification history, newest first" className="ml-[3px] w-[calc(100%-3px)] border-l border-line-strong pl-4">
+            {unique.map((event) => (
+              <li
+                key={event.id}
+                className={cx(toneClass(taskStateTone(event.event)), "relative flex items-baseline justify-between gap-3 py-1")}
+              >
+                <span aria-hidden="true" className="absolute top-2.5 -left-[19.5px] size-1.5 bg-[var(--c)] outline-3 outline-surface" />
+                <NotificationEventLabel event={event.event} />
+                <time
+                  dateTime={event.createdAt}
+                  title={dateTime(event.createdAt)}
+                  className="shrink-0 font-mono text-meta-sm tabular text-muted"
+                >
+                  {relativeTime(event.createdAt)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
+      </QueryState>
+      {history.hasNextPage ? (
+        <Button small className="self-start" busy={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>
+          Older updates
+        </Button>
+      ) : null}
+      {history.error === null ? null : (
+        <>
+          {unique.length === 0 ? null : <ErrorText error={history.error} />}
+          <Button small className="self-start" busy={history.isFetching} onClick={() => void history.refetch()}>
+            Retry history
+          </Button>
+        </>
       )}
     </div>
   );

@@ -53,12 +53,20 @@ export const latestNotificationsKey = [...keys.notifications, "latest"];
 export const useNotifications = () =>
   useQuery({ queryKey: latestNotificationsKey, queryFn: () => api.notifications({ limit: 50 }) });
 
-/** Notifications drawer: newest first, older pages on demand. */
+/** Notifications drawer: current needs input first, then recent task/thread groups. */
 export const useNotificationInbox = () =>
   useInfiniteQuery({
     queryKey: [...keys.notifications, "inbox"],
-    // pageParam 0 = newest page.
-    queryFn: ({ pageParam }) => api.notifications({ limit: 50, before: pageParam === 0 ? undefined : pageParam }),
+    queryFn: ({ pageParam }) => api.notificationGroups({ limit: 50, cursor: pageParam === "" ? undefined : pageParam }),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+
+/** Mounted on expansion; history is notification events, not a run lifecycle. */
+export const useNotificationHistory = (group: string) =>
+  useInfiniteQuery({
+    queryKey: [...keys.notifications, "history", group],
+    queryFn: ({ pageParam }) => api.notifications({ group, limit: 20, before: pageParam === 0 ? undefined : pageParam }),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextBefore ?? undefined,
   });

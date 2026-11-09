@@ -40,6 +40,7 @@ const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
 };
 
 export const taskStateLabel = (s: TaskState) => TASK_LABELS[s];
+export const taskStateTone = (s: TaskState) => TASK_TONES[s];
 
 /** T3 `completed` reads "done" (the run finished; settling happens in T3). */
 export const threadStatusLabel = (s: ThreadStatus) => (s === "completed" ? "done" : s.replace("_", " "));

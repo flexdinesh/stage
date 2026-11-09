@@ -1607,3 +1607,56 @@ func TestNotificationsInbox(t *testing.T) {
 	e.must("GET", "/api/notifications?limit=0", nil, 400, nil)
 	e.must("GET", "/api/notifications?before=x", nil, 400, nil)
 }
+
+func TestNotificationGroups(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	threads := []string{"ext-1", "ext-2"}
+	var latest int64
+	for _, thread := range []string{threads[0], threads[1], threads[0]} {
+		id, err := e.store.InsertNotification(ctx, db.NewNotification{
+			Event: db.StateDone, T3ThreadID: &thread, Title: "Same title", URL: "/history?q=Same",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest = id
+	}
+	type group struct {
+		db.NotificationGroup
+		T3DeepLink *string `json:"t3DeepLink"`
+	}
+	var pg struct {
+		Groups     []group `json:"groups"`
+		Unread     int     `json:"unread"`
+		LatestID   int64   `json:"latestId"`
+		NextCursor *string `json:"nextCursor"`
+	}
+	e.must("GET", "/api/notifications/groups?limit=1", nil, 200, &pg)
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:ext-1" || pg.Groups[0].EventCount != 2 ||
+		pg.Groups[0].UnreadCount != 2 || pg.LatestID != latest || pg.Unread != 3 || pg.NextCursor == nil {
+		t.Fatalf("first group page: %+v", pg)
+	}
+	if link := pg.Groups[0].T3DeepLink; link == nil || !strings.HasPrefix(*link, "t3code://threads/") {
+		t.Fatalf("group deep link: %v", link)
+	}
+	e.must("GET", "/api/notifications/groups?limit=1&cursor="+url.QueryEscape(*pg.NextCursor), nil, 200, &pg)
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:ext-2" || pg.NextCursor != nil {
+		t.Fatalf("next group page: %+v", pg)
+	}
+	var history struct {
+		Notifications []db.Notification `json:"notifications"`
+		NextBefore    *int64            `json:"nextBefore"`
+	}
+	e.must("GET", "/api/notifications?group=thread%3Aext-1&limit=1", nil, 200, &history)
+	if len(history.Notifications) != 1 || history.Notifications[0].ID != latest || history.NextBefore == nil {
+		t.Fatalf("first history page: %+v", history)
+	}
+	e.must("GET", fmt.Sprintf("/api/notifications?group=thread%%3Aext-1&limit=1&before=%d", *history.NextBefore), nil, 200, &history)
+	if len(history.Notifications) != 1 || *history.Notifications[0].T3ThreadID != "ext-1" || history.NextBefore != nil {
+		t.Fatalf("next history page: %+v", history)
+	}
+	for _, query := range []string{"limit=0", "cursor=x", "cursor=recent:0", "cursor=waiting:no", "cursor=other:1"} {
+		e.must("GET", "/api/notifications/groups?"+query, nil, 400, nil)
+	}
+}
