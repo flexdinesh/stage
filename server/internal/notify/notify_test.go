@@ -223,6 +223,9 @@ func TestSendPath(t *testing.T) {
 	if h.Get("TTL") != "86400" || h.Get("Urgency") != "high" || h.Get("Content-Encoding") != "aes128gcm" {
 		t.Fatalf("headers %v", h)
 	}
+	if got, want := h.Get("Topic"), topicFor(fmt.Sprintf("task-%d", task.ID)); got != want {
+		t.Fatalf("Topic %q, want %q", got, want)
+	}
 	if len(reqs[0].body) == 0 {
 		t.Fatal("empty push body")
 	}
@@ -338,4 +341,24 @@ func jwtSub(t *testing.T, auth string) string {
 		t.Fatal(err)
 	}
 	return claims.Sub
+}
+
+// Topic: at most 32 URL-safe base64 chars (RFC 8030 §5.4), stable per tag,
+// distinct across tags, also for thread tags longer than 32 chars.
+func TestTopicFor(t *testing.T) {
+	long := "thread-0b6f4c1e-3d2a-4f8e-9c7b-5a1d2e3f4a5b"
+	seen := map[string]string{}
+	for _, tag := range []string{"task-7", "task-8", "test", long} {
+		got := topicFor(tag)
+		if len(got) != 32 || strings.Trim(got, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != "" {
+			t.Fatalf("topicFor(%q) = %q, want 32 URL-safe base64 chars", tag, got)
+		}
+		if topicFor(tag) != got {
+			t.Fatalf("topicFor(%q) not stable", tag)
+		}
+		if prev, ok := seen[got]; ok {
+			t.Fatalf("topicFor(%q) == topicFor(%q)", tag, prev)
+		}
+		seen[got] = tag
+	}
 }

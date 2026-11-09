@@ -5,7 +5,7 @@ import { api } from "../api/client.ts";
 import { keys, latestNotificationsKey, useNotificationInbox, useNotifications } from "../api/queries.ts";
 import type { Notification, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { getPushState } from "../lib/push.ts";
+import { closeSystemNotifications, getPushState } from "../lib/push.ts";
 import { IconBell, IconClose } from "./icons.tsx";
 import { TaskStateBadge, taskStateLabel } from "./StateBadge.tsx";
 import { AppButton, Button, Drawer, ErrorText, Muted, QueryState, cx } from "./ui.tsx";
@@ -252,7 +252,12 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   });
   const readMutate = read.mutate;
 
-  const items = inbox.data?.pages.flatMap((p) => p.notifications) ?? [];
+  // Opening the inbox clears all system notifications.
+  useEffect(() => {
+    void closeSystemNotifications();
+  }, []);
+
+  const items =inbox.data?.pages.flatMap((p) => p.notifications) ?? [];
   const firstPage = inbox.data?.pages[0];
   if (firstPage !== undefined && opened === null) {
     const unread = new Set(firstPage.notifications.filter((n) => n.readAt === null).map((n) => n.id));

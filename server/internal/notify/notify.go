@@ -5,6 +5,8 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -221,6 +223,14 @@ func (n *Notifier) SendTest(ctx context.Context, endpoint string) error {
 	return n.send(ctx, sub, p, webpush.UrgencyNormal)
 }
 
+// topicFor is the Web Push Topic for tag: the push service keeps only the
+// latest pending message per topic. Topic allows at most 32 URL-safe base64
+// chars, so the tag is hashed (thread tags exceed it).
+func topicFor(tag string) string {
+	sum := sha256.Sum256([]byte(tag))
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:32]
+}
+
 // send pushes p to sub and records the outcome: 2xx → last_success_at;
 // 404/410 → subscription deleted; otherwise last_error. Failures return
 // *PushError.
@@ -233,14 +243,18 @@ func (n *Notifier) send(ctx context.Context, sub db.PushSubscription, p Payload,
 	if err != nil {
 		return err
 	}
+	opts := &webpush.Options{
+		HTTPClient: n.HTTPClient, Subscriber: n.subject, TTL: 86400, Urgency: urgency,
+		VAPIDPublicKey: keys.PublicKey, VAPIDPrivateKey: keys.PrivateKey,
+	}
+	if p.Tag != "" {
+		opts.Topic = topicFor(p.Tag)
+	}
 	callCtx, cancel := context.WithTimeout(ctx, n.SendTimeout)
 	defer cancel()
 	resp, err := webpush.SendNotificationWithContext(callCtx, msg, &webpush.Subscription{
 		Endpoint: sub.Endpoint, Keys: webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},
-	}, &webpush.Options{
-		HTTPClient: n.HTTPClient, Subscriber: n.subject, TTL: 86400, Urgency: urgency,
-		VAPIDPublicKey: keys.PublicKey, VAPIDPrivateKey: keys.PrivateKey,
-	})
+	}, opts)
 	if err != nil {
 		return n.fail(ctx, sub.Endpoint, &PushError{Msg: "push request failed: " + err.Error()})
 	}

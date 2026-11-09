@@ -34,6 +34,26 @@ async function requireRegistration(): Promise<ServiceWorkerRegistration> {
   return reg;
 }
 
+/** Tag of a notification: its own, else the copy in data (iOS drops tag; see sw.ts). */
+function tagOf(n: Notification): string | null {
+  if (n.tag !== "") return n.tag;
+  const data: unknown = n.data;
+  if (typeof data !== "object" || data === null || !("tag" in data)) return null;
+  return typeof data.tag === "string" ? data.tag : null;
+}
+
+/** Closes shown system notifications with `tag` (all when omitted). Best effort. */
+export async function closeSystemNotifications(tag?: string): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await registration();
+    if (reg === null) return;
+    for (const n of await reg.getNotifications()) if (tag === undefined || tagOf(n) === tag) n.close();
+  } catch {
+    // Not supported or no permission; nothing to close.
+  }
+}
+
 async function currentSubscription(): Promise<PushSubscription | null> {
   const reg = await registration();
   return reg === null ? null : reg.pushManager.getSubscription();

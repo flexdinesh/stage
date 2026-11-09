@@ -84,14 +84,39 @@ async function onPush(p: Payload): Promise<void> {
   const tasks: Promise<void>[] = [updateBadge(p.badge)];
   if (!(focused && maySkipNotification())) {
     // NotificationOptions lacks renotify in the DOM lib; it makes a replaced (same tag) notification alert again.
-    const options: NotificationOptions & { renotify?: boolean } = { body: p.body, icon: ICON, badge: ICON, data: { url: p.url } };
+    const options: NotificationOptions & { renotify?: boolean } = {
+      body: p.body,
+      icon: ICON,
+      badge: ICON,
+      data: { url: p.url, tag: p.tag },
+    };
     if (p.tag !== null) {
       options.tag = p.tag;
       options.renotify = true;
     }
-    tasks.push(self.registration.showNotification(p.title, options));
+    tasks.push(showReplacing(p.title, options, p.tag));
   }
   await Promise.all(tasks);
+}
+
+/** Tag of a notification: its own, else the copy in data (iOS drops tag). */
+function tagOf(n: Notification): string | null {
+  if (n.tag !== "") return n.tag;
+  const data: unknown = n.data;
+  if (typeof data !== "object" || data === null || !("tag" in data)) return null;
+  return typeof data.tag === "string" ? data.tag : null;
+}
+
+/** iOS ignores tag replacement (WebKit bug 258922): close same-tag notifications first. */
+async function showReplacing(title: string, options: NotificationOptions, tag: string | null): Promise<void> {
+  if (tag !== null) {
+    try {
+      for (const n of await self.registration.getNotifications()) if (tagOf(n) === tag) n.close();
+    } catch {
+      // Best effort; tag replacement still applies where supported.
+    }
+  }
+  await self.registration.showNotification(title, options);
 }
 
 self.addEventListener("push", (event) => {
