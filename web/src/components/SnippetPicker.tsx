@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useProjects, useSnippets } from "../api/queries.ts";
 import type { Snippet } from "../api/types.ts";
 import { findTrigger, matchSnippets, snippetsFor } from "../lib/snippets.ts";
-import { Chip, Kbd, Textarea, cx } from "./ui.tsx";
+import { IconClose } from "./icons.tsx";
+import { Button, Chip, Kbd, Textarea, cx } from "./ui.tsx";
 
 const MIRRORED = [
   "box-sizing",
@@ -58,33 +59,49 @@ const PICKER_WIDTH = 360;
 const GAP = 4;
 const EDGE = 8;
 
-/** Laptop: under the caret (flips above near the bottom). Phone: full width under the textarea. */
-function pickerPosition(el: HTMLTextAreaElement, index: number): CSSProperties {
-  const rect = el.getBoundingClientRect();
-  const viewH = window.visualViewport?.height ?? window.innerHeight;
-  let left: number;
-  let width: number;
-  let below: number;
-  let above: number;
-  if (window.matchMedia("(min-width: 768px)").matches) {
-    const c = caretOffset(el, index);
-    const top = rect.top + c.top - el.scrollTop;
-    width = PICKER_WIDTH;
-    left = Math.max(EDGE, Math.min(rect.left + c.left - el.scrollLeft, window.innerWidth - width - EDGE));
-    below = top + c.height + GAP;
-    above = top - GAP;
-  } else {
-    left = rect.left;
-    width = rect.width;
-    below = rect.bottom + GAP;
-    above = rect.top - GAP;
+type Placement =
+  /** Laptop: fixed box under (or above) the caret. */
+  | { mode: "caret"; style: CSSProperties }
+  /** Phone: frame matching the visual viewport; the tray sits at its bottom, right above the on-screen keyboard. */
+  | { mode: "tray"; frame: CSSProperties; keyboard: boolean };
+
+/** Laptop: under the caret (flips above near the bottom). Phone: tray docked to the bottom of the visible area. */
+function pickerPlacement(el: HTMLTextAreaElement, index: number): Placement {
+  const vv = window.visualViewport;
+  if (!window.matchMedia("(min-width: 768px)").matches) {
+    // Fixed boxes are laid out against the layout viewport; the keyboard shrinks and shifts the visual one (iOS).
+    const top = vv?.offsetTop ?? 0;
+    const height = vv?.height ?? window.innerHeight;
+    const layoutHeight = document.documentElement.clientHeight;
+    return {
+      mode: "tray",
+      frame: { left: vv?.offsetLeft ?? 0, top, width: vv?.width ?? window.innerWidth, height },
+      keyboard: top + height < layoutHeight - 1,
+    };
   }
+  const rect = el.getBoundingClientRect();
+  const viewH = vv?.height ?? window.innerHeight;
+  const c = caretOffset(el, index);
+  const caretTop = rect.top + c.top - el.scrollTop;
+  const width = PICKER_WIDTH;
+  const left = Math.max(EDGE, Math.min(rect.left + c.left - el.scrollLeft, window.innerWidth - width - EDGE));
+  const below = caretTop + c.height + GAP;
+  const above = caretTop - GAP;
   const spaceBelow = viewH - below - EDGE;
   const spaceAbove = above - EDGE;
   if (spaceBelow < 240 && spaceAbove > spaceBelow) {
-    return { left, width, bottom: window.innerHeight - above, maxHeight: spaceAbove };
+    return { mode: "caret", style: { left, width, bottom: window.innerHeight - above, maxHeight: spaceAbove } };
   }
-  return { left, width, top: below, maxHeight: spaceBelow };
+  return { mode: "caret", style: { left, width, top: below, maxHeight: spaceBelow } };
+}
+
+/** Nearest ancestor that scrolls vertically (the drawer body), else the document. */
+function scrollParent(node: HTMLElement): Element | null {
+  for (let p = node.parentElement; p !== null; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if ((overflowY === "auto" || overflowY === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return document.scrollingElement;
 }
 
 type Props = Omit<ComponentProps<"textarea">, "value" | "onChange" | "ref"> & {
@@ -109,7 +126,9 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
   /** Trigger start the user dismissed with Esc (stays closed until the token ends). */
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [active, setActive] = useState(0);
-  const [pos, setPos] = useState<CSSProperties | null>(null);
+  const [pos, setPos] = useState<Placement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const scope = useMemo(() => snippetsFor(snippets.data?.snippets ?? [], projectId), [snippets.data, projectId]);
   const trigger = caret === null || scope.length === 0 ? null : findTrigger(value, caret);
@@ -140,17 +159,49 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
       setPos(null);
       return;
     }
-    const update = () => setPos(pickerPosition(node, triggerStart));
-    update();
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    window.visualViewport?.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("resize", update);
+    const update = () => setPos(pickerPlacement(node, triggerStart));
+    // Scrolling the list itself must not re-place the picker.
+    const onScroll = (e: Event) => {
+      if (e.target instanceof Node && pickerRef.current?.contains(e.target)) return;
+      update();
     };
-  }, [open, triggerStart]);
+    update();
+    const vv = window.visualViewport;
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", update);
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", update);
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
+    };
+  }, [open, triggerStart, pickerRef]);
+
+  const mode = pos?.mode ?? null;
+
+  // Phone: keep the caret line visible above the tray by scrolling the form, once per open and as the tray grows.
+  useLayoutEffect(() => {
+    const node = el.current;
+    const tray = pickerRef.current;
+    if (mode !== "tray" || matches.length === 0 || node === null || tray === null || triggerStart === null) return;
+    const c = caretOffset(node, triggerStart);
+    const caretBottom = node.getBoundingClientRect().top + c.top - node.scrollTop + c.height;
+    const overlap = caretBottom + EDGE - tray.getBoundingClientRect().top;
+    if (overlap > 0) scrollParent(node)?.scrollBy({ top: overlap });
+  }, [mode, triggerStart, matches.length, pickerRef]);
+
+  // Keep the active row in view when it changes (keyboard), without touching the list's scroll otherwise.
+  useLayoutEffect(() => {
+    const box = listRef.current;
+    const row = box?.children[index];
+    if (mode === null || box === null || !(row instanceof HTMLElement)) return;
+    if (row.offsetTop < box.scrollTop) box.scrollTop = row.offsetTop;
+    else if (row.offsetTop + row.offsetHeight > box.scrollTop + box.clientHeight) {
+      box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight;
+    }
+  }, [index, mode]);
 
   const syncCaret = (node: HTMLTextAreaElement) => {
     const at = node.selectionStart === node.selectionEnd ? node.selectionStart : null;
@@ -203,6 +254,89 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
 
   const optionId = (s: Snippet) => `${listId}-${s.id}`;
 
+  const renderPicker = (placement: Placement) => {
+    const tray = placement.mode === "tray";
+    const panel = (
+      <div
+        ref={pickerRef}
+        style={tray ? undefined : placement.style}
+        className={cx(
+          "flex min-h-0 flex-col bg-surface",
+          tray
+            ? "pointer-events-auto max-h-[55%] border-t border-line-strong pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
+            : "fixed z-[60] border border-line-strong",
+          tray && !placement.keyboard && "pb-[env(safe-area-inset-bottom)]",
+        )}
+        // Keep focus (and the caret, and the phone keyboard) in the textarea while picking.
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel pr-1 pl-3 md:h-7 md:pr-3">
+          <span className="label-caps text-fg">Snippets</span>
+          <span className="font-mono text-meta-sm text-muted tabular-nums">{matches.length}</span>
+          {tray && trigger !== null ? (
+            <Button
+              variant="ghost"
+              small
+              className="ml-auto"
+              aria-label="Close snippets"
+              onClick={() => setDismissed(trigger.start)}
+            >
+              <IconClose />
+            </Button>
+          ) : null}
+        </div>
+        <div
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label="Snippets"
+          className="relative min-h-0 flex-1 overscroll-contain overflow-y-auto py-1"
+        >
+          {matches.map((s, i) => (
+            <div
+              key={s.id}
+              id={optionId(s)}
+              role="option"
+              aria-selected={i === index}
+              onMouseMove={() => setActive(i)}
+              onClick={() => insert(s)}
+              className={cx(
+                "flex cursor-pointer flex-col gap-0.5 px-3 py-2.5 md:py-1.5",
+                i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate text-ui text-fg">{s.name}</span>
+                <Chip className="ml-auto max-w-[45%] shrink-0 truncate">
+                  {s.projectId === null ? "global" : (projectTitle.get(s.projectId) ?? `project ${s.projectId}`)}
+                </Chip>
+              </span>
+              <span className="truncate font-mono text-meta text-muted">{s.body}</span>
+            </div>
+          ))}
+        </div>
+        <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
+          <span>
+            <Kbd>↑↓</Kbd> move
+          </span>
+          <span>
+            <Kbd>↵</Kbd> insert
+          </span>
+          <span>
+            <Kbd>Esc</Kbd> close
+          </span>
+        </div>
+      </div>
+    );
+    return tray ? (
+      <div style={placement.frame} className="pointer-events-none fixed z-[60] flex flex-col justify-end">
+        {panel}
+      </div>
+    ) : (
+      panel
+    );
+  };
+
   return (
     <>
       <Textarea
@@ -233,58 +367,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
         }}
         onKeyDown={handleKeyDown}
       />
-      {open && pos !== null
-        ? createPortal(
-            <div
-              style={pos}
-              className="fixed z-[60] flex flex-col border border-line-strong bg-surface"
-              // Keep focus (and the caret) in the textarea while picking.
-              onMouseDown={(e) => e.preventDefault()}
-            >
-              <div className="flex h-7 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
-                <span className="label-caps text-fg">Snippets</span>
-                <span className="font-mono text-meta-sm text-muted">{matches.length}</span>
-              </div>
-              <div id={listId} role="listbox" aria-label="Snippets" className="min-h-0 flex-1 overflow-y-auto py-1">
-                {matches.map((s, i) => (
-                  <div
-                    key={s.id}
-                    id={optionId(s)}
-                    role="option"
-                    aria-selected={i === index}
-                    ref={i === index ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
-                    onMouseMove={() => setActive(i)}
-                    onClick={() => insert(s)}
-                    className={cx(
-                      "flex cursor-pointer flex-col gap-0.5 px-3 py-1.5",
-                      i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate text-ui text-fg">{s.name}</span>
-                      <Chip className="ml-auto max-w-[45%] shrink-0 truncate">
-                        {s.projectId === null ? "global" : (projectTitle.get(s.projectId) ?? `project ${s.projectId}`)}
-                      </Chip>
-                    </span>
-                    <span className="truncate font-mono text-meta text-muted">{s.body}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
-                <span>
-                  <Kbd>↑↓</Kbd> move
-                </span>
-                <span>
-                  <Kbd>↵</Kbd> insert
-                </span>
-                <span>
-                  <Kbd>Esc</Kbd> close
-                </span>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {open && pos !== null ? createPortal(renderPicker(pos), document.body) : null}
     </>
   );
 }
