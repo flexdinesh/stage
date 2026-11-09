@@ -15,11 +15,12 @@ import {
 import { parseTags } from "../lib/format.ts";
 import { isFinal, isFullyEditable } from "../lib/tasks.ts";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
+import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
 import { TaskPicker, useLinkCandidates } from "./Sequence.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea } from "./ui.tsx";
 
 interface FormState {
   projectId: string;
@@ -264,14 +265,14 @@ function TaskFormDrawer({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Project">
             {(id) => (
-              <Select id={id} disabled={!full} value={s.projectId} onChange={(e) => set({ projectId: e.target.value })}>
-                <option value="">Select project…</option>
-                {(projects.data?.projects ?? []).map((p) => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.title}
-                  </option>
-                ))}
-              </Select>
+              <ProjectCombobox
+                id={id}
+                projects={projects.data?.projects ?? []}
+                disabled={!full}
+                value={s.projectId}
+                onChange={(projectId) => set({ projectId })}
+                placeholder="Select project…"
+              />
             )}
           </Field>
         </div>

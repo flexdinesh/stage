@@ -1,7 +1,63 @@
+import { useCallback, useMemo } from "react";
 import { useProjects } from "../api/queries.ts";
-import { Select } from "./ui.tsx";
+import type { Project } from "../api/types.ts";
+import { matchProjects, type ProjectMatch } from "../lib/projects.ts";
+import { Combobox, type ComboboxOption } from "./Combobox.tsx";
 
-/** Project filter select; value "" = all projects. */
+function toOption(m: ProjectMatch): ComboboxOption {
+  return {
+    value: String(m.project.id),
+    label: m.project.title,
+    labelMatch: m.title,
+    detail: m.project.workspaceRoot,
+    detailMatch: m.path,
+    ...(m.project.archivedAt === null ? {} : { chip: "archived" }),
+  };
+}
+
+/** Type-to-filter project picker; value is the project id as a string, "" for the pinned option (or none). */
+export function ProjectCombobox({
+  projects,
+  id,
+  value,
+  onChange,
+  pinned,
+  placeholder,
+  disabled,
+  className,
+  size,
+}: {
+  projects: readonly Project[];
+  id?: string | undefined;
+  value: string;
+  onChange: (value: string) => void;
+  /** Label of a first option with value "" (e.g. "All projects", "Global"). */
+  pinned?: string | undefined;
+  placeholder?: string | undefined;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
+  size?: number | undefined;
+}) {
+  const options = useCallback((query: string) => matchProjects(projects, query).map(toOption), [projects]);
+  const pinnedOptions = useMemo(() => (pinned === undefined ? [] : [{ value: "", label: pinned }]), [pinned]);
+  return (
+    <Combobox
+      id={id}
+      value={value}
+      onChange={onChange}
+      options={options}
+      pinned={pinnedOptions}
+      placeholder={placeholder}
+      emptyText="No matching projects"
+      listLabel="Projects"
+      disabled={disabled}
+      className={className}
+      size={size}
+    />
+  );
+}
+
+/** Project filter; value "" = all projects. */
 export function ProjectSelect({
   id,
   value,
@@ -15,13 +71,13 @@ export function ProjectSelect({
 }) {
   const projects = useProjects();
   return (
-    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="min-w-40">
-      <option value="">{allLabel}</option>
-      {(projects.data?.projects ?? []).map((p) => (
-        <option key={p.id} value={String(p.id)}>
-          {p.title}
-        </option>
-      ))}
-    </Select>
+    <ProjectCombobox
+      projects={projects.data?.projects ?? []}
+      id={id}
+      value={value}
+      onChange={onChange}
+      pinned={allLabel}
+      size={12}
+    />
   );
 }
