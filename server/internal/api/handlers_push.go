@@ -218,17 +218,45 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 
 func (s *server) readNotifications(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
-		UpTo *int64 `json:"upTo"`
+		UpTo   *int64   `json:"upTo"`
+		Groups []string `json:"groups"`
 	}
 	if err := decode(r, &b); err != nil {
 		return err
 	}
-	if b.UpTo == nil || *b.UpTo < 1 {
-		return db.Invalid("upTo is required")
-	}
-	if err := s.Store.MarkNotificationsRead(r.Context(), *b.UpTo); err != nil {
-		return err
+	switch {
+	case b.UpTo != nil && b.Groups != nil:
+		return db.Invalid("send either upTo or groups, not both")
+	case b.Groups != nil:
+		if len(b.Groups) < 1 || len(b.Groups) > maxReadGroups {
+			return db.Invalid("groups must have 1 to %d keys", maxReadGroups)
+		}
+		for _, g := range b.Groups {
+			if strings.TrimSpace(g) == "" {
+				return db.Invalid("groups must not contain empty keys")
+			}
+		}
+		if err := s.Store.MarkNotificationGroupsRead(r.Context(), b.Groups); err != nil {
+			return err
+		}
+	case b.UpTo != nil && *b.UpTo >= 1:
+		if err := s.Store.MarkNotificationsRead(r.Context(), *b.UpTo); err != nil {
+			return err
+		}
+	default:
+		return db.Invalid("upTo or groups is required")
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+const maxReadGroups = 20
+
+func (s *server) unreadNotificationTags(w http.ResponseWriter, r *http.Request) error {
+	tags, err := s.Store.UnreadNotificationTags(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"tags": tags})
 	return nil
 }

@@ -207,3 +207,54 @@ func TestNotificationGroups(t *testing.T) {
 		t.Fatalf("resolved input must leave priority: %+v %v", groups, err)
 	}
 }
+
+func TestNotificationGroupReadAndTags(t *testing.T) {
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), context.Background()
+	p := mustProject(t, s, ctx, "proj-1")
+	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
+	ext, other := "ext-1", "ext-2"
+	insert := func(n db.NewNotification) {
+		t.Helper()
+		if _, err := s.InsertNotification(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	taskURL := fmt.Sprintf("/tasks/%d", task.ID)
+	insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, T3ThreadID: &other, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.StateDone, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.StateDone, Title: "Deleted task", URL: "/tasks/99"})
+	insert(db.NewNotification{Event: db.StateNeedsInput, T3ThreadID: &ext, Title: "Ext", URL: "/sessions/ext-1"})
+	insert(db.NewNotification{Event: db.StateFailed, Title: "No identity", URL: "/"})
+
+	tags := func() []string {
+		t.Helper()
+		got, err := s.UnreadNotificationTags(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	taskTag := fmt.Sprintf("task-%d", task.ID)
+	// A task-owned thread notification is tagged by its task, never its thread.
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "task-99", "thread-ext-1"}) {
+		t.Fatalf("unread tags %s", got)
+	}
+
+	// Marking groups read covers every event of the task and the deleted task's URL key only.
+	if err := s.MarkNotificationGroupsRead(ctx, []string{fmt.Sprintf("task:%d", task.ID), "task:99"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"thread-ext-1"}) {
+		t.Fatalf("tags after group read %s", got)
+	}
+	if n, err := s.UnreadNotificationCount(ctx); err != nil || n != 2 {
+		t.Fatalf("unread after group read %d %v", n, err)
+	}
+
+	// A new event makes a read group unread again.
+	insert(db.NewNotification{Event: db.StateFailed, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "thread-ext-1"}) {
+		t.Fatalf("tags after new event %s", got)
+	}
+}

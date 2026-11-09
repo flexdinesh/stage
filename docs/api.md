@@ -449,7 +449,9 @@ JSON, shown by the service worker:
 ```
 `tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`); the service worker sets `renotify` so a replacement alerts again. iOS ignores tag replacement (WebKit bug 258922), so the service worker also closes shown notifications with the same tag (`tag`, or the copy in `data.tag`) before showing the new one. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise. Header `Topic` = first 32 chars of base64url(sha256(tag)): the push service keeps only the latest undelivered push per task/thread.
 
-Clear on view: opening a task page closes its `task-<id>` system notification; opening session detail closes its `thread-<id>` notification and the related task notification when present. Opening the notifications inbox closes all of them.
+Clear on view: opening a task page closes its `task-<id>` system notification and marks group `task:<id>` read; opening session detail closes its `thread-<id>` notification and the related task notification when present, and marks those groups read (`POST /api/notifications/read` with `groups`). Clicking a notification opens one of these pages. Opening the notifications inbox closes all of them and marks everything read.
+
+Cross-device clear (lazy): every device closes shown `task-*` / `thread-*` notifications whose tag is not in `GET /api/notifications/unread-tags`, i.e. viewed on any device. The service worker does this after showing each push; the app does it on load, when it becomes visible, and on every push. No dismiss pushes are sent: iOS revokes subscriptions for pushes that show no notification, and Chromium/Firefox only tolerate a small budget of them. WebKit ignores `close()` on notifications younger than ~30s, so those clear at a later sync. Other tags (e.g. `test`) are never closed by sync.
 
 Service worker: when a window of the app is focused and visible on a Chromium browser, it skips the system notification (the app shows an in-app toast instead); other browsers (Safari, Firefox) always show it, since a push without a notification there can revoke the subscription. Either way it updates the app badge and posts `{ "type": "push" }` to every open window so the app refetches at once.
 
@@ -490,7 +492,10 @@ Groups whose current state is `needs_input` come first, then other groups; each 
 Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `done`, and `failed` notifications, not every lifecycle transition. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
-Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. 204. 400 missing `upTo`.
+Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `{ "groups": string[] }` (1 to 20 group keys, e.g. `task:12`, `thread:<t3ThreadId>`): marks every unread entry in those groups read. 204. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
+
+### `GET /api/notifications/unread-tags`
+200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `thread:<id>` → `thread-<id>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
 
 ## Notification rules
 

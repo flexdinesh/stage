@@ -1609,6 +1609,40 @@ func TestNotificationsInbox(t *testing.T) {
 	e.must("GET", "/api/notifications?before=x", nil, 400, nil)
 }
 
+func TestNotificationGroupRead(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	for _, thread := range []string{"ext-1", "ext-2"} {
+		if _, err := e.store.InsertNotification(ctx, db.NewNotification{
+			Event: db.StateDone, T3ThreadID: &thread, Title: thread, URL: "/sessions/" + thread,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tags struct {
+		Tags []string `json:"tags"`
+	}
+	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
+	if fmt.Sprint(tags.Tags) != "[thread-ext-1 thread-ext-2]" {
+		t.Fatalf("unread tags %v", tags.Tags)
+	}
+
+	e.must("POST", "/api/notifications/read", map[string]any{"upTo": 1, "groups": []string{"thread:ext-1"}}, 400, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{}}, 400, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{" "}}, 400, nil)
+	many := make([]string, 21)
+	for i := range many {
+		many[i] = fmt.Sprintf("thread:x%d", i)
+	}
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": many}, 400, nil)
+
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:ext-1"}}, 204, nil)
+	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
+	if fmt.Sprint(tags.Tags) != "[thread-ext-2]" {
+		t.Fatalf("unread tags after group read %v", tags.Tags)
+	}
+}
+
 func TestNotificationGroups(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()

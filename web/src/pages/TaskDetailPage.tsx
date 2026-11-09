@@ -30,6 +30,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
+import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { closeSystemNotifications } from "../lib/push.ts";
 import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -41,10 +42,13 @@ export function TaskDetailPage() {
 
 function TaskDetailView({ id }: { id: number }) {
   const task = useTask(id);
-  // Viewing the task clears its system notification.
+  // Viewing the task clears its system notification here and marks its group
+  // read, so other devices close theirs on their next sync.
+  const markViewed = useMarkNotificationGroupsRead();
   useEffect(() => {
     void closeSystemNotifications(`task-${id}`);
-  }, [id]);
+    markViewed([`task:${id}`]);
+  }, [id, markViewed]);
   return (
     <QueryState isPending={task.isPending} error={task.error}>
       {task.data === undefined ? null : <TaskBody task={task.data} />}

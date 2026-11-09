@@ -16,7 +16,7 @@ import {
   IconThemeSystem,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
-import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh } from "./Notifications.tsx";
+import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
 import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
 
@@ -101,6 +101,7 @@ function Shell() {
   const badge = useBadge().data?.needsInput;
   useAppBadge(badge);
   usePushRefresh();
+  useSystemNotificationSync();
   const needsInput = badge ?? 0;
   const [inbox, setInbox] = useState(false);
   const openInbox = useCallback(() => setInbox(true), []);
