@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api/client.ts";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
@@ -28,6 +28,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
+import { closeSystemNotifications } from "../lib/push.ts";
 import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -38,6 +39,10 @@ export function TaskDetailPage() {
 
 function TaskDetailView({ id }: { id: number }) {
   const task = useTask(id);
+  // Viewing the task clears its system notification.
+  useEffect(() => {
+    void closeSystemNotifications(`task-${id}`);
+  }, [id]);
   return (
     <QueryState isPending={task.isPending} error={task.error}>
       {task.data === undefined ? null : <TaskBody task={task.data} />}
