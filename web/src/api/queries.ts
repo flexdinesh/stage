@@ -9,6 +9,8 @@ export const keys = {
   tasks: ["tasks"],
   task: ["task"],
   threads: ["threads"],
+  thread: ["thread"],
+  continuations: ["continuations"],
   snippets: ["snippets"],
   stats: ["stats"],
   preferences: ["preferences"],
@@ -35,6 +37,12 @@ export const useTask = (id: number) => useQuery({ queryKey: [...keys.task, id], 
 
 export const useThreads = (q: ThreadListQuery) =>
   useQuery({ queryKey: [...keys.threads, q], queryFn: () => api.threads(q), placeholderData: keepPreviousData });
+
+export const useThread = (id: string) =>
+  useQuery({ queryKey: [...keys.thread, id], queryFn: () => api.thread(id), enabled: id !== "" });
+
+export const useContinuations = (thread?: string) =>
+  useQuery({ queryKey: [...keys.continuations, thread], queryFn: () => api.continuations(thread) });
 
 /** External threads needing input (not task-owned; tasks come from useTasks). */
 export const useNeedsInputThreads = (project?: number) =>
@@ -83,7 +91,7 @@ export const useStats = (q: StatsQuery) =>
 /** Task mutations can change any task, thread, stat or prefill view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
-    [keys.tasks, keys.task, keys.threads, keys.stats, keys.preferences, keys.badge].map((queryKey) =>
+    [keys.tasks, keys.task, keys.threads, keys.thread, keys.continuations, keys.stats, keys.preferences, keys.badge].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),
   ).then(() => undefined);

@@ -32,6 +32,7 @@ type Fake struct {
 	SentAttachments []FakeSendAttachments
 	// LaunchErr, when set, fails LaunchThread (tests).
 	LaunchErr error
+	SendErr   error
 }
 
 type FakeUpload struct {
@@ -47,6 +48,7 @@ type FakeSendAttachments struct {
 type FakeSend struct {
 	ThreadID, Message string
 	Mode              SendMode
+	RequestID         string
 }
 
 var _ Client = (*Fake)(nil)
@@ -240,6 +242,30 @@ func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode Sen
 	}
 	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode})
 	return nil
+}
+
+func (f *Fake) QueueContinuation(_ context.Context, threadID, message, requestID string) (SendResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.threads[threadID]
+	if !ok {
+		return SendResult{}, ErrNotFound
+	}
+	if f.SendErr != nil {
+		return SendResult{}, f.SendErr
+	}
+	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: SendQueue, RequestID: requestID})
+	now := f.now()
+	run := Run{RunID: f.nextID("run"), Ordinal: d.RunCount + 1, Status: StatusRunning, RequestedAt: now, StartedAt: &now}
+	d.RecentRuns = append([]Run{run}, d.RecentRuns...)
+	d.LatestRunID = run.RunID
+	d.ActiveRunID = run.RunID
+	d.Status = StatusRunning
+	d.Settled = false
+	d.SettledAt = nil
+	d.RunCount++
+	d.UpdatedAt = now
+	return SendResult{ThreadID: threadID, RunID: run.RunID, MessageID: f.nextID("message"), Delivery: "started"}, nil
 }
 
 func (f *Fake) UploadAttachment(_ context.Context, in UploadInput) (Attachment, error) {

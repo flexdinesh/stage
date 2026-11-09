@@ -179,9 +179,9 @@ func TestPayload(t *testing.T) {
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · t3-stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Fix bug & test · t3-stage", URL: "/history?q=Fix+bug+%26+test", Tag: "thread-ext-1", Badge: 2}},
+			Payload{Title: "Needs input", Body: "Fix bug & test · t3-stage", URL: "/sessions/ext-1", Tag: "thread-ext-1", Badge: 2}},
 		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
-			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/history?q=Other", Tag: "thread-ext-2", Badge: 2}},
+			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/sessions/ext-2", Tag: "thread-ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
 		got, _, err := n.payload(ctx, tc.e)
@@ -290,8 +290,63 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 		t.Fatalf("task notification %+v", tk)
 	}
 	if th.Event != db.StateDone || th.TaskID != nil || th.T3ThreadID == nil || *th.T3ThreadID != "ext-1" ||
-		th.Title != "External" || th.URL != "/history?q=External" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
+		th.Title != "External" || th.URL != "/sessions/ext-1" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
 		t.Fatalf("thread notification %+v", th)
+	}
+}
+
+func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	task := seedTask(t, store, db.StateRunning)
+	id := "provider:session/with%id"
+	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, ThreadID: &id}); err != nil {
+		t.Fatal(err)
+	}
+	want := "/sessions/provider:session%2Fwith%25id"
+	for _, e := range []event{
+		{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
+		{thread: &t3sync.ThreadChange{ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
+	} {
+		payload, record, err := n.payload(ctx, e)
+		wantRecord := want
+		if e.task != nil {
+			wantRecord = fmt.Sprintf("/tasks/%d", task.ID)
+		}
+		if err != nil || payload.URL != want || record.URL != wantRecord {
+			t.Fatalf("payload=%+v record=%+v err=%v", payload, record, err)
+		}
+	}
+}
+
+func TestTaskNotificationGroupSurvivesSessionChangeAndDelete(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	task := seedTask(t, store, db.StateBacklog)
+	for _, thread := range []string{"first-session", "second-session"} {
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, ThreadID: &thread}); err != nil {
+			t.Fatal(err)
+		}
+		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}
+		payload, _, err := n.payload(ctx, e)
+		if err != nil || payload.URL != "/sessions/"+thread {
+			t.Fatalf("session navigation: %+v %v", payload, err)
+		}
+		n.handle(ctx, e)
+	}
+	if err := store.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	latest, _, err := store.NotificationReadState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := store.ListNotificationGroups(ctx, 10, nil, latest)
+	if err != nil || len(groups) != 1 || groups[0].Key != fmt.Sprintf("task:%d", task.ID) || groups[0].EventCount != 2 || groups[0].TaskID != nil {
+		t.Fatalf("deleted task lost stable notification group: %+v %v", groups, err)
 	}
 }
 

@@ -305,7 +305,7 @@ func TestRunRenewsInBackground(t *testing.T) {
 func TestToolErrorMapsNotFound(t *testing.T) {
 	f := newFakeT3(t)
 	f.tool("t3_thread_read", func(args map[string]any) (*mcp.CallToolResult, error) {
-		if args["limit"] != float64(1) || args["runLimit"] != float64(1) || args["maxCharsPerItem"] == nil {
+		if args["limit"] != float64(1) || args["runLimit"] != float64(50) || args["maxCharsPerItem"] == nil {
 			return structured(`{"bad":"args"}`), nil
 		}
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
@@ -327,6 +327,24 @@ func TestToolErrorMapsNotFound(t *testing.T) {
 	var te *ToolError
 	if !errors.As(err, &te) || te.Code != "thread_not_sendable" || errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestContinuationSendEnvelopeAndReceipt(t *testing.T) {
+	f := newFakeT3(t)
+	f.tool("t3_thread_send", func(args map[string]any) (*mcp.CallToolResult, error) {
+		if args["threadId"] != "target" || args["message"] != " exact\n" || args["mode"] != "queue" || args["clientRequestId"] != "persisted-request" {
+			t.Errorf("send args=%v", args)
+		}
+		return structured(`{"threadId":"target","delivery":"started","runId":"new-run","messageId":"new-message"}`), nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	out, err := c.QueueContinuation(ctxT(t), "target", " exact\n", "persisted-request")
+	if err != nil || out.RunID != "new-run" || out.MessageID != "new-message" {
+		t.Fatalf("receipt=%+v err=%v", out, err)
+	}
+	if retrySafe("t3_thread_send", map[string]any{"clientRequestId": "persisted-request"}) {
+		t.Fatal("send retry assumes unproven deduplication")
 	}
 }
 

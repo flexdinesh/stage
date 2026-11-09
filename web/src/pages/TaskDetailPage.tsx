@@ -1,3 +1,4 @@
+import { sessionPath } from "../lib/sessions.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
@@ -20,6 +21,7 @@ import {
   Details,
   ErrorText,
   Muted,
+  buttonClass,
   PageHeader,
   Panel,
   QueryState,
@@ -262,7 +264,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
       </Panel>
     );
   }
-  const links: ReactNode[] = [];
+  const links: ReactNode[] = [<Link key="session" to={sessionPath(task.t3ThreadId)} className={buttonClass("secondary", true)}>View session</Link>];
   if (task.t3DeepLink !== null) {
     links.push(
       <AppButton key="app" href={task.t3DeepLink} small>

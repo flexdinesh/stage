@@ -124,6 +124,7 @@ func newEnv(t *testing.T) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, client, log)
+	svc.SetPublicURL(publicURL)
 	runner := links.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{

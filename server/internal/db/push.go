@@ -136,8 +136,8 @@ SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
 func (s *Store) WatchedThreadIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT th.t3_thread_id FROM threads th
-WHERE th.observed_state IN ('running', 'needs_input') AND th.relationship IS DISTINCT FROM 'subagent'
-  AND NOT EXISTS (SELECT 1 FROM tasks tk WHERE tk.t3_thread_id = th.t3_thread_id)
+WHERE (th.observed_state IN ('running', 'needs_input') OR (`+threadStateSQL+`) IN ('running','needs_input'))
+  AND th.relationship IS DISTINCT FROM 'subagent'
 ORDER BY th.created_at`)
 	if err != nil {
 		return nil, err

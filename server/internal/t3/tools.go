@@ -99,7 +99,7 @@ func (c *MCPClient) ReadThread(ctx context.Context, threadID string) (ThreadDeta
 	if threadID == "" {
 		return ThreadDetail{}, ErrNotFound
 	}
-	args := map[string]any{"threadId": threadID, "limit": 1, "runLimit": 1, "maxCharsPerItem": readMaxChars}
+	args := map[string]any{"threadId": threadID, "limit": 1, "runLimit": 50, "maxCharsPerItem": readMaxChars}
 	var out wireThreadRead
 	if err := c.call(ctx, "t3_thread_read", args, &out); err != nil {
 		return ThreadDetail{}, err
@@ -189,6 +189,17 @@ func (c *MCPClient) SendMessage(ctx context.Context, threadID, message string, m
 		args["mode"] = mode
 	}
 	return c.call(ctx, "t3_thread_send", args, nil)
+}
+
+func (c *MCPClient) QueueContinuation(ctx context.Context, threadID, message, requestID string) (SendResult, error) {
+	var out SendResult
+	err := c.call(ctx, "t3_thread_send", map[string]any{
+		"threadId": threadID, "message": message, "mode": SendQueue, "clientRequestId": requestID,
+	}, &out)
+	if err == nil && (out.ThreadID != threadID || (out.Delivery != "started" && out.Delivery != "queued")) {
+		err = errors.New("unexpected continuation delivery result; review in T3")
+	}
+	return out, err
 }
 
 func attachmentsArg(atts []Attachment) []map[string]any {

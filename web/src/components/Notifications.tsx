@@ -5,6 +5,7 @@ import { api } from "../api/client.ts";
 import { keys, latestNotificationsKey, useNotificationHistory, useNotificationInbox, useNotifications } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
+import { sessionPath } from "../lib/sessions.ts";
 import { closeSystemNotifications, getPushState } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
@@ -15,6 +16,8 @@ const MAX_TOASTS = 3;
 
 /** A needs-input notification whose task/thread is still waiting (what the app badge counts). */
 const stillWaiting = (n: Notification) => n.event === "needs_input" && n.currentState === "needs_input";
+
+const notificationPath = (n: Notification) => n.t3ThreadId === null ? n.url : sessionPath(n.t3ThreadId);
 
 const projectOf = (n: Notification) => n.projectTitle ?? (n.taskId === null ? "external thread" : "");
 
@@ -28,7 +31,7 @@ export function usePushRefresh() {
     function onMessage(e: MessageEvent<unknown>) {
       const data = e.data;
       if (typeof data !== "object" || data === null || !("type" in data) || data.type !== "push") return;
-      for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.stats]) {
+      for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.continuations, keys.stats]) {
         void qc.invalidateQueries({ queryKey });
       }
     }
@@ -176,7 +179,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
           <IconClose />
         </Button>
       </div>
-      <Link to={n.url} onClick={onDismiss} className="line-clamp-2 text-body font-medium break-words hover:underline">
+      <Link to={notificationPath(n)} onClick={onDismiss} className="line-clamp-2 text-body font-medium break-words hover:underline">
         {n.title}
       </Link>
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
@@ -204,7 +207,7 @@ function ToastView({ n, onDismiss }: { n: Notification; onDismiss: () => void })
       small
       onClick={() => {
         onDismiss();
-        void navigate(n.url);
+        void navigate(notificationPath(n));
       }}
     >
       View
@@ -382,7 +385,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         <div className="flex min-w-0 items-baseline gap-2">
           {unread ? <span className="size-1.5 shrink-0 translate-y-[-1px] bg-fg" role="img" aria-label="Unread" /> : null}
           <Link
-            to={n.url}
+            to={notificationPath(n)}
             onClick={onNavigate}
             className={cx("min-w-0 text-body break-words hover:underline", unread ? "font-semibold" : "font-medium")}
           >

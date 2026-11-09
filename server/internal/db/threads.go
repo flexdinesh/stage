@@ -23,15 +23,15 @@ func threadArgs(t t3.Thread) []any {
 		nullIfEmpty(t.ProviderInstanceID), nullIfEmpty(t.Model),
 		nullIfEmpty(string(t.RuntimeMode)), nullIfEmpty(string(t.InteractionMode)),
 		nullIfEmpty(t.ParentThreadID), nullIfEmpty(t.RelationshipToParent),
-		nullIfEmpty(t.CreationSource), nullIfEmpty(t.Link), created, updated,
+		nullIfEmpty(t.CreationSource), nullIfEmpty(t.Link), created, updated, nullIfEmpty(t.LatestRunID), t.Archived,
 	}
 }
 
 const threadUpsertList = `
 INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, settled_at,
   provider_instance_id, model, runtime_mode, interaction_mode, parent_thread_id,
-  relationship, creation_source, link, created_at, updated_at, synced_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
+  relationship, creation_source, link, created_at, updated_at, latest_run_id, archived, synced_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now())
 ON CONFLICT (t3_thread_id) DO UPDATE SET
   t3_project_id = EXCLUDED.t3_project_id, title = EXCLUDED.title, status = EXCLUDED.status,
   settled = EXCLUDED.settled, settled_at = EXCLUDED.settled_at,
@@ -39,7 +39,11 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   runtime_mode = EXCLUDED.runtime_mode, interaction_mode = EXCLUDED.interaction_mode,
   parent_thread_id = EXCLUDED.parent_thread_id, relationship = EXCLUDED.relationship,
   creation_source = EXCLUDED.creation_source, link = COALESCE(EXCLUDED.link, threads.link),
-  created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at, synced_at = now()`
+  created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
+  latest_run_id = EXCLUDED.latest_run_id,
+  active_run_id = CASE WHEN EXCLUDED.status IN ('completed','failed','cancelled','interrupted','rolled_back','idle') THEN NULL ELSE threads.active_run_id END,
+  latest_run_status = CASE WHEN EXCLUDED.latest_run_id IS DISTINCT FROM threads.latest_run_id THEN NULL ELSE threads.latest_run_status END,
+  synced_at = now() WHERE EXCLUDED.updated_at >= threads.updated_at`
 
 // UpsertThreads mirrors t3_thread_list items. Detail-only columns
 // (branch, worktree_path, pending_request_count) are left untouched.
@@ -59,13 +63,17 @@ func (s *Store) UpsertThreads(ctx context.Context, threads []t3.Thread) error {
 
 // UpsertThreadDetail mirrors a t3_thread_read result (all columns).
 func (s *Store) UpsertThreadDetail(ctx context.Context, d t3.ThreadDetail) error {
-	args := append(threadArgs(d.Thread), nullIfEmpty(d.Branch), nullIfEmpty(d.WorktreePath), d.PendingRequestCount)
+	var latest string
+	if len(d.RecentRuns) > 0 {
+		latest = string(d.RecentRuns[0].Status)
+	}
+	args := append(threadArgs(d.Thread), nullIfEmpty(d.Branch), nullIfEmpty(d.WorktreePath), d.PendingRequestCount, nullIfEmpty(d.ActiveRunID), nullIfEmpty(latest))
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, settled_at,
   provider_instance_id, model, runtime_mode, interaction_mode, parent_thread_id,
-  relationship, creation_source, link, created_at, updated_at, branch, worktree_path,
-  pending_request_count, synced_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now())
+  relationship, creation_source, link, created_at, updated_at, latest_run_id, archived, branch, worktree_path,
+  pending_request_count, active_run_id, latest_run_status, synced_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23, now())
 ON CONFLICT (t3_thread_id) DO UPDATE SET
   t3_project_id = EXCLUDED.t3_project_id, title = EXCLUDED.title, status = EXCLUDED.status,
   settled = EXCLUDED.settled, settled_at = EXCLUDED.settled_at,
@@ -75,7 +83,10 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   creation_source = EXCLUDED.creation_source, link = COALESCE(EXCLUDED.link, threads.link),
   created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
   branch = EXCLUDED.branch, worktree_path = EXCLUDED.worktree_path,
-  pending_request_count = EXCLUDED.pending_request_count, synced_at = now()`, args...)
+  pending_request_count = EXCLUDED.pending_request_count, archived = EXCLUDED.archived,
+  active_run_id = EXCLUDED.active_run_id, latest_run_id = EXCLUDED.latest_run_id,
+  latest_run_status = EXCLUDED.latest_run_status, synced_at = now()
+WHERE EXCLUDED.updated_at >= threads.updated_at`, args...)
 	return err
 }
 
@@ -83,7 +94,7 @@ const threadSelect = `
 SELECT th.t3_thread_id, th.t3_project_id, p.id, p.title, th.title, th.status, th.settled,
   th.settled_at, th.pending_request_count, th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
-  th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at
+  th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id, ` + threadStateSQL + `
 FROM threads th
 LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
 LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id`
@@ -93,7 +104,7 @@ func scanThread(row pgx.Row) (Thread, error) {
 	err := row.Scan(&t.T3ThreadID, &t.T3ProjectID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Status,
 		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
 		&t.InteractionMode, &t.Branch, &t.WorktreePath, &t.ParentThreadID, &t.Relationship,
-		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt)
+		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt, &t.Archived, &t.ActiveRunID, &t.LatestRunID, &t.State)
 	if err != nil {
 		return Thread{}, notFound(err)
 	}
@@ -109,13 +120,17 @@ func (s *Store) GetThread(ctx context.Context, id string) (Thread, error) {
 }
 
 type ThreadFilter struct {
-	ProjectID *int64
-	Statuses  []string
-	Settled   *bool
-	Provider  string
-	Source    string // app | t3 | ""
-	Q         string
-	From, To  *time.Time
+	ProjectID    *int64
+	States       []string
+	Active       bool
+	SortActivity bool
+	Parent       *string
+	Statuses     []string
+	Settled      *bool
+	Provider     string
+	Source       string // app | t3 | ""
+	Q            string
+	From, To     *time.Time
 	// ExcludeSubagents keeps root threads only (parent_thread_id IS NULL).
 	ExcludeSubagents bool
 	// NeedsInput keeps external threads needing input (see NeedsInputCount).
@@ -130,6 +145,15 @@ type ThreadFilter struct {
 // total match count.
 func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int, error) {
 	var w where
+	if len(f.States) > 0 {
+		w.add("(" + threadStateSQL + ") = ANY(" + w.arg(f.States) + ")")
+	}
+	if f.Active {
+		w.add("NOT th.archived AND (" + threadStateSQL + ") IN ('running','needs_input')")
+	}
+	if f.Parent != nil {
+		w.add("th.parent_thread_id = " + w.arg(*f.Parent))
+	}
 	if f.ProjectID != nil {
 		w.add("p.id = " + w.arg(*f.ProjectID))
 	}
@@ -173,7 +197,11 @@ LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id` + w.sql()
 	if err := s.pool.QueryRow(ctx, countSQL, w.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	q := threadSelect + w.sql() + ` ORDER BY th.created_at DESC, th.t3_thread_id DESC LIMIT ` +
+	order := "th.created_at"
+	if f.SortActivity {
+		order = "th.updated_at"
+	}
+	q := threadSelect + w.sql() + ` ORDER BY ` + order + ` DESC, th.t3_thread_id DESC LIMIT ` +
 		w.arg(f.Limit) + ` OFFSET ` + w.arg(f.Offset)
 	rows, err := s.pool.Query(ctx, q, w.args...)
 	if err != nil {
@@ -190,3 +218,15 @@ LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id` + w.sql()
 	}
 	return out, total, rows.Err()
 }
+
+// The mirror's state follows T3 independently of frozen legacy task state.
+// Input, activity, and failure outrank a stale settled flag.
+const threadStateSQL = `CASE
+ WHEN th.pending_request_count > 0 THEN 'needs_input'
+ WHEN th.active_run_id IS NOT NULL OR COALESCE(NULLIF(th.status,'idle'),th.latest_run_status) IN ('preparing','queued','starting','running','waiting') THEN 'running'
+ WHEN COALESCE(NULLIF(th.status,'idle'),th.latest_run_status) = 'failed' THEN 'failed'
+ WHEN COALESCE(NULLIF(th.status,'idle'),th.latest_run_status) = 'interrupted' THEN 'interrupted'
+ WHEN COALESCE(NULLIF(th.status,'idle'),th.latest_run_status) IN ('cancelled','rolled_back') THEN 'cancelled'
+ WHEN th.settled THEN 'settled'
+ WHEN th.status IN ('idle','completed') THEN 'done'
+ ELSE 'running' END`

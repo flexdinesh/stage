@@ -538,8 +538,8 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 			return fmt.Errorf("t3 %s: %w", tool, err)
 		}
 		c.dropSession(cs)
-		if attempt == 0 && (errors.Is(err, mcp.ErrSessionMissing) ||
-			(errors.Is(err, mcp.ErrConnectionClosed) && retrySafe(tool, args))) {
+		if attempt == 0 && retrySafe(tool, args) && (errors.Is(err, mcp.ErrSessionMissing) ||
+			errors.Is(err, mcp.ErrConnectionClosed)) {
 			continue
 		}
 		return fmt.Errorf("t3 %s: %w", tool, err)

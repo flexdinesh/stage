@@ -197,6 +197,7 @@ func (w wireThread) toThread() Thread {
 		CreationSource:       w.CreationSource,
 		Status:               ThreadStatus(w.Status),
 		LatestRunID:          w.LatestRunID,
+		Archived:             w.Archived,
 		ProviderInstanceID:   w.ProviderInstanceID,
 		Model:                w.Model,
 		RuntimeMode:          RuntimeMode(w.RuntimeMode),
@@ -250,7 +251,6 @@ func (w wireThreadRead) toDetail() ThreadDetail {
 		WorktreePath:        w.Thread.WorktreePath,
 		RunCount:            w.Thread.RunCount,
 		PendingRequestCount: w.Thread.PendingRequestCount,
-		Archived:            w.Thread.Archived,
 		RecentRuns:          make([]Run, 0, len(w.RecentRuns)),
 	}
 	for _, r := range w.RecentRuns {
