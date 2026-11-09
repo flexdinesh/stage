@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
@@ -8,6 +9,7 @@ import { TaskStateBadge } from "../components/StateBadge.tsx";
 import { Alert, Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
 import { dateTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
+import { closeSystemNotifications } from "../lib/push.ts";
 
 export function SessionDetailPage() {
   const { id = "" } = useParams();
@@ -17,6 +19,11 @@ export function SessionDetailPage() {
 
 function SessionDetail({ data }: { data: ThreadDetail }) {
   const { thread, children, continuations, task } = data;
+  const taskId = task?.id;
+  useEffect(() => {
+    void closeSystemNotifications(`thread-${thread.t3ThreadId}`);
+    if (taskId !== undefined) void closeSystemNotifications(`task-${taskId}`);
+  }, [thread.t3ThreadId, taskId]);
   return <>
     <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
     <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>

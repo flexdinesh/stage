@@ -309,9 +309,44 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 		{thread: &t3sync.ThreadChange{ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
 	} {
 		payload, record, err := n.payload(ctx, e)
-		if err != nil || payload.URL != want || record.URL != want {
+		wantRecord := want
+		if e.task != nil {
+			wantRecord = fmt.Sprintf("/tasks/%d", task.ID)
+		}
+		if err != nil || payload.URL != want || record.URL != wantRecord {
 			t.Fatalf("payload=%+v record=%+v err=%v", payload, record, err)
 		}
+	}
+}
+
+func TestTaskNotificationGroupSurvivesSessionChangeAndDelete(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	task := seedTask(t, store, db.StateBacklog)
+	for _, thread := range []string{"first-session", "second-session"} {
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, ThreadID: &thread}); err != nil {
+			t.Fatal(err)
+		}
+		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}
+		payload, _, err := n.payload(ctx, e)
+		if err != nil || payload.URL != "/sessions/"+thread {
+			t.Fatalf("session navigation: %+v %v", payload, err)
+		}
+		n.handle(ctx, e)
+	}
+	if err := store.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	latest, _, err := store.NotificationReadState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := store.ListNotificationGroups(ctx, 10, nil, latest)
+	if err != nil || len(groups) != 1 || groups[0].Key != fmt.Sprintf("task:%d", task.ID) || groups[0].EventCount != 2 || groups[0].TaskID != nil {
+		t.Fatalf("deleted task lost stable notification group: %+v %v", groups, err)
 	}
 }
 

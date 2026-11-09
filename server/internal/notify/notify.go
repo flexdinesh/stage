@@ -177,8 +177,10 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 			p.URL = "/sessions/" + url.PathEscape(*t.T3ThreadID)
 		}
 		project := t.ProjectTitle
+		// Retain task identity across restarts and ON DELETE SET NULL. Push
+		// navigation can open the current session without changing this key.
 		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, T3ThreadID: t.T3ThreadID,
-			Title: t.Title, ProjectTitle: &project, URL: p.URL}
+			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID
