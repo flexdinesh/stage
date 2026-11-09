@@ -238,7 +238,7 @@ function TaskFormDrawer({
           <span className="hidden md:inline">Save to backlog</span>
         </Button>
       ) : null}
-      <span className="min-w-0 flex-1 text-right font-mono text-[11px] text-muted max-md:order-first max-md:basis-full max-md:text-left empty:hidden">
+      <span className="min-w-0 flex-1 text-right font-mono text-meta-sm text-muted max-md:order-first max-md:basis-full max-md:text-left empty:hidden">
         {missing.length > 0 ? `required: ${missing.join(", ")}` : null}
       </span>
       <Button
@@ -248,7 +248,7 @@ function TaskFormDrawer({
         onClick={() => submit(!queued)()}
       >
         {primaryLabel}
-        <kbd className="hidden border border-current/40 px-1 font-mono text-[10.5px] leading-4 md:inline">Ctrl ↵</kbd>
+        <kbd className="hidden border border-current/40 px-1 font-mono text-label leading-4 md:inline">Ctrl ↵</kbd>
       </Button>
     </>
   );
@@ -330,7 +330,7 @@ function TaskFormDrawer({
           ) : null}
         </fieldset>
         {prefill === null ? null : (
-          <p className="-mt-1.5 font-mono text-[11px] text-muted">
+          <p className="-mt-1.5 font-mono text-meta-sm text-muted">
             {prefill.source === "pinned"
               ? "model and mode prefilled from your pinned default (Settings)"
               : "model and mode prefilled from your last task · pin a default in Settings"}

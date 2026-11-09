@@ -39,63 +39,63 @@ colors:
 typography:
   headline:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "22px"
+    fontSize: "24px"
     fontWeight: 700
     lineHeight: 1.25
     letterSpacing: "-0.025em"
   headline-wide:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "24px"
+    fontSize: "26px"
     fontWeight: 700
     lineHeight: 1.25
     letterSpacing: "-0.025em"
   title:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "15px"
+    fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.45
   row-title:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "13.5px"
+    fontSize: "14.5px"
     fontWeight: 500
     lineHeight: 1.45
   body:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "13.5px"
+    fontSize: "14.5px"
     fontWeight: 400
     lineHeight: 1.45
     letterSpacing: "-0.005em"
   body-sm:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "12.5px"
+    fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.45
   button:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "12.5px"
+    fontSize: "13px"
     fontWeight: 500
   button-sm:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "11.5px"
+    fontSize: "12px"
     fontWeight: 500
   stat:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "15px"
+    fontSize: "16px"
     fontWeight: 700
     fontFeature: "tnum"
   label:
     fontFamily: "JetBrains Mono Variable, ui-monospace, monospace"
-    fontSize: "10.5px"
+    fontSize: "11px"
     fontWeight: 400
     letterSpacing: "0.12em"
   meta:
     fontFamily: "JetBrains Mono Variable, ui-monospace, monospace"
-    fontSize: "11.5px"
+    fontSize: "12px"
     fontWeight: 400
-    lineHeight: "18px"
+    lineHeight: 1.5
   meta-line:
     fontFamily: "JetBrains Mono Variable, ui-monospace, monospace"
-    fontSize: "12px"
+    fontSize: "12.5px"
     fontWeight: 400
 rounded:
   none: "0px"
@@ -183,7 +183,7 @@ components:
     height: "48px"
   bottom-tabs:
     backgroundColor: "{colors.bg}"
-    height: "56px"
+    height: "calc(56px + env(safe-area-inset-bottom))"
   task-row:
     padding: "8px 12px"
   drawer:
@@ -201,7 +201,7 @@ components:
 
 t3-stage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or near-black (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the owner.
 
-Density is high and deliberate: 13.5px body, 32px controls, 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.
+Density is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.
 
 Motion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading, a square spinner on busy buttons, and no entrance choreography.
 
@@ -253,14 +253,16 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 **Character:** A tight, slightly negative-tracked grotesk for anything a person reads as a sentence or presses, set against a mono that marks everything machine-shaped. The split is functional, not decorative: if it came from T3 or a clock, it is mono.
 
 ### Hierarchy
-- **Headline** (700, 22px, 24px from 640px up, 1.25, -0.025em): the page H1 only. Balanced wrapping, breaks long task titles.
-- **Title** (600, 15px): drawer and sheet titles.
-- **Row Title** (500, 13.5px): task and thread titles in rows; underline on hover.
-- **Body** (400, 13.5px, 1.45, -0.005em): base text, inputs at 13px.
-- **Body Small** (400, 12.5px): alerts, details, empty states, button labels (500).
-- **Stat** (700, 15px, tabular): stat strip counts.
-- **Label** (JetBrains Mono 400, 10.5px, 0.12em, uppercase): panel headers (in Ink Text), field labels and section labels (in Slate).
-- **Meta** (JetBrains Mono 400, 11.5px, 18px line): row metadata, chips, hints, timestamps. Detail values sit at 12px mono, prompts and textareas at 12.5px mono with relaxed leading.
+Sizes are role tokens (`--fs-*` on `:root`, exposed as `text-label`, `text-meta-sm`, `text-meta`, `text-detail`, `text-small`, `text-ui`, `text-body`, `text-title`, `text-headline`, `text-tab`, `text-input*` utilities). Values below are laptop; below 768px every role steps up about 1px (body 15.5px, meta 13px, label 11.5px, title 17px, headline 24px). Never write a raw `text-[Npx]`.
+
+- **Headline** (700, 26px on laptop, 24px on phone, 1.25, -0.025em): the page H1 only. Balanced wrapping, breaks long task titles.
+- **Title** (600, 16px): drawer and sheet titles.
+- **Row Title** (500, 14.5px): task and thread titles in rows; underline on hover.
+- **Body** (400, 14.5px, 1.45, -0.005em): base text. Inputs, selects and textareas use `text-input*` (14px, mono 13px on laptop) and are 16px on phone so iOS Safari never zooms on focus.
+- **Body Small** (400, 13px): alerts, details, empty states, button labels (500).
+- **Stat** (700, 16px, tabular): stat strip counts.
+- **Label** (JetBrains Mono 400, 11px, 0.12em, uppercase): panel headers (in Ink Text), field labels and section labels (in Slate).
+- **Meta** (JetBrains Mono 400, 12px, 1.5 line): row metadata, chips, hints, timestamps. Small counts and panel meta sit at 11.5px (`text-meta-sm`), detail values at 12.5px mono (`text-detail`), read-only prompts at 13px mono with relaxed leading.
 
 ### Named Rules
 **The Mono Is Metadata Rule.** JetBrains Mono for project names, models, times, ids, counts, chips, labels, keycaps; Geist for titles, actions and prose. Counts, times and step numbers use tabular numerals.
@@ -269,7 +271,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 
 ## Layout
 
-A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts and a 56px five-cell bottom tab bar (Stage, Projects, History, Snippets, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding for it.
+A single centered column, max 1240px, with 24px side gutters on laptop and 12px on phone (24px top padding on laptop, 16px on phone). The 48px sticky top bar holds the mark, text tabs (active tab gets a 2px ink underline; Dashboard carries the needs-input count chip), the Ctrl K search trigger, the T3 connection chip, the theme toggle and the primary New task button. Below 768px the top bar compacts to 52px with 40px controls and a 56px five-cell bottom tab bar (Stage, Projects, History, Snippets, More) takes over navigation, with a square yellow marker on Stage when anything needs input; page content reserves 96px of bottom padding plus the safe-area inset for it.
 
 Pages stack: PageHeader (H1, `//` meta line, actions right-aligned, 16px below), then panels separated by 14px. The Dashboard puts a one-row stat strip (16px below the header) above the state groups in fixed order: Needs input, Running, Completed, Failed, Backlog. Consecutive empty groups collapse into one ruled list with the label left and the empty sentence right. Detail pages split at 1024px into a fluid main column and a 340px side column (300px on History).
 
@@ -279,6 +281,8 @@ Rows are grids: 118px state column, fluid title, optional run order chip ("after
 **The Ruled List Rule.** One bordered panel per state or concern, rows separated by hairlines. Never a grid of cards.
 
 **The Drawer Not Modal Rule.** Secondary flows (new task, edit, filters, More) open in a right drawer, 580px or 680px wide, that becomes a full-screen sheet below 768px, with Esc, a focus trap and focus restore.
+
+**The Safe Area Rule.** The page sets `viewport-fit=cover`, so anything pinned to a screen edge on phone pads itself with `env(safe-area-inset-*)`: the phone top bar (top), bottom tabs, task detail action bar and toasts (bottom), and every drawer sheet and the command palette (header top, footer or body bottom, sides in landscape). Primary actions never sit on the home indicator.
 
 ## Elevation & Depth
 
@@ -306,7 +310,7 @@ Icons are authored 16px SVGs on a 16-unit grid: 1.5 stroke, square caps, miter j
 
 ### Buttons
 Compact, flat, and ink-led.
-- **Shape:** square (0px), 1px border, 32px tall with 12px side padding; small is 24px with 8px padding and 11.5px labels.
+- **Shape:** square (0px), 1px border, 32px tall with 12px side padding; small is 24px with 8px padding and 12px labels. On phone (below 768px) default is 40px with 14px padding and small is 32px, for thumb-sized targets.
 - **Primary:** Ink fill and border, `on-accent` text, 500 weight. One per region: New task, Start/Restart, Open in T3 when the task needs input, drawer submit.
 - **Hover / Focus:** primary drops to 85% opacity; secondary and ghost fill Bench Gray; 150ms transition; 2px ink focus outline offset 2px. Disabled at 45% opacity. Busy shows a square spinning border.
 - **Secondary:** Paper fill, Strong Hairline border, Ink Text. The default.
@@ -314,7 +318,7 @@ Compact, flat, and ink-led.
 - **Danger:** Paper fill, Fault Red text and 45% red border, 8% red hover fill; Delete only, pushed to the far right.
 
 ### Chips
-- **Style:** inline mono label (11.5px, 18px line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
+- **Style:** inline mono label (`text-meta`, 1.5 line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
 - **State:** task and thread states map onto the six tones; plain chips (Slate border, Ink Text) carry model, runtime, workspace, tags and the run order link.
 
 ### Cards / Containers (Panel)
@@ -325,16 +329,16 @@ Compact, flat, and ink-led.
 - **Internal Padding:** 12px; flush for row lists.
 
 ### Inputs / Fields
-- **Style:** 32px, Paper fill, Strong Hairline border, square, 10px padding, 13px text; textareas switch to 12.5px mono. Selects carry an authored Slate chevron (`.select-chevron`, per-theme `--chevron`). Enabled buttons, selects and labels show a pointer cursor; disabled ones `not-allowed`.
+- **Style:** 32px (40px on phone; small selects 24px, 32px on phone), Paper fill, Strong Hairline border, square, 10px padding, 14px text (16px on phone); textareas switch to 13px mono (16px on phone). Selects carry an authored Slate chevron (`.select-chevron`, per-theme `--chevron`). Enabled buttons, selects and labels show a pointer cursor; disabled ones `not-allowed`.
 - **Focus:** border and a 1px ring both go Ink.
 - **Error / Disabled:** errors render as a red Alert below; disabled at 55% opacity. Labels sit above in the Label style.
 
 ### Segmented control
-Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall, matching buttons and inputs it sits beside; small (follow-up send mode) is 26px. Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter.
+Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall (40px on phone), matching buttons and inputs it sits beside; small (follow-up send mode) is 26px (34px on phone). Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter.
 
 ### Navigation
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
-- **Phone:** 56px bottom bar, five equal cells with a 16px icon over a 10.5px label; active cell gets a 2px Ink top border. Settings lives in the More drawer.
+- **Phone:** 56px bottom bar plus the home-indicator inset below it, five equal cells with a 22px icon over an 11px label, iOS tab bar proportions; active cell gets a 2px Ink top border. Settings lives in the More drawer.
 
 ### Stat strip (signature)
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
@@ -345,7 +349,7 @@ State chip, row title with a mono meta line (project, model, relative time, tags
 On the Dashboard (every state group, external needs-input threads included) the project gets its own column: laptop rows put a fixed 150px project cell right after the 118px state chip (mono 12px, Ink Text, medium weight, linked, truncated with the full name in `title`) so project names align down the whole page, and the project leaves the meta line. Phone rows print the project as a mono 12px Ink Text line above the title. The column stays when the Dashboard is filtered to one project; Project detail rows keep the project in the meta line.
 
 ### Alert
-Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 12.5px text, actions right. `need` for waiting-on-you, `bad` for errors.
+Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 13px text, actions right. `need` for waiting-on-you, `bad` for errors.
 
 ### Run order pipeline
 Step cells joined by 1px Strong Hairline connectors, in the task detail Run order panel (top of the side column). Numbered, titled cells on laptop, numbers only on phone; the viewed task gets the Ink outline. Below it, "Runs after" and "Then runs" lines carry Unlink, and pickers link new steps. A waiting task's Start now arms a confirm ("unlink from #12 and start") before acting.
@@ -354,7 +358,7 @@ Step cells joined by 1px Strong Hairline connectors, in the task detail Run orde
 The prompt (new/backlog task) and the follow-up box are drop targets: dragging files over them lays a dashed Ink-accent border and a 90% surface scrim with "Drop images to attach" in mono. Below, 56px square thumbnails (1px Strong Hairline, `object-cover`) wrap in a row; each has an 18px square remove button on its top-right corner, uploading thumbs dim to 60% under the busy spinner, failed ones take a Red border and a red line naming the file. A ghost "Add image" button (file picker) and a mono `n/8` count (or the accepted types when empty) close the block. Read-only strips (task detail Prompt panel, non-backlog edit) are the same thumbnails linking to the full image. With images in a follow-up the send-mode group dims (images go as one new message).
 
 ### Notifications bell
-A secondary 32px button in the top bar (between search and the T3 chip on laptop; before search on phone) with an authored bell icon. Unread count sits inside as a mono chip: plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone, square.
+A secondary 32px button (40px on phone) in the top bar (between search and the T3 chip on laptop; before search on phone) with an authored bell icon. Unread count sits inside as a mono chip: plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone, square.
 
 ### Notifications drawer
 Right drawer (full-screen sheet on phone) listing the last 30 days, newest first, in ruled panels headed Today / Yesterday / Earlier (Label on Bench Gray). Rows reuse the task-row grid: event chip, title with a mono meta line (project, relative time, `still waiting` in need-fg, or `now <state>` once it moved on), and Open in app. Unread rows show a 6px Ink square before a 600-weight title; opening the drawer reads everything, but the markers stay until it closes. Load more pages older entries. The footer notes when push is off on this device.
@@ -363,7 +367,7 @@ Right drawer (full-screen sheet on phone) listing the last 30 days, newest first
 In-app notification while the app is visible: bottom-right stack, 360px wide on laptop; full width above the bottom tabs on phone. Flat (Strong Hairline border, Paper surface, no shadow), fades in over 150ms (no movement; none with reduced motion). Event chip and a ghost close on top, title (2 lines max), mono project and time, then View and Open in app. Needs-input toasts take the yellow edge and stay until acted on; done and failed dismiss after 8s, paused on hover or focus. At most three; older ones collapse into a mono "+n more · open notifications" strip that opens the drawer. Events that arrived while the app was hidden never toast; the bell count covers them. While the drawer is open, toasts are off.
 
 ### Snippet row
-On the Snippets page, one panel per scope (Global first, then each project with snippets), with an "Expand all / Collapse all" ghost action in the header. Each row: a 20px chevron button (`aria-expanded`, rotated -90° when collapsed), the name as Row Title, and a 2-line mono Slate preview. Expanded, the full body prints at 12.5px mono with whitespace kept, followed by a small Copy button. Edit and Delete sit right on laptop and wrap below on phone.
+On the Snippets page, one panel per scope (Global first, then each project with snippets), with an "Expand all / Collapse all" ghost action in the header. Each row: a 20px chevron button (`aria-expanded`, rotated -90° when collapsed), the name as Row Title, and a 2-line mono Slate preview. Expanded, the full body prints at 13px mono with whitespace kept, followed by a small Copy button. Edit and Delete sit right on laptop and wrap below on phone.
 
 ### Snippet picker
 Typing `/` at a word start (or `template:`) in the task prompt, follow-up or notes opens a list of matching snippets. Matches are global plus the task's project. On laptop it sits under the caret, 360px wide, and flips above near the viewport bottom; on phone it spans the textarea width. Flat (Strong Hairline border, Paper, no shadow), a 28px Bench Gray header ("SNIPPETS" Label plus count), rows with the name at 13px, a plain scope chip right and a 1-line mono preview. The active row gets the palette's 7% ink fill and 2px inset ink bar, and the footer shows keycaps (↑↓ move, ↵ insert, Esc close) on laptop. Enter or Tab inserts the snippet in place of the token and keeps native undo; Esc closes it until the token ends.
@@ -379,7 +383,7 @@ Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; 
 - **Do** color only what a state earns: chips, square markers, stat counts, alerts, the needs-input edge.
 - **Do** draw tones with the two-token pattern: border at 45-55% tone, fill at 8-14%, text in the tone's text color.
 - **Do** place the `//` meta line directly below the H1 in 12px mono Slate with a bold Ink Text `//`.
-- **Do** head every panel with the 32px Bench Gray bar and an uppercase 10.5px mono label at 0.12em.
+- **Do** head every panel with the 32px Bench Gray bar and an uppercase 11px mono label at 0.12em.
 - **Do** set titles, actions and prose in Geist; set metadata, labels, chips, counts and keycaps in JetBrains Mono with tabular numerals.
 - **Do** draw icons as authored 16px SVGs: 1.5 stroke, square caps, miter joins, currentColor.
 - **Do** open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.

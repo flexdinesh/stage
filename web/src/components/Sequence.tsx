@@ -106,8 +106,8 @@ export function SequencePipeline({ steps, currentId }: { steps: Task[]; currentI
               )}
             >
               {tone === null ? null : <span aria-hidden className="size-1.5 shrink-0 bg-[var(--c)] max-md:hidden" />}
-              <span className="font-mono text-[11.5px] tabular">{i + 1}</span>
-              <span className="hidden min-w-0 truncate text-[12.5px] font-medium md:inline">{s.title}</span>
+              <span className="font-mono text-meta tabular">{i + 1}</span>
+              <span className="hidden min-w-0 truncate text-small font-medium md:inline">{s.title}</span>
             </Link>
           </li>
         );
@@ -221,10 +221,10 @@ function LinkLine({
     <div className="flex min-w-0 items-start gap-2">
       <div className="min-w-0 flex-1">
         <span className="label-caps">{label}</span>
-        <Link to={`/tasks/${task.id}`} className="block truncate text-[13px] font-medium hover:underline" title={task.title}>
-          <span className="font-mono text-[11.5px] text-muted">#{task.id}</span> {task.title}
+        <Link to={`/tasks/${task.id}`} className="block truncate text-ui font-medium hover:underline" title={task.title}>
+          <span className="font-mono text-meta text-muted">#{task.id}</span> {task.title}
         </Link>
-        <span className="font-mono text-[11px] text-muted">
+        <span className="font-mono text-meta-sm text-muted">
           {taskStateLabel(task.state)}
           {hint === undefined ? null : ` · ${hint}`}
         </span>

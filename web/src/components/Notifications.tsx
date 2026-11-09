@@ -39,7 +39,7 @@ export function usePushRefresh() {
 
 // ---- Bell ----
 
-export function NotificationsBell({ onOpen, compact = false }: { onOpen: () => void; compact?: boolean }) {
+export function NotificationsBell({ onOpen }: { onOpen: () => void }) {
   const data = useNotifications().data;
   const unread = data?.unread ?? 0;
   const urgent = data?.notifications.some((n) => n.readAt === null && stillWaiting(n)) ?? false;
@@ -47,15 +47,14 @@ export function NotificationsBell({ onOpen, compact = false }: { onOpen: () => v
   return (
     <Button
       variant="secondary"
-      small={compact}
       onClick={onOpen}
       title={label}
       aria-label={label}
-      className={cx(compact ? "h-8" : "", unread === 0 ? "w-8 px-0" : "gap-1.5 px-2")}
+      className={cx(unread === 0 ? "w-10 px-0 md:w-8" : "gap-1.5 px-2.5 md:px-2")}
     >
-      <IconBell size={compact ? 15 : 16} />
+      <IconBell size={16} />
       {unread === 0 ? null : (
-        <span className={cx("chip px-1.5 text-[11px] leading-4 tabular", urgent ? "tone-need" : "tone-plain")}>
+        <span className={cx("chip px-1.5 text-meta-sm leading-4 tabular", urgent ? "tone-need" : "tone-plain")}>
           {unread > 99 ? "99+" : unread}
         </span>
       )}
@@ -128,7 +127,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
             setToasts([]);
             onOpenInbox();
           }}
-          className="toast-in pointer-events-auto border border-line-strong bg-surface px-3 py-2 text-left font-mono text-[11.5px] text-muted transition-colors duration-150 hover:bg-panel hover:text-fg"
+          className="toast-in pointer-events-auto border border-line-strong bg-surface px-3 py-2 text-left font-mono text-meta text-muted transition-colors duration-150 hover:bg-panel hover:text-fg"
         >
           +{hidden} more · open notifications
         </button>
@@ -177,11 +176,11 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
           <IconClose />
         </Button>
       </div>
-      <Link to={n.url} onClick={onDismiss} className="line-clamp-2 text-[13.5px] font-medium break-words hover:underline">
+      <Link to={n.url} onClick={onDismiss} className="line-clamp-2 text-body font-medium break-words hover:underline">
         {n.title}
       </Link>
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
-        <span className="min-w-0 truncate font-mono text-[11.5px] text-muted">
+        <span className="min-w-0 truncate font-mono text-meta text-muted">
           {project === "" ? "" : `${project} · `}
           <span className="tabular">{relativeTime(n.createdAt)}</span>
         </span>
@@ -285,7 +284,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
 
   const footer =
     push.data === undefined || push.data === "on" ? null : (
-      <p className="font-mono text-[11.5px] text-muted">
+      <p className="font-mono text-meta text-muted">
         Push is off on this device ·{" "}
         <Link to="/settings" onClick={onClose} className="text-fg underline underline-offset-2">
           Settings
@@ -346,12 +345,12 @@ function NotificationRow({ n, unread, onNavigate }: { n: Notification; unread: b
           <Link
             to={n.url}
             onClick={onNavigate}
-            className={cx("text-[13.5px] break-words hover:underline", unread ? "font-semibold" : "font-medium")}
+            className={cx("text-body break-words hover:underline", unread ? "font-semibold" : "font-medium")}
           >
             {n.title}
           </Link>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
+        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
           {project === "" ? null : <span>{project}</span>}
           <span title={dateTime(n.createdAt)} className="tabular">
             {relativeTime(n.createdAt)}

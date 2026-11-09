@@ -165,10 +165,10 @@ export function ProjectsPage() {
                   className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px]"
                 >
                   <div className="min-w-0">
-                    <Link to={`/projects/${p.id}`} className="block truncate text-[13.5px] font-medium hover:underline">
+                    <Link to={`/projects/${p.id}`} className="block truncate text-body font-medium hover:underline">
                       {p.title}
                     </Link>
-                    <div className="truncate font-mono text-[11.5px] text-muted" title={p.workspaceRoot}>
+                    <div className="truncate font-mono text-meta text-muted" title={p.workspaceRoot}>
                       {p.workspaceRoot}
                     </div>
                   </div>
@@ -176,7 +176,7 @@ export function ProjectsPage() {
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
                     <Chip title={p.source === "app" ? "Created here" : "Imported from T3"}>{p.source === "app" ? "app" : "t3"}</Chip>
                   </div>
-                  <div className="flex flex-col font-mono text-[11.5px] text-muted tabular">
+                  <div className="flex flex-col font-mono text-meta text-muted tabular">
                     <span>
                       {counts === null ? null : (
                         <>

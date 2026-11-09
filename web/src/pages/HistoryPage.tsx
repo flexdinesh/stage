@@ -408,9 +408,9 @@ function Summary({ stats, preset }: { stats: Stats; preset: Preset }) {
       </Panel>
       <Panel title="Per project" meta={preset}>
         {projects.length === 0 ? (
-          <p className="text-[12.5px] text-muted">No threads in this window.</p>
+          <p className="text-small text-muted">No threads in this window.</p>
         ) : (
-          <dl className="grid grid-cols-[1fr_auto] gap-x-2.5 gap-y-1.5 text-[12px]">
+          <dl className="grid grid-cols-[1fr_auto] gap-x-2.5 gap-y-1.5 text-detail">
             {projects.map((p) => (
               <div key={p.t3ProjectId} className="contents">
                 <dt className="truncate" title={p.title}>
@@ -429,7 +429,7 @@ function Summary({ stats, preset }: { stats: Stats; preset: Preset }) {
 function DayBars({ days }: { days: Day[] }) {
   const first = days[0];
   const last = days[days.length - 1];
-  if (first === undefined || last === undefined) return <p className="text-[12.5px] text-muted">No threads in this window.</p>;
+  if (first === undefined || last === undefined) return <p className="text-small text-muted">No threads in this window.</p>;
   const max = Math.max(...days.map((d) => d.count), 1);
   return (
     <div className="flex flex-1 flex-col">
@@ -448,7 +448,7 @@ function DayBars({ days }: { days: Day[] }) {
           );
         })}
       </ul>
-      <div className="mt-1.5 flex justify-between font-mono text-[10.5px] text-muted">
+      <div className="mt-1.5 flex justify-between font-mono text-label text-muted">
         <span>{axisLabel(first.date)}</span>
         {first === last ? null : <span>{axisLabel(last.date)}</span>}
       </div>
@@ -464,7 +464,7 @@ function ThreadList({ data }: { data: Thread[] }) {
   if (data.length === 0) {
     return (
       <Panel>
-        <p className="text-[12.5px] text-muted">No threads match. Widen the time window or clear filters.</p>
+        <p className="text-small text-muted">No threads match. Widen the time window or clear filters.</p>
       </Panel>
     );
   }
@@ -498,14 +498,14 @@ function ThreadRow({ t }: { t: Thread }) {
     );
   const project =
     t.projectId === null ? (
-      <span className="font-mono text-[11.5px] text-muted">{t.t3ProjectId}</span>
+      <span className="font-mono text-meta text-muted">{t.t3ProjectId}</span>
     ) : (
       <Link to={`/projects/${t.projectId}`} className="hover:underline">
         {t.projectTitle ?? t.t3ProjectId}
       </Link>
     );
   const model = t.model ?? t.providerInstanceId ?? "-";
-  const subagent = t.parentThreadId === null ? null : <span className="ml-1.5 text-[11px] font-normal text-muted">subagent</span>;
+  const subagent = t.parentThreadId === null ? null : <span className="ml-1.5 text-meta-sm font-normal text-muted">subagent</span>;
   const when = (
     <time dateTime={t.createdAt} title={dateTime(t.createdAt)}>
       {compactTime(t.createdAt)}
@@ -514,13 +514,13 @@ function ThreadRow({ t }: { t: Thread }) {
   return (
     <li
       className={cx(
-        "border-b border-line px-3 py-2 text-[12.5px] last:border-b-0 hover:bg-panel md:grid md:items-center md:gap-3",
+        "border-b border-line px-3 py-2 text-small last:border-b-0 hover:bg-panel md:grid md:items-center md:gap-3",
         COLS,
       )}
     >
       {/* laptop cells */}
-      <span className="hidden font-mono text-[11.5px] text-muted md:block">{when}</span>
-      <span className="hidden min-w-0 truncate text-[13px] md:block" title={t.title}>
+      <span className="hidden font-mono text-meta text-muted md:block">{when}</span>
+      <span className="hidden min-w-0 truncate text-ui md:block" title={t.title}>
         {title}
         {subagent}
       </span>
@@ -528,10 +528,10 @@ function ThreadRow({ t }: { t: Thread }) {
       <span className="hidden md:block">
         <ThreadStatusBadge status={t.status} settled={t.settled} />
       </span>
-      <span className="hidden min-w-0 truncate font-mono text-[11.5px] text-muted md:block" title={model}>
+      <span className="hidden min-w-0 truncate font-mono text-meta text-muted md:block" title={model}>
         {model}
       </span>
-      <span className="hidden font-mono text-[11.5px] text-muted md:block">{t.source}</span>
+      <span className="hidden font-mono text-meta text-muted md:block">{t.source}</span>
       <span className="hidden md:block">
         <T3Link t={t} />
       </span>
@@ -539,13 +539,13 @@ function ThreadRow({ t }: { t: Thread }) {
       {/* phone stack */}
       <div className="flex flex-col gap-1 md:hidden">
         <div className="flex items-start gap-2">
-          <span className="min-w-0 flex-1 text-[13px] break-words">
+          <span className="min-w-0 flex-1 text-ui break-words">
             {title}
             {subagent}
           </span>
           <ThreadStatusBadge status={t.status} settled={t.settled} />
         </div>
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-mono text-[11px] text-muted">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-mono text-meta-sm text-muted">
           {when}
           <span className="min-w-0 truncate">{project}</span>
           <span className="min-w-0 truncate">{model}</span>
@@ -578,7 +578,7 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
   const last = Math.min(total, (page + 1) * PAGE_SIZE);
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="tabular font-mono text-[11.5px] text-muted">
+      <span className="tabular font-mono text-meta text-muted">
         {first}-{last} of {total}
       </span>
       <div className="flex gap-2">

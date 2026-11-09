@@ -33,7 +33,7 @@ export function TaskRows({
   emptyText?: string;
   showProject?: boolean;
 }) {
-  if (tasks.length === 0) return <p className="px-3 py-2.5 text-[12.5px] text-muted">{emptyText}</p>;
+  if (tasks.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
   return (
     <ul>
       {tasks.map((t) => (
@@ -47,7 +47,7 @@ export function TaskRows({
 
 /** Project name in Ink Text; links to the project when it is mirrored. Full name in `title` for truncation. */
 function ProjectName({ projectId, title, className }: { projectId: number | null; title: string; className: string }) {
-  const cls = cx("font-mono text-[12px] font-medium text-fg", className);
+  const cls = cx("font-mono text-detail font-medium text-fg", className);
   if (projectId === null)
     return (
       <span title={title} className={cls}>
@@ -111,10 +111,10 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
         {showProject ? (
           <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
         ) : null}
-        <Link to={`/tasks/${task.id}`} className="text-[13.5px] font-medium break-words hover:underline">
+        <Link to={`/tasks/${task.id}`} className="text-body font-medium break-words hover:underline">
           {task.title}
         </Link>
-        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
+        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
           {showProject ? null : (
             <Link to={`/projects/${task.projectId}`} className="hover:text-fg hover:underline">
               {task.projectTitle}
@@ -168,7 +168,7 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
       ) : null}
 
       {task.lastError === null ? null : (
-        <p className={cx("order-5 col-span-2 truncate font-mono text-[11.5px] text-bad", underTitle)} title={task.lastError}>
+        <p className={cx("order-5 col-span-2 truncate font-mono text-meta text-bad", underTitle)} title={task.lastError}>
           {task.lastError}
         </p>
       )}
@@ -210,10 +210,10 @@ function ExternalThreadRow({ thread }: { thread: Thread }) {
 
       <div className="order-1 min-w-0 md:order-2">
         <ProjectName projectId={thread.projectId} title={project} className="mb-0.5 block break-words md:hidden" />
-        <Link to={`/history${toQuery({ q: thread.title })}`} className="text-[13.5px] font-medium break-words hover:underline">
+        <Link to={`/history${toQuery({ q: thread.title })}`} className="text-body font-medium break-words hover:underline">
           {thread.title}
         </Link>
-        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11.5px] text-muted">
+        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
           <span title={dateTime(thread.updatedAt)} className="tabular">
             {relativeTime(thread.updatedAt)}
           </span>

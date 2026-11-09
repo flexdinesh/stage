@@ -214,7 +214,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
           <div className="flex min-w-0 flex-col gap-3.5">
             <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
               <div className="flex flex-col gap-3">
-                <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">
+                <pre className="max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">
                   {task.prompt}
                 </pre>
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
@@ -338,19 +338,19 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
               key={e.id}
               className="grid grid-cols-[auto_1fr] items-center gap-x-3 border-b border-line px-3 py-1.5 last:border-b-0 sm:grid-cols-[88px_1fr]"
             >
-              <span className="font-mono text-[11.5px] text-muted tabular" title={dateTime(e.at)}>
+              <span className="font-mono text-meta text-muted tabular" title={dateTime(e.at)}>
                 {stamp(e.at)}
               </span>
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {e.fromState === null || e.fromState === e.toState ? null : (
-                  <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-muted">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-meta text-muted">
                     {taskStateLabel(e.fromState)}
                     <IconArrowRight size={12} label="to" />
                   </span>
                 )}
                 <TaskStateBadge state={e.toState} />
                 {e.detail === "" ? null : (
-                  <span className="min-w-0 font-mono text-[11.5px] break-words text-muted">{e.detail}</span>
+                  <span className="min-w-0 font-mono text-meta break-words text-muted">{e.detail}</span>
                 )}
               </span>
             </li>
@@ -396,7 +396,7 @@ function NotesPanel({ task }: { task: TaskDetail }) {
         task.notes === "" ? (
           <Muted>No notes. Use Edit to jot context for later.</Muted>
         ) : (
-          <p className="text-[12.5px] whitespace-pre-wrap">{task.notes}</p>
+          <p className="text-small whitespace-pre-wrap">{task.notes}</p>
         )
       ) : (
         <div className="flex flex-col gap-2">
@@ -460,7 +460,7 @@ function FollowupPanel({
           >
             <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
           </fieldset>
-          {withImages ? <span className="font-mono text-[11px] text-muted">sends as a new message</span> : null}
+          {withImages ? <span className="font-mono text-meta-sm text-muted">sends as a new message</span> : null}
           <Button type="submit" variant="primary" small className="ml-auto" busy={send.isPending} disabled={!ready}>
             Send
           </Button>

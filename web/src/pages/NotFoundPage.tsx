@@ -7,7 +7,7 @@ export function NotFoundPage() {
   return (
     <>
       <PageHeader title="Not found" meta={<span className="break-all">{pathname}</span>} />
-      <p className="mb-3 text-[13px] text-muted">Nothing lives at this address. It may have been deleted or the link is wrong.</p>
+      <p className="mb-3 text-ui text-muted">Nothing lives at this address. It may have been deleted or the link is wrong.</p>
       <Link to="/" className={buttonClass("secondary")}>
         <IconBack /> Back to dashboard
       </Link>

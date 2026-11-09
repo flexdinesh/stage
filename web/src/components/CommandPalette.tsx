@@ -152,7 +152,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="absolute inset-0 flex flex-col bg-surface md:inset-auto md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+        className="absolute inset-0 flex flex-col bg-surface pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:inset-auto md:p-0 md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
       >
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="text-muted">
@@ -171,15 +171,15 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             aria-expanded="true"
             aria-controls="palette-list"
             aria-activedescendant={items[active]?.key}
-            className="min-w-0 flex-1 bg-transparent text-[14px] outline-none"
+            className="min-w-0 flex-1 bg-transparent text-input outline-none"
           />
-          <button type="button" onClick={onClose} className="text-[12px] text-muted md:hidden">
+          <button type="button" onClick={onClose} className="-mr-2 h-10 px-2 text-small text-muted md:hidden">
             Cancel
           </button>
         </div>
         <div id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
           {items.length === 0 ? (
-            <p className="px-4 py-6 text-[12.5px] text-muted">
+            <p className="px-4 py-6 text-small text-muted">
               {threads.isFetching ? "Searching threads…" : `Nothing matches "${query.trim()}".`}
             </p>
           ) : (
@@ -198,7 +198,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                     onMouseMove={() => setActive(i)}
                     onClick={() => item.run()}
                     className={cx(
-                      "flex cursor-pointer items-center gap-2.5 px-4 py-2 text-[13px]",
+                      "flex cursor-pointer items-center gap-2.5 px-4 py-2 text-ui",
                       i === active && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
                     )}
                   >
@@ -207,7 +207,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                       <Highlight text={item.label} q={q} />
                     </span>
                     {item.hint === undefined ? null : (
-                      <span className="ml-auto shrink-0 truncate pl-3 font-mono text-[11.5px] text-muted">{item.hint}</span>
+                      <span className="ml-auto shrink-0 truncate pl-3 font-mono text-meta text-muted">{item.hint}</span>
                     )}
                   </div>
                 </div>
@@ -215,7 +215,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             })
           )}
         </div>
-        <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-[11px] text-muted md:flex">
+        <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm text-muted md:flex">
           <span>
             <Kbd>↑↓</Kbd> move
           </span>
