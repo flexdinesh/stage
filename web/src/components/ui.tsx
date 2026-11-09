@@ -144,7 +144,7 @@ export function Input({ className, ...rest }: ComponentProps<"input">) {
 export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
   return (
     <textarea
-      className={cx(inputClass, "h-auto w-full py-2 font-mono text-input-mono leading-relaxed", className)}
+      className={cx(inputBase, "w-full py-2 font-mono text-input-mono leading-relaxed", className)}
       {...rest}
     />
   );
