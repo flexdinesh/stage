@@ -340,6 +340,11 @@ Joined mono buttons inside one Strong Hairline border, hairline dividers between
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
 - **Phone:** 56px bottom bar plus the home-indicator inset below it, five equal cells with a 22px icon over an 11px label, iOS tab bar proportions; active cell gets a 2px Ink top border. Settings lives in the More drawer.
 
+### Pull to reload
+On phones and tablets, in browser and installed PWA, a single-finger downward pull from the document top reloads the current URL when released at 80 CSS pixels. Below that distance it cancels. Controls, focused editors, nested scrollers, drawers and the palette keep their gestures; horizontal intent, multitouch and navigation cancel the pull.
+
+A pointer-transparent, square-cornered Paper/Strong Hairline indicator sits below the active header without moving page content. Geist copy changes from “Pull to reload” to “Release to reload”, then “Reloading…” with the square busy spinner. State changes announce politely; reduced motion keeps the spinner still. Full reload clears unsaved drafts and requires connectivity.
+
 ### Stat strip (signature)
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
 
