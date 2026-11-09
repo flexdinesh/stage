@@ -94,6 +94,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/push/test", s.testPush)
 	h("GET /api/badge", s.badge)
 	h("GET /api/notifications", s.listNotifications)
+	h("GET /api/notifications/groups", s.listNotificationGroups)
 	h("POST /api/notifications/read", s.readNotifications)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -109,5 +110,100 @@ func TestNotificationsInbox(t *testing.T) {
 	}
 	if n, err := s.PruneNotifications(ctx, 30*24*time.Hour); err != nil || n != 1 {
 		t.Fatalf("pruned %d %v", n, err)
+	}
+}
+
+func TestNotificationGroups(t *testing.T) {
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), context.Background()
+	p := mustProject(t, s, ctx, "proj-1")
+	waiting := mustTask(t, s, ctx, p.ID, "Same title", nil)
+	active := mustTask(t, s, ctx, p.ID, "Same title", nil)
+	for _, change := range []db.Transition{
+		{TaskID: waiting.ID, To: db.StateNeedsInput},
+		{TaskID: active.ID, To: db.StateRunning},
+	} {
+		if _, err := s.TransitionTask(ctx, change); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert := func(n db.NewNotification) int64 {
+		t.Helper()
+		id, err := s.InsertNotification(ctx, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	waitingID := insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &waiting.ID,
+		Title: waiting.Title, URL: fmt.Sprintf("/tasks/%d", waiting.ID)})
+	thread1, thread2 := "ext-1", "ext-2"
+	insert(db.NewNotification{Event: db.StateDone, T3ThreadID: &thread1, Title: "Same title", URL: "/history?q=Same"})
+	insert(db.NewNotification{Event: db.StateFailed, T3ThreadID: &thread2, Title: "Same title", URL: "/history?q=Same"})
+	var activeIDs []int64
+	for i := range 55 {
+		thread := fmt.Sprintf("attempt-%d", i)
+		activeIDs = append(activeIDs, insert(db.NewNotification{Event: db.StateFailed, TaskID: &active.ID,
+			T3ThreadID: &thread, Title: fmt.Sprintf("Renamed %d", i), URL: fmt.Sprintf("/tasks/%d", active.ID)}))
+	}
+	latest, unread, err := s.NotificationReadState(ctx)
+	if err != nil || latest != activeIDs[len(activeIDs)-1] || unread != 58 {
+		t.Fatalf("read boundary: %d %d %v", latest, unread, err)
+	}
+	// An insert after capturing the boundary must not leak into this snapshot.
+	futureID := insert(db.NewNotification{Event: db.StateDone, TaskID: &active.ID, Title: "Future",
+		URL: fmt.Sprintf("/tasks/%d", active.ID)})
+	groups, err := s.ListNotificationGroups(ctx, 2, nil, latest)
+	if err != nil || len(groups) != 2 {
+		t.Fatalf("first page: %+v %v", groups, err)
+	}
+	if groups[0].ID != waitingID || groups[0].EventCount != 1 ||
+		groups[1].ID != latest || groups[1].EventCount != 55 || groups[1].UnreadCount != 55 ||
+		groups[1].CurrentState == nil || *groups[1].CurrentState != db.StateRunning {
+		t.Fatalf("priority, aggregation or live state: %+v", groups)
+	}
+	cursor := &db.NotificationCursor{Waiting: false, ID: groups[1].ID}
+	older, err := s.ListNotificationGroups(ctx, 2, cursor, latest)
+	if err != nil || len(older) != 2 || older[0].Key != "thread:ext-2" || older[1].Key != "thread:ext-1" {
+		t.Fatalf("group pagination/identity: %+v %v", older, err)
+	}
+	waitingCursor := &db.NotificationCursor{Waiting: true, ID: waitingID}
+	afterWaiting, err := s.ListNotificationGroups(ctx, 1, waitingCursor, latest)
+	if err != nil || len(afterWaiting) != 1 || afterWaiting[0].ID != latest {
+		t.Fatalf("priority cursor must reach newer recent items: %+v %v", afterWaiting, err)
+	}
+	key := fmt.Sprintf("task:%d", active.ID)
+	history, err := s.ListNotificationHistory(ctx, key, 2, &futureID)
+	if err != nil || len(history) != 2 || history[0].ID != latest || history[1].ID != activeIDs[len(activeIDs)-2] {
+		t.Fatalf("history pagination: %+v %v", history, err)
+	}
+	if err := s.MarkNotificationsRead(ctx, latest); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.UnreadNotificationCount(ctx); err != nil || n != 1 {
+		t.Fatalf("new event must remain unread: %d %v", n, err)
+	}
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: active.ID, To: db.StateFailed}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteTask(ctx, active.ID); err != nil {
+		t.Fatal(err)
+	}
+	groups, err = s.ListNotificationGroups(ctx, 10, nil, futureID)
+	if err != nil || len(groups) != 4 || groups[1].Key != key || groups[1].EventCount != 56 ||
+		groups[1].UnreadCount != 1 || groups[1].CurrentState != nil {
+		t.Fatalf("deleted/restarted task must retain its group: %+v %v", groups, err)
+	}
+	history, err = s.ListNotificationHistory(ctx, key, 100, nil)
+	if err != nil || len(history) != 56 {
+		t.Fatalf("deleted task history: %d %v", len(history), err)
+	}
+	// Attention follows current state, even without another notification.
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: waiting.ID, To: db.StateDone}); err != nil {
+		t.Fatal(err)
+	}
+	groups, err = s.ListNotificationGroups(ctx, 10, nil, futureID)
+	if err != nil || groups[0].Key != key || groups[len(groups)-1].ID != waitingID {
+		t.Fatalf("resolved input must leave priority: %+v %v", groups, err)
 	}
 }

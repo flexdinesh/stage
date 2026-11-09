@@ -456,3 +456,17 @@ export interface NotificationPage {
   /** `before` for the next (older) page; null when none. */
   nextBefore: number | null;
 }
+
+export interface NotificationGroup extends Notification {
+  key: string;
+  eventCount: number;
+  unreadCount: number;
+}
+
+export interface NotificationGroupPage {
+  groups: NotificationGroup[];
+  unread: number;
+  /** Newest event across all groups, independent of priority order. */
+  latestId: number;
+  nextCursor: string | null;
+}

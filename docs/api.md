@@ -414,7 +414,16 @@ Every notification the notifier sends is stored first (also when no browser is s
 `event`: `needs_input|done|failed`. `taskId` null for external threads (or once the task is deleted). `title` / `projectTitle` are snapshots at send time. `currentState` is live: the task's state, or for an external thread `settled` when settled, else its `observedState`; null when unknown.
 
 ### `GET /api/notifications`
-Query: `limit` (default 50, max 200), `before` (id; only older entries). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. 400 bad `limit` / `before`.
+Query: `limit` (default 50, max 200), `before` (id; only older entries), `group` (optional group key from the grouped inbox; restricts history to that task/thread). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. `unread` remains the global unread event count. 400 bad `limit` / `before`.
+
+### `GET /api/notifications/groups`
+Query: `limit` (default 50, max 200), `cursor` (opaque `nextCursor` from the previous page). 200 `{ "groups": NotificationGroup[], "unread": number, "latestId": number, "nextCursor": string | null }`. 400 bad `limit` / `cursor`.
+
+`NotificationGroup` extends `Notification` with `key` (stable task/thread identity), `eventCount` (retained notifications for this group), and `unreadCount`. Its inherited notification fields describe the latest event; `currentState` stays live. Group by task across restarts, or by external thread, never by title. Deleted tasks retain their group via their task URL. Identity-less entries remain separate.
+
+Groups whose current state is `needs_input` come first, then other groups; each section is newest-event-ID first. Aggregation precedes pagination, so repeated events cannot consume a page or cause older copies of a group to reappear. `latestId` is the global newest event ID captured before listing, independent of priority order; use it for read-on-open, then the newest observed `latestId` for arrivals while the drawer is open. Events inserted after that boundary remain unread. Unread markers captured on open stay visible until close. The bell still counts unread events.
+
+Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `done`, and `failed` notifications, not every lifecycle transition. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
 Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. 204. 400 missing `upTo`.
