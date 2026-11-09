@@ -316,6 +316,8 @@ export interface ThreadListQuery {
   subagents?: SubagentsFilter;
   /** Only external threads needing input (the ones the badge counts). */
   needsInput?: boolean;
+  /** Only external threads observed running. */
+  running?: boolean;
   limit?: number;
   offset?: number;
 }

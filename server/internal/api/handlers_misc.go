@@ -50,6 +50,13 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return db.Invalid("invalid needsInput %q (want 1|true)", v)
 	}
+	switch v := strings.TrimSpace(q.Get("running")); v {
+	case "":
+	case "1", "true":
+		f.Running = true
+	default:
+		return db.Invalid("invalid running %q (want 1|true)", v)
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {

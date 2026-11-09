@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useNeedsInputThreads, useProjects, useTasks } from "../api/queries.ts";
-import type { Task, TaskState } from "../api/types.ts";
+import { useNeedsInputThreads, useProjects, useRunningThreads, useTasks } from "../api/queries.ts";
+import type { Task, TaskState, Thread } from "../api/types.ts";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { ExternalThreadRows, TaskRows } from "../components/TaskList.tsx";
+import { ExternalThreadRows, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
 type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
@@ -92,6 +92,13 @@ function settledSince(): string {
   return d.toISOString();
 }
 const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_input"];
+
+/** External (non-task) threads a group lists after its tasks. */
+interface ExternalGroup {
+  threads: Thread[];
+  error: unknown;
+  state: ExternalThreadState;
+}
 
 const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.key === v)?.key ?? null;
 
@@ -188,15 +195,21 @@ export function DashboardPage() {
   const projects = useProjects();
   const projectQuery = project === "" ? {} : { project: Number(project) };
   const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
-  // External threads needing input join the Needs input group (count and rows) but never block the page.
-  const needThreads = useNeedsInputThreads(project === "" ? undefined : Number(project));
-  const externalNeeds = needThreads.data?.threads ?? [];
+  // External threads needing input / running join the Needs input / Running groups (count and rows)
+  // but never block the page.
+  const projectId = project === "" ? undefined : Number(project);
+  const needThreads = useNeedsInputThreads(projectId);
+  const runThreads = useRunningThreads(projectId);
+  const external: Partial<Record<GroupKey, ExternalGroup>> = {
+    needs: { threads: needThreads.data?.threads ?? [], error: needThreads.error, state: "needs_input" },
+    running: { threads: runThreads.data?.threads ?? [], error: runThreads.error, state: "running" },
+  };
   const [since] = useState(settledSince);
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
   const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
-  const groupCount = (g: Group) => byGroup(g).length + (g.key === "needs" ? externalNeeds.length : 0);
+  const groupCount = (g: Group) => byGroup(g).length + (external[g.key]?.threads.length ?? 0);
 
   const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, settled: 0 };
   for (const g of GROUPS) counts[g.key] = groupCount(g);
@@ -250,6 +263,7 @@ export function DashboardPage() {
             if (Array.isArray(block)) return <EmptyGroups key={block.map((g) => g.key).join("-")} groups={block} />;
             const g = block;
             const list = byGroup(g);
+            const ext = external[g.key];
             const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
             // self-baseline: flex baseline comes from the text, not the square/chevron (no baseline → bottom edge),
             // so Panel's cap-trimmed h2 centers the caps.
@@ -284,21 +298,21 @@ export function DashboardPage() {
                 meta={<span className="tabular">{groupCount(g)}</span>}
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
-                {g.key === "needs" && externalNeeds.length > 0 ? (
+                {ext !== undefined && ext.threads.length > 0 ? (
                   <>
                     {list.length > 0 ? (
                       <div className="border-b border-line">
                         <TaskRows tasks={list} showProject />
                       </div>
                     ) : null}
-                    <ExternalThreadRows threads={externalNeeds} />
+                    <ExternalThreadRows threads={ext.threads} state={ext.state} />
                   </>
                 ) : (
                   <TaskRows tasks={list} emptyText={g.empty} showProject />
                 )}
-                {g.key === "needs" && needThreads.error !== null ? (
+                {ext !== undefined && ext.error !== null ? (
                   <div className="border-t border-line p-3">
-                    <ErrorText error={needThreads.error} />
+                    <ErrorText error={ext.error} />
                   </div>
                 ) : null}
               </Panel>

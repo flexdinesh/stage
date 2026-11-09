@@ -145,6 +145,7 @@ export const api = {
         to: q.to,
         subagents: q.subagents,
         needsInput: q.needsInput,
+        running: q.running,
         limit: q.limit,
         offset: q.offset,
       })}`,

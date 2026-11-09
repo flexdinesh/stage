@@ -40,6 +40,10 @@ export const useThreads = (q: ThreadListQuery) =>
 export const useNeedsInputThreads = (project?: number) =>
   useThreads(project === undefined ? { needsInput: true } : { needsInput: true, project });
 
+/** External threads observed running (not task-owned; tasks come from useTasks). */
+export const useRunningThreads = (project?: number) =>
+  useThreads(project === undefined ? { running: true } : { running: true, project });
+
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => useQuery({ queryKey: keys.badge, queryFn: api.badge });
 

@@ -10,12 +10,14 @@ import (
 
 // MapThreadState derives a task state from a T3 thread (docs/api.md "State
 // mapping"). latestRun is recentRuns[0].status ("" when absent). Returns
-// current when no rule applies (idle without runs).
+// current when no rule applies (idle without runs). T3 "waiting" is the
+// checkpoint gap after a provider turn ends (T3 shows it as Working), not a
+// wait on the user: it maps to running.
 func MapThreadState(current db.TaskState, status t3.ThreadStatus, settled bool, pendingRequests int, latestRun t3.ThreadStatus) db.TaskState {
 	if settled {
 		return db.StateSettled
 	}
-	if pendingRequests > 0 || status == t3.StatusWaiting {
+	if pendingRequests > 0 {
 		return db.StateNeedsInput
 	}
 	if s, ok := runState(status); ok {
@@ -32,7 +34,7 @@ func MapThreadState(current db.TaskState, status t3.ThreadStatus, settled bool, 
 // runState applies rules 3-7.
 func runState(s t3.ThreadStatus) (db.TaskState, bool) {
 	switch s {
-	case t3.StatusPreparing, t3.StatusQueued, t3.StatusStarting, t3.StatusRunning:
+	case t3.StatusPreparing, t3.StatusQueued, t3.StatusStarting, t3.StatusRunning, t3.StatusWaiting:
 		return db.StateRunning, true
 	case t3.StatusCompleted:
 		return db.StateDone, true
