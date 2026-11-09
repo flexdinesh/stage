@@ -9,6 +9,7 @@ test("small downward movements are claimed before scrolling, without showing the
   gesture.start(point(0));
   assert.equal(gesture.move(point(1)), true);
   assert.equal(gesture.phase, "idle");
+  assert.equal(gesture.offset, 0);
   assert.equal(gesture.release(point(1)), false);
 });
 
@@ -89,4 +90,45 @@ test("cancelling a scheduled reload permits a new gesture", () => {
   gesture.cancel();
   gesture.start(point(0));
   assert.equal(gesture.release(point(100)), true);
+});
+
+test("content follows the pull with bounded, increasing resistance", () => {
+  const gesture = new PullToReloadGesture();
+  gesture.start(point(150));
+  const offsets = [20, 40, 80, 160, 320, 10000].map((distance) => {
+    gesture.move(point(150 + distance));
+    return gesture.offset;
+  });
+  assert.ok(offsets[0] > 0);
+  assert.ok(offsets[2] >= 48, "the armed pull leaves room for the indicator");
+  assert.ok(offsets.every((offset, i) => offset < 112 && (i === 0 || offset > offsets[i - 1])));
+  assert.ok((offsets[2] - offsets[1]) / 40 < (offsets[1] - offsets[0]) / 20, "resistance increases with distance");
+  gesture.move(point(190));
+  assert.equal(gesture.offset, offsets[1], "reversing the pull follows the current finger position");
+});
+
+test("release settles content immediately while the reloading phase stays latched", () => {
+  for (const distance of [40, 80, 200]) {
+    const gesture = new PullToReloadGesture();
+    gesture.start(point(0));
+    gesture.move(point(distance));
+    assert.ok(gesture.offset > 0);
+    assert.equal(gesture.release(point(distance)), distance >= 80);
+    assert.equal(gesture.offset, 0);
+    assert.equal(gesture.phase, distance >= 80 ? "reloading" : "idle");
+  }
+});
+
+test("cancellation clears displacement before another gesture", () => {
+  for (const cancel of [(g) => g.cancel(), (g) => g.move(point(-10)), (g) => g.move(point(100, 100, 2))]) {
+    const gesture = new PullToReloadGesture();
+    gesture.start(point(0));
+    gesture.move(point(100));
+    cancel(gesture);
+    assert.equal(gesture.offset, 0);
+    gesture.start(point(0));
+    assert.equal(gesture.offset, 0);
+    gesture.move(point(40));
+    assert.ok(gesture.offset > 0);
+  }
 });

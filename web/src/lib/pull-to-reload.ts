@@ -5,12 +5,14 @@ type Point = { identifier: number; clientX: number; clientY: number };
 /** One touch sequence. A cancelled gesture cannot re-arm until a new touch starts. */
 export class PullToReloadGesture {
   phase: PullPhase = "idle";
+  offset = 0;
   private origin: Point | null = null;
 
   start(point: Point): void {
     if (this.phase === "reloading") return;
     this.origin = point;
     this.phase = "idle";
+    this.offset = 0;
   }
 
   /** True only when this gesture owns a downward pull. */
@@ -30,6 +32,8 @@ export class PullToReloadGesture {
       return false;
     }
     this.phase = dy >= 80 ? "armed" : "pulling";
+    // Reveal the indicator at the trigger distance, with increasing resistance beyond it.
+    this.offset = 112 * dy / (dy + 80);
     return true;
   }
 
@@ -45,5 +49,6 @@ export class PullToReloadGesture {
   cancel(): void {
     this.origin = null;
     this.phase = "idle";
+    this.offset = 0;
   }
 }

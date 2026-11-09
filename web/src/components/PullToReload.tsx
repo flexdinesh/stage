@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { PullToReloadGesture, type PullPhase } from "../lib/pull-to-reload.ts";
 
 const CONTROLS = 'a, button, input, textarea, select, label, summary, audio, video, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="slider"], [role="listbox"], [role="option"]';
@@ -28,21 +28,32 @@ const LABELS: Record<PullPhase, string> = {
 };
 
 /** Mounted with the router location as key, so navigation cancels even a scheduled reload. */
-export function PullToReload() {
+export function PullToReload({ contentRef }: { contentRef: RefObject<HTMLElement | null> }) {
   const [phase, setPhase] = useState<PullPhase>("idle");
+  const targetRef = useRef<Element | null>(null);
+  const frameRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const gesture = new PullToReloadGesture();
+    const content = contentRef.current;
     const href = window.location.href;
-    let target: Element | null = null;
-    let frame: number | undefined;
+
+    function paint() {
+      if (gesture.phase === "pulling" || gesture.phase === "armed") {
+        content?.setAttribute("data-pulling", "");
+      } else {
+        content?.removeAttribute("data-pulling");
+      }
+      content?.style.setProperty("--pull-offset", `${gesture.offset}px`);
+      setPhase(gesture.phase);
+    }
 
     function cancel() {
       gesture.cancel();
-      target = null;
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      frame = undefined;
-      setPhase("idle");
+      targetRef.current = null;
+      if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current);
+      frameRef.current = undefined;
+      paint();
     }
 
     function start(event: TouchEvent) {
@@ -50,12 +61,12 @@ export function PullToReload() {
       cancel();
       const touch = event.touches.item(0);
       if (event.defaultPrevented || event.touches.length !== 1 || touch === null || blocked() || !eligible(event.target)) return;
-      target = event.target;
+      targetRef.current = event.target;
       gesture.start(touch);
     }
 
     function move(event: TouchEvent) {
-      if (target === null) return;
+      if (targetRef.current === null) return;
       const touch = event.touches.item(0);
       if (event.defaultPrevented || event.touches.length !== 1 || touch === null || blocked()) {
         cancel();
@@ -69,25 +80,23 @@ export function PullToReload() {
         }
         event.preventDefault();
       }
-      setPhase(gesture.phase);
+      paint();
     }
 
     function end(event: TouchEvent) {
-      if (target === null) return;
+      if (targetRef.current === null) return;
       const touch = event.changedTouches.item(0);
-      if (event.defaultPrevented || event.touches.length !== 0 || touch === null || blocked() || !eligible(target)) {
+      if (event.defaultPrevented || event.touches.length !== 0 || touch === null || blocked() || !eligible(targetRef.current)) {
         cancel();
         return;
       }
-      target = null;
-      if (!gesture.release(touch)) {
-        setPhase("idle");
-        return;
-      }
-      setPhase("reloading");
+      targetRef.current = null;
+      const reload = gesture.release(touch);
+      paint();
+      if (!reload) return;
       // Let the busy indicator paint, then reload the current URL once.
-      frame = requestAnimationFrame(() => {
-        frame = requestAnimationFrame(() => {
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = requestAnimationFrame(() => {
           if (blocked() || window.location.href !== href) {
             cancel();
             return;
@@ -105,7 +114,7 @@ export function PullToReload() {
     document.addEventListener("visibilitychange", cancel);
     window.addEventListener("resize", cancel);
     return () => {
-      if (frame !== undefined) cancelAnimationFrame(frame);
+      if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current);
       document.removeEventListener("touchstart", start);
       document.removeEventListener("touchmove", move);
       document.removeEventListener("touchend", end);
@@ -113,8 +122,10 @@ export function PullToReload() {
       document.removeEventListener("focusin", cancel);
       document.removeEventListener("visibilitychange", cancel);
       window.removeEventListener("resize", cancel);
+      content?.removeAttribute("data-pulling");
+      content?.style.removeProperty("--pull-offset");
     };
-  }, []);
+  }, [contentRef]);
 
   return (
     <div

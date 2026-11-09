@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useBadge, useT3Status } from "../api/queries.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
@@ -109,6 +109,7 @@ function Shell() {
   const [palette, setPalette] = useState(false);
   const [more, setMore] = useState(false);
   const location = useLocation();
+  const contentRef = useRef<HTMLElement>(null);
   const closePalette = useCallback(() => setPalette(false), []);
   const openNewTask = useCallback(() => newTask(), [newTask]);
 
@@ -192,9 +193,10 @@ function Shell() {
         </div>
       </header>
 
-      <PullToReload key={location.key} />
+      <PullToReload key={location.key} contentRef={contentRef} />
 
-      <main className="mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:px-6 md:pt-6 md:pb-10">
+      {/* Relative positioning keeps fixed task actions anchored to the viewport during a pull. */}
+      <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 md:pb-10">
         <Outlet />
       </main>
 
