@@ -67,9 +67,20 @@ func TestWatchThreads(t *testing.T) {
 		}
 		return res.ThreadID
 	}
+	// setStatus clears pending requests; needInput opens one on a running thread.
 	setStatus := func(id string, st t3.ThreadStatus) {
 		t.Helper()
+		if err := fake.SetThread(id, func(d *t3.ThreadDetail) { d.PendingRequestCount = 0 }); err != nil {
+			t.Fatal(err)
+		}
 		if err := fake.SetStatus(id, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	needInput := func(id string) {
+		t.Helper()
+		setStatus(id, t3.StatusRunning)
+		if err := fake.SetThread(id, func(d *t3.ThreadDetail) { d.PendingRequestCount = 1 }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,9 +95,9 @@ func TestWatchThreads(t *testing.T) {
 	// Threads that exist before the service starts.
 	ext := launch("external")
 	old(ext)
-	extWaiting := launch("external waiting")
-	old(extWaiting)
-	setStatus(extWaiting, t3.StatusWaiting)
+	extNeeds := launch("external needs input")
+	old(extNeeds)
+	needInput(extNeeds)
 	oldIdle := launch("old finished")
 	old(oldIdle)
 	setStatus(oldIdle, t3.StatusCompleted)
@@ -139,35 +150,42 @@ func TestWatchThreads(t *testing.T) {
 	sub := launch("subagent")
 	if err := fake.SetThread(sub, func(d *t3.ThreadDetail) {
 		d.ParentThreadID, d.RelationshipToParent = ext, "subagent"
-		d.Status = t3.StatusWaiting
+		d.PendingRequestCount = 1
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// First pass records silently, even threads created after start.
 	early := launch("early")
-	setStatus(early, t3.StatusWaiting)
+	needInput(early)
 	pass()
-	for id, want := range map[string]string{ext: "running", extWaiting: "needs_input", early: "needs_input", oldIdle: "", taskThread: "", sub: ""} {
+	for id, want := range map[string]string{ext: "running", extNeeds: "needs_input", early: "needs_input", oldIdle: "", taskThread: "", sub: ""} {
 		if o := observed(id); o != want {
 			t.Fatalf("observed %s = %q, want %q", id, o, want)
 		}
 	}
 
-	// running → needs_input; task-owned and subagent changes are ignored.
+	// T3 "waiting" (checkpoint gap) stays running, silently.
 	setStatus(ext, t3.StatusWaiting)
-	setStatus(taskThread, t3.StatusWaiting)
+	pass()
+	if o := observed(ext); o != "running" {
+		t.Fatalf("waiting thread observed %q", o)
+	}
+
+	// running → needs_input; task-owned and subagent changes are ignored.
+	needInput(ext)
+	needInput(taskThread)
 	setStatus(sub, t3.StatusCompleted)
 	pass(change{ext, "running", db.StateNeedsInput})
 
 	// needs_input → done; needs_input → failed (watched, no longer listed).
 	setStatus(ext, t3.StatusCompleted)
-	setStatus(extWaiting, t3.StatusFailed)
-	pass(change{ext, "needs_input", db.StateDone}, change{extWaiting, "needs_input", db.StateFailed})
+	setStatus(extNeeds, t3.StatusFailed)
+	pass(change{ext, "needs_input", db.StateDone}, change{extNeeds, "needs_input", db.StateFailed})
 	pass() // stable
 
 	// A thread created before start, first seen now: recorded silently.
-	setStatus(oldIdle, t3.StatusWaiting)
+	needInput(oldIdle)
 	pass()
 	if o := observed(oldIdle); o != "needs_input" {
 		t.Fatalf("old thread observed %q", o)
@@ -175,7 +193,7 @@ func TestWatchThreads(t *testing.T) {
 
 	// A new thread (created after start) needing input notifies on first sight.
 	fresh := launch("fresh")
-	setStatus(fresh, t3.StatusWaiting)
+	needInput(fresh)
 	pass(change{fresh, "", db.StateNeedsInput})
 
 	// A new thread that finished between list and read notifies done.

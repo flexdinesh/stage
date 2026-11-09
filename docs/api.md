@@ -300,7 +300,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 ### `GET /api/threads`
-Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }` ordered by `createdAt` desc; `total` = matches before limit/offset.
 
 ## Snippets
@@ -422,6 +422,7 @@ Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. 204.
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies; `url` = `/tasks/<id>`. Other states (incl. `interrupted`) do not. Links add no events of their own.
 - External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/history?q=<title>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently.
 - External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
+- External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
 
 ## State mapping (thread → task), pure function
 
@@ -430,14 +431,16 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 | # | Condition | Task state |
 |---|---|---|
 | 1 | `settled == true` | `settled` |
-| 2 | `pendingRequestCount > 0` or `status == waiting` | `needs_input` |
-| 3 | `status in (preparing, queued, starting, running)` | `running` |
+| 2 | `pendingRequestCount > 0` | `needs_input` |
+| 3 | `status in (preparing, queued, starting, running, waiting)` | `running` |
 | 4 | `status == completed` | `done` |
 | 5 | `status == failed` | `failed` |
 | 6 | `status == interrupted` | `interrupted` |
 | 7 | `status in (cancelled, rolled_back)` | `cancelled` |
 | 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
 | 9 | otherwise (idle, no runs) | unchanged (keep current state) |
+
+T3 `waiting` is the checkpoint gap after a provider turn ends (T3 shows it as "Working"), not a wait on the user; a pending approval or question keeps the thread `running` with `pendingRequestCount > 0`. T3's UI "Waiting" (blocked on a child thread, or awaited background work such as a PR watch after the turn ended) is not exposed over MCP: those threads report `running` or `completed` and map to `running` or `done`.
 
 Applied only to tasks with a thread whose state is not `backlog`, and not to `settled` or `cancelled` tasks with a follower (it has been released). T3 reports a cancelled turn (e.g. a denied permission) as thread status `cancelled` and the thread can run on, so a `cancelled` task without a follower reopens like a settled one. A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
 

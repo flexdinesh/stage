@@ -181,29 +181,38 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
   );
 }
 
+/** Observed state of an external thread the Dashboard lists. */
+export type ExternalThreadState = "needs_input" | "running";
+
 /**
- * External (non-task) threads needing input, styled as needs-input TaskRows with the project column
- * (Dashboard only). Title opens History filtered to it.
+ * External (non-task) threads needing input or running, styled as TaskRows in that state with the project
+ * column (Dashboard only). Title opens History filtered to it.
  */
-export function ExternalThreadRows({ threads }: { threads: Thread[] }) {
+export function ExternalThreadRows({ threads, state }: { threads: Thread[]; state: ExternalThreadState }) {
   return (
     <ul>
       {threads.map((t) => (
         <li key={t.t3ThreadId} className="border-b border-line last:border-b-0">
-          <ExternalThreadRow thread={t} />
+          <ExternalThreadRow thread={t} state={state} />
         </li>
       ))}
     </ul>
   );
 }
 
-function ExternalThreadRow({ thread }: { thread: Thread }) {
+function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalThreadState }) {
   const href = thread.t3DeepLink;
   const project = thread.projectTitle ?? thread.t3ProjectId;
+  const needsInput = state === "needs_input";
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-need px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2">
+    <div
+      className={cx(
+        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2",
+        needsInput ? "border-l-need" : "border-l-transparent",
+      )}
+    >
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
-        <TaskStateBadge state="needs_input" />
+        <TaskStateBadge state={state} />
       </div>
 
       <ProjectCell projectId={thread.projectId} title={project} />
@@ -223,7 +232,7 @@ function ExternalThreadRow({ thread }: { thread: Thread }) {
 
       {href === null ? null : (
         <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
-          <AppButton small variant="primary" href={href}>
+          <AppButton small variant={needsInput ? "primary" : "secondary"} href={href}>
             Open in app
           </AppButton>
         </div>

@@ -31,7 +31,7 @@ const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
   queued: "run",
   starting: "run",
   running: "run",
-  waiting: "need",
+  waiting: "run",
   completed: "done",
   interrupted: "bad",
   failed: "bad",

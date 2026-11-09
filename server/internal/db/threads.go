@@ -120,8 +120,10 @@ type ThreadFilter struct {
 	ExcludeSubagents bool
 	// NeedsInput keeps external threads needing input (see NeedsInputCount).
 	NeedsInput bool
-	Limit      int
-	Offset     int
+	// Running keeps external threads observed running (see externalRunning).
+	Running bool
+	Limit   int
+	Offset  int
 }
 
 // ListThreads returns a page of mirrored threads (createdAt desc) and the
@@ -160,6 +162,9 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 	}
 	if f.NeedsInput {
 		w.add(externalNeedsInput)
+	}
+	if f.Running {
+		w.add(externalRunning)
 	}
 	var total int
 	countSQL := `SELECT count(*) FROM threads th

@@ -116,6 +116,11 @@ func (s *Store) RecordPushResult(ctx context.Context, endpoint string, errMsg *s
 const externalNeedsInput = `th.observed_state = 'needs_input' AND NOT th.settled
   AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
 
+// externalRunning: external threads observed running (dashboard,
+// threads?running=1). Same scope as externalNeedsInput.
+const externalRunning = `th.observed_state = 'running' AND NOT th.settled
+  AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
+
 // NeedsInputCount: tasks in needs_input + external threads needing input.
 func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
 	var n int

@@ -1478,7 +1478,7 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 	tk := e.task(p.ID, "needs me", nil)
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusWaiting); err != nil {
+	if err := e.fake.SetThread(*started.T3ThreadID, func(d *t3.ThreadDetail) { d.PendingRequestCount = 1 }); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
@@ -1530,6 +1530,33 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		t.Fatalf("needsInput + q: %+v", pg)
 	}
 	e.must("GET", "/api/threads?needsInput=yes", nil, 400, nil)
+
+	// External running threads: observed running, not settled, not subagent, not task-owned.
+	if err := e.store.UpsertThreads(ctx, []t3.Thread{
+		{ThreadID: "run-sub", ProjectID: p.T3ProjectID, Title: "run sub", Status: t3.StatusRunning, CreatedAt: now,
+			ParentThreadID: "ext-running", RelationshipToParent: "subagent"},
+		{ThreadID: "run-settled", ProjectID: p.T3ProjectID, Title: "run settled", Status: t3.StatusRunning, Settled: true, CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"run-sub", "run-settled"} {
+		if err := e.store.SetObservedState(ctx, id, db.StateRunning); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.SetObservedState(ctx, *started.T3ThreadID, db.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/threads?running=1", "/api/threads?running=true"} {
+		e.must("GET", path, nil, 200, &pg)
+		if pg.Total != 1 || len(pg.Threads) != 1 || pg.Threads[0].T3ThreadID != "ext-running" {
+			t.Fatalf("%s: %+v", path, pg)
+		}
+	}
+	e.must("GET", "/api/threads?running=yes", nil, 400, nil)
 }
 
 func TestNotificationsInbox(t *testing.T) {
