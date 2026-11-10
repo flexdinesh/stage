@@ -295,6 +295,52 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	}
 }
 
+func TestNotifyEventsFilter(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	srv := newPushServer(t)
+	subscribe(t, store, srv.URL+"/push/1")
+	task := seedTask(t, store, db.StateNeedsInput)
+	if err := store.UpsertThreads(ctx, []t3.Thread{
+		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", Status: t3.StatusCompleted, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		t.Helper()
+		got, err := store.ListNotifications(ctx, 50, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got)
+	}
+
+	// Done off: done events (task and thread) leave no inbox row and no push.
+	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput, db.StateFailed}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	if c, r := count(), len(srv.requests()); c != 0 || r != 0 {
+		t.Fatalf("done disabled: %d notifications, %d pushes", c, r)
+	}
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	if c, r := count(), len(srv.requests()); c != 1 || r != 1 {
+		t.Fatalf("needs input enabled: %d notifications, %d pushes", c, r)
+	}
+
+	// All off: nothing recorded or pushed.
+	if _, err := store.SetNotifyEvents(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateFailed, db.StateDone} {
+		n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: to}})
+	}
+	if c, r := count(), len(srv.requests()); c != 1 || r != 1 {
+		t.Fatalf("all disabled: %d notifications, %d pushes", c, r)
+	}
+}
+
 func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()

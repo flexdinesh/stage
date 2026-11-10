@@ -1,10 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useId, useState, type FormEvent } from "react";
 import { api } from "../api/client.ts";
 import { invalidateWork, keys, usePreferences, useT3Status } from "../api/queries.ts";
-import { INTERACTION_MODES, type InteractionMode, type ModelDefaults, type Preferences, type T3Status } from "../api/types.ts";
+import {
+  INTERACTION_MODES,
+  type InteractionMode,
+  type ModelDefaults,
+  type NotificationEvent,
+  type Preferences,
+  type T3Status,
+} from "../api/types.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, type ChipTone } from "../components/ui.tsx";
+import { taskStateTone } from "../components/StateBadge.tsx";
+import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { disablePush, enablePush, getPushState, sendTestPush, type PushState } from "../lib/push.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
@@ -196,6 +204,70 @@ const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
   on: { tone: "ok", label: "on" },
 };
 
+/** Display order and copy for the global notification filter. */
+const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }[] = [
+  { event: "needs_input", label: "Needs input", hint: "waits on you" },
+  { event: "failed", label: "Failed", hint: "run failed" },
+  { event: "done", label: "Done", hint: "run finished" },
+];
+
+const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];
+
+/** Global (all devices) event filter: each toggle saves at once, optimistically; a failed save reverts. */
+function EventFilter() {
+  const qc = useQueryClient();
+  const prefs = usePreferences();
+  const pending = useIsMutating({ mutationKey: NOTIFY_EVENTS_KEY });
+  const save = useMutation({
+    mutationKey: NOTIFY_EVENTS_KEY,
+    mutationFn: api.setNotifyEvents,
+    onMutate: async (events) => {
+      await qc.cancelQueries({ queryKey: keys.preferences });
+      const previous = qc.getQueryData<Preferences>(keys.preferences);
+      if (previous !== undefined) qc.setQueryData<Preferences>(keys.preferences, { ...previous, notifyEvents: events });
+      return { previous };
+    },
+    onError: (_err, _events, ctx) => {
+      if (ctx?.previous !== undefined) qc.setQueryData(keys.preferences, ctx.previous);
+    },
+    // Only the last of overlapping saves writes the server copy (earlier responses are stale).
+    onSuccess: (p) => {
+      if (qc.isMutating({ mutationKey: NOTIFY_EVENTS_KEY }) <= 1) qc.setQueryData(keys.preferences, p);
+    },
+  });
+  const enabled = prefs.data?.notifyEvents ?? [];
+  const toggle = (event: NotificationEvent, on: boolean) =>
+    save.mutate(EVENTS.map((e) => e.event).filter((e) => (e === event ? on : enabled.includes(e))));
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-2" aria-busy={pending > 0}>
+      <legend className="mb-2 flex items-baseline gap-2">
+        <span className="label-caps">Events</span>
+        <span className="font-mono text-meta-sm text-muted">all devices</span>
+      </legend>
+      <QueryState isPending={prefs.isPending} error={prefs.error}>
+        <Muted>
+          {enabled.length === 0
+            ? "All events off. Nothing is recorded or pushed."
+            : "Checked events push to every device and appear in the inbox. Unchecked events are dropped."}
+        </Muted>
+        <ul className="border-y border-line">
+          {EVENTS.map(({ event, label, hint }) => (
+            <li key={event} className="border-b border-line last:border-b-0">
+              <label className="flex min-h-11 cursor-pointer items-center gap-3 transition-colors duration-150 hover:bg-panel md:min-h-8">
+                <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
+                <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c)", toneClass(taskStateTone(event)))} />
+                <span className="text-small text-fg">{label}</span>
+                <span className="ml-auto font-mono text-meta text-muted">{hint}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </QueryState>
+      <ErrorText error={save.error} />
+    </fieldset>
+  );
+}
+
 function NotificationsCard() {
   const qc = useQueryClient();
   // Browser state, not server state: no polling; rechecked on focus (permission may change in system settings).
@@ -206,43 +278,50 @@ function NotificationsCard() {
   const test = useMutation({ mutationFn: sendTestPush, onSettled: refresh });
   const busy = enable.isPending || disable.isPending || test.isPending;
   const chip = state.data === undefined ? null : PUSH_CHIP[state.data];
+  const deviceId = useId();
   return (
     <Panel
       title="Notifications"
       {...(chip === null ? {} : { actions: <Chip tone={chip.tone} dot>{chip.label}</Chip> })}
     >
-      <div className="flex flex-col gap-3">
-        <Muted>Push notifications to this device when a task or external thread needs input, is done, or failed.</Muted>
-        <QueryState isPending={state.isPending} error={state.error}>
-          {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
-          {state.data === "ios-install" ? (
-            <Alert tone="plain">
-              Add to Home Screen first: Share → Add to Home Screen, then open t3-stage from the Home Screen.
-            </Alert>
-          ) : null}
-          {state.data === "blocked" ? (
-            <Alert tone="plain">Notifications are blocked for this site. Allow them in the browser or system settings, then reload.</Alert>
-          ) : null}
-          {state.data === "off" ? (
-            <div>
-              <Button variant="primary" busy={enable.isPending} disabled={busy} onClick={() => enable.mutate()}>
-                Enable notifications
-              </Button>
-            </div>
-          ) : null}
-          {state.data === "on" ? (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="primary" busy={test.isPending} disabled={busy} onClick={() => test.mutate()}>
-                Send test
-              </Button>
-              <Button busy={disable.isPending} disabled={busy} onClick={() => disable.mutate()}>
-                Disable
-              </Button>
-            </div>
-          ) : null}
-        </QueryState>
-        {test.isSuccess ? <Alert tone="plain">Test notification sent.</Alert> : null}
-        <ErrorText error={enable.error ?? disable.error ?? test.error} />
+      <div className="flex flex-col gap-4">
+        <EventFilter />
+        <section className="flex flex-col gap-3 border-t border-line pt-4" aria-labelledby={deviceId}>
+          <h3 id={deviceId} className="label-caps">
+            This device
+          </h3>
+          <Muted>Web Push to this browser for the checked events.</Muted>
+          <QueryState isPending={state.isPending} error={state.error}>
+            {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
+            {state.data === "ios-install" ? (
+              <Alert tone="plain">
+                Add to Home Screen first: Share → Add to Home Screen, then open t3-stage from the Home Screen.
+              </Alert>
+            ) : null}
+            {state.data === "blocked" ? (
+              <Alert tone="plain">Notifications are blocked for this site. Allow them in the browser or system settings, then reload.</Alert>
+            ) : null}
+            {state.data === "off" ? (
+              <div>
+                <Button variant="primary" busy={enable.isPending} disabled={busy} onClick={() => enable.mutate()}>
+                  Enable notifications
+                </Button>
+              </div>
+            ) : null}
+            {state.data === "on" ? (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="primary" busy={test.isPending} disabled={busy} onClick={() => test.mutate()}>
+                  Send test
+                </Button>
+                <Button busy={disable.isPending} disabled={busy} onClick={() => disable.mutate()}>
+                  Disable
+                </Button>
+              </div>
+            ) : null}
+          </QueryState>
+          {test.isSuccess ? <Alert tone="plain">Test notification sent.</Alert> : null}
+          <ErrorText error={enable.error ?? disable.error ?? test.error} />
+        </section>
       </div>
     </Panel>
   );

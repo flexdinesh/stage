@@ -394,7 +394,7 @@ Reusable prompt text, inserted into prompts, follow-ups and notes by typing `/` 
 
 ## Preferences
 
-New-task model defaults. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`).
+New-task model defaults and the global notification filter. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`).
 
 `ModelDefaults`:
 ```json
@@ -403,11 +403,15 @@ New-task model defaults. A new task prefills from `pinned`, else `lastUsed`, els
 `providerInstanceId` / `model` null = T3 default (set together).
 
 ### `GET /api/preferences`
-200 `{ "pinned": ModelDefaults | null, "lastUsed": ModelDefaults | null }`. `lastUsed` is written by every `POST /api/tasks` (its model fields).
+200 `{ "pinned": ModelDefaults | null, "lastUsed": ModelDefaults | null, "notifyEvents": NotificationEvent[] }`. `lastUsed` is written by every `POST /api/tasks` (its model fields). `notifyEvents` (default all: `["needs_input","failed","done"]`, in that order) is the global filter of "Notification rules".
 
 ### `PUT /api/preferences/pinned`
 Body: `ModelDefaults` (pin; `runtimeMode` / `interactionMode` default to `full-access` / `default` when empty) or `null` (unpin). Empty body 400.
 200 `Preferences`. 400 invalid enum or provider/model not set together.
+
+### `PUT /api/preferences/notifications`
+Body: `{ "events": NotificationEvent[] }` (`needs_input|failed|done`; duplicates dropped; `[]` = all off). Applies to every device.
+200 `Preferences`. 400 unknown event or missing `events`.
 
 ## Stats
 
@@ -503,6 +507,8 @@ Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `
 200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `thread:<id>` → `thread-<id>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
 
 ## Notification rules
+
+- Filter: an event not in `preferences.notifyEvents` (read when the event is sent) is dropped entirely: no inbox row (so no toast or bell entry) and no push, on any device. If the filter cannot be read, the event notifies.
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = `/sessions/<encoded-thread-id>` when a thread exists, otherwise the task URL. Other states (incl. `interrupted`) do not. Links add no events of their own.
 - External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/sessions/<encoded-thread-id>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.

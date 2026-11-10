@@ -12,6 +12,7 @@ import type {
   FollowupRequest,
   Health,
   ModelDefaults,
+  NotificationEvent,
   NotificationGroupPage,
   NotificationPage,
   PairRequest,
@@ -180,6 +181,8 @@ export const api = {
 
   preferences: () => apiFetch<Preferences>("/preferences"),
   setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),
+  setNotifyEvents: (events: NotificationEvent[]) =>
+    apiFetch<Preferences>("/preferences/notifications", { method: "PUT", body: { events } }),
 
   stats: (q: StatsQuery = {}) => apiFetch<Stats>(`/stats${toQuery({ from: q.from, to: q.to, tz: q.tz, subagents: q.subagents })}`),
 

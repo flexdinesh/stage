@@ -457,9 +457,11 @@ export interface ModelDefaults {
 }
 
 /** New task prefills from `pinned`, else `lastUsed` (the latest created task). */
+/** notifyEvents: events that notify (inbox + push) on every device; others are dropped. */
 export interface Preferences {
   pinned: ModelDefaults | null;
   lastUsed: ModelDefaults | null;
+  notifyEvents: NotificationEvent[];
 }
 
 // ---- Notifications (Web Push) ----

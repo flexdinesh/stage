@@ -376,6 +376,12 @@ The prompt (new/backlog task) and the follow-up box are drop targets: dragging f
 ### Notifications bell
 A secondary 32px button (40px on phone) in the top bar (between search and the T3 status control on laptop; before search on phone) with an authored bell icon. Unread count sits inside as a mono chip: plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone, square.
 
+### Checkbox
+16px square native checkbox: Strong Hairline border on Paper; checked fills Ink with the authored check in On-Accent; focus-visible adds a 1px Paper gap and 1px Ink ring; disabled at 55%. Used in a ruled list (Settings Notifications events): whole row is the label, 44px tall on phone (32px laptop), Bench Gray hover, checkbox, 6px square state marker, Geist label, mono Slate hint right.
+
+### Settings notifications
+One panel, two sections split by a hairline. `EVENTS · all devices`: the global event filter (Needs input, Failed, Done), each toggle saving at once (optimistic; a failed save reverts and shows a red Alert); a muted line explains that unchecked events are dropped, or reads "All events off. Nothing is recorded or pushed." `THIS DEVICE`: per-browser push enable, test and disable; the header chip shows this device's push state.
+
 ### T3 status
 A square secondary control (32px, 40px on phone) in both top bars, linking to Settings. Only the icon carries hue: an authored green check when connected, a red X when offline or the status call fails, a 6px Idle Gray square while checking. Its `aria-label` names the state. On pointer devices, hover or keyboard focus reveals a 280px details card right-aligned 4px under it: flat Paper, Strong Hairline, no shadow, a Bench Gray "T3 CONNECTION" header with the state chip, mono rows for URL, last full sync and token expiry, the last error in red (2 lines max) when present, and a muted "Click to open settings" footer. 150ms opacity fade, none with reduced motion. Touch devices never show the card; a tap goes to Settings.
 

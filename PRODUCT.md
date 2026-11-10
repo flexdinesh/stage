@@ -30,7 +30,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Queued continuations: save a prompt to resume existing B after A settles and B finishes with no pending input. Running either session continues unchanged; restarting B keeps the continuation waiting. Linear chains gate later steps on the delivered continuation's run and subsequent settlement. Failures/interruption/cancellation block; uncertain delivery requires review. Saved prompts append only A's reference. Existing backlog-task order remains separate and conflicting membership must be unlinked first.
 - Dashboard Settled (last 7 days): tasks and external T3 threads in one list, newest settle first, each with its settle time and elapsed run time.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
-- Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now.
+- Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now, global notification event filter (needs input / failed / done; unchecked events are dropped from inbox and push).
 
 ## Brand Commitments
 - Name: t3-stage (lowercase).

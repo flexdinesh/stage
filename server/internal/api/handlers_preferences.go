@@ -45,6 +45,25 @@ func (s *server) putPinned(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|done).
+func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
+	var body struct {
+		Events *[]db.TaskState `json:"events"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+		return db.Invalid("invalid JSON: %v", err)
+	}
+	if body.Events == nil {
+		return db.Invalid("events required")
+	}
+	p, err := s.Store.SetNotifyEvents(r.Context(), *body.Events)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
 func validateDefaults(d *db.ModelDefaults) error {
 	d.ProviderInstanceID = trimmedPtr(d.ProviderInstanceID)
 	d.Model = trimmedPtr(d.Model)
