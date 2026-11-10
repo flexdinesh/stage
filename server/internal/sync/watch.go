@@ -30,11 +30,11 @@ var watchStatuses = []t3.ThreadStatus{
 
 // Notifiable: entering these states notifies (docs/api.md "Notification rules").
 func Notifiable(s db.TaskState) bool {
-	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed
+	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed || s == db.StateSettled
 }
 
 // WatchThreads reads every active external thread (unsettled root threads in
-// an active status, plus those last observed running|needs_input), stores
+// an active status, plus those last observed running|needs_input|done), stores
 // the mapped state as observed_state and reports changes into a notifiable
 // state via OnThreadChange. External = not owned by a task and not a
 // subagent (forks included). The first pass after

@@ -45,7 +45,7 @@ func (s *server) putPinned(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|done).
+// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|done|settled).
 func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		Events *[]db.TaskState `json:"events"`

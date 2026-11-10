@@ -18,7 +18,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Snippets**: reusable prompt text, global or per project. Type `/` in a task prompt, follow-up or notes to pick one and insert it.
 - **Model defaults**: new tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
 - **Settings**: T3 connection status, manual pairing, sync now.
-- **Notifications**: installable PWA with Web Push for needs input, done and failed, covering tasks and threads started directly in T3 (subagents excluded). The app icon badge counts what needs input.
+- **Notifications**: installable PWA with Web Push for needs input, failed, done and settled (each toggleable in Settings), covering tasks and threads started directly in T3 (subagents excluded). The app icon badge counts what needs input.
 
 ## Deploy
 

@@ -122,19 +122,19 @@ func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 
 func TestEventSelection(t *testing.T) {
 	n := New(nil, subject, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	for _, to := range []db.TaskState{db.StateInterrupted, db.StateCancelled, db.StateSettled, db.StateRunning, db.StateLaunching, db.StateBacklog} {
+	for _, to := range []db.TaskState{db.StateInterrupted, db.StateCancelled, db.StateRunning, db.StateLaunching, db.StateBacklog} {
 		n.OnTransition(context.Background(), t3sync.Change{TaskID: 1, To: to})
 		n.OnThreadChange(context.Background(), t3sync.ThreadChange{ThreadID: "th", To: to})
 	}
 	if len(n.events) != 0 {
 		t.Fatalf("queued %d events for non-notifying states", len(n.events))
 	}
-	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateDone, db.StateFailed} {
+	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateDone, db.StateFailed, db.StateSettled} {
 		n.OnTransition(context.Background(), t3sync.Change{TaskID: 1, To: to})
 		n.OnThreadChange(context.Background(), t3sync.ThreadChange{ThreadID: "th", To: to})
 	}
-	if len(n.events) != 6 {
-		t.Fatalf("queued %d events, want 6", len(n.events))
+	if len(n.events) != 8 {
+		t.Fatalf("queued %d events, want 8", len(n.events))
 	}
 	// A full queue drops instead of blocking.
 	done := make(chan struct{})
@@ -329,14 +329,35 @@ func TestNotifyEventsFilter(t *testing.T) {
 		t.Fatalf("needs input enabled: %d notifications, %d pushes", c, r)
 	}
 
+	// Settled: off drops it; on records "Settled" for task and thread.
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateSettled}})
+	if c, r := count(), len(srv.requests()); c != 1 || r != 1 {
+		t.Fatalf("settled disabled: %d notifications, %d pushes", c, r)
+	}
+	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateSettled}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateSettled}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateSettled}})
+	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
+		t.Fatalf("settled enabled: %d notifications, %d pushes", c, r)
+	}
+	if got, err := store.ListNotifications(ctx, 2, nil); err != nil || len(got) != 2 ||
+		got[0].Event != db.StateSettled || got[1].Event != db.StateSettled {
+		t.Fatalf("settled notifications %+v %v", got, err)
+	}
+	if p, _, err := n.payload(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateSettled}}); err != nil || p.Title != "Settled" {
+		t.Fatalf("settled payload %+v %v", p, err)
+	}
+
 	// All off: nothing recorded or pushed.
 	if _, err := store.SetNotifyEvents(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateFailed, db.StateDone} {
+	for _, to := range db.NotificationEvents {
 		n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: to}})
 	}
-	if c, r := count(), len(srv.requests()); c != 1 || r != 1 {
+	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
 		t.Fatalf("all disabled: %d notifications, %d pushes", c, r)
 	}
 }

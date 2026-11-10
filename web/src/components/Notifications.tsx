@@ -361,7 +361,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
       <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
         {items.length === 0 ? (
-          <Muted>No notifications in the last 30 days. Needs input, done and failed events land here.</Muted>
+          <Muted>No notifications in the last 30 days. Needs input, failed, done and settled events land here.</Muted>
         ) : (
           <div className="flex flex-col gap-3.5">
             {groupByDay(items).map((g) => (

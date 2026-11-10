@@ -26,7 +26,7 @@ type Preferences struct {
 }
 
 // NotificationEvents: the states that can notify, in display order.
-var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, StateDone}
+var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, StateDone, StateSettled}
 
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 	var p Preferences
@@ -45,7 +45,7 @@ func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Preferences, error) {
 	for _, e := range events {
 		if !slices.Contains(NotificationEvents, e) {
-			return Preferences{}, Invalid("invalid event %q (want needs_input, failed or done)", e)
+			return Preferences{}, Invalid("invalid event %q (want needs_input, failed, done or settled)", e)
 		}
 	}
 	stored := make([]string, 0, len(events))

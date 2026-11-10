@@ -1272,11 +1272,11 @@ func TestPreferences(t *testing.T) {
 	}
 
 	// Notification filter: default all; set; validate.
-	if len(p.NotifyEvents) != 3 {
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,done,settled" {
 		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
 	}
-	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"done", "needs_input"}}, 200, &p)
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,done" || p.LastUsed == nil {
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"settled", "done", "needs_input"}}, 200, &p)
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,done,settled" || p.LastUsed == nil {
 		t.Fatalf("notifyEvents %+v", p)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)

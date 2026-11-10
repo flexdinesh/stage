@@ -184,6 +184,13 @@ func TestWatchThreads(t *testing.T) {
 	pass(change{ext, "needs_input", db.StateDone}, change{extNeeds, "needs_input", db.StateFailed})
 	pass() // stable
 
+	// done → settled notifies (done stays watched until settled).
+	if err := fake.SetThread(ext, func(d *t3.ThreadDetail) { d.Settled = true }); err != nil {
+		t.Fatal(err)
+	}
+	pass(change{ext, "done", db.StateSettled})
+	pass() // settled: no longer watched
+
 	// A thread created before start, first seen now: recorded silently.
 	needInput(oldIdle)
 	pass()

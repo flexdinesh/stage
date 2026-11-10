@@ -593,7 +593,7 @@ export interface Badge {
 // ---- Notifications inbox ----
 
 /** States a notification is sent for. */
-export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed">;
+export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled">;
 
 export interface Notification {
   id: number;

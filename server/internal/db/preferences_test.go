@@ -14,7 +14,7 @@ func TestNotifyEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.StateDone}
+	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.StateDone, db.StateSettled}
 	if !slices.Equal(p.NotifyEvents, all) {
 		t.Fatalf("default %v, want all", p.NotifyEvents)
 	}
