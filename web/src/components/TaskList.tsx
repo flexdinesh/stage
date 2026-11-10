@@ -112,6 +112,9 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
         {showProject ? (
           <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
         ) : null}
+        <span title={`Task #${task.id}`} className="mr-1.5 font-mono text-meta whitespace-nowrap text-muted tabular">
+          #{task.id}
+        </span>
         <Link to={`/tasks/${task.id}`} className="text-body font-medium break-words hover:underline">
           {task.title}
         </Link>
