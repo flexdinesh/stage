@@ -137,12 +137,13 @@ SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
 	return n, err
 }
 
-// WatchedThreadIDs: external non-subagent threads the watcher last saw running or
-// needing input (re-read until they leave those states).
+// WatchedThreadIDs: external non-subagent threads the watcher last saw running,
+// needing input or done (re-read until they leave those states; done until
+// settled, so settling notifies).
 func (s *Store) WatchedThreadIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT th.t3_thread_id FROM threads th
-WHERE (th.observed_state IN ('running', 'needs_input') OR (`+threadStateSQL+`) IN ('running','needs_input'))
+WHERE (th.observed_state IN ('running', 'needs_input', 'done') OR (`+threadStateSQL+`) IN ('running','needs_input'))
   AND th.relationship IS DISTINCT FROM 'subagent'
 ORDER BY th.created_at`)
 	if err != nil {

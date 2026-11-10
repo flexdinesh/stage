@@ -492,14 +492,14 @@ New-task model defaults and the global notification filter. A new task prefills 
 `providerInstanceId` / `model` null = T3 default (set together).
 
 ### `GET /api/preferences`
-200 `{ "pinned": ModelDefaults | null, "lastUsed": ModelDefaults | null, "notifyEvents": NotificationEvent[] }`. `lastUsed` is written by every `POST /api/tasks` (its model fields). `notifyEvents` (default all: `["needs_input","failed","done"]`, in that order) is the global filter of "Notification rules".
+200 `{ "pinned": ModelDefaults | null, "lastUsed": ModelDefaults | null, "notifyEvents": NotificationEvent[] }`. `lastUsed` is written by every `POST /api/tasks` (its model fields). `notifyEvents` (default all: `["needs_input","failed","done","settled"]`, in that order) is the global filter of "Notification rules".
 
 ### `PUT /api/preferences/pinned`
 Body: `ModelDefaults` (pin; `runtimeMode` / `interactionMode` default to `full-access` / `default` when empty) or `null` (unpin). Empty body 400.
 200 `Preferences`. 400 invalid enum or provider/model not set together.
 
 ### `PUT /api/preferences/notifications`
-Body: `{ "events": NotificationEvent[] }` (`needs_input|failed|done`; duplicates dropped; `[]` = all off). Applies to every device.
+Body: `{ "events": NotificationEvent[] }` (`needs_input|failed|done|settled`; duplicates dropped; `[]` = all off). Applies to every device.
 200 `Preferences`. 400 unknown event or missing `events`.
 
 ## Stats
@@ -573,7 +573,7 @@ Every notification the notifier sends is stored first (also when no browser is s
   "t3DeepLink": "t3code://threads/env-1/thread-abc"
 }
 ```
-`event`: `needs_input|done|failed`. `taskId` null for external threads (or once the task is deleted). `title` / `projectTitle` are snapshots at send time. `currentState` is live: the task's state, or for an external thread `settled` when settled, else its `observedState`; null when unknown.
+`event`: `needs_input|done|failed|settled`. `taskId` null for external threads (or once the task is deleted). `title` / `projectTitle` are snapshots at send time. `currentState` is live: the task's state, or for an external thread `settled` when settled, else its `observedState`; null when unknown.
 
 Task notifications retain `/tasks/<id>` in their stored `url` to preserve grouped identity after restart/deletion. Push payloads and in-app navigation open `/sessions/<encoded-thread-id>` when a thread exists; tasks without a thread retain the task destination. External entries store their session URL.
 
@@ -587,7 +587,7 @@ Query: `limit` (default 50, max 200), `cursor` (opaque `nextCursor` from the pre
 
 Groups whose current state is `needs_input` come first, then other groups; each section is newest-event-ID first. Aggregation precedes pagination, so repeated events cannot consume a page or cause older copies of a group to reappear. `latestId` is the global newest event ID captured before listing, independent of priority order; use it for read-on-open, then the newest observed `latestId` for arrivals while the drawer is open. Events inserted after that boundary remain unread. Unread markers captured on open stay visible until close. The bell still counts unread events.
 
-Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `done`, and `failed` notifications, not every lifecycle transition. Unknown current state displays as unavailable rather than falling back to an old event.
+Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `done`, `failed`, and `settled` notifications, not every lifecycle transition. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
 Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `{ "groups": string[] }` (1 to 20 group keys, e.g. `task:12`, `thread:<t3ThreadId>`): marks every unread entry in those groups read. 204. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
@@ -599,8 +599,8 @@ Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `
 
 - Filter: an event not in `preferences.notifyEvents` (read when the event is sent) is dropped entirely: no inbox row (so no toast or bell entry) and no push, on any device. If the filter cannot be read, the event notifies.
 
-- Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = `/sessions/<encoded-thread-id>` when a thread exists, otherwise the task URL. Other states (incl. `interrupted`) do not. Links add no events of their own.
-- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/sessions/<encoded-thread-id>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
+- Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done"), `failed` ("Failed") or `settled` ("Settled") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = `/sessions/<encoded-thread-id>` when a thread exists, otherwise the task URL. Other states (incl. `interrupted`) do not. Links add no events of their own.
+- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input|done` (done until settled), and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed|settled` notifies with the same titles; `url` = `/sessions/<encoded-thread-id>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
 - External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
 - External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
 - External settled threads (Dashboard Settled group, `GET /api/threads?settledFrom=<iso>`): normalized state `settled`, `settledAt >= settledFrom`, not subagent, not owned by a task; forks and archived threads included.

@@ -209,6 +209,7 @@ const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }
   { event: "needs_input", label: "Needs input", hint: "waits on you" },
   { event: "failed", label: "Failed", hint: "run failed" },
   { event: "done", label: "Done", hint: "run finished" },
+  { event: "settled", label: "Settled", hint: "settled in T3" },
 ];
 
 const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];

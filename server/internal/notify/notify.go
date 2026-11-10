@@ -99,7 +99,7 @@ func New(store *db.Store, subject string, log *slog.Logger) *Notifier {
 }
 
 // OnTransition is the sync.Service task hook: transitions into needs_input,
-// done or failed are queued.
+// done, failed or settled are queued.
 func (n *Notifier) OnTransition(_ context.Context, c t3sync.Change) {
 	if t3sync.Notifiable(c.To) {
 		n.enqueue(event{task: &c})
@@ -175,6 +175,7 @@ var titles = map[db.TaskState]string{
 	db.StateNeedsInput: "Needs input",
 	db.StateDone:       "Done",
 	db.StateFailed:     "Failed",
+	db.StateSettled:    "Settled",
 }
 
 // payload builds the push payload and its inbox record (lookups at send time).
