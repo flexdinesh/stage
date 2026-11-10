@@ -115,6 +115,8 @@ type Task struct {
 	LaunchedAt         *time.Time       `json:"launchedAt"`
 	FinishedAt         *time.Time       `json:"finishedAt"`
 	SettledAt          *time.Time       `json:"settledAt"`
+	RunStartedAt       *time.Time       `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
+	RunEndedAt         *time.Time       `json:"runEndedAt"`
 	CreatedAt          time.Time        `json:"createdAt"`
 	UpdatedAt          time.Time        `json:"updatedAt"`
 	Attachments        []Attachment     `json:"attachments"` // images, upload order
@@ -143,6 +145,8 @@ type Thread struct {
 	Archived            bool       `json:"archived"`
 	ActiveRunID         *string    `json:"activeRunId"`
 	LatestRunID         *string    `json:"latestRunId"`
+	RunStartedAt        *time.Time `json:"runStartedAt"` // elapsed run span (RunSpan)
+	RunEndedAt          *time.Time `json:"runEndedAt"`
 	Settled             bool       `json:"settled"`
 	SettledAt           *time.Time `json:"settledAt"`
 	PendingRequestCount int        `json:"pendingRequestCount"`

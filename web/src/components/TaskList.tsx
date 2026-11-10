@@ -4,7 +4,8 @@ import { Link } from "react-router";
 import { api } from "../api/client.ts";
 import { useInvalidateWork } from "../api/queries.ts";
 import type { Task, Thread } from "../api/types.ts";
-import { dateTime, modelText, relativeTime } from "../lib/format.ts";
+import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
+import type { SettledItem } from "../lib/settled.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
 import { IconChainLink } from "./icons.tsx";
@@ -71,6 +72,31 @@ function ProjectCell({ projectId, title }: { projectId: number | null; title: st
   );
 }
 
+/** "settled 3h ago" (exact time on hover), then "ran 35m" when the run span is known. */
+function SettledMeta({
+  settledAt,
+  runStartedAt,
+  runEndedAt,
+}: {
+  settledAt: string;
+  runStartedAt: string | null;
+  runEndedAt: string | null;
+}) {
+  const ran = duration(runStartedAt, runEndedAt);
+  return (
+    <>
+      <span title={`Settled ${dateTime(settledAt)}`} className="tabular">
+        settled {relativeTime(settledAt)}
+      </span>
+      {ran === null ? null : (
+        <span title={`Ran ${dateTime(runStartedAt)} to ${dateTime(runEndedAt)}`} className="tabular">
+          ran {ran}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** A link chip: "after #X" while waiting on a predecessor, else "then #Y" when something runs after it. */
 function linkChip(task: Task): { to: number; label: string; title: string } | null {
   if (isWaiting(task) && task.afterTaskId !== null)
@@ -125,9 +151,13 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
             </Link>
           )}
           <span>{modelText(task.model, task.modelOptions)}</span>
-          <span title={dateTime(since)} className="tabular">
-            {relativeTime(since)}
-          </span>
+          {task.state === "settled" && task.settledAt !== null ? (
+            <SettledMeta settledAt={task.settledAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
+          ) : (
+            <span title={dateTime(since)} className="tabular">
+              {relativeTime(since)}
+            </span>
+          )}
           {chip === null ? null : (
             <Link
               to={`/tasks/${chip.to}`}
@@ -186,10 +216,10 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
 }
 
 /** Observed state of an external thread the Dashboard lists. */
-export type ExternalThreadState = "needs_input" | "running";
+export type ExternalThreadState = "needs_input" | "running" | "settled";
 
 /**
- * External (non-task) threads needing input or running, styled as TaskRows in that state with the project
+ * External (non-task) threads needing input, running or settled, styled as TaskRows in that state with the project
  * column (Dashboard only). Title opens History filtered to it.
  */
 export function ExternalThreadRows({ threads, state }: { threads: Thread[]; state: ExternalThreadState }) {
@@ -198,6 +228,27 @@ export function ExternalThreadRows({ threads, state }: { threads: Thread[]; stat
       {threads.map((t) => (
         <li key={t.t3ThreadId} className="border-b border-line last:border-b-0">
           <ExternalThreadRow thread={t} state={state} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Dashboard Settled group: tasks and external threads in one list (already ordered by settle time). */
+export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyText: string }) {
+  if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  return (
+    <ul>
+      {items.map((item) => (
+        <li
+          key={item.kind === "task" ? `task-${item.task.id}` : `thread-${item.thread.t3ThreadId}`}
+          className="border-b border-line last:border-b-0"
+        >
+          {item.kind === "task" ? (
+            <TaskRow task={item.task} showProject />
+          ) : (
+            <ExternalThreadRow thread={item.thread} state="settled" />
+          )}
         </li>
       ))}
     </ul>
@@ -227,9 +278,13 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
           {thread.title}
         </Link>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
-          <span title={dateTime(thread.updatedAt)} className="tabular">
-            {relativeTime(thread.updatedAt)}
-          </span>
+          {state === "settled" && thread.settledAt !== null ? (
+            <SettledMeta settledAt={thread.settledAt} runStartedAt={thread.runStartedAt} runEndedAt={thread.runEndedAt} />
+          ) : (
+            <span title={dateTime(thread.updatedAt)} className="tabular">
+              {relativeTime(thread.updatedAt)}
+            </span>
+          )}
           <span>external thread</span>
         </div>
       </div>

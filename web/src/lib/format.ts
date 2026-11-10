@@ -22,6 +22,21 @@ export function relativeTime(iso: string | null, now: number = Date.now()): stri
   return "now";
 }
 
+/** Compact elapsed time between two instants: "45s", "8m", "1h 12m", "2d 3h". Null when either is missing or invalid. */
+export function duration(fromIso: string | null, toIso: string | null): string | null {
+  if (fromIso === null || toIso === null) return null;
+  const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return null;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return h % 24 === 0 ? `${d}d` : `${d}d ${h % 24}h`;
+}
+
 export function dateTime(iso: string | null): string {
   if (iso === null) return "-";
   const d = new Date(iso);

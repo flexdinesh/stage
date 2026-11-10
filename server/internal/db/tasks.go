@@ -17,7 +17,7 @@ const taskSelect = `
 SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
   t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, t.created_at, t.updated_at, th.link,
+  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, t.created_at, t.updated_at, th.link,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
@@ -30,7 +30,7 @@ func scanTask(row pgx.Row) (Task, error) {
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
 		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
-		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.CreatedAt,
+		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)

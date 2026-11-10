@@ -160,6 +160,7 @@ export const api = {
         subagents: q.subagents,
         needsInput: q.needsInput,
         running: q.running,
+        settledFrom: q.settledFrom,
         limit: q.limit,
         offset: q.offset,
       }, ["state"])}`,

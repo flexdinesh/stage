@@ -268,6 +268,65 @@ func TestUpsertThreadsKeepsDetailColumns(t *testing.T) {
 	}
 }
 
+func TestRunSpan(t *testing.T) {
+	base := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
+	at := func(m int) *time.Time { v := base.Add(time.Duration(m) * time.Minute); return &v }
+	run := func(req int, start, done *time.Time) t3.Run {
+		return t3.Run{RequestedAt: *at(req), StartedAt: start, CompletedAt: done}
+	}
+	created := base.Add(-time.Minute)
+	cases := []struct {
+		name       string
+		d          t3.ThreadDetail
+		start, end *time.Time
+	}{
+		{"no runs", t3.ThreadDetail{}, nil, nil},
+		{"one run", t3.ThreadDetail{RunCount: 1, RecentRuns: []t3.Run{run(0, at(1), at(5))}}, at(1), at(5)},
+		{"first start to last completion", t3.ThreadDetail{RunCount: 3, RecentRuns: []t3.Run{
+			run(30, at(30), at(35)), run(20, nil, at(21)), run(0, at(1), at(2)),
+		}}, at(1), at(35)},
+		{"oldest never started uses requestedAt", t3.ThreadDetail{RunCount: 2, RecentRuns: []t3.Run{
+			run(10, at(10), at(12)), run(0, nil, at(1)),
+		}}, at(0), at(12)},
+		{"newest incomplete", t3.ThreadDetail{RunCount: 1, RecentRuns: []t3.Run{run(0, at(1), nil)}}, at(1), nil},
+		{"older runs not read fall back to createdAt", t3.ThreadDetail{
+			Thread: t3.Thread{CreatedAt: created}, RunCount: 60, RecentRuns: []t3.Run{run(30, at(30), at(40))},
+		}, &created, at(40)},
+	}
+	eq := func(a, b *time.Time) bool { return (a == nil) == (b == nil) && (a == nil || a.Equal(*b)) }
+	for _, c := range cases {
+		start, end := db.RunSpan(c.d)
+		if !eq(start, c.start) || !eq(end, c.end) {
+			t.Errorf("%s: span %v..%v, want %v..%v", c.name, start, end, c.start, c.end)
+		}
+	}
+}
+
+func TestUpsertThreadDetailStoresRunSpan(t *testing.T) {
+	s, ctx := setup(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	started, done := now.Add(-10*time.Minute), now.Add(-2*time.Minute)
+	d := t3.ThreadDetail{
+		Thread:     t3.Thread{ThreadID: "th-span", ProjectID: "proj-1", Title: "x", Status: t3.StatusCompleted, CreatedAt: started, UpdatedAt: now},
+		RunCount:   1,
+		RecentRuns: []t3.Run{{RunID: "r1", Status: t3.StatusCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &done}},
+	}
+	if err := s.UpsertThreadDetail(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	// A list upsert leaves the span alone.
+	if err := s.UpsertThreads(ctx, []t3.Thread{d.Thread}); err != nil {
+		t.Fatal(err)
+	}
+	th, err := s.GetThread(ctx, "th-span")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.RunStartedAt == nil || !th.RunStartedAt.Equal(started) || th.RunEndedAt == nil || !th.RunEndedAt.Equal(done) {
+		t.Fatalf("span %v..%v, want %v..%v", th.RunStartedAt, th.RunEndedAt, started, done)
+	}
+}
+
 func TestUpsertT3ProjectsFollowsT3(t *testing.T) {
 	s, ctx := setup(t)
 	upsert := func(ps ...t3.Project) int {

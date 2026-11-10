@@ -177,6 +177,8 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
+  "runStartedAt": null,
+  "runEndedAt": null,
   "createdAt": "2026-11-08T09:59:00Z",
   "updatedAt": "2026-11-08T10:00:00Z"
 }
@@ -186,6 +188,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
+- `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 
 `TaskEvent`:
 ```json
@@ -278,6 +281,8 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "status": "completed",
   "settled": false,
   "settledAt": null,
+  "runStartedAt": "2026-11-08T10:00:00Z",
+  "runEndedAt": "2026-11-08T10:01:00Z",
   "pendingRequestCount": 0,
   "providerInstanceId": "claude",
   "model": "claude-haiku-5-5",
@@ -297,10 +302,10 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "syncedAt": "2026-11-08T10:01:05Z"
 }
 ```
-`projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
+`projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `runStartedAt` / `runEndedAt`: elapsed run span from the last detail read (`t3_thread_read` recentRuns, up to 50): the oldest run's `startedAt` (`requestedAt` if it never started; thread `createdAt` when `runCount` exceeds the runs read) to the newest run's `completedAt`; null without runs, `runEndedAt` null while the newest run is incomplete. Full sync reads every root thread, so subagents have no span. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 ### `GET /api/threads`
-Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `state` (repeatable normalized TaskState), `active` (`1|true`: unarchived, unsettled running/needs-input sessions across origins, no implicit date cutoff), `sort` (`activity`: updatedAt desc; omitted: createdAt desc), `parent` (direct children of this T3 thread ID), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
+Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `state` (repeatable normalized TaskState), `active` (`1|true`: unarchived, unsettled running/needs-input sessions across origins, no implicit date cutoff), `sort` (`activity`: updatedAt desc; omitted: createdAt desc), `parent` (direct children of this T3 thread ID), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `settledFrom` (ISO date or datetime: only external settled threads with `settledAt >= settledFrom`, ordered by `settledAt` desc, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }`; `total` = matches before limit/offset. Thread also includes `state`, `archived`, `activeRunId` and `latestRunId`. Session state follows live thread metadata independently of a legacy task's frozen state. Pending input, active runs and failed/interrupted/cancelled runs outrank a stale settled flag.
 
 ### `GET /api/threads/:id`
@@ -503,6 +508,7 @@ Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `
 - External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input`, and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed` notifies with the same titles; `url` = `/sessions/<encoded-thread-id>`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
 - External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
 - External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
+- External settled threads (Dashboard Settled group, `GET /api/threads?settledFrom=<iso>`): normalized state `settled`, `settledAt >= settledFrom`, not subagent, not owned by a task; forks and archived threads included.
 
 ## State mapping (thread → task), pure function
 
