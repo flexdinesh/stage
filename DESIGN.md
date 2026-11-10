@@ -275,7 +275,7 @@ A single centered column, max 1240px, with 24px side gutters on laptop and 12px 
 
 Pages stack: PageHeader (H1, `//` meta line, actions right-aligned, 16px below), then panels separated by 14px. The Dashboard puts a one-row stat strip (16px below the header) above the state groups in fixed order: Needs input, Running, Completed, Failed, Backlog. Consecutive empty groups collapse into one ruled list with the label left and the empty sentence right. Detail pages split at 1024px into a fluid main column and a 340px side column (300px on History).
 
-Rows are grids: 118px state column, fluid title, optional run order chip ("after #12" or "then #14"), right-aligned actions on laptop; on phone the title leads, the state chip floats right and actions wrap below. Spacing steps are 4, 8, 10, 12, 14, 16, 24px.
+Rows are grids: 118px state column, fluid title (task rows lead it with the task number), optional run order chip ("after #12" or "then #14"), right-aligned actions on laptop; on phone the title leads, the state chip floats right and actions wrap below. Spacing steps are 4, 8, 10, 12, 14, 16, 24px.
 
 ### Named Rules
 **The Ruled List Rule.** One bordered panel per state or concern, rows separated by hairlines. Never a grid of cards.
@@ -352,7 +352,7 @@ A downward pull moves page content with increasing resistance, bounded below 112
 One bordered row of state counts that doubles as the Dashboard filter (`?state=`). Each cell shows a square tone marker (only when the count is non-zero), a bold tabular count and a mono label; zero counts go Slate. The selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. Laptop cells sit left with a "click a count to filter" hint right; phone cells split the width evenly with short labels. The last group, Settled (last 7 days), renders collapsed behind a chevron header (`aria-expanded`); filtering to it expands it.
 
 ### Task row (signature)
-State chip, row title with a mono meta line (project, model, relative time, tags), optional run order chip, and right-aligned small actions. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.
+State chip, row title with a mono meta line (project, model, relative time, tags), optional run order chip, and right-aligned small actions. The task number leads the title as an unlinked mono 12px Slate tabular `#51` (6px gap, never wrapped apart), so run order chips ("then #55") read against the rows they name; it sits outside the title link so the hover underline stays on the title. External thread rows have no number. Needs-input rows take the One Yellow Edge and a primary Open in T3. Last errors print as a truncated red mono line under the title.
 
 On the Dashboard (every state group, external needs-input threads included) the project gets its own column: laptop rows put a fixed 150px project cell right after the 118px state chip (mono 12px, Ink Text, medium weight, linked, truncated with the full name in `title`) so project names align down the whole page, and the project leaves the meta line. Phone rows print the project as a mono 12px Ink Text line above the title. The column stays when the Dashboard is filtered to one project; Project detail rows keep the project in the meta line.
 
