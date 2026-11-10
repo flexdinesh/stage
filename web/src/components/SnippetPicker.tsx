@@ -2,6 +2,7 @@ import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type Co
 import { createPortal } from "react-dom";
 import { useProjects, useSnippets } from "../api/queries.ts";
 import type { Snippet } from "../api/types.ts";
+import { anchorBox, anchorRoom, type AnchorInput } from "../lib/snippet-placement.ts";
 import { findTrigger, matchSnippets, snippetsFor } from "../lib/snippets.ts";
 import { IconClose } from "./icons.tsx";
 import { Button, Chip, Kbd, Textarea, cx } from "./ui.tsx";
@@ -59,26 +60,34 @@ const PICKER_WIDTH = 360;
 const GAP = 4;
 const EDGE = 8;
 
-type Placement =
-  /** Laptop: fixed box under (or above) the caret. */
-  | { mode: "caret"; style: CSSProperties }
-  /** Phone: frame matching the visual viewport; the tray sits at its bottom, right above the on-screen keyboard. */
-  | { mode: "tray"; frame: CSSProperties; keyboard: boolean };
+/** Fixed box for the picker; `phone` adds the Close button. */
+type Placement = { phone: boolean; style: CSSProperties };
 
-/** Laptop: under the caret (flips above near the bottom). Phone: tray docked to the bottom of the visible area. */
-function pickerPlacement(el: HTMLTextAreaElement, index: number): Placement {
+const isPhone = () => !window.matchMedia("(min-width: 768px)").matches;
+
+/** Phone geometry of the `/` line, the field and the visible area (the visual viewport shrinks above the keyboard). */
+function anchorInput(el: HTMLTextAreaElement, index: number): AnchorInput {
+  const rect = el.getBoundingClientRect();
+  const c = caretOffset(el, index);
+  const lineTop = rect.top + c.top - el.scrollTop;
   const vv = window.visualViewport;
-  if (!window.matchMedia("(min-width: 768px)").matches) {
-    // Fixed boxes are laid out against the layout viewport; the keyboard shrinks and shifts the visual one (iOS).
-    const top = vv?.offsetTop ?? 0;
-    const height = vv?.height ?? window.innerHeight;
-    const layoutHeight = document.documentElement.clientHeight;
-    return {
-      mode: "tray",
-      frame: { left: vv?.offsetLeft ?? 0, top, width: vv?.width ?? window.innerWidth, height },
-      keyboard: top + height < layoutHeight - 1,
-    };
-  }
+  const viewTop = vv?.offsetTop ?? 0;
+  const container = scrollParent(el);
+  return {
+    lineTop,
+    lineBottom: lineTop + c.height,
+    fieldLeft: rect.left,
+    fieldWidth: rect.width,
+    viewTop,
+    viewBottom: viewTop + (vv?.height ?? window.innerHeight),
+    containerTop: container === null || container === document.scrollingElement ? viewTop : container.getBoundingClientRect().top,
+  };
+}
+
+/** Laptop: under the caret (flips above near the bottom). Phone: under the `/` line, never flipped. */
+function pickerPlacement(el: HTMLTextAreaElement, index: number): Placement {
+  if (isPhone()) return { phone: true, style: anchorBox(anchorInput(el, index)) };
+  const vv = window.visualViewport;
   const rect = el.getBoundingClientRect();
   const viewH = vv?.height ?? window.innerHeight;
   const c = caretOffset(el, index);
@@ -90,9 +99,9 @@ function pickerPlacement(el: HTMLTextAreaElement, index: number): Placement {
   const spaceBelow = viewH - below - EDGE;
   const spaceAbove = above - EDGE;
   if (spaceBelow < 240 && spaceAbove > spaceBelow) {
-    return { mode: "caret", style: { left, width, bottom: window.innerHeight - above, maxHeight: spaceAbove } };
+    return { phone: false, style: { left, width, bottom: window.innerHeight - above, maxHeight: spaceAbove } };
   }
-  return { mode: "caret", style: { left, width, top: below, maxHeight: spaceBelow } };
+  return { phone: false, style: { left, width, top: below, maxHeight: spaceBelow } };
 }
 
 /** Nearest ancestor that scrolls vertically (the drawer body), else the document. */
@@ -165,6 +174,11 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
       if (e.target instanceof Node && pickerRef.current?.contains(e.target)) return;
       update();
     };
+    // Phone: make room under the `/` line once per open; after that the panel only follows the line.
+    if (isPhone()) {
+      const room = anchorRoom(anchorInput(node, triggerStart));
+      if (room > 0) scrollParent(node)?.scrollBy({ top: room });
+    }
     update();
     const vv = window.visualViewport;
     window.addEventListener("scroll", onScroll, true);
@@ -179,29 +193,18 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
     };
   }, [open, triggerStart, pickerRef]);
 
-  const mode = pos?.mode ?? null;
-
-  // Phone: keep the caret line visible above the tray by scrolling the form, once per open and as the tray grows.
-  useLayoutEffect(() => {
-    const node = el.current;
-    const tray = pickerRef.current;
-    if (mode !== "tray" || matches.length === 0 || node === null || tray === null || triggerStart === null) return;
-    const c = caretOffset(node, triggerStart);
-    const caretBottom = node.getBoundingClientRect().top + c.top - node.scrollTop + c.height;
-    const overlap = caretBottom + EDGE - tray.getBoundingClientRect().top;
-    if (overlap > 0) scrollParent(node)?.scrollBy({ top: overlap });
-  }, [mode, triggerStart, matches.length, pickerRef]);
+  const placed = pos !== null;
 
   // Keep the active row in view when it changes (keyboard), without touching the list's scroll otherwise.
   useLayoutEffect(() => {
     const box = listRef.current;
     const row = box?.children[index];
-    if (mode === null || box === null || !(row instanceof HTMLElement)) return;
+    if (!placed || box === null || !(row instanceof HTMLElement)) return;
     if (row.offsetTop < box.scrollTop) box.scrollTop = row.offsetTop;
     else if (row.offsetTop + row.offsetHeight > box.scrollTop + box.clientHeight) {
       box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight;
     }
-  }, [index, mode]);
+  }, [index, placed]);
 
   const syncCaret = (node: HTMLTextAreaElement) => {
     const at = node.selectionStart === node.selectionEnd ? node.selectionStart : null;
@@ -254,88 +257,72 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
 
   const optionId = (s: Snippet) => `${listId}-${s.id}`;
 
-  const renderPicker = (placement: Placement) => {
-    const tray = placement.mode === "tray";
-    const panel = (
+  const renderPicker = (placement: Placement) => (
+    <div
+      ref={pickerRef}
+      style={placement.style}
+      className="fixed z-[60] flex min-h-0 flex-col border border-line-strong bg-surface"
+      // Keep focus (and the caret, and the phone keyboard) in the textarea while picking.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel pr-1 pl-3 md:h-7 md:pr-3">
+        <span className="label-caps text-fg">Snippets</span>
+        <span className="font-mono text-meta-sm text-muted tabular-nums">{matches.length}</span>
+        {placement.phone && trigger !== null ? (
+          <Button
+            variant="ghost"
+            small
+            className="ml-auto"
+            aria-label="Close snippets"
+            onClick={() => setDismissed(trigger.start)}
+          >
+            <IconClose />
+          </Button>
+        ) : null}
+      </div>
       <div
-        ref={pickerRef}
-        style={tray ? undefined : placement.style}
-        className={cx(
-          "flex min-h-0 flex-col bg-surface",
-          tray
-            ? "pointer-events-auto max-h-[55%] border-t border-line-strong pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
-            : "fixed z-[60] border border-line-strong",
-          tray && !placement.keyboard && "pb-[env(safe-area-inset-bottom)]",
-        )}
-        // Keep focus (and the caret, and the phone keyboard) in the textarea while picking.
-        onMouseDown={(e) => e.preventDefault()}
+        ref={listRef}
+        id={listId}
+        role="listbox"
+        aria-label="Snippets"
+        className="relative min-h-0 flex-1 overscroll-contain overflow-y-auto py-1"
       >
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel pr-1 pl-3 md:h-7 md:pr-3">
-          <span className="label-caps text-fg">Snippets</span>
-          <span className="font-mono text-meta-sm text-muted tabular-nums">{matches.length}</span>
-          {tray && trigger !== null ? (
-            <Button
-              variant="ghost"
-              small
-              className="ml-auto"
-              aria-label="Close snippets"
-              onClick={() => setDismissed(trigger.start)}
-            >
-              <IconClose />
-            </Button>
-          ) : null}
-        </div>
-        <div
-          ref={listRef}
-          id={listId}
-          role="listbox"
-          aria-label="Snippets"
-          className="relative min-h-0 flex-1 overscroll-contain overflow-y-auto py-1"
-        >
-          {matches.map((s, i) => (
-            <div
-              key={s.id}
-              id={optionId(s)}
-              role="option"
-              aria-selected={i === index}
-              onMouseMove={() => setActive(i)}
-              onClick={() => insert(s)}
-              className={cx(
-                "flex cursor-pointer flex-col gap-0.5 px-3 py-2.5 md:py-1.5",
-                i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
-              )}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 truncate text-ui text-fg">{s.name}</span>
-                <Chip className="ml-auto max-w-[45%] shrink-0 truncate">
-                  {s.projectId === null ? "global" : (projectTitle.get(s.projectId) ?? `project ${s.projectId}`)}
-                </Chip>
-              </span>
-              <span className="truncate font-mono text-meta text-muted">{s.body}</span>
-            </div>
-          ))}
-        </div>
-        <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
-          <span>
-            <Kbd>↑↓</Kbd> move
-          </span>
-          <span>
-            <Kbd>↵</Kbd> insert
-          </span>
-          <span>
-            <Kbd>Esc</Kbd> close
-          </span>
-        </div>
+        {matches.map((s, i) => (
+          <div
+            key={s.id}
+            id={optionId(s)}
+            role="option"
+            aria-selected={i === index}
+            onMouseMove={() => setActive(i)}
+            onClick={() => insert(s)}
+            className={cx(
+              "flex cursor-pointer flex-col gap-0.5 px-3 py-2.5 md:py-1.5",
+              i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-ui text-fg">{s.name}</span>
+              <Chip className="ml-auto max-w-[45%] shrink-0 truncate">
+                {s.projectId === null ? "global" : (projectTitle.get(s.projectId) ?? `project ${s.projectId}`)}
+              </Chip>
+            </span>
+            <span className="truncate font-mono text-meta text-muted">{s.body}</span>
+          </div>
+        ))}
       </div>
-    );
-    return tray ? (
-      <div style={placement.frame} className="pointer-events-none fixed z-[60] flex flex-col justify-end">
-        {panel}
+      <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
+        <span>
+          <Kbd>↑↓</Kbd> move
+        </span>
+        <span>
+          <Kbd>↵</Kbd> insert
+        </span>
+        <span>
+          <Kbd>Esc</Kbd> close
+        </span>
       </div>
-    ) : (
-      panel
-    );
-  };
+    </div>
+  );
 
   return (
     <>
