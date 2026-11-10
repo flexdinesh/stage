@@ -27,9 +27,13 @@ const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
   { to: "/sessions", label: "Sessions" },
+  { to: "/history", label: "History" },
   { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
+
+/** Phone More drawer: the laptop nav items the bottom tabs leave out. */
+const MORE = NAV.filter((item) => item.to === "/history" || item.to === "/settings");
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -288,7 +292,7 @@ function Shell() {
         <Drawer title="More" onClose={() => setMore(false)}>
           <div className="flex flex-col gap-5">
             <nav className="flex flex-col border border-line" aria-label="More">
-              {[{ to: "/history", label: "History" }, ...NAV.slice(4)].map((item) => (
+              {MORE.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useNeedsInputThreads, useProjects, useRunningThreads, useTasks } from "../api/queries.ts";
+import { useNeedsInputThreads, useProjects, useRunningThreads, useSettledThreads, useTasks } from "../api/queries.ts";
 import type { Task, TaskState, Thread } from "../api/types.ts";
 import { PendingContinuationsPanel } from "../components/Continuations.tsx";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { ExternalThreadRows, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
+import { ExternalThreadRows, SettledRows, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
+import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
 type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
@@ -94,9 +95,11 @@ function settledSince(): string {
 }
 const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_input"];
 
-/** External (non-task) threads a group lists after its tasks. */
+/** External (non-task) threads a group lists with its tasks. */
 interface ExternalGroup {
   threads: Thread[];
+  /** Server match count (may exceed `threads` when the page limit is hit). */
+  total: number;
   error: unknown;
   state: ExternalThreadState;
 }
@@ -201,16 +204,33 @@ export function DashboardPage() {
   const projectId = project === "" ? undefined : Number(project);
   const needThreads = useNeedsInputThreads(projectId);
   const runThreads = useRunningThreads(projectId);
-  const external: Partial<Record<GroupKey, ExternalGroup>> = {
-    needs: { threads: needThreads.data?.threads ?? [], error: needThreads.error, state: "needs_input" },
-    running: { threads: runThreads.data?.threads ?? [], error: runThreads.error, state: "running" },
-  };
   const [since] = useState(settledSince);
+  const settledThreads = useSettledThreads(since, projectId);
+  const external: Partial<Record<GroupKey, ExternalGroup>> = {
+    needs: {
+      threads: needThreads.data?.threads ?? [],
+      total: needThreads.data?.total ?? 0,
+      error: needThreads.error,
+      state: "needs_input",
+    },
+    running: {
+      threads: runThreads.data?.threads ?? [],
+      total: runThreads.data?.total ?? 0,
+      error: runThreads.error,
+      state: "running",
+    },
+    settled: {
+      threads: settledThreads.data?.threads ?? [],
+      total: settledThreads.data?.total ?? 0,
+      error: settledThreads.error,
+      state: "settled",
+    },
+  };
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
   const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
-  const groupCount = (g: Group) => byGroup(g).length + (external[g.key]?.threads.length ?? 0);
+  const groupCount = (g: Group) => byGroup(g).length + (external[g.key]?.total ?? 0);
 
   const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, settled: 0 };
   for (const g of GROUPS) counts[g.key] = groupCount(g);
@@ -300,7 +320,9 @@ export function DashboardPage() {
                 meta={<span className="tabular">{groupCount(g)}</span>}
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
-                {ext !== undefined && ext.threads.length > 0 ? (
+                {g.key === "settled" ? (
+                  <SettledRows items={mergeSettled(list, ext?.threads ?? [])} emptyText={g.empty} />
+                ) : ext !== undefined && ext.threads.length > 0 ? (
                   <>
                     {list.length > 0 ? (
                       <div className="border-b border-line">

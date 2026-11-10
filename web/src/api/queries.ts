@@ -52,6 +52,15 @@ export const useNeedsInputThreads = (project?: number) =>
 export const useRunningThreads = (project?: number) =>
   useThreads(project === undefined ? { running: true } : { running: true, project });
 
+/** External threads settled since `since` (not task-owned; tasks come from useTasks), newest settle first. */
+export const useSettledThreads = (since: string, project?: number) =>
+  useThreads(
+    project === undefined
+      ? { settledFrom: since, limit: SETTLED_THREAD_LIMIT }
+      : { settledFrom: since, limit: SETTLED_THREAD_LIMIT, project },
+  );
+const SETTLED_THREAD_LIMIT = 500;
+
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => useQuery({ queryKey: keys.badge, queryFn: api.badge });
 

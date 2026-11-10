@@ -121,6 +121,12 @@ const externalNeedsInput = `th.observed_state = 'needs_input' AND NOT th.settled
 const externalRunning = `th.observed_state = 'running' AND NOT th.settled
   AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
 
+// externalSettled: external threads whose mirror state is settled
+// (dashboard, threads?settledFrom=). Same scope as externalNeedsInput;
+// archived threads included.
+const externalSettled = `(` + threadStateSQL + `) = 'settled'
+  AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
+
 // NeedsInputCount: tasks in needs_input + external threads needing input.
 func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
 	var n int

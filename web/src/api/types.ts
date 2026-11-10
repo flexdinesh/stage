@@ -185,6 +185,9 @@ export interface Task {
   launchedAt: string | null;
   finishedAt: string | null;
   settledAt: string | null;
+  /** Elapsed run span of the task's thread: first run start to newest run completion. */
+  runStartedAt: string | null;
+  runEndedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -280,6 +283,9 @@ export interface Thread {
   latestRunId: string | null;
   settled: boolean;
   settledAt: string | null;
+  /** Elapsed run span: first run start to newest run completion. */
+  runStartedAt: string | null;
+  runEndedAt: string | null;
   pendingRequestCount: number;
   providerInstanceId: string | null;
   model: string | null;
@@ -326,6 +332,8 @@ export interface ThreadListQuery {
   needsInput?: boolean;
   /** Only external threads observed running. */
   running?: boolean;
+  /** Only external threads settled at or after this (ISO), newest settle first. */
+  settledFrom?: string;
   limit?: number;
   offset?: number;
 }

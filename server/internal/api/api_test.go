@@ -216,6 +216,8 @@ type task struct {
 	LaunchedAt    *string           `json:"launchedAt"`
 	FinishedAt    *string           `json:"finishedAt"`
 	SettledAt     *string           `json:"settledAt"`
+	RunStartedAt  *string           `json:"runStartedAt"`
+	RunEndedAt    *string           `json:"runEndedAt"`
 	CreatedAt     string            `json:"createdAt"`
 	Events        []struct {
 		FromState *string `json:"fromState"`
@@ -247,6 +249,7 @@ type thread struct {
 	ProviderID  *string `json:"providerInstanceId"`
 	Title       string  `json:"title"`
 	T3ProjectID string  `json:"t3ProjectId"`
+	SettledAt   *string `json:"settledAt"`
 }
 
 func (e *env) project(root string) project {
@@ -1694,4 +1697,63 @@ func TestNotificationGroups(t *testing.T) {
 	for _, query := range []string{"limit=0", "cursor=x", "cursor=recent:0", "cursor=waiting:no", "cursor=other:1"} {
 		e.must("GET", "/api/notifications/groups?"+query, nil, 400, nil)
 	}
+}
+
+func TestSettledExternalThreads(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.project("/w/settled")
+
+	// Task-owned settled thread: excluded from the external list; its task carries the run span.
+	tk := e.task(p.ID, "settles", nil)
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
+	_ = e.fake.SetStatus(*started.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*started.T3ThreadID)
+	e.poll()
+	got := e.getTask(tk.ID)
+	if got.State != "settled" || got.RunStartedAt == nil || got.RunEndedAt == nil {
+		t.Fatalf("settled task %+v", got)
+	}
+
+	now := time.Now().UTC()
+	at := func(h int) *time.Time { v := now.Add(-time.Duration(h) * time.Hour); return &v }
+	settled := func(id string, settledAt *time.Time, mut func(*t3.Thread)) t3.Thread {
+		th := t3.Thread{ThreadID: id, ProjectID: p.T3ProjectID, Title: id, Status: t3.StatusCompleted,
+			Settled: true, SettledAt: settledAt, CreatedAt: now.Add(-48 * time.Hour)}
+		if mut != nil {
+			mut(&th)
+		}
+		return th
+	}
+	if err := e.store.UpsertThreads(ctx, []t3.Thread{
+		settled("older", at(5), nil),
+		settled("newer", at(1), nil),
+		settled("fork", at(3), func(th *t3.Thread) { th.ParentThreadID = "older"; th.RelationshipToParent = "fork" }),
+		settled("archived", at(4), func(th *t3.Thread) { th.Archived = true }),
+		settled("sub", at(2), func(th *t3.Thread) { th.ParentThreadID = "older"; th.RelationshipToParent = "subagent" }),
+		settled("stale", at(24*9), nil),
+		{ThreadID: "unsettled", ProjectID: p.T3ProjectID, Title: "done", Status: t3.StatusCompleted, CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var pg struct {
+		Threads []thread `json:"threads"`
+		Total   int      `json:"total"`
+	}
+	since := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
+	e.must("GET", "/api/threads?settledFrom="+url.QueryEscape(since), nil, 200, &pg)
+	var ids []string
+	for _, th := range pg.Threads {
+		ids = append(ids, th.T3ThreadID)
+	}
+	if want := []string{"newer", "fork", "archived", "older"}; pg.Total != len(want) || !slices.Equal(ids, want) {
+		t.Fatalf("settled external %v (total %d), want %v", ids, pg.Total, want)
+	}
+	e.must("GET", fmt.Sprintf("/api/threads?settledFrom=%s&project=%d", url.QueryEscape(since), p.ID), nil, 200, &pg)
+	if pg.Total != 4 {
+		t.Fatalf("project-scoped total %d", pg.Total)
+	}
+	e.must("GET", "/api/threads?settledFrom=yesterday", nil, 400, nil)
 }

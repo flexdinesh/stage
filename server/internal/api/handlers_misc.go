@@ -83,6 +83,9 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return db.Invalid("invalid running %q (want 1|true)", v)
 	}
+	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
+		return err
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {

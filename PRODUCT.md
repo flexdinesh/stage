@@ -28,6 +28,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Run order: a task can run after one other task (linear, may span projects), set while creating, viewing or editing a task; it starts when that task settles; a failed predecessor keeps it waiting; Start now unlinks it.
 - Sessions: Active and All views across the connected T3 instance, paginated and ordered by recent activity. Active has no creation cutoff. Session detail exposes live state, workspace, related task, children, and Run order. Top-level sessions can join continuation chains; children are inspectable.
 - Queued continuations: save a prompt to resume existing B after A settles and B finishes with no pending input. Running either session continues unchanged; restarting B keeps the continuation waiting. Linear chains gate later steps on the delivered continuation's run and subsequent settlement. Failures/interruption/cancellation block; uncertain delivery requires review. Saved prompts append only A's reference. Existing backlog-task order remains separate and conflicting membership must be unlinked first.
+- Dashboard Settled (last 7 days): tasks and external T3 threads in one list, newest settle first, each with its settle time and elapsed run time.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
 - Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now.
 
