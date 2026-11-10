@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useBadge, useT3Status } from "../api/queries.ts";
+import { relativeTime } from "../lib/format.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import {
+  IconCheck,
+  IconClose,
   IconHistory,
   IconMoon,
   IconMore,
@@ -18,7 +21,7 @@ import {
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
-import { Button, Chip, Drawer, Kbd, Segmented, cx } from "./ui.tsx";
+import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx";
 
 const NAV = [
   { to: "/", label: "Dashboard" },
@@ -53,16 +56,59 @@ function Mark() {
   );
 }
 
-function ConnectionChip({ compact = false }: { compact?: boolean }) {
-  const status = useT3Status();
-  const connected = status.data?.connected === true;
-  const label = status.isPending ? "checking T3" : connected ? "T3 connected" : "T3 offline";
+function StatusRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Link to="/settings" title={label} className="shrink-0">
-      <Chip dot tone={status.isPending ? "idle" : connected ? "ok" : "bad"}>
-        {compact ? "T3" : label}
-      </Chip>
-    </Link>
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+      <dt className="text-muted">{label}</dt>
+      <dd className="truncate text-fg">{children}</dd>
+    </div>
+  );
+}
+
+/** Square T3 status control; links to Settings, hover/focus (pointer devices only) reveals details. */
+function ConnectionStatus() {
+  const status = useT3Status();
+  const detailsId = useId();
+  const data = status.data;
+  // A data-less query returns to pending on every refetch; after the first error keep showing offline.
+  const checking = status.isPending && status.errorUpdateCount === 0;
+  const state = checking ? "checking" : data?.connected === true ? "connected" : "offline";
+  const label = state === "checking" ? "Checking T3" : state === "connected" ? "T3 connected" : "T3 offline";
+  const lastError = data?.lastError ?? (status.isError ? status.error.message : null);
+  const tokenExpiresAt = data?.tokenExpiresAt ?? null;
+  return (
+    <div className="group relative shrink-0">
+      <Link to="/settings" aria-label={label} aria-describedby={detailsId} className={cx(buttonClass("secondary"), "w-10 px-0 md:w-8")}>
+        {state === "checking" ? (
+          <span className="size-1.5 bg-idle" />
+        ) : (
+          <span className={state === "connected" ? "text-ok" : "text-bad"}>
+            {state === "connected" ? <IconCheck /> : <IconClose />}
+          </span>
+        )}
+      </Link>
+      <div
+        id={detailsId}
+        role="tooltip"
+        className="pointer-events-none invisible absolute top-full right-0 z-50 mt-1 w-[280px] border border-line-strong bg-surface opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none group-hover:visible group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:opacity-100"
+      >
+        <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
+          <span className="label-caps text-fg">T3 connection</span>
+          <Chip dot tone={state === "checking" ? "idle" : state === "connected" ? "ok" : "bad"} className="ml-auto">
+            {state}
+          </Chip>
+        </div>
+        <div className="flex flex-col gap-1 px-3 py-2 font-mono text-meta">
+          <dl className="flex flex-col gap-1">
+            <StatusRow label="URL">{data?.t3Url ?? "-"}</StatusRow>
+            <StatusRow label="Last sync">{relativeTime(data?.lastFullSyncAt ?? null)}</StatusRow>
+            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `expires ${relativeTime(tokenExpiresAt)}`}</StatusRow>
+          </dl>
+          {lastError === null ? null : <p className="line-clamp-2 break-words text-bad">{lastError}</p>}
+        </div>
+        <div className="border-t border-line px-3 py-1.5 font-mono text-meta-sm text-muted">Click to open settings</div>
+      </div>
+    </div>
   );
 }
 
@@ -169,7 +215,7 @@ function Shell() {
             <Kbd>Ctrl K</Kbd>
           </button>
           <NotificationsBell onOpen={openInbox} />
-          <ConnectionChip />
+          <ConnectionStatus />
           <ThemeButton />
           <Button variant="primary" onClick={() => newTask()}>
             <IconPlus size={14} />
@@ -182,7 +228,7 @@ function Shell() {
       <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] md:hidden">
         <Mark />
         <div className="ml-auto flex items-center gap-2">
-          <ConnectionChip compact />
+          <ConnectionStatus />
           <NotificationsBell onOpen={openInbox} />
           <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 px-0">
             <IconSearch size={16} />
