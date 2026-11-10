@@ -8,7 +8,8 @@ import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
-import { IconChainLink } from "./icons.tsx";
+import { browserTimeZone, wallTime } from "../lib/schedules.ts";
+import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
@@ -97,12 +98,39 @@ function SettledMeta({
   );
 }
 
-/** A link chip: "after #X" while waiting on a predecessor, else "then #Y" when something runs after it. */
-function linkChip(task: Task): { to: number; label: string; title: string } | null {
+interface RowChip {
+  to: string;
+  label: string;
+  title: string;
+  icon: ReactNode;
+}
+
+/**
+ * The row's one chip: the one-shot start time while timed, "after #X" while waiting on a predecessor, "then #Y" when
+ * something runs after it, else the schedule that spawned it.
+ */
+function rowChip(task: Task): RowChip | null {
+  if (task.state === "backlog" && task.startAt !== null) {
+    const tz = browserTimeZone();
+    const when = wallTime(task.startAt, tz, { short: true });
+    return {
+      to: `/tasks/${task.id}`,
+      label: when.length <= 5 ? `at ${when}` : when,
+      title: `Starts ${wallTime(task.startAt, task.startTz ?? tz, { zone: true })}`,
+      icon: <IconClock />,
+    };
+  }
   if (isWaiting(task) && task.afterTaskId !== null)
-    return { to: task.afterTaskId, label: `after #${task.afterTaskId}`, title: "Starts when this task settles" };
+    return { to: `/tasks/${task.afterTaskId}`, label: `after #${task.afterTaskId}`, title: "Starts when this task settles", icon: <IconChainLink /> };
   if (task.nextTaskId !== null)
-    return { to: task.nextTaskId, label: `then #${task.nextTaskId}`, title: "Runs next when this task settles" };
+    return { to: `/tasks/${task.nextTaskId}`, label: `then #${task.nextTaskId}`, title: "Runs next when this task settles", icon: <IconChainLink /> };
+  if (task.scheduleId !== null)
+    return {
+      to: `/schedules/${task.scheduleId}`,
+      label: "schedule",
+      title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
+      icon: <IconRepeat />,
+    };
   return null;
 }
 
@@ -112,7 +140,7 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
   const showStart = canStart(task) && !isWaiting(task);
-  const chip = linkChip(task);
+  const chip = rowChip(task);
   const needsInput = task.state === "needs_input";
   const hasActions = showStart || task.t3DeepLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
@@ -160,11 +188,11 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
           )}
           {chip === null ? null : (
             <Link
-              to={`/tasks/${chip.to}`}
+              to={chip.to}
               title={chip.title}
-              className="inline-flex items-center gap-1 hover:text-fg hover:underline md:hidden"
+              className="inline-flex items-center gap-1 tabular hover:text-fg hover:underline md:hidden"
             >
-              <IconChainLink />
+              {chip.icon}
               {chip.label}
             </Link>
           )}
@@ -176,9 +204,9 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
 
       <div className="hidden md:order-3 md:block">
         {chip === null ? null : (
-          <Link to={`/tasks/${chip.to}`} title={chip.title} className="hover:opacity-80">
-            <Chip tone="plain">
-              <IconChainLink />
+          <Link to={chip.to} title={chip.title} className="hover:opacity-80">
+            <Chip tone="plain" className="tabular">
+              {chip.icon}
               {chip.label}
             </Chip>
           </Link>
@@ -189,7 +217,7 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
         <div className="order-4 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
           {showStart ? (
             <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-              {task.state === "backlog" ? "Start" : "Restart"}
+              {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
             </Button>
           ) : null}
           {task.t3DeepLink === null ? null : (

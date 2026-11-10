@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useNeedsInputThreads, useProjects, useRunningThreads, useSettledThreads, useTasks } from "../api/queries.ts";
-import type { Task, TaskState, Thread } from "../api/types.ts";
+import { useNeedsInputThreads, useProjects, useRunningThreads, useSchedules, useSettledThreads, useTasks } from "../api/queries.ts";
+import type { Schedule, Task, TaskState, Thread } from "../api/types.ts";
 import { PendingContinuationsPanel } from "../components/Continuations.tsx";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
-import { ExternalThreadRows, SettledRows, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
+import { ScheduleRow } from "../components/ScheduleList.tsx";
+import { ExternalThreadRows, SettledRows, TaskRow, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
-type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "settled";
+type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "scheduled" | "settled";
 
 interface Group {
   key: GroupKey;
@@ -18,7 +19,11 @@ interface Group {
   short: string;
   tone: ChipTone;
   states: TaskState[];
+  /** Narrows `states` (backlog splits into untimed and timed). */
+  filter?: (t: Task) => boolean;
   empty: string;
+  /** Not a stat strip cell (no `?state=` filter). */
+  noStat?: boolean;
   hideEmpty?: boolean;
   /** Rendered collapsed until opened (or filtered to). */
   collapsible?: boolean;
@@ -69,7 +74,19 @@ const GROUPS: Group[] = [
     short: "backlog",
     tone: "idle",
     states: ["backlog"],
+    filter: (t) => t.startAt === null,
     empty: "Backlog is empty. Add one with New task.",
+  },
+  {
+    key: "scheduled",
+    title: "Scheduled · next 24h",
+    stat: "Scheduled",
+    short: "sched",
+    tone: "idle",
+    states: ["backlog"],
+    filter: (t) => t.startAt !== null,
+    empty: "Nothing scheduled in the next 24 hours. Pick At time or Repeat under Start in New task.",
+    noStat: true,
   },
   {
     key: "settled",
@@ -94,6 +111,32 @@ function settledSince(): string {
   return d.toISOString();
 }
 const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_input"];
+const STAT_GROUPS = GROUPS.filter((g) => g.noStat !== true);
+
+/** Scheduled group: timed backlog tasks and due schedules interleaved, soonest first. */
+type ScheduledItem = { kind: "task"; task: Task; at: number } | { kind: "schedule"; schedule: Schedule; at: number };
+
+const ms = (iso: string | null) => (iso === null ? Number.POSITIVE_INFINITY : new Date(iso).getTime());
+
+function mergeScheduled(tasks: readonly Task[], schedules: readonly Schedule[]): ScheduledItem[] {
+  return [
+    ...tasks.map((task): ScheduledItem => ({ kind: "task", task, at: ms(task.startAt) })),
+    ...schedules.map((schedule): ScheduledItem => ({ kind: "schedule", schedule, at: ms(schedule.nextRunAt) })),
+  ].toSorted((a, b) => a.at - b.at);
+}
+
+function ScheduledRows({ items, emptyText }: { items: ScheduledItem[]; emptyText: string }) {
+  if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.kind === "task" ? `task-${item.task.id}` : `schedule-${item.schedule.id}`} className="border-b border-line last:border-b-0">
+          {item.kind === "task" ? <TaskRow task={item.task} showProject /> : <ScheduleRow schedule={item.schedule} showProject actions="run" />}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** External (non-task) threads a group lists with its tasks. */
 interface ExternalGroup {
@@ -148,7 +191,7 @@ function StatStrip({
 }) {
   return (
     <div role="group" aria-label="Filter by state" className="mb-4 flex border border-line bg-surface">
-      {GROUPS.map((g) => {
+      {STAT_GROUPS.map((g) => {
         const on = selected === g.key;
         const n = counts[g.key];
         return (
@@ -229,10 +272,13 @@ export function DashboardPage() {
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
-  const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state));
-  const groupCount = (g: Group) => byGroup(g).length + (external[g.key]?.total ?? 0);
+  const dueSchedules = useSchedules({ dueWithin: "24h", ...projectQuery });
+  const due = dueSchedules.data?.schedules ?? [];
+  const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state) && (g.filter?.(t) ?? true));
+  const groupCount = (g: Group) =>
+    byGroup(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0);
 
-  const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, settled: 0 };
+  const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, scheduled: 0, settled: 0 };
   for (const g of GROUPS) counts[g.key] = groupCount(g);
   const active = all.filter((t) => ACTIVE_STATES.includes(t.state)).length;
   const projectCount = projects.data?.projects.length;
@@ -322,6 +368,15 @@ export function DashboardPage() {
               >
                 {g.key === "settled" ? (
                   <SettledRows items={mergeSettled(list, ext?.threads ?? [])} emptyText={g.empty} />
+                ) : g.key === "scheduled" ? (
+                  <>
+                    <ScheduledRows items={mergeScheduled(list, due)} emptyText={g.empty} />
+                    {dueSchedules.error === null ? null : (
+                      <div className="border-t border-line p-3">
+                        <ErrorText error={dueSchedules.error} />
+                      </div>
+                    )}
+                  </>
                 ) : ext !== undefined && ext.threads.length > 0 ? (
                   <>
                     {list.length > 0 ? (

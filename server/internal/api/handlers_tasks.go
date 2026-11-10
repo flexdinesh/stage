@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/t3-stage/server/internal/cronexpr"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
@@ -56,6 +57,8 @@ type createTaskReq struct {
 	Notes              *string          `json:"notes"`
 	AfterTaskID        *int64           `json:"afterTaskId"`
 	AttachmentIDs      []int64          `json:"attachmentIds"`
+	StartLocal         *string          `json:"startLocal"`
+	StartTz            *string          `json:"startTz"`
 	Start              bool             `json:"start"`
 }
 
@@ -112,7 +115,46 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 	if req.Notes != nil {
 		in.Notes = *req.Notes
 	}
+	if in.StartAt, err = startAt(req.StartLocal, req.StartTz, time.Now()); err != nil {
+		return in, err
+	}
+	if in.StartAt != nil {
+		in.StartTz = req.StartTz
+		if req.AfterTaskID != nil {
+			return in, db.Invalid("a task can have a start time or run after another task, not both")
+		}
+		if req.Start {
+			return in, db.Invalid("a task with a start time cannot also start now")
+		}
+	}
 	return in, nil
+}
+
+// startLocalLayout is the startLocal wall-time format.
+const startLocalLayout = "2006-01-02T15:04"
+
+// startAt converts a one-shot start (wall time local in zone tz) into an
+// instant, which must be after now. Both nil: no start.
+func startAt(local, tz *string, now time.Time) (*time.Time, error) {
+	if local == nil && tz == nil {
+		return nil, nil
+	}
+	if local == nil || tz == nil {
+		return nil, db.Invalid("startLocal and startTz must be set together")
+	}
+	loc, err := cronexpr.Zone(*tz)
+	if err != nil {
+		return nil, db.Invalid("%s", err.Error())
+	}
+	at, err := time.ParseInLocation(startLocalLayout, strings.TrimSpace(*local), loc)
+	if err != nil {
+		return nil, db.Invalid("invalid startLocal %q (want YYYY-MM-DDTHH:mm)", *local)
+	}
+	if !at.After(now) {
+		return nil, db.Invalid("start time %s %s is not in the future", *local, *tz)
+	}
+	at = at.UTC()
+	return &at, nil
 }
 
 func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
@@ -190,54 +232,97 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &p); err != nil {
 		return err
 	}
-	if p.ProjectID.Set && p.ProjectID.Null {
-		return db.Invalid("projectId must not be null")
-	}
-	if err := requiredText("title", &p.Title); err != nil {
+	if err := validateConfigPatch(configPatch{
+		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
+		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
+		Workspace: &p.Workspace, Tags: &p.Tags, Notes: &p.Notes, AttachmentIDs: &p.AttachmentIDs,
+	}); err != nil {
 		return err
 	}
-	if p.Prompt.Set && (p.Prompt.Null || strings.TrimSpace(p.Prompt.V) == "") {
-		return db.Invalid("prompt must be a non-empty string")
-	}
-	nullableText(&p.ProviderInstanceID)
-	nullableText(&p.Model)
-	if p.ModelOptions.Set {
-		if p.ModelOptions.V, err = validateOptions(p.ModelOptions.V); err != nil {
+	if p.StartLocal.Set || p.StartTz.Set {
+		if p.StartLocal.Set != p.StartTz.Set || p.StartLocal.Null != p.StartTz.Null {
+			return db.Invalid("startLocal and startTz must be set (or null) together")
+		}
+		at, err := startAt(p.StartLocal.Ptr(), p.StartTz.Ptr(), time.Now())
+		if err != nil {
 			return err
 		}
-		p.ModelOptions.Null = false
-	}
-	if err := enumField("runtimeMode", &p.RuntimeMode, db.RuntimeModes); err != nil {
-		return err
-	}
-	if err := enumField("interactionMode", &p.InteractionMode, db.InteractionModes); err != nil {
-		return err
-	}
-	if p.Workspace.Set {
-		if p.Workspace.Null {
-			return db.Invalid("workspace must not be null")
+		p.StartAt = db.Optional[time.Time]{Set: true, Null: at == nil}
+		if at != nil {
+			p.StartAt.V = *at
 		}
-		if p.Workspace.V, err = validateWorkspace(p.Workspace.V); err != nil {
-			return err
-		}
-	}
-	if p.Tags.Set {
-		p.Tags.V, p.Tags.Null = cleanTags(p.Tags.V), false
-	}
-	if p.Notes.Set && p.Notes.Null {
-		p.Notes.V, p.Notes.Null = "", false
-	}
-	if p.AttachmentIDs.Set {
-		if err := attachmentIDs(p.AttachmentIDs.V); err != nil {
-			return err
-		}
-		p.AttachmentIDs.Null = false
 	}
 	task, err := s.Store.UpdateTask(r.Context(), id, p)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
+	return nil
+}
+
+// configPatch points at the task-config fields shared by task and schedule
+// patches.
+type configPatch struct {
+	ProjectID          *db.Optional[int64]
+	Title              *db.Optional[string]
+	Prompt             *db.Optional[string]
+	ProviderInstanceID *db.Optional[string]
+	Model              *db.Optional[string]
+	ModelOptions       *db.Optional[[]t3.ModelOption]
+	RuntimeMode        *db.Optional[string]
+	InteractionMode    *db.Optional[string]
+	Workspace          *db.Optional[db.Workspace]
+	Tags               *db.Optional[[]string]
+	Notes              *db.Optional[string]
+	AttachmentIDs      *db.Optional[[]int64]
+}
+
+// validateConfigPatch validates and normalizes the shared config fields.
+func validateConfigPatch(c configPatch) error {
+	var err error
+	if c.ProjectID.Set && c.ProjectID.Null {
+		return db.Invalid("projectId must not be null")
+	}
+	if err := requiredText("title", c.Title); err != nil {
+		return err
+	}
+	if c.Prompt.Set && (c.Prompt.Null || strings.TrimSpace(c.Prompt.V) == "") {
+		return db.Invalid("prompt must be a non-empty string")
+	}
+	nullableText(c.ProviderInstanceID)
+	nullableText(c.Model)
+	if c.ModelOptions.Set {
+		if c.ModelOptions.V, err = validateOptions(c.ModelOptions.V); err != nil {
+			return err
+		}
+		c.ModelOptions.Null = false
+	}
+	if err := enumField("runtimeMode", c.RuntimeMode, db.RuntimeModes); err != nil {
+		return err
+	}
+	if err := enumField("interactionMode", c.InteractionMode, db.InteractionModes); err != nil {
+		return err
+	}
+	if c.Workspace.Set {
+		if c.Workspace.Null {
+			return db.Invalid("workspace must not be null")
+		}
+		if c.Workspace.V, err = validateWorkspace(c.Workspace.V); err != nil {
+			return err
+		}
+	}
+	if c.Tags.Set {
+		c.Tags.V, c.Tags.Null = cleanTags(c.Tags.V), false
+	}
+	if c.Notes.Set && c.Notes.Null {
+		c.Notes.V, c.Notes.Null = "", false
+	}
+	if c.AttachmentIDs.Set {
+		if err := attachmentIDs(c.AttachmentIDs.V); err != nil {
+			return err
+		}
+		c.AttachmentIDs.Null = false
+	}
 	return nil
 }
 

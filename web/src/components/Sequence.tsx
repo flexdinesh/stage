@@ -36,7 +36,11 @@ export function useLinkCandidates(self: Task | undefined) {
   const all = open.data?.tasks ?? [];
   const before = all.filter((t) => t.id !== self?.id && (t.nextTaskId === null || t.nextTaskId === self?.id));
   const after = all.filter(
-    (t) => t.id !== self?.id && t.state === "backlog" && (t.afterTaskId === null || t.afterTaskId === self?.id),
+    (t) =>
+      t.id !== self?.id &&
+      t.state === "backlog" &&
+      t.startAt === null && // a timed task can't also wait on a predecessor
+      (t.afterTaskId === null || t.afterTaskId === self?.id),
   );
   return { before, after, isPending: open.isPending };
 }

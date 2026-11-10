@@ -10,6 +10,8 @@ import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
 import { SnippetsPage } from "./pages/SnippetsPage.tsx";
+import { ScheduleDetailPage } from "./pages/ScheduleDetailPage.tsx";
+import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 
 export const router = createBrowserRouter([
   {
@@ -22,6 +24,8 @@ export const router = createBrowserRouter([
       { path: "tasks/:id", element: <TaskDetailPage /> },
       { path: "sessions", element: <SessionsPage /> },
       { path: "sessions/:id", element: <SessionDetailPage /> },
+      { path: "schedules", element: <SchedulesPage /> },
+      { path: "schedules/:id", element: <ScheduleDetailPage /> },
       { path: "history", element: <HistoryPage /> },
       { path: "snippets", element: <SnippetsPage /> },
       { path: "settings", element: <SettingsPage /> },

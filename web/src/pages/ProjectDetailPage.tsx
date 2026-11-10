@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useProject, useTasks } from "../api/queries.ts";
+import { useProject, useSchedules, useTasks } from "../api/queries.ts";
 import { TASK_STATES } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
+import { ScheduleRows } from "../components/ScheduleList.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { Button, PageHeader, Panel, QueryState, Select } from "../components/ui.tsx";
@@ -22,6 +23,8 @@ function ProjectDetail({ id }: { id: number }) {
   const tasks = useTasks({ project: id, ...(state === undefined ? {} : { state: [state] }) });
   const newTask = useNewTask();
   const taskCount = tasks.data?.tasks.length;
+  const schedules = useSchedules({ project: id });
+  const scheduleList = schedules.data?.schedules ?? [];
 
   return (
     <QueryState isPending={project.isPending} error={project.error}>
@@ -36,12 +39,33 @@ function ProjectDetail({ id }: { id: number }) {
               </span>
             }
             actions={
-              <Button variant="primary" onClick={() => newTask(id)}>
-                <IconPlus /> New task
-              </Button>
+              <>
+                {scheduleList.length === 0 ? (
+                  <Button onClick={() => newTask(id, "repeat")}>New schedule</Button>
+                ) : null}
+                <Button variant="primary" onClick={() => newTask(id)}>
+                  <IconPlus /> New task
+                </Button>
+              </>
             }
           />
           <div className="flex flex-col gap-5">
+            {scheduleList.length === 0 && schedules.error === null ? null : (
+              <Panel
+                flush
+                title="Schedules"
+                meta={<span className="tabular">{scheduleList.length}</span>}
+                actions={
+                  <Button small variant="ghost" onClick={() => newTask(id, "repeat")}>
+                    <IconPlus size={12} /> New schedule
+                  </Button>
+                }
+              >
+                <QueryState isPending={false} error={schedules.error}>
+                  <ScheduleRows schedules={scheduleList} />
+                </QueryState>
+              </Panel>
+            )}
             <Panel
               flush
               title="Tasks"

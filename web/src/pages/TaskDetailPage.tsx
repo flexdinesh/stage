@@ -30,6 +30,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
+import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { closeSystemNotifications } from "../lib/push.ts";
 import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
@@ -152,6 +153,17 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 </Link>
               </>
             )}
+            {task.startAt === null ? null : (
+              <span title={dateTime(task.startAt)}>{` · starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
+            )}
+            {task.scheduleId === null ? null : (
+              <>
+                {" · from "}
+                <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
+                  {task.scheduleTitle ?? `schedule #${task.scheduleId}`}
+                </Link>
+              </>
+            )}
           </>
         }
       />
@@ -185,8 +197,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
               {armed ? `Confirm: unlink from #${task.afterTaskId ?? ""} and start` : "Start now"}
             </Button>
           ) : startable ? (
-            <Button variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-              {task.state === "backlog" ? "Start" : "Restart"}
+            <Button
+              variant="primary"
+              busy={start.isPending}
+              onClick={() => start.mutate()}
+              {...(task.startAt === null ? {} : { title: "Starts now instead of at the scheduled time" })}
+            >
+              {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
             </Button>
           ) : null}
           {waiting ? null : openInApp("secondary", "max-md:hidden")}
@@ -325,6 +342,18 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         <Detail label="Runtime">{task.runtimeMode}</Detail>
         <Detail label="Interaction">{task.interactionMode}</Detail>
         <Detail label="Workspace">{workspaceText(task.workspace)}</Detail>
+        {task.startAt === null ? null : (
+          <Detail label="Starts">
+            <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>
+          </Detail>
+        )}
+        {task.scheduleId === null ? null : (
+          <Detail label="Schedule">
+            <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
+              {task.scheduleTitle ?? `#${task.scheduleId}`}
+            </Link>
+          </Detail>
+        )}
         <Detail label="Attempts">{task.launchAttempt}</Detail>
         <Detail label="Created">{when(task.createdAt)}</Detail>
         <Detail label="Launched">{when(task.launchedAt)}</Detail>

@@ -71,6 +71,14 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/stop", s.stopTask)
 	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
 
+	h("GET /api/schedules", s.listSchedules)
+	h("POST /api/schedules", s.createSchedule)
+	h("POST /api/schedules/preview", s.previewSchedule)
+	h("GET /api/schedules/{id}", s.getSchedule)
+	h("PATCH /api/schedules/{id}", s.updateSchedule)
+	h("DELETE /api/schedules/{id}", s.deleteSchedule)
+	h("POST /api/schedules/{id}/run", s.runSchedule)
+
 	h("POST /api/uploads", s.uploadImage)
 	h("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)

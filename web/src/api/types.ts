@@ -174,6 +174,13 @@ export interface Task {
   afterTaskId: number | null;
   /** The task that runs after this one. */
   nextTaskId: number | null;
+  /** One-shot start (UTC instant) of a backlog task; null once launched or when unset. */
+  startAt: string | null;
+  /** IANA zone the start time was entered in (set with startAt). */
+  startTz: string | null;
+  /** Recurring schedule that spawned this task. */
+  scheduleId: number | null;
+  scheduleTitle: string | null;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
   launchAttempt: number;
@@ -228,6 +235,9 @@ export interface CreateTaskRequest {
   afterTaskId?: number | null;
   /** Staged uploads to attach (max 8). */
   attachmentIds?: number[];
+  /** One-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz (not with afterTaskId or start). */
+  startLocal?: string | null;
+  startTz?: string | null;
   start?: boolean;
 }
 
@@ -247,6 +257,100 @@ export interface UpdateTaskRequest {
   afterTaskId?: number | null;
   /** Backlog only: the exact image set (task's own ids + staged uploads). */
   attachmentIds?: number[];
+  /** Backlog only: one-shot start; both null clears. */
+  startLocal?: string | null;
+  startTz?: string | null;
+}
+
+// ---- Schedules ----
+
+export const SCHEDULE_RUN_OUTCOMES = ["started", "skipped", "missed", "manual"] as const;
+export type ScheduleRunOutcome = (typeof SCHEDULE_RUN_OUTCOMES)[number];
+
+/** Recurring task template: each cron fire spawns a task with this config. */
+export interface Schedule {
+  id: number;
+  projectId: number;
+  projectTitle: string;
+  title: string;
+  prompt: string;
+  providerInstanceId: string | null;
+  model: string | null;
+  modelOptions: ModelOption[];
+  runtimeMode: RuntimeMode;
+  interactionMode: InteractionMode;
+  workspace: Workspace;
+  tags: string[];
+  notes: string;
+  attachments: Attachment[];
+  /** Standard 5-field cron, evaluated in tz. */
+  cron: string;
+  tz: string;
+  paused: boolean;
+  /** Next fire (UTC); null while paused. */
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastTaskId: number | null;
+  lastTaskState: TaskState | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduleRun {
+  id: number;
+  scheduleId: number;
+  fireAt: string;
+  outcome: ScheduleRunOutcome;
+  taskId: number | null;
+  detail: string;
+  at: string;
+  /** The spawned task on detail reads. */
+  task: Task | null;
+}
+
+export interface ScheduleDetail extends Schedule {
+  /** Newest first, at most 50. */
+  runs: ScheduleRun[];
+}
+
+export interface ScheduleList {
+  schedules: Schedule[];
+}
+
+export interface ScheduleListQuery {
+  project?: number;
+  /** Go duration, e.g. "24h". */
+  dueWithin?: string;
+}
+
+export interface CreateScheduleRequest {
+  projectId: number;
+  title: string;
+  prompt: string;
+  providerInstanceId?: string | null;
+  model?: string | null;
+  modelOptions?: ModelOption[];
+  runtimeMode?: RuntimeMode;
+  interactionMode?: InteractionMode;
+  workspace?: Workspace;
+  tags?: string[];
+  notes?: string;
+  attachmentIds?: number[];
+  cron: string;
+  tz: string;
+  paused?: boolean;
+}
+
+export type UpdateScheduleRequest = Partial<CreateScheduleRequest>;
+
+export interface SchedulePreviewRequest {
+  cron: string;
+  tz: string;
+}
+
+export interface SchedulePreview {
+  /** Next three fires, UTC. */
+  next: string[];
 }
 
 export interface FollowupRequest {

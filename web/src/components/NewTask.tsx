@@ -1,19 +1,20 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { usePreferences } from "../api/queries.ts";
-import { TaskFormModal } from "./TaskForm.tsx";
+import { TaskFormModal, type StartMode } from "./TaskForm.tsx";
 
-type Open = (defaultProjectId?: number) => void;
+/** Opens the New task drawer; `mode: "repeat"` opens it as a new schedule. */
+type Open = (defaultProjectId?: number, mode?: StartMode) => void;
 
 const NewTaskContext = createContext<Open>(() => {});
 
-/** Global "New task" drawer: top bar button, command palette, `N` shortcut. */
+/** Global "New task" drawer: top bar button, command palette, `N` shortcut, New schedule actions. */
 export function NewTaskProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<{ projectId: number | undefined } | null>(null);
+  const [state, setState] = useState<{ projectId: number | undefined; mode: StartMode | undefined } | null>(null);
   const navigate = useNavigate();
   // Warm the model-defaults cache so the drawer opens prefilled without a loading step.
   usePreferences();
-  const open = useCallback<Open>((projectId) => setState({ projectId }), []);
+  const open = useCallback<Open>((projectId, mode) => setState({ projectId, mode }), []);
   const value = useMemo(() => open, [open]);
   return (
     <NewTaskContext.Provider value={value}>
@@ -21,10 +22,11 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
       {state === null ? null : (
         <TaskFormModal
           {...(state.projectId === undefined ? {} : { defaultProjectId: state.projectId })}
+          {...(state.mode === undefined ? {} : { defaultMode: state.mode })}
           onClose={() => setState(null)}
-          onSaved={(task) => {
+          onSaved={(saved) => {
             setState(null);
-            void navigate(`/tasks/${task.id}`);
+            void navigate(saved.kind === "task" ? `/tasks/${saved.task.id}` : `/schedules/${saved.schedule.id}`);
           }}
         />
       )}
