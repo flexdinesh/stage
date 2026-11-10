@@ -206,28 +206,48 @@ export function Segmented<T extends string>({
   onChange,
   label,
   small = false,
+  fill = false,
 }: {
-  options: readonly { value: T; label: string }[];
+  /** `short` replaces `label` below 768px. */
+  options: readonly { value: T; label: string; short?: string }[];
   value: T;
   onChange: (value: T) => void;
   label: string;
   small?: boolean;
+  /** Phone: span the full width in equal cells (never wraps). */
+  fill?: boolean;
 }) {
   return (
-    <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap border border-line-strong bg-surface">
+    <div
+      role="group"
+      aria-label={label}
+      className={cx(
+        "max-w-full border border-line-strong bg-surface",
+        fill ? "flex w-full md:inline-flex md:w-auto" : "inline-flex flex-wrap",
+      )}
+    >
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           aria-pressed={o.value === value}
+          aria-label={o.short === undefined ? undefined : o.label}
           onClick={() => onChange(o.value)}
           className={cx(
             "border-r border-line-strong font-mono whitespace-nowrap transition-colors duration-150 last:border-r-0",
             small ? "h-8 px-2.5 text-meta-sm md:h-6 md:px-2" : "h-[38px] px-3 text-detail md:h-[30px] md:px-2.5",
+            fill && "min-w-0 flex-1 max-md:px-1 md:flex-none",
             o.value === value ? "bg-accent text-on-accent" : "text-muted hover:bg-panel hover:text-fg",
           )}
         >
-          {o.label}
+          {o.short === undefined ? (
+            o.label
+          ) : (
+            <>
+              <span className="md:hidden">{o.short}</span>
+              <span className="max-md:hidden">{o.label}</span>
+            </>
+          )}
         </button>
       ))}
     </div>

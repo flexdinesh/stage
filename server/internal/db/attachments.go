@@ -80,7 +80,7 @@ func (s *Store) TaskAttachments(ctx context.Context, taskID int64) ([]Attachment
 // StagedAttachments returns the staged images ids (in ids order); Invalid
 // when any is unknown or already attached.
 func (s *Store) StagedAttachments(ctx context.Context, ids []int64) ([]AttachmentData, error) {
-	rows, err := s.attachmentData(ctx, `WHERE task_id IS NULL AND id = ANY($1)`, ids)
+	rows, err := s.attachmentData(ctx, `WHERE task_id IS NULL AND schedule_id IS NULL AND id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -114,14 +114,14 @@ func (s *Store) attachmentData(ctx context.Context, cond string, arg any) ([]Att
 
 // DeleteStagedAttachments removes staged images (after a follow-up sent them).
 func (s *Store) DeleteStagedAttachments(ctx context.Context, ids []int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM task_attachments WHERE task_id IS NULL AND id = ANY($1)`, ids)
+	_, err := s.pool.Exec(ctx, `DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND id = ANY($1)`, ids)
 	return err
 }
 
 // SweepStagedAttachments removes staged images older than age.
 func (s *Store) SweepStagedAttachments(ctx context.Context, age time.Duration) (int64, error) {
 	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM task_attachments WHERE task_id IS NULL AND created_at < $1`, time.Now().Add(-age))
+		`DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND created_at < $1`, time.Now().Add(-age))
 	return tag.RowsAffected(), err
 }
 
@@ -129,24 +129,39 @@ func (s *Store) SweepStagedAttachments(ctx context.Context, age time.Duration) (
 // attached, the task's images not in ids are deleted. Invalid when an id is
 // neither staged nor the task's own, or when more than MaxTaskAttachments.
 func setAttachments(ctx context.Context, tx pgx.Tx, taskID int64, ids []int64) error {
+	return setOwnedAttachments(ctx, tx, "task_id", taskID, ids)
+}
+
+// setOwnedAttachments is setAttachments for an owner column (task_id or
+// schedule_id). Staged = no owner.
+func setOwnedAttachments(ctx context.Context, tx pgx.Tx, col string, ownerID int64, ids []int64) error {
 	ids = uniqueIDs(ids)
 	if len(ids) > MaxTaskAttachments {
 		return Invalid("at most %d images per task", MaxTaskAttachments)
 	}
+	const staged = `(task_id IS NULL AND schedule_id IS NULL)`
 	var usable int
 	err := tx.QueryRow(ctx, `
 SELECT count(*) FROM task_attachments
-WHERE id = ANY($2) AND (task_id IS NULL OR task_id = $1)`, taskID, ids).Scan(&usable)
+WHERE id = ANY($2) AND (`+staged+` OR `+col+` = $1)`, ownerID, ids).Scan(&usable)
 	if err != nil {
 		return err
 	}
 	if usable != len(ids) {
 		return Invalid("unknown or already attached image in attachmentIds")
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM task_attachments WHERE task_id = $1 AND NOT (id = ANY($2))`, taskID, ids); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM task_attachments WHERE `+col+` = $1 AND NOT (id = ANY($2))`, ownerID, ids); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE task_attachments SET task_id = $1 WHERE task_id IS NULL AND id = ANY($2)`, taskID, ids)
+	_, err = tx.Exec(ctx, `UPDATE task_attachments SET `+col+` = $1 WHERE `+staged+` AND id = ANY($2)`, ownerID, ids)
+	return err
+}
+
+// copyScheduleAttachments copies a schedule's images onto task dst.
+func copyScheduleAttachments(ctx context.Context, tx pgx.Tx, scheduleID, dst int64) error {
+	_, err := tx.Exec(ctx, `
+INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data)
+SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE schedule_id = $1 ORDER BY id`, scheduleID, dst)
 	return err
 }
 

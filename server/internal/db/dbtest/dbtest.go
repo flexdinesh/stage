@@ -86,7 +86,7 @@ func (d *DB) Reset(t *testing.T) *pgxpool.Pool {
 	}
 	ctx := context.Background()
 	_, err := d.Pool.Exec(ctx, `
-TRUNCATE task_attachments, task_events, tasks, snippets, threads, projects, t3_connection, preferences,
+TRUNCATE task_attachments, task_events, schedule_runs, tasks, schedules, snippets, threads, projects, t3_connection, preferences,
   push_subscriptions, push_vapid RESTART IDENTITY CASCADE;
 INSERT INTO t3_connection (id) VALUES (1);
 INSERT INTO preferences (id) VALUES (1);`)

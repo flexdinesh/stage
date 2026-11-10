@@ -169,6 +169,10 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "t3ThreadId": "thread_abc",
   "afterTaskId": null,
   "nextTaskId": null,
+  "startAt": null,
+  "startTz": null,
+  "scheduleId": null,
+  "scheduleTitle": null,
   "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
@@ -185,6 +189,8 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ```
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `afterTaskId`: runs after that task (launches when it is settled or cancelled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
+- `startAt` (UTC instant) / `startTz` (IANA zone it was entered in): one-shot start time of a `backlog` task; the scheduler launches it at that time (see "Schedule rules"). Both null or both set; non-null only while the task is in `backlog` (any launch clears them). Never set together with `afterTaskId`.
+- `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
@@ -219,17 +225,20 @@ Body `CreateTaskRequest`:
   "notes": "",                   // optional
   "afterTaskId": null,           // optional: run after this task (link rules)
   "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
+  "startLocal": null,            // optional: one-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz
+  "startTz": null,               // required with startLocal: IANA zone, e.g. "Asia/Kolkata"
   "start": false                 // optional: true = Save & start (ignored when afterTaskId set)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8). 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with `afterTaskId` or `start: true`). 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `attachmentIds`.
+Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `attachmentIds` `startLocal` `startTz`.
 In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
+`startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must not have both a start time and `afterTaskId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`).
 200 `Task`. 404.
 
 ### `DELETE /api/tasks/:id`
@@ -252,8 +261,88 @@ Follow-up and stop bump `updatedAt`; that re-arms polling of a `failed|interrupt
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
-New `backlog` task with the same project, title, prompt, images (copied), model config, workspace, tags, notes; not linked.
+New `backlog` task with the same project, title, prompt, images (copied), model config, workspace, tags, notes; not linked, no start time, no schedule.
 201 `Task`. 404.
+
+## Schedules
+
+A schedule is a recurring task template: on each cron fire it spawns a new task (`scheduleId` set) with its config and images and starts it. One-shot starts are not schedules; they are `startAt` on a backlog task.
+
+`Schedule`:
+```json
+{
+  "id": 3,
+  "projectId": 1,
+  "projectTitle": "t3-stage",
+  "title": "Nightly deps bump",
+  "prompt": "bump deps, run tests",
+  "providerInstanceId": "claude",
+  "model": "claude-sonnet-5-5",
+  "modelOptions": [],
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null },
+  "tags": ["deps"],
+  "notes": "",
+  "attachments": [],
+  "cron": "0 2 * * *",
+  "tz": "Asia/Kolkata",
+  "paused": false,
+  "nextRunAt": "2026-11-11T20:30:00Z",
+  "lastRunAt": "2026-11-10T20:30:00Z",
+  "lastTaskId": 41,
+  "lastTaskState": "settled",
+  "createdAt": "2026-11-08T09:59:00Z",
+  "updatedAt": "2026-11-08T10:00:00Z"
+}
+```
+- `cron`: standard 5-field expression (minute hour day-of-month month day-of-week; `@hourly|@daily|@weekly|@monthly|@yearly` also accepted). `@every` and `CRON_TZ=`/`TZ=` prefixes are rejected (400). Evaluated in `tz` (IANA), so DST is handled by the zone.
+- `nextRunAt`: next fire (UTC); null while `paused`. `lastRunAt`: fire time of the newest run row (any outcome); null before the first.
+- `lastTaskId` / `lastTaskState`: newest task this schedule spawned (null before the first).
+
+`ScheduleRun`:
+```json
+{ "id": 9, "scheduleId": 3, "fireAt": "2026-11-10T20:30:00Z", "outcome": "started", "taskId": 41, "detail": "", "at": "2026-11-10T20:30:04Z", "task": null }
+```
+- `outcome`: `started` (task spawned; launch result lives on the task), `skipped` (previous run still active), `missed` (server was down across the fire time; one row per outage), `manual` (Run now).
+- `task`: the spawned `Task` on detail reads, else null.
+
+`ScheduleDetail` = `Schedule` + `{ "runs": ScheduleRun[] }` (newest first, at most 50, each with `task`).
+
+### `GET /api/schedules`
+Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: only unpaused schedules with `nextRunAt <= now + dueWithin`).
+200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
+
+### `POST /api/schedules`
+Body `CreateScheduleRequest`: the `CreateTaskRequest` config fields (`projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes attachmentIds`, same rules) plus `"cron": "0 2 * * *"` (required), `"tz": "Asia/Kolkata"` (required), `"paused": false` (optional).
+201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
+
+### `GET /api/schedules/:id`
+200 `ScheduleDetail`. 404.
+
+### `PATCH /api/schedules/:id`
+Body: any of the create fields (`attachmentIds` is the exact image set, as for tasks). Changing `cron`, `tz` or `paused` recomputes `nextRunAt` from now (resuming never fires a missed time). Spawned tasks are not changed.
+200 `Schedule`. 400. 404.
+
+### `DELETE /api/schedules/:id`
+204. Spawned tasks are kept (their `scheduleId` becomes null). 404.
+
+### `POST /api/schedules/:id/run`
+Run now: spawn a task and start it immediately, ignoring `paused` and the overlap rule; records a `manual` run; `nextRunAt` unchanged. Launch errors land on the task (`failed` + `lastError`).
+201 `Task`. 404.
+
+### `POST /api/schedules/preview`
+Body `{ "cron": "0 2 * * 1-5", "tz": "Asia/Kolkata" }`. 200 `{ "next": [ISO, ISO, ISO] }` (next three fires, UTC). 400 with the parse error message.
+
+### Schedule rules
+- The scheduler ticks every 15s (and on start).
+- One-shot: a `backlog` task with `startAt <= now` is launched (link runner path, `startAt` cleared); the `launching` event detail reads `scheduled start` or `scheduled start, late by 12m` when more than a minute late (e.g. server was down: late starts are not skipped). Manual Start now also clears `startAt`.
+- Recurring, per unpaused schedule with `nextRunAt <= now`, in one transaction (row locked):
+  - `now - nextRunAt > 2m` (server was down): record one `missed` run (`detail`: `missed N fires`), advance `nextRunAt` to the first fire after now. Nothing starts.
+  - A previous spawned task still `backlog` (pending launch), `launching`, `running` or `needs_input`: record `skipped` (`detail`: `#41 still running`), advance. `done` but unsettled does not block.
+  - Else spawn a task (config + images copied, `scheduleId`, `startAt = fireAt`, `startTz = tz`), record `started`, advance. The one-shot pass then launches it (a crash in between still launches it on restart).
+- Fires are computed in the schedule's `tz`; a fire is never run twice (`nextRunAt` advances in the same transaction).
+- Scheduled starts and skips do not notify; a failed launch notifies as usual (`failed`).
 
 ## Images
 

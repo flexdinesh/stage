@@ -146,3 +146,17 @@ export const IconBell = (p: IconProps) => (
     <path d="M4.5 11.5V6.5a3.5 3.5 0 0 1 7 0v5M2.5 11.5h11M6.5 14h3" />
   </Svg>
 );
+
+/** One-shot start time: square clock face (sharp grid), hands at 8:00 → 12. */
+export const IconClock = (p: IconProps) => (
+  <Svg {...p} size={p.size ?? 12}>
+    <path d="M2.5 2.5h11v11h-11zM8 5v3.5h2.5" />
+  </Svg>
+);
+
+/** Recurring schedule: two square-cornered return arrows. */
+export const IconRepeat = (p: IconProps) => (
+  <Svg {...p} size={p.size ?? 12}>
+    <path d="M2.5 7.5V4.5h10M10.5 2.5l2 2-2 2M13.5 8.5v3h-10M5.5 13.5l-2-2 2-2" />
+  </Svg>
+);

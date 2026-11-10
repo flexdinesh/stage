@@ -110,6 +110,10 @@ type Task struct {
 	T3ThreadID         *string          `json:"t3ThreadId"`
 	AfterTaskID        *int64           `json:"afterTaskId"` // runs after this task (launches when it settles)
 	NextTaskID         *int64           `json:"nextTaskId"`  // the task that runs after this one
+	StartAt            *time.Time       `json:"startAt"`     // one-shot start of a backlog task (scheduler launches it)
+	StartTz            *string          `json:"startTz"`     // IANA zone startAt was entered in
+	ScheduleID         *int64           `json:"scheduleId"`  // recurring schedule that spawned the task
+	ScheduleTitle      *string          `json:"scheduleTitle"`
 	LaunchAttempt      int              `json:"launchAttempt"`
 	LastError          *string          `json:"lastError"`
 	LaunchedAt         *time.Time       `json:"launchedAt"`

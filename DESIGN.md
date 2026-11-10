@@ -359,6 +359,11 @@ On the Dashboard (every state group, external needs-input threads included) the 
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 13px text, actions right. `need` for waiting-on-you, `bad` for errors.
 
+### Start control and schedules
+The task drawer's Start segmented control (Now / Backlog / At time / After task / Repeat; Backlog / At time / After task when editing a backlog task) decides what the single primary footer button does, and its label follows: "Save & start", "Save to backlog", "Save · starts Nov 12 02:00", "Save · runs after #12", "Save schedule". At time shows date and time inputs, a zone select (browser default) and a mono "starts in" line. Repeat shows a preset segmented control (Hourly, Daily, Weekdays (Mon-Fri on phone), Weekly, Cron) with its minute, time, weekday or raw cron field, a zone select and a Bench Gray mono box with the summary and the next three fires from the server. On phone the segmented controls fill the width in equal cells with short labels.
+
+Schedule rows share the task row grid: a plain "repeat" chip (idle "paused" when paused) with the authored repeat icon, title, mono summary, zone and "next in", the last run's state chip, then Run now and Pause/Resume. A timed backlog task shows a plain chip with the authored clock icon ("at 02:00") in the run order chip slot and its Start reads "Start now"; a spawned task shows a plain repeat chip linking its schedule. Stage adds a "Scheduled · next 24h" group between Backlog and Settled (timed tasks leave Backlog for it); it has no stat strip cell. Schedule detail: Run now (primary), Pause, Edit, Delete (danger, inline confirm); Runs in the main column, When / Config / Prompt panels in the side column.
+
 ### Run order pipeline
 Step cells joined by 1px Strong Hairline connectors, in the task detail Run order panel (top of the side column). Numbered, titled cells on laptop, numbers only on phone; the viewed task gets the Ink outline. Below it, "Runs after" and "Then runs" lines carry Unlink, and pickers link new steps. A waiting task's Start now arms a confirm ("unlink from #12 and start") before acting.
 

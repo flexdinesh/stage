@@ -334,12 +334,18 @@ var launchable = []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterru
 // backlog task still waiting on an unfinished predecessor is unlinked from
 // it, then launched. Its own follower stays linked.
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
-	return s.launch(ctx, id, true)
+	return s.launch(ctx, id, true, "launch requested")
 }
 
 // LaunchTask starts a task in T3 (link runner path; keeps links).
 func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
-	return s.launch(ctx, id, false)
+	return s.launch(ctx, id, false, "launch requested")
+}
+
+// LaunchScheduled starts a task whose start time has come (scheduler path;
+// keeps links). detail is the launching event's detail.
+func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error) {
+	return s.launch(ctx, id, false, detail)
 }
 
 // launch: launching (attempt+1, or the same attempt when the previous launch
@@ -351,13 +357,13 @@ func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
 // task.
-func (s *Service) launch(ctx context.Context, id int64, manual bool) (db.Task, error) {
+func (s *Service) launch(ctx context.Context, id int64, manual bool, detail string) (db.Task, error) {
 	// The launch must finish (or fail) even if the HTTP client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 
 	res, err := s.transition(ctx, db.Transition{
-		TaskID: id, From: launchable, To: db.StateLaunching, Detail: "launch requested", BeginAttempt: true,
+		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true,
 		UnlinkWaiting: manual,
 	})
 	if err != nil {

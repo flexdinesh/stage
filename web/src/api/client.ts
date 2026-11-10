@@ -9,6 +9,14 @@ import type {
   CreateProjectRequest,
   CreateTaskRequest,
   CreateSnippetRequest,
+  CreateScheduleRequest,
+  Schedule,
+  ScheduleDetail,
+  ScheduleList,
+  ScheduleListQuery,
+  SchedulePreview,
+  SchedulePreviewRequest,
+  UpdateScheduleRequest,
   FollowupRequest,
   Health,
   ModelDefaults,
@@ -135,6 +143,15 @@ export const api = {
   followupTask: (id: number, body: FollowupRequest) => apiFetch<Task>(`/tasks/${id}/followup`, post(body)),
   stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
   duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
+
+  schedules: (q: ScheduleListQuery = {}) =>
+    apiFetch<ScheduleList>(`/schedules${toQuery({ project: q.project, dueWithin: q.dueWithin })}`),
+  schedule: (id: number) => apiFetch<ScheduleDetail>(`/schedules/${id}`),
+  createSchedule: (body: CreateScheduleRequest) => apiFetch<Schedule>("/schedules", post(body)),
+  updateSchedule: (id: number, body: UpdateScheduleRequest) => apiFetch<Schedule>(`/schedules/${id}`, patch(body)),
+  deleteSchedule: (id: number) => apiSend(`/schedules/${id}`, del),
+  runSchedule: (id: number) => apiFetch<Task>(`/schedules/${id}/run`, post()),
+  previewSchedule: (body: SchedulePreviewRequest) => apiFetch<SchedulePreview>("/schedules/preview", post(body)),
 
   uploadImage: (file: File) => {
     const form = new FormData();

@@ -27,13 +27,14 @@ const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
   { to: "/sessions", label: "Sessions" },
+  { to: "/schedules", label: "Schedules" },
   { to: "/history", label: "History" },
   { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
 /** Phone More drawer: the laptop nav items the bottom tabs leave out. */
-const MORE = NAV.filter((item) => item.to === "/history" || item.to === "/settings");
+const MORE = NAV.filter((item) => item.to === "/schedules" || item.to === "/history" || item.to === "/settings");
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;

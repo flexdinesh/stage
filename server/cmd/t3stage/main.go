@@ -17,6 +17,7 @@ import (
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	"github.com/flexdinesh/t3-stage/server/internal/links"
 	"github.com/flexdinesh/t3-stage/server/internal/notify"
+	"github.com/flexdinesh/t3-stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 	"github.com/flexdinesh/t3-stage/server/internal/webui"
@@ -81,6 +82,7 @@ func run() error {
 	syncSvc := t3sync.New(store, t3Client, logger)
 	syncSvc.SetPublicURL(cfg.T3PublicURL)
 	runner := links.NewRunner(store, syncSvc, logger)
+	scheduler := schedule.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	syncSvc.OnTransition = func(ctx context.Context, c t3sync.Change) {
@@ -88,12 +90,13 @@ func run() error {
 		notifier.OnTransition(ctx, c)
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
-	// Before the poller, link runner and HTTP server can touch launching tasks.
+	// Before the poller, link runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
-	wg.Add(5)
+	wg.Add(6)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	go func() { defer wg.Done(); runner.Run(ctx) }()
+	go func() { defer wg.Done(); scheduler.Run(ctx) }()
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger) }()
 

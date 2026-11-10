@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, type ArchivedFilter } from "./client.ts";
-import type { StatsQuery, TaskListQuery, ThreadListQuery } from "./types.ts";
+import type { ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -16,6 +16,9 @@ export const keys = {
   preferences: ["preferences"],
   badge: ["badge"],
   notifications: ["notifications"],
+  schedules: ["schedules"],
+  schedule: ["schedule"],
+  schedulePreview: ["schedulePreview"],
 } as const;
 
 export const useT3Status = () => useQuery({ queryKey: keys.t3Status, queryFn: api.t3Status });
@@ -34,6 +37,23 @@ export const useTasks = (q: TaskListQuery = {}) =>
   useQuery({ queryKey: [...keys.tasks, q], queryFn: () => api.tasks(q) });
 
 export const useTask = (id: number) => useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id) });
+
+export const useSchedules = (q: ScheduleListQuery = {}) =>
+  useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q) });
+
+export const useSchedule = (id: number) => useQuery({ queryKey: [...keys.schedule, id], queryFn: () => api.schedule(id) });
+
+/** Next fires for a cron + zone; null input disables the query. Errors carry the parse message. */
+export const useSchedulePreview = (body: SchedulePreviewRequest | null) =>
+  useQuery({
+    queryKey: [...keys.schedulePreview, body?.cron ?? "", body?.tz ?? ""],
+    queryFn: () => (body === null ? Promise.resolve({ next: [] }) : api.previewSchedule(body)),
+    enabled: body !== null,
+    refetchInterval: false,
+    staleTime: 30_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
 
 export const useThreads = (q: ThreadListQuery) =>
   useQuery({ queryKey: [...keys.threads, q], queryFn: () => api.threads(q), placeholderData: keepPreviousData });
@@ -100,7 +120,18 @@ export const useStats = (q: StatsQuery) =>
 /** Task mutations can change any task, thread, stat or prefill view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
-    [keys.tasks, keys.task, keys.threads, keys.thread, keys.continuations, keys.stats, keys.preferences, keys.badge].map((queryKey) =>
+    [
+      keys.tasks,
+      keys.task,
+      keys.threads,
+      keys.thread,
+      keys.continuations,
+      keys.stats,
+      keys.preferences,
+      keys.badge,
+      keys.schedules,
+      keys.schedule,
+    ].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),
   ).then(() => undefined);
