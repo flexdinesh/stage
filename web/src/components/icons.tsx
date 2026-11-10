@@ -72,6 +72,12 @@ export const IconExternal = (p: IconProps) => (
   </Svg>
 );
 
+export const IconCheck = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 8.5l3.5 3.5L13 4.5" />
+  </Svg>
+);
+
 export const IconClose = (p: IconProps) => (
   <Svg {...p}>
     <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
