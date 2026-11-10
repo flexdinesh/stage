@@ -92,6 +92,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	h("GET /api/preferences", s.getPreferences)
 	h("PUT /api/preferences/pinned", s.putPinned)
+	h("PUT /api/preferences/notifications", s.putNotifyEvents)
 
 	h("GET /api/push/config", s.pushConfig)
 	h("POST /api/push/subscriptions", s.subscribePush)

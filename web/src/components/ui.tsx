@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ApiError } from "../api/client.ts";
-import { IconClose } from "./icons.tsx";
+import { IconCheck, IconClose } from "./icons.tsx";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -156,6 +156,22 @@ export function Select({ className, small = false, ...rest }: ComponentProps<"se
       className={cx(inputBase, small ? "h-8 py-0 text-input-sm md:h-6" : "h-10 md:h-8", "select-chevron appearance-none pr-8", className)}
       {...rest}
     />
+  );
+}
+
+/** Square checkbox: native input (keyboard, forms, a11y) with an Ink fill and authored check. */
+export function Checkbox({ className, ...rest }: Omit<ComponentProps<"input">, "type">) {
+  return (
+    <span className={cx("relative inline-flex size-4 shrink-0", className)}>
+      <input
+        type="checkbox"
+        className="peer size-4 cursor-pointer appearance-none border border-line-strong bg-surface transition-colors duration-150 checked:border-accent checked:bg-accent focus-visible:shadow-[0_0_0_1px_var(--surface),0_0_0_2px_var(--accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55"
+        {...rest}
+      />
+      <span className="pointer-events-none absolute inset-0 hidden items-center justify-center text-on-accent peer-checked:flex">
+        <IconCheck size={12} />
+      </span>
+    </span>
   );
 }
 

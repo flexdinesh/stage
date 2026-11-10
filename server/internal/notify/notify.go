@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,9 @@ func (n *Notifier) Run(ctx context.Context) {
 }
 
 func (n *Notifier) handle(ctx context.Context, e event) {
+	if !n.enabled(ctx, e.to()) {
+		return
+	}
 	p, rec, err := n.payload(ctx, e)
 	if err != nil {
 		n.log.Warn("build notification", "err", err)
@@ -152,6 +156,19 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 			n.log.Warn("push failed", "endpoint", sub.Endpoint, "err", err)
 		}
 	}
+}
+
+// enabled: the global filter (preferences.notifyEvents) allows the event.
+// Read at send time; a failed read notifies (a missed event costs more).
+func (n *Notifier) enabled(ctx context.Context, to db.TaskState) bool {
+	p, err := n.store.GetPreferences(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			n.log.Warn("read notification filter; notifying", "err", err)
+		}
+		return true
+	}
+	return slices.Contains(p.NotifyEvents, to)
 }
 
 var titles = map[db.TaskState]string{

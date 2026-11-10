@@ -1234,8 +1234,9 @@ func TestPreferences(t *testing.T) {
 		InteractionMode string `json:"interactionMode"`
 	}
 	type prefs struct {
-		Pinned   *defaults `json:"pinned"`
-		LastUsed *defaults `json:"lastUsed"`
+		Pinned       *defaults `json:"pinned"`
+		LastUsed     *defaults `json:"lastUsed"`
+		NotifyEvents []string  `json:"notifyEvents"`
 	}
 	var p prefs
 	e.must("GET", "/api/preferences", nil, 200, &p)
@@ -1268,6 +1269,25 @@ func TestPreferences(t *testing.T) {
 	e.must("PUT", "/api/preferences/pinned", json.RawMessage("null"), 200, &p)
 	if p.Pinned != nil || p.LastUsed == nil {
 		t.Fatalf("cleared %+v", p)
+	}
+
+	// Notification filter: default all; set; validate.
+	if len(p.NotifyEvents) != 3 {
+		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
+	}
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"done", "needs_input"}}, 200, &p)
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,done" || p.LastUsed == nil {
+		t.Fatalf("notifyEvents %+v", p)
+	}
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)
+	if p.NotifyEvents == nil || len(p.NotifyEvents) != 0 {
+		t.Fatalf("all off %+v", p.NotifyEvents)
+	}
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"running"}}, 400, nil)
+	e.must("PUT", "/api/preferences/notifications", map[string]any{}, 400, nil)
+	e.must("GET", "/api/preferences", nil, 200, &p)
+	if len(p.NotifyEvents) != 0 {
+		t.Fatalf("after invalid %v", p.NotifyEvents)
 	}
 }
 

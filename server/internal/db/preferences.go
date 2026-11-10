@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"slices"
 
 	"github.com/flexdinesh/t3-stage/server/internal/t3"
 )
@@ -16,16 +17,47 @@ type ModelDefaults struct {
 	InteractionMode    string           `json:"interactionMode"`
 }
 
-// Preferences: new-task prefill is Pinned, else LastUsed.
+// Preferences: new-task prefill is Pinned, else LastUsed. NotifyEvents:
+// events that notify (inbox + push); others are dropped.
 type Preferences struct {
-	Pinned   *ModelDefaults `json:"pinned"`
-	LastUsed *ModelDefaults `json:"lastUsed"`
+	Pinned       *ModelDefaults `json:"pinned"`
+	LastUsed     *ModelDefaults `json:"lastUsed"`
+	NotifyEvents []TaskState    `json:"notifyEvents"`
 }
+
+// NotificationEvents: the states that can notify, in display order.
+var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, StateDone}
 
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 	var p Preferences
-	err := s.pool.QueryRow(ctx, `SELECT pinned, last_used FROM preferences WHERE id = 1`).Scan(&p.Pinned, &p.LastUsed)
+	var events []string
+	err := s.pool.QueryRow(ctx, `SELECT pinned, last_used, notify_events FROM preferences WHERE id = 1`).
+		Scan(&p.Pinned, &p.LastUsed, &events)
+	p.NotifyEvents = make([]TaskState, 0, len(events))
+	for _, e := range events {
+		p.NotifyEvents = append(p.NotifyEvents, TaskState(e))
+	}
 	return normalize(p), err
+}
+
+// SetNotifyEvents stores the notification filter (deduplicated, display
+// order). ErrInvalid for a state that cannot notify.
+func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Preferences, error) {
+	for _, e := range events {
+		if !slices.Contains(NotificationEvents, e) {
+			return Preferences{}, Invalid("invalid event %q (want needs_input, failed or done)", e)
+		}
+	}
+	stored := make([]string, 0, len(events))
+	for _, e := range NotificationEvents {
+		if slices.Contains(events, e) {
+			stored = append(stored, string(e))
+		}
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET notify_events = $1, updated_at = now() WHERE id = 1`, stored); err != nil {
+		return Preferences{}, err
+	}
+	return s.GetPreferences(ctx)
 }
 
 // SetPinned stores (or clears, nil) the pinned defaults.
