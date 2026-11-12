@@ -413,12 +413,13 @@ function TaskFormDrawer({
                 value={s.projectId}
                 onChange={(projectId) => set({ projectId })}
                 placeholder="Select project…"
+                autoFocus={isNew}
               />
             )}
           </Field>
         </div>
         <Field label="Title">
-          {(id) => <Input id={id} data-autofocus value={s.title} onChange={(e) => set({ title: e.target.value })} />}
+          {(id) => <Input id={id} data-autofocus={isNew ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
         <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
           {(id) =>

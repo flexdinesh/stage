@@ -26,6 +26,7 @@ export function ProjectCombobox({
   disabled,
   className,
   size,
+  autoFocus,
 }: {
   projects: readonly Project[];
   id?: string | undefined;
@@ -37,6 +38,7 @@ export function ProjectCombobox({
   disabled?: boolean | undefined;
   className?: string | undefined;
   size?: number | undefined;
+  autoFocus?: boolean | undefined;
 }) {
   const options = useCallback((query: string) => matchProjects(projects, query).map(toOption), [projects]);
   const pinnedOptions = useMemo(() => (pinned === undefined ? [] : [{ value: "", label: pinned }]), [pinned]);
@@ -53,6 +55,7 @@ export function ProjectCombobox({
       disabled={disabled}
       className={className}
       size={size}
+      autoFocus={autoFocus}
     />
   );
 }

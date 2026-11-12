@@ -69,6 +69,7 @@ export function Combobox({
   disabled = false,
   className,
   size,
+  autoFocus = false,
   "aria-label": ariaLabel,
 }: {
   id?: string | undefined;
@@ -85,6 +86,8 @@ export function Combobox({
   className?: string | undefined;
   /** Intrinsic width in characters (where the layout does not stretch the input). */
   size?: number | undefined;
+  /** Marks the input `data-autofocus` so an enclosing Drawer focuses it first. */
+  autoFocus?: boolean | undefined;
   "aria-label"?: string | undefined;
 }) {
   const listId = useId();
@@ -264,6 +267,7 @@ export function Combobox({
         spellCheck={false}
         disabled={disabled}
         size={size}
+        data-autofocus={autoFocus ? true : undefined}
         placeholder={placeholder}
         value={query ?? selected?.label ?? ""}
         className={cx(inputClass, "select-chevron cursor-pointer truncate pr-8 focus:cursor-text", className)}
