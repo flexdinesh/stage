@@ -404,7 +404,7 @@
           "oklch(83.6% 0.008 264.5)",
           "oklch(95.0% 0.006 264.5)"
         ],
-        "canonical": "rgba(230, 235, 245, 0.1)",
+        "canonical": "rgba(220, 226, 235, 0.11)",
         "cssVar": "--line",
         "theme": "dark"
       },
@@ -421,7 +421,7 @@
           "oklch(83.6% 0.008 264.5)",
           "oklch(95.0% 0.006 264.5)"
         ],
-        "canonical": "rgba(230, 235, 245, 0.2)",
+        "canonical": "rgba(220, 226, 235, 0.22)",
         "cssVar": "--line-strong",
         "theme": "dark"
       },
