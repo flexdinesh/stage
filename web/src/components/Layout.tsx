@@ -6,6 +6,7 @@ import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import {
   IconCheck,
+  IconChevronDown,
   IconClose,
   IconHistory,
   IconMoon,
@@ -35,6 +36,52 @@ const NAV = [
 
 /** Phone More drawer: the laptop nav items the bottom tabs leave out. */
 const MORE = NAV.filter((item) => item.to === "/schedules" || item.to === "/history" || item.to === "/settings");
+
+/** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
+const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
+
+/** Laptop top bar tab styling, shared by nav links and the More menu trigger. */
+function navTabClass(active: boolean): string {
+  return cx(
+    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 xl:px-3",
+    active ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
+  );
+}
+
+/** Laptop More menu (below `lg` only): the nav items that don't fit beside the primary tabs. */
+function MoreMenu({ active }: { active: boolean }) {
+  const menuId = useId();
+  const menuRef = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      <button type="button" popoverTarget={menuId} className={cx(navTabClass(active), "[anchor-name:--nav-more] lg:hidden")}>
+        More
+        <IconChevronDown size={12} />
+      </button>
+      <div
+        ref={menuRef}
+        id={menuId}
+        popover="auto"
+        className="m-0 w-44 border border-line-strong bg-surface text-fg [position-anchor:--nav-more] [top:anchor(bottom)] [left:anchor(left)]"
+      >
+        <nav className="flex flex-col" aria-label="More">
+          {MORE.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => menuRef.current?.hidePopover()}
+              className={({ isActive }) =>
+                cx("border-b border-line px-3 py-2 text-ui last:border-b-0 hover:bg-panel", isActive && "bg-panel font-medium")
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
+    </>
+  );
+}
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -182,7 +229,7 @@ function Shell() {
     return () => document.removeEventListener("keydown", onKey);
   }, [newTask]);
 
-  const moreActive = ["/settings", "/history"].some((p) => location.pathname.startsWith(p));
+  const moreActive = MORE_PATHS.some((p) => location.pathname.startsWith(p));
 
   return (
     <div className="min-h-screen bg-bg text-fg">
@@ -197,34 +244,31 @@ function Shell() {
               key={item.to}
               to={item.to}
               end={item.to === "/"}
-              className={({ isActive }) =>
-                cx(
-                  "flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-ui transition-colors duration-150",
-                  isActive ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
-                )
-              }
+              className={({ isActive }) => cx(navTabClass(isActive), MORE_PATHS.includes(item.to) && "max-lg:hidden")}
             >
               {item.label}
               {item.to === "/" ? <NeedsCount n={needsInput} /> : null}
             </NavLink>
           ))}
+          <MoreMenu active={moreActive} />
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
             onClick={() => setPalette(true)}
+            aria-label="Search tasks, threads"
             className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
-            <span className="hidden lg:inline">Search tasks, threads</span>
-            <Kbd>Ctrl K</Kbd>
+            <span className="hidden xl:inline">Search tasks, threads</span>
+            <Kbd className="max-xl:hidden">Ctrl K</Kbd>
           </button>
           <NotificationsBell onOpen={openInbox} />
           <ConnectionStatus />
           <ThemeButton />
-          <Button variant="primary" onClick={() => newTask()}>
+          <Button variant="primary" onClick={() => newTask()} className="max-lg:w-8 max-lg:px-0">
             <IconPlus size={14} />
-            New task
+            <span className="max-lg:sr-only">New task</span>
           </Button>
         </div>
       </header>

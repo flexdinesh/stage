@@ -203,7 +203,7 @@ function StatStrip({
             onClick={() => onToggle(g.key)}
             className={cx(
               toneClass(g.tone),
-              "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-md:last-of-type:border-r-0 transition-colors duration-150 md:flex-none md:flex-row md:justify-start md:gap-2 md:px-3",
+              "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-lg:last-of-type:border-r-0 transition-colors duration-150 lg:flex-none lg:flex-row lg:justify-start lg:gap-2 lg:px-3",
               on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "hover:bg-panel",
             )}
           >
@@ -213,12 +213,12 @@ function StatStrip({
                 {n}
               </span>
             </span>
-            <span className="label-caps text-label md:hidden">{g.short}</span>
-            <span className="label-caps hidden md:inline">{g.stat}</span>
+            <span className="label-caps text-label lg:hidden">{g.short}</span>
+            <span className="label-caps hidden lg:inline">{g.stat}</span>
           </button>
         );
       })}
-      <div className="hidden flex-1 items-center justify-end px-3 md:flex">
+      <div className="hidden flex-1 items-center justify-end px-3 whitespace-nowrap lg:flex">
         {selected === null ? (
           <span className="font-mono text-meta-sm text-muted">click a count to filter</span>
         ) : (
