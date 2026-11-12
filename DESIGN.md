@@ -22,20 +22,20 @@ colors:
   accent-dark: "#eef0f5"
   on-accent-dark: "#0b0d14"
   fg-dark: "#e6e8ee"
-  muted-dark: "#8b92a3"
-  bg-dark: "#0c0e13"
-  surface-dark: "#11141a"
-  panel-dark: "#161a22"
-  line-dark: "rgba(230, 235, 245, 0.1)"
-  line-strong-dark: "rgba(230, 235, 245, 0.2)"
+  muted-dark: "#9aa1b0"
+  bg-dark: "#1a1d23"
+  surface-dark: "#1f2229"
+  panel-dark: "#252830"
+  line-dark: "rgba(220, 226, 235, 0.11)"
+  line-strong-dark: "rgba(220, 226, 235, 0.22)"
   scrim-dark: "rgba(0, 0, 0, 0.55)"
   need-dark: "#e3c341"
   need-fg-dark: "#efd36a"
   run-dark: "#5ec4f0"
   done-dark: "#4fd1c5"
   ok-dark: "#5fd38a"
-  bad-dark: "#e5736a"
-  idle-dark: "#8b92a3"
+  bad-dark: "#ec8378"
+  idle-dark: "#9aa1b0"
 typography:
   headline:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
@@ -199,7 +199,7 @@ components:
 
 **Creative North Star: "The Ink Workbench"**
 
-t3-stage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or near-black (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the owner.
+t3-stage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or deep slate (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the owner.
 
 Density is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.
 
@@ -218,10 +218,10 @@ Motion is quiet: 150ms color, opacity and border transitions on state change, a 
 An ink-and-paper neutral system with a strictly semantic state palette; nothing else is colored.
 
 ### Primary
-- **Ink** (`accent` / `accent-dark`): the primary action color. Black (#0b0d14) on white in light mode, near-white (#eef0f5) on near-black in dark. Fills primary buttons (New task, Start, Open in T3 on a needs-input row), the active nav underline, the selected segmented option, the brand square, text selection, focus outlines and the history bar chart. Paired with `on-accent` for text on it.
+- **Ink** (`accent` / `accent-dark`): the primary action color. Black (#0b0d14) on white in light mode, near-white (#eef0f5) on deep slate in dark. Fills primary buttons (New task, Start, Open in T3 on a needs-input row), the active nav underline, the selected segmented option, the brand square, text selection, focus outlines and the history bar chart. Paired with `on-accent` for text on it.
 
 ### Neutral
-- **Paper** (`bg`, `surface`): the ground and panel bodies. Both pure white in light; in dark the ground is #0c0e13 and panel bodies lift one step to #11141a.
+- **Paper** (`bg`, `surface`): the ground and panel bodies. Both pure white in light; in dark the ground is #1a1d23 and panel bodies lift one step to #1f2229.
 - **Bench Gray** (`panel` / `panel-dark`): panel header bars, drawer footers, keycaps, hover fills on secondary and ghost buttons, the palette footer.
 - **Ink Text** (`fg` / `fg-dark`): all primary text and row titles.
 - **Slate** (`muted` / `muted-dark`): metadata, labels, placeholders, empty-state copy, inactive tabs.
