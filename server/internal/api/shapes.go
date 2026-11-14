@@ -3,9 +3,9 @@ package api
 import (
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 type taskJSON struct {

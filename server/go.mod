@@ -1,4 +1,4 @@
-module github.com/flexdinesh/t3-stage/server
+module github.com/flexdinesh/stage/server
 
 go 1.27.3
 

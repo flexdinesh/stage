@@ -14,23 +14,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agentctx"
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/cli"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/t3-stage/server/internal/notify"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/cli"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/notify"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_cli")
+	testDB = dbtest.Open("stage_test_cli")
 	if testDB.Skip != "" {
 		fmt.Println("cli integration tests skipped:", testDB.Skip)
 	}
@@ -60,7 +60,7 @@ func newHarness(t *testing.T) *harness {
 	h.sync = t3sync.New(store, h.fake, log)
 	srv := httptest.NewServer(api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, T3: h.fake, Sync: h.sync, Push: notify.New(store, "https://t3stage.test", log), Logger: log,
+		Store:  store, T3: h.fake, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	}))
 	t.Cleanup(srv.Close)
 	h.url = srv.URL
@@ -85,7 +85,7 @@ func (h *harness) run(stdin string, args ...string) (int, string, string) {
 			}
 			return ""
 		},
-		Caller: h.caller, Home: h.t.TempDir(), Executable: "/usr/local/bin/t3stage",
+		Caller: h.caller, Home: h.t.TempDir(), Executable: "/usr/local/bin/stage",
 		Exec: func(name string, args ...string) error {
 			h.execs = append(h.execs, append([]string{name}, args...))
 			return nil
@@ -244,7 +244,7 @@ func TestSetupInstructionsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	if strings.Count(s, "<!-- t3stage:begin -->") != 1 || !strings.HasPrefix(s, "# Mine\n\nkeep this\n\n") || !strings.Contains(s, "afterMe") {
+	if strings.Count(s, "<!-- stage:begin -->") != 1 || !strings.HasPrefix(s, "# Mine\n\nkeep this\n\n") || !strings.Contains(s, "afterMe") {
 		t.Fatalf("file:\n%s", s)
 	}
 	if code, stdout, _ := h.run("", "setup", "instructions", "--file", path); code != 0 || !strings.Contains(stdout, "unchanged") {
@@ -260,7 +260,7 @@ func TestSetupMCP(t *testing.T) {
 		t.Fatalf("setup mcp: %s", stderr)
 	}
 	got := fmt.Sprint(h.execs)
-	want := "[[claude mcp remove --scope user t3stage] [claude mcp add --scope user -e T3STAGE_URL=http://controlbox:7380 t3stage -- /usr/local/bin/t3stage mcp] [codex mcp remove t3stage]]"
+	want := "[[claude mcp remove --scope user stage] [claude mcp add --scope user -e STAGE_URL=http://controlbox:7380 stage -- /usr/local/bin/stage mcp] [codex mcp remove stage]]"
 	if got != want || !strings.Contains(stdout, "skipped codex") {
 		t.Fatalf("execs %s\nstdout %s", got, stdout)
 	}
@@ -268,7 +268,7 @@ func TestSetupMCP(t *testing.T) {
 	if code, _, _ := h.run("", "setup", "mcp", "--claude", "--http"); code != 0 {
 		t.Fatal("http")
 	}
-	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user t3stage] [claude mcp add --scope user --transport http t3stage http://controlbox:7380/mcp]]" {
+	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user --transport http stage http://controlbox:7380/mcp]]" {
 		t.Fatalf("http execs %s", got)
 	}
 }

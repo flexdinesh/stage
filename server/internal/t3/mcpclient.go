@@ -474,7 +474,7 @@ func (c *MCPClient) sessionFor(ctx context.Context) (*mcp.ClientSession, error) 
 	if c.session != nil {
 		return c.session, nil
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "t3-stage", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "stage", Version: "0.1.0"}, nil)
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:             c.opts.BaseURL + "/mcp",
 		HTTPClient:           c.mcpHC,

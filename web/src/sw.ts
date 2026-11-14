@@ -15,7 +15,7 @@ interface Payload {
   badge: number | null;
 }
 
-const FALLBACK: Payload = { title: "t3-stage", body: "Something changed. Open t3-stage to see it.", url: "/", tag: null, badge: null };
+const FALLBACK: Payload = { title: "stage", body: "Something changed. Open stage to see it.", url: "/", tag: null, badge: null };
 
 /** Same-origin path for `raw`, else "/". */
 function safeUrl(raw: unknown): string {

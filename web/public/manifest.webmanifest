@@ -1,6 +1,6 @@
 {
-  "name": "t3-stage",
-  "short_name": "t3-stage",
+  "name": "stage",
+  "short_name": "stage",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

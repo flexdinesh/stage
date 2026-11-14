@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // uploadImage stores one staged image (multipart field "file"). The type is

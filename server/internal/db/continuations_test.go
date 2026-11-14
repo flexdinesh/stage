@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func continuationThreads(t *testing.T, s *db.Store, ctx context.Context) {

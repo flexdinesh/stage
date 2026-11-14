@@ -7,13 +7,13 @@
 web
 
 ## Users
-One developer (the owner) running many T3 Code agent threads across several local projects. Uses t3-stage mostly from a laptop and a phone on the LAN, rarely a desktop: queueing work, checking what needs input, and glancing at what is running or done.
+One developer (the owner) running many T3 Code agent threads across several local projects. Uses stage mostly from a laptop and a phone on the LAN, rarely a desktop: queueing work, checking what needs input, and glancing at what is running or done.
 
 ## Product Purpose
 A personal stage manager for T3 Code. It queues tasks (prompt + provider/model/effort + runtime/workspace), launches them as T3 threads, tracks thread status, runs linked tasks in order (a task linked to run after another starts when that thread is settled in T3), and gives a cross-project history of every T3 thread. Success: never miss a thread that needs input, keep a queue moving without babysitting, and see recent work at a glance.
 
 ## Positioning
-Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); t3-stage owns the queue, run order, and the cross-project view T3 does not provide.
+Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide.
 
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, bound to 0.0.0.0:7380 on a home LAN, no auth.
@@ -31,11 +31,11 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Queued continuations: save a prompt to resume existing B after A settles and B finishes with no pending input. Running either session continues unchanged; restarting B keeps the continuation waiting. Linear chains gate later steps on the delivered continuation's run and subsequent settlement. Failures/interruption/cancellation block; uncertain delivery requires review. Saved prompts append only A's reference. Existing backlog-task order remains separate and conflicting membership must be unlinked first.
 - Dashboard Settled (last 7 days): tasks and external T3 threads in one list, newest settle first, each with its settle time and elapsed run time.
 - History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
-- Agent interface: agents (and scripts) manage tasks through the `t3stage` CLI (`--json`), a stdio MCP server (`t3stage mcp`) or HTTP MCP at `/mcp`, all over the REST API. Create backlog tasks, start/stop/follow up, link run order (incl. "after me": start when the calling session settles), schedules, session reads. The calling session and cwd pick the project; tasks and schedules record the session that created them (shown as "Created by" / "by agent").
+- Agent interface: agents (and scripts) manage tasks through the `stage` CLI (`--json`), a stdio MCP server (`stage mcp`) or HTTP MCP at `/mcp`, all over the REST API. Create backlog tasks, start/stop/follow up, link run order (incl. "after me": start when the calling session settles), schedules, session reads. The calling session and cwd pick the project; tasks and schedules record the session that created them (shown as "Created by" / "by agent").
 - Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now, global notification event filter (needs input / failed / done; unchecked events are dropped from inbox and push).
 
 ## Brand Commitments
-- Name: t3-stage (lowercase).
+- Name: stage (lowercase).
 - User-pinned visual direction: inspired by zed.dev and px0.ai; sharp borders, mildly colored borders; Ink accent (black on white / near-white on near-black); pure white light mode; color only on states; Geist UI text with JetBrains Mono for metadata.
 
 ## Evidence on Hand
@@ -43,6 +43,6 @@ Real data lives in the user's T3 instance; there are no testimonials, customers,
 
 ## Product Principles
 1. Needs-input is never missable: it leads every view it appears in.
-2. T3 is the place to talk; t3-stage is the place to queue and watch. Every task links straight to its thread.
+2. T3 is the place to talk; stage is the place to queue and watch. Every task links straight to its thread.
 3. Phone and laptop are both first-class; phone gets the glance and the quick action.
 4. Dense and scannable over decorative; state carries the color.

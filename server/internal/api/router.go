@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/notify"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/notify"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // Deps are the API's collaborators.

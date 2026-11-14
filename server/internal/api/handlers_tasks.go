@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/cronexpr"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/cronexpr"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {

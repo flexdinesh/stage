@@ -4,8 +4,8 @@
 package sync
 
 import (
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // MapThreadState derives a task state from a T3 thread (docs/api.md "State

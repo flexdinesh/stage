@@ -14,18 +14,18 @@ import (
 	"time"
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/cli"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/links"
-	"github.com/flexdinesh/t3-stage/server/internal/notify"
-	"github.com/flexdinesh/t3-stage/server/internal/schedule"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
-	"github.com/flexdinesh/t3-stage/server/internal/webui"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/cli"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/links"
+	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/schedule"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/webui"
 )
 
 func main() {

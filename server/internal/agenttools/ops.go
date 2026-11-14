@@ -1,5 +1,5 @@
-// Package agenttools is the agent interface to t3-stage: operations over the
-// REST client, exposed as MCP tools (stdio `t3stage mcp`, HTTP /mcp) and as
+// Package agenttools is the agent interface to stage: operations over the
+// REST client, exposed as MCP tools (stdio `stage mcp`, HTTP /mcp) and as
 // CLI commands. Inputs and outputs are the tool schemas.
 package agenttools
 
@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agentctx"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // Ops runs agent operations against the REST API.
@@ -54,7 +54,7 @@ type ContextOut struct {
 	Project       *db.Project `json:"project"`
 	ProjectSource string      `json:"projectSource"` // session | cwd | "" (unresolved)
 	ProjectError  string      `json:"projectError,omitempty"`
-	// CallerTaskID: the t3-stage task that owns the caller's session.
+	// CallerTaskID: the stage task that owns the caller's session.
 	CallerTaskID *int64 `json:"callerTaskId"`
 	APIURL       string `json:"apiUrl"`
 }
@@ -234,7 +234,7 @@ func (o *Ops) uploadImages(ctx context.Context, paths []string) ([]int64, error)
 		return nil, nil
 	}
 	if !o.LocalFiles {
-		return nil, errors.New("imagePaths needs local file access: use the stdio MCP server (`t3stage mcp`) or the CLI")
+		return nil, errors.New("imagePaths needs local file access: use the stdio MCP server (`stage mcp`) or the CLI")
 	}
 	ids := make([]int64, 0, len(paths))
 	for _, p := range paths {

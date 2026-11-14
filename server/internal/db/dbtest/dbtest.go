@@ -15,14 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-const defaultAdminURL = "postgres://t3stage:t3stage@127.0.0.1:5440/postgres?sslmode=disable"
+const defaultAdminURL = "postgres://stage:stage@127.0.0.1:5440/postgres?sslmode=disable"
 
 // namePrefix: Open only drops and creates databases with this prefix.
-const namePrefix = "t3stage_test_"
+const namePrefix = "stage_test_"
 
 // DB is a migrated test database (Pool nil + Skip set when unavailable).
 type DB struct {

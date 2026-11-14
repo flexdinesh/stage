@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // ContinuationEnvelope is shared with API preview data: preserve the saved

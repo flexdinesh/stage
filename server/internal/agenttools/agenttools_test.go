@@ -16,23 +16,23 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agentctx"
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/t3-stage/server/internal/links"
-	"github.com/flexdinesh/t3-stage/server/internal/notify"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/links"
+	"github.com/flexdinesh/stage/server/internal/notify"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_agenttools")
+	testDB = dbtest.Open("stage_test_agenttools")
 	if testDB.Skip != "" {
 		fmt.Println("agenttools integration tests skipped:", testDB.Skip)
 	}
@@ -63,7 +63,7 @@ func newEnv(t *testing.T) *env {
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, T3: fake, Sync: svc, Push: notify.New(store, "https://t3stage.test", log), Logger: log,
+		Store:  store, T3: fake, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

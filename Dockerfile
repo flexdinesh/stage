@@ -14,8 +14,8 @@ COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
 COPY --from=web /src/web/dist/ ./internal/webui/dist/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/t3stage ./cmd/t3stage
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
 
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=server /out/t3stage /t3stage
-ENTRYPOINT ["/t3stage"]
+COPY --from=server /out/stage /stage
+ENTRYPOINT ["/stage"]

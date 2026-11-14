@@ -91,7 +91,7 @@ const SORT_OPTIONS = [
 ] as const;
 type Sort = (typeof SORT_OPTIONS)[number]["value"];
 
-const SORT_KEY = "t3stage-projects-sort";
+const SORT_KEY = "stage-projects-sort";
 
 function readSort(): Sort {
   try {

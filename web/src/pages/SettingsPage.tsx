@@ -296,7 +296,7 @@ function NotificationsCard() {
             {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
             {state.data === "ios-install" ? (
               <Alert tone="plain">
-                Add to Home Screen first: Share → Add to Home Screen, then open t3-stage from the Home Screen.
+                Add to Home Screen first: Share → Add to Home Screen, then open stage from the Home Screen.
               </Alert>
             ) : null}
             {state.data === "blocked" ? (

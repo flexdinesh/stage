@@ -7,9 +7,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 func table(w io.Writer, header string, rows func(tw io.Writer)) {

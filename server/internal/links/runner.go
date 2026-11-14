@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/db"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // Launcher starts a task in T3 (sync.Service.LaunchTask).

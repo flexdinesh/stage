@@ -1,4 +1,4 @@
-// Package client is a typed client for the t3-stage REST API (docs/api.md).
+// Package client is a typed client for the stage REST API (docs/api.md).
 // The CLI, the stdio MCP server and the in-server HTTP MCP endpoint all go
 // through it, so the server stays the only writer and validator.
 package client
@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-// DefaultURL is the server address when T3STAGE_URL is unset.
+// DefaultURL is the server address when STAGE_URL is unset.
 const DefaultURL = "http://127.0.0.1:7380"
 
 // Client calls the REST API at BaseURL.
@@ -44,7 +44,7 @@ type Error struct {
 	Msg    string
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("t3-stage API %d: %s", e.Status, e.Msg) }
+func (e *Error) Error() string { return fmt.Sprintf("stage API %d: %s", e.Status, e.Msg) }
 
 // IsStatus reports whether err is an API error with that status.
 func IsStatus(err error, status int) bool {
@@ -230,7 +230,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 func (c *Client) send(req *http.Request, out any) error {
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("t3-stage unreachable at %s (set T3STAGE_URL): %w", c.BaseURL, err)
+		return fmt.Errorf("stage unreachable at %s (set STAGE_URL): %w", c.BaseURL, err)
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(res.Body)

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/cronexpr"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/cronexpr"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // scheduleRunsLimit: runs returned on a schedule detail read.

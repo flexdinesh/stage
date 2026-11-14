@@ -21,8 +21,8 @@ import (
 
 	"github.com/SherClockHolmes/webpush-go"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/db"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // Payload is the JSON the service worker shows.
@@ -242,7 +242,7 @@ func (n *Notifier) SendTest(ctx context.Context, endpoint string) error {
 	if err != nil {
 		return err
 	}
-	p := Payload{Title: "t3-stage", Body: "Test notification", URL: "/settings", Tag: "test", Badge: badge}
+	p := Payload{Title: "stage", Body: "Test notification", URL: "/settings", Tag: "test", Badge: badge}
 	return n.send(ctx, sub, p, webpush.UrgencyNormal)
 }
 

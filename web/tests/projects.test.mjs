@@ -7,7 +7,7 @@ const project = (id, title, workspaceRoot, lastActivityAt) => ({
   createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt,
 });
 
-const stage = project(1, "t3-stage", "/home/dee/workspace/t3-stage", "2026-11-09T10:00:00Z");
+const stage = project(1, "stage", "/home/dee/workspace/stage", "2026-11-09T10:00:00Z");
 const gitsy = project(2, "gitsy", "/home/dee/workspace/gitsy/main", "2026-11-09T12:00:00Z");
 const k8s = project(3, "k8s-cluster", "/home/dee/workspace-lab/k8s-cluster/main", null);
 const stash = project(4, "stash", "/home/dee/workspace/stash/main", "2026-11-08T00:00:00Z");
@@ -28,10 +28,10 @@ test("matches title case-insensitively and reports the matched span", () => {
 });
 
 test("ranks title prefix, then title substring, then path only", () => {
-  // "sta": stash and t3-stage... stash is a prefix match; t3-stage a substring; "scratch" path has no "sta".
-  assert.deepEqual(ids(matchProjects(all, "sta")), [4, 1]);
-  // "s": prefix stash; substrings (by recency) gitsy, t3-stage, k8s-cluster; path only none left except "No project" (/home/dee/.t3/scratch).
-  assert.deepEqual(ids(matchProjects(all, "s")), [4, 2, 1, 3, 5]);
+  // "sta": stage and stash are both prefix matches, by recency; "scratch" path has no "sta".
+  assert.deepEqual(ids(matchProjects(all, "sta")), [1, 4]);
+  // "s": prefixes (by recency) stage, stash; then substrings gitsy (most recent overall), k8s-cluster; path only "No project" (/home/dee/.t3/scratch).
+  assert.deepEqual(ids(matchProjects(all, "s")), [1, 4, 2, 3, 5]);
 });
 
 test("matches the workspace path when the title does not", () => {

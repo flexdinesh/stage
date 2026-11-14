@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_sync")
+	testDB = dbtest.Open("stage_test_sync")
 	if testDB.Skip != "" {
 		fmt.Println("sync integration tests skipped:", testDB.Skip)
 	}
