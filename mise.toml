@@ -1,0 +1,87 @@
+# Dev and tests use compose.dev.yaml (Postgres on 5440), never the prod stack
+# (compose.yaml, 5439). Only `up`/`down` touch prod.
+
+[tools]
+go = "1.27.3"   # server/go.mod
+node = "26"     # Dockerfile
+pnpm = "12.15.0" # Dockerfile
+
+[tasks.dev]
+description = "Dev Postgres + branch db + Go server (:7390, real T3) + Vite dev server (proxies /api)"
+depends = ["db"]
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -e
+DEV_COMPOSE=(docker compose -f compose.dev.yaml)
+DEV_PG=postgres://stage:stage@127.0.0.1:5440
+# One dev database per branch, so worktrees don't share state.
+DEV_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+DEV_DB=stage_dev_$(printf '%s' "$DEV_BRANCH" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9' '_' | cut -c1-40)
+"${DEV_COMPOSE[@]}" exec -T db psql -U stage -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DEV_DB'" | grep -q 1 \
+  || "${DEV_COMPOSE[@]}" exec -T db createdb -U stage "$DEV_DB"
+# Load .env.dev (if present, never .env). DATABASE_URL is always the branch's dev db.
+set -a; [ -f .env.dev ] && . ./.env.dev; set +a
+export APP_ENV=dev DATABASE_URL="$DEV_PG/$DEV_DB?sslmode=disable" APP_PORT="${APP_PORT:-7390}"
+echo "dev db $DEV_DB, server :$APP_PORT"
+# On exit, kill only this script's jobs and their descendants (go run's binary,
+# vite), never the process group (mise, the calling shell).
+kill_tree() { local c; for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null || true; }
+trap 'for p in $(jobs -p); do kill_tree "$p"; done' EXIT
+(cd server && go run ./cmd/stage) &
+(cd web && pnpm install && pnpm dev) &
+wait
+'''
+
+[tasks.db]
+description = "Start the dev/test Postgres (5440) and wait until healthy"
+run = "docker compose -f compose.dev.yaml up -d --wait db"
+
+[tasks.dev-down]
+description = "Stop the dev/test Postgres (data volume kept)"
+run = "docker compose -f compose.dev.yaml down"
+
+[tasks.build]
+description = "Web bundle embedded into a single Go binary at bin/stage"
+run = [
+  "cd web && pnpm install --frozen-lockfile && pnpm build",
+  "find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete",
+  "cp -r web/dist/. server/internal/webui/dist/",
+  "cd server && CGO_ENABLED=0 go build -o ../bin/stage ./cmd/stage",
+]
+
+[tasks.install-cli]
+description = "Agent CLI / stdio MCP binary (no web bundle) at ~/.local/bin/stage"
+run = [
+  'mkdir -p "$HOME/.local/bin"',
+  'cd server && CGO_ENABLED=0 go build -o "$HOME/.local/bin/stage" ./cmd/stage',
+]
+
+[tasks.test]
+description = "Go tests (dev Postgres) + web tests/typecheck/lint"
+depends = ["db"]
+run = [
+  "cd server && go vet ./... && go test ./...",
+  "cd web && pnpm test && pnpm typecheck && pnpm lint",
+]
+
+[tasks.check]
+description = "Everything CI-like: go vet + go test (dev Postgres), web install + test/typecheck/lint"
+depends = ["check:go", "check:web"]
+
+[tasks."check:go"]
+description = "go vet + go test (dev Postgres)"
+depends = ["db"]
+run = "cd server && go vet ./... && go test ./..."
+
+[tasks."check:web"]
+description = "Web install (frozen lockfile) + test/typecheck/lint"
+run = "cd web && pnpm install --frozen-lockfile && pnpm test && pnpm typecheck && pnpm lint"
+
+[tasks.up]
+description = "Build and run the production stack in compose"
+run = "docker compose up -d --build"
+
+[tasks.down]
+description = "Stop the production stack (data volume kept)"
+run = "docker compose down"

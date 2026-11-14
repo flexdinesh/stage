@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     proxy: {
-      // `make dev` exports APP_PORT (default 7390; prod owns 7380).
+      // `mise run dev` exports APP_PORT (default 7390; prod owns 7380).
       "/api": `http://127.0.0.1:${loadEnv(mode, ".", "").APP_PORT ?? "7390"}`,
     },
   },

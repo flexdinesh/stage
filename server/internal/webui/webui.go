@@ -22,7 +22,7 @@ func Handler() http.Handler {
 	index, err := fs.ReadFile(root, "index.html")
 	if errors.Is(err, fs.ErrNotExist) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "web UI not built; use the Vite dev server (make dev) or make build", http.StatusNotFound)
+			http.Error(w, "web UI not built; use the Vite dev server (mise run dev) or mise run build", http.StatusNotFound)
 		})
 	}
 	files := http.FileServerFS(root)

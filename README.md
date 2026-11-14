@@ -60,7 +60,7 @@ The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript
 
 - iOS/iPadOS 16.4+: open the URL in Safari, Share → Add to Home Screen, open stage from the Home Screen, then Settings → Notifications → Enable.
 - macOS: Safari → File → Add to Dock (or use the site in Safari/Chrome), then Settings → Notifications → Enable.
-- Settings → Notifications → Send test checks the device. The service worker registers only in production builds (`make build` / compose).
+- Settings → Notifications → Send test checks the device. The service worker registers only in production builds (`mise run build` / compose).
 
 ## Agents
 
@@ -73,7 +73,7 @@ Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks.
 Install the binary on the T3 host (the compose image does not install it; rerun after updates) and register it:
 
 ```sh
-make install-cli                     # ~/.local/bin/stage (no args = server; subcommands = CLI)
+mise run install-cli                 # ~/.local/bin/stage (no args = server; subcommands = CLI)
 stage setup mcp                    # claude mcp add --scope user + codex mcp add (stdio); --http registers /mcp instead
 stage setup instructions           # idempotent usage block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 ```
@@ -106,13 +106,16 @@ stage sessions search "token refresh" --project stage                          #
 
 ## Develop
 
-Development never touches production. Dev and tests run on their own Postgres (`compose.dev.yaml`, `127.0.0.1:5440`, volume `stage-dev_pgdata`). The prod stack is `compose.yaml` (`5439`), and only `make up` / `make down` touch it.
+Development never touches production. Dev and tests run on their own Postgres (`compose.dev.yaml`, `127.0.0.1:5440`, volume `stage-dev_pgdata`). The prod stack is `compose.yaml` (`5439`), and only `mise run up` / `mise run down` touch it.
 
-- `make dev`: dev Postgres, a database per branch (`stage_dev_<branch>`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`; prod is `stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `DATABASE_URL` itself.
-- `make test`: Go tests in throwaway `stage_test_*` databases on the dev Postgres, web typecheck/lint, and session semantic/API contract tests.
+Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise tasks` lists them.
+
+- `mise run dev`: dev Postgres, a database per branch (`stage_dev_<branch>`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`; prod is `stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `DATABASE_URL` itself.
+- `mise run test`: Go tests in throwaway `stage_test_*` databases on the dev Postgres, web typecheck/lint, and session semantic/API contract tests.
 - `node --test web/tests/sessions.test.mjs`: session eligibility, continuation editing/delivery preview, URL encoding and HTTP contract tests.
 - `node --test web/tests/palette-search.test.mjs`: palette session search merge, dedupe, labels and T3 offline note.
 - `node --test web/tests/tasks.test.mjs`: session batch helpers (selection, Start chain, reorder, progress) and the order HTTP contract.
-- `make dev-down` stops the dev Postgres. Other targets: `make build`, `make install-cli`, `make up`, `make down`. API contract: `docs/api.md`.
+- `mise run check`: everything CI-like (go vet, go test, web install/test/typecheck/lint). Run before a PR.
+- `mise run dev-down` stops the dev Postgres. Other tasks: `mise run build`, `mise run install-cli`, `mise run up`, `mise run down`. API contract: `docs/api.md`.
 
-Guards: with `APP_ENV=dev` (set by `make dev`) the server refuses the prod database (port `5439` or name `stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.
+Guards: with `APP_ENV=dev` (set by `mise run dev`) the server refuses the prod database (port `5439` or name `stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

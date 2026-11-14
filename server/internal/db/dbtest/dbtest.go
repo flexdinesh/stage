@@ -44,14 +44,14 @@ func OpenAt(name string, version int64) *DB {
 	}
 	// Loud, not a skip: tests must never drop databases next to prod data.
 	if config.ProdDatabase(adminURL) {
-		panic(fmt.Sprintf("dbtest: refusing production database %s; use the dev db (`make db`, 5440)", redact(adminURL)))
+		panic(fmt.Sprintf("dbtest: refusing production database %s; use the dev db (`mise run db`, 5440)", redact(adminURL)))
 	}
 	if !strings.HasPrefix(name, namePrefix) {
 		panic(fmt.Sprintf("dbtest: database name %q must start with %q", name, namePrefix))
 	}
 	admin, err := pgx.Connect(ctx, adminURL)
 	if err != nil {
-		return &DB{Skip: fmt.Sprintf("postgres unreachable at %s (run `make db`): %v", redact(adminURL), err)}
+		return &DB{Skip: fmt.Sprintf("postgres unreachable at %s (run `mise run db`): %v", redact(adminURL), err)}
 	}
 	defer admin.Close(ctx)
 	ident := pgx.Identifier{name}.Sanitize()
