@@ -222,8 +222,21 @@ type Thread struct {
 	ParentThreadID       string
 	RelationshipToParent string // fork|subagent|""
 	ItemCount            int
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// PullRequests: linkedPullRequest first, then pullRequests, deduped by URL.
+	PullRequests []PullRequest
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// PullRequest is a PR T3 associates with a thread. State is T3's string
+// (open, merged, closed, draft, ...); Source is created, agent or linked.
+type PullRequest struct {
+	Host       string `json:"host"`
+	Repository string `json:"repository"` // owner/name
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	Source     string `json:"source"`
+	State      string `json:"state"`
 }
 
 // ThreadDetail is t3_thread_read: thread + detail fields + recentRuns.
@@ -263,7 +276,8 @@ type Run struct {
 	Ordinal            int
 	Status             ThreadStatus
 	ProviderInstanceID string
-	Model              string
+	Model              string // requested
+	ExecutedModel      string // model the provider ran; "" if not reported
 	RequestedAt        time.Time
 	StartedAt          *time.Time
 	CompletedAt        *time.Time

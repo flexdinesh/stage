@@ -224,6 +224,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if err == nil {
 			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
 		}
+		if err == nil {
+			th.RecentRuns, err = s.Store.ThreadRuns(ctx, th.T3ThreadID)
+		}
 		switch {
 		case err == nil:
 			tj := s.thread(env, th)

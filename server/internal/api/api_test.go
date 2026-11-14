@@ -1800,3 +1800,96 @@ func TestSettledExternalThreads(t *testing.T) {
 	}
 	e.must("GET", "/api/threads?settledFrom=yesterday", nil, 400, nil)
 }
+
+func TestPullRequestsAndRuns(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/prs")
+	tk := e.task(p.ID, "Ship", nil)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, nil)
+	tk = e.getTask(tk.ID)
+	if tk.T3ThreadID == nil {
+		t.Fatalf("not launched: %+v", tk)
+	}
+	id := *tk.T3ThreadID
+	pr := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "created", State: "open"}
+	if err := e.fake.SetThread(id, func(d *t3.ThreadDetail) {
+		d.PullRequests = []t3.PullRequest{pr}
+		d.RecentRuns[0].ExecutedModel = "m-exec"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.poll()
+
+	type prJSON struct {
+		Repository string `json:"repository"`
+		Number     int    `json:"number"`
+		URL        string `json:"url"`
+		State      string `json:"state"`
+		Source     string `json:"source"`
+	}
+	type runJSON struct {
+		RunID         string  `json:"runId"`
+		Ordinal       int     `json:"ordinal"`
+		Status        string  `json:"status"`
+		ExecutedModel *string `json:"executedModel"`
+		RequestedAt   string  `json:"requestedAt"`
+		StartedAt     *string `json:"startedAt"`
+	}
+	type threadJSON struct {
+		PullRequests []prJSON   `json:"pullRequests"`
+		RunCount     int        `json:"runCount"`
+		RecentRuns   *[]runJSON `json:"recentRuns"`
+	}
+	wantPR := prJSON{Repository: "o/r", Number: 7, URL: pr.URL, State: "open", Source: "created"}
+	checkRuns := func(where string, th threadJSON) {
+		t.Helper()
+		if th.RecentRuns == nil || len(*th.RecentRuns) != 1 || th.RunCount != 1 {
+			t.Fatalf("%s: runs %+v count %d", where, th.RecentRuns, th.RunCount)
+		}
+		r := (*th.RecentRuns)[0]
+		if r.Ordinal != 1 || r.Status != "running" || r.ExecutedModel == nil || *r.ExecutedModel != "m-exec" || r.StartedAt == nil || r.RequestedAt == "" {
+			t.Fatalf("%s: run %+v", where, r)
+		}
+	}
+
+	var detail struct {
+		PullRequests []prJSON   `json:"pullRequests"`
+		Thread       threadJSON `json:"thread"`
+	}
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &detail)
+	if len(detail.PullRequests) != 1 || detail.PullRequests[0] != wantPR || len(detail.Thread.PullRequests) != 1 {
+		t.Fatalf("task detail prs %+v / %+v", detail.PullRequests, detail.Thread.PullRequests)
+	}
+	checkRuns("task detail", detail.Thread)
+
+	var tasks struct {
+		Tasks []struct {
+			ID           int64    `json:"id"`
+			PullRequests []prJSON `json:"pullRequests"`
+		} `json:"tasks"`
+	}
+	e.must("GET", "/api/tasks", nil, 200, &tasks)
+	for _, x := range tasks.Tasks {
+		if x.ID == tk.ID && (len(x.PullRequests) != 1 || x.PullRequests[0] != wantPR) {
+			t.Fatalf("task list prs %+v", x.PullRequests)
+		}
+	}
+
+	var sd struct {
+		Thread threadJSON `json:"thread"`
+	}
+	e.must("GET", "/api/threads/"+url.PathEscape(id), nil, 200, &sd)
+	if len(sd.Thread.PullRequests) != 1 || sd.Thread.PullRequests[0] != wantPR {
+		t.Fatalf("thread detail prs %+v", sd.Thread.PullRequests)
+	}
+	checkRuns("thread detail", sd.Thread)
+
+	// Lists carry PRs and runCount, not runs.
+	var pg struct {
+		Threads []threadJSON `json:"threads"`
+	}
+	e.must("GET", "/api/threads", nil, 200, &pg)
+	if len(pg.Threads) != 1 || len(pg.Threads[0].PullRequests) != 1 || pg.Threads[0].RunCount != 1 || pg.Threads[0].RecentRuns != nil {
+		t.Fatalf("thread list %+v", pg.Threads)
+	}
+}

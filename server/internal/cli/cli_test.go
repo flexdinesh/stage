@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
@@ -197,6 +198,66 @@ func TestTaskCommands(t *testing.T) {
 	}
 	if code, _, _ := h.run("", "task", "show"); code != 2 {
 		t.Fatalf("missing id exit %d", code)
+	}
+}
+
+func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	ctx := context.Background()
+	p := h.project("/w/cli-prs")
+	code, stdout, stderr := h.run("", "task", "add", "--project", fmt.Sprint(p.ID), "--title", "Ship", "--prompt", "go", "--start", "--json")
+	if code != 0 {
+		t.Fatalf("add: %d %s", code, stderr)
+	}
+	tk := decode[client.Task](t, stdout)
+	if tk.T3ThreadID == nil {
+		t.Fatalf("not launched: %+v", tk)
+	}
+	thread := *tk.T3ThreadID
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := h.fake.SetThread(thread, func(d *t3.ThreadDetail) {
+		d.PullRequests = []t3.PullRequest{{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "created", State: "merged"}}
+		d.RecentRuns = nil
+		for i := 12; i >= 1; i-- {
+			req := base.Add(time.Duration(i) * time.Minute)
+			start, done := req.Add(2*time.Second), req.Add(32*time.Second)
+			d.RecentRuns = append(d.RecentRuns, t3.Run{RunID: fmt.Sprint("r", i), Ordinal: i, Status: t3.StatusCompleted,
+				Model: "m", ExecutedModel: "m", RequestedAt: req, StartedAt: &start, CompletedAt: &done})
+		}
+		d.RecentRuns[0].ExecutedModel = "m-big"
+		d.RunCount = 12
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sync.RefreshSession(ctx, thread); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{{"task", "show", fmt.Sprint(tk.ID)}, {"session", "show", thread}} {
+		code, stdout, stderr = h.run("", args...)
+		if code != 0 {
+			t.Fatalf("%v: %d %s", args, code, stderr)
+		}
+		for _, want := range []string{"prs", "o/r#7", "merged", "https://github.com/o/r/pull/7", "runs", "#12", "m -> m-big", "30s", "2s", "(10 of 12 runs)"} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("%v: missing %q in\n%s", args, want, stdout)
+			}
+		}
+		if strings.Contains(stdout, "#2 ") {
+			t.Fatalf("%v: runs block not capped:\n%s", args, stdout)
+		}
+	}
+
+	code, stdout, _ = h.run("", "session", "show", thread, "--json")
+	d := decode[client.ThreadDetail](t, stdout)
+	if code != 0 || len(d.Thread.RecentRuns) != 12 || d.Thread.RunCount != 12 || len(d.Thread.PullRequests) != 1 {
+		t.Fatalf("session json: %d runs=%d count=%d prs=%d", code, len(d.Thread.RecentRuns), d.Thread.RunCount, len(d.Thread.PullRequests))
+	}
+	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(tk.ID), "--json")
+	td := decode[client.TaskDetail](t, stdout)
+	if code != 0 || len(td.PullRequests) != 1 || td.Thread == nil || len(td.Thread.RecentRuns) != 12 {
+		t.Fatalf("task json: %s", stdout)
 	}
 }
 
