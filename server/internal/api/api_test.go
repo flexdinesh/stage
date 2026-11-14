@@ -892,22 +892,33 @@ func TestCancelledTaskReopens(t *testing.T) {
 		t.Fatalf("resumed thread did not reopen stale cancelled task: %s", got.State)
 	}
 
-	// Cancelled with a follower that already ran: released, stays cancelled.
+	// Cancelled with a follower: the follower waits; the task keeps following
+	// T3 and the follower starts once it settles.
 	b := e.task(p.ID, "b", map[string]any{"start": true})
 	c := e.task(p.ID, "c", map[string]any{"afterTaskId": b.ID})
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCancelled)
 	e.poll()
 	e.reconcile()
-	if got := e.getTask(c.ID); got.State != "running" {
-		t.Fatalf("follower %s", got.State)
+	if got := e.getTask(c.ID); got.State != "backlog" {
+		t.Fatalf("follower of cancelled task %s", got.State)
 	}
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusRunning)
 	if _, err := e.sync.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
-	if got := e.getTask(b.ID); got.State != "cancelled" {
-		t.Fatalf("released cancelled task reopened: %s", got.State)
+	if got := e.getTask(b.ID); got.State != "running" {
+		t.Fatalf("cancelled task with follower did not reopen: %s", got.State)
+	}
+	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*b.T3ThreadID)
+	e.poll()
+	e.reconcile()
+	if got := e.getTask(b.ID); got.State != "settled" {
+		t.Fatalf("predecessor %s", got.State)
+	}
+	if got := e.getTask(c.ID); got.State != "running" {
+		t.Fatalf("follower after settle %s", got.State)
 	}
 }
 

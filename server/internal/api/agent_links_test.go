@@ -98,6 +98,37 @@ func TestTaskRunsAfterSession(t *testing.T) {
 	e.agentTask(p.ID, "d", map[string]any{"afterThreadId": "nope"}, 404)
 }
 
+func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/after-cancelled-session")
+	ctx := context.Background()
+	s := runningSession(t, e, p.T3ProjectID, "Agent session")
+	a := e.agentTask(p.ID, "a", map[string]any{"afterThreadId": s}, 201)
+
+	// Cancelled: keeps waiting, and can still be linked.
+	_ = e.fake.SetStatus(s, t3.StatusCancelled)
+	if err := e.sync.WatchThreads(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	if got := e.getAgentTask(a.ID); got.State != "backlog" {
+		t.Fatalf("cancelled session must hold: %+v", got)
+	}
+	b := e.agentTask(p.ID, "b", map[string]any{"afterThreadId": s}, 201)
+
+	// Settled with the last run still cancelled: passes.
+	_ = e.fake.Settle(s)
+	if err := e.sync.WatchThreads(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	for _, id := range []int64{a.ID, b.ID} {
+		if got := e.getAgentTask(id); got.State != "running" {
+			t.Fatalf("after settle task %d must run: %+v", id, got)
+		}
+	}
+}
+
 func TestAfterSessionOwnedByTaskBecomesTaskLink(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-task-session")

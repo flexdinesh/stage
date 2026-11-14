@@ -1,6 +1,6 @@
 // Package links runs runs-after links: a backlog task linked to run after
-// another task, or a T3 session, launches once it is settled (or cancelled)
-// in T3 (docs/api.md "Link rules").
+// another task, or a T3 session, launches once it is settled in T3
+// (docs/api.md "Link rules"). A cancelled one keeps it waiting.
 package links
 
 import (
@@ -20,7 +20,7 @@ type Launcher interface {
 }
 
 // Passed: the predecessor no longer blocks its follower.
-func Passed(s db.TaskState) bool { return s == db.StateSettled || s == db.StateCancelled }
+func Passed(s db.TaskState) bool { return s == db.StateSettled }
 
 // Runner launches ready followers. Launches are serialized.
 type Runner struct {
@@ -46,8 +46,8 @@ func NewRunner(store *db.Store, launcher Launcher, log *slog.Logger) *Runner {
 	}
 }
 
-// OnTransition is the sync.Service hook: a task passing (settled or
-// cancelled) schedules a reconcile that launches its follower.
+// OnTransition is the sync.Service hook: a task passing (settled)
+// schedules a reconcile that launches its follower.
 func (r *Runner) OnTransition(_ context.Context, c t3sync.Change) {
 	if !Passed(c.To) {
 		return
@@ -58,8 +58,8 @@ func (r *Runner) OnTransition(_ context.Context, c t3sync.Change) {
 	}
 }
 
-// OnThreadChange is the watcher hook: a session passing (settled or
-// cancelled) schedules a reconcile that launches tasks waiting on it.
+// OnThreadChange is the watcher hook: a session passing (settled)
+// schedules a reconcile that launches tasks waiting on it.
 func (r *Runner) OnThreadChange(_ context.Context, c t3sync.ThreadChange) {
 	if !Passed(c.To) {
 		return

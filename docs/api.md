@@ -192,11 +192,11 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 }
 ```
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
-- `afterTaskId`: runs after that task (launches when it is settled or cancelled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
+- `afterTaskId`: runs after that task (launches when it is settled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
 - `startAt` (UTC instant) / `startTz` (IANA zone it was entered in): one-shot start time of a `backlog` task; the scheduler launches it at that time (see "Schedule rules"). Both null or both set; non-null only while the task is in `backlog` (any launch clears them). Never set together with `afterTaskId`.
 - `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
 - `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
-- `afterThreadId` / `afterThreadTitle`: runs after that T3 session (launches when it is settled or cancelled; see "Link rules"). A task waits on at most one of `startAt`, `afterTaskId`, `afterThreadId`.
+- `afterThreadId` / `afterThreadTitle`: runs after that T3 session (launches when it is settled; see "Link rules"). A task waits on at most one of `startAt`, `afterTaskId`, `afterThreadId`.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
@@ -253,7 +253,7 @@ In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (4
 204. 409 when state is `launching|running|needs_input` (stop first). Its follower is relinked to its predecessor (A→X→B becomes A→B; B unlinked when X had none).
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor task or session that is not settled or cancelled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor task or session that is not settled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one. The same applies to a task left in `launching` by a server restart (failed at startup with `launch interrupted by server restart`). On shutdown the server waits up to 100s for in-flight launches (compose `stop_grace_period: 2m`).
 Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
@@ -640,16 +640,16 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 ## Link rules
 
 - A task runs after at most one task (`afterTaskId`) and has at most one follower (`nextTaskId`): a run order is a linear list. Links may span projects.
-- Linking (create or `PATCH afterTaskId`), 409 otherwise: the task is `backlog`; the predecessor exists (404), is not the task, is not `settled|cancelled`, has no other follower, and is not already after the task (no loops).
-- A predecessor is passed when it is `settled` or `cancelled`. The link runner launches every `backlog` task whose predecessor has passed: on each transition into `settled|cancelled`, at startup and every 10s. The link stays (history).
-- A `failed|interrupted` (or still running / `done`) predecessor keeps its follower waiting. Restart the predecessor, unlink the follower, or "Start now" on it.
+- Linking (create or `PATCH afterTaskId`), 409 otherwise: the task is `backlog`; the predecessor exists (404), is not the task, is not `settled`, has no other follower, and is not already after the task (no loops).
+- A predecessor is passed when it is `settled`. The link runner launches every `backlog` task whose predecessor has passed: on each transition into `settled`, at startup and every 10s. The link stays (history).
+- A `failed|interrupted|cancelled` (or still running / `done`) predecessor keeps its follower waiting. Restart the predecessor, unlink the follower, or "Start now" on it.
 - `GET /api/tasks/:id` returns `sequence`: the whole run order containing the task, head first.
 
 Session links (`afterThreadId`, "run after me" from the agent interface):
 
 - Linking a session that is a task's current thread stores a task link to that task instead (`afterTaskId`, all rules above, so 409 when it already has a follower).
-- Otherwise (409 / 404): the task is `backlog`; the session is mirrored (404) and its normalized session state (`GET /api/threads` `state`) is not `settled|cancelled`. Many tasks may wait on one session.
-- The link runner launches every `backlog` task whose session has passed (normalized state `settled|cancelled`); failed, interrupted, running or done-but-unsettled keep it waiting. The watcher refreshes every session that a backlog task waits on each 5s pass (subagents included, no notifications), and a session settling kicks the runner. The link stays (history); it is not part of `sequence`.
+- Otherwise (409 / 404): the task is `backlog`; the session is mirrored (404) and has not passed. Many tasks may wait on one session.
+- A session is passed when it is settled in T3 with no pending requests and no active run (the raw settled flag: a settled session whose last run was cancelled passes). The link runner launches every `backlog` task whose session has passed; failed, interrupted, cancelled, running or done-but-unsettled keep it waiting. The watcher refreshes every session that a backlog task waits on each 5s pass (subagents included, no notifications), and a session settling kicks the runner. The link stays (history); it is not part of `sequence`.
 
 ## Agent interface
 
