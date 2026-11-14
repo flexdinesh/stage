@@ -175,11 +175,11 @@ func TestPayload(t *testing.T) {
 		want Payload
 	}{
 		{"task needs input", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d#answer", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/sessions/ext-1", Tag: "thread-ext-1", Badge: 2}},
+			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/sessions/ext-1#answer", Tag: "thread-ext-1", Badge: 2}},
 		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/sessions/ext-2", Tag: "thread-ext-2", Badge: 2}},
 	}
@@ -376,11 +376,12 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 		{thread: &t3sync.ThreadChange{ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
 	} {
 		payload, record, err := n.payload(ctx, e)
-		wantRecord := want
+		wantPayload, wantRecord := want, want
 		if e.task != nil {
-			wantRecord = fmt.Sprintf("/tasks/%d", task.ID)
+			// Needs input lands on the Needs input panel; the record keeps the task path.
+			wantPayload, wantRecord = want+"#answer", fmt.Sprintf("/tasks/%d", task.ID)
 		}
-		if err != nil || payload.URL != want || record.URL != wantRecord {
+		if err != nil || payload.URL != wantPayload || record.URL != wantRecord {
 			t.Fatalf("payload=%+v record=%+v err=%v", payload, record, err)
 		}
 	}

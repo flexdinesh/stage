@@ -54,6 +54,8 @@ type flakyT3 struct {
 	failInterrupt atomic.Bool
 	onInterrupt   func()
 	offline       atomic.Bool // Status reports not connected
+	// failQuestions fails t3_pending_request list (transport error).
+	failQuestions atomic.Bool
 	// foreignProject: the next launch answers with a thread in this project
 	// (T3 deduped the clientRequestId to another client's launch).
 	foreignProject atomic.Pointer[string]
@@ -120,6 +122,13 @@ func (f *flakyT3) Interrupt(ctx context.Context, threadID string) error {
 		return errors.New("interrupt transport failure")
 	}
 	return f.Fake.Interrupt(ctx, threadID)
+}
+
+func (f *flakyT3) ListPendingQuestions(ctx context.Context, threadID string) ([]string, error) {
+	if f.failQuestions.Load() {
+		return nil, errors.New("list transport failure")
+	}
+	return f.Fake.ListPendingQuestions(ctx, threadID)
 }
 
 type env struct {

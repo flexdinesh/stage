@@ -444,3 +444,34 @@ func TestHandoffFlags(t *testing.T) {
 		t.Fatalf("link --handoff=false: %s", stdout)
 	}
 }
+
+func TestSessionQuestionsCommand(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	p := h.project("/w/cliq")
+	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Asks"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	no := false
+	if _, err := h.fake.AddUserInput(out.ThreadID, []t3.Question{{ID: "q", Header: "Scope", Question: "Which scope?", MultiSelect: true, AllowCustomAnswer: &no,
+		Options: []t3.QuestionOption{{Label: "Server", Description: "Go only"}, {Label: "Web"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.fake.AddApproval(out.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := h.run("", "sessions", "questions", out.ThreadID)
+	if code != 0 || !strings.Contains(stdout, "2 pending request(s): 1 question(s), 1 approval(s) in T3") ||
+		!strings.Contains(stdout, "1. [Scope] Which scope?  (multi-select)") || !strings.Contains(stdout, "- Server: Go only") ||
+		strings.Contains(stdout, "custom answer") {
+		t.Fatalf("questions: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, _ = h.run("", "sessions", "questions", out.ThreadID, "--json")
+	if pq := decode[client.PendingQuestions](t, stdout); code != 0 || pq.ApprovalCount != 1 || len(pq.Requests) != 1 {
+		t.Fatalf("questions json: %d %s", code, stdout)
+	}
+	if code, _, _ := h.run("", "sessions", "questions"); code == 0 {
+		t.Fatal("missing id accepted")
+	}
+}

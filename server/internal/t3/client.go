@@ -59,6 +59,15 @@ type Client interface {
 	SendAttachments(ctx context.Context, threadID, message string, atts []Attachment) error
 	// Interrupt calls t3_thread_interrupt with stop:true (Stop button semantics).
 	Interrupt(ctx context.Context, threadID string) error
+	// ListPendingQuestions calls t3_pending_request list: pending user-input
+	// request ids (approvals are not listed).
+	ListPendingQuestions(ctx context.Context, threadID string) ([]string, error)
+	// ReadPendingQuestion calls t3_pending_request read. ErrRequestAnswered /
+	// ErrRequestStale when the request is no longer pending.
+	ReadPendingQuestion(ctx context.Context, threadID, requestID string) (PendingQuestion, error)
+	// RespondPendingQuestion calls t3_pending_request respond (answers keyed by
+	// question id). Same errors as ReadPendingQuestion. Not retried.
+	RespondPendingQuestion(ctx context.Context, threadID, requestID string, answers map[string]Answer) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
 	// unfiltered; callers drop providers with non-empty Constraints.
 	Capabilities(ctx context.Context) (Catalog, error)

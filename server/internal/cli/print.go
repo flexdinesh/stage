@@ -383,3 +383,31 @@ func printOrder(w io.Writer, ts []client.Task) {
 		fmt.Fprintf(w, "%d. #%d [%s] %s\n", i+1, t.ID, t.State, t.Title)
 	}
 }
+
+func printQuestions(w io.Writer, threadID string, p client.PendingQuestions) {
+	n := 0
+	for _, r := range p.Requests {
+		n += len(r.Questions)
+	}
+	fmt.Fprintf(w, "session %s  %d pending request(s): %d question(s), %d approval(s) in T3\n", threadID, p.PendingRequestCount, n, p.ApprovalCount)
+	for _, r := range p.Requests {
+		fmt.Fprintf(w, "  request %s\n", r.RequestID)
+		for i, q := range r.Questions {
+			kind := ""
+			if q.MultiSelect {
+				kind = "  (multi-select)"
+			}
+			fmt.Fprintf(w, "    %d. [%s] %s%s\n", i+1, q.Header, q.Question, kind)
+			for _, o := range q.Options {
+				if o.Description == "" {
+					fmt.Fprintf(w, "       - %s\n", o.Label)
+				} else {
+					fmt.Fprintf(w, "       - %s: %s\n", o.Label, o.Description)
+				}
+			}
+			if q.CustomAllowed() {
+				fmt.Fprintln(w, "       - (custom answer allowed)")
+			}
+		}
+	}
+}

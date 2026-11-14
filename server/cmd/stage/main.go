@@ -78,7 +78,12 @@ func run() error {
 	// T3_FAKE=1 forces the in-memory fake (dev/demo without a T3 server).
 	var t3Client t3.Client
 	if os.Getenv("T3_FAKE") == "1" {
-		t3Client = t3.NewFake()
+		fake := t3.NewFake()
+		// T3_FAKE_SEED=1 seeds demo threads waiting on questions (UI work).
+		if os.Getenv("T3_FAKE_SEED") == "1" {
+			fake.SeedDemo()
+		}
+		t3Client = fake
 		logger.Info("using fake T3 client")
 	} else {
 		mc := t3.NewMCPClient(t3.Options{

@@ -129,11 +129,13 @@ type Task struct {
 	LastWordPreview    *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
 	LastWordAt         *time.Time       `json:"lastWordAt"`
 	PullRequests       []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
-	CreatedAt          time.Time        `json:"createdAt"`
-	UpdatedAt          time.Time        `json:"updatedAt"`
-	Attachments        []Attachment     `json:"attachments"` // images, upload order
-	T3ProjectID        string           `json:"-"`           // project's T3 id (for launch)
-	ThreadLink         *string          `json:"-"`           // mirrored thread link
+	// PendingQuestionCount: the thread's answerable pending questions.
+	PendingQuestionCount int          `json:"pendingQuestionCount"`
+	CreatedAt            time.Time    `json:"createdAt"`
+	UpdatedAt            time.Time    `json:"updatedAt"`
+	Attachments          []Attachment `json:"attachments"` // images, upload order
+	T3ProjectID          string       `json:"-"`           // project's T3 id (for launch)
+	ThreadLink           *string      `json:"-"`           // mirrored thread link
 }
 
 type TaskEvent struct {
@@ -164,22 +166,25 @@ type Thread struct {
 	Settled             bool             `json:"settled"`
 	SettledAt           *time.Time       `json:"settledAt"`
 	PendingRequestCount int              `json:"pendingRequestCount"`
-	ProviderInstanceID  *string          `json:"providerInstanceId"`
-	Model               *string          `json:"model"`
-	RuntimeMode         *string          `json:"runtimeMode"`
-	InteractionMode     *string          `json:"interactionMode"`
-	Branch              *string          `json:"branch"`
-	WorktreePath        *string          `json:"worktreePath"`
-	ParentThreadID      *string          `json:"parentThreadId"`
-	Relationship        *string          `json:"relationship"`
-	CreationSource      *string          `json:"creationSource"`
-	Source              string           `json:"source"`
-	TaskID              *int64           `json:"taskId"`
-	CreatedAt           time.Time        `json:"createdAt"`
-	UpdatedAt           time.Time        `json:"updatedAt"`
-	SyncedAt            time.Time        `json:"syncedAt"`
-	LastWordPreview     *string          `json:"lastWordPreview"` // latest assistant reply, plain one-line preview
-	LastWordAt          *time.Time       `json:"lastWordAt"`
+	// PendingQuestionCount: pending requests stage can answer (user-input
+	// questions); the rest are approvals handled in T3.
+	PendingQuestionCount int        `json:"pendingQuestionCount"`
+	ProviderInstanceID   *string    `json:"providerInstanceId"`
+	Model                *string    `json:"model"`
+	RuntimeMode          *string    `json:"runtimeMode"`
+	InteractionMode      *string    `json:"interactionMode"`
+	Branch               *string    `json:"branch"`
+	WorktreePath         *string    `json:"worktreePath"`
+	ParentThreadID       *string    `json:"parentThreadId"`
+	Relationship         *string    `json:"relationship"`
+	CreationSource       *string    `json:"creationSource"`
+	Source               string     `json:"source"`
+	TaskID               *int64     `json:"taskId"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+	SyncedAt             time.Time  `json:"syncedAt"`
+	LastWordPreview      *string    `json:"lastWordPreview"` // latest assistant reply, plain one-line preview
+	LastWordAt           *time.Time `json:"lastWordAt"`
 	// LastWord is the reply excerpt; set on detail reads only
 	// (GetThreadLastWord), null in lists.
 	LastWord *LastWord `json:"lastWord"`

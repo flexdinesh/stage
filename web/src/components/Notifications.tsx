@@ -9,6 +9,7 @@ import { sessionPath } from "../lib/sessions.ts";
 import { closeSystemNotifications, getPushState, syncSystemNotifications } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
+import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, toneClass } from "./ui.tsx";
 
 const TOAST_MS = 8000;
@@ -16,6 +17,8 @@ const MAX_TOASTS = 3;
 
 /** A needs-input notification whose task/thread is still waiting (what the app badge counts). */
 const stillWaiting = (n: Notification) => n.event === "needs_input" && n.currentState === "needs_input";
+/** Still waiting on questions stage can answer. */
+const answerable = (n: Notification) => n.currentState === "needs_input" && n.pendingQuestionCount > 0;
 
 const notificationPath = (n: Notification) => n.t3ThreadId === null ? n.url : sessionPath(n.t3ThreadId);
 
@@ -226,9 +229,9 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
           <span className="tabular">{relativeTime(n.createdAt)}</span>
         </span>
         <div className="flex items-center gap-1.5">
-          <ToastView n={n} onDismiss={onDismiss} />
+          {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onDismiss} /> : <ToastView n={n} onDismiss={onDismiss} />}
           {n.t3DeepLink === null ? null : (
-            <AppButton small variant={stillWaiting(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
+            <AppButton small variant={stillWaiting(n) && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
               Open in app
             </AppButton>
           )}
@@ -460,11 +463,14 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           </span>
           <span className="font-mono">{n.eventCount} {n.eventCount === 1 ? "update" : "updates"}</span>
         </Button>
-        {n.t3DeepLink === null ? null : (
-          <AppButton small variant={waiting ? "primary" : "secondary"} href={n.t3DeepLink}>
-            Open in app
-          </AppButton>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onNavigate} /> : null}
+          {n.t3DeepLink === null ? null : (
+            <AppButton small variant={waiting && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
+              Open in app
+            </AppButton>
+          )}
+        </div>
       </div>
       <div id={historyId} hidden={!expanded}>
         {expanded ? <NotificationHistory groupKey={n.key} /> : null}

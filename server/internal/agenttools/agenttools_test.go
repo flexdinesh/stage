@@ -173,7 +173,7 @@ func TestToolList(t *testing.T) {
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
 		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "order_tasks", "unlink_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
-		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session",
+		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -308,6 +308,16 @@ func TestLifecycleLinkWaitTools(t *testing.T) {
 	mustCall(t, cs, "get_session", map[string]any{"id": *a.T3ThreadID}, &sd)
 	if sd.Task == nil || sd.Task.ID != a.ID {
 		t.Fatalf("session %+v", sd)
+	}
+
+	if _, err := e.fake.AddApproval(*a.T3ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := e.fake.AddUserInput(*a.T3ThreadID, []t3.Question{{ID: "q", Header: "H", Question: "Which?", Options: []t3.QuestionOption{{Label: "A"}}}})
+	var pq client.PendingQuestions
+	mustCall(t, cs, "get_session_questions", map[string]any{"id": *a.T3ThreadID}, &pq)
+	if pq.PendingRequestCount != 2 || pq.ApprovalCount != 1 || len(pq.Requests) != 1 || pq.Requests[0].RequestID != req || pq.Requests[0].Questions[0].Question != "Which?" {
+		t.Fatalf("questions %+v", pq)
 	}
 }
 
@@ -495,7 +505,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 26 {
+	if err != nil || len(res.Tools) != 27 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

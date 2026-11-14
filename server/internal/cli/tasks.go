@@ -582,6 +582,18 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { printSessionDetail(w, res) })
+	case "questions":
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		if len(c.pos) != 1 {
+			return usagef("sessions questions: want one thread id")
+		}
+		res, err := c.ops().GetSessionQuestions(ctx, agenttools.SessionArgs{ID: c.pos[0]})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printQuestions(w, c.pos[0], res) })
 	}
 	return usagef("sessions %s: unknown", v)
 }

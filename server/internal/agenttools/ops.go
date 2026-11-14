@@ -882,3 +882,9 @@ type SessionArgs struct {
 func (o *Ops) GetSession(ctx context.Context, a SessionArgs) (client.ThreadDetail, error) {
 	return o.Client.Thread(ctx, a.ID)
 }
+
+// GetSessionQuestions reads what a session is asking its owner. Read-only:
+// the owner answers in stage or T3.
+func (o *Ops) GetSessionQuestions(ctx context.Context, a SessionArgs) (client.PendingQuestions, error) {
+	return o.Client.Questions(ctx, a.ID)
+}

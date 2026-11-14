@@ -96,6 +96,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/threads/{id}/transcript", s.getTranscript)
 	h("GET /api/threads/{id}/transcript/items/{itemId}", s.getTranscriptItem)
 	h("GET /api/threads/{id}/transcript/stream", s.streamTranscript)
+	h("GET /api/threads/{id}/questions", s.listQuestions)
+	h("POST /api/threads/{id}/questions/{requestId}/answer", s.answerQuestion)
 	h("GET /api/continuations", s.listContinuations)
 	h("POST /api/continuations", s.createContinuation)
 	h("PATCH /api/continuations/{id}", s.updateContinuation)
@@ -157,6 +159,8 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.As(err, &conflict) && conflict.Code != "":
+		writeJSON(w, http.StatusConflict, map[string]string{"error": conflict.Msg, "code": conflict.Code})
 	case errors.As(err, &conflict):
 		writeError(w, http.StatusConflict, conflict.Msg)
 	case errors.As(err, &t3Err):

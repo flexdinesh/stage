@@ -178,6 +178,14 @@ var titles = map[db.TaskState]string{
 	db.StateSettled:    "Settled",
 }
 
+// answerAnchor lands needs-input pushes on the Needs input panel.
+func answerAnchor(to db.TaskState) string {
+	if to == db.StateNeedsInput {
+		return "#answer"
+	}
+	return ""
+}
+
 // payload builds the push payload and its inbox record (lookups at send time).
 func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
 	var p Payload
@@ -194,6 +202,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		if t.T3ThreadID != nil {
 			p.URL = "/sessions/" + url.PathEscape(*t.T3ThreadID)
 		}
+		p.URL += answerAnchor(e.task.To)
 		project := t.ProjectTitle
 		// Retain task identity across restarts and ON DELETE SET NULL. Push
 		// navigation can open the current session without changing this key.
@@ -210,10 +219,10 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		} else if !errors.Is(err, db.ErrNotFound) {
 			return p, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 		}
-		p = Payload{Title: titles[c.To], Body: title + " · " + project,
-			URL: "/sessions/" + url.PathEscape(c.ThreadID), Tag: "thread-" + c.ThreadID}
+		path := "/sessions/" + url.PathEscape(c.ThreadID)
+		p = Payload{Title: titles[c.To], Body: title + " · " + project, URL: path + answerAnchor(c.To), Tag: "thread-" + c.ThreadID}
 		threadID := c.ThreadID
-		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project, URL: p.URL}
+		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project, URL: path}
 	default:
 		return p, rec, errors.New("empty event")
 	}

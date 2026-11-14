@@ -115,6 +115,7 @@ Usage:
   stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
   stage sessions search QUERY [--project P] [--limit N]   title, branch, PR, project, message text
   stage sessions show THREAD_ID
+  stage sessions questions THREAD_ID  pending questions (read-only)
   stage mcp                           stdio MCP server
   stage setup mcp [--claude] [--codex] [--http]
   stage setup instructions [--claude] [--codex] [--file PATH]

@@ -12,7 +12,8 @@ import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
 import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
-import { Alert, Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
+import { NeedsInputSlot } from "../components/NeedsInputPanel.tsx";
+import { Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
 import { dateTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { closeSystemNotifications } from "../lib/push.ts";
@@ -40,7 +41,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
     <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
     <div className="mb-3.5"><DetailViewTabs view={view} onChange={setView} live={isLiveState(thread.state)} /></div>
     <div className="flex flex-col gap-3.5">
-      {thread.pendingRequestCount > 0 ? <Alert tone="need">{thread.pendingRequestCount} pending request{thread.pendingRequestCount === 1 ? "" : "s"}. Resolve input in T3 before queued delivery can proceed.</Alert> : null}
+      <NeedsInputSlot pending={thread.pendingRequestCount} threadId={thread.t3ThreadId} links={thread} />
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-3.5">
           {view === "transcript" ? <Transcript threadId={thread.t3ThreadId} jumpOffset="session" /> : <>

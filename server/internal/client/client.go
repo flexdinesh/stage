@@ -514,6 +514,21 @@ func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	return out, err
 }
 
+// PendingQuestions is GET /api/threads/:id/questions: answerable questions
+// plus approvals stage cannot resolve (handled in T3).
+type PendingQuestions struct {
+	PendingRequestCount int                  `json:"pendingRequestCount"`
+	ApprovalCount       int                  `json:"approvalCount"`
+	Requests            []t3.PendingQuestion `json:"requests"`
+}
+
+// Questions reads a session's pending questions fresh from T3.
+func (c *Client) Questions(ctx context.Context, threadID string) (PendingQuestions, error) {
+	var out PendingQuestions
+	err := c.do(ctx, http.MethodGet, "/api/threads/"+url.PathEscape(threadID)+"/questions", nil, &out)
+	return out, err
+}
+
 // Upload stages one image (POST /api/uploads).
 func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attachment, error) {
 	var buf bytes.Buffer
