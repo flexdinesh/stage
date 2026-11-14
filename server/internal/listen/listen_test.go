@@ -108,6 +108,31 @@ func TestListenUnix(t *testing.T) {
 	}
 }
 
+// A socket that cannot be probed (EACCES) may be live: left alone.
+func TestListenUnixKeepsUnprobeableSocket(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses socket permissions")
+	}
+	path := sockPath(t)
+	stale, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = stale.Close()
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	a := Addr{Network: "unix", Address: path}
+	if l, err := a.Listen(); err == nil {
+		_ = l.Close()
+		t.Fatal("listen replaced a socket it could not probe")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("unprobeable socket removed: %v", err)
+	}
+}
+
 func TestListenUnixRefusesRegularFile(t *testing.T) {
 	path := sockPath(t)
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {

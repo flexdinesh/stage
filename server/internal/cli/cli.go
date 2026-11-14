@@ -92,8 +92,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 const usage = `stage: stage server and agent CLI
 
 Usage:
-  stage [serve] [--listen ADDR]       run the server (default); ADDR host:port or unix:/abs/path.sock
-                                      (env STAGE_LISTEN, default 127.0.0.1:7380)
+  stage serve [--listen ADDR]         run the server (also: stage with no args); ADDR host:port or
+                                      unix:/abs/path.sock (env STAGE_LISTEN, default 127.0.0.1:7380)
   stage context                       your session, cwd and resolved project
   stage projects ls
   stage models ls

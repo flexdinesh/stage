@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -38,18 +39,26 @@ type Client struct {
 	HTTP    *http.Client
 	// base prefixes request paths (BaseURL, or socketBase).
 	base string
+	// err is an invalid BaseURL, returned by every request.
+	err error
 }
 
 // New returns a client for baseURL (DefaultURL when empty): http(s)://host:port,
-// or unix:///abs/path.sock to dial a unix socket.
+// or unix:///abs/path.sock (same syntax as STAGE_LISTEN) to dial a unix
+// socket. An invalid socket address makes every request fail with its error.
 func New(baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 	c := &Client{BaseURL: baseURL, base: baseURL, HTTP: &http.Client{Timeout: 2 * time.Minute}}
-	if p, ok := strings.CutPrefix(baseURL, "unix:"); ok {
-		path := strings.TrimPrefix(p, "//")
+	if strings.HasPrefix(baseURL, "unix:") {
+		a, err := listen.Parse(baseURL)
+		if err != nil {
+			c.err = fmt.Errorf("stage URL: %w", err)
+			return c
+		}
+		path := a.Address
 		c.base = socketBase
 		c.HTTP.Transport = &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -319,6 +328,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 }
 
 func (c *Client) send(req *http.Request, out any) error {
+	if c.err != nil {
+		return c.err
+	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("stage unreachable at %s (set STAGE_URL): %w", c.BaseURL, err)

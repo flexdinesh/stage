@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -104,9 +105,15 @@ func removeStale(path string) error {
 	if st.Mode()&fs.ModeSocket == 0 {
 		return fmt.Errorf("%s exists and is not a socket", path)
 	}
-	if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
+	c, err := net.DialTimeout("unix", path, time.Second)
+	if err == nil {
 		_ = c.Close()
 		return fmt.Errorf("%s is in use by another server", path)
+	}
+	// Only a refused connection proves nothing listens; on anything else
+	// (EACCES, timeout) the socket may be live, so leave it.
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("%s exists and may be in use (not removed): %w", path, err)
 	}
 	return os.Remove(path)
 }

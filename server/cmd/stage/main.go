@@ -52,7 +52,7 @@ func main() {
 	}
 }
 
-// run is `stage [serve] [--listen ADDR]`.
+// run is `stage` or `stage serve [--listen ADDR]`.
 func run(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listenFlag := fs.String("listen", "", "listen address: host:port or unix:/abs/path.sock (overrides STAGE_LISTEN; default "+listen.Default+")")
@@ -69,6 +69,14 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Bind first: an instance that cannot listen (e.g. a second one) exits
+	// before touching the database or T3. Shutdown closes ln, which also
+	// removes a unix socket file; the defer covers earlier error returns.
+	ln, err := cfg.Listen.Listen()
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", cfg.Listen, err)
+	}
+	defer ln.Close()
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return fmt.Errorf("data dir: %w", err)
 	}
@@ -157,11 +165,6 @@ func run(args []string) error {
 	}))
 	mux.Handle("/", webui.Handler())
 
-	ln, err := cfg.Listen.Listen()
-	if err != nil {
-		return fmt.Errorf("listen %s: %w", cfg.Listen, err)
-	}
-	// Shutdown closes ln, which also removes a unix socket file.
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
