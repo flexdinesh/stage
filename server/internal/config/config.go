@@ -41,18 +41,19 @@ func Load() (Config, error) {
 		return Config{}, errors.New("APP_PORT must be a valid port number")
 	}
 	cfg.Port = port
-	defaultDir, err := DefaultDataDir()
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.DataDir = defaultDir
+	// The default is only needed when STAGE_DATA_DIR is unset, or for the dev
+	// guard; one that cannot be resolved cannot be STAGE_DATA_DIR's target.
+	defaultDir, defaultErr := DefaultDataDir()
 	if v := os.Getenv("STAGE_DATA_DIR"); v != "" {
-		cfg.DataDir = v
+		if cfg.DataDir, err = filepath.Abs(v); err != nil {
+			return Config{}, fmt.Errorf("STAGE_DATA_DIR: %w", err)
+		}
+	} else if defaultErr != nil {
+		return Config{}, defaultErr
+	} else {
+		cfg.DataDir = defaultDir
 	}
-	if cfg.DataDir, err = filepath.Abs(cfg.DataDir); err != nil {
-		return Config{}, fmt.Errorf("STAGE_DATA_DIR: %w", err)
-	}
-	if os.Getenv("APP_ENV") == "dev" && cfg.DataDir == defaultDir {
+	if os.Getenv("APP_ENV") == "dev" && defaultErr == nil && cfg.DataDir == defaultDir {
 		return Config{}, fmt.Errorf("APP_ENV=dev refuses the default (production) data dir %s; set STAGE_DATA_DIR or use `mise run dev`", defaultDir)
 	}
 	return cfg, nil

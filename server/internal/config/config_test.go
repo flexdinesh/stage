@@ -64,3 +64,23 @@ func TestLoadDevRefusesProd(t *testing.T) {
 		t.Fatalf("prod config %+v, %v", cfg, err)
 	}
 }
+
+// STAGE_DATA_DIR works when the default cannot be resolved (no HOME, no
+// XDG_DATA_HOME), also under APP_ENV=dev; without it Load fails.
+func TestLoadDataDirWithoutHome(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("STAGE_DATA_DIR", "")
+	t.Setenv("APP_ENV", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load without HOME, XDG_DATA_HOME or STAGE_DATA_DIR succeeded")
+	}
+	dir := t.TempDir()
+	t.Setenv("STAGE_DATA_DIR", dir)
+	for _, env := range []string{"", "dev"} {
+		t.Setenv("APP_ENV", env)
+		if cfg, err := Load(); err != nil || cfg.DataDir != dir {
+			t.Fatalf("APP_ENV=%q: %+v, %v", env, cfg, err)
+		}
+	}
+}

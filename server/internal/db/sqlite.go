@@ -107,17 +107,29 @@ func (t *Tx) QueryRow(ctx context.Context, q string, args ...any) *oneRow {
 	return &oneRow{t.tx.QueryRowContext(ctx, q, convertArgs(args)...)}
 }
 
-// inTx runs fn in a BEGIN IMMEDIATE transaction, committing when fn returns nil.
-func (s *Store) inTx(ctx context.Context, fn func(tx *Tx) error) error {
+// inTx runs fn in a BEGIN IMMEDIATE transaction, committing when fn returns
+// nil. It rolls back on error or panic, so the write lock is never left held.
+func (s *Store) inTx(ctx context.Context, fn func(tx *Tx) error) (err error) {
 	sqlTx, err := s.pool.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = sqlTx.Rollback()
+		}
+	}()
 	if err := fn(&Tx{sqlTx}); err != nil {
-		_ = sqlTx.Rollback()
 		return err
 	}
+	committed = true
 	return sqlTx.Commit()
+}
+
+// queryRower is a conn or a *Tx, for single-statement reads.
+type queryRower interface {
+	QueryRow(ctx context.Context, query string, args ...any) *oneRow
 }
 
 type execResult struct{ n int64 }

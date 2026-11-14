@@ -150,17 +150,17 @@ func (s *Store) ListContinuations(ctx context.Context, thread string) ([]Continu
 	return out, nil
 }
 
-func legacyConflict(ctx context.Context, tx *Tx, ids []string) (bool, error) {
+func legacyConflict(ctx context.Context, q queryRower, ids []string) (bool, error) {
 	var found bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.t3_thread_id IN (SELECT value FROM json_each($1))
+	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.t3_thread_id IN (SELECT value FROM json_each($1))
   AND (t.after_task_id IS NOT NULL OR EXISTS(SELECT 1 FROM tasks f WHERE f.after_task_id=t.id)))`, jsonArray(ids)).Scan(&found)
 	return found, err
 }
 
+// HasLegacyConflict is a single-statement read (no write lock);
+// ClaimContinuation re-checks inside its transaction before writing.
 func (s *Store) HasLegacyConflict(ctx context.Context, ids ...string) (bool, error) {
-	var found bool
-	err := s.inTx(ctx, func(tx *Tx) error { var err error; found, err = legacyConflict(ctx, tx, ids); return err })
-	return found, err
+	return legacyConflict(ctx, s.pool, ids)
 }
 
 // continuationConflict is also used by legacy setAfter under the same lock.
