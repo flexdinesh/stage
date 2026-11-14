@@ -796,6 +796,60 @@ func (o *Ops) ListSessions(ctx context.Context, a ListSessionsArgs) (SessionsOut
 	return out, nil
 }
 
+// SearchSessionsArgs is search_sessions.
+type SearchSessionsArgs struct {
+	Query   string `json:"query" jsonschema:"text to find (2 to 200 chars): title, branch, PR, project, then message text"`
+	Project string `json:"project,omitempty" jsonschema:"project id or title; omitted = all"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"max matches per source (default 20, max 50)"`
+}
+
+// SearchRow is one search_sessions match.
+type SearchRow struct {
+	T3ThreadID string        `json:"t3ThreadId"`
+	Title      string        `json:"title"`
+	Match      string        `json:"match"` // title|branch|project|pr|user|assistant
+	Snippet    *string       `json:"snippet,omitempty"`
+	Project    *string       `json:"project,omitempty"`
+	State      *db.TaskState `json:"state,omitempty"` // nil when stage has not synced the session yet
+	TaskID     *int64        `json:"taskId,omitempty"`
+	// LastWordPreview: latest assistant reply, one plain line.
+	LastWordPreview *string `json:"lastWordPreview,omitempty"`
+	T3WebURL        *string `json:"t3WebUrl,omitempty"`
+}
+
+// SearchSessionsOut is search_sessions. T3: ok|offline|timeout|error
+// (anything but ok means title matches from stage only).
+type SearchSessionsOut struct {
+	Results []SearchRow `json:"results"`
+	T3      string      `json:"t3"`
+}
+
+func (o *Ops) SearchSessions(ctx context.Context, a SearchSessionsArgs) (SearchSessionsOut, error) {
+	var projectID *int64
+	if a.Project != "" {
+		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
+		if err != nil {
+			return SearchSessionsOut{}, err
+		}
+		projectID = &p.ID
+	}
+	res, err := o.Client.SearchThreads(ctx, a.Query, projectID, a.Limit)
+	if err != nil {
+		return SearchSessionsOut{}, err
+	}
+	out := SearchSessionsOut{Results: []SearchRow{}, T3: res.T3}
+	for _, r := range res.Results {
+		row := SearchRow{T3ThreadID: r.T3ThreadID, Title: r.Title, Match: r.MatchSource, Snippet: r.Snippet, Project: r.ProjectTitle}
+		if r.Thread != nil {
+			state := r.Thread.State
+			row.State, row.TaskID, row.T3WebURL = &state, r.Thread.TaskID, r.Thread.T3WebURL
+			row.LastWordPreview = r.Thread.LastWordPreview
+		}
+		out.Results = append(out.Results, row)
+	}
+	return out, nil
+}
+
 // SessionArgs names one session.
 type SessionArgs struct {
 	ID string `json:"id" jsonschema:"T3 thread id"`

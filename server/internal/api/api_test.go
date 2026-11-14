@@ -52,6 +52,7 @@ type flakyT3 struct {
 	lostLaunches  atomic.Int32
 	failInterrupt atomic.Bool
 	onInterrupt   func()
+	offline       atomic.Bool // Status reports not connected
 	// foreignProject: the next launch answers with a thread in this project
 	// (T3 deduped the clientRequestId to another client's launch).
 	foreignProject atomic.Pointer[string]
@@ -95,6 +96,13 @@ func (f *flakyT3) launchRequestIDs() []string {
 	return slices.Clone(f.requestIDs)
 }
 
+func (f *flakyT3) Status(ctx context.Context) t3.ConnectionStatus {
+	if f.offline.Load() {
+		return t3.ConnectionStatus{}
+	}
+	return f.Fake.Status(ctx)
+}
+
 func (f *flakyT3) Interrupt(ctx context.Context, threadID string) error {
 	if f.onInterrupt != nil {
 		f.onInterrupt()
@@ -117,7 +125,7 @@ type env struct {
 
 const publicURL = "http://controlbox:3773"
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	fake := t3.NewFake()
@@ -127,10 +135,14 @@ func newEnv(t *testing.T) *env {
 	svc.SetPublicURL(publicURL)
 	runner := links.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
-	h := api.NewRouter(api.Deps{
+	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
 		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
-	})
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	h := api.NewRouter(deps)
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
 

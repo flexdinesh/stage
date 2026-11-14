@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -22,6 +23,8 @@ type Deps struct {
 	Sync   *t3sync.Service
 	Push   *notify.Notifier
 	Logger *slog.Logger
+	// SearchTimeout bounds the T3 call in GET /api/threads/search (0 = 2s).
+	SearchTimeout time.Duration
 }
 
 type server struct {
@@ -84,6 +87,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
 	h("GET /api/threads", s.listThreads)
+	h("GET /api/threads/search", s.searchThreads)
 	h("GET /api/threads/{id}", s.getThread)
 	h("GET /api/continuations", s.listContinuations)
 	h("POST /api/continuations", s.createContinuation)

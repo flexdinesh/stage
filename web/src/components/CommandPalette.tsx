@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { api } from "../api/client.ts";
 import { keys, useInvalidateWork, useProjects, useTasks } from "../api/queries.ts";
+import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from "../lib/paletteSearch.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { IconSearch } from "./icons.tsx";
@@ -15,6 +16,10 @@ interface Item {
   group: string;
   label: string;
   hint?: string;
+  /** Why it matched (e.g. "branch", "you said"); stays visible when the hint truncates. */
+  tag?: string | null;
+  /** Second line: message snippet. */
+  detail?: string | null;
   badge?: ReactNode;
   run: () => void;
   /** Ctrl+Enter target. */
@@ -56,7 +61,8 @@ function useDebounced(value: string, ms: number): string {
 
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  /** Highlighted item by key, so late results never move the highlight; null = first. */
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const navigate = useNavigate();
   const { setTheme } = useTheme();
   const invalidate = useInvalidateWork();
@@ -72,6 +78,17 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     enabled: debounced.length >= 2,
     refetchInterval: false,
   });
+  // Message text via T3 (merged server side with title matches).
+  const searchQ = useDebounced(q, 250);
+  const search = useQuery({
+    queryKey: [...keys.threads, "palette-search", searchQ],
+    queryFn: () => api.searchThreads(searchQ, { limit: 20 }),
+    enabled: searchQ.length >= 2,
+    refetchInterval: false,
+    retry: false,
+  });
+  const searchCurrent = searchQ === q && q.length >= 2;
+  const note = searchCurrent ? t3SearchNote(search.isError ? "error" : search.data?.t3) : null;
 
   const items = useMemo<Item[]>(() => {
     const go = (to: string) => () => {
@@ -94,17 +111,27 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
-      if (debounced === q)
-        for (const th of (threads.data?.threads ?? []).filter((hit) => !taskThreadIds.has(hit.t3ThreadId)))
-          out.push({
-            key: `thread-${th.t3ThreadId}`,
-            group: "Sessions",
-            label: th.title,
-            hint: `${th.projectTitle ?? th.t3ProjectId} · ${th.source}`,
-            badge: <ThreadStatusBadge status={th.status} settled={th.settled} />,
-            run: go(sessionPath(th.t3ThreadId)),
-            t3Url: th.t3DeepLink,
-          });
+      const { sessions, messages } = mergePaletteSessions(
+        debounced === q ? (threads.data?.threads ?? []) : [],
+        searchCurrent ? (search.data?.results ?? []) : [],
+        taskThreadIds,
+      );
+      const sessionItem = (hit: SessionHit, group: string): Item => {
+        const th = hit.thread;
+        return {
+          key: `${group === "Sessions" ? "thread" : "message"}-${hit.id}`,
+          group,
+          label: hit.title,
+          hint: [hit.projectTitle ?? th?.t3ProjectId, th?.source].filter(Boolean).join(" · "),
+          tag: matchLabel(hit.source),
+          detail: hit.snippet,
+          badge: th === null ? undefined : <ThreadStatusBadge status={th.status} settled={th.settled} />,
+          run: go(sessionPath(hit.id)),
+          t3Url: hit.t3DeepLink,
+        };
+      };
+      for (const hit of sessions) out.push(sessionItem(hit, "Sessions"));
+      for (const hit of messages) out.push(sessionItem(hit, "In messages"));
     }
     const actions: Item[] = [
       { key: "new", group: "Actions", label: "New task", hint: "N", run: () => {
@@ -122,7 +149,14 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, debounced, tasks.data, projects.data, threads.data, navigate, onClose, onNewTask, setTheme, sync]);
+  }, [q, debounced, searchCurrent, tasks.data, projects.data, threads.data, search.data, navigate, onClose, onNewTask, setTheme, sync]);
+
+  const found = items.findIndex((item) => item.key === activeKey);
+  const active = found < 0 ? 0 : found;
+  const move = (delta: number) => {
+    const next = items[Math.min(Math.max(active + delta, 0), items.length - 1)];
+    if (next !== undefined) setActiveKey(next.key);
+  };
 
 
   function onKey(e: KeyboardEvent) {
@@ -131,10 +165,10 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((a) => Math.min(a + 1, items.length - 1));
+      move(1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((a) => Math.max(a - 1, 0));
+      move(-1);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = items[active];
@@ -164,10 +198,10 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setActive(0);
+              setActiveKey(null);
             }}
             autoFocus
-            placeholder="Search tasks, projects, threads"
+            placeholder="Search tasks, projects, sessions, messages"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"
@@ -182,12 +216,14 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         <div id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
           {items.length === 0 ? (
             <p className="px-4 py-6 text-small text-muted">
-              {threads.isFetching ? "Searching threads…" : `Nothing matches "${query.trim()}".`}
+              {threads.isFetching || search.isFetching ? "Searching sessions…" : `Nothing matches "${query.trim()}".`}
             </p>
           ) : (
             items.map((item, i) => {
               const header = item.group !== lastGroup ? item.group : null;
               lastGroup = item.group;
+              const hint = item.hint === undefined || item.hint === "" ? null : item.hint;
+              const tag = item.tag ?? null;
               return (
                 <div key={item.key}>
                   {header === null ? null : <div className="label-caps px-4 pt-2.5 pb-1">{header}</div>}
@@ -197,25 +233,36 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                     aria-selected={i === active}
                     data-active={i === active}
                     ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
-                    onMouseMove={() => setActive(i)}
+                    onMouseMove={() => setActiveKey(item.key)}
                     onClick={() => item.run()}
                     className={cx(
-                      "flex cursor-pointer items-center gap-2.5 px-4 py-2 text-ui",
+                      "cursor-pointer px-4 py-2 text-ui",
                       i === active && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
                     )}
                   >
-                    {item.badge}
-                    <span className="min-w-0 truncate text-fg/90">
-                      <Highlight text={item.label} q={q} />
-                    </span>
-                    {item.hint === undefined ? null : (
-                      <span className="ml-auto shrink-0 truncate pl-3 font-mono text-meta text-muted">{item.hint}</span>
+                    <div className="flex items-center gap-2.5">
+                      {item.badge}
+                      <span className="min-w-0 truncate text-fg/90">
+                        <Highlight text={item.label} q={q} />
+                      </span>
+                      {hint === null && tag === null ? null : (
+                        <span className="ml-auto flex max-w-[40%] min-w-0 shrink-0 pl-3 font-mono text-meta whitespace-nowrap text-muted md:max-w-none">
+                          {hint === null ? null : <span className="truncate">{hint}</span>}
+                          {tag === null ? null : <span className="shrink-0">{hint === null ? tag : `\u00a0· ${tag}`}</span>}
+                        </span>
+                      )}
+                    </div>
+                    {typeof item.detail !== "string" ? null : (
+                      <div className="mt-0.5 truncate font-mono text-meta text-muted">
+                        <Highlight text={item.detail} q={q} />
+                      </div>
                     )}
                   </div>
                 </div>
               );
             })
           )}
+          {note === null ? null : <p className="px-4 pt-2 pb-3 font-mono text-meta-sm text-muted md:hidden">{note}</p>}
         </div>
         <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm text-muted md:flex">
           <span>
@@ -230,6 +277,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           <span>
             <Kbd>Esc</Kbd> close
           </span>
+          {note === null ? null : <span className="ml-auto">{note}</span>}
         </div>
       </div>
     </div>,

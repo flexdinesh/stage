@@ -112,6 +112,7 @@ Usage:
   stage schedule rm|run|pause|resume ID
   stage schedule preview --cron CRON --tz ZONE
   stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
+  stage sessions search QUERY [--project P] [--limit N]   title, branch, PR, project, message text
   stage sessions show THREAD_ID
   stage mcp                           stdio MCP server
   stage setup mcp [--claude] [--codex] [--http]

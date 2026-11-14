@@ -413,6 +413,35 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `state` (repeatable normalized TaskState), `active` (`1|true`: unarchived, unsettled running/needs-input sessions across origins, no implicit date cutoff), `sort` (`activity`: updatedAt desc; omitted: createdAt desc), `parent` (direct children of this T3 thread ID), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `settledFrom` (ISO date or datetime: only external settled threads with `settledAt >= settledFrom`, ordered by `settledAt` desc, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
 200 `{ "threads": Thread[], "total": number }`; `total` = matches before limit/offset. Thread also includes `state`, `archived`, `activeRunId` and `latestRunId`. Session state follows live thread metadata independently of a legacy task's frozen state. Pending input, active runs and failed/interrupted/cancelled runs outrank a stale settled flag.
 
+### `GET /api/threads/search`
+Query: `q` (required, trimmed, 2 to 200 characters), `project` (app project id, optional), `limit` (1..50, default 20; applies to each source).
+
+Finds sessions by title, then by what was said in them. Two sources, run concurrently:
+1. stage: root threads whose title contains `q` (case-insensitive), newest activity first, up to `limit`.
+2. T3 `t3_thread_search` (only when connected, cancelled after 2s): active, unarchived, non-subagent threads by title, branch, PR and project, then message text; not exhaustive; up to `limit`.
+
+Results: stage matches first, then T3 matches whose thread is not already listed, in T3's order (dedupe by thread id; a stage title match wins over a T3 message match).
+
+200 `{ "results": SearchResult[], "t3": "ok"|"offline"|"timeout"|"error" }`. T3 failures never fail the request: `t3` other than `ok` means stage title matches only.
+
+`SearchResult`:
+```jsonc
+{
+  "t3ThreadId": "thread-a",
+  "title": "Fix auth token refresh",
+  "projectTitle": "stage",          // null when unknown
+  "matchSource": "branch",          // title|branch|project|pr|user|assistant
+  "snippet": null,                  // message text around the match (user|assistant only, <= 240 chars)
+  "messageCreatedAt": null,         // ISO, user|assistant only
+  "t3DeepLink": "t3code://threads/<env>/thread-a",
+  "thread": {}                      // Thread, or null when stage has not synced it yet (session detail still opens it)
+}
+```
+
+`matchSource`: stage matches are `title`. T3 reports `title` for title, branch, PR and project matches alike; stage labels them from its mirrored row: title contains `q` (or every word of it) → `title`, else branch → `branch`, else project title → `project`, else `pr` (PRs are not mirrored). An unsynced thread keeps `title`. T3 message matches are `user` or `assistant`.
+
+400 invalid `q`/`limit`/`project`; 404 unknown project.
+
 ### `GET /api/threads/:id`
 
 200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null }`. Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
@@ -659,7 +688,7 @@ Session links (`afterThreadId`, "run after me" from the agent interface):
 
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions get_session`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session`. `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.

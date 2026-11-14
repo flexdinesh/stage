@@ -228,6 +228,40 @@ func TestScheduleAndContextCommands(t *testing.T) {
 	}
 }
 
+func TestSessionsSearchCommand(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	p := h.project("/w/cli-search")
+	ctx := context.Background()
+	res, err := h.fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "What more?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sync.RefreshSession(ctx, res.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	h.fake.AddMessage(res.ThreadID, t3.SearchUser, "…find sessions by what was said…")
+
+	code, stdout, stderr := h.run("", "sessions", "search", "what", "was", "said")
+	if code != 0 || !strings.Contains(stdout, "user") || !strings.Contains(stdout, "What more?") ||
+		!strings.Contains(stdout, "…find sessions by what was said…") || strings.Contains(stdout, "titles only") {
+		t.Fatalf("search: %d %q %q", code, stdout, stderr)
+	}
+	code, stdout, _ = h.run("", "sessions", "search", "what was said", "--project", p.Title, "--json")
+	out := decode[agenttools.SearchSessionsOut](t, stdout)
+	if code != 0 || out.T3 != "ok" || len(out.Results) != 1 || out.Results[0].T3ThreadID != res.ThreadID {
+		t.Fatalf("search --json: %d %s", code, stdout)
+	}
+	h.fake.SearchErr = errors.New("down")
+	code, stdout, _ = h.run("", "sessions", "search", "nothing here")
+	if code != 0 || !strings.Contains(stdout, "no matching sessions") || !strings.Contains(stdout, "(T3 offline: titles only)") {
+		t.Fatalf("search offline: %d %q", code, stdout)
+	}
+	if code, _, _ := h.run("", "sessions", "search"); code == 0 {
+		t.Fatal("search without query succeeded")
+	}
+}
+
 func TestSetupInstructionsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	path := filepath.Join(t.TempDir(), "AGENTS.md")

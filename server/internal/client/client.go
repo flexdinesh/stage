@@ -88,6 +88,23 @@ type ThreadPage struct {
 	Total   int      `json:"total"`
 }
 
+// ThreadSearch is GET /api/threads/search.
+type ThreadSearch struct {
+	Results []SearchResult `json:"results"`
+	T3      string         `json:"t3"` // ok|offline|timeout|error
+}
+
+// SearchResult is one session match. MatchSource: title|branch|project|pr|user|assistant.
+type SearchResult struct {
+	T3ThreadID       string     `json:"t3ThreadId"`
+	Title            string     `json:"title"`
+	ProjectTitle     *string    `json:"projectTitle"`
+	MatchSource      string     `json:"matchSource"`
+	Snippet          *string    `json:"snippet"`
+	MessageCreatedAt *time.Time `json:"messageCreatedAt"`
+	Thread           *Thread    `json:"thread"`
+}
+
 // ScheduleRun is one fire of a schedule (detail reads include the task).
 type ScheduleRun struct {
 	ID         int64     `json:"id"`
@@ -452,6 +469,19 @@ func (c *Client) Threads(ctx context.Context, f ThreadQuery) (ThreadPage, error)
 	}
 	var out ThreadPage
 	err := c.do(ctx, http.MethodGet, withQuery("/api/threads", q), nil, &out)
+	return out, err
+}
+
+// SearchThreads finds sessions by title, then by what was said in them (T3).
+func (c *Client) SearchThreads(ctx context.Context, query string, projectID *int64, limit int) (ThreadSearch, error) {
+	q := url.Values{}
+	q.Set("q", query)
+	setID(q, "project", projectID)
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	var out ThreadSearch
+	err := c.do(ctx, http.MethodGet, withQuery("/api/threads/search", q), nil, &out)
 	return out, err
 }
 

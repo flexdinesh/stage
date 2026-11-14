@@ -227,6 +227,35 @@ func (w wireThreadList) toPage() ThreadPage {
 	return page
 }
 
+type wireThreadSearch struct {
+	Matches []struct {
+		ThreadID         string  `json:"threadId"`
+		ProjectID        string  `json:"projectId"`
+		Title            string  `json:"title"`
+		Source           string  `json:"source"`
+		Snippet          string  `json:"snippet"`
+		MessageCreatedAt isoTime `json:"messageCreatedAt"`
+	} `json:"matches"`
+}
+
+func (w wireThreadSearch) toMatches() []SearchMatch {
+	out := make([]SearchMatch, 0, len(w.Matches))
+	for _, m := range w.Matches {
+		if m.ThreadID == "" {
+			continue
+		}
+		out = append(out, SearchMatch{
+			ThreadID:         m.ThreadID,
+			ProjectID:        m.ProjectID,
+			Title:            m.Title,
+			Source:           SearchSource(m.Source),
+			Snippet:          m.Snippet,
+			MessageCreatedAt: m.MessageCreatedAt.ptr(),
+		})
+	}
+	return out
+}
+
 type wireRun struct {
 	RunID              string  `json:"runId"`
 	Ordinal            int     `json:"ordinal"`

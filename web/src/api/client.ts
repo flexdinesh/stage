@@ -41,6 +41,7 @@ import type {
   Snippet,
   SnippetList,
   ThreadList,
+  ThreadSearch,
   ThreadListQuery,
   UnreadNotificationTags,
   UpdateTaskRequest,
@@ -184,6 +185,8 @@ export const api = {
       }, ["state"])}`,
     ),
 
+  searchThreads: (q: string, opts: { project?: number; limit?: number } = {}) =>
+    apiFetch<ThreadSearch>(`/threads/search${toQuery({ q, project: opts.project, limit: opts.limit })}`),
   thread: (id: string) => apiFetch<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
   continuations: (thread?: string) => apiFetch<ContinuationList>(`/continuations${toQuery({ thread })}`),
   createContinuation: (body: CreateContinuationRequest) => apiFetch<Continuation>("/continuations", post(body)),

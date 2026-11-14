@@ -20,7 +20,7 @@ FORM: User-pinned Workbench direction (px0/zed inspired), first of three present
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 ## Signature interaction
-The stat strip is the filter: clicking a count isolates that state's group (URL `?state=`); the Ctrl K palette reaches any task, thread, or project by title.
+The stat strip is the filter: clicking a count isolates that state's group (URL `?state=`); the Ctrl K palette reaches any task, thread, or project by title, and any session by what was said in it (In messages, with a snippet).
 
 ## Motion grammar
 150-200ms color/opacity transitions on state change only; no entrance choreography.
