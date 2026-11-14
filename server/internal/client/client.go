@@ -68,6 +68,9 @@ type TaskDetail struct {
 	Batch    *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
 	// CurrentHandoff: what the current launch attempt appended (null when none).
 	CurrentHandoff *db.Handoff `json:"currentHandoff"`
+	// CurrentLaunchBase: the worktree base the current launch attempt used
+	// (workspace.base predecessor; null when none).
+	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
 // CreatedTasks is a session batch: tasks one session created, grouped by run

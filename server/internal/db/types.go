@@ -71,21 +71,40 @@ type Project struct {
 	LastActivityAt *time.Time `json:"lastActivityAt"`
 }
 
+// Workspace bases: ref (the worktree starts from BaseRef) or predecessor
+// (from the linked predecessor's branch; BaseRef is the fallback,
+// docs/api.md "Predecessor base").
+const (
+	BaseRef         = "ref"
+	BasePredecessor = "predecessor"
+)
+
 // Workspace is the task workspace config (jsonb).
 type Workspace struct {
 	Type    string  `json:"type"` // root | worktree
 	BaseRef string  `json:"baseRef,omitempty"`
 	Branch  *string `json:"branch,omitempty"`
+	Base    string  `json:"base,omitempty"` // worktree: ref ("" = ref) | predecessor
 }
 
-// MarshalJSON emits {type:"root"} or {type:"worktree", baseRef, branch|null}.
+// FromPredecessor: a worktree that starts from the predecessor's branch.
+func (w Workspace) FromPredecessor() bool {
+	return w.Type == "worktree" && w.Base == BasePredecessor
+}
+
+// MarshalJSON emits {type:"root"} or {type:"worktree", baseRef, branch|null, base}.
 func (w Workspace) MarshalJSON() ([]byte, error) {
 	if w.Type == "worktree" {
+		base := BaseRef
+		if w.Base == BasePredecessor {
+			base = BasePredecessor
+		}
 		return json.Marshal(struct {
 			Type    string  `json:"type"`
 			BaseRef string  `json:"baseRef"`
 			Branch  *string `json:"branch"`
-		}{w.Type, w.BaseRef, w.Branch})
+			Base    string  `json:"base"`
+		}{w.Type, w.BaseRef, w.Branch, base})
 	}
 	return json.Marshal(struct {
 		Type string `json:"type"`

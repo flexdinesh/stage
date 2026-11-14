@@ -109,7 +109,10 @@ func printTask(w io.Writer, t client.Task) {
 		model = orDash(t.ProviderInstanceID) + "/" + *t.Model
 	}
 	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, t.RuntimeMode, t.InteractionMode)
-	if t.Workspace.Type == "worktree" {
+	switch {
+	case t.Workspace.FromPredecessor():
+		fmt.Fprintf(w, "  worktree from %s's branch (fallback %s, branch %s)\n", predecessorLabel(t), t.Workspace.BaseRef, orDash(t.Workspace.Branch))
+	case t.Workspace.Type == "worktree":
 		fmt.Fprintf(w, "  worktree %s (branch %s)\n", t.Workspace.BaseRef, orDash(t.Workspace.Branch))
 	}
 	if s := waitsOn(t.AfterTaskID, t.AfterThreadID, t.StartAt); s != "-" {
@@ -146,6 +149,7 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 		fmt.Fprintf(w, "  tags     %s\n", strings.Join(d.Tags, ", "))
 	}
 	printHandoff(w, d)
+	printLaunchBase(w, d.CurrentLaunchBase)
 	printPullRequests(w, d.PullRequests)
 	if d.Thread != nil {
 		printRuns(w, d.Thread.RecentRuns, d.Thread.RunCount)
@@ -189,6 +193,36 @@ func printHandoff(w io.Writer, d client.TaskDetail) {
 		}
 		fmt.Fprintf(w, "  handoff  skipped (attempt %d): %s\n", h.Attempt, reason)
 	}
+}
+
+// predecessorLabel names a task's predecessor: `#12`, `session <id>` or
+// `predecessor` when unlinked.
+func predecessorLabel(t client.Task) string {
+	switch {
+	case t.AfterTaskID != nil:
+		return fmt.Sprintf("#%d", *t.AfterTaskID)
+	case t.AfterThreadID != nil:
+		return "session " + *t.AfterThreadID
+	}
+	return "predecessor"
+}
+
+// printLaunchBase prints the base the current launch attempt used:
+// `base     feat-x (from #12)` or `base     origin/main (fallback: <reason>)`.
+func printLaunchBase(w io.Writer, b *db.LaunchBase) {
+	if b == nil {
+		return
+	}
+	if b.Source == db.LaunchBasePredecessor {
+		from := db.HandoffSource{TaskID: b.SourceTaskID, Title: b.SourceTitle}.Label()
+		fmt.Fprintf(w, "  base     %s (from %s)\n", b.BaseRef, from)
+		return
+	}
+	reason := ""
+	if b.Reason != nil {
+		reason = *b.Reason
+	}
+	fmt.Fprintf(w, "  base     %s (fallback: %s)\n", b.BaseRef, reason)
 }
 
 func printSchedules(w io.Writer, ss []db.Schedule) {

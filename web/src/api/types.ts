@@ -57,9 +57,12 @@ export interface ModelOption {
   value: string | boolean;
 }
 
+/** Worktree base: ref (from baseRef) or predecessor (from the linked predecessor's branch; baseRef is the fallback). */
+export type WorkspaceBase = "ref" | "predecessor";
+
 export type Workspace =
   | { type: "root" }
-  | { type: "worktree"; baseRef: string; branch: string | null };
+  | { type: "worktree"; baseRef: string; branch: string | null; base?: WorkspaceBase };
 
 // ---- Health ----
 
@@ -261,6 +264,22 @@ export interface TaskDetail extends Task {
   batch: CreatedTasks | null;
   /** Handoff record of the current launch attempt; null when none was built. */
   currentHandoff: Handoff | null;
+  /** Worktree base the current launch attempt used (base predecessor); null when none was recorded. */
+  currentLaunchBase: LaunchBase | null;
+}
+
+/** The worktree base a launch attempt with base "predecessor" used: the predecessor's branch, or the fallback and why. */
+export interface LaunchBase {
+  attempt: number;
+  baseRef: string;
+  startFromOrigin: boolean;
+  source: "predecessor" | "fallback";
+  sourceTaskId: number | null;
+  sourceThreadId: string | null;
+  sourceTitle: string;
+  /** Why it fell back; null when it used the predecessor's branch. */
+  reason: string | null;
+  at: string;
 }
 
 /** What a launch attempt appended (or why it appended nothing) from its predecessor. */

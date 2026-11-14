@@ -225,6 +225,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if out.CurrentHandoff, err = s.Store.GetHandoff(ctx, id, task.LaunchAttempt); err != nil {
 			return err
 		}
+		if out.CurrentLaunchBase, err = s.Store.GetLaunchBase(ctx, id, task.LaunchAttempt); err != nil {
+			return err
+		}
 	}
 	if task.OriginThreadID != nil {
 		batch, err := s.Store.CreatedBy(ctx, *task.OriginThreadID)

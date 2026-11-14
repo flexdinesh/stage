@@ -37,6 +37,7 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
+import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
@@ -83,7 +84,8 @@ function workspaceChip(task: TaskDetail): string {
   const w = task.workspace;
   if (w.type === "root") return "project root";
   const branch = w.branch ?? task.thread?.branch ?? null;
-  return branch === null ? `worktree from ${w.baseRef}` : `worktree ${branch}`;
+  if (branch !== null) return `worktree ${branch}`;
+  return predecessorChip(task, task.currentLaunchBase) ?? `worktree from ${w.baseRef}`;
 }
 
 const linkClass = "text-fg underline-offset-2 hover:underline";
@@ -280,6 +282,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 {pendingHandoffNote(task) === null ? null : (
                   <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
                 )}
+                {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
                 {task.currentHandoff === null ? null : <HandoffRecord handoff={task.currentHandoff} />}
               </div>
@@ -387,7 +390,12 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         <Detail label="Model">{modelText(task.model, task.modelOptions)}</Detail>
         <Detail label="Runtime">{task.runtimeMode}</Detail>
         <Detail label="Interaction">{task.interactionMode}</Detail>
-        <Detail label="Workspace">{workspaceText(task.workspace)}</Detail>
+        <Detail label="Workspace">
+          {predecessorWorkspaceText(task, task.currentLaunchBase) ?? workspaceText(task.workspace)}
+          {task.currentLaunchBase?.reason == null ? null : (
+            <span className="block text-meta text-muted">fell back: {task.currentLaunchBase.reason}</span>
+          )}
+        </Detail>
         {task.startAt === null ? null : (
           <Detail label="Starts">
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>

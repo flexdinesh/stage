@@ -12,7 +12,6 @@ import {
   type Schedule,
   type Task,
   type UpdateTaskRequest,
-  type Workspace,
 } from "../api/types.ts";
 import { parseTags } from "../lib/format.ts";
 import {
@@ -34,6 +33,7 @@ import {
   type RepeatSpec,
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
+import { choiceToWorkspace, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
 import { isFinal, isFullyEditable } from "../lib/tasks.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
@@ -72,7 +72,8 @@ interface FormState {
   prompt: string;
   config: ModelConfig;
   interactionMode: InteractionMode;
-  workspaceType: Workspace["type"];
+  /** root, worktree from baseRef, or worktree from the predecessor's branch (baseRef the fallback). */
+  workspaceType: WorkspaceChoice;
   baseRef: string;
   branch: string;
   tags: string;
@@ -131,7 +132,7 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "afterTaskId" | "ne
       runtimeMode: t.runtimeMode,
     },
     interactionMode: t.interactionMode,
-    workspaceType: t.workspace.type,
+    workspaceType: workspaceChoice(t.workspace),
     baseRef: t.workspace.type === "worktree" ? t.workspace.baseRef : "origin/main",
     branch: t.workspace.type === "worktree" ? (t.workspace.branch ?? "") : "",
     tags: t.tags.join(", "),
@@ -190,18 +191,7 @@ function initialState(
   };
 }
 
-const WORKSPACE_OPTIONS: readonly { value: Workspace["type"]; label: string }[] = [
-  { value: "root", label: "root" },
-  { value: "worktree", label: "worktree" },
-];
-
 const INTERACTION_OPTIONS = INTERACTION_MODES.map((m) => ({ value: m, label: m }));
-
-function toWorkspace(s: FormState): Workspace {
-  if (s.workspaceType === "root") return { type: "root" };
-  const branch = s.branch.trim();
-  return { type: "worktree", baseRef: s.baseRef.trim(), branch: branch === "" ? null : branch };
-}
 
 /** Value that settles `ms` after its last change (preview requests while typing a cron). */
 function useDebounced<T>(value: T, ms: number): T {
@@ -262,6 +252,12 @@ function TaskFormDrawer({
   // Then run: any task that can still gate (not settled).
   const canLinkAfter = task !== undefined && !isFinal(task);
   const after = mode === "after" && s.afterTaskId !== "" ? Number(s.afterTaskId) : null;
+  // The predecessor a worktree can stack on: the picked Runs after task, or (editing) the session it waits on.
+  const predName = predecessorName({
+    afterTaskId: after,
+    afterThreadId: mode === "backlog" && task !== undefined ? task.afterThreadId : null,
+  });
+  const wsChoice = effectiveChoice(s.workspaceType, predName);
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
 
   const tzValid = validTimeZone(s.tz);
@@ -290,7 +286,7 @@ function TaskFormDrawer({
       modelOptions: s.config.modelOptions,
       runtimeMode: s.config.runtimeMode,
       interactionMode: s.interactionMode,
-      workspace: toWorkspace(s),
+      workspace: choiceToWorkspace(wsChoice, s.baseRef, s.branch),
       tags: parseTags(s.tags),
       notes: s.notes,
     };
@@ -348,7 +344,7 @@ function TaskFormDrawer({
     s.projectId === "" && "project",
     s.title.trim() === "" && "title",
     s.prompt.trim() === "" && "prompt",
-    s.workspaceType === "worktree" && s.baseRef.trim() === "" && "base ref",
+    wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "fallback base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -462,14 +458,17 @@ function TaskFormDrawer({
             <span className="label-caps">Workspace</span>
             <Segmented
               label="Workspace"
-              options={WORKSPACE_OPTIONS}
-              value={s.workspaceType}
+              options={workspaceOptions(predName)}
+              value={wsChoice}
               onChange={(workspaceType) => set({ workspaceType })}
             />
           </div>
-          {s.workspaceType === "worktree" ? (
+          {wsChoice !== "root" ? (
             <>
-              <Field label="Base ref">
+              <Field
+                label={wsChoice === "predecessor" ? "Fallback base ref" : "Base ref"}
+                hint={wsChoice === "predecessor" ? `Used when ${predName ?? "the predecessor"} has no usable branch.` : undefined}
+              >
                 {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
               </Field>
               <Field label="Branch" hint={mode === "repeat" ? "Empty = T3 picks a name each run." : "Empty = T3 picks a name."}>

@@ -136,13 +136,22 @@ func taskStateStrings() []string {
 }
 
 func validateWorkspace(w db.Workspace) (db.Workspace, error) {
+	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
+		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
+	}
 	switch w.Type {
 	case "root":
+		if w.Base == db.BasePredecessor {
+			return w, db.Invalid("workspace.base predecessor needs type worktree")
+		}
 		return db.Workspace{Type: "root"}, nil
 	case "worktree":
 		w.BaseRef = strings.TrimSpace(w.BaseRef)
 		if w.BaseRef == "" {
-			return w, db.Invalid("workspace.baseRef is required for worktree")
+			return w, db.Invalid("workspace.baseRef is required for worktree (the fallback with base predecessor)")
+		}
+		if w.Base != db.BasePredecessor {
+			w.Base = ""
 		}
 		if w.Branch != nil {
 			b := strings.TrimSpace(*w.Branch)

@@ -33,6 +33,9 @@ type taskDetailJSON struct {
 	Batch *createdTasksJSON `json:"batch"`
 	// CurrentHandoff: what the current launch attempt appended (null when none).
 	CurrentHandoff *db.Handoff `json:"currentHandoff"`
+	// CurrentLaunchBase: the worktree base the current launch attempt used
+	// (workspace.base predecessor; null when none).
+	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
 // createdTasksJSON is db.CreatedTasks with API task shapes.

@@ -592,3 +592,36 @@ func TestHandoffFlagTools(t *testing.T) {
 		t.Fatalf("get_task %+v", d)
 	}
 }
+
+func TestBaseTools(t *testing.T) {
+	e := newEnv(t)
+	e.project("/w/base")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/base"}, PollEvery: 10 * time.Millisecond})
+
+	var a, b, r client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x"}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "afterTaskId": a.ID, "baseRef": "origin/main", "base": "predecessor"}, &b)
+	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
+		t.Fatalf("create_task base=predecessor: %+v", b.Workspace)
+	}
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "base": "ref"}, &b)
+	if b.Workspace.Type != "worktree" || b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
+		t.Fatalf("update_task base=ref keeps the worktree: %+v", b.Workspace)
+	}
+	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID, "base": "predecessor"}, &b)
+	if !b.Workspace.FromPredecessor() {
+		t.Fatalf("link_task base=predecessor: %+v", b.Workspace)
+	}
+	var d client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": b.ID}, &d)
+	if !d.Workspace.FromPredecessor() || d.CurrentLaunchBase != nil {
+		t.Fatalf("get_task %+v", d)
+	}
+	mustCall(t, cs, "create_task", map[string]any{"title": "r", "prompt": "z"}, &r)
+	if msg := call(t, cs, "link_task", map[string]any{"id": r.ID, "afterTaskId": a.ID, "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
+		t.Fatal("link_task base=predecessor on a root task must fail")
+	}
+	if msg := call(t, cs, "create_task", map[string]any{"title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
+		t.Fatal("create_task base without baseRef must fail")
+	}
+}

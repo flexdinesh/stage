@@ -379,17 +379,25 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool, detail stri
 		return db.Task{}, err
 	}
 	in := launchInput(task, res.RequestID)
-	if block := s.prepareHandoff(ctx, task); block != "" {
+	pred := s.predecessorOf(task)
+	if block := s.prepareHandoff(ctx, task, pred); block != "" {
 		in.Message = task.Prompt + "\n\n" + block
+	}
+	var fallback *t3.WorkspaceStrategy
+	if task.Workspace.FromPredecessor() {
+		in.Workspace, fallback = s.prepareBase(ctx, task, pred)
 	}
 	in.Attachments, err = s.uploadImages(ctx, id)
 	var out t3.LaunchResult
 	collision := false
 	if err == nil {
-		out, err = s.launchThread(ctx, in)
-		if t3.IsTransportError(err) && ctx.Err() == nil {
-			s.log.Warn("launch transport failure; retrying with the same clientRequestId", "task", id, "clientRequestId", in.ClientRequestID, "err", err)
-			out, err = s.launchThread(ctx, in)
+		out, err = s.launchWithRetry(ctx, in)
+		if fallback != nil && BaseRefRejected(err, in.Workspace.BaseRef) && ctx.Err() == nil {
+			// T3 created no thread: relaunch from the task's own baseRef.
+			s.log.Warn("predecessor branch rejected; launching from fallback base", "task", id, "branch", in.Workspace.BaseRef, "err", err)
+			s.rejectBase(ctx, task, fallback)
+			in.Workspace = fallback
+			out, err = s.launchWithRetry(ctx, in)
 		}
 		if err == nil && out.ProjectID != "" && out.ProjectID != task.T3ProjectID {
 			collision = true // definite: the next start needs a new clientRequestId
@@ -478,6 +486,17 @@ func (s *Service) DiscardUploads(ctx context.Context, atts []t3.Attachment) {
 			s.log.Warn("discard t3 upload", "attachment", a.ID, "err", err)
 		}
 	}
+}
+
+// launchWithRetry is launchThread, retried once with the same clientRequestId
+// on a transport failure.
+func (s *Service) launchWithRetry(ctx context.Context, in t3.LaunchInput) (t3.LaunchResult, error) {
+	out, err := s.launchThread(ctx, in)
+	if t3.IsTransportError(err) && ctx.Err() == nil {
+		s.log.Warn("launch transport failure; retrying with the same clientRequestId", "clientRequestId", in.ClientRequestID, "err", err)
+		out, err = s.launchThread(ctx, in)
+	}
+	return out, err
 }
 
 // launchThread is one t3_thread_launch call bounded by LaunchAttemptTimeout.

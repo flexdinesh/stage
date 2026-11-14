@@ -23,6 +23,7 @@ type Fake struct {
 	items       map[string][]TimelineItem // thread id -> visible timeline, position = index
 	itemReads   int
 	launches    map[string]string // clientRequestID -> threadID
+	missingRefs map[string]bool   // worktree base refs that do not resolve (MissRef)
 	Catalog     Catalog
 	Sent        []FakeSend
 	Interrupted []string // interrupted thread ids
@@ -434,8 +435,15 @@ func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, er
 			return LaunchResult{}, fmt.Errorf("unknown attachment %s", a.ID)
 		}
 	}
+	id, replay := f.launches[in.ClientRequestID]
+	replay = replay && in.ClientRequestID != ""
+	if w := in.Workspace; !replay && w != nil && w.Type == WorkspaceWorktree && f.missingRefs[w.BaseRef] {
+		// T3 checkWorktreeBase: rejected before any thread is created.
+		return LaunchResult{}, &ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: fmt.Sprintf(
+			"Base ref %q does not resolve to a commit in project %q. No thread was created.", w.BaseRef, in.ProjectID)}
+	}
 	f.Launched = append(f.Launched, in)
-	if id, ok := f.launches[in.ClientRequestID]; ok && in.ClientRequestID != "" {
+	if replay {
 		return launchResult(f.threads[id]), nil
 	}
 	now := f.now()
@@ -450,7 +458,7 @@ func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, er
 	if interaction == "" {
 		interaction = InteractionDefault
 	}
-	id := f.nextID("thread")
+	id = f.nextID("thread")
 	run := Run{RunID: f.nextID("run"), Ordinal: 1, Status: StatusRunning, ProviderInstanceID: sel.InstanceID, Model: sel.Model, RequestedAt: now, StartedAt: &now}
 	d := &ThreadDetail{
 		Thread: Thread{
@@ -605,6 +613,17 @@ func (f *Fake) SetProject(projectID string, mutate func(*Project)) error {
 		}
 	}
 	return ErrNotFound
+}
+
+// MissRef makes worktree launches from base ref fail like T3's
+// checkWorktreeBase (the ref does not resolve in the project).
+func (f *Fake) MissRef(ref string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.missingRefs == nil {
+		f.missingRefs = map[string]bool{}
+	}
+	f.missingRefs[ref] = true
 }
 
 // SetThread mutates a thread in place (status, settled, pending requests...).
