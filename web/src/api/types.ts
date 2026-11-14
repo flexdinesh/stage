@@ -442,6 +442,29 @@ export interface ThreadList {
   total: number;
 }
 
+/** Why a session matched: title/branch/project/pr (title-ish) or user/assistant (message text). */
+export type MatchSource = "title" | "branch" | "project" | "pr" | "user" | "assistant";
+/** T3 half of a session search: anything but ok means stage title matches only. */
+export type T3SearchStatus = "ok" | "offline" | "timeout" | "error";
+
+export interface ThreadSearchResult {
+  t3ThreadId: string;
+  title: string;
+  projectTitle: string | null;
+  matchSource: MatchSource;
+  /** Message text around the match (message matches only). */
+  snippet: string | null;
+  messageCreatedAt: string | null;
+  t3DeepLink: string | null;
+  /** null until stage syncs the session. */
+  thread: Thread | null;
+}
+
+export interface ThreadSearch {
+  results: ThreadSearchResult[];
+  t3: T3SearchStatus;
+}
+
 export type SubagentsFilter = "include" | "exclude";
 
 export interface ThreadListQuery {

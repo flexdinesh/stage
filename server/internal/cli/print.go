@@ -206,6 +206,25 @@ func printSessions(w io.Writer, res agenttools.SessionsOut) {
 	}
 }
 
+func printSearch(w io.Writer, res agenttools.SearchSessionsOut) {
+	if len(res.Results) == 0 {
+		fmt.Fprintln(w, "no matching sessions")
+	}
+	for _, r := range res.Results {
+		fmt.Fprintf(w, "%-9s  %s  %s  %s\n", r.Match, orDash(r.Project), r.Title, r.T3ThreadID)
+		if r.Snippet != nil {
+			fmt.Fprintf(w, "           %s\n", *r.Snippet)
+		}
+	}
+	switch res.T3 {
+	case "ok":
+	case "timeout":
+		fmt.Fprintln(w, "(T3 slow: titles only)")
+	default:
+		fmt.Fprintln(w, "(T3 offline: titles only)")
+	}
+}
+
 func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	t := d.Thread
 	fmt.Fprintf(w, "session %s  %s  [%s]  %s\n", t.T3ThreadID, t.Title, t.State, orDash(t.ProjectTitle))

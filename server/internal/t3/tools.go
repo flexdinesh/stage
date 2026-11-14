@@ -97,6 +97,21 @@ func (c *MCPClient) ListThreads(ctx context.Context, in ListThreadsInput) (Threa
 	return page, nil
 }
 
+func (c *MCPClient) SearchThreads(ctx context.Context, in SearchThreadsInput) ([]SearchMatch, error) {
+	args := map[string]any{"query": strings.TrimSpace(in.Query)}
+	if in.ProjectID != "" {
+		args["projectId"] = in.ProjectID
+	}
+	if in.Limit > 0 {
+		args["limit"] = min(in.Limit, 50)
+	}
+	var out wireThreadSearch
+	if err := c.call(ctx, "t3_thread_search", args, &out); err != nil {
+		return nil, err
+	}
+	return out.toMatches(), nil
+}
+
 func (c *MCPClient) ReadThread(ctx context.Context, threadID string) (ThreadDetail, error) {
 	if threadID == "" {
 		return ThreadDetail{}, ErrNotFound

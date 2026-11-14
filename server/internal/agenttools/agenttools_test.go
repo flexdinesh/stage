@@ -173,7 +173,7 @@ func TestToolList(t *testing.T) {
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
 		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "unlink_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
-		"run_schedule", "preview_schedule", "list_sessions", "get_session",
+		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -356,6 +356,33 @@ func TestLastWordTools(t *testing.T) {
 	}
 }
 
+func TestSearchSessionsTool(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/search")
+	other := e.project("/w/search-other")
+	titled := e.session(p, "Palette search")
+	said := e.session(p, "What more?")
+	e.fake.AddMessage(said, t3.SearchAssistant, "…the palette should find sessions…")
+	e.session(other, "palette elsewhere")
+	cs := connect(t, &agenttools.Ops{Client: e.client})
+
+	var out agenttools.SearchSessionsOut
+	mustCall(t, cs, "search_sessions", map[string]any{"query": "palette", "project": p.Title}, &out)
+	if out.T3 != "ok" || len(out.Results) != 2 {
+		t.Fatalf("search %+v", out)
+	}
+	if r := out.Results[0]; r.T3ThreadID != titled || r.Match != "title" || r.State == nil || r.Snippet != nil {
+		t.Fatalf("title row %+v", r)
+	}
+	if r := out.Results[1]; r.T3ThreadID != said || r.Match != "assistant" || r.Snippet == nil ||
+		*r.Snippet != "…the palette should find sessions…" || r.Project == nil || *r.Project != p.Title {
+		t.Fatalf("message row %+v", r)
+	}
+	if msg := call(t, cs, "search_sessions", map[string]any{"query": "p"}, nil); !strings.Contains(msg, "2 to 200") {
+		t.Fatalf("short query error %q", msg)
+	}
+}
+
 func TestScheduleTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched")
@@ -431,7 +458,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 24 {
+	if err != nil || len(res.Tools) != 25 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

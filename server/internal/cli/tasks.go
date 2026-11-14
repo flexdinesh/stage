@@ -522,6 +522,22 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { printSessions(w, res) })
+	case "search", "find":
+		var a agenttools.SearchSessionsArgs
+		c.fs.StringVar(&a.Project, "project", "", "project")
+		c.fs.IntVar(&a.Limit, "limit", 20, "max matches per source")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		a.Query = strings.Join(c.pos, " ")
+		if strings.TrimSpace(a.Query) == "" {
+			return usagef("sessions search: want a query")
+		}
+		res, err := c.ops().SearchSessions(ctx, a)
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printSearch(w, res) })
 	case "show", "get":
 		if err := c.parse(rest); err != nil {
 			return err

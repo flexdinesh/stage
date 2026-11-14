@@ -29,6 +29,9 @@ type Client interface {
 	CreateProject(ctx context.Context, in CreateProjectInput) (Project, error)
 	// ListThreads calls t3_thread_list for one page.
 	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
+	// SearchThreads calls t3_thread_search: active, non-subagent threads by
+	// title/branch/PR/project, then message text. Not exhaustive.
+	SearchThreads(ctx context.Context, in SearchThreadsInput) ([]SearchMatch, error)
 	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
 	ReadThread(ctx context.Context, threadID string) (ThreadDetail, error)
 	// LatestReply finds a thread's latest assistant reply (optionally for one
@@ -163,6 +166,33 @@ type ListThreadsInput struct {
 	IncludeSubagents bool
 	Cursor           *int // nil = first page
 	Limit            int  // 1..100; 0 = T3 default
+}
+
+type SearchThreadsInput struct {
+	Query     string // trimmed, 2..200 chars
+	ProjectID string // "" = all projects (calls outside a thread)
+	Limit     int    // 1..50; 0 = T3 default (50)
+}
+
+// SearchSource is why T3 matched a thread: "title" covers title, branch, PR
+// and project; user/assistant are message text matches.
+type SearchSource string
+
+const (
+	SearchTitle     SearchSource = "title"
+	SearchUser      SearchSource = "user"
+	SearchAssistant SearchSource = "assistant"
+)
+
+// SearchMatch is one t3_thread_search match. Snippet and MessageCreatedAt
+// are set for message matches only.
+type SearchMatch struct {
+	ThreadID         string
+	ProjectID        string
+	Title            string
+	Source           SearchSource
+	Snippet          string
+	MessageCreatedAt *time.Time
 }
 
 type ThreadPage struct {

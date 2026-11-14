@@ -20,6 +20,7 @@ Use it to:
 - Chain work: afterMe=true starts the task when your own session is settled in T3; afterTaskId / afterThreadId wait on another task or session. A failed predecessor keeps it waiting.
 - Recurring work: create_schedule (5-field cron in an IANA zone).
 - Check progress: list_tasks, get_task, wait_task, list_sessions.
+- Find a past session by what was said in it: search_sessions.
 
 Rules:
 - Prompts must be self-contained: the new thread does not see your conversation.
@@ -64,6 +65,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, "preview_schedule", "Next three fire times of a cron in a zone.", ro, o.PreviewSchedule)
 
 	add(s, "list_sessions", "List T3 sessions (root threads) across projects, newest first.", ro, o.ListSessions)
+	add(s, "search_sessions", "Find T3 sessions by title, branch, PR or project, then by message text (via T3; falls back to stage titles when T3 is offline, see t3).", ro, o.SearchSessions)
 	add(s, "get_session", "Read a T3 session with children, continuations and its task.", ro, o.GetSession)
 	return s
 }

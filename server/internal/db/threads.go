@@ -157,7 +157,9 @@ type ThreadFilter struct {
 	Provider     string
 	Source       string // app | t3 | ""
 	Q            string
-	From, To     *time.Time
+	// IDs keeps these T3 thread ids only (nil = no id filter).
+	IDs      []string
+	From, To *time.Time
 	// ExcludeSubagents keeps root threads only (parent_thread_id IS NULL).
 	ExcludeSubagents bool
 	// NeedsInput keeps external threads needing input (see NeedsInputCount).
@@ -204,6 +206,9 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 	}
 	if f.Q != "" {
 		w.add("th.title ILIKE " + w.arg(likePattern(f.Q)))
+	}
+	if f.IDs != nil {
+		w.add("th.t3_thread_id = ANY(" + w.arg(f.IDs) + ")")
 	}
 	if f.From != nil {
 		w.add("th.created_at >= " + w.arg(*f.From))

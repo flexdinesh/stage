@@ -412,6 +412,8 @@ Typing `/` at a word start (or `template:`) in the task prompt, follow-up or not
 ### Command palette
 Ctrl K. Centered 660px panel 72px from the top on laptop, full screen on phone; grouped results under Label headers, matched text bolded, active result gets a 7% ink fill and a 2px inset ink bar; a Bench Gray footer lists keycaps.
 
+Session search: title matches from stage render at once under Sessions; T3 thread-search hits (250ms debounce, 2+ characters) append below them and never reorder rows already shown, and the highlight follows its row, not its index. Sessions rows carry a mono hint `project · origin` plus a match tag when the match was not the title (`branch`, `project`, `PR`). Message matches get their own In messages group: the title row (tag `you said` / `agent said`), then a full-width one-line Slate mono snippet with the query bolded. On phone the hint caps at 40% and truncates its project part first; the tag always stays visible. A session stage has not synced yet shows no state chip. When T3 is offline, slow (2s) or errors, only title matches show and a quiet mono note ("T3 offline · titles only" / "T3 slow · titles only") sits at the right of the footer on laptop, under the results on phone. Enter opens session detail (also for a task's session); Ctrl Enter opens it in T3.
+
 ## Do's and Don'ts
 
 ### Do:

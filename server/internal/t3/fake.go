@@ -34,6 +34,18 @@ type Fake struct {
 	// LaunchErr, when set, fails LaunchThread (tests).
 	LaunchErr error
 	SendErr   error
+	// SearchErr fails SearchThreads; SearchDelay holds it (until ctx ends).
+	SearchErr   error
+	SearchDelay time.Duration
+	// Searches: every SearchThreads input.
+	Searches []SearchThreadsInput
+	messages []fakeMessage
+}
+
+type fakeMessage struct {
+	threadID, text string
+	source         SearchSource
+	at             time.Time
 }
 
 type FakeUpload struct {
@@ -153,6 +165,73 @@ func (f *Fake) ListThreads(_ context.Context, in ListThreadsInput) (ThreadPage, 
 		page.NextCursor = &end
 	}
 	return page, nil
+}
+
+// SearchThreads mimics t3_thread_search: unarchived root threads whose title,
+// branch or project title contains the query (source title), then message
+// matches (AddMessage) from other threads, newest message first.
+func (f *Fake) SearchThreads(ctx context.Context, in SearchThreadsInput) ([]SearchMatch, error) {
+	f.mu.Lock()
+	f.Searches = append(f.Searches, in)
+	delay, searchErr := f.SearchDelay, f.SearchErr
+	f.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if searchErr != nil {
+		return nil, searchErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	q := strings.ToLower(strings.TrimSpace(in.Query))
+	limit := in.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	projectTitle := map[string]string{}
+	for _, p := range f.projects {
+		projectTitle[p.ID] = p.Title
+	}
+	eligible := func(t *ThreadDetail) bool {
+		return !t.Archived && t.RelationshipToParent != "subagent" && (in.ProjectID == "" || t.ProjectID == in.ProjectID)
+	}
+	var out []SearchMatch
+	shown := map[string]bool{}
+	for i := len(f.order) - 1; i >= 0; i-- {
+		t := f.threads[f.order[i]]
+		if !eligible(t) {
+			continue
+		}
+		for _, text := range []string{t.Title, t.Branch, projectTitle[t.ProjectID]} {
+			if text != "" && strings.Contains(strings.ToLower(text), q) {
+				out = append(out, SearchMatch{ThreadID: t.ThreadID, ProjectID: t.ProjectID, Title: t.Title, Source: SearchTitle})
+				shown[t.ThreadID] = true
+				break
+			}
+		}
+	}
+	for i := len(f.messages) - 1; i >= 0; i-- {
+		m := f.messages[i]
+		t, ok := f.threads[m.threadID]
+		if !ok || shown[m.threadID] || !eligible(t) || !strings.Contains(strings.ToLower(m.text), q) {
+			continue
+		}
+		at := m.at
+		out = append(out, SearchMatch{ThreadID: t.ThreadID, ProjectID: t.ProjectID, Title: t.Title, Source: m.source, Snippet: m.text, MessageCreatedAt: &at})
+		shown[m.threadID] = true
+	}
+	return out[:min(limit, len(out))], nil
+}
+
+// AddMessage seeds message text for SearchThreads (source user|assistant).
+func (f *Fake) AddMessage(threadID string, source SearchSource, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = append(f.messages, fakeMessage{threadID: threadID, text: text, source: source, at: f.now()})
 }
 
 func (f *Fake) ReadThread(_ context.Context, threadID string) (ThreadDetail, error) {

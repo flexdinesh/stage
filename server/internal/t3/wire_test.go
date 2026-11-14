@@ -193,6 +193,33 @@ func TestDecodeThreadRead(t *testing.T) {
 	}
 }
 
+const threadSearchJSON = `{"matches":[
+ {"threadId":"t1","projectId":"proj-1","title":"Ctrl K palette","link":"[Ctrl K palette](t3-thread://v2/env-1/t1)","source":"title"},
+ {"threadId":"t2","projectId":"proj-1","title":"what more?","link":"[what more?](t3-thread://v2/env-1/t2)","source":"assistant","snippet":"…from the Ctrl K palette. Where I'd push back…","messageCreatedAt":"2026-11-14T08:50:07.904Z"},
+ {"threadId":"","projectId":"proj-1","title":"dropped","source":"user"}
+]}`
+
+func TestDecodeThreadSearch(t *testing.T) {
+	var w wireThreadSearch
+	if err := decodeToolResult("t3_thread_search", structuredResult(t, threadSearchJSON), &w); err != nil {
+		t.Fatal(err)
+	}
+	ms := w.toMatches()
+	if len(ms) != 2 {
+		t.Fatalf("matches = %+v", ms)
+	}
+	if m := ms[0]; m.ThreadID != "t1" || m.Source != SearchTitle || m.Snippet != "" || m.MessageCreatedAt != nil {
+		t.Fatalf("title match = %+v", m)
+	}
+	m := ms[1]
+	if m.Source != SearchAssistant || m.Snippet != "…from the Ctrl K palette. Where I'd push back…" || m.Title != "what more?" || m.ProjectID != "proj-1" {
+		t.Fatalf("message match = %+v", m)
+	}
+	if want := time.Date(2026, 11, 14, 8, 50, 7, 904e6, time.UTC); m.MessageCreatedAt == nil || !m.MessageCreatedAt.Equal(want) {
+		t.Fatalf("messageCreatedAt = %v", m.MessageCreatedAt)
+	}
+}
+
 func TestDecodeFallsBackToTextContent(t *testing.T) {
 	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"projects":[{"id":"p","title":"T","workspaceRoot":"/w","createdAt":"bogus","deletedAt":null}],"nextCursor":null}`}}}
 	var w wireProjectList
