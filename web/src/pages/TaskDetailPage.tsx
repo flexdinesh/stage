@@ -33,7 +33,7 @@ import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { closeSystemNotifications } from "../lib/push.ts";
-import { canStart, canStop, isActive, isWaiting } from "../lib/tasks.ts";
+import { canStart, canStop, isActive, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -153,6 +153,14 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 </Link>
               </>
             )}
+            {task.afterThreadId === null || !isWaiting(task) ? null : (
+              <>
+                {" · waits for "}
+                <Link to={sessionPath(task.afterThreadId)} className={linkClass}>
+                  {task.afterThreadTitle ?? "session"}
+                </Link>
+              </>
+            )}
             {task.startAt === null ? null : (
               <span title={dateTime(task.startAt)}>{` · starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
             )}
@@ -190,11 +198,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <Button
               variant={armed ? "primary" : "secondary"}
               busy={start.isPending}
-              title={`Unlinks it from #${task.afterTaskId ?? ""} and starts it now`}
+              title={`Unlinks it from ${waitTarget(task)} and starts it now`}
               onClick={() => (armed ? start.mutate() : setArmed(true))}
               onBlur={() => setArmed(false)}
             >
-              {armed ? `Confirm: unlink from #${task.afterTaskId ?? ""} and start` : "Start now"}
+              {armed ? `Confirm: unlink from ${waitTarget(task)} and start` : "Start now"}
             </Button>
           ) : startable ? (
             <Button
@@ -345,6 +353,20 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         {task.startAt === null ? null : (
           <Detail label="Starts">
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>
+          </Detail>
+        )}
+        {task.afterThreadId === null ? null : (
+          <Detail label="Runs after">
+            <Link to={sessionPath(task.afterThreadId)} className={linkClass}>
+              {task.afterThreadTitle ?? task.afterThreadId}
+            </Link>
+          </Detail>
+        )}
+        {task.originThreadId === null ? null : (
+          <Detail label="Created by">
+            <Link to={sessionPath(task.originThreadId)} className={linkClass}>
+              {task.originThreadTitle ?? task.originThreadId}
+            </Link>
           </Detail>
         )}
         {task.scheduleId === null ? null : (

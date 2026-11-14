@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,46 @@ SELECT EXISTS (SELECT 1 FROM down WHERE id = $2)`, id, *after).Scan(&cycle); err
 	return err
 }
 
+// setAfterThread links task id to run after T3 thread threadID (nil unlinks
+// the thread link). A thread that is a task's current thread becomes a task
+// link (setAfter rules). Otherwise (409 Conflict): the task is backlog; the
+// thread is mirrored (404) and has not passed (settled or cancelled). Many
+// tasks may wait on one thread.
+func setAfterThread(ctx context.Context, tx pgx.Tx, id int64, threadID *string) error {
+	if threadID == nil {
+		_, err := tx.Exec(ctx, `UPDATE tasks SET after_thread_id = NULL WHERE id = $1`, id)
+		return err
+	}
+	var owner int64
+	err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE t3_thread_id = $1 ORDER BY id LIMIT 1`, *threadID).Scan(&owner)
+	switch {
+	case err == nil:
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_thread_id = NULL WHERE id = $1`, id); err != nil {
+			return err
+		}
+		return setAfter(ctx, tx, id, &owner)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	var state TaskState
+	if err := tx.QueryRow(ctx, `SELECT state FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state); err != nil {
+		return notFound(err)
+	}
+	if state != StateBacklog {
+		return Conflict("task is %s: only a backlog task can be linked to run after a session", state)
+	}
+	var threadState TaskState
+	err = tx.QueryRow(ctx, `SELECT `+threadStateSQL+` FROM threads th WHERE th.t3_thread_id = $1`, *threadID).Scan(&threadState)
+	if err != nil {
+		return fmt.Errorf("session to run after: %w", notFound(err))
+	}
+	if threadState == StateSettled || threadState == StateCancelled {
+		return Conflict("session %s is %s: start this task instead of linking it", *threadID, threadState)
+	}
+	_, err = tx.Exec(ctx, `UPDATE tasks SET after_thread_id = $2, after_task_id = NULL WHERE id = $1`, id, *threadID)
+	return err
+}
+
 // Sequence returns the linked run order containing task id (head first;
 // just the task when unlinked).
 func (s *Store) Sequence(ctx context.Context, id int64) ([]Task, error) {
@@ -89,14 +130,33 @@ WITH RECURSIVE up AS (
 	return collectTasks(rows, err)
 }
 
-// ReadyFollowers: backlog tasks whose predecessor is settled or cancelled
-// (the link runner launches them).
+// ReadyFollowers: backlog tasks whose predecessor task, or session (mirrored
+// thread state), is settled or cancelled (the link runner launches them).
 func (s *Store) ReadyFollowers(ctx context.Context) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT f.id FROM tasks f JOIN tasks p ON p.id = f.after_task_id
-WHERE f.state = 'backlog' AND p.state IN ('settled', 'cancelled') ORDER BY f.id`)
+WHERE f.state = 'backlog' AND p.state IN ('settled', 'cancelled')
+UNION
+SELECT f.id FROM tasks f JOIN threads th ON th.t3_thread_id = f.after_thread_id
+WHERE f.state = 'backlog' AND (`+threadStateSQL+`) IN ('settled', 'cancelled')
+ORDER BY 1`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[int64])
+}
+
+// LinkedThreadIDs: sessions that backlog tasks wait on and that have not
+// passed (the watcher refreshes them, subagents included).
+func (s *Store) LinkedThreadIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT DISTINCT f.after_thread_id FROM tasks f
+LEFT JOIN threads th ON th.t3_thread_id = f.after_thread_id
+WHERE f.state = 'backlog' AND f.after_thread_id IS NOT NULL
+  AND (th.t3_thread_id IS NULL OR (`+threadStateSQL+`) NOT IN ('settled', 'cancelled'))
+ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }

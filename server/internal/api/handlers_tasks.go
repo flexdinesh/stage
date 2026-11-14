@@ -56,6 +56,8 @@ type createTaskReq struct {
 	Tags               []string         `json:"tags"`
 	Notes              *string          `json:"notes"`
 	AfterTaskID        *int64           `json:"afterTaskId"`
+	AfterThreadID      *string          `json:"afterThreadId"`
+	OriginThreadID     *string          `json:"originThreadId"`
 	AttachmentIDs      []int64          `json:"attachmentIds"`
 	StartLocal         *string          `json:"startLocal"`
 	StartTz            *string          `json:"startTz"`
@@ -73,7 +75,12 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		Workspace:          db.Workspace{Type: "root"},
 		Tags:               cleanTags(req.Tags),
 		AfterTaskID:        req.AfterTaskID,
+		AfterThreadID:      trimmedPtr(req.AfterThreadID),
+		OriginThreadID:     trimmedPtr(req.OriginThreadID),
 		AttachmentIDs:      req.AttachmentIDs,
+	}
+	if in.AfterTaskID != nil && in.AfterThreadID != nil {
+		return in, db.Invalid("a task can run after another task or a session, not both")
 	}
 	if err := attachmentIDs(req.AttachmentIDs); err != nil {
 		return in, err
@@ -122,6 +129,9 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		in.StartTz = req.StartTz
 		if req.AfterTaskID != nil {
 			return in, db.Invalid("a task can have a start time or run after another task, not both")
+		}
+		if in.AfterThreadID != nil {
+			return in, db.Invalid("a task can have a start time or run after a session, not both")
 		}
 		if req.Start {
 			return in, db.Invalid("a task with a start time cannot also start now")
@@ -176,7 +186,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		s.log.Warn("record last-used model", "task", task.ID, "err", err)
 	}
-	if req.Start && req.AfterTaskID == nil {
+	if req.Start && req.AfterTaskID == nil && in.AfterThreadID == nil {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
@@ -239,6 +249,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		return err
 	}
+	nullableText(&p.AfterThreadID)
 	if p.StartLocal.Set || p.StartTz.Set {
 		if p.StartLocal.Set != p.StartTz.Set || p.StartLocal.Null != p.StartTz.Null {
 			return db.Invalid("startLocal and startTz must be set (or null) together")

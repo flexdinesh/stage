@@ -114,6 +114,10 @@ type Task struct {
 	StartTz            *string          `json:"startTz"`     // IANA zone startAt was entered in
 	ScheduleID         *int64           `json:"scheduleId"`  // recurring schedule that spawned the task
 	ScheduleTitle      *string          `json:"scheduleTitle"`
+	OriginThreadID     *string          `json:"originThreadId"`    // T3 session that created the task (agent interface)
+	OriginThreadTitle  *string          `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
+	AfterThreadID      *string          `json:"afterThreadId"`     // runs after this T3 session (launches when it settles)
+	AfterThreadTitle   *string          `json:"afterThreadTitle"`
 	LaunchAttempt      int              `json:"launchAttempt"`
 	LastError          *string          `json:"lastError"`
 	LaunchedAt         *time.Time       `json:"launchedAt"`

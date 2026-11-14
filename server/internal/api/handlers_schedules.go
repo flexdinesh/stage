@@ -65,8 +65,8 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &req); err != nil {
 		return err
 	}
-	if req.AfterTaskID != nil || req.Start || req.StartLocal != nil || req.StartTz != nil {
-		return db.Invalid("afterTaskId, start, startLocal and startTz are not schedule fields")
+	if req.AfterTaskID != nil || req.AfterThreadID != nil || req.Start || req.StartLocal != nil || req.StartTz != nil {
+		return db.Invalid("afterTaskId, afterThreadId, start, startLocal and startTz are not schedule fields")
 	}
 	in, err := req.validate()
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
 		Tags: in.Tags, Notes: in.Notes, AttachmentIDs: in.AttachmentIDs,
-		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused,
+		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginThreadID: in.OriginThreadID,
 	})
 	if err != nil {
 		return err

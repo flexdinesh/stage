@@ -19,13 +19,16 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
+  t.origin_thread_id, oth.title, t.after_thread_id, ath.title,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN tasks nx ON nx.after_task_id = t.id
 LEFT JOIN threads th ON th.t3_thread_id = t.t3_thread_id
-LEFT JOIN schedules sc ON sc.id = t.schedule_id`
+LEFT JOIN schedules sc ON sc.id = t.schedule_id
+LEFT JOIN threads oth ON oth.t3_thread_id = t.origin_thread_id
+LEFT JOIN threads ath ON ath.t3_thread_id = t.after_thread_id`
 
 func scanTask(row pgx.Row) (Task, error) {
 	var t Task
@@ -33,7 +36,8 @@ func scanTask(row pgx.Row) (Task, error) {
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
 		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt, &t.CreatedAt,
-		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle, &t.Attachments)
+		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
+		&t.OriginThreadID, &t.OriginThreadTitle, &t.AfterThreadID, &t.AfterThreadTitle, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -162,10 +166,26 @@ type NewTask struct {
 	StartAt            *time.Time
 	StartTz            *string // set with StartAt (IANA zone)
 	ScheduleID         *int64  // spawning schedule
+	OriginThreadID     *string // T3 thread that created the task (agent interface)
+	AfterThreadID      *string // runs after this T3 thread (setAfterThread)
 }
 
 // errStartAndAfter: a task waits on a start time or a predecessor, not both.
 var errStartAndAfter = Invalid("a task can have a start time or run after another task, not both")
+
+// errOneWait: a task waits on at most one of a start time, a task or a thread.
+var errOneWait = Invalid("a task can wait on one of: a start time, another task, a thread")
+
+// countSet counts the non-nil waits.
+func countSet(waits ...bool) int {
+	n := 0
+	for _, w := range waits {
+		if w {
+			n++
+		}
+	}
+	return n
+}
 
 // CreateTask inserts a backlog task (+ creation event), linked to run after
 // AfterTaskID when set (setAfter rules; the whole insert fails otherwise).
@@ -192,23 +212,31 @@ func insertTask(ctx context.Context, tx pgx.Tx, in NewTask, extra func(tx pgx.Tx
 	if in.StartAt != nil && in.AfterTaskID != nil {
 		return 0, errStartAndAfter
 	}
+	if countSet(in.StartAt != nil, in.AfterTaskID != nil, in.AfterThreadID != nil) > 1 {
+		return 0, errOneWait
+	}
 	if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 		return 0, err
 	}
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-		in.StartAt, in.StartTz, in.ScheduleID,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
 	if in.AfterTaskID != nil {
 		if err := setAfter(ctx, tx, id, in.AfterTaskID); err != nil {
+			return 0, err
+		}
+	}
+	if in.AfterThreadID != nil {
+		if err := setAfterThread(ctx, tx, id, in.AfterThreadID); err != nil {
 			return 0, err
 		}
 	}
@@ -251,6 +279,7 @@ type TaskPatch struct {
 	Tags               Optional[[]string]         `json:"tags"`
 	Notes              Optional[string]           `json:"notes"`
 	AfterTaskID        Optional[int64]            `json:"afterTaskId"`   // null unlinks
+	AfterThreadID      Optional[string]           `json:"afterThreadId"` // null unlinks (setAfterThread)
 	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
@@ -274,8 +303,9 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		var provider, model *string
 		var startAt *time.Time
 		var after *int64
-		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, start_at, after_task_id FROM tasks WHERE id = $1 FOR UPDATE`, id).
-			Scan(&state, &provider, &model, &startAt, &after)
+		var afterThread *string
+		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, start_at, after_task_id, after_thread_id FROM tasks WHERE id = $1 FOR UPDATE`, id).
+			Scan(&state, &provider, &model, &startAt, &after, &afterThread)
 		if err != nil {
 			return notFound(err)
 		}
@@ -297,11 +327,27 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.AfterTaskID.Set {
 			after = p.AfterTaskID.Ptr()
 		}
+		if p.AfterThreadID.Set {
+			afterThread = p.AfterThreadID.Ptr()
+		}
 		if startAt != nil && after != nil {
 			return errStartAndAfter
 		}
-		// Clear a start before linking and set one after unlinking, so the
-		// start-or-after check holds at every step.
+		if countSet(startAt != nil, after != nil, afterThread != nil) > 1 {
+			return errOneWait
+		}
+		// Clear waits before setting new ones, so the one-wait check holds
+		// at every step.
+		if p.AfterThreadID.Set && p.AfterThreadID.Null {
+			if err := setAfterThread(ctx, tx, id, nil); err != nil {
+				return err
+			}
+		}
+		if p.AfterTaskID.Set && p.AfterTaskID.Null {
+			if err := setAfter(ctx, tx, id, nil); err != nil {
+				return err
+			}
+		}
 		setStart := func() error {
 			_, err := tx.Exec(ctx, `UPDATE tasks SET start_at = $2, start_tz = $3 WHERE id = $1`, id, p.StartAt.Ptr(), p.StartTz.Ptr())
 			return err
@@ -311,8 +357,13 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				return err
 			}
 		}
-		if p.AfterTaskID.Set {
+		if p.AfterTaskID.Set && !p.AfterTaskID.Null {
 			if err := setAfter(ctx, tx, id, p.AfterTaskID.Ptr()); err != nil {
+				return err
+			}
+		}
+		if p.AfterThreadID.Set && !p.AfterThreadID.Null {
+			if err := setAfterThread(ctx, tx, id, p.AfterThreadID.Ptr()); err != nil {
 				return err
 			}
 		}
@@ -366,7 +417,7 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.Notes.Set {
 			set("notes", p.Notes.V)
 		}
-		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
+		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AfterThreadID.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
 		sets = append(sets, "updated_at = now()")
@@ -446,7 +497,8 @@ type Transition struct {
 	// the attempt number and the clientRequestId.
 	ReuseAttempt bool
 	// UnlinkWaiting ("Start now"): a backlog task still waiting on an
-	// unfinished predecessor (not settled|cancelled) is unlinked from it.
+	// unfinished predecessor task or thread (not settled|cancelled) is
+	// unlinked from it.
 	UnlinkWaiting bool
 }
 
@@ -493,6 +545,9 @@ UPDATE tasks SET
   after_task_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
       SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state IN ('settled', 'cancelled'))
     THEN NULL ELSE after_task_id END,
+  after_thread_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
+      SELECT 1 FROM threads th WHERE th.t3_thread_id = tasks.after_thread_id AND (`+threadStateSQL+`) IN ('settled', 'cancelled'))
+    THEN NULL ELSE after_thread_id END,
   updated_at = now()
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting,

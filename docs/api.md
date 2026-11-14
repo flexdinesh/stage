@@ -173,6 +173,10 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "startTz": null,
   "scheduleId": null,
   "scheduleTitle": null,
+  "originThreadId": null,
+  "originThreadTitle": null,
+  "afterThreadId": null,
+  "afterThreadTitle": null,
   "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
@@ -191,6 +195,8 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `afterTaskId`: runs after that task (launches when it is settled or cancelled; see "Link rules"). `nextTaskId`: the task that runs after this one. Both nullable.
 - `startAt` (UTC instant) / `startTz` (IANA zone it was entered in): one-shot start time of a `backlog` task; the scheduler launches it at that time (see "Schedule rules"). Both null or both set; non-null only while the task is in `backlog` (any launch clears them). Never set together with `afterTaskId`.
 - `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
+- `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
+- `afterThreadId` / `afterThreadTitle`: runs after that T3 session (launches when it is settled or cancelled; see "Link rules"). A task waits on at most one of `startAt`, `afterTaskId`, `afterThreadId`.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
@@ -224,28 +230,30 @@ Body `CreateTaskRequest`:
   "tags": [],                    // optional
   "notes": "",                   // optional
   "afterTaskId": null,           // optional: run after this task (link rules)
+  "afterThreadId": null,         // optional: run after this T3 session (link rules); not with afterTaskId
+  "originThreadId": null,        // optional: T3 session creating the task (provenance)
   "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
   "startLocal": null,            // optional: one-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz
   "startTz": null,               // required with startLocal: IANA zone, e.g. "Asia/Kolkata"
-  "start": false                 // optional: true = Save & start (ignored when afterTaskId set)
+  "start": false                 // optional: true = Save & start (ignored when afterTaskId or afterThreadId set)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with `afterTaskId` or `start: true`). 404 project / afterTaskId. 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with `afterTaskId`, `afterThreadId` or `start: true`; `afterTaskId` together with `afterThreadId`). 404 project / afterTaskId / afterThreadId (session not mirrored). 409 link rule broken. Start errors after save: task is still created; it lands in `failed` with `lastError`.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `attachmentIds` `startLocal` `startTz`.
+Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `afterThreadId` `attachmentIds` `startLocal` `startTz`.
 In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
-`startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must not have both a start time and `afterTaskId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`).
+`startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must wait on at most one of a start time, `afterTaskId`, `afterThreadId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`, `{ "afterTaskId": null, "afterThreadId": "thread-x" }`). `afterThreadId`: set links per "Link rules"; `null` unlinks.
 200 `Task`. 404.
 
 ### `DELETE /api/tasks/:id`
 204. 409 when state is `launching|running|needs_input` (stop first). Its follower is relinked to its predecessor (A→X→B becomes A→B; B unlinked when X had none).
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor that is not settled or cancelled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409. "Start now": a `backlog` task waiting on a predecessor task or session that is not settled or cancelled is unlinked from it first (its own follower stays linked). Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one. The same applies to a task left in `launching` by a server restart (failed at startup with `launch interrupted by server restart`). On shutdown the server waits up to 100s for in-flight launches (compose `stop_grace_period: 2m`).
 Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
@@ -292,6 +300,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "lastRunAt": "2026-11-10T20:30:00Z",
   "lastTaskId": 41,
   "lastTaskState": "settled",
+  "originThreadId": null,
   "createdAt": "2026-11-08T09:59:00Z",
   "updatedAt": "2026-11-08T10:00:00Z"
 }
@@ -299,6 +308,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
 - `cron`: standard 5-field expression (minute hour day-of-month month day-of-week; `@hourly|@daily|@weekly|@monthly|@yearly` also accepted). `@every` and `CRON_TZ=`/`TZ=` prefixes are rejected (400). Evaluated in `tz` (IANA), so DST is handled by the zone.
 - `nextRunAt`: next fire (UTC); null while `paused`. `lastRunAt`: fire time of the newest run row (any outcome); null before the first.
 - `lastTaskId` / `lastTaskState`: newest task this schedule spawned (null before the first).
+- `originThreadId`: the T3 session that created the schedule (agent provenance; set on create only). Spawned tasks inherit it as their `originThreadId`.
 
 `ScheduleRun`:
 ```json
@@ -314,7 +324,7 @@ Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: 
 200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
 
 ### `POST /api/schedules`
-Body `CreateScheduleRequest`: the `CreateTaskRequest` config fields (`projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes attachmentIds`, same rules) plus `"cron": "0 2 * * *"` (required), `"tz": "Asia/Kolkata"` (required), `"paused": false` (optional).
+Body `CreateScheduleRequest`: the `CreateTaskRequest` config fields (`projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes attachmentIds originThreadId`, same rules; `afterTaskId`, `afterThreadId`, `start`, `startLocal`, `startTz` are 400) plus `"cron": "0 2 * * *"` (required), `"tz": "Asia/Kolkata"` (required), `"paused": false` (optional).
 201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
 
 ### `GET /api/schedules/:id`
@@ -634,3 +644,20 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 - A predecessor is passed when it is `settled` or `cancelled`. The link runner launches every `backlog` task whose predecessor has passed: on each transition into `settled|cancelled`, at startup and every 10s. The link stays (history).
 - A `failed|interrupted` (or still running / `done`) predecessor keeps its follower waiting. Restart the predecessor, unlink the follower, or "Start now" on it.
 - `GET /api/tasks/:id` returns `sequence`: the whole run order containing the task, head first.
+
+Session links (`afterThreadId`, "run after me" from the agent interface):
+
+- Linking a session that is a task's current thread stores a task link to that task instead (`afterTaskId`, all rules above, so 409 when it already has a follower).
+- Otherwise (409 / 404): the task is `backlog`; the session is mirrored (404) and its normalized session state (`GET /api/threads` `state`) is not `settled|cancelled`. Many tasks may wait on one session.
+- The link runner launches every `backlog` task whose session has passed (normalized state `settled|cancelled`); failed, interrupted, running or done-but-unsettled keep it waiting. The watcher refreshes every session that a backlog task waits on each 5s pass (subagents included, no notifications), and a session settling kicks the runner. The link stays (history); it is not part of `sequence`.
+
+## Agent interface
+
+`t3stage` subcommands (CLI, `--json`), `t3stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions get_session`. Results are the REST shapes (lists as compact rows); errors are tool errors carrying the API `error`.
+
+- Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
+- Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.
+- Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
+- `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `afterThreadId` of the caller session (error without one).
+- `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
+- `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.

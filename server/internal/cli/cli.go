@@ -1,0 +1,287 @@
+// Package cli is the t3stage command line: task, schedule and session
+// commands over the REST API (agenttools operations), the stdio MCP server
+// and agent setup helpers. `t3stage` with no args (or `serve`) runs the
+// server instead (cmd/t3stage).
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/flexdinesh/t3-stage/server/internal/agentctx"
+	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
+	"github.com/flexdinesh/t3-stage/server/internal/client"
+)
+
+// URLEnv overrides the server address.
+const URLEnv = "T3STAGE_URL"
+
+// Env is the process environment (injectable for tests).
+type Env struct {
+	Stdin          io.Reader
+	Stdout, Stderr io.Writer
+	Getenv         func(string) string
+	Caller         agentctx.Caller
+	Home           string
+	// Executable is this binary's path (registered as the stdio MCP command).
+	Executable string
+	// Exec runs an external command (claude / codex mcp add).
+	Exec func(name string, args ...string) error
+	// LookPath reports whether a command is installed.
+	LookPath func(name string) error
+}
+
+// OSEnv is the real process environment.
+func OSEnv() Env {
+	home, _ := os.UserHomeDir()
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "t3stage"
+	}
+	return Env{
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
+		Caller: agentctx.FromEnv(), Home: home, Executable: exe,
+		Exec: func(name string, args ...string) error {
+			cmd := exec.Command(name, args...)
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			return cmd.Run()
+		},
+		LookPath: func(name string) error { _, err := exec.LookPath(name); return err },
+	}
+}
+
+// errUsage prints usage and exits 2.
+type errUsage struct{ msg string }
+
+func (e errUsage) Error() string { return e.msg }
+
+func usagef(format string, a ...any) error { return errUsage{fmt.Sprintf(format, a...)} }
+
+// errTimeout: task wait timed out (exit 3).
+var errTimeout = errors.New("timed out")
+
+// Run executes args (without the program name) and returns the exit code.
+func Run(ctx context.Context, args []string, env Env) int {
+	err := run(ctx, args, env)
+	var u errUsage
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, flag.ErrHelp):
+		return 0
+	case errors.As(err, &u):
+		fmt.Fprintf(env.Stderr, "error: %s\n\n%s", u.msg, usage)
+		return 2
+	case errors.Is(err, errTimeout):
+		return 3
+	default:
+		fmt.Fprintf(env.Stderr, "error: %s\n", err)
+		return 1
+	}
+}
+
+const usage = `t3stage: t3-stage server and agent CLI
+
+Usage:
+  t3stage [serve]                       run the server (default)
+  t3stage context                       your session, cwd and resolved project
+  t3stage projects ls
+  t3stage models ls
+  t3stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
+  t3stage task show ID
+  t3stage task add --title T --prompt TEXT|- [config] [--after-me|--after-task ID|--after-thread ID]
+                   [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start]
+  t3stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""]
+  t3stage task rm|start|stop|dup|unlink ID
+  t3stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
+  t3stage task link ID --after-me|--after-task ID|--after-thread ID
+  t3stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
+  t3stage schedule ls [--project P]
+  t3stage schedule show ID
+  t3stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]
+  t3stage schedule edit ID [config] [--cron CRON] [--tz ZONE]
+  t3stage schedule rm|run|pause|resume ID
+  t3stage schedule preview --cron CRON --tz ZONE
+  t3stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
+  t3stage sessions show THREAD_ID
+  t3stage mcp                           stdio MCP server
+  t3stage setup mcp [--claude] [--codex] [--http]
+  t3stage setup instructions [--claude] [--codex] [--file PATH]
+  t3stage guide                         agent workflow guide
+
+Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
+        --mode default|plan --base-ref REF --branch NAME --tag T... --notes TEXT
+        --prompt-file PATH --image PATH...
+Global: --url URL (env T3STAGE_URL, default http://127.0.0.1:7380) --json
+Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
+and enable --after-me.
+`
+
+// cmd holds a command's parsed global flags.
+type cmd struct {
+	env  Env
+	fs   *flag.FlagSet
+	url  string
+	json bool
+	pos  []string
+}
+
+func newCmd(env Env, name string) *cmd {
+	c := &cmd{env: env, fs: flag.NewFlagSet(name, flag.ContinueOnError)}
+	c.fs.SetOutput(io.Discard)
+	c.fs.StringVar(&c.url, "url", "", "server URL")
+	c.fs.BoolVar(&c.json, "json", false, "JSON output")
+	return c
+}
+
+// parse parses flags interspersed with positional args.
+func (c *cmd) parse(args []string) error {
+	for {
+		if err := c.fs.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				fmt.Fprint(c.env.Stdout, usage)
+				return err
+			}
+			return usagef("%s: %v", c.fs.Name(), err)
+		}
+		rest := c.fs.Args()
+		if len(rest) == 0 {
+			return nil
+		}
+		c.pos = append(c.pos, rest[0])
+		args = rest[1:]
+	}
+}
+
+func (c *cmd) set(name string) bool {
+	found := false
+	c.fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+func (c *cmd) ops() *agenttools.Ops {
+	u := c.url
+	if u == "" {
+		u = c.env.Getenv(URLEnv)
+	}
+	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, LocalFiles: true}
+}
+
+// out prints v as JSON (--json) or with human.
+func (c *cmd) out(v any, human func(io.Writer)) error {
+	if c.json {
+		enc := json.NewEncoder(c.env.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(v)
+	}
+	human(c.env.Stdout)
+	return nil
+}
+
+func run(ctx context.Context, args []string, env Env) error {
+	if len(args) == 0 {
+		fmt.Fprint(env.Stdout, usage)
+		return nil
+	}
+	sub := args[1:]
+	switch args[0] {
+	case "help", "-h", "--help":
+		fmt.Fprint(env.Stdout, usage)
+		return nil
+	case "guide":
+		fmt.Fprintln(env.Stdout, agenttools.Guide)
+		return nil
+	case "context":
+		return runContext(ctx, env, sub)
+	case "projects":
+		return runProjects(ctx, env, sub)
+	case "models":
+		return runModels(ctx, env, sub)
+	case "task", "tasks":
+		return runTask(ctx, env, sub)
+	case "schedule", "schedules":
+		return runSchedule(ctx, env, sub)
+	case "sessions", "session":
+		return runSessions(ctx, env, sub)
+	case "mcp":
+		return runMCP(ctx, env, sub)
+	case "setup":
+		return runSetup(env, sub)
+	}
+	return usagef("unknown command %q", args[0])
+}
+
+func verb(args []string, def string) (string, []string) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return def, args
+	}
+	return args[0], args[1:]
+}
+
+func runContext(ctx context.Context, env Env, args []string) error {
+	c := newCmd(env, "context")
+	var a agenttools.CallerArgs
+	c.fs.StringVar(&a.CallerThreadID, "thread", "", "session id")
+	c.fs.StringVar(&a.Cwd, "cwd", "", "working directory")
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	res, err := c.ops().Context(ctx, a)
+	if err != nil {
+		return err
+	}
+	return c.out(res, func(w io.Writer) { printContext(w, res) })
+}
+
+func runProjects(ctx context.Context, env Env, args []string) error {
+	v, rest := verb(args, "ls")
+	if v != "ls" {
+		return usagef("projects %s: unknown", v)
+	}
+	c := newCmd(env, "projects ls")
+	if err := c.parse(rest); err != nil {
+		return err
+	}
+	res, err := c.ops().ListProjects(ctx, struct{}{})
+	if err != nil {
+		return err
+	}
+	return c.out(res, func(w io.Writer) { printProjects(w, res.Projects) })
+}
+
+func runModels(ctx context.Context, env Env, args []string) error {
+	v, rest := verb(args, "ls")
+	if v != "ls" {
+		return usagef("models %s: unknown", v)
+	}
+	c := newCmd(env, "models ls")
+	if err := c.parse(rest); err != nil {
+		return err
+	}
+	res, err := c.ops().ListModels(ctx, struct{}{})
+	if err != nil {
+		return err
+	}
+	return c.out(res, func(w io.Writer) { printCatalog(w, res) })
+}
+
+func runMCP(ctx context.Context, env Env, args []string) error {
+	c := newCmd(env, "mcp")
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	return agenttools.NewServer(c.ops()).Run(ctx, &mcp.StdioTransport{})
+}

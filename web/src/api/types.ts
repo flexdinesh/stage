@@ -181,6 +181,12 @@ export interface Task {
   /** Recurring schedule that spawned this task. */
   scheduleId: number | null;
   scheduleTitle: string | null;
+  /** T3 session that created the task (agent CLI/MCP); null otherwise. */
+  originThreadId: string | null;
+  originThreadTitle: string | null;
+  /** Runs after this T3 session (launches when it settles); not set together with afterTaskId. */
+  afterThreadId: string | null;
+  afterThreadTitle: string | null;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
   launchAttempt: number;
@@ -292,6 +298,8 @@ export interface Schedule {
   lastRunAt: string | null;
   lastTaskId: number | null;
   lastTaskState: TaskState | null;
+  /** T3 session that created the schedule (agent CLI/MCP); spawned tasks inherit it. */
+  originThreadId: string | null;
   createdAt: string;
   updatedAt: string;
 }
