@@ -405,3 +405,42 @@ func TestSetupMCP(t *testing.T) {
 		t.Fatalf("http execs %s", got)
 	}
 }
+
+func TestHandoffFlags(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	h.project("/w/cli-handoff")
+	h.caller = agentctx.Caller{Cwd: "/w/cli-handoff"}
+	code, stdout, stderr := h.run("", "task", "add", "--title", "a", "--prompt", "x", "--json")
+	if code != 0 {
+		t.Fatalf("add: %d %s", code, stderr)
+	}
+	a := decode[client.Task](t, stdout)
+	if !a.Handoff {
+		t.Fatalf("handoff defaults on: %+v", a)
+	}
+	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--after-task", fmt.Sprint(a.ID), "--handoff=false", "--json")
+	if code != 0 {
+		t.Fatalf("add b: %d %s", code, stderr)
+	}
+	b := decode[client.Task](t, stdout)
+	if b.Handoff {
+		t.Fatalf("--handoff=false: %+v", b)
+	}
+	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(b.ID))
+	if code != 0 || !strings.Contains(stdout, "handoff  off") {
+		t.Fatalf("show: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--title", "b2", "--json")
+	if code != 0 || decode[client.Task](t, stdout).Handoff {
+		t.Fatalf("edit without --handoff keeps it: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--handoff=true", "--json")
+	if code != 0 || !decode[client.Task](t, stdout).Handoff {
+		t.Fatalf("edit --handoff=true: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "link", fmt.Sprint(b.ID), "--after-task", fmt.Sprint(a.ID), "--handoff=false", "--json")
+	if code != 0 || decode[client.Task](t, stdout).Handoff {
+		t.Fatalf("link --handoff=false: %s", stdout)
+	}
+}

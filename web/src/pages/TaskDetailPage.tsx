@@ -6,6 +6,7 @@ import { api } from "../api/client.ts";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
@@ -34,6 +35,7 @@ import {
   cx,
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
+import { pendingHandoffNote } from "../lib/handoff.ts";
 import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
@@ -268,7 +270,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 <pre className="max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">
                   {task.prompt}
                 </pre>
+                {pendingHandoffNote(task) === null ? null : (
+                  <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
+                )}
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
+                {task.currentHandoff === null ? null : <HandoffRecord handoff={task.currentHandoff} />}
               </div>
             </Panel>
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}

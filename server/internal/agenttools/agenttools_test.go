@@ -549,3 +549,36 @@ func TestGetTaskAndSessionCarryPullRequestsAndRuns(t *testing.T) {
 		t.Fatalf("get_session thread=%+v", sd.Thread)
 	}
 }
+
+func TestHandoffFlagTools(t *testing.T) {
+	e := newEnv(t)
+	e.project("/w/handoff")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/handoff"}, PollEvery: 10 * time.Millisecond})
+
+	var a, b client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x"}, &a)
+	if !a.Handoff {
+		t.Fatalf("create_task: handoff defaults on: %+v", a)
+	}
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "afterTaskId": a.ID, "handoff": false}, &b)
+	if b.Handoff {
+		t.Fatalf("create_task handoff=false: %+v", b)
+	}
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "handoff": true}, &b)
+	if !b.Handoff {
+		t.Fatalf("update_task handoff=true: %+v", b)
+	}
+	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID}, &b)
+	if !b.Handoff {
+		t.Fatalf("link_task without handoff keeps it: %+v", b)
+	}
+	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID, "handoff": false}, &b)
+	if b.Handoff {
+		t.Fatalf("link_task handoff=false: %+v", b)
+	}
+	var d client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": b.ID}, &d)
+	if d.Handoff || d.CurrentHandoff != nil {
+		t.Fatalf("get_task %+v", d)
+	}
+}

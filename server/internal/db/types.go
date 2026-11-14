@@ -118,6 +118,7 @@ type Task struct {
 	OriginThreadTitle  *string          `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
 	AfterThreadID      *string          `json:"afterThreadId"`     // runs after this T3 session (launches when it settles)
 	AfterThreadTitle   *string          `json:"afterThreadTitle"`
+	Handoff            bool             `json:"handoff"` // append the predecessor handoff at launch (docs/api.md "Handoff")
 	LaunchAttempt      int              `json:"launchAttempt"`
 	LastError          *string          `json:"lastError"`
 	LaunchedAt         *time.Time       `json:"launchedAt"`

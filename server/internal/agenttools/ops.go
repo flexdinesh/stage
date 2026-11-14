@@ -350,6 +350,7 @@ type WaitArgs struct {
 	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles (needs your session id)"`
 	StartLocal    string `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
 	StartTz       string `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. Asia/Kolkata"`
+	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
 }
 
 // afterThread resolves afterThreadId / afterMe.
@@ -397,7 +398,7 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
 		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs,
 		AfterTaskID: idPtr(a.AfterTaskID), AfterThreadID: after, OriginThreadID: c.ThreadPtr(),
-		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start,
+		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
 }
 
@@ -488,6 +489,7 @@ type UpdateTaskArgs struct {
 	UpdateArgs
 	StartLocal *string `json:"startLocal,omitempty" jsonschema:"set a one-shot start (with startTz); empty string clears it"`
 	StartTz    *string `json:"startTz,omitempty"`
+	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch; backlog only"`
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
@@ -501,6 +503,9 @@ func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, er
 		} else {
 			p["startLocal"], p["startTz"] = *a.StartLocal, a.StartTz
 		}
+	}
+	if a.Handoff != nil {
+		p["handoff"] = *a.Handoff
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
@@ -551,6 +556,7 @@ type LinkTaskArgs struct {
 	AfterTaskID   int64  `json:"afterTaskId,omitempty" jsonschema:"run after this task settles"`
 	AfterThreadID string `json:"afterThreadId,omitempty" jsonschema:"run after this T3 session settles"`
 	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles"`
+	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch; omitted keeps the task's setting (default true)"`
 	CallerArgs
 }
 
@@ -577,6 +583,9 @@ func (o *Ops) LinkTask(ctx context.Context, a LinkTaskArgs) (client.Task, error)
 	}
 	if cur.StartAt != nil {
 		p["startLocal"], p["startTz"] = nil, nil // a link replaces a start time
+	}
+	if a.Handoff != nil {
+		p["handoff"] = *a.Handoff
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }

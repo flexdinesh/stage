@@ -114,6 +114,14 @@ func strFlag(c *cmd, name, v string) *string {
 	return &v
 }
 
+// boolFlag is v when flag name was given, else nil.
+func boolFlag(c *cmd, name string, v bool) *bool {
+	if !c.set(name) {
+		return nil
+	}
+	return &v
+}
+
 func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 	if len(f.images) > 0 {
 		return agenttools.UpdateArgs{}, usagef("--image is not supported on edit")
@@ -163,6 +171,7 @@ type waitFlags struct {
 	afterTask        int64
 	afterThread      string
 	afterMe          bool
+	handoff          bool
 	startAt, startTz string
 }
 
@@ -170,6 +179,7 @@ func (w *waitFlags) register(c *cmd, start bool) {
 	c.fs.Int64Var(&w.afterTask, "after-task", 0, "run after this task")
 	c.fs.StringVar(&w.afterThread, "after-thread", "", "run after this T3 session")
 	c.fs.BoolVar(&w.afterMe, "after-me", false, "run after your own session")
+	c.fs.BoolVar(&w.handoff, "handoff", true, "append the predecessor's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
 	if start {
 		c.fs.StringVar(&w.startAt, "start-at", "", "one-shot start YYYY-MM-DDTHH:mm")
 		c.fs.StringVar(&w.startTz, "tz", "", "IANA zone for --start-at")
@@ -230,7 +240,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			ConfigArgs: cfg, Start: start,
 			WaitArgs: agenttools.WaitArgs{
 				AfterTaskID: wf.afterTask, AfterThreadID: wf.afterThread, AfterMe: wf.afterMe,
-				StartLocal: wf.startAt, StartTz: wf.startTz,
+				StartLocal: wf.startAt, StartTz: wf.startTz, Handoff: boolFlag(c, "handoff", wf.handoff),
 			},
 		})
 		if err != nil {
@@ -240,9 +250,11 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	case "edit", "update":
 		var f configFlags
 		var startAt, tz string
+		var handoff bool
 		f.register(c)
 		c.fs.StringVar(&startAt, "start-at", "", "one-shot start (empty clears)")
 		c.fs.StringVar(&tz, "tz", "", "zone for --start-at")
+		c.fs.BoolVar(&handoff, "handoff", true, "append the predecessor handoff at launch (true|false)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -254,7 +266,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		a := agenttools.UpdateTaskArgs{UpdateArgs: u, StartLocal: strFlag(c, "start-at", startAt), StartTz: strFlag(c, "tz", tz)}
+		a := agenttools.UpdateTaskArgs{UpdateArgs: u, StartLocal: strFlag(c, "start-at", startAt), StartTz: strFlag(c, "tz", tz), Handoff: boolFlag(c, "handoff", handoff)}
 		res, err := o().UpdateTask(ctx, a)
 		if err != nil {
 			return err
@@ -331,7 +343,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		res, err := o().LinkTask(ctx, agenttools.LinkTaskArgs{ID: id, AfterTaskID: wf.afterTask, AfterThreadID: wf.afterThread, AfterMe: wf.afterMe})
+		res, err := o().LinkTask(ctx, agenttools.LinkTaskArgs{ID: id, AfterTaskID: wf.afterTask, AfterThreadID: wf.afterThread, AfterMe: wf.afterMe, Handoff: boolFlag(c, "handoff", wf.handoff)})
 		if err != nil {
 			return err
 		}

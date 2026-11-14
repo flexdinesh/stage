@@ -145,6 +145,7 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	if len(d.Tags) > 0 {
 		fmt.Fprintf(w, "  tags     %s\n", strings.Join(d.Tags, ", "))
 	}
+	printHandoff(w, d)
 	printPullRequests(w, d.PullRequests)
 	if d.Thread != nil {
 		printRuns(w, d.Thread.RecentRuns, d.Thread.RunCount)
@@ -158,6 +159,35 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 		for _, e := range d.Events {
 			fmt.Fprintf(w, "  %s  %s  %s\n", e.At.Local().Format("2006-01-02 15:04:05"), e.ToState, e.Detail)
 		}
+	}
+}
+
+// printHandoff: the toggle for a linked task, then the current attempt's record.
+func printHandoff(w io.Writer, d client.TaskDetail) {
+	if d.AfterTaskID != nil || d.AfterThreadID != nil {
+		state := "on"
+		if !d.Handoff {
+			state = "off"
+		}
+		fmt.Fprintf(w, "  handoff  %s\n", state)
+	}
+	h := d.CurrentHandoff
+	if h == nil {
+		return
+	}
+	from := h.SourceTitle
+	if h.SourceTaskID != nil {
+		from = fmt.Sprintf("#%d", *h.SourceTaskID)
+	}
+	switch h.Status {
+	case db.HandoffSent:
+		fmt.Fprintf(w, "  handoff  sent from %s (attempt %d, %d chars)\n", from, h.Attempt, len([]rune(h.Text)))
+	default:
+		reason := ""
+		if h.Reason != nil {
+			reason = *h.Reason
+		}
+		fmt.Fprintf(w, "  handoff  skipped (attempt %d): %s\n", h.Attempt, reason)
 	}
 }
 

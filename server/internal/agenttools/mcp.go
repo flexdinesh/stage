@@ -18,13 +18,14 @@ Use it to:
 - Save follow-up work you notice but should not do now: create_task (lands in backlog; does not start).
 - Kick off work: create_task with start=true, or start_task on a backlog task.
 - Chain work: afterMe=true starts the task when your own session is settled in T3; afterTaskId / afterThreadId wait on another task or session; order_tasks links several backlog tasks in order at once. A failed predecessor keeps it waiting.
+- Handoff: when a linked task starts, stage appends its predecessor's final reply (up to 4000 chars), PR links, branch/worktree and T3 thread id to the prompt, so sequential tasks carry context forward (handoff=false turns it off). Read more of the predecessor with t3_thread_read.
 - Verify a plan you queued: get_session on your session id returns createdTasks (chains and independent tasks).
 - Recurring work: create_schedule (5-field cron in an IANA zone).
 - Check progress: list_tasks, get_task, wait_task, list_sessions.
 - Find a past session by what was said in it: search_sessions.
 
 Rules:
-- Prompts must be self-contained: the new thread does not see your conversation.
+- Prompts must be self-contained: the new thread does not see your conversation (a linked task also gets the handoff).
 - Project defaults to your session's project, else the project containing your cwd. Pass project (id or title) to target another one (list_projects).
 - Model defaults to the user's pinned or last-used model; list_models shows choices.
 - Over HTTP MCP, pass callerThreadId ($T3CODE_THREAD_ID) and cwd so afterMe, provenance and project defaults work; stdio and CLI read them from the environment.
@@ -45,15 +46,15 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, "list_models", "List providers, models and model options (effort, ...) available for tasks.", ro, o.ListModels)
 
 	add(s, "list_tasks", "List tasks (compact rows, newest activity first).", ro, o.ListTasks)
-	add(s, "get_task", "Read a task with its events, thread (recent runs: ordinal, status, model, times), pull requests and run order.", ro, o.GetTask)
-	add(s, "create_task", "Create a task: saved to backlog by default; start=true launches it now; afterMe/afterTaskId/afterThreadId queue it to run after a session or task settles; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
-	add(s, "update_task", "Edit a task. Outside backlog only title, tags and notes change.", nil, o.UpdateTask)
+	add(s, "get_task", "Read a task with its events, thread (recent runs: ordinal, status, model, times), pull requests, run order and currentHandoff (what its launch appended from its predecessor).", ro, o.GetTask)
+	add(s, "create_task", "Create a task: saved to backlog by default; start=true launches it now; afterMe/afterTaskId/afterThreadId queue it to run after a session or task settles (handoff, default true, appends that predecessor's final reply, PRs, branch and thread id at launch); startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
+	add(s, "update_task", "Edit a task (incl. handoff on/off). Outside backlog only title, tags and notes change.", nil, o.UpdateTask)
 	add(s, "delete_task", "Delete a task (not while launching, running or needing input).", del, o.DeleteTask)
 	add(s, "start_task", "Launch a task in T3 now (backlog, failed, interrupted or cancelled). Unlinks it from an unfinished predecessor.", nil, o.StartTask)
 	add(s, "stop_task", "Interrupt a task's running thread.", nil, o.StopTask)
 	add(s, "followup_task", "Send a message (and optionally images) to a task's thread.", nil, o.FollowupTask)
 	add(s, "duplicate_task", "Copy a task into a new backlog task.", nil, o.DuplicateTask)
-	add(s, "link_task", "Make a backlog task run after a task, a session, or your own session (afterMe).", nil, o.LinkTask)
+	add(s, "link_task", "Make a backlog task run after a task, a session, or your own session (afterMe). handoff (default true) appends the predecessor's final reply, PRs, branch and thread id at launch.", nil, o.LinkTask)
 	add(s, "order_tasks", "Link backlog tasks to run in the given order in one step (each after the previous one settles). The first keeps its own wait; the others' start times and session waits are replaced.", nil, o.OrderTasks)
 	add(s, "unlink_task", "Remove a task's run-after link.", nil, o.UnlinkTask)
 	add(s, "wait_task", "Wait until a task reaches a state (default: needs input or finished) or a timeout.", ro, o.WaitTask)

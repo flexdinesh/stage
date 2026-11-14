@@ -187,6 +187,8 @@ export interface Task {
   /** Runs after this T3 session (launches when it settles); not set together with afterTaskId. */
   afterThreadId: string | null;
   afterThreadTitle: string | null;
+  /** Append the predecessor's handoff block (final reply, PRs, branch, thread link) to the launch prompt. */
+  handoff: boolean;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
   launchAttempt: number;
@@ -253,6 +255,22 @@ export interface TaskDetail extends Task {
   sequence: Task[];
   /** Tasks the task's origin session created; null without an origin session. */
   batch: CreatedTasks | null;
+  /** Handoff record of the current launch attempt; null when none was built. */
+  currentHandoff: Handoff | null;
+}
+
+/** What a launch attempt appended (or why it appended nothing) from its predecessor. */
+export interface Handoff {
+  attempt: number;
+  status: "sent" | "skipped";
+  sourceTaskId: number | null;
+  sourceThreadId: string;
+  sourceTitle: string;
+  /** The appended block; "" when skipped. */
+  text: string;
+  /** Skip reason; null when sent. */
+  reason: string | null;
+  at: string;
 }
 
 /** A session batch: tasks one session created, grouped by run order. */
@@ -286,6 +304,8 @@ export interface CreateTaskRequest {
   notes?: string;
   /** Run after this task (start is then ignored). */
   afterTaskId?: number | null;
+  /** Append the predecessor's handoff at launch (server default true). */
+  handoff?: boolean;
   /** Staged uploads to attach (max 8). */
   attachmentIds?: number[];
   /** One-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz (not with afterTaskId or start). */
@@ -308,6 +328,10 @@ export interface UpdateTaskRequest {
   notes?: string;
   /** null unlinks. */
   afterTaskId?: number | null;
+  /** null unlinks the session wait. */
+  afterThreadId?: string | null;
+  /** Backlog only: append the predecessor's handoff at launch. */
+  handoff?: boolean;
   /** Backlog only: the exact image set (task's own ids + staged uploads). */
   attachmentIds?: number[];
   /** Backlog only: one-shot start; both null clears. */

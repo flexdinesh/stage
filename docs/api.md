@@ -200,6 +200,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
 - `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
 - `afterThreadId` / `afterThreadTitle`: runs after that T3 session (launches when it is settled; see "Link rules"). A task waits on at most one of `startAt`, `afterTaskId`, `afterThreadId`.
+- `handoff`: append the settled predecessor's handoff block to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
@@ -213,7 +214,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "sequence": Task[], "batch": CreatedTasks | null }`. `sequence`: see "Link rules". `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "sequence": Task[], "batch": CreatedTasks | null, "currentHandoff": Handoff | null }`. `currentHandoff`: the current launch attempt's handoff record (see "Handoff"); null before the first launch, for unlinked tasks, or with `handoff` off. `sequence`: see "Link rules". `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
 
 ### `GET /api/tasks`
 Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
@@ -240,6 +241,7 @@ Body `CreateTaskRequest`:
   "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
   "startLocal": null,            // optional: one-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz
   "startTz": null,               // required with startLocal: IANA zone, e.g. "Asia/Kolkata"
+  "handoff": true,               // optional, default true: append the predecessor handoff at launch
   "start": false                 // optional: true = Save & start (ignored when afterTaskId or afterThreadId set)
 }
 ```
@@ -251,7 +253,7 @@ Body `CreateTaskRequest`:
 ### `PATCH /api/tasks/:id`
 Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes` `afterTaskId` `afterThreadId` `attachmentIds` `startLocal` `startTz`.
 In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
-`startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must wait on at most one of a start time, `afterTaskId`, `afterThreadId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`, `{ "afterTaskId": null, "afterThreadId": "thread-x" }`). `afterThreadId`: set links per "Link rules"; `null` unlinks.
+`startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must wait on at most one of a start time, `afterTaskId`, `afterThreadId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`, `{ "afterTaskId": null, "afterThreadId": "thread-x" }`). `afterThreadId`: set links per "Link rules"; `null` unlinks. `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`).
 200 `Task`. 404.
 
 ### `POST /api/tasks/order`
@@ -750,6 +752,37 @@ Session links (`afterThreadId`, "run after me" from the agent interface):
 - Otherwise (409 / 404): the task is `backlog`; the session is mirrored (404) and has not passed. Many tasks may wait on one session.
 - A session is passed when it is settled in T3 with no pending requests and no active run (the raw settled flag: a settled session whose last run was cancelled passes). The link runner launches every `backlog` task whose session has passed; failed, interrupted, cancelled, running or done-but-unsettled keep it waiting. The watcher refreshes every session that a backlog task waits on each 5s pass (subagents included, no notifications), and a session settling kicks the runner. The link stays (history); it is not part of `sequence`.
 
+## Handoff
+
+When a linked task launches (link runner, Start, or restart from `failed|interrupted|cancelled`) with `handoff` on and its predecessor passed (a `settled` task with a thread, or a passed session), stage reads the predecessor from T3 (`t3_thread_read` and its latest assistant reply, 20s budget) and sends `prompt + "\n\n" + block`:
+
+```
+<handoff from="stage">
+This task runs after "Build API" (task #12), settled 2026-11-14T10:02:00Z.
+- T3 thread: <threadId> <link> (read more with t3_thread_read)
+- Branch: feat/api · Worktree: /path/to/worktree
+- Pull requests:
+  - owner/repo#41 (open) https://github.com/owner/repo/pull/41
+Final reply:
+<the predecessor's final assistant reply, at most 4000 chars>
+[truncated at 4000 chars; full reply via t3_thread_read <threadId>]
+</handoff>
+```
+- `(session)` replaces `(task #12)` for session links. Empty branch/worktree and PR lines are omitted; no reply gives `Final reply: none found.`; the truncation line appears only when the reply is longer.
+- Composed at launch, never at link time. Each launch attempt records `Handoff` in `task_handoffs` plus a `launching` task event (`handoff from #12 appended (N chars)`). An attempt that reuses its clientRequestId (lost launch response) resends the stored text.
+- A failed read never blocks the launch: the task launches with the bare prompt, the attempt is recorded as `skipped` with `reason`, and the event reads `handoff skipped: <reason>`.
+- "Start now" on a task whose predecessor has not passed unlinks it first, so no handoff is sent.
+
+`Handoff`:
+```jsonc
+{ "attempt": 1, "status": "sent", // sent | skipped
+  "sourceTaskId": 12,             // null for a session link
+  "sourceThreadId": "thread-abc", "sourceTitle": "Build API",
+  "text": "<handoff ...",          // "" when skipped
+  "reason": null,                  // why skipped
+  "at": "2026-11-14T10:02:01Z" }
+```
+
 ## Session batch
 
 A session batch is the set of tasks one session created (`originThreadId`), usually a plan an agent broke into tasks.
@@ -780,5 +813,6 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
 - `get_session` returns `createdTasks` (see "Session batch"); `get_task` returns `batch`. `order_tasks` takes `taskIds` and returns `{ "tasks": Task[] }`.
 - `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `afterThreadId` of the caller session (error without one).
+- `create_task`, `update_task` and `link_task` take optional `handoff` (CLI `task add|link --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoff`; `stage task show` prints `handoff  on|off` for linked tasks and the current attempt's record.
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.
