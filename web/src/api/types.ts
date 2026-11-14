@@ -204,8 +204,37 @@ export interface Task {
   /** The thread's latest assistant reply as one plain line (detail: `thread.lastWord`). */
   lastWordPreview: string | null;
   lastWordAt: string | null;
+  /** Pull requests of the task's thread (T3 mirror); empty without a thread. */
+  pullRequests: PullRequest[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** A pull request T3 associates with a thread. `state` is T3's string (open, merged, closed, draft, ...). */
+export interface PullRequest {
+  host: string;
+  /** owner/name */
+  repository: string;
+  number: number;
+  url: string;
+  /** created | agent | linked */
+  source: string;
+  state: string;
+}
+
+/** One thread run (each follow-up is a new run), newest first in `recentRuns`. */
+export interface ThreadRun {
+  runId: string;
+  ordinal: number;
+  status: ThreadStatus;
+  providerInstanceId: string | null;
+  /** Requested model. */
+  model: string | null;
+  /** Model the provider ran; null when T3 did not report it. */
+  executedModel: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 export interface TaskEvent {
@@ -401,6 +430,9 @@ export interface Thread {
   /** Elapsed run span: first run start to newest run completion. */
   runStartedAt: string | null;
   runEndedAt: string | null;
+  /** Runs T3 reported for the thread; 0 until a detail read. */
+  runCount: number;
+  pullRequests: PullRequest[];
   pendingRequestCount: number;
   providerInstanceId: string | null;
   model: string | null;
@@ -425,6 +457,8 @@ export interface Thread {
   lastWordAt: string | null;
   /** Reply excerpt (markdown); set on detail reads only, null in lists. */
   lastWord: LastWord | null;
+  /** Runs, newest first (at most 50; `runCount` is the T3 total); set on detail reads only, null in lists. */
+  recentRuns: ThreadRun[] | null;
 }
 
 /** A thread's latest assistant reply as last synced: markdown excerpt capped at 4000 chars. */

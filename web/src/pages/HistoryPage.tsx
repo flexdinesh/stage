@@ -5,6 +5,7 @@ import { useCatalog, useStats, useThreads } from "../api/queries.ts";
 import { THREAD_STATUSES, type Stats, type ThreadStatus, type SubagentsFilter, type Thread, type ThreadListQuery, type ThreadSource } from "../api/types.ts";
 import { IconExternal } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
+import { PrChips } from "../components/PullRequests.tsx";
 import { ThreadStatusBadge, threadStatusLabel } from "../components/StateBadge.tsx";
 import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Segmented, Select, cx } from "../components/ui.tsx";
 import { dateTime, localDateToIso, localMidnight, pick } from "../lib/format.ts";
@@ -500,6 +501,11 @@ function ThreadRow({ t }: { t: Thread }) {
     );
   const model = t.model ?? t.providerInstanceId ?? "-";
   const subagent = t.parentThreadId === null ? null : <span className="ml-1.5 text-meta-sm font-normal text-muted">subagent</span>;
+  const pulls = t.pullRequests.length === 0 ? null : (
+    <span className="shrink-0">
+      <PrChips prs={t.pullRequests} detailTo={sessionPath(t.t3ThreadId)} />
+    </span>
+  );
   const when = (
     <time dateTime={t.createdAt} title={dateTime(t.createdAt)}>
       {compactTime(t.createdAt)}
@@ -514,9 +520,12 @@ function ThreadRow({ t }: { t: Thread }) {
     >
       {/* laptop cells */}
       <span className="hidden font-mono text-meta text-muted md:block">{when}</span>
-      <span className="hidden min-w-0 truncate text-ui md:block" title={t.title}>
-        {title}
-        {subagent}
+      <span className="hidden min-w-0 items-center gap-2 md:flex">
+        <span className="min-w-0 truncate text-ui" title={t.title}>
+          {title}
+          {subagent}
+        </span>
+        {pulls}
       </span>
       <span className="hidden min-w-0 truncate md:block">{project}</span>
       <span className="hidden md:block">
@@ -544,6 +553,7 @@ function ThreadRow({ t }: { t: Thread }) {
           <span className="min-w-0 truncate">{project}</span>
           <span className="min-w-0 truncate">{model}</span>
           <span>{t.source}</span>
+          {pulls}
           <span className="ml-auto">
             <T3Link t={t} />
           </span>

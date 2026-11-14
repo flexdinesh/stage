@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router";
 import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
 import { RunOrderPanel } from "../components/Continuations.tsx";
+import { PullRequestsPanel } from "../components/PullRequests.tsx";
+import { RunsPanel } from "../components/RunsPanel.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
@@ -39,29 +41,33 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
         <div className="flex min-w-0 flex-col gap-3.5">
           <LastWordPanel thread={thread} />
           <RunOrderPanel thread={thread} entries={continuations} />
+          <RunsPanel runs={thread.recentRuns ?? []} runCount={thread.runCount} />
           <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>
         </div>
-        <Panel title="Session details">
-          <Details>
-            <Detail label="Session ID"><span className="flex min-w-0 flex-wrap items-center gap-2"><span className="break-all">{thread.t3ThreadId}</span><CopyButton text={thread.t3ThreadId} label="Copy" /></span></Detail>
-            <Detail label="Project">{thread.projectId === null ? thread.projectTitle ?? thread.t3ProjectId : <Link to={`/projects/${thread.projectId}`} className="hover:underline">{thread.projectTitle ?? thread.t3ProjectId}</Link>}</Detail>
-            <Detail label="Source">{thread.source}</Detail>
-            <Detail label="Run status">{thread.status}</Detail>
-            <Detail label="Settled">{thread.settled ? dateTime(thread.settledAt) : "No. Settle in T3."}</Detail>
-            <Detail label="Pending input">{thread.pendingRequestCount}</Detail>
-            <Detail label="Provider">{thread.providerInstanceId ?? "T3 default"}</Detail>
-            <Detail label="Model">{thread.model ?? "T3 default"}</Detail>
-            <Detail label="Runtime">{thread.runtimeMode ?? "T3 default"}</Detail>
-            <Detail label="Interaction">{thread.interactionMode ?? "default"}</Detail>
-            <Detail label="Branch">{thread.branch ?? "Project root"}</Detail>
-            <Detail label="Worktree">{thread.worktreePath ?? "Project root"}</Detail>
-            <Detail label="Active run">{thread.activeRunId ?? "None"}</Detail>
-            <Detail label="Latest run">{thread.latestRunId ?? "None"}</Detail>
-            <Detail label="Created">{dateTime(thread.createdAt)}</Detail>
-            <Detail label="Activity">{dateTime(thread.updatedAt)}</Detail>
-            <Detail label="Synced">{dateTime(thread.syncedAt)}</Detail>
-          </Details>
-        </Panel>
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <PullRequestsPanel prs={thread.pullRequests} />
+          <Panel title="Session details">
+            <Details>
+              <Detail label="Session ID"><span className="flex min-w-0 flex-wrap items-center gap-2"><span className="break-all">{thread.t3ThreadId}</span><CopyButton text={thread.t3ThreadId} label="Copy" /></span></Detail>
+              <Detail label="Project">{thread.projectId === null ? thread.projectTitle ?? thread.t3ProjectId : <Link to={`/projects/${thread.projectId}`} className="hover:underline">{thread.projectTitle ?? thread.t3ProjectId}</Link>}</Detail>
+              <Detail label="Source">{thread.source}</Detail>
+              <Detail label="Run status">{thread.status}</Detail>
+              <Detail label="Settled">{thread.settled ? dateTime(thread.settledAt) : "No. Settle in T3."}</Detail>
+              <Detail label="Pending input">{thread.pendingRequestCount}</Detail>
+              <Detail label="Provider">{thread.providerInstanceId ?? "T3 default"}</Detail>
+              <Detail label="Model">{thread.model ?? "T3 default"}</Detail>
+              <Detail label="Runtime">{thread.runtimeMode ?? "T3 default"}</Detail>
+              <Detail label="Interaction">{thread.interactionMode ?? "default"}</Detail>
+              <Detail label="Branch">{thread.branch ?? "Project root"}</Detail>
+              <Detail label="Worktree">{thread.worktreePath ?? "Project root"}</Detail>
+              <Detail label="Active run">{thread.activeRunId ?? "None"}</Detail>
+              <Detail label="Latest run">{thread.latestRunId ?? "None"}</Detail>
+              <Detail label="Created">{dateTime(thread.createdAt)}</Detail>
+              <Detail label="Activity">{dateTime(thread.updatedAt)}</Detail>
+              <Detail label="Synced">{dateTime(thread.syncedAt)}</Detail>
+            </Details>
+          </Panel>
+        </div>
       </div>
     </div>
   </>;
