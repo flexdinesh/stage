@@ -175,6 +175,8 @@ type wireThread struct {
 	ParentThreadID       string  `json:"parentThreadId"`
 	RelationshipToParent string  `json:"relationshipToParent"`
 	ItemCount            int     `json:"itemCount"`
+	LinkedPullRequest    *wirePR `json:"linkedPullRequest"`
+	PullRequests         wirePRs `json:"pullRequests"`
 	CreatedAt            isoTime `json:"createdAt"`
 	UpdatedAt            isoTime `json:"updatedAt"`
 
@@ -208,9 +210,68 @@ func (w wireThread) toThread() Thread {
 		ParentThreadID:       w.ParentThreadID,
 		RelationshipToParent: w.RelationshipToParent,
 		ItemCount:            w.ItemCount,
+		PullRequests:         pullRequests(w.LinkedPullRequest, w.PullRequests),
 		CreatedAt:            w.CreatedAt.Time,
 		UpdatedAt:            w.UpdatedAt.Time,
 	}
+}
+
+// wirePR is a T3 thread pull request {host, repository, number, url,
+// source, state}. Malformed entries decode to zero and are dropped.
+type wirePR struct {
+	Host       string `json:"host"`
+	Repository string `json:"repository"`
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	Source     string `json:"source"`
+	State      string `json:"state"`
+}
+
+func (w *wirePR) UnmarshalJSON(data []byte) error {
+	type plain wirePR
+	var p plain
+	if json.Unmarshal(data, &p) != nil {
+		*w = wirePR{}
+		return nil
+	}
+	*w = wirePR(p)
+	return nil
+}
+
+// wirePRs tolerates a non-array pullRequests (decodes to empty).
+type wirePRs []wirePR
+
+func (w *wirePRs) UnmarshalJSON(data []byte) error {
+	var list []wirePR
+	if json.Unmarshal(data, &list) != nil {
+		list = nil
+	}
+	*w = list
+	return nil
+}
+
+// pullRequests merges the linked PR (source "linked" when unreported) ahead
+// of pullRequests, dropping entries without a URL and URL duplicates.
+func pullRequests(linked *wirePR, prs wirePRs) []PullRequest {
+	out := []PullRequest{}
+	seen := map[string]bool{}
+	add := func(w wirePR, source string) {
+		if w.URL == "" || seen[w.URL] {
+			return
+		}
+		seen[w.URL] = true
+		if w.Source == "" {
+			w.Source = source
+		}
+		out = append(out, PullRequest(w))
+	}
+	if linked != nil {
+		add(*linked, "linked")
+	}
+	for _, w := range prs {
+		add(w, "")
+	}
+	return out
 }
 
 type wireThreadList struct {
@@ -262,6 +323,7 @@ type wireRun struct {
 	Status             string  `json:"status"`
 	ProviderInstanceID string  `json:"providerInstanceId"`
 	Model              string  `json:"model"`
+	ExecutedModel      string  `json:"executedModel"`
 	RequestedAt        isoTime `json:"requestedAt"`
 	StartedAt          isoTime `json:"startedAt"`
 	CompletedAt        isoTime `json:"completedAt"`
@@ -309,6 +371,7 @@ func (w wireThreadRead) toDetail() ThreadDetail {
 			Status:             ThreadStatus(r.Status),
 			ProviderInstanceID: r.ProviderInstanceID,
 			Model:              r.Model,
+			ExecutedModel:      r.ExecutedModel,
 			RequestedAt:        r.RequestedAt.Time,
 			StartedAt:          r.StartedAt.ptr(),
 			CompletedAt:        r.CompletedAt.ptr(),

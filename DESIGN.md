@@ -320,6 +320,7 @@ Compact, flat, and ink-led.
 ### Chips
 - **Style:** inline mono label (`text-meta`, 1.5 line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
 - **State:** task and thread states map onto the six tones; plain chips (Slate border, Ink Text) carry model, runtime, workspace, tags and the run order link.
+- **Pull request:** a PR's state is a state, so it takes a tone, never a seventh: open Running Sky (in flight), merged Settled Green (landed), closed, draft and any unknown state Idle Gray (an unmerged close reads like cancelled, not a fault). The row chip is the `dot` variant labelled `repo#num` (repository name without the owner, tabular), `owner/repo #num · state` in its title, and it opens the PR in a new tab.
 
 ### Cards / Containers (Panel)
 - **Corner Style:** square.
@@ -371,6 +372,12 @@ Schedule rows share the task row grid: a plain "repeat" chip (idle "paused" when
 
 ### Run order pipeline
 Step cells joined by 1px Strong Hairline connectors, in the task detail Run order panel (top of the side column). Numbered, titled cells on laptop, numbers only on phone; the viewed task gets the Ink outline. Below it, "Runs after" and "Then runs" lines carry Unlink, and pickers link new steps. A waiting task's Start now arms a confirm ("unlink from #12 and start") before acting.
+
+### Pull requests
+Rows (Dashboard tasks and external threads, Project, Sessions, History) print PR chips at the end of the mono meta line: the first two, then a plain `+n` chip linking to the task or session detail; History puts them after the title on laptop. Detail pages add a `PULL REQUESTS · n` panel to the side column (task: under Run order; session: above Session details), hidden when there are none: one row per PR with the tone chip naming the state, the mono `owner/repo #num` linked to the PR with a 12px external icon, and the Slate mono source (`created`, `agent`, `linked`) right. Settled rows often show two greens (settled and merged); that is accepted.
+
+### Runs panel
+`RUNS · n` in the detail main column (task: under Follow-up, above Timeline; session: under Run order), one ruled row per run, newest first. Laptop columns: mono Ink `#ordinal` (36px), the thread status chip (118px, T3 `completed` reads done), the model (executed model; `requested → executed` when they differ; truncated), started (relative, exact on hover; `queued 2m ago` before start), `ran 14m` (live elapsed while running) and `queued 3m` (omitted under one second). Phone: ordinal, chip and started on the first line, model, ran and queued in mono below. Five newest by default; a ghost `Show all n` / `Show fewer` in the header toggles every stored run (at most 50), and a muted footer notes runs older than that live only in T3. Empty: "No runs yet."
 
 ### Sessions and queued continuations
 

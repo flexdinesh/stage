@@ -10,6 +10,8 @@ import { IconArrowRight } from "../components/icons.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
+import { PullRequestsPanel } from "../components/PullRequests.tsx";
+import { RunsPanel } from "../components/RunsPanel.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
@@ -259,10 +261,12 @@ function TaskBody({ task }: { task: TaskDetail }) {
               </div>
             </Panel>
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
+            {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
             <TimelinePanel events={task.events} />
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
             <SequencePanel task={task} />
+            <PullRequestsPanel prs={task.pullRequests} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
             <NotesPanel task={task} />

@@ -18,7 +18,7 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
   t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at,
-  t.created_at, t.updated_at, th.link,
+  COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
   t.origin_thread_id, oth.title, t.after_thread_id, ath.title,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
@@ -37,7 +37,7 @@ func scanTask(row pgx.Row) (Task, error) {
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
 		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
-		&t.LastWordPreview, &t.LastWordAt, &t.CreatedAt,
+		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.AfterThreadID, &t.AfterThreadTitle, &t.Attachments)
 	if err != nil {
@@ -45,6 +45,7 @@ func scanTask(row pgx.Row) (Task, error) {
 	}
 	t.ModelOptions = nonNilOptions(t.ModelOptions)
 	t.Tags = nonNilStrings(t.Tags)
+	t.PullRequests = nonNilPRs(t.PullRequests)
 	if t.Workspace.Type == "" {
 		t.Workspace.Type = "root"
 	}

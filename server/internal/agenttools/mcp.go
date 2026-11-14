@@ -44,7 +44,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, "list_models", "List providers, models and model options (effort, ...) available for tasks.", ro, o.ListModels)
 
 	add(s, "list_tasks", "List tasks (compact rows, newest activity first).", ro, o.ListTasks)
-	add(s, "get_task", "Read a task with its events, thread and run order.", ro, o.GetTask)
+	add(s, "get_task", "Read a task with its events, thread (recent runs: ordinal, status, model, times), pull requests and run order.", ro, o.GetTask)
 	add(s, "create_task", "Create a task: saved to backlog by default; start=true launches it now; afterMe/afterTaskId/afterThreadId queue it to run after a session or task settles; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
 	add(s, "update_task", "Edit a task. Outside backlog only title, tags and notes change.", nil, o.UpdateTask)
 	add(s, "delete_task", "Delete a task (not while launching, running or needing input).", del, o.DeleteTask)
@@ -66,7 +66,7 @@ func NewServer(o *Ops) *mcp.Server {
 
 	add(s, "list_sessions", "List T3 sessions (root threads) across projects, newest first.", ro, o.ListSessions)
 	add(s, "search_sessions", "Find T3 sessions by title, branch, PR or project, then by message text (via T3; falls back to stage titles when T3 is offline, see t3).", ro, o.SearchSessions)
-	add(s, "get_session", "Read a T3 session with children, continuations and its task.", ro, o.GetSession)
+	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, continuations and task.", ro, o.GetSession)
 	return s
 }
 

@@ -3,6 +3,7 @@ import type { Thread } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { LastWordLine } from "./LastWord.tsx";
+import { PrChips } from "./PullRequests.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, ExternalButton, cx } from "./ui.tsx";
 
@@ -29,6 +30,7 @@ export function SessionRows({ threads, emptyText = "No sessions match. Clear fil
               {thread.parentThreadId === null ? null : <span>child session</span>}
               {thread.archived ? <span>archived</span> : null}
               <time dateTime={thread.updatedAt} title={dateTime(thread.updatedAt)}>{relativeTime(thread.updatedAt)}</time>
+              <PrChips prs={thread.pullRequests} detailTo={sessionPath(thread.t3ThreadId)} />
             </div>
             <LastWordLine state={thread.state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
           </div>

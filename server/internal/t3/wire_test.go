@@ -73,7 +73,7 @@ const threadReadJSON = `{
  "items": [{"createdBy":"user","itemId":"turn-item:message:m1","position":0,"status":"completed","text":"hello","textTruncated":true,"title":null,"type":"user_message","updatedAt":"2026-11-07T23:16:00.654Z","visibility":"local"}],
  "nextPosition": 0,
  "recentRuns": [
-  {"completedAt": null, "model": "claude-opus-5-5", "ordinal": 2, "providerInstanceId": "claudeAgent",
+  {"completedAt": null, "model": "claude-opus-5-5", "executedModel": "claude-opus-5-5-20261101", "ordinal": 2, "providerInstanceId": "claudeAgent",
    "requestedAt": "2026-11-08T00:03:40.338Z", "runId": "run:thread:t1:ordinal:2", "startedAt": "2026-11-08T00:03:40.365Z", "status": "running"}
  ],
  "thread": {
@@ -185,7 +185,8 @@ func TestDecodeThreadRead(t *testing.T) {
 		t.Fatalf("runs = %+v", d.RecentRuns)
 	}
 	r := d.RecentRuns[0]
-	if r.Ordinal != 2 || r.Status != StatusRunning || r.StartedAt == nil || r.CompletedAt != nil || r.RequestedAt.IsZero() {
+	if r.Ordinal != 2 || r.Status != StatusRunning || r.StartedAt == nil || r.CompletedAt != nil || r.RequestedAt.IsZero() ||
+		r.Model != "claude-opus-5-5" || r.ExecutedModel != "claude-opus-5-5-20261101" {
 		t.Fatalf("run = %+v", r)
 	}
 	if env := environmentFromLink(d.Link); env != "38506b05-b4b9-4dc1-ad0c-ae95a74cd13e" {
@@ -217,6 +218,60 @@ func TestDecodeThreadSearch(t *testing.T) {
 	}
 	if want := time.Date(2026, 11, 14, 8, 50, 7, 904e6, time.UTC); m.MessageCreatedAt == nil || !m.MessageCreatedAt.Equal(want) {
 		t.Fatalf("messageCreatedAt = %v", m.MessageCreatedAt)
+	}
+}
+
+func TestDecodeThreadPullRequests(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []PullRequest
+	}{
+		{"none", `{"threadId":"t","pullRequests":[],"linkedPullRequest":null}`, []PullRequest{}},
+		{"missing", `{"threadId":"t"}`, []PullRequest{}},
+		{"malformed list", `{"threadId":"t","pullRequests":"nope","linkedPullRequest":7}`, []PullRequest{}},
+		{
+			"list order kept, url dupes and url-less dropped",
+			`{"threadId":"t","pullRequests":[
+			  {"host":"github.com","repository":"o/a","number":94,"url":"https://github.com/o/a/pull/94","source":"created","state":"merged"},
+			  {"host":"github.com","repository":"o/b","number":53,"url":"https://github.com/o/b/pull/53","source":"agent","state":"open"},
+			  {"host":"github.com","repository":"o/a","number":94,"url":"https://github.com/o/a/pull/94","source":"agent","state":"open"},
+			  {"host":"github.com","repository":"o/c","number":1,"source":"created","state":"open"},
+			  "junk"]}`,
+			[]PullRequest{
+				{Host: "github.com", Repository: "o/a", Number: 94, URL: "https://github.com/o/a/pull/94", Source: "created", State: "merged"},
+				{Host: "github.com", Repository: "o/b", Number: 53, URL: "https://github.com/o/b/pull/53", Source: "agent", State: "open"},
+			},
+		},
+		{
+			"linked first, deduped, source defaults to linked",
+			`{"threadId":"t",
+			  "linkedPullRequest":{"host":"github.com","repository":"o/b","number":53,"url":"https://github.com/o/b/pull/53","state":"closed"},
+			  "pullRequests":[
+			  {"host":"github.com","repository":"o/a","number":94,"url":"https://github.com/o/a/pull/94","source":"created","state":"merged"},
+			  {"host":"github.com","repository":"o/b","number":53,"url":"https://github.com/o/b/pull/53","source":"agent","state":"open"}]}`,
+			[]PullRequest{
+				{Host: "github.com", Repository: "o/b", Number: 53, URL: "https://github.com/o/b/pull/53", Source: "linked", State: "closed"},
+				{Host: "github.com", Repository: "o/a", Number: 94, URL: "https://github.com/o/a/pull/94", Source: "created", State: "merged"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var w wireThread
+			if err := json.Unmarshal([]byte(tc.raw), &w); err != nil {
+				t.Fatal(err)
+			}
+			got := w.toThread().PullRequests
+			if got == nil || len(got) != len(tc.want) {
+				t.Fatalf("prs = %#v, want %#v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("prs[%d] = %#v, want %#v", i, got[i], tc.want[i])
+				}
+			}
+		})
 	}
 }
 

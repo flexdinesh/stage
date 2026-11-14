@@ -189,6 +189,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "runEndedAt": null,
   "lastWordPreview": null,
   "lastWordAt": null,
+  "pullRequests": [],
   "createdAt": "2026-11-08T09:59:00Z",
   "updatedAt": "2026-11-08T10:00:00Z"
 }
@@ -204,6 +205,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
+- `pullRequests`: the task thread's `PullRequest[]` (see Thread); `[]` without a thread.
 
 `TaskEvent`:
 ```json
@@ -211,7 +213,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`. `thread.lastWord` carries the reply excerpt.
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
 
 ### `GET /api/tasks`
 Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
@@ -385,6 +387,10 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "settledAt": null,
   "runStartedAt": "2026-11-08T10:00:00Z",
   "runEndedAt": "2026-11-08T10:01:00Z",
+  "runCount": 2,
+  "pullRequests": [
+    { "host": "github.com", "repository": "flexdinesh/stage", "number": 41, "url": "https://github.com/flexdinesh/stage/pull/41", "source": "created", "state": "merged" }
+  ],
   "pendingRequestCount": 0,
   "providerInstanceId": "claude",
   "model": "claude-haiku-5-5",
@@ -404,10 +410,21 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "syncedAt": "2026-11-08T10:01:05Z",
   "lastWordPreview": "Done. Fixed the race in PollTask and added a regression test.",
   "lastWordAt": "2026-11-08T10:00:58Z",
-  "lastWord": null
+  "lastWord": null,
+  "recentRuns": null
 }
 ```
 `lastWord` (detail reads only: `GET /api/threads/:id` `thread` and `GET /api/tasks/:id` `thread`; always null in lists): the thread's latest assistant reply (last word) as last synced, `{ "text": "## Done\nFixed **the race**.", "truncated": false, "runId": "run_2", "at": "2026-11-08T10:00:58Z" }`; null until one is read. `text` is the reply's markdown capped at 4000 chars (T3 UTF-16 units); `truncated` = the reply is longer (full text in T3); `runId` = the reply's run; `at` = the reply item's updatedAt. `lastWordPreview` (every Thread and Task): the same reply as one plain line (markdown markers dropped, whitespace collapsed, up to 240 chars); `lastWordAt` = `lastWord.at`. Sync reads the last word only when a thread is at rest (no active run, or pending input) and its `updatedAt` changed since the last check, from any detail read (task polls, watched threads, root threads in full sync, linked and continuation sessions); a running thread keeps its previous reply. A thread with no assistant reply keeps the stored one. `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `runStartedAt` / `runEndedAt`: elapsed run span from the last detail read (`t3_thread_read` recentRuns, up to 50): the oldest run's `startedAt` (`requestedAt` if it never started; thread `createdAt` when `runCount` exceeds the runs read) to the newest run's `completedAt`; null without runs, `runEndedAt` null while the newest run is incomplete. Full sync reads every root thread, so subagents have no span. `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
+
+`pullRequests` (`PullRequest[]`, never null): PRs T3 associates with the thread, mirrored on every list and detail read (`t3_thread_list` / `t3_thread_read` `linkedPullRequest` first, then `pullRequests`, deduped by `url`, entries without a `url` dropped). `repository` is `owner/name`; `state` is T3's string (`open`, `merged`, `closed`, `draft`, ...); `source` is T3's (`created`, `agent`) or `linked` for an unlabelled `linkedPullRequest`. Fresh within the 5 min full sync (sooner for polled/watched threads).
+`runCount`: runs T3 reported on the last detail read (each follow-up is a new run); 0 before one.
+
+`recentRuns` (`ThreadRun[]`; detail reads only: `GET /api/threads/:id` `thread` and `GET /api/tasks/:id` `thread`; always null in lists): newest first, at most 50 (T3 `runLimit`), from the last detail read; `[]` before one. `runCount` can exceed its length; older runs live only in T3.
+`ThreadRun`:
+```json
+{ "runId": "run:thread:t1:ordinal:2", "ordinal": 2, "status": "completed", "providerInstanceId": "claudeAgent", "model": "claude-opus-5-5", "executedModel": "claude-opus-5-5", "requestedAt": "2026-11-08T10:00:00Z", "startedAt": "2026-11-08T10:00:01Z", "completedAt": "2026-11-08T10:01:00Z" }
+```
+`status`: ThreadStatus. `model`: requested; `executedModel`: what the provider ran (null when T3 did not report it). `startedAt` null while queued, `completedAt` null while running. Queue time = `startedAt - requestedAt`; run time = `completedAt - startedAt`.
 
 ### `GET /api/threads`
 Query (all optional): `project` (app project id), `status` (repeatable ThreadStatus), `state` (repeatable normalized TaskState), `active` (`1|true`: unarchived, unsettled running/needs-input sessions across origins, no implicit date cutoff), `sort` (`activity`: updatedAt desc; omitted: createdAt desc), `parent` (direct children of this T3 thread ID), `settled` (`true|false`), `provider` (providerInstanceId), `source` (`app|t3`), `q` (case-insensitive title substring), `from`, `to` (createdAt), `subagents` (`include|exclude`, default `include`; `exclude` = root threads only, `parentThreadId` null), `needsInput` (`1|true`: only external threads counted by the badge, see "Notification rules"; other filters still apply), `running` (`1|true`: only external running threads, see "Notification rules"; other filters still apply), `settledFrom` (ISO date or datetime: only external settled threads with `settledAt >= settledFrom`, ordered by `settledAt` desc, see "Notification rules"; other filters still apply), `limit` (default 100, max 500), `offset` (default 0).
@@ -688,7 +705,7 @@ Session links (`afterThreadId`, "run after me" from the agent interface):
 
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session`. `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session`. `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.

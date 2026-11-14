@@ -11,6 +11,7 @@ import { canStart, isWaiting } from "../lib/tasks.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
+import { PrChips } from "./PullRequests.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
@@ -215,6 +216,7 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
           {task.tags.map((tag) => (
             <span key={tag}>#{tag}</span>
           ))}
+          <PrChips prs={task.pullRequests} detailTo={`/tasks/${task.id}`} />
         </div>
         <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
       </div>
@@ -333,6 +335,7 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
             </span>
           )}
           <span>external thread</span>
+          <PrChips prs={thread.pullRequests} detailTo={sessionPath(thread.t3ThreadId)} />
         </div>
         <LastWordLine state={state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
       </div>

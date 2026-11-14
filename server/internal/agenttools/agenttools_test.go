@@ -482,3 +482,33 @@ func TestProjectForPath(t *testing.T) {
 		}
 	}
 }
+
+func TestGetTaskAndSessionCarryPullRequestsAndRuns(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/prs")
+	s := e.session(p, "Agent")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s, Cwd: "/w/prs"}})
+	var tk client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "Ship", "prompt": "go", "start": true}, &tk)
+	if tk.T3ThreadID == nil {
+		t.Fatalf("not launched: %+v", tk)
+	}
+	pr := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "agent", State: "merged"}
+	if err := e.fake.SetThread(*tk.T3ThreadID, func(d *t3.ThreadDetail) { d.PullRequests = []t3.PullRequest{pr} }); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sync.RefreshSession(context.Background(), *tk.T3ThreadID); err != nil {
+		t.Fatal(err)
+	}
+
+	var td client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": tk.ID}, &td)
+	if len(td.PullRequests) != 1 || td.PullRequests[0] != pr || td.Thread == nil || len(td.Thread.RecentRuns) != 1 || td.Thread.RunCount != 1 {
+		t.Fatalf("get_task prs=%+v thread=%+v", td.PullRequests, td.Thread)
+	}
+	var sd client.ThreadDetail
+	mustCall(t, cs, "get_session", map[string]any{"id": *tk.T3ThreadID}, &sd)
+	if len(sd.Thread.PullRequests) != 1 || sd.Thread.PullRequests[0] != pr || len(sd.Thread.RecentRuns) != 1 || sd.Thread.RecentRuns[0].Ordinal != 1 {
+		t.Fatalf("get_session thread=%+v", sd.Thread)
+	}
+}

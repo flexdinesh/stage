@@ -127,6 +127,7 @@ type Task struct {
 	RunEndedAt         *time.Time       `json:"runEndedAt"`
 	LastWordPreview    *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
 	LastWordAt         *time.Time       `json:"lastWordAt"`
+	PullRequests       []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
 	CreatedAt          time.Time        `json:"createdAt"`
 	UpdatedAt          time.Time        `json:"updatedAt"`
 	Attachments        []Attachment     `json:"attachments"` // images, upload order
@@ -145,41 +146,46 @@ type TaskEvent struct {
 
 // Thread is a T3 mirror row joined with its app project and task.
 type Thread struct {
-	T3ThreadID          string     `json:"t3ThreadId"`
-	T3ProjectID         string     `json:"t3ProjectId"`
-	ProjectID           *int64     `json:"projectId"`
-	ProjectTitle        *string    `json:"projectTitle"`
-	Title               string     `json:"title"`
-	Status              string     `json:"status"`
-	State               TaskState  `json:"state"`
-	Archived            bool       `json:"archived"`
-	ActiveRunID         *string    `json:"activeRunId"`
-	LatestRunID         *string    `json:"latestRunId"`
-	RunStartedAt        *time.Time `json:"runStartedAt"` // elapsed run span (RunSpan)
-	RunEndedAt          *time.Time `json:"runEndedAt"`
-	Settled             bool       `json:"settled"`
-	SettledAt           *time.Time `json:"settledAt"`
-	PendingRequestCount int        `json:"pendingRequestCount"`
-	ProviderInstanceID  *string    `json:"providerInstanceId"`
-	Model               *string    `json:"model"`
-	RuntimeMode         *string    `json:"runtimeMode"`
-	InteractionMode     *string    `json:"interactionMode"`
-	Branch              *string    `json:"branch"`
-	WorktreePath        *string    `json:"worktreePath"`
-	ParentThreadID      *string    `json:"parentThreadId"`
-	Relationship        *string    `json:"relationship"`
-	CreationSource      *string    `json:"creationSource"`
-	Source              string     `json:"source"`
-	TaskID              *int64     `json:"taskId"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
-	SyncedAt            time.Time  `json:"syncedAt"`
-	LastWordPreview     *string    `json:"lastWordPreview"` // latest assistant reply, plain one-line preview
-	LastWordAt          *time.Time `json:"lastWordAt"`
+	T3ThreadID          string           `json:"t3ThreadId"`
+	T3ProjectID         string           `json:"t3ProjectId"`
+	ProjectID           *int64           `json:"projectId"`
+	ProjectTitle        *string          `json:"projectTitle"`
+	Title               string           `json:"title"`
+	Status              string           `json:"status"`
+	State               TaskState        `json:"state"`
+	Archived            bool             `json:"archived"`
+	ActiveRunID         *string          `json:"activeRunId"`
+	LatestRunID         *string          `json:"latestRunId"`
+	RunStartedAt        *time.Time       `json:"runStartedAt"` // elapsed run span (RunSpan)
+	RunEndedAt          *time.Time       `json:"runEndedAt"`
+	RunCount            int              `json:"runCount"` // runs T3 reported (detail reads); 0 until read
+	PullRequests        []t3.PullRequest `json:"pullRequests"`
+	Settled             bool             `json:"settled"`
+	SettledAt           *time.Time       `json:"settledAt"`
+	PendingRequestCount int              `json:"pendingRequestCount"`
+	ProviderInstanceID  *string          `json:"providerInstanceId"`
+	Model               *string          `json:"model"`
+	RuntimeMode         *string          `json:"runtimeMode"`
+	InteractionMode     *string          `json:"interactionMode"`
+	Branch              *string          `json:"branch"`
+	WorktreePath        *string          `json:"worktreePath"`
+	ParentThreadID      *string          `json:"parentThreadId"`
+	Relationship        *string          `json:"relationship"`
+	CreationSource      *string          `json:"creationSource"`
+	Source              string           `json:"source"`
+	TaskID              *int64           `json:"taskId"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	UpdatedAt           time.Time        `json:"updatedAt"`
+	SyncedAt            time.Time        `json:"syncedAt"`
+	LastWordPreview     *string          `json:"lastWordPreview"` // latest assistant reply, plain one-line preview
+	LastWordAt          *time.Time       `json:"lastWordAt"`
 	// LastWord is the reply excerpt; set on detail reads only
 	// (GetThreadLastWord), null in lists.
 	LastWord *LastWord `json:"lastWord"`
-	Link     *string   `json:"-"`
+	// RecentRuns are the mirrored runs, newest first (at most 50); set on
+	// detail reads only (ThreadRuns), null in lists.
+	RecentRuns []ThreadRun `json:"recentRuns"`
+	Link       *string     `json:"-"`
 }
 
 // LastWord is a thread's latest assistant reply as last read by sync: a
@@ -189,6 +195,20 @@ type LastWord struct {
 	Truncated bool       `json:"truncated"`
 	RunID     *string    `json:"runId"`
 	At        *time.Time `json:"at"` // the reply item's updatedAt
+}
+
+// ThreadRun is one t3_thread_read recentRuns entry as mirrored in
+// threads.recent_runs. Each follow-up on a thread is a new run.
+type ThreadRun struct {
+	RunID              string     `json:"runId"`
+	Ordinal            int        `json:"ordinal"`
+	Status             string     `json:"status"`
+	ProviderInstanceID *string    `json:"providerInstanceId"`
+	Model              *string    `json:"model"`         // requested
+	ExecutedModel      *string    `json:"executedModel"` // what the provider ran
+	RequestedAt        time.Time  `json:"requestedAt"`
+	StartedAt          *time.Time `json:"startedAt"`
+	CompletedAt        *time.Time `json:"completedAt"`
 }
 
 // Snippet is reusable prompt text; ProjectID nil = global.
