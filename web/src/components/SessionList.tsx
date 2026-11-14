@@ -4,11 +4,15 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { LastWordLine } from "./LastWord.tsx";
 import { PrChips } from "./PullRequests.tsx";
+import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, ExternalButton, cx } from "./ui.tsx";
 
+/** Needs input with questions stage can answer: Answer leads, Open in T3 steps back. */
+const answerable = (thread: Thread) => thread.state === "needs_input" && thread.pendingQuestionCount > 0;
+
 export function SessionOpenButton({ thread }: { thread: Thread }) {
-  const variant = thread.state === "needs_input" ? "primary" : "secondary";
+  const variant = thread.state === "needs_input" && !answerable(thread) ? "primary" : "secondary";
   if (thread.t3DeepLink !== null) return <AppButton small variant={variant} href={thread.t3DeepLink}>Open in T3</AppButton>;
   const href = thread.t3WebUrl ?? thread.t3AppUrl;
   return href === null ? null : <ExternalButton small variant={variant} href={href}>Open in T3</ExternalButton>;
@@ -35,7 +39,10 @@ export function SessionRows({ threads, emptyText = "No sessions match. Clear fil
             <LastWordLine state={thread.state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
           </div>
           <LastWordLine state={thread.state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
-          <div className="order-3 col-span-2 flex flex-wrap gap-2 md:col-span-1"><SessionOpenButton thread={thread} /></div>
+          <div className="order-3 col-span-2 flex flex-wrap gap-2 md:col-span-1">
+            {answerable(thread) ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
+            <SessionOpenButton thread={thread} />
+          </div>
         </li>
       ))}
     </ul>

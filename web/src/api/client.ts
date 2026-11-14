@@ -1,4 +1,7 @@
 import type {
+  AnswerResult,
+  PendingQuestions,
+  QuestionAnswer,
   Attachment,
   Continuation,
   ContinuationList,
@@ -52,14 +55,16 @@ import type {
   UpdateSnippetRequest,
 } from "./types.ts";
 
-/** Non-2xx API response; `message` is the server's `{ error }` text. */
+/** Non-2xx API response; `message` is the server's `{ error }` text, `code` its optional reason. */
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -79,6 +84,11 @@ export function toQuery(params: Record<string, QueryValue>, repeatable: readonly
   }
   const query = search.toString();
   return query === "" ? "" : `?${query}`;
+}
+
+function errorCode(body: unknown): string | null {
+  if (typeof body === "object" && body !== null && "code" in body && typeof body.code === "string") return body.code;
+  return null;
 }
 
 function errorMessage(body: unknown, fallback: string): string {
@@ -102,7 +112,7 @@ async function request(path: string, init: RequestOptions): Promise<Response> {
   const res = await fetch(`/api${path}`, req);
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => null);
-    throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`));
+    throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`), errorCode(body));
   }
   return res;
 }
@@ -201,6 +211,12 @@ export const api = {
   /** SSE URL (not fetched: opened with EventSource). */
   transcriptStreamUrl: (id: string, after: number) =>
     `/api/threads/${encodeURIComponent(id)}/transcript/stream${toQuery({ after })}`,
+  questions: (id: string) => apiFetch<PendingQuestions>(`/threads/${encodeURIComponent(id)}/questions`),
+  answerQuestion: (id: string, requestId: string, answers: Record<string, QuestionAnswer>) =>
+    apiFetch<AnswerResult>(
+      `/threads/${encodeURIComponent(id)}/questions/${encodeURIComponent(requestId)}/answer`,
+      post({ answers }),
+    ),
   continuations: (thread?: string) => apiFetch<ContinuationList>(`/continuations${toQuery({ thread })}`),
   createContinuation: (body: CreateContinuationRequest) => apiFetch<Continuation>("/continuations", post(body)),
   updateContinuation: (id: number, prompt: string) => apiFetch<Continuation>(`/continuations/${id}`, patch({ prompt })),

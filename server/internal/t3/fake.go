@@ -46,8 +46,10 @@ type Fake struct {
 	Responses []FakeResponse
 	// requests: per-thread pending requests (user input and approvals).
 	requests map[string][]*fakeRequest
-	// askOnLaunch: every launched thread asks the demo questions (SeedDemo).
+	// askOnLaunch: every launched thread asks the demo questions a moment
+	// after launch (SeedDemo); askAt holds when each one asks.
 	askOnLaunch bool
+	askAt       map[string]time.Time
 }
 
 type fakeMessage struct {
@@ -264,6 +266,11 @@ func (f *Fake) ReadThread(_ context.Context, threadID string) (ThreadDetail, err
 	if !ok {
 		return ThreadDetail{}, ErrNotFound
 	}
+	if at, ok := f.askAt[threadID]; ok && !f.now().Before(at) {
+		delete(f.askAt, threadID)
+		f.requests[threadID] = append(f.requests[threadID], &fakeRequest{id: f.nextID("request"), status: "pending", questions: demoQuestions()})
+		f.recount(t)
+	}
 	out := *t
 	out.RecentRuns = slices.Clone(t.RecentRuns)
 	return out, nil
@@ -466,8 +473,7 @@ func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, er
 		f.launches[in.ClientRequestID] = id
 	}
 	if f.askOnLaunch {
-		f.requests[id] = append(f.requests[id], &fakeRequest{id: f.nextID("request"), status: "pending", questions: demoQuestions()})
-		f.recount(d)
+		f.askAt[id] = now.Add(3 * time.Second)
 	}
 	return launchResult(d), nil
 }
@@ -822,6 +828,7 @@ func (f *Fake) SeedDemo() {
 	_, _ = f.AddApproval(approval)
 	f.mu.Lock()
 	f.askOnLaunch = true
+	f.askAt = map[string]time.Time{}
 	f.mu.Unlock()
 }
 

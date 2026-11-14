@@ -47,6 +47,8 @@ export type ThreadSource = "app" | "t3";
 
 export interface ApiErrorBody {
   error: string;
+  /** Machine-readable reason on some 409s (e.g. already_answered, request_stale). */
+  code?: string;
 }
 
 /** T3 ProviderOptionSelection, e.g. { id: "effort", value: "low" }. */
@@ -208,6 +210,8 @@ export interface Task {
   lastWordAt: string | null;
   /** Pull requests of the task's thread (T3 mirror); empty without a thread. */
   pullRequests: PullRequest[];
+  /** Answerable questions the task's thread is waiting on (approvals excluded). */
+  pendingQuestionCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -473,6 +477,8 @@ export interface Thread {
   runCount: number;
   pullRequests: PullRequest[];
   pendingRequestCount: number;
+  /** Pending requests stage can answer (user-input questions); the rest are approvals handled in T3. */
+  pendingQuestionCount: number;
   providerInstanceId: string | null;
   model: string | null;
   runtimeMode: RuntimeMode | null;
@@ -656,6 +662,48 @@ export interface TranscriptItemText {
   truncated: boolean;
 }
 
+// ---- Pending questions ----
+
+/** T3 user-input question option; `value` absent = answered by label. */
+export interface QuestionOption {
+  label: string;
+  description: string;
+  value?: string | null;
+}
+
+export interface Question {
+  id: string;
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  multiSelect?: boolean | null;
+  /** Free text allowed unless false. */
+  allowCustomAnswer?: boolean | null;
+  initialAnswer?: string | null;
+  required?: boolean | null;
+}
+
+export interface PendingRequest {
+  requestId: string;
+  questions: Question[];
+}
+
+export interface PendingQuestions {
+  pendingRequestCount: number;
+  /** Pending permission requests stage cannot resolve (handled in T3). */
+  approvalCount: number;
+  requests: PendingRequest[];
+}
+
+/** An option value/label or custom text; an array of options for multi-select. */
+export type QuestionAnswer = string | string[];
+
+export interface AnswerResult {
+  requestId: string;
+  respondedAt: string;
+  thread: Thread;
+}
+
 // ---- Snippets ----
 
 /** Reusable prompt text; `projectId` null = global (shown in every project). */
@@ -783,6 +831,8 @@ export interface Notification {
   readAt: string | null;
   /** Live: the task's state, or the external thread's (`settled` when settled). null = unknown. */
   currentState: TaskState | null;
+  /** Answerable questions the session is waiting on now. */
+  pendingQuestionCount: number;
   t3DeepLink: string | null;
 }
 

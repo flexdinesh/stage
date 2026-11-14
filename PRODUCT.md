@@ -13,7 +13,7 @@ One developer (the owner) running many T3 Code agent threads across several loca
 A personal stage manager for T3 Code. It queues tasks (prompt + provider/model/effort + runtime/workspace), launches them as T3 threads, tracks thread status, runs linked tasks in order (a task linked to run after another starts when that thread is settled in T3), and gives a cross-project history of every T3 thread. Success: never miss a thread that needs input, keep a queue moving without babysitting, and see recent work at a glance.
 
 ## Positioning
-Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide.
+Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide. The one exception is a session's pending question: stage shows it and lets the owner answer it in place, so a needs-input thread can be unblocked from a phone in one step.
 
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, bound to 0.0.0.0:7380 on a home LAN, no auth.
@@ -24,6 +24,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Projects mirror T3 projects 1:1; existing T3 projects import automatically.
 - Task states: backlog, launching, running, needs input, done, settled, failed, interrupted, cancelled.
 - Task actions: start/restart, follow-up (auto/queue/steer/restart, or with images), stop, duplicate, delete, open in T3.
+- Pending questions: a session waiting on T3 user input shows a Needs input panel at the top of task and session detail (single/multi select, own answer, one Send answer per request). Rows, toasts and inbox entries get Answer; needs-input pushes deep link to the panel. Approvals cannot be answered here: the panel counts them and links to T3. Sync counts answerable questions per waiting thread; questions are read fresh when shown. A resent answer is idempotent; answered-elsewhere and stale requests say so. Agents can read questions (CLI/MCP), not answer them.
 - Screenshots: images dropped on (or picked for) the prompt are sent with it on every launch; read-only once the task leaves backlog.
 - Run order: a task can run after one other task (linear, may span projects), set while creating, viewing or editing a task; it starts when that task settles; a failed predecessor keeps it waiting; Start now unlinks it.
 - Handoff: on by default per task (toggle beside Runs after in the form and the Run order panel; REST, CLI and MCP flag). When a linked follower (task or session link) launches after its predecessor settles, stage reads the predecessor live from T3 and appends a block to the prompt: final reply (4000 chars, truncation marked), PR links with state, branch/worktree, thread id and link. Composed at launch; each attempt's block is stored and shown in the task's Prompt panel (backlog shows what will be appended). A failed read never blocks the launch: it launches bare and records why.
@@ -47,6 +48,6 @@ Real data lives in the user's T3 instance; there are no testimonials, customers,
 
 ## Product Principles
 1. Needs-input is never missable: it leads every view it appears in.
-2. T3 is the place to talk; stage is the place to queue and watch. Every task links straight to its thread.
+2. T3 is the place to talk; stage is the place to queue, watch and answer what blocks a thread. Every task links straight to its thread.
 3. Phone and laptop are both first-class; phone gets the glance and the quick action.
 4. Dense and scannable over decorative; state carries the color.

@@ -13,6 +13,7 @@ import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
 import { PrChips } from "./PullRequests.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
+import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
 /** Standalone bordered task list. Inside a `Panel flush`, use `TaskRows` instead. */
@@ -176,7 +177,8 @@ export function TaskRow({
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
   const chip = rowChip(task, contextThreadId);
   const needsInput = task.state === "needs_input";
-  const hasActions = showStart || task.t3DeepLink !== null || extra !== undefined;
+  const answerable = needsInput && task.pendingQuestionCount > 0;
+  const hasActions = showStart || answerable || task.t3DeepLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -258,8 +260,9 @@ export function TaskRow({
               {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
             </Button>
           ) : null}
+          {answerable ? <AnswerButton to={`/tasks/${task.id}`} /> : null}
           {task.t3DeepLink === null ? null : (
-            <AppButton small variant={needsInput ? "primary" : "secondary"} href={task.t3DeepLink}>
+            <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={task.t3DeepLink}>
               Open in app
             </AppButton>
           )}
@@ -325,6 +328,7 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
   const href = thread.t3DeepLink;
   const project = thread.projectTitle ?? thread.t3ProjectId;
   const needsInput = state === "needs_input";
+  const answerable = needsInput && thread.pendingQuestionCount > 0;
   return (
     <div
       className={cx(
@@ -359,11 +363,14 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
 
       <LastWordLine state={state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
 
-      {href === null ? null : (
+      {href === null && !answerable ? null : (
         <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
-          <AppButton small variant={needsInput ? "primary" : "secondary"} href={href}>
-            Open in app
-          </AppButton>
+          {answerable ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
+          {href === null ? null : (
+            <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={href}>
+              Open in app
+            </AppButton>
+          )}
         </div>
       )}
     </div>

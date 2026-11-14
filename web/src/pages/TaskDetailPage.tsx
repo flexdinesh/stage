@@ -13,6 +13,7 @@ import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
+import { NeedsInputSlot, focusAnswerPanel } from "../components/NeedsInputPanel.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
@@ -113,6 +114,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
+  // Questions stage can answer: the phone bar leads with Answer.
+  const answerable = waiting && task.pendingQuestionCount > 0;
   const hasThread = task.t3ThreadId !== null;
   const startable = canStart(task);
   // Waiting on a predecessor: Start now unlinks it, so it takes a second click to confirm.
@@ -120,7 +123,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
   const appUrl = task.t3DeepLink;
-  const phoneBar = appUrl !== null || hasThread || stoppable;
+  const phoneBar = appUrl !== null || hasThread || stoppable || answerable;
 
   const focusFollowup = () => {
     const el = followupInput.current;
@@ -195,9 +198,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
       </div>
 
       <div className="flex flex-col gap-3.5">
-        {waiting ? (
+        {task.t3ThreadId !== null ? (
+          <NeedsInputSlot pending={pending} threadId={task.t3ThreadId} links={task} />
+        ) : null}
+        {/* Needs input before T3 reports the request (sync lag): no questions to show yet. */}
+        {waiting && pending === 0 ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            {pending > 0 ? `T3 is waiting on ${pending} request${pending === 1 ? "" : "s"}` : "T3 is waiting on input"}
+            T3 is waiting on input
           </Alert>
         ) : null}
 
@@ -295,8 +302,14 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {phoneBar ? (
         <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {openInApp(waiting ? "primary" : "secondary", "flex-1")}
-          {hasThread ? (
+          {answerable ? (
+            <Button variant="primary" onClick={focusAnswerPanel} className="flex-1">
+              Answer
+            </Button>
+          ) : null}
+          {openInApp(waiting && !answerable ? "primary" : "secondary", "flex-1")}
+          {/* While answerable, Answer takes Follow-up's slot so the bar fits a phone. */}
+          {hasThread && !answerable ? (
             <Button onClick={focusFollowup} className="flex-1">
               Follow-up
             </Button>

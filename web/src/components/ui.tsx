@@ -175,6 +175,20 @@ export function Checkbox({ className, ...rest }: Omit<ComponentProps<"input">, "
   );
 }
 
+/** Square radio (Zero Radius Rule: never a circle): native input with an Ink square when checked. */
+export function Radio({ className, ...rest }: Omit<ComponentProps<"input">, "type">) {
+  return (
+    <span className={cx("relative inline-flex size-4 shrink-0", className)}>
+      <input
+        type="radio"
+        className="peer size-4 cursor-pointer appearance-none border border-line-strong bg-surface transition-colors duration-150 checked:border-accent focus-visible:shadow-[0_0_0_1px_var(--surface),0_0_0_2px_var(--accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55"
+        {...rest}
+      />
+      <span className="pointer-events-none absolute inset-[4px] hidden bg-accent peer-checked:block" />
+    </span>
+  );
+}
+
 /** Label + control. `children` receives the generated id for the control. */
 export function Field({
   label,

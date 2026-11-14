@@ -10,6 +10,7 @@ export const keys = {
   task: ["task"],
   threads: ["threads"],
   thread: ["thread"],
+  questions: ["questions"],
   continuations: ["continuations"],
   snippets: ["snippets"],
   stats: ["stats"],
@@ -60,6 +61,10 @@ export const useThreads = (q: ThreadListQuery) =>
 
 export const useThread = (id: string) =>
   useQuery({ queryKey: [...keys.thread, id], queryFn: () => api.thread(id), enabled: id !== "" });
+
+/** Pending questions, read fresh from T3; only while the thread has pending requests. */
+export const useThreadQuestions = (id: string, enabled: boolean) =>
+  useQuery({ queryKey: [...keys.questions, id], queryFn: () => api.questions(id), enabled: enabled && id !== "", retry: false });
 
 export const useContinuations = (thread?: string) =>
   useQuery({ queryKey: [...keys.continuations, thread], queryFn: () => api.continuations(thread) });
@@ -125,6 +130,7 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
       keys.task,
       keys.threads,
       keys.thread,
+      keys.questions,
       keys.continuations,
       keys.stats,
       keys.preferences,

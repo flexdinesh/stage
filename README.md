@@ -9,6 +9,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Screenshots**: drop images on the prompt (or Add image; PNG, JPEG, GIF, WebP, up to 8 × 10 MB). They are sent to the T3 thread with the prompt on every launch; follow-ups can carry images too.
 - **Live status**: backlog → running → needs input → done → settled (or failed / interrupted). Polled from T3 every 5s.
 - **Task actions**: start, follow-up, stop, duplicate, open in T3.
+- **Answer questions**: when a session waits on a question (T3 user input), task and session detail show it in a Needs input panel at the top: single or multi select, or your own answer, then Send answer. Needs-input rows, toasts and the notifications drawer get an Answer button, and needs-input pushes land on the panel. Permission approvals still resolve in T3; the panel counts them and links there.
 - **Run order**: link a task to run after another (while creating, viewing or editing it; can span projects). It starts when that thread is settled in T3; a failed predecessor keeps it waiting. Start now unlinks it and starts it immediately. Handoff (on by default, per task): when a linked task starts, stage appends its predecessor's final reply (up to 4000 chars), PR links, branch/worktree and T3 thread link to the prompt, so sequential work carries context forward. Task detail shows what was (or will be) appended; a failed read launches without it and logs why.
 - **Sessions**: browse Active or All sessions across projects, regardless of where they started. Active has no creation-date cutoff. Open local session details, inspect child sessions, or jump to T3. History remains available from Sessions.
 - **Transcript**: session and task detail have an Overview | Transcript switch (`?view=transcript`). Read-only user and assistant messages and plans as safe markdown (no raw HTML, no remote images), newest 50 with Load earlier, long messages collapsed. Live while a run is active: the server polls T3 every 2s (one poller per session, only while someone watches) and pushes changes over SSE. Tool calls, commands and diffs stay in T3.
@@ -65,7 +66,7 @@ The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript
 
 Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks. Three front ends share one set of operations over the REST API:
 
-- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show`, `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents/scripts. `stage help` lists everything.
+- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show|questions` (questions is read-only), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents/scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
 - **HTTP MCP**: `http://<host>:7380/mcp` (streamable HTTP, served by the running app; no install). Cannot read local files, so no `imagePaths`.
 
