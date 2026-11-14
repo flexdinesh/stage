@@ -66,6 +66,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)
+	h("POST /api/tasks/order", s.orderTasks)
 	h("GET /api/tasks/{id}", s.getTask)
 	h("PATCH /api/tasks/{id}", s.updateTask)
 	h("DELETE /api/tasks/{id}", s.deleteTask)

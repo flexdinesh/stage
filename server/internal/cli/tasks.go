@@ -336,6 +336,26 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return printTask(res)
+	case "order":
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		ids := make([]int64, len(c.pos))
+		for i, p := range c.pos {
+			id, err := parseID(p)
+			if err != nil {
+				return err
+			}
+			ids[i] = id
+		}
+		if len(ids) < 2 {
+			return usagef("task order: want at least two ids, in run order")
+		}
+		res, err := o().OrderTasks(ctx, agenttools.OrderTasksArgs{TaskIDs: ids})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printOrder(w, res.Tasks) })
 	case "wait":
 		var until string
 		var timeout time.Duration

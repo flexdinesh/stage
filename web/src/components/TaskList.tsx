@@ -110,9 +110,10 @@ interface RowChip {
 /**
  * The row's one chip: the one-shot start time while timed, "after #X" while waiting on a predecessor, "then #Y" when
  * something runs after it, else the schedule that spawned it, else the
- * agent session that created it.
+ * agent session that created it. Viewed from a session (`contextThreadId`), a wait on it reads "after this session"
+ * and its own provenance chip is dropped.
  */
-function rowChip(task: Task): RowChip | null {
+function rowChip(task: Task, contextThreadId?: string): RowChip | null {
   if (task.state === "backlog" && task.startAt !== null) {
     const tz = browserTimeZone();
     const when = wallTime(task.startAt, tz, { short: true });
@@ -128,7 +129,7 @@ function rowChip(task: Task): RowChip | null {
   if (isWaiting(task) && task.afterThreadId !== null)
     return {
       to: sessionPath(task.afterThreadId),
-      label: "after session",
+      label: task.afterThreadId === contextThreadId ? "after this session" : "after session",
       title: `Starts when session ${task.afterThreadTitle ?? task.afterThreadId} settles`,
       icon: <IconChainLink />,
     };
@@ -141,7 +142,7 @@ function rowChip(task: Task): RowChip | null {
       title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
       icon: <IconRepeat />,
     };
-  if (task.originThreadId !== null)
+  if (task.originThreadId !== null && task.originThreadId !== contextThreadId)
     return {
       to: sessionPath(task.originThreadId),
       label: "by agent",
@@ -151,13 +152,29 @@ function rowChip(task: Task): RowChip | null {
   return null;
 }
 
-/** Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). */
-export function TaskRow({ task, extra, showProject = false }: { task: Task; extra?: ReactNode; showProject?: boolean }) {
+/**
+ * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). `contextThreadId`: the session
+ * page showing the row (relative run-order chip copy).
+ */
+export function TaskRow({
+  task,
+  extra,
+  showProject = false,
+  contextThreadId,
+  hideStart = false,
+}: {
+  task: Task;
+  extra?: ReactNode;
+  showProject?: boolean;
+  contextThreadId?: string;
+  /** The Start lives elsewhere (a chain head's Start chain). */
+  hideStart?: boolean;
+}) {
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
-  const showStart = canStart(task) && !isWaiting(task);
-  const chip = rowChip(task);
+  const showStart = !hideStart && canStart(task) && !isWaiting(task);
+  const chip = rowChip(task, contextThreadId);
   const needsInput = task.state === "needs_input";
   const hasActions = showStart || task.t3DeepLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.

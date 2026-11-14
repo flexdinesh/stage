@@ -261,6 +261,44 @@ func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
 	}
 }
 
+func TestTaskOrderAndSessionBatch(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	p := h.project("/w/cli-o")
+	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Planner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	h.caller = agentctx.Caller{ThreadID: out.ThreadID}
+	ids := make([]string, 3)
+	for i, title := range []string{"first", "second", "loose"} {
+		code, stdout, stderr := h.run("", "task", "add", "--title", title, "--prompt", "p", "--json")
+		if code != 0 {
+			t.Fatalf("add: %s", stderr)
+		}
+		ids[i] = fmt.Sprint(decode[client.Task](t, stdout).ID)
+	}
+	code, stdout, stderr := h.run("", "task", "order", ids[1], ids[0])
+	if code != 0 || !strings.Contains(stdout, "1. #"+ids[1]+" [backlog] second") || !strings.Contains(stdout, "2. #"+ids[0]) {
+		t.Fatalf("order: %d %s %s", code, stdout, stderr)
+	}
+	if code, _, _ := h.run("", "task", "order", ids[0]); code != 2 {
+		t.Fatalf("order one id exit %d", code)
+	}
+	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID)
+	want := "\ncreated tasks (3)\n  chain #" + ids[1] + " [backlog] second\n        #" + ids[0] + " [backlog] first\n  task  #" + ids[2] + " [backlog] loose\n"
+	if code != 0 || !strings.Contains(stdout, want) {
+		t.Fatalf("sessions show:\n%s\nwant:\n%s", stdout, want)
+	}
+	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID, "--json")
+	if d := decode[client.ThreadDetail](t, stdout); code != 0 || len(d.CreatedTasks.Chains) != 1 || len(d.CreatedTasks.Independent) != 1 {
+		t.Fatalf("sessions show json: %s", stdout)
+	}
+}
+
 func TestScheduleAndContextCommands(t *testing.T) {
 	h := newHarness(t)
 	h.needDB()

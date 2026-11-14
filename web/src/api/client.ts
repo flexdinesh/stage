@@ -23,6 +23,7 @@ import type {
   NotificationEvent,
   NotificationGroupPage,
   NotificationPage,
+  OrderTasksResponse,
   PairRequest,
   Preferences,
   Project,
@@ -144,6 +145,8 @@ export const api = {
   followupTask: (id: number, body: FollowupRequest) => apiFetch<Task>(`/tasks/${id}/followup`, post(body)),
   stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
   duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
+  /** Links backlog tasks to run in this order (each after the previous one). */
+  orderTasks: (taskIds: number[]) => apiFetch<OrderTasksResponse>("/tasks/order", post({ taskIds })),
 
   schedules: (q: ScheduleListQuery = {}) =>
     apiFetch<ScheduleList>(`/schedules${toQuery({ project: q.project, dueWithin: q.dueWithin })}`),

@@ -64,7 +64,12 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 		shaped := s.task(env, t)
 		task = &shaped
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread), "children": childJSON, "continuations": s.continuations(env, cs), "task": task})
+	created, err := s.Store.CreatedBy(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread), "children": childJSON,
+		"continuations": s.continuations(env, cs), "task": task, "createdTasks": s.createdTasks(env, created)})
 	return nil
 }
 

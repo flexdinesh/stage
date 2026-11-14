@@ -242,6 +242,7 @@ func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	for _, c := range d.Children {
 		fmt.Fprintf(w, "  child %s  %s  [%s]\n", c.T3ThreadID, c.Title, c.State)
 	}
+	printCreated(w, d.CreatedTasks)
 	printPullRequests(w, t.PullRequests)
 	printRuns(w, t.RecentRuns, t.RunCount)
 	printLastWord(w, t.LastWord)
@@ -306,5 +307,49 @@ func printLastWord(w io.Writer, lw *db.LastWord) {
 	fmt.Fprintf(w, "\nlast word (%s)\n%s\n", ts(lw.At), strings.TrimRight(lw.Text, "\n"))
 	if lw.Truncated {
 		fmt.Fprintln(w, "[excerpt; full reply in T3]")
+	}
+}
+
+// printCreated prints a session batch: each chain head first (followers
+// indented), then independent tasks.
+func printCreated(w io.Writer, c client.CreatedTasks) {
+	n := len(c.Independent)
+	for _, chain := range c.Chains {
+		n += len(chain)
+	}
+	if n == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\ncreated tasks (%d)\n", n)
+	for _, chain := range c.Chains {
+		for i, t := range chain {
+			lead := "chain "
+			if i > 0 {
+				lead = "      "
+			}
+			fmt.Fprintf(w, "  %s#%d [%s] %s%s\n", lead, t.ID, t.State, t.Title, createdWait(t, i == 0))
+		}
+	}
+	for _, t := range c.Independent {
+		fmt.Fprintf(w, "  task  #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t, true))
+	}
+}
+
+// createdWait is a batch row's outside wait ("  (waits on session x)"); a
+// chain follower's wait on its predecessor is implied by its position.
+func createdWait(t client.Task, show bool) string {
+	if !show {
+		return ""
+	}
+	if s := waitsOn(t.AfterTaskID, t.AfterThreadID, t.StartAt); s != "-" {
+		return "  (waits on " + s + ")"
+	}
+	return ""
+}
+
+// printOrder prints a run order, head first.
+func printOrder(w io.Writer, ts []client.Task) {
+	for i, t := range ts {
+		fmt.Fprintf(w, "%d. #%d [%s] %s\n", i+1, t.ID, t.State, t.Title)
 	}
 }

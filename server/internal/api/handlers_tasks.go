@@ -219,6 +219,14 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
+	if task.OriginThreadID != nil {
+		batch, err := s.Store.CreatedBy(ctx, *task.OriginThreadID)
+		if err != nil {
+			return err
+		}
+		shaped := s.createdTasks(env, batch)
+		out.Batch = &shaped
+	}
 	if task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		if err == nil {
@@ -491,5 +499,23 @@ func (s *server) duplicateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusCreated, s.task(s.envID(r.Context()), task))
+	return nil
+}
+
+// orderTasks: POST /api/tasks/order {taskIds} links the tasks to run in that
+// order (db.OrderTasks) and returns the resulting run order.
+func (s *server) orderTasks(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		TaskIDs []int64 `json:"taskIds"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	seq, err := s.Store.OrderTasks(ctx, in.TaskIDs)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.tasks(s.envID(ctx), seq)})
 	return nil
 }

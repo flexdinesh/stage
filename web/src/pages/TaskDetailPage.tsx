@@ -1,4 +1,4 @@
-import { sessionPath } from "../lib/sessions.ts";
+import { batchPath, sessionPath } from "../lib/sessions.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Link, useNavigate } from "react-router";
@@ -13,6 +13,7 @@ import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
+import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
@@ -267,6 +268,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
           <div className="flex min-w-0 flex-col gap-3.5">
             <SequencePanel task={task} />
             <PullRequestsPanel prs={task.pullRequests} />
+            <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
             <NotesPanel task={task} />
@@ -370,7 +372,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         )}
         {task.originThreadId === null ? null : (
           <Detail label="Created by">
-            <Link to={sessionPath(task.originThreadId)} className={linkClass}>
+            <Link to={batchPath(task.originThreadId)} className={linkClass}>
               {task.originThreadTitle ?? task.originThreadId}
             </Link>
           </Detail>
