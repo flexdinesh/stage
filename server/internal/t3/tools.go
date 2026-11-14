@@ -132,7 +132,7 @@ const (
 	// replyWindows bounds the backward scan (~2000 timeline positions).
 	replyWindows = 20
 	// itemCharsMax is t3_thread_read's maxCharsPerItem cap.
-	itemCharsMax = 50000
+	itemCharsMax = MaxItemChars
 )
 
 func (c *MCPClient) LatestReply(ctx context.Context, in LatestReplyInput) (Reply, error) {
@@ -264,6 +264,35 @@ func utf16Len(s string) int {
 		n += max(utf16.RuneLen(r), 1)
 	}
 	return n
+}
+
+func (c *MCPClient) ReadItems(ctx context.Context, in ReadItemsInput) (ItemPage, error) {
+	if in.ThreadID == "" {
+		return ItemPage{}, ErrNotFound
+	}
+	args := map[string]any{"threadId": in.ThreadID, "view": "messages", "runLimit": 1}
+	if in.AfterPosition != nil && *in.AfterPosition >= 0 {
+		args["afterPosition"] = *in.AfterPosition
+	}
+	if in.Limit > 0 {
+		args["limit"] = min(in.Limit, MaxItemsPerRead)
+	}
+	if in.MaxChars > 0 {
+		args["maxCharsPerItem"] = min(in.MaxChars, MaxItemChars)
+	}
+	if in.ItemID != "" {
+		args["itemId"] = in.ItemID
+		if in.TextOffset > 0 {
+			args["textOffset"] = in.TextOffset
+		}
+	}
+	var out wireThreadRead
+	if err := c.call(ctx, "t3_thread_read", args, &out); err != nil {
+		return ItemPage{}, err
+	}
+	page := out.toItemPage()
+	c.noteEnvironment(environmentFromLink(page.Thread.Link))
+	return page, nil
 }
 
 func (c *MCPClient) LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error) {

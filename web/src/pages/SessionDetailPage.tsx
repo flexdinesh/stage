@@ -11,6 +11,7 @@ import { CreatedTasksPanel } from "../components/CreatedTasks.tsx";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
+import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
 import { Alert, Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
 import { dateTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
@@ -28,6 +29,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
   // Viewing clears system notifications here and marks their groups read, so
   // other devices close theirs on their next sync.
   const markViewed = useMarkNotificationGroupsRead();
+  const [view, setView] = useDetailView();
   useEffect(() => {
     void closeSystemNotifications(`thread-${thread.t3ThreadId}`);
     if (taskId !== undefined) void closeSystemNotifications(`task-${taskId}`);
@@ -36,15 +38,18 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
   return <>
     <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
     <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
+    <div className="mb-3.5"><DetailViewTabs view={view} onChange={setView} live={isLiveState(thread.state)} /></div>
     <div className="flex flex-col gap-3.5">
       {thread.pendingRequestCount > 0 ? <Alert tone="need">{thread.pendingRequestCount} pending request{thread.pendingRequestCount === 1 ? "" : "s"}. Resolve input in T3 before queued delivery can proceed.</Alert> : null}
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-3.5">
-          <LastWordPanel thread={thread} />
-          <CreatedTasksPanel threadId={thread.t3ThreadId} batch={createdTasks} />
-          <RunOrderPanel thread={thread} entries={continuations} />
-          <RunsPanel runs={thread.recentRuns ?? []} runCount={thread.runCount} />
-          <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>
+          {view === "transcript" ? <Transcript threadId={thread.t3ThreadId} jumpOffset="session" /> : <>
+            <LastWordPanel thread={thread} />
+            <CreatedTasksPanel threadId={thread.t3ThreadId} batch={createdTasks} />
+            <RunOrderPanel thread={thread} entries={continuations} />
+            <RunsPanel runs={thread.recentRuns ?? []} runCount={thread.runCount} />
+            <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>
+          </>}
         </div>
         <div className="flex min-w-0 flex-col gap-3.5">
           <PullRequestsPanel prs={thread.pullRequests} />

@@ -44,6 +44,9 @@ import type {
   ThreadList,
   ThreadSearch,
   ThreadListQuery,
+  TranscriptItemText,
+  TranscriptPage,
+  TranscriptQuery,
   UnreadNotificationTags,
   UpdateTaskRequest,
   UpdateSnippetRequest,
@@ -191,6 +194,13 @@ export const api = {
   searchThreads: (q: string, opts: { project?: number; limit?: number } = {}) =>
     apiFetch<ThreadSearch>(`/threads/search${toQuery({ q, project: opts.project, limit: opts.limit })}`),
   thread: (id: string) => apiFetch<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+  transcript: (id: string, q: TranscriptQuery = {}) =>
+    apiFetch<TranscriptPage>(`/threads/${encodeURIComponent(id)}/transcript${toQuery({ before: q.before, limit: q.limit })}`),
+  transcriptItem: (id: string, itemId: string) =>
+    apiFetch<TranscriptItemText>(`/threads/${encodeURIComponent(id)}/transcript/items/${encodeURIComponent(itemId)}`),
+  /** SSE URL (not fetched: opened with EventSource). */
+  transcriptStreamUrl: (id: string, after: number) =>
+    `/api/threads/${encodeURIComponent(id)}/transcript/stream${toQuery({ after })}`,
   continuations: (thread?: string) => apiFetch<ContinuationList>(`/continuations${toQuery({ thread })}`),
   createContinuation: (body: CreateContinuationRequest) => apiFetch<Continuation>("/continuations", post(body)),
   updateContinuation: (id: number, prompt: string) => apiFetch<Continuation>(`/continuations/${id}`, patch({ prompt })),

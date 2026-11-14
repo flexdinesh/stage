@@ -7,12 +7,17 @@ function escapeHtml(s: string): string {
 }
 
 // GFM markdown; raw HTML in a reply renders as literal text, never as markup.
+// Images render as links: stage never loads remote images from agent output.
 const marked = new Marked({
   gfm: true,
   async: false,
   renderer: {
     html({ text }) {
       return escapeHtml(text);
+    },
+    image({ href, text }) {
+      const label = text === "" ? href : `image: ${text}`;
+      return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
     },
   },
 });

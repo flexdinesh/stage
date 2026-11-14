@@ -330,6 +330,89 @@ func TestToolErrorMapsNotFound(t *testing.T) {
 	}
 }
 
+func TestReadItemsArgsAndDecode(t *testing.T) {
+	f := newFakeT3(t)
+	var mu sync.Mutex
+	var calls []map[string]any
+	f.tool("t3_thread_read", func(args map[string]any) (*mcp.CallToolResult, error) {
+		mu.Lock()
+		calls = append(calls, args)
+		mu.Unlock()
+		return structured(`{"thread":{"threadId":"th-1","status":"running","activeRunId":"run-2","link":"t3-thread://v2/env-a/th-1"},"recentRuns":[],
+			"items":[{"position":4,"visibility":"local","sourceThreadId":"th-1","itemId":"i4","runId":"run-2","messageId":"m4","createdBy":"user","type":"user_message","status":"completed","title":null,"text":"hi","textTruncated":false,"nextTextOffset":null,"updatedAt":"2026-11-14T01:02:03.000Z"},
+			{"position":9,"visibility":"inherited","sourceThreadId":"th-0","itemId":"i9","runId":null,"messageId":null,"createdBy":null,"type":"assistant_message","status":"running","title":null,"text":"par","textTruncated":true,"nextTextOffset":3,"updatedAt":"2026-11-14T01:02:04.000Z"}],
+			"nextPosition":9,"hasMore":true}`), nil
+	})
+	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+	ctx := ctxT(t)
+
+	page, err := c.ReadItems(ctx, ReadItemsInput{ThreadID: "th-1", Limit: 500, MaxChars: 90000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := 3
+	if _, err := c.ReadItems(ctx, ReadItemsInput{ThreadID: "th-1", AfterPosition: &after, ItemID: "i9", TextOffset: 3}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	first, second := calls[0], calls[1]
+	mu.Unlock()
+	if _, ok := first["afterPosition"]; ok || first["view"] != "messages" || first["limit"] != float64(100) || first["maxCharsPerItem"] != float64(50000) {
+		t.Fatalf("first args = %v (nil afterPosition must be omitted; limits clamped)", first)
+	}
+	if second["afterPosition"] != float64(3) || second["itemId"] != "i9" || second["textOffset"] != float64(3) {
+		t.Fatalf("second args = %v", second)
+	}
+	if page.Thread.Status != StatusRunning || page.Thread.ActiveRunID != "run-2" || !page.HasMore || page.NextPosition == nil || *page.NextPosition != 9 {
+		t.Fatalf("page = %+v", page)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("items = %+v", page.Items)
+	}
+	a, b := page.Items[0], page.Items[1]
+	if a.Position != 4 || a.ItemID != "i4" || a.Type != "user_message" || a.CreatedBy != "user" || a.Text != "hi" || !a.Settled() || a.UpdatedAt.IsZero() {
+		t.Fatalf("item 0 = %+v", a)
+	}
+	if b.Visibility != "inherited" || b.SourceThreadID != "th-0" || b.RunID != "" || !b.TextTruncated || b.NextTextOffset == nil || *b.NextTextOffset != 3 || b.Settled() {
+		t.Fatalf("item 1 = %+v", b)
+	}
+}
+
+func TestFakeReadItemsPagesMessagesOnly(t *testing.T) {
+	f := NewFake()
+	ctx := context.Background()
+	res, err := f.LaunchThread(ctx, LaunchInput{ProjectID: "p", Title: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.ThreadID
+	f.AddItem(id, TimelineItem{Type: "user_message", Text: "q"})
+	f.AddItem(id, TimelineItem{Type: "command_execution", Text: "ls"})
+	f.AddItem(id, TimelineItem{Type: "assistant_message", Text: "abcdef", Status: "running"})
+	f.AddItem(id, TimelineItem{Type: "proposed_plan", Text: "plan"})
+	page, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: id, Limit: 2, MaxChars: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Items[0].Position != 0 || page.Items[1].Position != 2 || !page.HasMore || *page.NextPosition != 2 {
+		t.Fatalf("page = %+v", page)
+	}
+	if it := page.Items[1]; it.Text != "abcd" || !it.TextTruncated || *it.NextTextOffset != 4 {
+		t.Fatalf("truncation = %+v", it)
+	}
+	rest, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: id, AfterPosition: page.NextPosition})
+	if err != nil || len(rest.Items) != 1 || rest.Items[0].Type != "proposed_plan" || rest.HasMore {
+		t.Fatalf("rest = %+v, %v", rest, err)
+	}
+	tail, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: id, ItemID: page.Items[1].ItemID, TextOffset: 4})
+	if err != nil || len(tail.Items) != 1 || tail.Items[0].Text != "ef" || tail.Items[0].TextTruncated {
+		t.Fatalf("continuation = %+v, %v", tail, err)
+	}
+	if _, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: "nope"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown thread err = %v", err)
+	}
+}
+
 func TestContinuationSendEnvelopeAndReceipt(t *testing.T) {
 	f := newFakeT3(t)
 	f.tool("t3_thread_send", func(args map[string]any) (*mcp.CallToolResult, error) {
