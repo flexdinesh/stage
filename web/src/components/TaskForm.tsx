@@ -254,7 +254,7 @@ function TaskFormDrawer({
   // Start options: all for a new task, timing only for a backlog task, none otherwise (or for a schedule).
   const modes: readonly StartMode[] = isNew ? START_MODES : task !== undefined && full ? ["backlog", "at", "after"] : [];
   const mode = s.mode;
-  // Then run: any task that can still gate (not settled/cancelled).
+  // Then run: any task that can still gate (not settled).
   const canLinkAfter = task !== undefined && !isFinal(task);
   const after = mode === "after" && s.afterTaskId !== "" ? Number(s.afterTaskId) : null;
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);

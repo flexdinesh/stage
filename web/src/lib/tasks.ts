@@ -16,5 +16,5 @@ export const isActive = (t: Task) => ACTIVE.includes(t.state);
 export const canStop = (t: Task) => t.t3ThreadId !== null && isActive(t);
 /** Outside backlog only title, tags, notes may change. */
 export const isFullyEditable = (t: Task) => t.state === "backlog";
-/** Settled or cancelled: no longer gates anything and can't be linked. */
-export const isFinal = (t: Task) => t.state === "settled" || t.state === "cancelled";
+/** Settled: no longer gates anything and can't be linked. */
+export const isFinal = (t: Task) => t.state === "settled";

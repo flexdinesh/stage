@@ -525,7 +525,7 @@ func TestLinks(t *testing.T) {
 			t.Fatalf("sequence from %d: %s", id, got)
 		}
 	}
-	// Only a backlog task can be linked; a settled/cancelled predecessor is refused.
+	// Only a backlog task can be linked; a settled predecessor is refused.
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning})
 	d := mustTask(t, s, ctx, p.ID, "d", nil)
 	if _, err := s.UpdateTask(ctx, a.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
@@ -536,7 +536,14 @@ func TestLinks(t *testing.T) {
 	if _, err := s.UpdateTask(ctx, e.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
 		t.Fatalf("settled predecessor: %v", err)
 	}
-	// Ready followers: b once a settles.
+	// A cancelled predecessor can be linked; its follower waits (only settled passes).
+	h := mustTask(t, s, ctx, p.ID, "h", nil)
+	g := mustTask(t, s, ctx, p.ID, "g", nil)
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: h.ID, To: db.StateCancelled})
+	if _, err := s.UpdateTask(ctx, g.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: h.ID}}); err != nil {
+		t.Fatalf("cancelled predecessor: %v", err)
+	}
+	// Ready followers: b once a settles; never g.
 	if ids, _ := s.ReadyFollowers(ctx); len(ids) != 0 {
 		t.Fatalf("ready before settle %v", ids)
 	}
@@ -582,6 +589,14 @@ func TestStartNowUnlinksWaitingTask(t *testing.T) {
 	begin(c.ID, true)
 	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil {
 		t.Fatalf("c unlinked from settled predecessor %+v", got)
+	}
+	// A cancelled predecessor is unfinished: Start now unlinks.
+	x := mustTask(t, s, ctx, p.ID, "x", nil)
+	y := mustTask(t, s, ctx, p.ID, "y", &x.ID)
+	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: x.ID, To: db.StateCancelled})
+	begin(y.ID, true)
+	if got, _ := s.GetTask(ctx, y.ID); got.AfterTaskID != nil {
+		t.Fatalf("y still linked to cancelled predecessor %+v", got)
 	}
 }
 

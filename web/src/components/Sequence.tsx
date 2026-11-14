@@ -22,8 +22,8 @@ const STEP_TONE: Record<TaskState, ChipTone | null> = {
   cancelled: "idle",
 };
 
-/** Tasks that can still gate or be gated (not settled/cancelled). */
-const OPEN_STATES: TaskState[] = ["backlog", "launching", "running", "needs_input", "done", "failed", "interrupted"];
+/** Tasks that can still gate or be gated (not settled). */
+const OPEN_STATES: TaskState[] = ["backlog", "launching", "running", "needs_input", "done", "failed", "interrupted", "cancelled"];
 
 export const taskOption = (t: Task) => `#${t.id} ${t.title} · ${t.projectTitle} · ${taskStateLabel(t.state)}`;
 
@@ -160,7 +160,7 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3">
         {task.sequence.length > 1 ? <SequencePipeline steps={task.sequence} currentId={task.id} /> : null}
         {prev === undefined && next === undefined && !canLinkBefore && !canLinkAfter ? (
-          <Muted>Not linked. Settled and cancelled tasks can&apos;t be linked.</Muted>
+          <Muted>Not linked. Settled tasks can&apos;t be linked.</Muted>
         ) : null}
         {prev === undefined ? null : (
           <LinkLine

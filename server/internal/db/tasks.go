@@ -109,20 +109,19 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 // PollableTasks: tasks whose thread may still change state. Active tasks
 // always; done tasks updated in the last hour always, older ones only
 // when includeStale (the poller passes it at most once a minute);
-// failed/interrupted only when touched in the last 10 minutes (e.g. a
-// follow-up restarted the thread). backlog, settled and cancelled (skip /
-// rollback) are final for polling.
+// failed/interrupted/cancelled when touched in the last 10 minutes (e.g. a
+// follow-up restarted the thread) or the mirror shows the thread active.
+// backlog and settled are final for polling.
 func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
 	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
 	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
 	// minutes after the last change, then whenever the thread mirror (full
-	// sync) shows it active again. A cancelled task with a follower has been
-	// released and stays cancelled.
+	// sync) shows it active again.
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
   OR (t.state = 'done' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
-  OR (t.state IN ('failed', 'interrupted', 'cancelled') AND NOT (t.state = 'cancelled' AND nx.id IS NOT NULL) AND (
+  OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > now() - interval '10 minutes'
     OR (NOT th.settled AND (th.pending_request_count > 0
       OR th.status IN ('preparing', 'queued', 'starting', 'running', 'waiting'))))))
@@ -497,7 +496,7 @@ type Transition struct {
 	// the attempt number and the clientRequestId.
 	ReuseAttempt bool
 	// UnlinkWaiting ("Start now"): a backlog task still waiting on an
-	// unfinished predecessor task or thread (not settled|cancelled) is
+	// unfinished predecessor task or thread (not settled) is
 	// unlinked from it.
 	UnlinkWaiting bool
 }
@@ -543,10 +542,10 @@ UPDATE tasks SET
   start_at = CASE WHEN $3::boolean THEN NULL ELSE start_at END,
   start_tz = CASE WHEN $3::boolean THEN NULL ELSE start_tz END,
   after_task_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
-      SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state IN ('settled', 'cancelled'))
+      SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state = 'settled')
     THEN NULL ELSE after_task_id END,
   after_thread_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
-      SELECT 1 FROM threads th WHERE th.t3_thread_id = tasks.after_thread_id AND (`+threadStateSQL+`) IN ('settled', 'cancelled'))
+      SELECT 1 FROM threads th WHERE th.t3_thread_id = tasks.after_thread_id AND `+threadPassedSQL+`)
     THEN NULL ELSE after_thread_id END,
   updated_at = now()
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
