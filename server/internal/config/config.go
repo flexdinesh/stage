@@ -46,7 +46,7 @@ func Load() (Config, error) {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
 	if os.Getenv("APP_ENV") == "dev" && ProdDatabase(cfg.DatabaseURL) {
-		return Config{}, fmt.Errorf("APP_ENV=dev refuses the production database (port %s or name %q); use `make dev`", ProdPort, ProdDBName)
+		return Config{}, fmt.Errorf("APP_ENV=dev refuses the production database (port %s or name %q); use `mise run dev`", ProdPort, ProdDBName)
 	}
 	return cfg, nil
 }
