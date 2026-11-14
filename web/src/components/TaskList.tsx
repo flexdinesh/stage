@@ -107,7 +107,8 @@ interface RowChip {
 
 /**
  * The row's one chip: the one-shot start time while timed, "after #X" while waiting on a predecessor, "then #Y" when
- * something runs after it, else the schedule that spawned it.
+ * something runs after it, else the schedule that spawned it, else the
+ * agent session that created it.
  */
 function rowChip(task: Task): RowChip | null {
   if (task.state === "backlog" && task.startAt !== null) {
@@ -122,6 +123,13 @@ function rowChip(task: Task): RowChip | null {
   }
   if (isWaiting(task) && task.afterTaskId !== null)
     return { to: `/tasks/${task.afterTaskId}`, label: `after #${task.afterTaskId}`, title: "Starts when this task settles", icon: <IconChainLink /> };
+  if (isWaiting(task) && task.afterThreadId !== null)
+    return {
+      to: sessionPath(task.afterThreadId),
+      label: "after session",
+      title: `Starts when session ${task.afterThreadTitle ?? task.afterThreadId} settles`,
+      icon: <IconChainLink />,
+    };
   if (task.nextTaskId !== null)
     return { to: `/tasks/${task.nextTaskId}`, label: `then #${task.nextTaskId}`, title: "Runs next when this task settles", icon: <IconChainLink /> };
   if (task.scheduleId !== null)
@@ -130,6 +138,13 @@ function rowChip(task: Task): RowChip | null {
       label: "schedule",
       title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
       icon: <IconRepeat />,
+    };
+  if (task.originThreadId !== null)
+    return {
+      to: sessionPath(task.originThreadId),
+      label: "by agent",
+      title: `Created by session ${task.originThreadTitle ?? task.originThreadId}`,
+      icon: <IconChainLink />,
     };
   return null;
 }

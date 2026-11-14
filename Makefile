@@ -10,7 +10,7 @@ DEV_DB := t3stage_dev_$(shell printf '%s' '$(DEV_BRANCH)' | tr 'A-Z' 'a-z' | tr 
 # always the branch's dev db.
 LOAD_ENV := set -a; [ -f .env.dev ] && . ./.env.dev; set +a; export APP_ENV=dev DATABASE_URL='$(DEV_PG)/$(DEV_DB)?sslmode=disable' APP_PORT="$${APP_PORT:-7390}";
 
-.PHONY: dev db dev-down build test up down
+.PHONY: dev db dev-down build install-cli test up down
 
 ## dev: dev Postgres + branch db + Go server (:7390, real T3) + Vite dev server (proxies /api)
 dev: db
@@ -35,6 +35,11 @@ build:
 	find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete
 	cp -r web/dist/. server/internal/webui/dist/
 	cd server && CGO_ENABLED=0 go build -o ../bin/t3stage ./cmd/t3stage
+
+## install-cli: agent CLI / stdio MCP binary (no web bundle) at ~/.local/bin/t3stage
+install-cli:
+	mkdir -p $(HOME)/.local/bin
+	cd server && CGO_ENABLED=0 go build -o $(HOME)/.local/bin/t3stage ./cmd/t3stage
 
 ## test: Go tests (dev Postgres) + web tests/typecheck/lint
 test: db

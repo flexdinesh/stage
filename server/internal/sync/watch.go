@@ -104,6 +104,23 @@ func (s *Service) WatchThreads(ctx context.Context) error {
 			s.log.Warn("watch thread", "thread", id, "err", err)
 		}
 	}
+	// Sessions that backlog tasks run after (links runner): refresh the
+	// mirror only, no notifications (subagents included).
+	linked, err := s.store.LinkedThreadIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range linked {
+		if seen[id] || ctx.Err() != nil {
+			continue
+		}
+		if _, err := s.readSession(ctx, id); err != nil && !errors.Is(err, t3.ErrNotFound) {
+			if errors.Is(err, t3.ErrNotConnected) {
+				return err
+			}
+			s.log.Warn("refresh linked session", "thread", id, "err", err)
+		}
+	}
 	s.watchSeeded.Store(true)
 	return nil
 }

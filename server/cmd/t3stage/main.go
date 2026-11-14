@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
+	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
 	"github.com/flexdinesh/t3-stage/server/internal/api"
+	"github.com/flexdinesh/t3-stage/server/internal/cli"
+	"github.com/flexdinesh/t3-stage/server/internal/client"
 	"github.com/flexdinesh/t3-stage/server/internal/config"
 	"github.com/flexdinesh/t3-stage/server/internal/db"
 	"github.com/flexdinesh/t3-stage/server/internal/links"
@@ -24,6 +29,13 @@ import (
 )
 
 func main() {
+	// No args (or `serve`): the server. Anything else: the agent CLI.
+	if len(os.Args) > 1 && os.Args[1] != "serve" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code := cli.Run(ctx, os.Args[1:], cli.OSEnv())
+		stop()
+		os.Exit(code)
+	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
@@ -89,7 +101,10 @@ func run() error {
 		runner.OnTransition(ctx, c)
 		notifier.OnTransition(ctx, c)
 	}
-	syncSvc.OnThreadChange = notifier.OnThreadChange
+	syncSvc.OnThreadChange = func(ctx context.Context, c t3sync.ThreadChange) {
+		runner.OnThreadChange(ctx, c)
+		notifier.OnThreadChange(ctx, c)
+	}
 	// Before the poller, link runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
 	wg.Add(6)
@@ -103,6 +118,11 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(api.Deps{
 		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger,
+	}))
+	// Streamable HTTP MCP: the agent tools over this server's own REST API
+	// (loopback), so validation stays in one place. No local file access.
+	mux.Handle("/mcp", agenttools.HTTPHandler(&agenttools.Ops{
+		Client: client.New("http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))),
 	}))
 	mux.Handle("/", webui.Handler())
 
