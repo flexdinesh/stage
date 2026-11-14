@@ -280,7 +280,7 @@ func (p *poller) serveJoins() bool {
 			// with the next read.
 			st := p.state
 			for _, s := range joins {
-				s.send(Event{State: &st, Cursor: p.cursor})
+				s.send(Event{State: &st, Cursor: max(p.cursor, s.after)})
 			}
 			p.mu.Lock()
 			p.pending = append(joins, p.pending...)
@@ -291,16 +291,17 @@ func (p *poller) serveJoins() bool {
 	defer p.compact()
 	for _, s := range joins {
 		ok := true
+		cursor := max(p.cursor, s.after)
 		for _, pos := range p.positions() {
 			if pos > s.after {
 				it := p.seen[pos]
-				if ok = s.send(Event{Item: &it, Cursor: p.cursor}); !ok {
+				if ok = s.send(Event{Item: &it, Cursor: cursor}); !ok {
 					break
 				}
 			}
 		}
 		st := p.state
-		if ok && s.send(Event{State: &st, Cursor: p.cursor}) {
+		if ok && s.send(Event{State: &st, Cursor: cursor}) {
 			p.mu.Lock()
 			p.subs = append(p.subs, s)
 			p.mu.Unlock()
@@ -412,13 +413,20 @@ func (p *poller) compact() {
 	}
 }
 
+// broadcast sends ev to every subscriber. A subscriber can join at a cursor
+// ahead of the poller's (a fresh REST page read between ticks): it never gets
+// items at or below its join cursor, and its event ids never go below it.
 func (p *poller) broadcast(ev Event) {
-	ev.Cursor = p.cursor
 	p.mu.Lock()
 	subs := p.subs
 	p.mu.Unlock()
 	for _, s := range subs {
-		s.send(ev)
+		if ev.Item != nil && ev.Item.Position <= s.after {
+			continue
+		}
+		e := ev
+		e.Cursor = max(p.cursor, s.after)
+		s.send(e)
 	}
 }
 

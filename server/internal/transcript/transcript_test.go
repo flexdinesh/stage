@@ -297,6 +297,40 @@ func TestHubResumeFromCursorSkipsOlderItems(t *testing.T) {
 	re.Close()
 }
 
+// A client that loads a fresh REST page between poller ticks subscribes with a
+// cursor ahead of the poller's. The next tick must not replay items at or
+// below that cursor, and event ids must not go below it.
+func TestHubJoinAheadOfPollerCursor(t *testing.T) {
+	f, id := newThread(t)
+	run := runID(t, f, id)
+	f.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "q", RunID: run})
+	h := newHub(t, f, &mirror{})
+	h.PollEvery = 50 * time.Millisecond
+	a := h.Subscribe(id, -1)
+	until(t, a, "state", func(ev Event) bool { return ev.State != nil })
+
+	ahead := f.AddItem(id, t3.TimelineItem{Type: "assistant_message", Text: "done", RunID: run, Status: "completed"})
+	stream := f.AddItem(id, t3.TimelineItem{Type: "assistant_message", Text: "…", RunID: run, Status: "running"})
+	b := h.Subscribe(id, ahead)
+	for {
+		ev := next(t, b)
+		if ev.Cursor < ahead {
+			t.Fatalf("event id %d below join cursor %d", ev.Cursor, ahead)
+		}
+		if ev.Item == nil {
+			continue
+		}
+		if ev.Item.Position <= ahead {
+			t.Fatalf("replayed item %d at or below join cursor %d", ev.Item.Position, ahead)
+		}
+		if ev.Item.Position == stream {
+			break
+		}
+	}
+	a.Close()
+	b.Close()
+}
+
 func TestHubPositionShiftResets(t *testing.T) {
 	f, id := newThread(t)
 	run := runID(t, f, id)

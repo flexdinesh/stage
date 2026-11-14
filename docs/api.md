@@ -498,7 +498,7 @@ Query: `limit` (default 50, max 200), `before` (position; only items below it). 
 200 `{ "itemId": string, "text": string, "truncated": boolean }`: the item's full text, assembled from T3 text pages; `truncated` only when it exceeds 1,000,000 characters.
 
 ### `GET /api/threads/:id/transcript/stream`
-Server-Sent Events (`text/event-stream`). Query `after` (cursor; default -1). A `Last-Event-ID` header (browser reconnect) wins over `after`. On connect the server sends `retry: 3000`, every item after the cursor, then a `state` event, then live changes.
+Server-Sent Events (`text/event-stream`). Query `after` (cursor; default -1). A `Last-Event-ID` header (browser reconnect) wins over `after`. On connect the server sends `retry: 3000`, every item after the cursor, then a `state` event, then live changes. It never sends items at or below the cursor, and event ids never go below it.
 
 | Event | `data` | Meaning |
 |---|---|---|
