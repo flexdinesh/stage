@@ -61,6 +61,7 @@ type createTaskReq struct {
 	AttachmentIDs      []int64          `json:"attachmentIds"`
 	StartLocal         *string          `json:"startLocal"`
 	StartTz            *string          `json:"startTz"`
+	Handoff            *bool            `json:"handoff"`
 	Start              bool             `json:"start"`
 }
 
@@ -78,6 +79,7 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		AfterThreadID:      trimmedPtr(req.AfterThreadID),
 		OriginThreadID:     trimmedPtr(req.OriginThreadID),
 		AttachmentIDs:      req.AttachmentIDs,
+		Handoff:            req.Handoff,
 	}
 	if in.AfterTaskID != nil && in.AfterThreadID != nil {
 		return in, db.Invalid("a task can run after another task or a session, not both")
@@ -219,6 +221,11 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
+	if task.LaunchAttempt > 0 {
+		if out.CurrentHandoff, err = s.Store.GetHandoff(ctx, id, task.LaunchAttempt); err != nil {
+			return err
+		}
+	}
 	if task.OriginThreadID != nil {
 		batch, err := s.Store.CreatedBy(ctx, *task.OriginThreadID)
 		if err != nil {
@@ -264,6 +271,9 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	nullableText(&p.AfterThreadID)
+	if p.Handoff.Set && p.Handoff.Null {
+		return db.Invalid("handoff must be true or false")
+	}
 	if p.StartLocal.Set || p.StartTz.Set {
 		if p.StartLocal.Set != p.StartTz.Set || p.StartLocal.Null != p.StartTz.Null {
 			return db.Invalid("startLocal and startTz must be set (or null) together")

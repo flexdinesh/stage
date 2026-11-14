@@ -3,8 +3,11 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api/client.ts";
 import { useInvalidateWork, useTasks } from "../api/queries.ts";
-import type { Task, TaskDetail, TaskState } from "../api/types.ts";
+import type { Task, TaskDetail, TaskState, UpdateTaskRequest } from "../api/types.ts";
+import { handoffHint } from "../lib/handoff.ts";
+import { sessionPath } from "../lib/sessions.ts";
 import { isFinal } from "../lib/tasks.ts";
+import { HandoffToggle } from "./Handoff.tsx";
 import { IconChainLink } from "./icons.tsx";
 import { taskStateLabel } from "./StateBadge.tsx";
 import { Button, ErrorText, Muted, Panel, Select, cx, toneClass, type ChipTone } from "./ui.tsx";
@@ -134,17 +137,23 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
   const [before, setBefore] = useState("");
   const [after, setAfter] = useState("");
   const link = useMutation({
-    mutationFn: ({ id, afterTaskId }: { id: number; afterTaskId: number | null }) => api.updateTask(id, { afterTaskId }),
+    mutationFn: ({ id, patch }: { id: number; patch: UpdateTaskRequest }) => api.updateTask(id, patch),
     onSuccess: () => {
       setBefore("");
       setAfter("");
     },
     onSettled: invalidate,
   });
+  const toggleHandoff = useMutation({
+    mutationFn: (handoff: boolean) => api.updateTask(task.id, { handoff }),
+    onSettled: invalidate,
+  });
   const prev = task.sequence.find((t) => t.id === task.afterTaskId);
   const next = task.sequence.find((t) => t.id === task.nextTaskId);
-  const canLinkBefore = task.state === "backlog" && task.afterTaskId === null;
+  const afterThread = task.afterThreadId;
+  const canLinkBefore = task.state === "backlog" && task.afterTaskId === null && afterThread === null;
   const canLinkAfter = !isFinal(task) && task.nextTaskId === null;
+  const canHandoff = task.state === "backlog" && (task.afterTaskId !== null || afterThread !== null);
   const busy = link.isPending;
 
   return (
@@ -159,25 +168,50 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
     >
       <div className="flex flex-col gap-3">
         {task.sequence.length > 1 ? <SequencePipeline steps={task.sequence} currentId={task.id} /> : null}
-        {prev === undefined && next === undefined && !canLinkBefore && !canLinkAfter ? (
+        {prev === undefined && next === undefined && afterThread === null && !canLinkBefore && !canLinkAfter ? (
           <Muted>Not linked. Settled tasks can&apos;t be linked.</Muted>
         ) : null}
         {prev === undefined ? null : (
           <LinkLine
             label="Runs after"
-            task={prev}
+            to={`/tasks/${prev.id}`}
+            title={prev.title}
+            number={prev.id}
+            kind={taskStateLabel(prev.state)}
             hint={task.state === "backlog" ? "starts when it settles" : undefined}
             busy={busy}
-            onUnlink={() => link.mutate({ id: task.id, afterTaskId: null })}
+            onUnlink={() => link.mutate({ id: task.id, patch: { afterTaskId: null } })}
           />
         )}
+        {afterThread === null ? null : (
+          <LinkLine
+            label="Runs after"
+            to={sessionPath(afterThread)}
+            title={task.afterThreadTitle ?? afterThread}
+            kind="session"
+            hint={task.state === "backlog" ? "starts when it settles" : undefined}
+            busy={busy}
+            onUnlink={() => link.mutate({ id: task.id, patch: { afterThreadId: null } })}
+          />
+        )}
+        {canHandoff ? (
+          <HandoffToggle
+            checked={toggleHandoff.isPending ? toggleHandoff.variables : task.handoff}
+            disabled={toggleHandoff.isPending}
+            onChange={(handoff) => toggleHandoff.mutate(handoff)}
+            hint={handoffHint(task)}
+          />
+        ) : null}
         {next === undefined ? null : (
           <LinkLine
             label="Then runs"
-            task={next}
+            to={`/tasks/${next.id}`}
+            title={next.title}
+            number={next.id}
+            kind={taskStateLabel(next.state)}
             hint={next.state === "backlog" ? "starts when this settles" : undefined}
             busy={busy}
-            onUnlink={() => link.mutate({ id: next.id, afterTaskId: null })}
+            onUnlink={() => link.mutate({ id: next.id, patch: { afterTaskId: null } })}
           />
         )}
         {canLinkBefore ? (
@@ -188,7 +222,7 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
             options={candidates.before}
             none={candidates.before.length === 0 ? "No open tasks to wait on" : "Pick a task to wait on…"}
             busy={busy}
-            onLink={() => link.mutate({ id: task.id, afterTaskId: Number(before) })}
+            onLink={() => link.mutate({ id: task.id, patch: { afterTaskId: Number(before) } })}
           />
         ) : null}
         {canLinkAfter ? (
@@ -199,24 +233,34 @@ export function SequencePanel({ task }: { task: TaskDetail }) {
             options={candidates.after}
             none={candidates.after.length === 0 ? "No unlinked backlog tasks" : "Pick a backlog task to run next…"}
             busy={busy}
-            onLink={() => link.mutate({ id: Number(after), afterTaskId: task.id })}
+            onLink={() => link.mutate({ id: Number(after), patch: { afterTaskId: task.id } })}
           />
         ) : null}
         <ErrorText error={link.error} />
+        <ErrorText error={toggleHandoff.error} />
       </div>
     </Panel>
   );
 }
 
+/** A predecessor or follower (task or session) with its state line and Unlink. */
 function LinkLine({
   label,
-  task,
+  to,
+  title,
+  number,
+  kind,
   hint,
   busy,
   onUnlink,
 }: {
   label: string;
-  task: Task;
+  to: string;
+  title: string;
+  /** Task number; omitted for a session. */
+  number?: number;
+  /** Task state label, or "session". */
+  kind: string;
   hint: string | undefined;
   busy: boolean;
   onUnlink: () => void;
@@ -225,11 +269,12 @@ function LinkLine({
     <div className="flex min-w-0 items-start gap-2">
       <div className="min-w-0 flex-1">
         <span className="label-caps">{label}</span>
-        <Link to={`/tasks/${task.id}`} className="block truncate text-ui font-medium hover:underline" title={task.title}>
-          <span className="font-mono text-meta text-muted">#{task.id}</span> {task.title}
+        <Link to={to} className="block truncate text-ui font-medium hover:underline" title={title}>
+          {number === undefined ? null : <span className="font-mono text-meta text-muted">#{number} </span>}
+          {title}
         </Link>
         <span className="font-mono text-meta-sm text-muted">
-          {taskStateLabel(task.state)}
+          {kind}
           {hint === undefined ? null : ` · ${hint}`}
         </span>
       </div>

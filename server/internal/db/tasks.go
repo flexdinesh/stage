@@ -20,7 +20,7 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at,
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
-  t.origin_thread_id, oth.title, t.after_thread_id, ath.title,
+  t.origin_thread_id, oth.title, t.after_thread_id, ath.title, t.handoff,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
@@ -39,7 +39,7 @@ func scanTask(row pgx.Row) (Task, error) {
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadID, &t.OriginThreadTitle, &t.AfterThreadID, &t.AfterThreadTitle, &t.Attachments)
+		&t.OriginThreadID, &t.OriginThreadTitle, &t.AfterThreadID, &t.AfterThreadTitle, &t.Handoff, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -170,6 +170,7 @@ type NewTask struct {
 	ScheduleID         *int64  // spawning schedule
 	OriginThreadID     *string // T3 thread that created the task (agent interface)
 	AfterThreadID      *string // runs after this T3 thread (setAfterThread)
+	Handoff            *bool   // append the predecessor handoff at launch; nil = default (on)
 }
 
 // errStartAndAfter: a task waits on a start time or a predecessor, not both.
@@ -223,11 +224,11 @@ func insertTask(ctx context.Context, tx pgx.Tx, in NewTask, extra func(tx pgx.Tx
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id, handoff)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true)) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -283,6 +284,7 @@ type TaskPatch struct {
 	AfterTaskID        Optional[int64]            `json:"afterTaskId"`   // null unlinks
 	AfterThreadID      Optional[string]           `json:"afterThreadId"` // null unlinks (setAfterThread)
 	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
+	Handoff            Optional[bool]             `json:"handoff"`       // append the predecessor handoff at launch
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
 	StartLocal Optional[string]    `json:"startLocal"`
@@ -294,7 +296,7 @@ type TaskPatch struct {
 func (p TaskPatch) restrictedSet() bool {
 	return p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
 		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
-		p.StartAt.Set
+		p.StartAt.Set || p.Handoff.Set
 }
 
 // UpdateTask applies a validated patch. Outside backlog only title, tags and
@@ -418,6 +420,9 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		}
 		if p.Notes.Set {
 			set("notes", p.Notes.V)
+		}
+		if p.Handoff.Set {
+			set("handoff", p.Handoff.V)
 		}
 		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AfterThreadID.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil

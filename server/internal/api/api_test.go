@@ -57,6 +57,7 @@ type flakyT3 struct {
 	// foreignProject: the next launch answers with a thread in this project
 	// (T3 deduped the clientRequestId to another client's launch).
 	foreignProject atomic.Pointer[string]
+	failReply      atomic.Bool // LatestReply transport failure
 
 	mu         gosync.Mutex
 	requestIDs []string // clientRequestId of every launch call
@@ -77,6 +78,13 @@ func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.Launc
 		return t3.LaunchResult{}, errors.New("connection reset by peer")
 	}
 	return res, err
+}
+
+func (f *flakyT3) LatestReply(ctx context.Context, in t3.LatestReplyInput) (t3.Reply, error) {
+	if f.failReply.Load() {
+		return t3.Reply{}, errors.New("t3 read timed out")
+	}
+	return f.Fake.LatestReply(ctx, in)
 }
 
 func (f *flakyT3) takeLost() bool {

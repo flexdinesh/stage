@@ -33,7 +33,9 @@ import {
   type RepeatPreset,
   type RepeatSpec,
 } from "../lib/schedules.ts";
+import { handoffHint } from "../lib/handoff.ts";
 import { isFinal, isFullyEditable } from "../lib/tasks.ts";
+import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
@@ -80,6 +82,8 @@ interface FormState {
   afterTaskId: string;
   /** Follower id ("" none). */
   nextTaskId: string;
+  /** Append the predecessor's handoff at launch. */
+  handoff: boolean;
   /** One-shot wall time "YYYY-MM-DDTHH:mm" in tz. */
   startLocal: string;
   repeat: RepeatSpec;
@@ -115,7 +119,7 @@ type Template = Pick<
   | "notes"
 >;
 
-function fromTemplate(t: Template): Omit<FormState, "mode" | "afterTaskId" | "nextTaskId" | "startLocal" | "repeat" | "tz"> {
+function fromTemplate(t: Template): Omit<FormState, "mode" | "afterTaskId" | "nextTaskId" | "handoff" | "startLocal" | "repeat" | "tz"> {
   return {
     projectId: String(t.projectId),
     title: t.title,
@@ -143,7 +147,7 @@ function initialState(
   defaults: ModelDefaults | undefined,
 ): FormState {
   const tz = browserTimeZone();
-  const timing = { afterTaskId: "", nextTaskId: "", startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
+  const timing = { afterTaskId: "", nextTaskId: "", handoff: true, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
   if (schedule !== undefined) {
     return { ...fromTemplate(schedule), ...timing, mode: "repeat", repeat: parseCron(schedule.cron), tz: schedule.tz };
   }
@@ -157,6 +161,7 @@ function initialState(
       mode,
       afterTaskId: task.afterTaskId === null ? "" : String(task.afterTaskId),
       nextTaskId: task.nextTaskId === null ? "" : String(task.nextTaskId),
+      handoff: task.handoff,
       startLocal: task.startAt === null ? defaultStartLocal(startTz) : toLocalInput(task.startAt, startTz),
       tz: startTz,
     };
@@ -304,6 +309,7 @@ function TaskFormDrawer({
         const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags, notes: s.notes };
         if (full) {
           if (after !== task.afterTaskId) body.afterTaskId = after;
+          if (mode === "after" && s.handoff !== task.handoff) body.handoff = s.handoff;
           if (timed !== null) {
             body.startLocal = timed.startLocal;
             body.startTz = timed.startTz;
@@ -318,7 +324,7 @@ function TaskFormDrawer({
       const body: CreateTaskRequest = {
         ...template(),
         ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
-        ...(after !== null ? { afterTaskId: after } : timed !== null ? timed : { start: mode === "now" }),
+        ...(after !== null ? { afterTaskId: after, handoff: s.handoff } : timed !== null ? timed : { start: mode === "now" }),
       };
       return { kind: "task", task: await api.createTask(body) };
     },
@@ -489,17 +495,24 @@ function TaskFormDrawer({
           <StartAtFields s={s} set={set} startMs={startMs} past={startPast} now={now} />
         ) : null}
         {mode === "after" && modes.length > 0 ? (
-          <Field label="Runs after" hint={after === null ? "Starts when that task settles in T3." : "Saved waiting; starts when that task settles in T3."}>
-            {(id) => (
-              <TaskPicker
-                id={id}
-                value={s.afterTaskId}
-                onChange={(afterTaskId) => set({ afterTaskId })}
-                options={candidates.before}
-                none="Pick a task…"
-              />
-            )}
-          </Field>
+          <div className="flex min-w-0 flex-col gap-2">
+            <Field label="Runs after" hint={after === null ? "Starts when that task settles in T3." : "Saved waiting; starts when that task settles in T3."}>
+              {(id) => (
+                <TaskPicker
+                  id={id}
+                  value={s.afterTaskId}
+                  onChange={(afterTaskId) => set({ afterTaskId })}
+                  options={candidates.before}
+                  none="Pick a task…"
+                />
+              )}
+            </Field>
+            <HandoffToggle
+              checked={s.handoff}
+              onChange={(handoff) => set({ handoff })}
+              hint={handoffHint({ afterTaskId: after, afterThreadId: null })}
+            />
+          </div>
         ) : null}
         {mode === "repeat" ? (
           <RepeatFields

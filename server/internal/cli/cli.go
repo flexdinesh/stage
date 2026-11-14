@@ -99,11 +99,11 @@ Usage:
   stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--after-me|--after-task ID|--after-thread ID]
-                   [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start]
-  stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""]
+                   [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start] [--handoff=false]
+  stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
   stage task rm|start|stop|dup|unlink ID
   stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
-  stage task link ID --after-me|--after-task ID|--after-thread ID
+  stage task link ID --after-me|--after-task ID|--after-thread ID [--handoff=false]
   stage task order ID ID...           link backlog tasks to run in this order
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
   stage schedule ls [--project P]

@@ -379,6 +379,9 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool, detail stri
 		return db.Task{}, err
 	}
 	in := launchInput(task, res.RequestID)
+	if block := s.prepareHandoff(ctx, task); block != "" {
+		in.Message = task.Prompt + "\n\n" + block
+	}
 	in.Attachments, err = s.uploadImages(ctx, id)
 	var out t3.LaunchResult
 	collision := false

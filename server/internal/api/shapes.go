@@ -31,6 +31,8 @@ type taskDetailJSON struct {
 	Sequence []taskJSON     `json:"sequence"` // linked run order containing the task (head first)
 	// Batch: the tasks the task's origin session created (null without one).
 	Batch *createdTasksJSON `json:"batch"`
+	// CurrentHandoff: what the current launch attempt appended (null when none).
+	CurrentHandoff *db.Handoff `json:"currentHandoff"`
 }
 
 // createdTasksJSON is db.CreatedTasks with API task shapes.

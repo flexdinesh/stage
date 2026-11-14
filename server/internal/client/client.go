@@ -66,6 +66,8 @@ type TaskDetail struct {
 	Thread   *Thread        `json:"thread"`
 	Sequence []Task         `json:"sequence"`
 	Batch    *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
+	// CurrentHandoff: what the current launch attempt appended (null when none).
+	CurrentHandoff *db.Handoff `json:"currentHandoff"`
 }
 
 // CreatedTasks is a session batch: tasks one session created, grouped by run
@@ -176,6 +178,7 @@ type CreateTask struct {
 	Notes              *string          `json:"notes,omitempty"`
 	AfterTaskID        *int64           `json:"afterTaskId,omitempty"`
 	AfterThreadID      *string          `json:"afterThreadId,omitempty"`
+	Handoff            *bool            `json:"handoff,omitempty"`
 	OriginThreadID     *string          `json:"originThreadId,omitempty"`
 	AttachmentIDs      []int64          `json:"attachmentIds,omitempty"`
 	StartLocal         *string          `json:"startLocal,omitempty"`
