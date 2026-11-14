@@ -92,7 +92,7 @@ function NeedsInputPanel({ threadId, links, onNotice }: { threadId: string; link
   const questionTotal = open.reduce((n, r) => n + r.questions.length, 0);
   const approvals = data?.approvalCount ?? 0;
   const noticed = Object.keys(notices).length > 0;
-  // The yellow edge marks only what still waits on the owner.
+  // The yellow edge marks only what still waits on the user.
   const waiting = query.isPending || query.error !== null || open.length > 0 || approvals > 0 || !noticed;
 
   // Deep link (#answer from a row or push): land on the panel once it has content.

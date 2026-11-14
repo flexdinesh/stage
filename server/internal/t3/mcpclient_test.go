@@ -583,7 +583,8 @@ func TestProtocolErrorKeepsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := c.currentSession()
-	if _, err := c.CallRaw(ctx, "no_such_tool", map[string]any{}); err == nil {
+	var out map[string]any
+	if err := c.call(ctx, "no_such_tool", map[string]any{}, &out); err == nil {
 		t.Fatal("unknown tool must fail")
 	} else if IsTransportError(err) {
 		t.Fatalf("protocol error classified as transport: %v", err)

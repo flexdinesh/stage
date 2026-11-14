@@ -519,7 +519,7 @@ Polling: one server poller per session, shared by every open stream. While a run
 
 ## Pending questions
 
-A session waiting on its owner has pending requests: user-input questions (T3 `AskUserQuestion`-style) and permission approvals. stage reads and answers questions through T3 `t3_pending_request` (needs `orchestration:operate`); approvals are only counted and must be resolved in T3.
+A session waiting on its user has pending requests: user-input questions (T3 `AskUserQuestion`-style) and permission approvals. stage reads and answers questions through T3 `t3_pending_request` (needs `orchestration:operate`); approvals are only counted and must be resolved in T3.
 
 `Question` (T3 user-input question):
 ```jsonc
