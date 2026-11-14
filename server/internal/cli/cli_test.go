@@ -387,13 +387,13 @@ func TestSetupInstructionsIdempotent(t *testing.T) {
 
 func TestSetupMCP(t *testing.T) {
 	h := newHarness(t)
-	h.url = "http://controlbox:7380"
+	h.url = "http://localhost:7380"
 	code, stdout, stderr := h.run("", "setup", "mcp")
 	if code != 0 {
 		t.Fatalf("setup mcp: %s", stderr)
 	}
 	got := fmt.Sprint(h.execs)
-	want := "[[claude mcp remove --scope user stage] [claude mcp add --scope user -e STAGE_URL=http://controlbox:7380 stage -- /usr/local/bin/stage mcp] [codex mcp remove stage]]"
+	want := "[[claude mcp remove --scope user stage] [claude mcp add --scope user -e STAGE_URL=http://localhost:7380 stage -- /usr/local/bin/stage mcp] [codex mcp remove stage]]"
 	if got != want || !strings.Contains(stdout, "skipped codex") {
 		t.Fatalf("execs %s\nstdout %s", got, stdout)
 	}
@@ -401,7 +401,7 @@ func TestSetupMCP(t *testing.T) {
 	if code, _, _ := h.run("", "setup", "mcp", "--claude", "--http"); code != 0 {
 		t.Fatal("http")
 	}
-	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user --transport http stage http://controlbox:7380/mcp]]" {
+	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user --transport http stage http://localhost:7380/mcp]]" {
 		t.Fatalf("http execs %s", got)
 	}
 }

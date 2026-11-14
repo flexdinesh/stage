@@ -18,7 +18,7 @@ import (
 
 func newTestClient(t *testing.T, f *fakeT3, admin string, store *MemoryTokenStore) *MCPClient {
 	t.Helper()
-	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://controlbox:3773", Store: store, Logger: slog.New(slog.DiscardHandler), ClientName: DefaultClientName})
+	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://localhost:3773", Store: store, Logger: slog.New(slog.DiscardHandler), ClientName: DefaultClientName})
 	t.Cleanup(c.Close)
 	return c
 }
@@ -103,7 +103,7 @@ func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
 	if !st.Connected || st.ClientID != saved.ClientID || st.ExpiresAt == nil || st.EnvironmentID != "env-fake" || st.LastError != "" {
 		t.Fatalf("status = %+v", st)
 	}
-	if got := c.WebURL(ctx, "thread-1"); got != "http://controlbox:3773/env-fake/thread-1" {
+	if got := c.WebURL(ctx, "thread-1"); got != "http://localhost:3773/env-fake/thread-1" {
 		t.Fatalf("web url = %q", got)
 	}
 }

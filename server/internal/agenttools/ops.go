@@ -371,7 +371,7 @@ type WaitArgs struct {
 	AfterThreadID string `json:"afterThreadId,omitempty" jsonschema:"run after this T3 session settles"`
 	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles (needs your session id)"`
 	StartLocal    string `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
-	StartTz       string `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. Asia/Kolkata"`
+	StartTz       string `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`
 	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
 }
 
@@ -734,7 +734,7 @@ type CreateScheduleArgs struct {
 	ConfigArgs
 	CallerArgs
 	Cron   string `json:"cron" jsonschema:"5-field cron (minute hour day-of-month month day-of-week) or @hourly|@daily|@weekly|@monthly"`
-	Tz     string `json:"tz" jsonschema:"IANA zone the cron is evaluated in, e.g. Asia/Kolkata"`
+	Tz     string `json:"tz" jsonschema:"IANA zone the cron is evaluated in, e.g. America/New_York"`
 	Paused bool   `json:"paused,omitempty"`
 }
 

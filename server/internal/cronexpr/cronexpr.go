@@ -48,11 +48,11 @@ func Parse(expr, tz string) (Spec, error) {
 // Zone loads an IANA zone; empty and "Local" are rejected.
 func Zone(tz string) (*time.Location, error) {
 	if tz == "" || tz == "Local" {
-		return nil, fmt.Errorf("invalid tz %q (want an IANA zone, e.g. Asia/Kolkata)", tz)
+		return nil, fmt.Errorf("invalid tz %q (want an IANA zone, e.g. America/New_York)", tz)
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return nil, fmt.Errorf("invalid tz %q (want an IANA zone, e.g. Asia/Kolkata)", tz)
+		return nil, fmt.Errorf("invalid tz %q (want an IANA zone, e.g. America/New_York)", tz)
 	}
 	return loc, nil
 }

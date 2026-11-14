@@ -7,16 +7,16 @@
 web
 
 ## Users
-One developer (the owner) running many T3 Code agent threads across several local projects. Uses stage mostly from a laptop and a phone on the LAN, rarely a desktop: queueing work, checking what needs input, and glancing at what is running or done.
+Developers running many T3 Code agent threads across several projects. They use stage mostly from a laptop and a phone on their private network, rarely a desktop: queueing work, checking what needs input, and glancing at what is running or done.
 
 ## Product Purpose
-A personal stage manager for T3 Code. It queues tasks (prompt + provider/model/effort + runtime/workspace), launches them as T3 threads, tracks thread status, runs linked tasks in order (a task linked to run after another starts when that thread is settled in T3), and gives a cross-project history of every T3 thread. Success: never miss a thread that needs input, keep a queue moving without babysitting, and see recent work at a glance.
+A self-hosted stage manager for T3 Code. It queues tasks (prompt + provider/model/effort + runtime/workspace), launches them as T3 threads, tracks thread status, runs linked tasks in order (a task linked to run after another starts when that thread is settled in T3), and gives a cross-project history of every T3 thread. Success: never miss a thread that needs input, keep a queue moving without babysitting, and see recent work at a glance.
 
 ## Positioning
-Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide. The one exception is a session's pending question: stage shows it and lets the owner answer it in place, so a needs-input thread can be unblocked from a phone in one step.
+Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide. The one exception is a session's pending question: stage shows it and lets the user answer it in place, so a needs-input thread can be unblocked from a phone in one step.
 
 ## Operating Context
-- Self-hosted on the T3 host via docker compose, bound to 0.0.0.0:7380 on a home LAN, no auth.
+- Self-hosted on the T3 host via docker compose, bound to 0.0.0.0:7380 on a trusted private network, no auth.
 - Talks to T3 only through T3's MCP endpoint; polls active tasks every 5s, full sync every 5 min, watched transcripts every 2s while their run is active.
 - Settling a thread happens in T3, not here; linked tasks wait for it.
 
@@ -36,7 +36,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Last word: each session's latest assistant reply, read during sync only when a thread is at rest and its updatedAt changed; stored as a 4000-char excerpt (truncated replies link to T3) plus a one-line preview. Task and session detail show the excerpt as sanitized markdown; Needs input and Done rows (dashboard, project, sessions) show the preview as one clamped line. A running thread keeps its previous reply. Agents get it via get_task/get_session (excerpt) and list rows (preview). Read-only; replying stays in T3.
 - Pull requests and runs: PRs T3 associates with a thread are mirrored on every sync and shown as state chips on task and session rows (Dashboard, Project, Sessions, History; two, then +n) and as a list on task and session detail linking to the PR (open sky, merged green, closed/draft gray). Task and session detail show a Runs panel (each follow-up is a new run): ordinal, status, model, start, run time, queue time; five newest, Show all for up to 50 stored. REST, `get_task`/`get_session` and CLI show expose both.
 - Dashboard Settled (last 7 days): tasks and external T3 threads in one list, newest settle first, each with its settle time and elapsed run time.
-- History: all mirrored threads (about 785, of which about 487 are subagent threads), time-window and attribute filters.
+- History: all mirrored threads (often hundreds, many of them subagent threads), time-window and attribute filters.
 - Agent interface: agents (and scripts) manage tasks through the `stage` CLI (`--json`), a stdio MCP server (`stage mcp`) or HTTP MCP at `/mcp`, all over the REST API. Create backlog tasks, start/stop/follow up, link run order (incl. "after me": start when the calling session settles), schedules, session reads (incl. the tasks the session created, so a planning agent can verify its batch), ordering several backlog tasks in one step. The calling session and cwd pick the project; tasks and schedules record the session that created them (shown as "Created by" / "by agent").
 - Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now, global notification event filter (needs input / failed / done; unchecked events are dropped from inbox and push).
 

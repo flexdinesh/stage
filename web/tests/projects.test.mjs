@@ -7,11 +7,11 @@ const project = (id, title, workspaceRoot, lastActivityAt) => ({
   createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt,
 });
 
-const stage = project(1, "stage", "/home/dee/workspace/stage", "2026-11-09T10:00:00Z");
-const gitsy = project(2, "gitsy", "/home/dee/workspace/gitsy/main", "2026-11-09T12:00:00Z");
-const k8s = project(3, "k8s-cluster", "/home/dee/workspace-lab/k8s-cluster/main", null);
-const stash = project(4, "stash", "/home/dee/workspace/stash/main", "2026-11-08T00:00:00Z");
-const scratch = project(5, "No project", "/home/dee/.t3/scratch", null);
+const stage = project(1, "stage", "/home/user/workspace/stage", "2026-11-09T10:00:00Z");
+const gitsy = project(2, "gitsy", "/home/user/workspace/gitsy/main", "2026-11-09T12:00:00Z");
+const k8s = project(3, "k8s-cluster", "/home/user/workspace-lab/k8s-cluster/main", null);
+const stash = project(4, "stash", "/home/user/workspace/stash/main", "2026-11-08T00:00:00Z");
+const scratch = project(5, "No project", "/home/user/.t3/scratch", null);
 const all = [stage, gitsy, k8s, stash, scratch];
 const ids = (matches) => matches.map((m) => m.project.id);
 
@@ -30,7 +30,7 @@ test("matches title case-insensitively and reports the matched span", () => {
 test("ranks title prefix, then title substring, then path only", () => {
   // "sta": stage and stash are both prefix matches, by recency; "scratch" path has no "sta".
   assert.deepEqual(ids(matchProjects(all, "sta")), [1, 4]);
-  // "s": prefixes (by recency) stage, stash; then substrings gitsy (most recent overall), k8s-cluster; path only "No project" (/home/dee/.t3/scratch).
+  // "s": prefixes (by recency) stage, stash; then substrings gitsy (most recent overall), k8s-cluster; path only "No project" (/home/user/.t3/scratch).
   assert.deepEqual(ids(matchProjects(all, "s")), [1, 4, 2, 3, 5]);
 });
 
@@ -39,7 +39,7 @@ test("matches the workspace path when the title does not", () => {
   assert.equal(rest.length, 0);
   assert.equal(m.project.id, 3);
   assert.equal(m.title, null);
-  assert.deepEqual(m.path, { start: 10, end: 23 });
+  assert.deepEqual(m.path, { start: 11, end: 24 });
 });
 
 test("ignores surrounding whitespace and returns nothing for no match", () => {

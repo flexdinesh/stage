@@ -61,7 +61,7 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
               id={id}
               value={root}
               onChange={(e) => setRoot(e.target.value)}
-              placeholder="/home/dee/workspace/my-app"
+              placeholder="/home/user/workspace/my-app"
               className="font-mono"
             />
           )}
