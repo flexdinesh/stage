@@ -125,6 +125,8 @@ type Task struct {
 	SettledAt          *time.Time       `json:"settledAt"`
 	RunStartedAt       *time.Time       `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
 	RunEndedAt         *time.Time       `json:"runEndedAt"`
+	LastWordPreview    *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
+	LastWordAt         *time.Time       `json:"lastWordAt"`
 	CreatedAt          time.Time        `json:"createdAt"`
 	UpdatedAt          time.Time        `json:"updatedAt"`
 	Attachments        []Attachment     `json:"attachments"` // images, upload order
@@ -172,7 +174,21 @@ type Thread struct {
 	CreatedAt           time.Time  `json:"createdAt"`
 	UpdatedAt           time.Time  `json:"updatedAt"`
 	SyncedAt            time.Time  `json:"syncedAt"`
-	Link                *string    `json:"-"`
+	LastWordPreview     *string    `json:"lastWordPreview"` // latest assistant reply, plain one-line preview
+	LastWordAt          *time.Time `json:"lastWordAt"`
+	// LastWord is the reply excerpt; set on detail reads only
+	// (GetThreadLastWord), null in lists.
+	LastWord *LastWord `json:"lastWord"`
+	Link     *string   `json:"-"`
+}
+
+// LastWord is a thread's latest assistant reply as last read by sync: a
+// markdown excerpt capped at sync's limit (Truncated = the reply is longer).
+type LastWord struct {
+	Text      string     `json:"text"`
+	Truncated bool       `json:"truncated"`
+	RunID     *string    `json:"runId"`
+	At        *time.Time `json:"at"` // the reply item's updatedAt
 }
 
 // Snippet is reusable prompt text; ProjectID nil = global.

@@ -311,6 +311,51 @@ func TestLifecycleLinkWaitTools(t *testing.T) {
 	}
 }
 
+func TestLastWordTools(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/word")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/word"}})
+	var a client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x", "start": true}, &a)
+	if a.T3ThreadID == nil {
+		t.Fatalf("not launched %+v", a)
+	}
+	id := *a.T3ThreadID
+	if err := e.fake.SetReply(id, t3.Reply{ItemID: "i1", Text: "## Done\nFixed **the race**."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.fake.SetThread(id, func(d *t3.ThreadDetail) { d.ItemCount = 2 }); err != nil {
+		t.Fatal(err)
+	}
+	_ = e.fake.SetStatus(id, t3.StatusCompleted)
+
+	// get_session refreshes the session, which reads the reply.
+	var sd client.ThreadDetail
+	mustCall(t, cs, "get_session", map[string]any{"id": id}, &sd)
+	if sd.Thread.LastWord == nil || sd.Thread.LastWord.Text != "## Done\nFixed **the race**." || sd.Thread.LastWord.Truncated {
+		t.Fatalf("session last word %+v", sd.Thread.LastWord)
+	}
+	var got client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": a.ID}, &got)
+	if got.Thread == nil || got.Thread.LastWord == nil || got.Thread.LastWord.Text != sd.Thread.LastWord.Text {
+		t.Fatalf("task thread last word %+v", got.Thread)
+	}
+	const preview = "Done Fixed the race."
+	if got.LastWordPreview == nil || *got.LastWordPreview != preview {
+		t.Fatalf("task preview %v", got.LastWordPreview)
+	}
+	var rows agenttools.TasksOut
+	mustCall(t, cs, "list_tasks", map[string]any{"project": fmt.Sprint(p.ID)}, &rows)
+	if rows.Total != 1 || rows.Tasks[0].LastWordPreview == nil || *rows.Tasks[0].LastWordPreview != preview {
+		t.Fatalf("list_tasks %+v", rows)
+	}
+	var sessions agenttools.SessionsOut
+	mustCall(t, cs, "list_sessions", map[string]any{"project": p.Title}, &sessions)
+	if sessions.Total != 1 || sessions.Sessions[0].LastWordPreview == nil || *sessions.Sessions[0].LastWordPreview != preview {
+		t.Fatalf("list_sessions %+v", sessions)
+	}
+}
+
 func TestScheduleTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched")

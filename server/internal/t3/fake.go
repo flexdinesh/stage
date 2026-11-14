@@ -18,8 +18,9 @@ type Fake struct {
 	seq         int
 	projects    []Project
 	threads     map[string]*ThreadDetail
-	order       []string          // thread ids, oldest first
-	launches    map[string]string // clientRequestID -> threadID
+	order       []string           // thread ids, oldest first
+	replies     map[string][]Reply // thread id -> assistant replies, oldest first
+	launches    map[string]string  // clientRequestID -> threadID
 	Catalog     Catalog
 	Sent        []FakeSend
 	Interrupted []string // interrupted thread ids
@@ -57,6 +58,7 @@ func NewFake() *Fake {
 	return &Fake{
 		now:      time.Now,
 		threads:  map[string]*ThreadDetail{},
+		replies:  map[string][]Reply{},
 		launches: map[string]string{},
 		Catalog: Catalog{Providers: []Provider{{
 			ProviderInstanceID: "claude",
@@ -163,6 +165,33 @@ func (f *Fake) ReadThread(_ context.Context, threadID string) (ThreadDetail, err
 	out := *t
 	out.RecentRuns = slices.Clone(t.RecentRuns)
 	return out, nil
+}
+
+// LatestReply returns the newest reply set with SetReply (of RunID if set),
+// text cut to MaxChars runes.
+func (f *Fake) LatestReply(_ context.Context, in LatestReplyInput) (Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.threads[in.ThreadID]; !ok {
+		return Reply{}, ErrNotFound
+	}
+	replies := f.replies[in.ThreadID]
+	for i := len(replies) - 1; i >= 0; i-- {
+		r := replies[i]
+		if in.RunID != "" && r.RunID != in.RunID {
+			continue
+		}
+		limit := in.MaxChars
+		if limit <= 0 {
+			limit = 50000
+		}
+		if runes := []rune(r.Text); len(runes) > limit {
+			r.Text = string(runes[:limit])
+			r.Truncated = true
+		}
+		return r, nil
+	}
+	return Reply{}, ErrNoReply
 }
 
 func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, error) {
@@ -365,11 +394,35 @@ func (f *Fake) SetThread(threadID string, mutate func(*ThreadDetail)) error {
 	return nil
 }
 
+// SetReply records an assistant reply on a thread: replaces the reply with
+// the same ItemID, else appends it as the newest. Empty ItemID gets one.
+func (f *Fake) SetReply(threadID string, r Reply) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.threads[threadID]; !ok {
+		return ErrNotFound
+	}
+	if r.ItemID == "" {
+		r.ItemID = f.nextID("item")
+	}
+	if r.UpdatedAt.IsZero() {
+		r.UpdatedAt = f.now()
+	}
+	replies := f.replies[threadID]
+	if i := slices.IndexFunc(replies, func(x Reply) bool { return x.ItemID == r.ItemID }); i >= 0 {
+		replies[i] = r
+	} else {
+		f.replies[threadID] = append(replies, r)
+	}
+	return nil
+}
+
 // RemoveThread forgets a thread (T3 no longer knows it).
 func (f *Fake) RemoveThread(threadID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.threads, threadID)
+	delete(f.replies, threadID)
 	f.order = slices.DeleteFunc(f.order, func(id string) bool { return id == threadID })
 }
 

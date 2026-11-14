@@ -281,14 +281,18 @@ type TaskRow struct {
 	StartAt       *time.Time   `json:"startAt,omitempty"`
 	ScheduleID    *int64       `json:"scheduleId,omitempty"`
 	Tags          []string     `json:"tags,omitempty"`
-	UpdatedAt     time.Time    `json:"updatedAt"`
+	// LastWordPreview is the thread's latest assistant reply, one plain line
+	// (get_task has the excerpt in thread.lastWord).
+	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 func taskRow(t client.Task) TaskRow {
 	return TaskRow{
 		ID: t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
 		T3ThreadID: t.T3ThreadID, AfterTaskID: t.AfterTaskID, AfterThreadID: t.AfterThreadID,
-		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, UpdatedAt: t.UpdatedAt,
+		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, LastWordPreview: t.LastWordPreview,
+		UpdatedAt: t.UpdatedAt,
 	}
 }
 
@@ -744,8 +748,11 @@ type SessionRow struct {
 	Project        *string      `json:"project,omitempty"`
 	TaskID         *int64       `json:"taskId,omitempty"`
 	ParentThreadID *string      `json:"parentThreadId,omitempty"`
-	UpdatedAt      time.Time    `json:"updatedAt"`
-	T3WebURL       *string      `json:"t3WebUrl,omitempty"`
+	// LastWordPreview: latest assistant reply, one plain line (get_session
+	// has the excerpt in thread.lastWord).
+	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	T3WebURL        *string   `json:"t3WebUrl,omitempty"`
 }
 
 // ListSessionsArgs is list_sessions.
@@ -783,7 +790,7 @@ func (o *Ops) ListSessions(ctx context.Context, a ListSessionsArgs) (SessionsOut
 	for _, t := range page.Threads {
 		out.Sessions = append(out.Sessions, SessionRow{
 			T3ThreadID: t.T3ThreadID, Title: t.Title, State: t.State, Project: t.ProjectTitle, TaskID: t.TaskID,
-			ParentThreadID: t.ParentThreadID, UpdatedAt: t.UpdatedAt, T3WebURL: t.T3WebURL,
+			ParentThreadID: t.ParentThreadID, LastWordPreview: t.LastWordPreview, UpdatedAt: t.UpdatedAt, T3WebURL: t.T3WebURL,
 		})
 	}
 	return out, nil

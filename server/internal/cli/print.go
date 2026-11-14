@@ -145,6 +145,9 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 		fmt.Fprintf(w, "  tags     %s\n", strings.Join(d.Tags, ", "))
 	}
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
+	if d.Thread != nil {
+		printLastWord(w, d.Thread.LastWord)
+	}
 	if len(d.Events) > 0 {
 		fmt.Fprintln(w)
 		for _, e := range d.Events {
@@ -214,5 +217,17 @@ func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	}
 	for _, c := range d.Children {
 		fmt.Fprintf(w, "  child %s  %s  [%s]\n", c.T3ThreadID, c.Title, c.State)
+	}
+	printLastWord(w, t.LastWord)
+}
+
+// printLastWord prints the thread's latest assistant reply excerpt.
+func printLastWord(w io.Writer, lw *db.LastWord) {
+	if lw == nil {
+		return
+	}
+	fmt.Fprintf(w, "\nlast word (%s)\n%s\n", ts(lw.At), strings.TrimRight(lw.Text, "\n"))
+	if lw.Truncated {
+		fmt.Fprintln(w, "[excerpt; full reply in T3]")
 	}
 }

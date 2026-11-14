@@ -36,6 +36,9 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if thread.LastWord, err = s.Store.GetThreadLastWord(r.Context(), id); err != nil {
+		return err
+	}
 	children, _, err := s.Store.ListThreads(r.Context(), db.ThreadFilter{Parent: &id, Limit: 2147483647, SortActivity: true})
 	if err != nil {
 		return err

@@ -356,6 +356,11 @@ State chip, row title with a mono meta line (project, model, relative time, tags
 
 On the Dashboard (every state group, external needs-input threads included) the project gets its own column: laptop rows put a fixed 150px project cell right after the 118px state chip (mono 12px, Ink Text, medium weight, linked, truncated with the full name in `title`) so project names align down the whole page, and the project leaves the meta line. Phone rows print the project as a mono 12px Ink Text line above the title. The column stays when the Dashboard is filtered to one project; Project detail rows keep the project in the meta line.
 
+### Last word
+A session's latest assistant reply, a read-only glance (T3 stays the place to talk).
+- **Row preview:** needs-input and done rows only (task rows, external thread rows, session rows). One line of Geist 13px Slate prose with an ellipsis, full preview in `title`, no marker or label. Laptop: under the meta line in the title column. Phone: its own full-width line between the title block and the actions, so it is not squeezed beside the state chip.
+- **Panel:** "Last word" Panel at the top of the main column on task detail (above Prompt) and session detail (above Run order). Header meta is the reply's relative time (mono, exact time on hover), plus "· earlier run" when the reply is not from the thread's latest run; Copy in the header. The body renders sanitized markdown (`.prose-reply`): Geist 14.5px at 1.55 leading, 75ch measure, headings at body or title size (never competing with the page H1), square Slate list markers, inline code and code blocks in mono on the Bench Gray panel with hairline borders (code blocks scroll sideways, prose wraps anywhere), hairline tables and rules, and a 1px Strong Hairline quote rule. Raw HTML shows as literal text. A truncated excerpt ends with a hairline-ruled mono footer, "Excerpt. Full reply in T3", linking to the thread. Hidden until a reply has been read.
+
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 13px text, actions right. `need` for waiting-on-you, `bad` for errors.
 

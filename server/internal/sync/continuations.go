@@ -92,7 +92,7 @@ func (s *Service) readSession(ctx context.Context, id string) (t3.ThreadDetail, 
 	if d.ThreadID != id {
 		return d, fmt.Errorf("T3 returned a different session for %s", id)
 	}
-	if err := s.store.UpsertThreadDetail(ctx, d); err != nil {
+	if err := s.mirrorDetail(ctx, d); err != nil {
 		return d, err
 	}
 	return d, nil

@@ -10,6 +10,7 @@ import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting } from "../lib/tasks.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
+import { LastWordLine } from "./LastWord.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 
@@ -215,7 +216,10 @@ export function TaskRow({ task, extra, showProject = false }: { task: Task; extr
             <span key={tag}>#{tag}</span>
           ))}
         </div>
+        <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
       </div>
+
+      <LastWordLine state={task.state} preview={task.lastWordPreview} className="order-3 col-span-2 md:hidden" />
 
       <div className="hidden md:order-3 md:block">
         {chip === null ? null : (
@@ -330,7 +334,10 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
           )}
           <span>external thread</span>
         </div>
+        <LastWordLine state={state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
       </div>
+
+      <LastWordLine state={state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
 
       {href === null ? null : (
         <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">

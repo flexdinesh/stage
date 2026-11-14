@@ -221,6 +221,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
 	if task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
+		if err == nil {
+			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
+		}
 		switch {
 		case err == nil:
 			tj := s.thread(env, th)

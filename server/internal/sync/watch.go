@@ -138,7 +138,7 @@ func (s *Service) watchThread(ctx context.Context, id string, prev *db.TaskState
 	if d.RelationshipToParent == subagent {
 		return nil
 	}
-	if err := s.store.UpsertThreadDetail(ctx, d); err != nil {
+	if err := s.mirrorDetail(ctx, d); err != nil {
 		return fmt.Errorf("upsert thread: %w", err)
 	}
 	cur := db.StateRunning

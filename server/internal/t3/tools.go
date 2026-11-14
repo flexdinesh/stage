@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"unicode/utf16"
 )
 
 const (
@@ -107,6 +109,146 @@ func (c *MCPClient) ReadThread(ctx context.Context, threadID string) (ThreadDeta
 	d := out.toDetail()
 	c.noteEnvironment(environmentFromLink(d.Link))
 	return d, nil
+}
+
+const (
+	// replyWindow is positions scanned per t3_thread_read (its max limit).
+	replyWindow = 100
+	// replyWindows bounds the backward scan (~2000 timeline positions).
+	replyWindows = 20
+	// itemCharsMax is t3_thread_read's maxCharsPerItem cap.
+	itemCharsMax = 50000
+)
+
+func (c *MCPClient) LatestReply(ctx context.Context, in LatestReplyInput) (Reply, error) {
+	if in.ThreadID == "" {
+		return Reply{}, ErrNotFound
+	}
+	budget := in.MaxChars
+	if budget <= 0 {
+		budget = itemCharsMax
+	}
+	count := in.ItemCount
+	if count <= 0 {
+		var out wireThreadRead
+		args := map[string]any{"threadId": in.ThreadID, "limit": 1, "runLimit": 1, "maxCharsPerItem": 1}
+		if err := c.call(ctx, "t3_thread_read", args, &out); err != nil {
+			return Reply{}, err
+		}
+		count = out.Thread.ItemCount
+	}
+	if count <= 0 {
+		return Reply{}, ErrNoReply
+	}
+	item, found, err := c.findReply(ctx, in.ThreadID, in.RunID, count)
+	if err != nil {
+		return Reply{}, err
+	}
+	if !found {
+		return Reply{}, ErrNoReply
+	}
+	return c.replyText(ctx, in.ThreadID, item, budget)
+}
+
+// findReply scans the messages view backwards in replyWindow-position windows
+// (start, end] for the newest local assistant_message (of runID if set). The
+// newest window pages forward while hasMore: the thread may have grown since
+// itemCount was read.
+func (c *MCPClient) findReply(ctx context.Context, threadID, runID string, itemCount int) (wireTimelineItem, bool, error) {
+	end := itemCount - 1
+	for w := range replyWindows {
+		start := end - replyWindow
+		var best wireTimelineItem
+		found := false
+		after := start
+		for range maxPages {
+			args := map[string]any{"threadId": threadID, "view": "messages", "limit": replyWindow, "runLimit": 1, "maxCharsPerItem": 1}
+			if after >= 0 { // T3 afterPosition is NonNegativeInt; omitted = -1
+				args["afterPosition"] = after
+			}
+			var page wireThreadRead
+			if err := c.call(ctx, "t3_thread_read", args, &page); err != nil {
+				return wireTimelineItem{}, false, err
+			}
+			for _, it := range page.Items {
+				if it.Position <= after || (w > 0 && it.Position > end) {
+					continue
+				}
+				if it.Type == "assistant_message" && it.Visibility == "local" && (runID == "" || it.RunID == runID) &&
+					(!found || it.Position > best.Position) {
+					best, found = it, true
+				}
+			}
+			if w > 0 || !page.HasMore || page.NextPosition == nil {
+				break
+			}
+			if *page.NextPosition <= after {
+				return wireTimelineItem{}, false, fmt.Errorf("t3 t3_thread_read: position did not advance (%d -> %d)", after, *page.NextPosition)
+			}
+			after = *page.NextPosition
+		}
+		if found {
+			return best, true, nil
+		}
+		if start < 0 {
+			break
+		}
+		end = start
+	}
+	return wireTimelineItem{}, false, nil
+}
+
+// replyText reads up to budget UTF-16 units of item's text, paging by
+// itemId + textOffset (T3 caps a page at itemCharsMax).
+func (c *MCPClient) replyText(ctx context.Context, threadID string, item wireTimelineItem, budget int) (Reply, error) {
+	r := Reply{ItemID: item.ItemID, RunID: item.RunID, MessageID: item.MessageID, Position: item.Position, UpdatedAt: item.UpdatedAt.Time}
+	var text strings.Builder
+	offset := 0
+	for i := 0; budget > 0 && i < maxPages; i++ {
+		args := map[string]any{"threadId": threadID, "itemId": item.ItemID, "textOffset": offset, "runLimit": 1, "maxCharsPerItem": min(budget, itemCharsMax)}
+		var page wireThreadRead
+		if err := c.call(ctx, "t3_thread_read", args, &page); err != nil {
+			return Reply{}, err
+		}
+		idx := slices.IndexFunc(page.Items, func(it wireTimelineItem) bool { return it.ItemID == item.ItemID })
+		if idx < 0 {
+			if offset == 0 {
+				return Reply{}, ErrNoReply // gone since the scan (e.g. rolled back)
+			}
+			r.Truncated = true
+			break
+		}
+		got := page.Items[idx]
+		if offset == 0 {
+			r.UpdatedAt = got.UpdatedAt.Time
+		}
+		text.WriteString(got.Text)
+		n := utf16Len(got.Text)
+		budget -= n
+		r.Truncated = got.TextTruncated
+		if !got.TextTruncated {
+			break
+		}
+		next := offset + n
+		if got.NextTextOffset != nil {
+			next = *got.NextTextOffset
+		}
+		if next <= offset {
+			break
+		}
+		offset = next
+	}
+	r.Text = text.String()
+	return r, nil
+}
+
+// utf16Len is len(s) in UTF-16 code units (JS string length).
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += max(utf16.RuneLen(r), 1)
+	}
+	return n
 }
 
 func (c *MCPClient) LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error) {

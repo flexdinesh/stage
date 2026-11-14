@@ -201,6 +201,9 @@ export interface Task {
   /** Elapsed run span of the task's thread: first run start to newest run completion. */
   runStartedAt: string | null;
   runEndedAt: string | null;
+  /** The thread's latest assistant reply as one plain line (detail: `thread.lastWord`). */
+  lastWordPreview: string | null;
+  lastWordAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -417,6 +420,21 @@ export interface Thread {
   createdAt: string;
   updatedAt: string;
   syncedAt: string;
+  /** Latest assistant reply as one plain line. */
+  lastWordPreview: string | null;
+  lastWordAt: string | null;
+  /** Reply excerpt (markdown); set on detail reads only, null in lists. */
+  lastWord: LastWord | null;
+}
+
+/** A thread's latest assistant reply as last synced: markdown excerpt capped at 4000 chars. */
+export interface LastWord {
+  text: string;
+  /** The reply is longer than `text`; the rest is in T3. */
+  truncated: boolean;
+  runId: string | null;
+  /** When the reply was last updated in T3. */
+  at: string | null;
 }
 
 export interface ThreadList {
