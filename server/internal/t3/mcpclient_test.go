@@ -18,7 +18,7 @@ import (
 
 func newTestClient(t *testing.T, f *fakeT3, admin string, store *MemoryTokenStore) *MCPClient {
 	t.Helper()
-	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://controlbox:3773", Store: store, Logger: slog.New(slog.DiscardHandler), ClientName: DefaultClientName})
+	c := NewMCPClient(Options{BaseURL: f.url() + "/", AdminToken: admin, PublicURL: "http://localhost:3773", Store: store, Logger: slog.New(slog.DiscardHandler), ClientName: DefaultClientName})
 	t.Cleanup(c.Close)
 	return c
 }
@@ -103,7 +103,7 @@ func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
 	if !st.Connected || st.ClientID != saved.ClientID || st.ExpiresAt == nil || st.EnvironmentID != "env-fake" || st.LastError != "" {
 		t.Fatalf("status = %+v", st)
 	}
-	if got := c.WebURL(ctx, "thread-1"); got != "http://controlbox:3773/env-fake/thread-1" {
+	if got := c.WebURL(ctx, "thread-1"); got != "http://localhost:3773/env-fake/thread-1" {
 		t.Fatalf("web url = %q", got)
 	}
 }
@@ -583,7 +583,8 @@ func TestProtocolErrorKeepsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := c.currentSession()
-	if _, err := c.CallRaw(ctx, "no_such_tool", map[string]any{}); err == nil {
+	var out map[string]any
+	if err := c.call(ctx, "no_such_tool", map[string]any{}, &out); err == nil {
 		t.Fatal("unknown tool must fail")
 	} else if IsTransportError(err) {
 		t.Fatalf("protocol error classified as transport: %v", err)

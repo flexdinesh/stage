@@ -390,10 +390,10 @@ func TestEnvironmentFromLink(t *testing.T) {
 }
 
 func TestWebThreadURL(t *testing.T) {
-	if got := WebThreadURL("http://controlbox:3773/", "env", "t:1"); got != "http://controlbox:3773/env/t:1" {
+	if got := WebThreadURL("http://localhost:3773/", "env", "t:1"); got != "http://localhost:3773/env/t:1" {
 		t.Fatalf("got %q", got)
 	}
-	if got := WebThreadURL("http://controlbox:3773", "", "t"); got != "" {
+	if got := WebThreadURL("http://localhost:3773", "", "t"); got != "" {
 		t.Fatalf("got %q", got)
 	}
 }

@@ -7,7 +7,7 @@ import { Panel, cx } from "./ui.tsx";
 // marked + DOMPurify load only when a reply is shown.
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 
-/** Rows that show the reply preview: the ones waiting on the owner to read it. */
+/** Rows that show the reply preview: the ones waiting on the user to read it. */
 const PREVIEW_STATES: readonly TaskState[] = ["needs_input", "done"];
 
 /**

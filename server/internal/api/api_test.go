@@ -142,7 +142,7 @@ type env struct {
 	hub    *transcript.Hub
 }
 
-const publicURL = "http://controlbox:3773"
+const publicURL = "http://localhost:3773"
 
 func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)

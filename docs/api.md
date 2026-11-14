@@ -64,7 +64,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 {
   "connected": true,
   "t3Url": "http://127.0.0.1:3773",
-  "publicUrl": "http://controlbox:3773",
+  "publicUrl": "http://t3.example.com:3773",
   "environmentId": "env_123",
   "clientId": "mcp_client_abc",
   "tokenExpiresAt": "2026-12-08T10:00:00Z",
@@ -120,7 +120,7 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
   "id": 1,
   "t3ProjectId": "proj_abc",
   "title": "stage",
-  "workspaceRoot": "/home/dee/workspace/stage",
+  "workspaceRoot": "/home/user/workspace/stage",
   "source": "app",
   "archivedAt": null,
   "createdAt": "2026-11-08T10:00:00Z",
@@ -182,7 +182,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
-  "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
+  "t3WebUrl": "http://t3.example.com:3773/env_123/thread_abc",
   "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
@@ -244,7 +244,7 @@ Body `CreateTaskRequest`:
   "originThreadId": null,        // optional: T3 session creating the task (provenance)
   "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
   "startLocal": null,            // optional: one-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz
-  "startTz": null,               // required with startLocal: IANA zone, e.g. "Asia/Kolkata"
+  "startTz": null,               // required with startLocal: IANA zone, e.g. "America/New_York"
   "handoff": true,               // optional, default true: append the predecessor handoff at launch
   "start": false                 // optional: true = Save & start (ignored when afterTaskId or afterThreadId set)
 }
@@ -308,7 +308,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "notes": "",
   "attachments": [],
   "cron": "0 2 * * *",
-  "tz": "Asia/Kolkata",
+  "tz": "America/New_York",
   "paused": false,
   "nextRunAt": "2026-11-11T20:30:00Z",
   "lastRunAt": "2026-11-10T20:30:00Z",
@@ -338,7 +338,7 @@ Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: 
 200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
 
 ### `POST /api/schedules`
-Body `CreateScheduleRequest`: the `CreateTaskRequest` config fields (`projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes attachmentIds originThreadId`, same rules; `afterTaskId`, `afterThreadId`, `start`, `startLocal`, `startTz` are 400) plus `"cron": "0 2 * * *"` (required), `"tz": "Asia/Kolkata"` (required), `"paused": false` (optional).
+Body `CreateScheduleRequest`: the `CreateTaskRequest` config fields (`projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags notes attachmentIds originThreadId`, same rules; `afterTaskId`, `afterThreadId`, `start`, `startLocal`, `startTz` are 400) plus `"cron": "0 2 * * *"` (required), `"tz": "America/New_York"` (required), `"paused": false` (optional).
 201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
 
 ### `GET /api/schedules/:id`
@@ -356,7 +356,7 @@ Run now: spawn a task and start it immediately, ignoring `paused` and the overla
 201 `Task`. 404.
 
 ### `POST /api/schedules/preview`
-Body `{ "cron": "0 2 * * 1-5", "tz": "Asia/Kolkata" }`. 200 `{ "next": [ISO, ISO, ISO] }` (next three fires, UTC). 400 with the parse error message.
+Body `{ "cron": "0 2 * * 1-5", "tz": "America/New_York" }`. 200 `{ "next": [ISO, ISO, ISO] }` (next three fires, UTC). 400 with the parse error message.
 
 ### Schedule rules
 - The scheduler ticks every 15s (and on start).
@@ -413,7 +413,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "creationSource": "mcp",
   "source": "app",
   "taskId": 7,
-  "t3WebUrl": "http://controlbox:3773/env_123/thread_abc",
+  "t3WebUrl": "http://t3.example.com:3773/env_123/thread_abc",
   "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
   "createdAt": "2026-11-08T10:00:00Z",
   "updatedAt": "2026-11-08T10:01:00Z",
@@ -519,7 +519,7 @@ Polling: one server poller per session, shared by every open stream. While a run
 
 ## Pending questions
 
-A session waiting on its owner has pending requests: user-input questions (T3 `AskUserQuestion`-style) and permission approvals. stage reads and answers questions through T3 `t3_pending_request` (needs `orchestration:operate`); approvals are only counted and must be resolved in T3.
+A session waiting on its user has pending requests: user-input questions (T3 `AskUserQuestion`-style) and permission approvals. stage reads and answers questions through T3 `t3_pending_request` (needs `orchestration:operate`); approvals are only counted and must be resolved in T3.
 
 `Question` (T3 user-input question):
 ```jsonc

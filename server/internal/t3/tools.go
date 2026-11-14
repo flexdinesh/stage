@@ -3,7 +3,6 @@ package t3
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -460,17 +459,4 @@ func (c *MCPClient) Capabilities(ctx context.Context) (Catalog, error) {
 		return Catalog{}, err
 	}
 	return out.toCatalog(), nil
-}
-
-// CallRaw calls any T3 MCP tool and returns its result JSON undecoded
-// (debugging and dev tools; not part of Client).
-func (c *MCPClient) CallRaw(ctx context.Context, tool string, args map[string]any) (json.RawMessage, error) {
-	var out json.RawMessage
-	if args == nil {
-		args = map[string]any{}
-	}
-	if err := c.call(ctx, tool, args, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
