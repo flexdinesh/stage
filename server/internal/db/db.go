@@ -45,7 +45,11 @@ func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 var ErrNotFound = errors.New("not found")
 
 // ConflictError: action not allowed in current state / duplicate (409).
-type ConflictError struct{ Msg string }
+// Code, when set, is a machine-readable reason (error body "code").
+type ConflictError struct {
+	Msg  string
+	Code string
+}
 
 func (e *ConflictError) Error() string { return e.Msg }
 

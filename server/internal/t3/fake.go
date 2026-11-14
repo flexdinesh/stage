@@ -42,12 +42,31 @@ type Fake struct {
 	// Searches: every SearchThreads input.
 	Searches []SearchThreadsInput
 	messages []fakeMessage
+	// Responses: every accepted RespondPendingQuestion.
+	Responses []FakeResponse
+	// requests: per-thread pending requests (user input and approvals).
+	requests map[string][]*fakeRequest
+	// askOnLaunch: every launched thread asks the demo questions (SeedDemo).
+	askOnLaunch bool
 }
 
 type fakeMessage struct {
 	threadID, text string
 	source         SearchSource
 	at             time.Time
+}
+
+// FakeResponse is one accepted answer.
+type FakeResponse struct {
+	ThreadID, RequestID string
+	Answers             map[string]Answer
+}
+
+type fakeRequest struct {
+	id        string
+	approval  bool
+	status    string // pending|resolved|expired
+	questions []Question
 }
 
 type FakeUpload struct {
@@ -75,6 +94,7 @@ func NewFake() *Fake {
 		replies:  map[string][]Reply{},
 		items:    map[string][]TimelineItem{},
 		launches: map[string]string{},
+		requests: map[string][]*fakeRequest{},
 		Catalog: Catalog{Providers: []Provider{{
 			ProviderInstanceID: "claude",
 			DriverKind:         "claude",
@@ -445,6 +465,10 @@ func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, er
 	if in.ClientRequestID != "" {
 		f.launches[in.ClientRequestID] = id
 	}
+	if f.askOnLaunch {
+		f.requests[id] = append(f.requests[id], &fakeRequest{id: f.nextID("request"), status: "pending", questions: demoQuestions()})
+		f.recount(d)
+	}
 	return launchResult(d), nil
 }
 
@@ -658,3 +682,165 @@ func (f *Fake) setStatus(t *ThreadDetail, status ThreadStatus) {
 		}
 	}
 }
+
+// AddUserInput adds a pending user-input request (as AskUserQuestion would)
+// and returns its id. PendingRequestCount follows.
+func (f *Fake) AddUserInput(threadID string, questions []Question) (string, error) {
+	return f.addRequest(threadID, &fakeRequest{questions: slices.Clone(questions)})
+}
+
+// AddApproval adds a pending permission request (never listed by
+// t3_pending_request). PendingRequestCount follows.
+func (f *Fake) AddApproval(threadID string) (string, error) {
+	return f.addRequest(threadID, &fakeRequest{approval: true})
+}
+
+func (f *Fake) addRequest(threadID string, r *fakeRequest) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.threads[threadID]
+	if !ok {
+		return "", ErrNotFound
+	}
+	r.id = f.nextID("request")
+	r.status = "pending"
+	f.requests[threadID] = append(f.requests[threadID], r)
+	f.recount(t)
+	return r.id, nil
+}
+
+// ResolveRequest settles a request outside stage (answered in T3: resolved;
+// "expired" for a stale one). PendingRequestCount follows.
+func (f *Fake) ResolveRequest(threadID, requestID, status string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.threads[threadID]
+	if !ok {
+		return ErrNotFound
+	}
+	for _, r := range f.requests[threadID] {
+		if r.id == requestID {
+			r.status = status
+			f.recount(t)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+// recount sets PendingRequestCount from pending requests. Caller holds mu.
+func (f *Fake) recount(t *ThreadDetail) {
+	n := 0
+	for _, r := range f.requests[t.ThreadID] {
+		if r.status == "pending" {
+			n++
+		}
+	}
+	t.PendingRequestCount = n
+	t.UpdatedAt = f.now()
+}
+
+func (f *Fake) ListPendingQuestions(_ context.Context, threadID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.threads[threadID]; !ok {
+		return nil, &ToolError{Tool: "t3_pending_request", Code: "thread_not_found", Message: "Thread " + threadID + " is no longer available."}
+	}
+	ids := []string{}
+	for _, r := range f.requests[threadID] {
+		if !r.approval && r.status == "pending" {
+			ids = append(ids, r.id)
+		}
+	}
+	return ids, nil
+}
+
+// question is T3 readQuestion. Caller holds mu.
+func (f *Fake) question(threadID, requestID string) (*fakeRequest, error) {
+	if _, ok := f.threads[threadID]; !ok {
+		return nil, &ToolError{Tool: "t3_pending_request", Code: "thread_not_found", Message: "Thread " + threadID + " is no longer available."}
+	}
+	for _, r := range f.requests[threadID] {
+		if r.id != requestID || r.approval {
+			continue
+		}
+		switch r.status {
+		case "pending":
+			return r, nil
+		case "resolved":
+			return nil, &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: "The user-input request was already answered."}
+		default:
+			return nil, &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: "The user-input request is no longer pending (" + r.status + ")."}
+		}
+	}
+	return nil, &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: "The pending user-input request was not found."}
+}
+
+func (f *Fake) ReadPendingQuestion(_ context.Context, threadID, requestID string) (PendingQuestion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, err := f.question(threadID, requestID)
+	if err != nil {
+		return PendingQuestion{}, err
+	}
+	return PendingQuestion{RequestID: r.id, Questions: slices.Clone(r.questions)}, nil
+}
+
+func (f *Fake) RespondPendingQuestion(_ context.Context, threadID, requestID string, answers map[string]Answer) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, err := f.question(threadID, requestID)
+	if err != nil {
+		return err
+	}
+	if len(answers) == 0 {
+		return &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: "answers is required."}
+	}
+	r.status = "resolved"
+	f.recount(f.threads[threadID])
+	f.Responses = append(f.Responses, FakeResponse{ThreadID: threadID, RequestID: requestID, Answers: answers})
+	return nil
+}
+
+// SeedDemo fills the fake for local UI work (T3_FAKE_SEED=1): a demo project
+// with external threads waiting on questions, a mix, and an approval only;
+// launched tasks then ask the demo questions too.
+func (f *Fake) SeedDemo() {
+	ctx := context.Background()
+	p := f.AddProject("demo", "/demo")
+	launch := func(title string) string {
+		r, _ := f.LaunchThread(ctx, LaunchInput{ProjectID: p.ID, Title: title})
+		return r.ThreadID
+	}
+	asks := launch("Pick the rollout plan for the sync rewrite")
+	_, _ = f.AddUserInput(asks, demoQuestions())
+	mixed := launch("Migrate notifications table")
+	_, _ = f.AddUserInput(mixed, []Question{{ID: "strict", Header: "Backfill", Question: "Backfill old rows now?",
+		AllowCustomAnswer: ptrBool(false), Options: []QuestionOption{{Label: "Yes", Description: "Runs in one transaction"}, {Label: "No", Description: "New rows only"}}}})
+	_, _ = f.AddApproval(mixed)
+	approval := launch("Delete stale worktrees")
+	_, _ = f.AddApproval(approval)
+	f.mu.Lock()
+	f.askOnLaunch = true
+	f.mu.Unlock()
+}
+
+func ptrBool(b bool) *bool { return &b }
+
+func demoQuestions() []Question {
+	initial := "Ship behind a flag first"
+	return []Question{
+		{ID: "approach", Header: "Approach", Question: "Which rollout approach should I take?", Options: []QuestionOption{
+			{Label: "Big bang", Description: "Replace the sync loop in one change"},
+			{Label: "Incremental", Description: "Run old and new loops side by side, compare, then switch", Value: ptrString("incremental")},
+		}},
+		{ID: "checks", Header: "Checks", Question: "Which checks must pass before merging?", MultiSelect: true, Options: []QuestionOption{
+			{Label: "Unit tests", Description: "go test ./..."},
+			{Label: "Fake T3 e2e", Description: "Full flow against the in-memory fake"},
+			{Label: "Manual phone check", Description: ""},
+		}},
+		{ID: "notes", Header: "Notes", Question: "Anything else I should know?", InitialAnswer: &initial, Options: []QuestionOption{}},
+	}
+}
+
+func ptrString(s string) *string { return &s }

@@ -20,6 +20,9 @@ type Notification struct {
 	// CurrentState: the task's state, or for an external thread `settled`
 	// when settled, else its observed state. nil = unknown (deleted/unobserved).
 	CurrentState *TaskState `json:"currentState"`
+	// PendingQuestionCount: answerable questions the task's or external
+	// thread's session is waiting on now.
+	PendingQuestionCount int `json:"pendingQuestionCount"`
 }
 
 // NewNotification is what the notifier records.
@@ -58,10 +61,13 @@ const notificationColumns = `n.id, n.event, n.task_id, COALESCE(tk.t3_thread_id,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
        WHEN th.settled THEN 'settled'
-       ELSE th.observed_state END AS current_state`
+       ELSE th.observed_state END AS current_state,
+  COALESCE(LEAST(COALESCE(tth.pending_question_count, th.pending_question_count),
+    COALESCE(tth.pending_request_count, th.pending_request_count)), 0) AS pending_question_count`
 
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
+LEFT JOIN threads tth ON tth.t3_thread_id = tk.t3_thread_id
 LEFT JOIN threads th ON n.task_id IS NULL AND th.t3_thread_id = n.t3_thread_id`
 
 // InsertNotification stores n and returns its id.
@@ -100,7 +106,7 @@ LIMIT $1`, limit, beforeID, key)
 	for rows.Next() {
 		var n Notification
 		if err := rows.Scan(&n.ID, &n.Event, &n.TaskID, &n.T3ThreadID, &n.Title, &n.ProjectTitle,
-			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState); err != nil {
+			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState, &n.PendingQuestionCount); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
@@ -146,7 +152,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID)
 	for rows.Next() {
 		var g NotificationGroup
 		if err := rows.Scan(&g.ID, &g.Event, &g.TaskID, &g.T3ThreadID, &g.Title, &g.ProjectTitle,
-			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
+			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.PendingQuestionCount, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, g)

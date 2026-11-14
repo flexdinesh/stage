@@ -30,8 +30,12 @@ func (e *ToolError) Error() string {
 	return fmt.Sprintf("t3 %s: %s", e.Tool, e.Message)
 }
 
-// Is maps T3 not-found codes to ErrNotFound.
+// Is maps T3 not-found codes to ErrNotFound and pending-request failures to
+// ErrRequestAnswered / ErrRequestStale.
 func (e *ToolError) Is(target error) bool {
+	if target == ErrRequestAnswered || target == ErrRequestStale {
+		return requestError(e, target)
+	}
 	return target == ErrNotFound && (e.Code == "thread_not_found" || e.Code == "run_not_found")
 }
 

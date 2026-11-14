@@ -112,6 +112,7 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
   branch = EXCLUDED.branch, worktree_path = EXCLUDED.worktree_path,
   pending_request_count = EXCLUDED.pending_request_count, archived = EXCLUDED.archived,
+  pending_question_count = CASE WHEN EXCLUDED.pending_request_count = 0 THEN 0 ELSE threads.pending_question_count END,
   active_run_id = EXCLUDED.active_run_id, latest_run_id = EXCLUDED.latest_run_id,
   latest_run_status = EXCLUDED.latest_run_status,
   run_started_at = EXCLUDED.run_started_at, run_ended_at = EXCLUDED.run_ended_at,
@@ -144,7 +145,7 @@ func RunSpan(d t3.ThreadDetail) (start, end *time.Time) {
 
 const threadSelect = `
 SELECT th.t3_thread_id, th.t3_project_id, p.id, p.title, th.title, th.status, th.settled,
-  th.settled_at, th.pending_request_count, th.provider_instance_id, th.model, th.runtime_mode,
+  th.settled_at, th.pending_request_count, LEAST(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
   th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
   th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `
@@ -155,7 +156,7 @@ LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id`
 func scanThread(row pgx.Row) (Thread, error) {
 	var t Thread
 	err := row.Scan(&t.T3ThreadID, &t.T3ProjectID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Status,
-		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
+		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.PendingQuestionCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
 		&t.InteractionMode, &t.Branch, &t.WorktreePath, &t.ParentThreadID, &t.Relationship,
 		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt, &t.Archived, &t.ActiveRunID, &t.LatestRunID,
 		&t.RunStartedAt, &t.RunEndedAt, &t.LastWordPreview, &t.LastWordAt, &t.RunCount, &t.PullRequests, &t.State)
