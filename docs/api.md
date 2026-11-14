@@ -41,10 +41,12 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 // Workspace
 { "type": "root" }
-{ "type": "worktree", "baseRef": "origin/main", "branch": "feat-x" }   // branch: string | null (null = T3 picks)
+{ "type": "worktree", "baseRef": "origin/main", "branch": "feat-x", "base": "ref" }   // branch: string | null (null = T3 picks)
 ```
 
 `Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}` (remote = `origin` or `upstream`; `feature/x` is treated as local).
+
+`base` (worktree only, always emitted; `ref` when omitted on input): `ref` starts from `baseRef`; `predecessor` starts a linked task's worktree from its predecessor's branch, with `baseRef` as the fallback (see "Predecessor base"). Invalid values, `predecessor` with `root`, and `predecessor` on a schedule are 400.
 
 ## Health
 
@@ -216,7 +218,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "sequence": Task[], "batch": CreatedTasks | null, "currentHandoff": Handoff | null }`. `currentHandoff`: the current launch attempt's handoff record (see "Handoff"); null before the first launch, for unlinked tasks, or with `handoff` off. `sequence`: see "Link rules". `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "sequence": Task[], "batch": CreatedTasks | null, "currentHandoff": Handoff | null, "currentLaunchBase": LaunchBase | null }`. `currentHandoff`: the current launch attempt's handoff record (see "Handoff"); null before the first launch, for unlinked tasks, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `sequence`: see "Link rules". `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
 
 ### `GET /api/tasks`
 Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
@@ -828,6 +830,27 @@ Final reply:
   "at": "2026-11-14T10:02:01Z" }
 ```
 
+## Predecessor base
+
+A task with `workspace.base` `predecessor` (opt-in per task, default `ref`) starts its T3 worktree from its predecessor's branch, so stacked sequential work builds on unmerged changes. Resolved at launch (link runner, Start, restart), from the same live `t3_thread_read` as the handoff:
+
+- Uses the predecessor's local branch: `{type:"worktree", baseRef: <branch>, startFromOrigin: false, branch: <the task's branch, else T3 picks>}`. Worktrees share refs, so the predecessor's worktree branch resolves in the project repo, unpushed commits included.
+- Falls back to the task's own `baseRef` (same `startFromOrigin` rule as `Workspace`) when, in order: the task is not linked; the predecessor has not passed or has no thread; the read fails; the predecessor ran in another T3 project; it ran at project root (no worktree); it has no branch; it has pull requests and all are `merged` (its work is already on the default branch).
+- T3 rejects a base ref that does not resolve before creating a thread (`invalid_request`, `Base ref "<branch>" does not resolve…`; e.g. the branch was deleted). stage then relaunches once from the fallback with the same clientRequestId and records reason `branch <x> not found in project`.
+- The launch is never blocked by the base. Each attempt records `LaunchBase` in `task_launch_bases` plus a `launching` task event: `base from #12's branch feat/api` (`session "Title"'s` for session links) or `base fallback origin/main: <reason>`. An attempt that reuses its clientRequestId resends the stored base.
+- The follower's own branch name is unchanged (`workspace.branch`, else T3 picks). A follower branch equal to the predecessor's fails in T3 (already checked out).
+
+`LaunchBase`:
+```jsonc
+{ "attempt": 1, "baseRef": "feat/api", "startFromOrigin": false,
+  "source": "predecessor",          // predecessor | fallback
+  "sourceTaskId": 12,               // null for a session link or when not linked
+  "sourceThreadId": "thread-abc",   // null when not linked
+  "sourceTitle": "Build API",
+  "reason": null,                   // why it fell back
+  "at": "2026-11-14T10:02:01Z" }
+```
+
 ## Session batch
 
 A session batch is the set of tasks one session created (`originThreadId`), usually a plan an agent broke into tasks.
@@ -859,5 +882,6 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - `get_session` returns `createdTasks` (see "Session batch"); `get_task` returns `batch`. `order_tasks` takes `taskIds` and returns `{ "tasks": Task[] }`.
 - `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `afterThreadId` of the caller session (error without one).
 - `create_task`, `update_task` and `link_task` take optional `handoff` (CLI `task add|link --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoff`; `stage task show` prints `handoff  on|off` for linked tasks and the current attempt's record.
+- `create_task`, `create_schedule`, `update_task`, `update_schedule` and `link_task` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (the fallback); on `update_task` / `link_task` without `baseRef` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (fallback origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.

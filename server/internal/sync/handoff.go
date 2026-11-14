@@ -85,11 +85,11 @@ func ComposeHandoff(src db.HandoffSource, d t3.ThreadDetail, reply *t3.Reply) st
 // none): the task has handoff on and a settled predecessor. An attempt that
 // already sent one (a reused clientRequestId) resends the stored text. A
 // failed read is recorded as skipped and never blocks the launch.
-func (s *Service) prepareHandoff(ctx context.Context, task db.Task) string {
+func (s *Service) prepareHandoff(ctx context.Context, task db.Task, p *predecessor) string {
 	if !task.Handoff || (task.AfterTaskID == nil && task.AfterThreadID == nil) {
 		return ""
 	}
-	src, err := s.store.HandoffSourceFor(ctx, task)
+	src, err := p.source(ctx)
 	if err != nil {
 		s.skipHandoff(ctx, task, db.HandoffSource{ThreadID: deref(task.AfterThreadID), TaskID: task.AfterTaskID}, err)
 		return ""
@@ -101,7 +101,7 @@ func (s *Service) prepareHandoff(ctx context.Context, task db.Task) string {
 	if err == nil && prev != nil && prev.Status == db.HandoffSent {
 		return prev.Text
 	}
-	text, err := s.readHandoff(ctx, *src)
+	text, err := s.readHandoff(ctx, *src, p)
 	if err != nil {
 		s.skipHandoff(ctx, task, *src, err)
 		return ""
@@ -116,14 +116,15 @@ func (s *Service) prepareHandoff(ctx context.Context, task db.Task) string {
 	return text
 }
 
-// readHandoff reads src's thread and final reply from T3 and composes the block.
-func (s *Service) readHandoff(ctx context.Context, src db.HandoffSource) (string, error) {
+// readHandoff reads src's thread (shared with the predecessor base) and
+// final reply from T3 and composes the block.
+func (s *Service) readHandoff(ctx context.Context, src db.HandoffSource, p *predecessor) (string, error) {
+	d, err := p.read(ctx, src)
+	if err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, handoffReadTimeout)
 	defer cancel()
-	d, err := s.t3.ReadThread(ctx, src.ThreadID)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", src.Label(), err)
-	}
 	r, err := s.t3.LatestReply(ctx, t3.LatestReplyInput{ThreadID: src.ThreadID, MaxChars: handoffReplyMaxChars, ItemCount: d.ItemCount})
 	switch {
 	case errors.Is(err, t3.ErrNoReply):

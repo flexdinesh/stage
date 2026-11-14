@@ -60,6 +60,9 @@ func validCron(cron, tz string) error {
 	return nil
 }
 
+// errSchedulePredecessor: a schedule's runs have no predecessor.
+var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a schedule option (schedule runs are not linked)")
+
 func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	var req createScheduleReq
 	if err := decode(r, &req); err != nil {
@@ -71,6 +74,9 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	in, err := req.validate()
 	if err != nil {
 		return err
+	}
+	if in.Workspace.FromPredecessor() {
+		return errSchedulePredecessor
 	}
 	if err := validCron(req.Cron, req.Tz); err != nil {
 		return err
@@ -131,6 +137,9 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		Workspace: &p.Workspace, Tags: &p.Tags, Notes: &p.Notes, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
 		return err
+	}
+	if p.Workspace.Set && p.Workspace.V.FromPredecessor() {
+		return errSchedulePredecessor
 	}
 	for name, o := range map[string]db.Optional[string]{"cron": p.Cron, "tz": p.Tz} {
 		if o.Set && o.Null {

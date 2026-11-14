@@ -36,7 +36,7 @@ func csv(s string) []string {
 // add/edit).
 type configFlags struct {
 	project, title, prompt, promptFile, provider, model, effort string
-	runtime, mode, baseRef, branch, notes                       string
+	runtime, mode, baseRef, branch, base, notes                 string
 	options, tags, images                                       list
 }
 
@@ -52,6 +52,7 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.mode, "mode", "", "interaction mode: default|plan")
 	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
+	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from the linked predecessor's branch; --base-ref is the fallback)")
 	c.fs.StringVar(&f.notes, "notes", "", "notes")
 	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
 	c.fs.Var(&f.tags, "tag", "tag (repeatable)")
@@ -103,7 +104,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	return agenttools.ConfigArgs{
 		Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
 		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
-		BaseRef: f.baseRef, Branch: f.branch, Tags: f.tags, Notes: f.notes, ImagePaths: f.images,
+		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, Notes: f.notes, ImagePaths: f.images,
 	}, nil
 }
 
@@ -139,7 +140,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		Provider: strFlag(c, "provider", f.provider), Model: strFlag(c, "model", f.model),
 		Effort: strFlag(c, "effort", f.effort), Options: opts, RuntimeMode: strFlag(c, "runtime", f.runtime),
 		InteractionMode: strFlag(c, "mode", f.mode), BaseRef: strFlag(c, "base-ref", f.baseRef),
-		Branch: strFlag(c, "branch", f.branch), Notes: strFlag(c, "notes", f.notes),
+		Branch: strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base), Notes: strFlag(c, "notes", f.notes),
 	}
 	if promptSet {
 		a.Prompt = &prompt

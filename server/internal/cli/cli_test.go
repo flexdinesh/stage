@@ -475,3 +475,35 @@ func TestSessionQuestionsCommand(t *testing.T) {
 		t.Fatal("missing id accepted")
 	}
 }
+
+func TestBaseFlag(t *testing.T) {
+	h := newHarness(t)
+	h.needDB()
+	h.project("/w/cli-base")
+	h.caller = agentctx.Caller{Cwd: "/w/cli-base"}
+	code, stdout, stderr := h.run("", "task", "add", "--title", "a", "--prompt", "x", "--json")
+	if code != 0 {
+		t.Fatalf("add: %d %s", code, stderr)
+	}
+	a := decode[client.Task](t, stdout)
+	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--after-task", fmt.Sprint(a.ID),
+		"--base-ref", "origin/main", "--base", "predecessor", "--json")
+	if code != 0 {
+		t.Fatalf("add b: %d %s", code, stderr)
+	}
+	b := decode[client.Task](t, stdout)
+	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
+		t.Fatalf("--base predecessor: %+v", b.Workspace)
+	}
+	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(b.ID))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch (fallback origin/main, branch -)", a.ID)) {
+		t.Fatalf("show: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--base", "ref", "--json")
+	if w := decode[client.Task](t, stdout).Workspace; code != 0 || w.FromPredecessor() || w.BaseRef != "origin/main" {
+		t.Fatalf("edit --base ref: %s", stdout)
+	}
+	if code, _, _ = h.run("", "task", "add", "--title", "c", "--prompt", "z", "--base", "predecessor"); code == 0 {
+		t.Fatal("--base without --base-ref must fail")
+	}
+}

@@ -111,6 +111,7 @@ type ConfigArgs struct {
 	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name (with baseRef); omitted = T3 picks"`
+	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: a linked task's worktree starts from its predecessor's branch; baseRef is the fallback (tasks only)"`
 	Tags            []string          `json:"tags,omitempty"`
 	Notes           string            `json:"notes,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
@@ -221,11 +222,30 @@ func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, applyDefaults bool
 	return nil
 }
 
-func workspace(baseRef, branch string) *db.Workspace {
+func workspace(baseRef, branch, base string) *db.Workspace {
 	if strings.TrimSpace(baseRef) == "" {
 		return nil
 	}
-	return &db.Workspace{Type: "worktree", BaseRef: strings.TrimSpace(baseRef), Branch: strPtr(branch)}
+	return &db.Workspace{Type: "worktree", BaseRef: strings.TrimSpace(baseRef), Branch: strPtr(branch), Base: strings.TrimSpace(base)}
+}
+
+// errBaseNeedsWorktree: base without a worktree to apply it to.
+var errBaseNeedsWorktree = errors.New("base needs a worktree: pass baseRef (with base predecessor it is the fallback)")
+
+// baseOnly patches task id's current workspace with base (base given
+// without baseRef).
+func (o *Ops) baseOnly(ctx context.Context, id int64, base string, p client.Patch) error {
+	cur, err := o.Client.Task(ctx, id)
+	if err != nil {
+		return err
+	}
+	w := cur.Workspace
+	if w.Type != "worktree" {
+		return errBaseNeedsWorktree
+	}
+	w.Base = strings.TrimSpace(base)
+	p["workspace"] = w
+	return nil
 }
 
 // uploadImages stages local images and returns their attachment ids.
@@ -261,7 +281,9 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	if err := o.resolveModel(ctx, a, true, &rc); err != nil {
 		return rc, err
 	}
-	rc.workspace = workspace(a.BaseRef, a.Branch)
+	if rc.workspace = workspace(a.BaseRef, a.Branch, a.Base); rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
+		return rc, errBaseNeedsWorktree
+	}
 	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
 	return rc, err
 }
@@ -417,6 +439,7 @@ type UpdateArgs struct {
 	InteractionMode *string           `json:"interactionMode,omitempty"`
 	BaseRef         *string           `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
 	Branch          *string           `json:"branch,omitempty"`
+	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from the predecessor's branch; baseRef is the fallback); without baseRef keeps the current worktree"`
 	Tags            []string          `json:"tags,omitempty" jsonschema:"replaces tags"`
 	Notes           *string           `json:"notes,omitempty"`
 }
@@ -469,10 +492,14 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, erro
 		if a.Branch != nil {
 			branch = *a.Branch
 		}
-		if w := workspace(*a.BaseRef, branch); w != nil {
+		base := ""
+		if a.Base != nil {
+			base = *a.Base
+		}
+		if w := workspace(*a.BaseRef, branch, base); w != nil {
 			p["workspace"] = w
 		} else {
-			p["workspace"] = db.Workspace{Type: "root"}
+			p["workspace"] = db.Workspace{Type: "root", Base: base}
 		}
 	}
 	if a.Tags != nil {
@@ -506,6 +533,11 @@ func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, er
 	}
 	if a.Handoff != nil {
 		p["handoff"] = *a.Handoff
+	}
+	if a.Base != nil && a.BaseRef == nil {
+		if err := o.baseOnly(ctx, a.ID, *a.Base, p); err != nil {
+			return client.Task{}, err
+		}
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
@@ -557,6 +589,7 @@ type LinkTaskArgs struct {
 	AfterThreadID string `json:"afterThreadId,omitempty" jsonschema:"run after this T3 session settles"`
 	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles"`
 	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch; omitted keeps the task's setting (default true)"`
+	Base          string `json:"base,omitempty" jsonschema:"predecessor: the task's worktree starts from the predecessor's branch (its baseRef is the fallback; needs a worktree); ref: from its baseRef; omitted keeps it"`
 	CallerArgs
 }
 
@@ -586,6 +619,14 @@ func (o *Ops) LinkTask(ctx context.Context, a LinkTaskArgs) (client.Task, error)
 	}
 	if a.Handoff != nil {
 		p["handoff"] = *a.Handoff
+	}
+	if a.Base != "" {
+		w := cur.Workspace
+		if w.Type != "worktree" {
+			return client.Task{}, errBaseNeedsWorktree
+		}
+		w.Base = a.Base
+		p["workspace"] = w
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
