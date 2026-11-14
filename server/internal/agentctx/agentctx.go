@@ -1,6 +1,6 @@
 // Package agentctx resolves the calling agent's context: its T3 session
 // (T3CODE_THREAD_ID, set by T3 in every provider process) and working
-// directory, and from those the t3-stage project it works in.
+// directory, and from those the stage project it works in.
 package agentctx
 
 import (
@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flexdinesh/t3-stage/server/internal/client"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // ThreadEnv is the env var T3 sets to the provider session's thread id.

@@ -104,7 +104,7 @@ function useFilters() {
 }
 
 // Last-used filters (search string without `page`), restored when /history is opened without params.
-const FILTERS_KEY = "t3stage-history-filters";
+const FILTERS_KEY = "stage-history-filters";
 
 function readStoredFilters(): string {
   try {

@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/t3-stage/server/internal/schedule"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/schedule"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_schedule")
+	testDB = dbtest.Open("stage_test_schedule")
 	if testDB.Skip != "" {
 		fmt.Println("schedule integration tests skipped:", testDB.Skip)
 	}

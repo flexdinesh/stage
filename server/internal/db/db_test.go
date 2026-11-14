@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_db")
+	testDB = dbtest.Open("stage_test_db")
 	if testDB.Skip != "" {
 		fmt.Println("db integration tests skipped:", testDB.Skip)
 	}
@@ -629,7 +629,7 @@ func TestSweepStagedAttachments(t *testing.T) {
 }
 
 func TestSnippetsMigration(t *testing.T) {
-	old := dbtest.OpenAt("t3stage_test_migrate_snippets", 9)
+	old := dbtest.OpenAt("stage_test_migrate_snippets", 9)
 	defer old.Close()
 	if old.Pool == nil {
 		t.Skip(old.Skip)
@@ -656,7 +656,7 @@ INSERT INTO templates (name, prompt, model, interaction_mode) VALUES
 }
 
 func TestLaunchRequestIDMigration(t *testing.T) {
-	old := dbtest.OpenAt("t3stage_test_migrate_launch_request", 10)
+	old := dbtest.OpenAt("stage_test_migrate_launch_request", 10)
 	defer old.Close()
 	if old.Pool == nil {
 		t.Skip(old.Skip)

@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/flexdinesh/t3-stage/server/internal/cronexpr"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/cronexpr"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // Schedule is a recurring task template (docs/api.md "Schedules").

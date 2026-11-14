@@ -10,9 +10,9 @@ import (
 // Version is the MCP server implementation version.
 const Version = "1.0.0"
 
-// Guide is the agent workflow guidance: MCP server instructions, `t3stage
-// guide`, and the block `t3stage setup instructions` writes.
-const Guide = `t3-stage is the task queue for T3 Code: a backlog of agent tasks, run order, schedules, and a cross-project view of T3 sessions. T3 stays where conversations happen; t3-stage queues and starts them.
+// Guide is the agent workflow guidance: MCP server instructions, `stage
+// guide`, and the block `stage setup instructions` writes.
+const Guide = `stage is the task queue for T3 Code: a backlog of agent tasks, run order, schedules, and a cross-project view of T3 sessions. T3 stays where conversations happen; stage queues and starts them.
 
 Use it to:
 - Save follow-up work you notice but should not do now: create_task (lands in backlog; does not start).
@@ -28,18 +28,18 @@ Rules:
 - Over HTTP MCP, pass callerThreadId ($T3CODE_THREAD_ID) and cwd so afterMe, provenance and project defaults work; stdio and CLI read them from the environment.
 - Settling happens in T3, not here.
 
-CLI equivalent: ` + "`t3stage task add|ls|show|start|stop|followup|link|wait ... --json`" + ` (t3stage help).`
+CLI equivalent: ` + "`stage task add|ls|show|start|stop|followup|link|wait ... --json`" + ` (stage help).`
 
 // NewServer returns an MCP server exposing every operation as a tool.
 func NewServer(o *Ops) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "t3stage", Title: "t3-stage", Version: Version},
+	s := mcp.NewServer(&mcp.Implementation{Name: "stage", Title: "stage", Version: Version},
 		&mcp.ServerOptions{Instructions: Guide})
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	destructive := true
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
 
-	add(s, "get_context", "Your session id, cwd, resolved t3-stage project and owning task.", ro, o.Context)
-	add(s, "list_projects", "List t3-stage projects (mirrors T3 projects).", ro, o.ListProjects)
+	add(s, "get_context", "Your session id, cwd, resolved stage project and owning task.", ro, o.Context)
+	add(s, "list_projects", "List stage projects (mirrors T3 projects).", ro, o.ListProjects)
 	add(s, "list_models", "List providers, models and model options (effort, ...) available for tasks.", ro, o.ListModels)
 
 	add(s, "list_tasks", "List tasks (compact rows, newest activity first).", ro, o.ListTasks)

@@ -78,7 +78,7 @@ func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
 	dec, form, auth := f.lastDecision, f.lastTokenForm, f.mcpAuthHeaders
 	names, labels := f.clientNames, f.pairingLabels
 	f.mu.Unlock()
-	if !slices.Equal(names, []string{"t3-stage"}) || !slices.Equal(labels, []string{"t3-stage mcp"}) {
+	if !slices.Equal(names, []string{"stage"}) || !slices.Equal(labels, []string{"stage mcp"}) {
 		t.Fatalf("client names %v, pairing labels %v", names, labels)
 	}
 	d, _ := dec["decision"].(map[string]any)
@@ -658,7 +658,7 @@ func TestUploadAndSendAttachments(t *testing.T) {
 func TestClientNameLabelsSession(t *testing.T) {
 	f := newFakeT3(t)
 	capabilitiesTool(f)
-	c := NewMCPClient(Options{BaseURL: f.url(), AdminToken: f.adminToken, Store: NewMemoryTokenStore(), Logger: slog.New(slog.DiscardHandler), ClientName: "t3-stage dev"})
+	c := NewMCPClient(Options{BaseURL: f.url(), AdminToken: f.adminToken, Store: NewMemoryTokenStore(), Logger: slog.New(slog.DiscardHandler), ClientName: "stage dev"})
 	t.Cleanup(c.Close)
 	if _, err := c.Capabilities(ctxT(t)); err != nil {
 		t.Fatal(err)
@@ -666,7 +666,7 @@ func TestClientNameLabelsSession(t *testing.T) {
 	f.mu.Lock()
 	names, labels := f.clientNames, f.pairingLabels
 	f.mu.Unlock()
-	if !slices.Equal(names, []string{"t3-stage dev"}) || !slices.Equal(labels, []string{"t3-stage dev mcp"}) {
+	if !slices.Equal(names, []string{"stage dev"}) || !slices.Equal(labels, []string{"stage dev mcp"}) {
 		t.Fatalf("client names %v, pairing labels %v", names, labels)
 	}
 }

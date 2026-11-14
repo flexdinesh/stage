@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var _ t3.TokenStore = (*Store)(nil)

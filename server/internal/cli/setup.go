@@ -8,18 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/client"
 )
 
 // Instruction block markers (setup instructions replaces between them).
 const (
-	blockBegin = "<!-- t3stage:begin -->"
-	blockEnd   = "<!-- t3stage:end -->"
+	blockBegin = "<!-- stage:begin -->"
+	blockEnd   = "<!-- stage:end -->"
 )
 
 // mcpName is the MCP server name registered with agents.
-const mcpName = "t3stage"
+const mcpName = "stage"
 
 func runSetup(env Env, args []string) error {
 	v, rest := verb(args, "")
@@ -104,7 +104,7 @@ func register(env Env, tool string, args []string) error {
 
 // instructionsBlock is the marked block written to agent instruction files.
 func instructionsBlock() string {
-	return blockBegin + "\n## t3-stage (task queue)\n\n" + agenttools.Guide + "\n" + blockEnd + "\n"
+	return blockBegin + "\n## stage (task queue)\n\n" + agenttools.Guide + "\n" + blockEnd + "\n"
 }
 
 // upsertBlock replaces the marked block in content, or appends it.

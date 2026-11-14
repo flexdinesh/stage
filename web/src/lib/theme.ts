@@ -3,7 +3,7 @@ import { useCallback, useSyncExternalStore } from "react";
 export const THEMES = ["system", "light", "dark"] as const;
 export type Theme = (typeof THEMES)[number];
 
-const KEY = "t3stage-theme";
+const KEY = "stage-theme";
 const listeners = new Set<() => void>();
 
 function read(): Theme {

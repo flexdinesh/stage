@@ -1,21 +1,21 @@
 # Production stack. Dev and tests use compose.dev.yaml (separate project, port
 # and volume); nothing in development connects to this database.
-name: t3-stage
+name: stage
 
 services:
   db:
     image: postgres:17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: t3stage
-      POSTGRES_PASSWORD: t3stage
-      POSTGRES_DB: t3stage
+      POSTGRES_USER: stage
+      POSTGRES_PASSWORD: stage
+      POSTGRES_DB: stage
     ports:
       - "127.0.0.1:5439:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U t3stage -d t3stage"]
+      test: ["CMD-SHELL", "pg_isready -U stage -d stage"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,7 +30,7 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://t3stage:t3stage@127.0.0.1:5439/t3stage?sslmode=disable
+      DATABASE_URL: postgres://stage:stage@127.0.0.1:5439/stage?sslmode=disable
     depends_on:
       db:
         condition: service_healthy

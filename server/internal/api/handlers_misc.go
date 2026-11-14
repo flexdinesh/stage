@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // ---- threads (history) ----

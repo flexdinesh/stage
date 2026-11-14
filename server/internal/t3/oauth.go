@@ -33,8 +33,8 @@ import (
 
 const (
 	// DefaultClientName is the OAuth client_name; the pairing label is
-	// "<name> mcp". Options.ClientName overrides it (dev: "t3-stage dev").
-	DefaultClientName = "t3-stage"
+	// "<name> mcp". Options.ClientName overrides it (dev: "stage dev").
+	DefaultClientName = "stage"
 	// DefaultRedirectURI is registered with T3 but never served: the code is
 	// read from the decision response. T3 accepts http only on loopback.
 	DefaultRedirectURI = "http://127.0.0.1:7380/oauth/callback"

@@ -21,20 +21,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/api"
-	"github.com/flexdinesh/t3-stage/server/internal/config"
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/t3-stage/server/internal/links"
-	"github.com/flexdinesh/t3-stage/server/internal/notify"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/links"
+	"github.com/flexdinesh/stage/server/internal/notify"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_api")
+	testDB = dbtest.Open("stage_test_api")
 	if testDB.Skip != "" {
 		fmt.Println("api integration tests skipped:", testDB.Skip)
 	}
@@ -129,7 +129,7 @@ func newEnv(t *testing.T) *env {
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://t3stage.test", log), Logger: log,
+		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }

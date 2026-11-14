@@ -1,4 +1,4 @@
-# t3-stage REST API
+# stage REST API
 
 Base path `/api`. JSON in and out (`Content-Type: application/json`). Field names camelCase. TypeScript mirror: `web/src/api/types.ts` (change both together).
 
@@ -30,7 +30,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
 | InteractionMode | `default` `plan` (default `default`) |
 | SendMode | `auto` `queue` `steer` `restart` (default `auto`) |
-| ProjectSource | `app` (created via t3-stage) `t3` (imported from T3) |
+| ProjectSource | `app` (created via stage) `t3` (imported from T3) |
 | ThreadSource | `app` (thread belongs to a task) `t3` (any other thread) |
 
 ## Shared shapes
@@ -117,8 +117,8 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
 {
   "id": 1,
   "t3ProjectId": "proj_abc",
-  "title": "t3-stage",
-  "workspaceRoot": "/home/dee/workspace/t3-stage",
+  "title": "stage",
+  "workspaceRoot": "/home/dee/workspace/stage",
   "source": "app",
   "archivedAt": null,
   "createdAt": "2026-11-08T10:00:00Z",
@@ -154,7 +154,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 {
   "id": 7,
   "projectId": 1,
-  "projectTitle": "t3-stage",
+  "projectTitle": "stage",
   "title": "Say OK",
   "prompt": "reply OK",
   "providerInstanceId": "claude",
@@ -281,7 +281,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
 {
   "id": 3,
   "projectId": 1,
-  "projectTitle": "t3-stage",
+  "projectTitle": "stage",
   "title": "Nightly deps bump",
   "prompt": "bump deps, run tests",
   "providerInstanceId": "claude",
@@ -375,7 +375,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "t3ThreadId": "thread_abc",
   "t3ProjectId": "proj_abc",
   "projectId": 1,
-  "projectTitle": "t3-stage",
+  "projectTitle": "stage",
   "title": "Say OK",
   "status": "completed",
   "settled": false,
@@ -523,7 +523,7 @@ Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz`
   "to": "2026-11-08T10:00:00Z",
   "tz": "UTC",
   "threadsByDay": [{ "day": "2026-11-08", "count": 14 }],
-  "threadsByProject": [{ "projectId": 1, "t3ProjectId": "proj_abc", "title": "t3-stage", "count": 9 }],
+  "threadsByProject": [{ "projectId": 1, "t3ProjectId": "proj_abc", "title": "stage", "count": 9 }],
   "threadsByStatus": [{ "status": "completed", "count": 20 }],
   "tasksByState": [{ "state": "running", "count": 2 }],
   "needsInput": 1
@@ -553,7 +553,7 @@ Body `{ "endpoint": string }`. Sends a test notification to that subscription sy
 ### Push payload
 JSON, shown by the service worker:
 ```json
-{ "title": "Needs input", "body": "Say OK · t3-stage", "url": "/sessions/thread-abc", "tag": "task-7", "badge": 2 }
+{ "title": "Needs input", "body": "Say OK · stage", "url": "/sessions/thread-abc", "tag": "task-7", "badge": 2 }
 ```
 `tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`); the service worker sets `renotify` so a replacement alerts again. iOS ignores tag replacement (WebKit bug 258922), so the service worker also closes shown notifications with the same tag (`tag`, or the copy in `data.tag`) before showing the new one. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise. Header `Topic` = first 32 chars of base64url(sha256(tag)): the push service keeps only the latest undelivered push per task/thread.
 
@@ -575,7 +575,7 @@ Every notification the notifier sends is stored first (also when no browser is s
   "taskId": 7,
   "t3ThreadId": "thread-abc",
   "title": "Say OK",
-  "projectTitle": "t3-stage",
+  "projectTitle": "stage",
   "url": "/tasks/7",
   "createdAt": "2026-11-08T10:00:00Z",
   "readAt": null,
@@ -653,7 +653,7 @@ Session links (`afterThreadId`, "run after me" from the agent interface):
 
 ## Agent interface
 
-`t3stage` subcommands (CLI, `--json`), `t3stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions get_session`. Results are the REST shapes (lists as compact rows); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions get_session`. Results are the REST shapes (lists as compact rows); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.

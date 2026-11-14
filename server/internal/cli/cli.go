@@ -1,7 +1,7 @@
-// Package cli is the t3stage command line: task, schedule and session
+// Package cli is the stage command line: task, schedule and session
 // commands over the REST API (agenttools operations), the stdio MCP server
-// and agent setup helpers. `t3stage` with no args (or `serve`) runs the
-// server instead (cmd/t3stage).
+// and agent setup helpers. `stage` with no args (or `serve`) runs the
+// server instead (cmd/stage).
 package cli
 
 import (
@@ -17,13 +17,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/flexdinesh/t3-stage/server/internal/agentctx"
-	"github.com/flexdinesh/t3-stage/server/internal/agenttools"
-	"github.com/flexdinesh/t3-stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/client"
 )
 
 // URLEnv overrides the server address.
-const URLEnv = "T3STAGE_URL"
+const URLEnv = "STAGE_URL"
 
 // Env is the process environment (injectable for tests).
 type Env struct {
@@ -45,7 +45,7 @@ func OSEnv() Env {
 	home, _ := os.UserHomeDir()
 	exe, err := os.Executable()
 	if err != nil {
-		exe = "t3stage"
+		exe = "stage"
 	}
 	return Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
@@ -89,39 +89,39 @@ func Run(ctx context.Context, args []string, env Env) int {
 	}
 }
 
-const usage = `t3stage: t3-stage server and agent CLI
+const usage = `stage: stage server and agent CLI
 
 Usage:
-  t3stage [serve]                       run the server (default)
-  t3stage context                       your session, cwd and resolved project
-  t3stage projects ls
-  t3stage models ls
-  t3stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
-  t3stage task show ID
-  t3stage task add --title T --prompt TEXT|- [config] [--after-me|--after-task ID|--after-thread ID]
+  stage [serve]                       run the server (default)
+  stage context                       your session, cwd and resolved project
+  stage projects ls
+  stage models ls
+  stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
+  stage task show ID
+  stage task add --title T --prompt TEXT|- [config] [--after-me|--after-task ID|--after-thread ID]
                    [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start]
-  t3stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""]
-  t3stage task rm|start|stop|dup|unlink ID
-  t3stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
-  t3stage task link ID --after-me|--after-task ID|--after-thread ID
-  t3stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
-  t3stage schedule ls [--project P]
-  t3stage schedule show ID
-  t3stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]
-  t3stage schedule edit ID [config] [--cron CRON] [--tz ZONE]
-  t3stage schedule rm|run|pause|resume ID
-  t3stage schedule preview --cron CRON --tz ZONE
-  t3stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
-  t3stage sessions show THREAD_ID
-  t3stage mcp                           stdio MCP server
-  t3stage setup mcp [--claude] [--codex] [--http]
-  t3stage setup instructions [--claude] [--codex] [--file PATH]
-  t3stage guide                         agent workflow guide
+  stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""]
+  stage task rm|start|stop|dup|unlink ID
+  stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
+  stage task link ID --after-me|--after-task ID|--after-thread ID
+  stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
+  stage schedule ls [--project P]
+  stage schedule show ID
+  stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]
+  stage schedule edit ID [config] [--cron CRON] [--tz ZONE]
+  stage schedule rm|run|pause|resume ID
+  stage schedule preview --cron CRON --tz ZONE
+  stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
+  stage sessions show THREAD_ID
+  stage mcp                           stdio MCP server
+  stage setup mcp [--claude] [--codex] [--http]
+  stage setup instructions [--claude] [--codex] [--file PATH]
+  stage guide                         agent workflow guide
 
 Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
         --mode default|plan --base-ref REF --branch NAME --tag T... --notes TEXT
         --prompt-file PATH --image PATH...
-Global: --url URL (env T3STAGE_URL, default http://127.0.0.1:7380) --json
+Global: --url URL (env STAGE_URL, default http://127.0.0.1:7380) --json
 Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
 and enable --after-me.
 `

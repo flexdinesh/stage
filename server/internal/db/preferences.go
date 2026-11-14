@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // ModelDefaults is a new-task model preset (pinned or last used).

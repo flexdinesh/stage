@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 func (s *server) getPreferences(w http.ResponseWriter, r *http.Request) error {

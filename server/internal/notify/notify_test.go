@@ -18,16 +18,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/t3-stage/server/internal/db"
-	"github.com/flexdinesh/t3-stage/server/internal/db/dbtest"
-	t3sync "github.com/flexdinesh/t3-stage/server/internal/sync"
-	"github.com/flexdinesh/t3-stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB *dbtest.DB
 
 func TestMain(m *testing.M) {
-	testDB = dbtest.Open("t3stage_test_notify")
+	testDB = dbtest.Open("stage_test_notify")
 	if testDB.Skip != "" {
 		fmt.Println("notify integration tests skipped:", testDB.Skip)
 	}
@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-const subject = "https://t3stage.test"
+const subject = "https://stage.test"
 
 func newNotifier(t *testing.T) (*Notifier, *db.Store) {
 	store := db.NewStore(testDB.Reset(t))
@@ -103,7 +103,7 @@ func subscribe(t *testing.T, store *db.Store, endpoint string) {
 func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 	t.Helper()
 	ctx := context.Background()
-	p, err := store.InsertProject(ctx, db.Project{T3ProjectID: "proj-1", Title: "t3-stage", WorkspaceRoot: "/w/1", Source: db.SourceApp})
+	p, err := store.InsertProject(ctx, db.Project{T3ProjectID: "proj-1", Title: "stage", WorkspaceRoot: "/w/1", Source: db.SourceApp})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,11 +175,11 @@ func TestPayload(t *testing.T) {
 		want Payload
 	}{
 		{"task needs input", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Say OK · t3-stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
-			Payload{Title: "Done", Body: "Say OK · t3-stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Fix bug & test · t3-stage", URL: "/sessions/ext-1", Tag: "thread-ext-1", Badge: 2}},
+			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/sessions/ext-1", Tag: "thread-ext-1", Badge: 2}},
 		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/sessions/ext-2", Tag: "thread-ext-2", Badge: 2}},
 	}
@@ -285,7 +285,7 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	}
 	th, tk := got[0], got[1] // newest first
 	if tk.Event != db.StateNeedsInput || tk.TaskID == nil || *tk.TaskID != task.ID || tk.Title != "Say OK" ||
-		tk.ProjectTitle == nil || *tk.ProjectTitle != "t3-stage" || tk.URL != fmt.Sprintf("/tasks/%d", task.ID) ||
+		tk.ProjectTitle == nil || *tk.ProjectTitle != "stage" || tk.URL != fmt.Sprintf("/tasks/%d", task.ID) ||
 		tk.CurrentState == nil || *tk.CurrentState != db.StateNeedsInput || tk.ReadAt != nil {
 		t.Fatalf("task notification %+v", tk)
 	}
