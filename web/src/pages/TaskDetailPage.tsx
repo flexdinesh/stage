@@ -7,6 +7,7 @@ import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
+import { LastWordPanel } from "../components/LastWord.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { SequencePanel, stepText } from "../components/Sequence.tsx";
@@ -248,6 +249,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-3.5">
+            {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
               <div className="flex flex-col gap-3">
                 <pre className="max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">

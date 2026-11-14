@@ -266,7 +266,7 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	if err != nil {
 		return t3Err(err)
 	}
-	if err := s.store.UpsertThreadDetail(ctx, d); err != nil {
+	if err := s.mirrorDetail(ctx, d); err != nil {
 		return fmt.Errorf("upsert thread: %w", err)
 	}
 	if frozen(task) {

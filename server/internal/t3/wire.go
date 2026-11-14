@@ -241,6 +241,26 @@ type wireRun struct {
 type wireThreadRead struct {
 	Thread     wireThread `json:"thread"`
 	RecentRuns []wireRun  `json:"recentRuns"`
+	// Timeline page (OrchestratorMcpThreadReadResult items/nextPosition/hasMore).
+	Items        []wireTimelineItem `json:"items"`
+	NextPosition *int               `json:"nextPosition"`
+	HasMore      bool               `json:"hasMore"`
+}
+
+// wireTimelineItem is OrchestratorMcpThreadTimelineItem. Position is the
+// global index into the visible timeline (the messages view leaves gaps).
+// NextTextOffset is nil when null or absent (older T3).
+type wireTimelineItem struct {
+	Position       int     `json:"position"`
+	Visibility     string  `json:"visibility"` // local|inherited|synthetic
+	ItemID         string  `json:"itemId"`
+	RunID          string  `json:"runId"`
+	MessageID      string  `json:"messageId"`
+	Type           string  `json:"type"`
+	Text           string  `json:"text"`
+	TextTruncated  bool    `json:"textTruncated"`
+	NextTextOffset *int    `json:"nextTextOffset"`
+	UpdatedAt      isoTime `json:"updatedAt"`
 }
 
 func (w wireThreadRead) toDetail() ThreadDetail {

@@ -120,7 +120,7 @@ SELECT th.t3_thread_id, th.t3_project_id, p.id, p.title, th.title, th.status, th
   th.settled_at, th.pending_request_count, th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
   th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
-  th.run_started_at, th.run_ended_at, ` + threadStateSQL + `
+  th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, ` + threadStateSQL + `
 FROM threads th
 LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
 LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id`
@@ -131,7 +131,7 @@ func scanThread(row pgx.Row) (Thread, error) {
 		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
 		&t.InteractionMode, &t.Branch, &t.WorktreePath, &t.ParentThreadID, &t.Relationship,
 		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt, &t.Archived, &t.ActiveRunID, &t.LatestRunID,
-		&t.RunStartedAt, &t.RunEndedAt, &t.State)
+		&t.RunStartedAt, &t.RunEndedAt, &t.LastWordPreview, &t.LastWordAt, &t.State)
 	if err != nil {
 		return Thread{}, notFound(err)
 	}

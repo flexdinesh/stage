@@ -31,6 +31,10 @@ type Client interface {
 	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
 	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
 	ReadThread(ctx context.Context, threadID string) (ThreadDetail, error)
+	// LatestReply finds a thread's latest assistant reply (optionally for one
+	// run) and returns up to MaxChars of its text, paging long text.
+	// ErrNoReply if none; ErrNotFound if the thread is unknown.
+	LatestReply(ctx context.Context, in LatestReplyInput) (Reply, error)
 	// LaunchThread calls t3_thread_launch. Idempotent per ClientRequestID.
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
 	// SendMessage calls t3_thread_send (follow-up).
@@ -71,6 +75,7 @@ type StoredToken struct {
 var (
 	ErrNotConnected = errors.New("t3: not connected")
 	ErrNotFound     = errors.New("t3: not found")
+	ErrNoReply      = errors.New("t3: no assistant reply")
 )
 
 type ConnectionStatus struct {
@@ -200,6 +205,27 @@ type ThreadDetail struct {
 	RunCount            int
 	PendingRequestCount int
 	RecentRuns          []Run // newest first
+}
+
+// LatestReplyInput selects a thread's latest assistant reply.
+type LatestReplyInput struct {
+	ThreadID string
+	RunID    string // "" = any run
+	MaxChars int    // text budget in UTF-16 units (T3 counts these); <= 0 = 50000
+	// ItemCount is thread.itemCount from a recent ReadThread; 0 = read it.
+	ItemCount int
+}
+
+// Reply is an assistant_message timeline item. Truncated: the message is
+// longer than the returned Text.
+type Reply struct {
+	ItemID    string
+	RunID     string
+	MessageID string
+	Text      string
+	Truncated bool
+	Position  int
+	UpdatedAt time.Time
 }
 
 type Run struct {

@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import type { Thread } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
+import { LastWordLine } from "./LastWord.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, ExternalButton, cx } from "./ui.tsx";
 
@@ -29,7 +30,9 @@ export function SessionRows({ threads, emptyText = "No sessions match. Clear fil
               {thread.archived ? <span>archived</span> : null}
               <time dateTime={thread.updatedAt} title={dateTime(thread.updatedAt)}>{relativeTime(thread.updatedAt)}</time>
             </div>
+            <LastWordLine state={thread.state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
           </div>
+          <LastWordLine state={thread.state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
           <div className="order-3 col-span-2 flex flex-wrap gap-2 md:col-span-1"><SessionOpenButton thread={thread} /></div>
         </li>
       ))}

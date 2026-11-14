@@ -4,6 +4,7 @@ import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
 import { RunOrderPanel } from "../components/Continuations.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { LastWordPanel } from "../components/LastWord.tsx";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
@@ -36,6 +37,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
       {thread.pendingRequestCount > 0 ? <Alert tone="need">{thread.pendingRequestCount} pending request{thread.pendingRequestCount === 1 ? "" : "s"}. Resolve input in T3 before queued delivery can proceed.</Alert> : null}
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-3.5">
+          <LastWordPanel thread={thread} />
           <RunOrderPanel thread={thread} entries={continuations} />
           <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>
         </div>

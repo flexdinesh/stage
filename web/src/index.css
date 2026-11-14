@@ -266,6 +266,106 @@
     }
   }
 
+  /* Last word: an agent's markdown reply. Prose in Geist, code in mono on the bench gray; headings stay below panel
+     and page titles; square list markers; hairline rules only. */
+  .prose-reply {
+    max-width: 75ch;
+    font-size: var(--fs-body);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .prose-reply > :first-child {
+    margin-top: 0;
+  }
+  .prose-reply > :last-child {
+    margin-bottom: 0;
+  }
+  .prose-reply :where(p, ul, ol, pre, blockquote, table, hr) {
+    margin: 0 0 0.7em;
+  }
+  .prose-reply :where(h1, h2, h3, h4, h5, h6) {
+    margin: 1.1em 0 0.4em;
+    font-size: var(--fs-body);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .prose-reply :where(h1, h2) {
+    font-size: var(--fs-title);
+    letter-spacing: -0.01em;
+  }
+  .prose-reply :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+  .prose-reply ul {
+    list-style-type: square;
+  }
+  .prose-reply ol {
+    list-style-type: decimal;
+  }
+  .prose-reply li + li,
+  .prose-reply li > :where(ul, ol) {
+    margin-top: 0.2em;
+  }
+  .prose-reply li::marker {
+    color: var(--muted);
+  }
+  .prose-reply a {
+    text-decoration: underline;
+  }
+  .prose-reply a:hover {
+    opacity: 0.8;
+  }
+  .prose-reply strong {
+    font-weight: 600;
+  }
+  .prose-reply :not(pre) > code {
+    padding: 0 4px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+  }
+  .prose-reply pre {
+    overflow-x: auto;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-family: var(--font-mono);
+    font-size: var(--fs-detail);
+    line-height: 1.55;
+    overflow-wrap: normal;
+  }
+  .prose-reply blockquote {
+    padding-left: 12px;
+    border-left: 1px solid var(--line-strong);
+    color: var(--muted);
+  }
+  .prose-reply table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: var(--fs-small);
+    font-variant-numeric: tabular-nums;
+  }
+  .prose-reply :where(th, td) {
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .prose-reply th {
+    background: var(--panel);
+    font-weight: 600;
+  }
+  .prose-reply hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .prose-reply img {
+    max-width: 100%;
+  }
+
   /* Authored chevron on selects (per-theme --chevron). */
   .select-chevron {
     background-image: var(--chevron);
