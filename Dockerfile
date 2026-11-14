@@ -15,7 +15,12 @@ RUN go mod download
 COPY server/ ./
 COPY --from=web /src/web/dist/ ./internal/webui/dist/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
+# Data dir for the SQLite database, owned by distroless nonroot (65532), so a
+# named volume mounted at /data starts out writable.
+RUN mkdir -p /out/data && chown 65532:65532 /out/data && chmod 0700 /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=server /out/stage /stage
+COPY --from=server --chown=65532:65532 /out/data /data
+ENV STAGE_DATA_DIR=/data
 ENTRYPOINT ["/stage"]

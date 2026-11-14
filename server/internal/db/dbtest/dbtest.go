@@ -1,111 +1,34 @@
-// Package dbtest provisions throwaway Postgres databases for integration
-// tests against the dev db (compose.dev.yaml, 127.0.0.1:5440). Override the
-// admin URL with TEST_DATABASE_URL. It refuses the production server.
+// Package dbtest gives each integration test a fresh, migrated SQLite
+// database file in the test's temp dir.
 package dbtest
 
 import (
 	"context"
-	"fmt"
-	"net/url"
-	"os"
-	"strings"
+	"database/sql"
+	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-const defaultAdminURL = "postgres://stage:stage@127.0.0.1:5440/postgres?sslmode=disable"
-
-// namePrefix: Open only drops and creates databases with this prefix.
-const namePrefix = "stage_test_"
-
-// DB is a migrated test database (Pool nil + Skip set when unavailable).
+// DB holds the current test's database (Pool, set by Reset).
 type DB struct {
-	Pool *pgxpool.Pool
-	Skip string
+	Pool *sql.DB
 }
 
-// Open (re)creates database `name`, migrates it and returns a pool. Call
-// from TestMain; when Postgres is unreachable Skip explains why.
-func Open(name string) *DB { return OpenAt(name, 0) }
-
-// OpenAt is Open migrated only up to version (0 = latest).
-func OpenAt(name string, version int64) *DB {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	adminURL := os.Getenv("TEST_DATABASE_URL")
-	if adminURL == "" {
-		adminURL = defaultAdminURL
-	}
-	// Loud, not a skip: tests must never drop databases next to prod data.
-	if config.ProdDatabase(adminURL) {
-		panic(fmt.Sprintf("dbtest: refusing production database %s; use the dev db (`mise run db`, 5440)", redact(adminURL)))
-	}
-	if !strings.HasPrefix(name, namePrefix) {
-		panic(fmt.Sprintf("dbtest: database name %q must start with %q", name, namePrefix))
-	}
-	admin, err := pgx.Connect(ctx, adminURL)
-	if err != nil {
-		return &DB{Skip: fmt.Sprintf("postgres unreachable at %s (run `mise run db`): %v", redact(adminURL), err)}
-	}
-	defer admin.Close(ctx)
-	ident := pgx.Identifier{name}.Sanitize()
-	if _, err := admin.Exec(ctx, `DROP DATABASE IF EXISTS `+ident+` WITH (FORCE)`); err != nil {
-		return &DB{Skip: "drop test database: " + err.Error()}
-	}
-	if _, err := admin.Exec(ctx, `CREATE DATABASE `+ident); err != nil {
-		return &DB{Skip: "create test database: " + err.Error()}
-	}
-	u, err := url.Parse(adminURL)
-	if err != nil {
-		return &DB{Skip: err.Error()}
-	}
-	u.Path = "/" + name
-	pool, err := db.Open(ctx, u.String())
-	if err != nil {
-		return &DB{Skip: err.Error()}
-	}
-	if err := db.MigrateTo(ctx, pool, version); err != nil {
-		pool.Close()
-		return &DB{Skip: "migrate: " + err.Error()}
-	}
-	return &DB{Pool: pool}
-}
-
-// Reset skips the test when no database is available, else truncates all
-// tables and restores the t3_connection row.
-func (d *DB) Reset(t *testing.T) *pgxpool.Pool {
+// Reset opens a new migrated database for t (closed when t ends), stores it
+// in Pool and returns it.
+func (d *DB) Reset(t testing.TB) *sql.DB {
 	t.Helper()
-	if d.Pool == nil {
-		t.Skip(d.Skip)
-	}
 	ctx := context.Background()
-	_, err := d.Pool.Exec(ctx, `
-TRUNCATE task_attachments, task_events, schedule_runs, tasks, schedules, snippets, threads, projects, t3_connection, preferences,
-  push_subscriptions, push_vapid RESTART IDENTITY CASCADE;
-INSERT INTO t3_connection (id) VALUES (1);
-INSERT INTO preferences (id) VALUES (1);`)
+	pool, err := db.Open(ctx, filepath.Join(t.TempDir(), db.DBFile))
 	if err != nil {
-		t.Fatalf("reset db: %v", err)
+		t.Fatalf("open test db: %v", err)
 	}
-	return d.Pool
-}
-
-func (d *DB) Close() {
-	if d.Pool != nil {
-		d.Pool.Close()
+	t.Cleanup(func() { pool.Close() })
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatalf("migrate test db: %v", err)
 	}
-}
-
-func redact(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "<invalid url>"
-	}
-	return u.Redacted()
+	d.Pool = pool
+	return pool
 }

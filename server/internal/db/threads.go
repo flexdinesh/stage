@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -56,7 +54,7 @@ const threadUpsertList = `
 INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, settled_at,
   provider_instance_id, model, runtime_mode, interaction_mode, parent_thread_id,
   relationship, creation_source, link, created_at, updated_at, latest_run_id, archived, pull_requests, synced_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now())
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, ` + nowSQL + `)
 ON CONFLICT (t3_thread_id) DO UPDATE SET
   t3_project_id = EXCLUDED.t3_project_id, title = EXCLUDED.title, status = EXCLUDED.status,
   settled = EXCLUDED.settled, settled_at = EXCLUDED.settled_at,
@@ -67,8 +65,8 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
   latest_run_id = EXCLUDED.latest_run_id, pull_requests = EXCLUDED.pull_requests,
   active_run_id = CASE WHEN EXCLUDED.status IN ('completed','failed','cancelled','interrupted','rolled_back','idle') THEN NULL ELSE threads.active_run_id END,
-  latest_run_status = CASE WHEN EXCLUDED.latest_run_id IS DISTINCT FROM threads.latest_run_id THEN NULL ELSE threads.latest_run_status END,
-  synced_at = now() WHERE EXCLUDED.updated_at >= threads.updated_at`
+  latest_run_status = CASE WHEN EXCLUDED.latest_run_id IS NOT threads.latest_run_id THEN NULL ELSE threads.latest_run_status END,
+  synced_at = ` + nowSQL + ` WHERE EXCLUDED.updated_at >= threads.updated_at`
 
 // UpsertThreads mirrors t3_thread_list items (pull requests included).
 // Detail-only columns (branch, worktree_path, pending_request_count,
@@ -77,14 +75,17 @@ func (s *Store) UpsertThreads(ctx context.Context, threads []t3.Thread) error {
 	if len(threads) == 0 {
 		return nil
 	}
-	batch := &pgx.Batch{}
-	for _, t := range threads {
-		if t.ThreadID == "" {
-			continue
+	return s.inTx(ctx, func(tx *Tx) error {
+		for _, t := range threads {
+			if t.ThreadID == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, threadUpsertList, threadArgs(t)...); err != nil {
+				return err
+			}
 		}
-		batch.Queue(threadUpsertList, threadArgs(t)...)
-	}
-	return s.pool.SendBatch(ctx, batch).Close()
+		return nil
+	})
 }
 
 // UpsertThreadDetail mirrors a t3_thread_read result (all columns).
@@ -101,7 +102,7 @@ INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, settle
   provider_instance_id, model, runtime_mode, interaction_mode, parent_thread_id,
   relationship, creation_source, link, created_at, updated_at, latest_run_id, archived, pull_requests, branch, worktree_path,
   pending_request_count, active_run_id, latest_run_status, run_started_at, run_ended_at, recent_runs, run_count, synced_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28, now())
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28, `+nowSQL+`)
 ON CONFLICT (t3_thread_id) DO UPDATE SET
   t3_project_id = EXCLUDED.t3_project_id, title = EXCLUDED.title, status = EXCLUDED.status,
   settled = EXCLUDED.settled, settled_at = EXCLUDED.settled_at,
@@ -116,7 +117,7 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   active_run_id = EXCLUDED.active_run_id, latest_run_id = EXCLUDED.latest_run_id,
   latest_run_status = EXCLUDED.latest_run_status,
   run_started_at = EXCLUDED.run_started_at, run_ended_at = EXCLUDED.run_ended_at,
-  pull_requests = EXCLUDED.pull_requests, recent_runs = EXCLUDED.recent_runs, run_count = EXCLUDED.run_count, synced_at = now()
+  pull_requests = EXCLUDED.pull_requests, recent_runs = EXCLUDED.recent_runs, run_count = EXCLUDED.run_count, synced_at = `+nowSQL+`
 WHERE EXCLUDED.updated_at >= threads.updated_at`, args...)
 	return err
 }
@@ -145,7 +146,7 @@ func RunSpan(d t3.ThreadDetail) (start, end *time.Time) {
 
 const threadSelect = `
 SELECT th.t3_thread_id, th.t3_project_id, p.id, p.title, th.title, th.status, th.settled,
-  th.settled_at, th.pending_request_count, LEAST(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
+  th.settled_at, th.pending_request_count, min(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
   th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
   th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `
@@ -153,7 +154,7 @@ FROM threads th
 LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
 LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id`
 
-func scanThread(row pgx.Row) (Thread, error) {
+func scanThread(row rowScanner) (Thread, error) {
 	var t Thread
 	err := row.Scan(&t.T3ThreadID, &t.T3ProjectID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Status,
 		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.PendingQuestionCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
@@ -220,7 +221,7 @@ type ThreadFilter struct {
 func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int, error) {
 	var w where
 	if len(f.States) > 0 {
-		w.add("(" + threadStateSQL + ") = ANY(" + w.arg(f.States) + ")")
+		w.add("(" + threadStateSQL + ") IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
 	}
 	if f.Active {
 		w.add("NOT th.archived AND (" + threadStateSQL + ") IN ('running','needs_input')")
@@ -232,7 +233,7 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 		w.add("p.id = " + w.arg(*f.ProjectID))
 	}
 	if len(f.Statuses) > 0 {
-		w.add("th.status = ANY(" + w.arg(f.Statuses) + ")")
+		w.add("th.status IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.Statuses)) + "))")
 	}
 	if f.Settled != nil {
 		w.add("th.settled = " + w.arg(*f.Settled))
@@ -247,10 +248,10 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 		w.add("tk.id IS NULL")
 	}
 	if f.Q != "" {
-		w.add("th.title ILIKE " + w.arg(likePattern(f.Q)))
+		w.add(likeSQL("th.title", w.arg(likePattern(f.Q))))
 	}
 	if f.IDs != nil {
-		w.add("th.t3_thread_id = ANY(" + w.arg(f.IDs) + ")")
+		w.add("th.t3_thread_id IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.IDs)) + "))")
 	}
 	if f.From != nil {
 		w.add("th.created_at >= " + w.arg(*f.From))

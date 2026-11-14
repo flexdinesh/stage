@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	gosync "sync"
@@ -32,17 +31,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_api")
-	if testDB.Skip != "" {
-		fmt.Println("api integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 // flakyT3 is the fake with switchable failures.
 type flakyT3 struct {
@@ -653,7 +642,7 @@ func TestRecoverLaunching(t *testing.T) {
 		t.Fatalf("restart after recover %+v ids %v", started, ids)
 	}
 	var reqID string
-	if err := testDB.Pool.QueryRow(context.Background(), `SELECT launch_request_id FROM tasks WHERE id = $1`, a.ID).Scan(&reqID); err != nil {
+	if err := testDB.Pool.QueryRowContext(context.Background(), `SELECT launch_request_id FROM tasks WHERE id = $1`, a.ID).Scan(&reqID); err != nil {
 		t.Fatal(err)
 	}
 	if reqID != ids[0] {
@@ -910,7 +899,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	// in the mirror and the next poll reopens it.
 	_ = e.fake.SetStatus(threadA, t3.StatusCancelled)
 	e.poll()
-	if _, err := testDB.Pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - interval '1 hour' WHERE id = $1`, a.ID); err != nil {
+	if _, err := testDB.Pool.ExecContext(ctx, `UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-1 hour') WHERE id = $1`, a.ID); err != nil {
 		t.Fatal(err)
 	}
 	_ = e.fake.SetStatus(threadA, t3.StatusRunning)

@@ -1,25 +1,8 @@
-# Production stack. Dev and tests use compose.dev.yaml (separate project, port
-# and volume); nothing in development connects to this database.
+# Production stack. Development never uses it: `mise run dev` keeps a
+# per-branch SQLite file under .scratch/dev and tests use temp files.
 name: stage
 
 services:
-  db:
-    image: postgres:17
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: stage
-      POSTGRES_PASSWORD: stage
-      POSTGRES_DB: stage
-    ports:
-      - "127.0.0.1:5439:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stage -d stage"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   app:
     build: .
     # Above the app's 100s shutdown wait for in-flight launches.
@@ -30,10 +13,9 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://stage:stage@127.0.0.1:5439/stage?sslmode=disable
-    depends_on:
-      db:
-        condition: service_healthy
+      STAGE_DATA_DIR: /data
+    volumes:
+      - stagedata:/data
 
 volumes:
-  pgdata:
+  stagedata:

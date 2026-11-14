@@ -2,10 +2,8 @@ package sync_test
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -17,17 +15,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_sync")
-	if testDB.Skip != "" {
-		fmt.Println("sync integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 // hookT3 runs afterList after every ListThreads (simulates a thread
 // finishing between list and read).

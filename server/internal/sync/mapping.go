@@ -1,4 +1,4 @@
-// Package sync keeps Postgres in step with T3: full project/thread mirror
+// Package sync keeps the database in step with T3: full project/thread mirror
 // sync, the active task poller, the capabilities catalog cache, and task
 // launch (the only places task state follows T3).
 package sync

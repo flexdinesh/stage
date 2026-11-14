@@ -61,7 +61,7 @@ func TestNotificationsInbox(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE threads SET settled = true WHERE t3_thread_id = 'ext-1'`); err != nil {
+	if _, err := pool.ExecContext(ctx, `UPDATE threads SET settled = 1 WHERE t3_thread_id = 'ext-1'`); err != nil {
 		t.Fatal(err)
 	}
 	all, err = s.ListNotifications(ctx, 10, nil)
@@ -105,7 +105,7 @@ func TestNotificationsInbox(t *testing.T) {
 	}
 
 	// Prune drops entries older than the age.
-	if _, err := pool.Exec(ctx, `UPDATE notifications SET created_at = now() - interval '31 days' WHERE id = $1`, id1); err != nil {
+	if _, err := pool.ExecContext(ctx, `UPDATE notifications SET created_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-31 days') WHERE id = $1`, id1); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.PruneNotifications(ctx, 30*24*time.Hour); err != nil || n != 1 {

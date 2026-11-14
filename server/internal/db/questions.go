@@ -2,11 +2,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -33,7 +32,7 @@ func (s *Store) GetQuestionResponse(ctx context.Context, threadID, requestID str
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT answers, responded_at FROM question_responses
 WHERE t3_thread_id = $1 AND request_id = $2`, threadID, requestID).Scan(&raw, &r.RespondedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
 	if err != nil {
@@ -53,7 +52,7 @@ func (s *Store) RecordQuestionResponse(ctx context.Context, threadID, requestID 
 		return QuestionResponse{}, err
 	}
 	if _, err := s.pool.Exec(ctx, `INSERT INTO question_responses (t3_thread_id, request_id, answers)
-VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, threadID, requestID, raw); err != nil {
+VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, threadID, requestID, string(raw)); err != nil {
 		return QuestionResponse{}, err
 	}
 	return s.GetQuestionResponse(ctx, threadID, requestID)

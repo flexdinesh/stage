@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	gosync "sync"
 	"testing"
@@ -24,17 +23,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_notify")
-	if testDB.Skip != "" {
-		fmt.Println("notify integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 const subject = "https://stage.test"
 

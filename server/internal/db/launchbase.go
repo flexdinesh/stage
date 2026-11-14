@@ -2,11 +2,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // Launch base sources: predecessor (the worktree started from the
@@ -48,14 +47,14 @@ func (b LaunchBase) Detail() string {
 // of the same attempt) and a launching task event describing it, in one
 // transaction.
 func (s *Store) RecordLaunchBase(ctx context.Context, taskID int64, b LaunchBase) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	return s.inTx(ctx, func(tx *Tx) error {
 		_, err := tx.Exec(ctx, `
 INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (task_id, attempt) DO UPDATE SET
   base_ref = EXCLUDED.base_ref, start_from_origin = EXCLUDED.start_from_origin, source = EXCLUDED.source,
   source_task_id = EXCLUDED.source_task_id, source_thread_id = EXCLUDED.source_thread_id,
-  source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, created_at = now()`,
+  source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, created_at = `+nowSQL+``,
 			taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceThreadID, b.SourceTitle, b.Reason)
 		if err != nil {
 			return err
@@ -74,7 +73,7 @@ func (s *Store) GetLaunchBase(ctx context.Context, taskID int64, attempt int) (*
 SELECT attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, created_at
 FROM task_launch_bases WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
 		Scan(&b.Attempt, &b.BaseRef, &b.StartFromOrigin, &b.Source, &b.SourceTaskID, &b.SourceThreadID, &b.SourceTitle, &b.Reason, &b.At)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

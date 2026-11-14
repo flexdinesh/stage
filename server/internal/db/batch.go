@@ -2,11 +2,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // CreatedTasks is a session batch: the tasks one T3 session created
@@ -103,13 +102,10 @@ func (s *Store) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
 		}
 		seen[id] = true
 	}
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := lockLinks(ctx, tx); err != nil {
-			return err
-		}
+	err := s.inTx(ctx, func(tx *Tx) error {
 		set := make(map[int64]orderRow, len(ids))
 		rows, err := tx.Query(ctx,
-			`SELECT id, state, after_task_id, after_thread_id, start_at, start_tz FROM tasks WHERE id = ANY($1) ORDER BY id FOR UPDATE`, ids)
+			`SELECT id, state, after_task_id, after_thread_id, start_at, start_tz FROM tasks WHERE id IN (SELECT value FROM json_each($1)) ORDER BY id`, jsonArray(ids))
 		if err != nil {
 			return err
 		}
@@ -155,7 +151,7 @@ func (s *Store) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
 			var oldTail int64
 			for _, id := range ids {
 				var f *int64
-				if err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE after_task_id = $1`, id).Scan(&f); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				if err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE after_task_id = $1`, id).Scan(&f); err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
 				if f == nil {
@@ -186,7 +182,7 @@ func (s *Store) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
 		}
 
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = NULL, after_thread_id = NULL, start_at = NULL, start_tz = NULL,
-  updated_at = now() WHERE id = ANY($1)`, ids); err != nil {
+  updated_at = `+nowSQL+` WHERE id IN (SELECT value FROM json_each($1))`, jsonArray(ids)); err != nil {
 			return err
 		}
 		if tailFollower != nil {
@@ -219,7 +215,7 @@ func (s *Store) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
 			if err := setAfter(ctx, tx, *tailFollower, &tail); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE tasks SET updated_at = now() WHERE id = $1`, *tailFollower); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE tasks SET updated_at = `+nowSQL+` WHERE id = $1`, *tailFollower); err != nil {
 				return err
 			}
 		}

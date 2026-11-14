@@ -28,17 +28,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_cli")
-	if testDB.Skip != "" {
-		fmt.Println("cli integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 type harness struct {
 	t      *testing.T
@@ -51,9 +41,6 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, url: "http://127.0.0.1:1"}
-	if testDB.Skip != "" {
-		return h
-	}
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	h.fake = t3.NewFake()
@@ -66,12 +53,6 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(srv.Close)
 	h.url = srv.URL
 	return h
-}
-
-func (h *harness) needDB() {
-	if testDB.Skip != "" {
-		h.t.Skip(testDB.Skip)
-	}
 }
 
 // run executes the CLI; returns exit code, stdout, stderr.
@@ -135,7 +116,6 @@ func decode[T any](t *testing.T, s string) T {
 
 func TestTaskCommands(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	p := h.project("/w/cli")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Me"})
 	if err != nil {
@@ -203,7 +183,6 @@ func TestTaskCommands(t *testing.T) {
 
 func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	ctx := context.Background()
 	p := h.project("/w/cli-prs")
 	code, stdout, stderr := h.run("", "task", "add", "--project", fmt.Sprint(p.ID), "--title", "Ship", "--prompt", "go", "--start", "--json")
@@ -263,7 +242,6 @@ func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
 
 func TestTaskOrderAndSessionBatch(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	p := h.project("/w/cli-o")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Planner"})
 	if err != nil {
@@ -301,7 +279,6 @@ func TestTaskOrderAndSessionBatch(t *testing.T) {
 
 func TestScheduleAndContextCommands(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	p := h.project("/w/cli-s")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-s/pkg"}
 	code, stdout, stderr := h.run("", "context", "--json")
@@ -329,7 +306,6 @@ func TestScheduleAndContextCommands(t *testing.T) {
 
 func TestSessionsSearchCommand(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	p := h.project("/w/cli-search")
 	ctx := context.Background()
 	res, err := h.fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "What more?"})
@@ -408,7 +384,6 @@ func TestSetupMCP(t *testing.T) {
 
 func TestHandoffFlags(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	h.project("/w/cli-handoff")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-handoff"}
 	code, stdout, stderr := h.run("", "task", "add", "--title", "a", "--prompt", "x", "--json")
@@ -447,7 +422,6 @@ func TestHandoffFlags(t *testing.T) {
 
 func TestSessionQuestionsCommand(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	p := h.project("/w/cliq")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Asks"})
 	if err != nil {
@@ -478,7 +452,6 @@ func TestSessionQuestionsCommand(t *testing.T) {
 
 func TestBaseFlag(t *testing.T) {
 	h := newHarness(t)
-	h.needDB()
 	h.project("/w/cli-base")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-base"}
 	code, stdout, stderr := h.run("", "task", "add", "--title", "a", "--prompt", "x", "--json")
