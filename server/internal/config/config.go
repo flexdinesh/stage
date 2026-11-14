@@ -2,45 +2,48 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
+
+	"github.com/flexdinesh/stage/server/internal/listen"
 )
 
 type Config struct {
-	Host         string // APP_HOST, default 0.0.0.0
-	Port         int    // APP_PORT, default 7380
-	DataDir      string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With APP_ENV=dev never the default.
-	T3URL        string // T3_URL, default http://127.0.0.1:3773 (server-side MCP/OAuth calls)
-	T3PublicURL  string // T3_PUBLIC_URL, default http://controlbox:3773 (browser "Open in T3" links)
-	T3AdminToken string // T3_ADMIN_TOKEN, optional; enables OAuth auto-renew
-	PublicURL    string // APP_PUBLIC_URL, default https://stage.local.deebox.xyz (PWA URL; VAPID subject)
+	Listen       listen.Addr // STAGE_LISTEN (or `stage serve --listen`), default listen.Default
+	DataDir      string      // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With STAGE_ENV=dev never the default.
+	T3URL        string      // T3_URL, default http://127.0.0.1:3773 (server-side MCP/OAuth calls)
+	T3PublicURL  string      // T3_PUBLIC_URL, default T3_URL (browser "Open in T3" links)
+	T3AdminToken string      // T3_ADMIN_TOKEN, optional; enables OAuth auto-renew
+	PublicURL    string      // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
 	// T3ClientName names this app's T3 session (OAuth client, pairing
-	// label): "stage", or "stage dev" with APP_ENV=dev.
+	// label): "stage", or "stage dev" with STAGE_ENV=dev.
 	T3ClientName string
 }
 
-func Load() (Config, error) {
+// Load reads the environment. listenFlag (`stage serve --listen`), when set,
+// overrides STAGE_LISTEN.
+func Load(listenFlag string) (Config, error) {
 	cfg := Config{
-		Host:         env("APP_HOST", "0.0.0.0"),
 		T3URL:        env("T3_URL", "http://127.0.0.1:3773"),
-		T3PublicURL:  env("T3_PUBLIC_URL", "http://controlbox:3773"),
 		T3AdminToken: os.Getenv("T3_ADMIN_TOKEN"),
-		PublicURL:    env("APP_PUBLIC_URL", "https://stage.local.deebox.xyz"),
+		PublicURL:    os.Getenv("STAGE_PUBLIC_URL"),
 		T3ClientName: "stage",
 	}
-	if os.Getenv("APP_ENV") == "dev" {
+	cfg.T3PublicURL = env("T3_PUBLIC_URL", cfg.T3URL)
+	dev := os.Getenv("STAGE_ENV") == "dev"
+	if dev {
 		cfg.T3ClientName = "stage dev"
 	}
-	port, err := strconv.Atoi(env("APP_PORT", "7380"))
-	if err != nil || port <= 0 || port > 65535 {
-		return Config{}, errors.New("APP_PORT must be a valid port number")
+	addr, name := listenFlag, "--listen"
+	if addr == "" {
+		addr, name = env("STAGE_LISTEN", listen.Default), "STAGE_LISTEN"
 	}
-	cfg.Port = port
+	var err error
+	if cfg.Listen, err = listen.Parse(addr); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", name, err)
+	}
 	// The default is only needed when STAGE_DATA_DIR is unset, or for the dev
 	// guard; one that cannot be resolved cannot be STAGE_DATA_DIR's target.
 	defaultDir, defaultErr := DefaultDataDir()
@@ -53,8 +56,8 @@ func Load() (Config, error) {
 	} else {
 		cfg.DataDir = defaultDir
 	}
-	if os.Getenv("APP_ENV") == "dev" && defaultErr == nil && cfg.DataDir == defaultDir {
-		return Config{}, fmt.Errorf("APP_ENV=dev refuses the default (production) data dir %s; set STAGE_DATA_DIR or use `mise run dev`", defaultDir)
+	if dev && defaultErr == nil && cfg.DataDir == defaultDir {
+		return Config{}, fmt.Errorf("STAGE_ENV=dev refuses the default (production) data dir %s; set STAGE_DATA_DIR or use `mise run dev`", defaultDir)
 	}
 	return cfg, nil
 }
@@ -74,11 +77,6 @@ func DefaultDataDir() (string, error) {
 		return filepath.Join(home, "Library", "Application Support", "stage"), nil
 	}
 	return filepath.Join(home, ".local", "share", "stage"), nil
-}
-
-// Addr is the HTTP listen address.
-func (c Config) Addr() string {
-	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 
 func env(key, fallback string) string {

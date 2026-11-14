@@ -92,7 +92,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 const usage = `stage: stage server and agent CLI
 
 Usage:
-  stage [serve]                       run the server (default)
+  stage [serve] [--listen ADDR]       run the server (default); ADDR host:port or unix:/abs/path.sock
+                                      (env STAGE_LISTEN, default 127.0.0.1:7380)
   stage context                       your session, cwd and resolved project
   stage projects ls
   stage models ls
@@ -124,7 +125,7 @@ Usage:
 Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
         --mode default|plan --base-ref REF --branch NAME --tag T... --notes TEXT
         --prompt-file PATH --image PATH...
-Global: --url URL (env STAGE_URL, default http://127.0.0.1:7380) --json
+Global: --url URL (env STAGE_URL, default http://127.0.0.1:7380; unix:///abs/path.sock for a socket) --json
 Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
 and enable --after-me.
 `

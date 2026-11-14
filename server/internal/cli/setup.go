@@ -58,6 +58,9 @@ func setupMCP(env Env, args []string) error {
 	if base == "" {
 		base = client.DefaultURL
 	}
+	if http && strings.HasPrefix(base, "unix:") {
+		return usagef("setup mcp --http: %s is a unix socket; agents need an http(s) URL (use stdio)", base)
+	}
 	endpoint := strings.TrimRight(base, "/") + "/mcp"
 
 	var errs []error

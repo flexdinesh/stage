@@ -474,3 +474,16 @@ func TestTopicFor(t *testing.T) {
 		seen[got] = tag
 	}
 }
+
+func TestVAPIDSubject(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for in, want := range map[string]string{
+		"https://stage.example": "https://stage.example",
+		"http://stage.lan:7380": FallbackSubject,
+		"":                      FallbackSubject,
+	} {
+		if got := New(nil, in, log).subject; got != want {
+			t.Errorf("STAGE_PUBLIC_URL %q: subject %q, want %q", in, got, want)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -31,12 +33,13 @@ import (
 var testDB dbtest.DB
 
 type harness struct {
-	t      *testing.T
-	url    string
-	fake   *t3.Fake
-	sync   *t3sync.Service
-	caller agentctx.Caller
-	execs  [][]string
+	t       *testing.T
+	url     string
+	handler http.Handler // the /api router
+	fake    *t3.Fake
+	sync    *t3sync.Service
+	caller  agentctx.Caller
+	execs   [][]string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -46,10 +49,11 @@ func newHarness(t *testing.T) *harness {
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.sync = t3sync.New(store, h.fake, log)
-	srv := httptest.NewServer(api.NewRouter(api.Deps{
+	h.handler = api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
 		Store:  store, T3: h.fake, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
-	}))
+	})
+	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)
 	h.url = srv.URL
 	return h
@@ -379,6 +383,61 @@ func TestSetupMCP(t *testing.T) {
 	}
 	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user --transport http stage http://localhost:7380/mcp]]" {
 		t.Fatalf("http execs %s", got)
+	}
+	// A unix socket URL passes through unchanged to the stdio server; agents
+	// cannot reach HTTP MCP over a socket.
+	h.execs = nil
+	h.url = "unix:///run/stage/stage.sock"
+	if code, _, stderr := h.run("", "setup", "mcp", "--claude"); code != 0 {
+		t.Fatalf("unix: %s", stderr)
+	}
+	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user -e STAGE_URL=unix:///run/stage/stage.sock stage -- /usr/local/bin/stage mcp]]" {
+		t.Fatalf("unix execs %s", got)
+	}
+	h.execs = nil
+	if code, _, stderr := h.run("", "setup", "mcp", "--claude", "--http"); code != 2 || !strings.Contains(stderr, "--http") || h.execs != nil {
+		t.Fatalf("unix --http: code %d, execs %v, stderr %s", code, h.execs, stderr)
+	}
+}
+
+// The CLI reaches a server that listens only on a unix socket
+// (STAGE_URL=unix:///abs/path.sock).
+func TestCLIOverUnixSocket(t *testing.T) {
+	h := newHarness(t)
+	dir, err := os.MkdirTemp("", "stc") // short: unix socket paths are length-limited
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	addr, err := listen.Parse("unix:" + filepath.Join(dir, "stage.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := addr.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: h.handler}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	h.url = addr.URL()
+	if !strings.HasPrefix(h.url, "unix:///") {
+		t.Fatalf("socket URL %q", h.url)
+	}
+
+	p := h.project("/w/cli-unix")
+	code, stdout, stderr := h.run("", "task", "add", "--project", fmt.Sprint(p.ID), "--title", "Over unix", "--prompt", "go", "--json")
+	if code != 0 {
+		t.Fatalf("task add over unix socket: %d %s", code, stderr)
+	}
+	task := decode[client.Task](t, stdout)
+	code, stdout, stderr = h.run("", "task", "show", fmt.Sprint(task.ID), "--json")
+	if code != 0 || decode[client.TaskDetail](t, stdout).Title != "Over unix" {
+		t.Fatalf("task show over unix socket: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, _ = h.run("", "context", "--json")
+	if code != 0 || decode[agenttools.ContextOut](t, stdout).APIURL != h.url {
+		t.Fatalf("context apiUrl: %s", stdout)
 	}
 }
 
