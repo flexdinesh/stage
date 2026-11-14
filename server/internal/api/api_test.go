@@ -29,6 +29,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
 var testDB *dbtest.DB
@@ -121,6 +122,7 @@ type env struct {
 	sync   *t3sync.Service
 	runner *links.Runner
 	store  *db.Store
+	hub    *transcript.Hub
 }
 
 const publicURL = "http://controlbox:3773"
@@ -135,15 +137,18 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	svc.SetPublicURL(publicURL)
 	runner := links.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
+	hub := transcript.NewHub(t.Context(), client, api.MirrorActive(store), log)
+	hub.PollEvery, hub.IdleEvery, hub.Grace = 10*time.Millisecond, 10*time.Millisecond, 50*time.Millisecond
 	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
 		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Transcript: hub,
 	}
 	for _, opt := range opts {
 		opt(&deps)
 	}
 	h := api.NewRouter(deps)
-	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
+	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store, hub: hub}
 }
 
 // do sends a request; out (if non-nil) receives the decoded body.

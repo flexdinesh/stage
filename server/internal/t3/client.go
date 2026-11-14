@@ -38,6 +38,9 @@ type Client interface {
 	// run) and returns up to MaxChars of its text, paging long text.
 	// ErrNoReply if none; ErrNotFound if the thread is unknown.
 	LatestReply(ctx context.Context, in LatestReplyInput) (Reply, error)
+	// ReadItems calls t3_thread_read (view messages) for one page of
+	// timeline items. ErrNotFound if unknown.
+	ReadItems(ctx context.Context, in ReadItemsInput) (ItemPage, error)
 	// LaunchThread calls t3_thread_launch. Idempotent per ClientRequestID.
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
 	// SendMessage calls t3_thread_send (follow-up).
@@ -269,6 +272,61 @@ type Reply struct {
 	Truncated bool
 	Position  int
 	UpdatedAt time.Time
+}
+
+// Item limits of t3_thread_read.
+const (
+	MaxItemsPerRead = 100
+	MaxItemChars    = 50000
+)
+
+// ReadItemsInput pages t3_thread_read view "messages" (user_message,
+// assistant_message, proposed_plan) by global timeline position.
+type ReadItemsInput struct {
+	ThreadID      string
+	AfterPosition *int   // nil = from the start (T3 rejects -1)
+	Limit         int    // 1..MaxItemsPerRead; 0 = T3 default (50)
+	MaxChars      int    // per item, 1..MaxItemChars; 0 = T3 default (20000)
+	ItemID        string // set: that item only, text from TextOffset
+	TextOffset    int
+}
+
+// ItemPage is one t3_thread_read page. NextPosition is the last returned
+// item's position (nil when empty).
+type ItemPage struct {
+	Thread       ThreadDetail
+	Items        []TimelineItem
+	NextPosition *int
+	HasMore      bool
+}
+
+// TimelineItem is OrchestratorMcpThreadTimelineItem. Positions are global
+// timeline positions (tool items in between are skipped by the view).
+type TimelineItem struct {
+	Position       int
+	Visibility     string // local|inherited|synthetic
+	SourceThreadID string
+	ItemID         string
+	RunID          string
+	MessageID      string
+	CreatedBy      string // user|agent|system|""
+	Type           string // user_message|assistant_message|proposed_plan
+	Status         string // idle|pending|running|waiting|completed|failed|cancelled|interrupted
+	Title          string
+	Text           string
+	TextTruncated  bool
+	NextTextOffset *int
+	UpdatedAt      time.Time
+}
+
+// Settled reports whether the item can no longer change (not pending,
+// running or waiting). Streaming assistant text grows in place until then.
+func (i TimelineItem) Settled() bool {
+	switch i.Status {
+	case "pending", "running", "waiting":
+		return false
+	}
+	return true
 }
 
 type Run struct {

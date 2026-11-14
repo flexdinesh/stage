@@ -10,6 +10,13 @@ test("markdownToHtml renders GFM blocks", () => {
   assert.match(html, /<table>/);
 });
 
+test("markdownToHtml renders images as links, never <img>", () => {
+  const html = markdownToHtml('![chart](https://example.com/a.png) and ![](https://example.com/"b".png)');
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /<a href="https:\/\/example.com\/a.png">image: chart<\/a>/);
+  assert.match(html, /<a href="https:\/\/example.com\/(&quot;|%22)b(&quot;|%22).png">/);
+});
+
 test("markdownToHtml renders raw HTML as literal text", () => {
   const html = markdownToHtml('Use <Panel> here.\n\n<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">');
   assert.doesNotMatch(html, /<script|<img|<Panel/);

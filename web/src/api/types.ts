@@ -583,6 +583,55 @@ export interface ThreadDetail {
   createdTasks: CreatedTasks;
 }
 
+// ---- Transcript (docs/api.md "Transcript") ----
+
+export const TRANSCRIPT_KINDS = ["user", "assistant", "plan"] as const;
+export type TranscriptKind = (typeof TRANSCRIPT_KINDS)[number];
+
+/** One message; an upsert keyed by `position` (newer `updatedAt` wins). */
+export interface TranscriptItem {
+  position: number;
+  itemId: string;
+  sourceThreadId: string;
+  inherited: boolean;
+  kind: TranscriptKind;
+  status: string;
+  streaming: boolean;
+  createdBy: string | null;
+  runId: string | null;
+  /** At most 2000 chars; `truncated` = full text is longer. */
+  text: string;
+  truncated: boolean;
+  updatedAt: string;
+}
+
+export interface TranscriptPage {
+  items: TranscriptItem[];
+  hasEarlier: boolean;
+  /** Stream resume point; null on a `before` page, -1 when empty. */
+  cursor: number | null;
+  active: boolean;
+  status: ThreadStatus;
+}
+
+export interface TranscriptQuery {
+  before?: number;
+  limit?: number;
+}
+
+/** SSE `state` event. */
+export interface TranscriptState {
+  active: boolean;
+  status: ThreadStatus;
+  error: string | null;
+}
+
+export interface TranscriptItemText {
+  itemId: string;
+  text: string;
+  truncated: boolean;
+}
+
 // ---- Snippets ----
 
 /** Reusable prompt text; `projectId` null = global (shown in every project). */

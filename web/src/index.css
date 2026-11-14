@@ -362,8 +362,15 @@
     border: 0;
     border-top: 1px solid var(--line);
   }
-  .prose-reply img {
-    max-width: 100%;
+  .prose-reply input[type="checkbox"] {
+    accent-color: var(--accent);
+    margin-right: 0.4em;
+    vertical-align: -1px;
+  }
+
+  /* Collapsed long transcript message: fade the last lines into the row instead of a hard cut. */
+  .transcript-clamp {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent);
   }
 
   /* Authored chevron on selects (per-theme --chevron). */

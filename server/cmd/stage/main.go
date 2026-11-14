@@ -25,6 +25,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/transcript"
 	"github.com/flexdinesh/stage/server/internal/webui"
 )
 
@@ -116,8 +117,11 @@ func run() error {
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger) }()
 
 	mux := http.NewServeMux()
+	// Transcript pollers and their event streams end with ctx, so Shutdown
+	// does not wait on open streams.
+	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
 	mux.Handle("/api/", api.NewRouter(api.Deps{
-		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger,
+		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
 	}))
 	// Streamable HTTP MCP: the agent tools over this server's own REST API
 	// (loopback), so validation stays in one place. No local file access.

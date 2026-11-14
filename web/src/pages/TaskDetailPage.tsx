@@ -16,6 +16,7 @@ import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
+import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
 import {
   Alert,
   AppButton,
@@ -88,6 +89,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
+  const [view, setView] = useDetailView();
   const followupInput = useRef<HTMLTextAreaElement>(null);
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
@@ -250,7 +252,15 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </Alert>
         )}
 
+        {task.t3ThreadId === null ? null : <DetailViewTabs view={view} onChange={setView} live={isLiveState(task.state)} />}
+
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {task.t3ThreadId !== null && view === "transcript" ? (
+            <div className="flex min-w-0 flex-col gap-3.5">
+              <Transcript threadId={task.t3ThreadId} jumpOffset="task" />
+              <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} />
+            </div>
+          ) : (
           <div className="flex min-w-0 flex-col gap-3.5">
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
@@ -265,6 +275,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
             <TimelinePanel events={task.events} />
           </div>
+          )}
           <div className="flex min-w-0 flex-col gap-3.5">
             <SequencePanel task={task} />
             <PullRequestsPanel prs={task.pullRequests} />

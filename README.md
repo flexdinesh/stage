@@ -11,6 +11,7 @@ Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, 
 - **Task actions**: start, follow-up, stop, duplicate, open in T3.
 - **Run order**: link a task to run after another (while creating, viewing or editing it; can span projects). It starts when that thread is settled in T3; a failed predecessor keeps it waiting. Start now unlinks it and starts it immediately.
 - **Sessions**: browse Active or All sessions across projects, regardless of where they started. Active has no creation-date cutoff. Open local session details, inspect child sessions, or jump to T3. History remains available from Sessions.
+- **Transcript**: session and task detail have an Overview | Transcript switch (`?view=transcript`). Read-only user and assistant messages and plans as safe markdown (no raw HTML, no remote images), newest 50 with Load earlier, long messages collapsed. Live while a run is active: the server polls T3 every 2s (one poller per session, only while someone watches) and pushes changes over SSE. Tool calls, commands and diffs stay in T3.
 - **Queued continuations**: open session A, choose an existing top-level session B, and save a prompt. Both current runs continue untouched. Delivery waits for A to settle explicitly and B to finish with no pending input. Linear chains track the delivered continuation run before releasing the next step. Failed, interrupted, or cancelled sessions block delivery; uncertain sends are held for review rather than retried. Edit, pause, resume, or cancel before delivery is claimed. The saved prompt includes A's reference, without copying its transcript.
 - **Last word**: each session's latest assistant reply, read during sync once a thread is at rest. Task and session detail show it as markdown (up to 4000 chars, with a link to T3 when longer); Needs input and Done rows show it as one line. Read-only: reply in T3.
 - **Dashboard**: needs-input alert, plus running, done (awaiting settle), backlog and settled (last 7 days) across projects. External T3 threads (not tasks) show under needs input and running.
@@ -53,6 +54,8 @@ Update: `git pull && docker compose up -d --build`.
 ## Install as an app (PWA) and notifications
 
 Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `APP_PUBLIC_URL` to that URL (it is also the VAPID subject). The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
+
+The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript/stream`). Caddy's `reverse_proxy` flushes it immediately; if your config uses `encode`, exclude that path so events aren't buffered. Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
 
 - iOS/iPadOS 16.4+: open the URL in Safari, Share → Add to Home Screen, open stage from the Home Screen, then Settings → Notifications → Enable.
 - macOS: Safari → File → Add to Dock (or use the site in Safari/Chrome), then Settings → Notifications → Enable.

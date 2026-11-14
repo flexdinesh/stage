@@ -344,10 +344,14 @@ type wireThreadRead struct {
 type wireTimelineItem struct {
 	Position       int     `json:"position"`
 	Visibility     string  `json:"visibility"` // local|inherited|synthetic
+	SourceThreadID string  `json:"sourceThreadId"`
 	ItemID         string  `json:"itemId"`
 	RunID          string  `json:"runId"`
 	MessageID      string  `json:"messageId"`
+	CreatedBy      string  `json:"createdBy"`
 	Type           string  `json:"type"`
+	Status         string  `json:"status"`
+	Title          string  `json:"title"`
 	Text           string  `json:"text"`
 	TextTruncated  bool    `json:"textTruncated"`
 	NextTextOffset *int    `json:"nextTextOffset"`
@@ -378,6 +382,29 @@ func (w wireThreadRead) toDetail() ThreadDetail {
 		})
 	}
 	return d
+}
+
+func (w wireThreadRead) toItemPage() ItemPage {
+	page := ItemPage{Thread: w.toDetail(), Items: make([]TimelineItem, 0, len(w.Items)), NextPosition: w.NextPosition, HasMore: w.HasMore}
+	for _, it := range w.Items {
+		page.Items = append(page.Items, TimelineItem{
+			Position:       it.Position,
+			Visibility:     it.Visibility,
+			SourceThreadID: it.SourceThreadID,
+			ItemID:         it.ItemID,
+			RunID:          it.RunID,
+			MessageID:      it.MessageID,
+			CreatedBy:      it.CreatedBy,
+			Type:           it.Type,
+			Status:         it.Status,
+			Title:          it.Title,
+			Text:           it.Text,
+			TextTruncated:  it.TextTruncated,
+			NextTextOffset: it.NextTextOffset,
+			UpdatedAt:      it.UpdatedAt.Time,
+		})
+	}
+	return page
 }
 
 // wireModelSelection accepts options as [{id,value}] or a legacy record

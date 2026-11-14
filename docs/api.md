@@ -466,6 +466,50 @@ Results: stage matches first, then T3 matches whose thread is not already listed
 
 200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null, "createdTasks": CreatedTasks }`. `createdTasks`: the tasks this session created (see "Session batch"; empty arrays when none). Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
 
+## Transcript
+
+Read-only conversation of a session: user messages, assistant messages and plans (T3 `t3_thread_read` view `messages`). No tool calls, commands, reasoning or diffs; those stay in T3. Encode the T3 thread ID and item ID as single path segments. All endpoints: 404 when the session is not mirrored, 503 when T3 is not connected, 502 on T3 read errors.
+
+`TranscriptItem`:
+```json
+{
+  "position": 12,
+  "itemId": "item_abc",
+  "sourceThreadId": "thread_abc",
+  "inherited": false,
+  "kind": "assistant",
+  "status": "completed",
+  "streaming": false,
+  "createdBy": "agent",
+  "runId": "run_1",
+  "text": "Done. Summary...",
+  "truncated": false,
+  "updatedAt": "2026-11-08T10:01:00Z"
+}
+```
+`position`: T3 global timeline position, unique per item, ascending in time (tool items in between are skipped, so positions have gaps). `kind`: `user|assistant|plan`. `inherited`: the item belongs to a parent thread (fork history). `status`: T3 turn item status (`idle|pending|running|waiting|completed|failed|cancelled|interrupted`). `streaming`: the item belongs to the active run and is still pending/running/waiting, so its text may grow. `createdBy`: `user|agent|system|null`. `text`: at most 2000 characters; `truncated` true when the full text is longer (fetch it from the item endpoint). Items are upserts keyed by `position`: a newer copy (same or later `updatedAt`) replaces the older.
+
+Cursor: the highest position at or below which every message is final (not streaming). Resuming from a cursor resends everything after it, including streaming items.
+
+### `GET /api/threads/:id/transcript`
+Query: `limit` (default 50, max 200), `before` (position; only items below it). 200 `{ "items": TranscriptItem[], "hasEarlier": boolean, "cursor": number|null, "active": boolean, "status": ThreadStatus }`. `items` ascending by position: the newest `limit` messages (below `before` when given). `hasEarlier`: older messages exist (page with `before` = first item's position). `cursor`: resume point for the stream, null when `before` is set; -1 for an empty session. `active`: a run is in flight (active run or status preparing/queued/starting/running/waiting). T3 has no backward paging, so each page scans the session forward.
+
+### `GET /api/threads/:id/transcript/items/:itemId`
+200 `{ "itemId": string, "text": string, "truncated": boolean }`: the item's full text, assembled from T3 text pages; `truncated` only when it exceeds 1,000,000 characters.
+
+### `GET /api/threads/:id/transcript/stream`
+Server-Sent Events (`text/event-stream`). Query `after` (cursor; default -1). A `Last-Event-ID` header (browser reconnect) wins over `after`. On connect the server sends `retry: 3000`, every item after the cursor, then a `state` event, then live changes. It never sends items at or below the cursor, and event ids never go below it.
+
+| Event | `data` | Meaning |
+|---|---|---|
+| `item` | TranscriptItem | new or changed item (upsert). `id:` is the current cursor. |
+| `state` | `{ "active": boolean, "status": ThreadStatus, "error": string\|null }` | sent on connect and whenever activity, status or the T3 read error changes. |
+| `reset` | `{}` | positions no longer line up, or the client fell behind. The server closes the stream; refetch the REST page and reconnect with its cursor. |
+
+Comment lines (`: ping`) every 15s keep proxies from timing out. Headers: `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`; every event is flushed. Caddy's `reverse_proxy` flushes event streams by default; keep this path out of `encode` if responses arrive in bursts.
+
+Polling: one server poller per session, shared by every open stream. While a run is active it reads T3 every 2s from the cursor (re-reading streaming items). After the run ends it reads once more, then stops calling T3 and watches the mirrored session status (refreshed by sync every 5s) to resume. It stops 10s after the last stream closes. Child (subagent) sessions are not refreshed by the watcher, so a new run in one goes live only after reconnecting.
+
 ## Queued continuations
 
 A continuation sends a saved prompt into an existing top-level, unarchived session. It never launches a replacement thread, steers or interrupts current work. Saving and resuming only check readiness; the background runner owns delivery.

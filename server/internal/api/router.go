@@ -13,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
 // Deps are the API's collaborators.
@@ -25,6 +26,8 @@ type Deps struct {
 	Logger *slog.Logger
 	// SearchTimeout bounds the T3 call in GET /api/threads/search (0 = 2s).
 	SearchTimeout time.Duration
+	// Transcript serves session transcripts; nil disables those routes.
+	Transcript *transcript.Hub
 }
 
 type server struct {
@@ -90,6 +93,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/threads", s.listThreads)
 	h("GET /api/threads/search", s.searchThreads)
 	h("GET /api/threads/{id}", s.getThread)
+	h("GET /api/threads/{id}/transcript", s.getTranscript)
+	h("GET /api/threads/{id}/transcript/items/{itemId}", s.getTranscriptItem)
+	h("GET /api/threads/{id}/transcript/stream", s.streamTranscript)
 	h("GET /api/continuations", s.listContinuations)
 	h("POST /api/continuations", s.createContinuation)
 	h("PATCH /api/continuations/{id}", s.updateContinuation)

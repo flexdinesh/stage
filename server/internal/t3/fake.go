@@ -18,9 +18,11 @@ type Fake struct {
 	seq         int
 	projects    []Project
 	threads     map[string]*ThreadDetail
-	order       []string           // thread ids, oldest first
-	replies     map[string][]Reply // thread id -> assistant replies, oldest first
-	launches    map[string]string  // clientRequestID -> threadID
+	order       []string                  // thread ids, oldest first
+	replies     map[string][]Reply        // thread id -> assistant replies, oldest first
+	items       map[string][]TimelineItem // thread id -> visible timeline, position = index
+	itemReads   int
+	launches    map[string]string // clientRequestID -> threadID
 	Catalog     Catalog
 	Sent        []FakeSend
 	Interrupted []string // interrupted thread ids
@@ -71,6 +73,7 @@ func NewFake() *Fake {
 		now:      time.Now,
 		threads:  map[string]*ThreadDetail{},
 		replies:  map[string][]Reply{},
+		items:    map[string][]TimelineItem{},
 		launches: map[string]string{},
 		Catalog: Catalog{Providers: []Provider{{
 			ProviderInstanceID: "claude",
@@ -271,6 +274,120 @@ func (f *Fake) LatestReply(_ context.Context, in LatestReplyInput) (Reply, error
 		return r, nil
 	}
 	return Reply{}, ErrNoReply
+}
+
+// messageItemTypes are the item types t3_thread_read view "messages" returns.
+var messageItemTypes = []string{"user_message", "assistant_message", "proposed_plan"}
+
+func (f *Fake) ReadItems(_ context.Context, in ReadItemsInput) (ItemPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.itemReads++
+	t, ok := f.threads[in.ThreadID]
+	if !ok {
+		return ItemPage{}, ErrNotFound
+	}
+	detail := *t
+	detail.RecentRuns = slices.Clone(t.RecentRuns)
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, MaxItemsPerRead)
+	maxChars := in.MaxChars
+	if maxChars <= 0 {
+		maxChars = 20000
+	}
+	maxChars = min(maxChars, MaxItemChars)
+	after := -1
+	if in.AfterPosition != nil {
+		after = *in.AfterPosition
+	}
+	var matching []TimelineItem
+	for _, it := range f.items[in.ThreadID] {
+		if in.ItemID != "" {
+			if it.ItemID == in.ItemID {
+				matching = append(matching, it)
+			}
+			continue
+		}
+		if it.Position > after && slices.Contains(messageItemTypes, it.Type) {
+			matching = append(matching, it)
+		}
+	}
+	page := ItemPage{Thread: detail, HasMore: len(matching) > limit}
+	if len(matching) > limit {
+		matching = matching[:limit]
+	}
+	offset := 0
+	if in.ItemID != "" {
+		offset = in.TextOffset
+	}
+	for _, it := range matching {
+		text := []rune(it.Text)
+		start := min(offset, len(text))
+		end := min(start+maxChars, len(text))
+		it.Text = string(text[start:end])
+		it.TextTruncated = end < len(text)
+		it.NextTextOffset = nil
+		if it.TextTruncated {
+			next := end
+			it.NextTextOffset = &next
+		}
+		page.Items = append(page.Items, it)
+	}
+	if n := len(page.Items); n > 0 {
+		pos := page.Items[n-1].Position
+		page.NextPosition = &pos
+	}
+	return page, nil
+}
+
+// AddItem appends a timeline item to a thread (any type; only message types
+// are readable) and returns its position. Zero Status means completed.
+func (f *Fake) AddItem(threadID string, it TimelineItem) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pos := len(f.items[threadID])
+	it.Position = pos
+	if it.ItemID == "" {
+		it.ItemID = f.nextID("item")
+	}
+	if it.SourceThreadID == "" {
+		it.SourceThreadID = threadID
+	}
+	if it.Visibility == "" {
+		it.Visibility = "local"
+	}
+	if it.Status == "" {
+		it.Status = "completed"
+	}
+	if it.UpdatedAt.IsZero() {
+		it.UpdatedAt = f.now()
+	}
+	f.items[threadID] = append(f.items[threadID], it)
+	return pos
+}
+
+// UpdateItem mutates the item at a position (streaming text, status).
+func (f *Fake) UpdateItem(threadID string, position int, mutate func(*TimelineItem)) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := f.items[threadID]
+	if position < 0 || position >= len(items) {
+		return ErrNotFound
+	}
+	mutate(&items[position])
+	items[position].Position = position
+	items[position].UpdatedAt = f.now()
+	return nil
+}
+
+// ItemReads counts ReadItems calls (tests: poller T3 load).
+func (f *Fake) ItemReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.itemReads
 }
 
 func (f *Fake) LaunchThread(_ context.Context, in LaunchInput) (LaunchResult, error) {
