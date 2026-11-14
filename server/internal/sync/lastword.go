@@ -36,7 +36,7 @@ func (s *Service) refreshLastWord(ctx context.Context, d t3.ThreadDetail) error 
 	if !atRest || d.ItemCount == 0 || d.UpdatedAt.IsZero() {
 		return nil
 	}
-	updated := d.UpdatedAt.Truncate(time.Microsecond) // Postgres precision
+	updated := d.UpdatedAt.Truncate(time.Microsecond) // stored timestamp precision
 	checked, err := s.store.LastWordCheckedAt(ctx, d.ThreadID)
 	if err != nil {
 		return err

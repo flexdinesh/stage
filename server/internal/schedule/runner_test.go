@@ -2,8 +2,6 @@ package schedule_test
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -14,17 +12,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/schedule"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_schedule")
-	if testDB.Skip != "" {
-		fmt.Println("schedule integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 type launch struct {
 	ID     int64

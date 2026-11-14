@@ -4,8 +4,6 @@ import (
 	"context"
 	"slices"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // MaxTaskAttachments is the per-task (and per-follow-up) image limit (T3's).
@@ -56,11 +54,11 @@ func (s *Store) GetAttachment(ctx context.Context, id int64) (AttachmentData, er
 // DeleteAttachment removes a staged image, or one of a backlog task's images
 // (Conflict once the task has left backlog).
 func (s *Store) DeleteAttachment(ctx context.Context, id int64) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	return s.inTx(ctx, func(tx *Tx) error {
 		var state *TaskState
 		err := tx.QueryRow(ctx, `
 SELECT t.state FROM task_attachments a LEFT JOIN tasks t ON t.id = a.task_id
-WHERE a.id = $1 FOR UPDATE OF a`, id).Scan(&state)
+WHERE a.id = $1`, id).Scan(&state)
 		if err != nil {
 			return notFound(err)
 		}
@@ -80,7 +78,7 @@ func (s *Store) TaskAttachments(ctx context.Context, taskID int64) ([]Attachment
 // StagedAttachments returns the staged images ids (in ids order); Invalid
 // when any is unknown or already attached.
 func (s *Store) StagedAttachments(ctx context.Context, ids []int64) ([]AttachmentData, error) {
-	rows, err := s.attachmentData(ctx, `WHERE task_id IS NULL AND schedule_id IS NULL AND id = ANY($1)`, ids)
+	rows, err := s.attachmentData(ctx, `WHERE task_id IS NULL AND schedule_id IS NULL AND id IN (SELECT value FROM json_each($1))`, jsonArray(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +112,7 @@ func (s *Store) attachmentData(ctx context.Context, cond string, arg any) ([]Att
 
 // DeleteStagedAttachments removes staged images (after a follow-up sent them).
 func (s *Store) DeleteStagedAttachments(ctx context.Context, ids []int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND id = ANY($1)`, ids)
+	_, err := s.pool.Exec(ctx, `DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND id IN (SELECT value FROM json_each($1))`, jsonArray(ids))
 	return err
 }
 
@@ -128,13 +126,13 @@ func (s *Store) SweepStagedAttachments(ctx context.Context, age time.Duration) (
 // setAttachments makes ids the task's exact image set: staged ids are
 // attached, the task's images not in ids are deleted. Invalid when an id is
 // neither staged nor the task's own, or when more than MaxTaskAttachments.
-func setAttachments(ctx context.Context, tx pgx.Tx, taskID int64, ids []int64) error {
+func setAttachments(ctx context.Context, tx *Tx, taskID int64, ids []int64) error {
 	return setOwnedAttachments(ctx, tx, "task_id", taskID, ids)
 }
 
 // setOwnedAttachments is setAttachments for an owner column (task_id or
 // schedule_id). Staged = no owner.
-func setOwnedAttachments(ctx context.Context, tx pgx.Tx, col string, ownerID int64, ids []int64) error {
+func setOwnedAttachments(ctx context.Context, tx *Tx, col string, ownerID int64, ids []int64) error {
 	ids = uniqueIDs(ids)
 	if len(ids) > MaxTaskAttachments {
 		return Invalid("at most %d images per task", MaxTaskAttachments)
@@ -143,22 +141,22 @@ func setOwnedAttachments(ctx context.Context, tx pgx.Tx, col string, ownerID int
 	var usable int
 	err := tx.QueryRow(ctx, `
 SELECT count(*) FROM task_attachments
-WHERE id = ANY($2) AND (`+staged+` OR `+col+` = $1)`, ownerID, ids).Scan(&usable)
+WHERE id IN (SELECT value FROM json_each($2)) AND (`+staged+` OR `+col+` = $1)`, ownerID, jsonArray(ids)).Scan(&usable)
 	if err != nil {
 		return err
 	}
 	if usable != len(ids) {
 		return Invalid("unknown or already attached image in attachmentIds")
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM task_attachments WHERE `+col+` = $1 AND NOT (id = ANY($2))`, ownerID, ids); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM task_attachments WHERE `+col+` = $1 AND id NOT IN (SELECT value FROM json_each($2))`, ownerID, jsonArray(ids)); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE task_attachments SET `+col+` = $1 WHERE `+staged+` AND id = ANY($2)`, ownerID, ids)
+	_, err = tx.Exec(ctx, `UPDATE task_attachments SET `+col+` = $1 WHERE `+staged+` AND id IN (SELECT value FROM json_each($2))`, ownerID, jsonArray(ids))
 	return err
 }
 
 // copyScheduleAttachments copies a schedule's images onto task dst.
-func copyScheduleAttachments(ctx context.Context, tx pgx.Tx, scheduleID, dst int64) error {
+func copyScheduleAttachments(ctx context.Context, tx *Tx, scheduleID, dst int64) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data)
 SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE schedule_id = $1 ORDER BY id`, scheduleID, dst)
@@ -166,7 +164,7 @@ SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE schedul
 }
 
 // copyAttachments copies src's images onto dst.
-func copyAttachments(ctx context.Context, tx pgx.Tx, src, dst int64) error {
+func copyAttachments(ctx context.Context, tx *Tx, src, dst int64) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data)
 SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE task_id = $1 ORDER BY id`, src, dst)

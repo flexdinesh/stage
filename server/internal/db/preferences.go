@@ -54,7 +54,7 @@ func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Prefer
 			stored = append(stored, string(e))
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET notify_events = $1, updated_at = now() WHERE id = 1`, stored); err != nil {
+	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET notify_events = $1, updated_at = `+nowSQL+` WHERE id = 1`, stored); err != nil {
 		return Preferences{}, err
 	}
 	return s.GetPreferences(ctx)
@@ -62,7 +62,7 @@ func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Prefer
 
 // SetPinned stores (or clears, nil) the pinned defaults.
 func (s *Store) SetPinned(ctx context.Context, d *ModelDefaults) (Preferences, error) {
-	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET pinned = $1, updated_at = now() WHERE id = 1`, d); err != nil {
+	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET pinned = $1, updated_at = `+nowSQL+` WHERE id = 1`, d); err != nil {
 		return Preferences{}, err
 	}
 	return s.GetPreferences(ctx)
@@ -71,7 +71,7 @@ func (s *Store) SetPinned(ctx context.Context, d *ModelDefaults) (Preferences, e
 // SetLastUsed records the model config of the latest created task.
 func (s *Store) SetLastUsed(ctx context.Context, d ModelDefaults) error {
 	d.ModelOptions = nonNilOptions(d.ModelOptions)
-	_, err := s.pool.Exec(ctx, `UPDATE preferences SET last_used = $1, updated_at = now() WHERE id = 1`, d)
+	_, err := s.pool.Exec(ctx, `UPDATE preferences SET last_used = $1, updated_at = `+nowSQL+` WHERE id = 1`, d)
 	return err
 }
 

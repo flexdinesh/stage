@@ -2,11 +2,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // Handoff statuses: sent (the block went out with the launch prompt) or
@@ -74,7 +73,7 @@ WHERE th.t3_thread_id = $1 AND `+threadPassedSQL, *task.AfterThreadID).Scan(&src
 	default:
 		return nil, nil
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -94,14 +93,14 @@ func (s *Store) RecordHandoff(ctx context.Context, taskID int64, h Handoff) erro
 		}
 		detail = "handoff skipped: " + reason
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	return s.inTx(ctx, func(tx *Tx) error {
 		_, err := tx.Exec(ctx, `
 INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_thread_id, source_title, status, text, reason)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (task_id, attempt) DO UPDATE SET
   source_task_id = EXCLUDED.source_task_id, source_thread_id = EXCLUDED.source_thread_id,
   source_title = EXCLUDED.source_title, status = EXCLUDED.status, text = EXCLUDED.text,
-  reason = EXCLUDED.reason, created_at = now()`,
+  reason = EXCLUDED.reason, created_at = `+nowSQL+``,
 			taskID, h.Attempt, h.SourceTaskID, h.SourceThreadID, h.SourceTitle, h.Status, h.Text, h.Reason)
 		if err != nil {
 			return err
@@ -124,7 +123,7 @@ func (s *Store) GetHandoff(ctx context.Context, taskID int64, attempt int) (*Han
 SELECT attempt, status, source_task_id, source_thread_id, source_title, text, reason, created_at
 FROM task_handoffs WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
 		Scan(&h.Attempt, &h.Status, &h.SourceTaskID, &h.SourceThreadID, &h.SourceTitle, &h.Text, &h.Reason, &h.At)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

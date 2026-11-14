@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 )
 
@@ -46,25 +48,32 @@ func (s *Store) Stats(ctx context.Context, from, to time.Time, tz string, exclud
 		ThreadsByDay: []DayCount{}, ThreadsByProject: []ProjectCount{},
 		ThreadsByStatus: []StatusCount{}, TasksByState: []StateCount{}}
 
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return st, Invalid("invalid tz %q", tz)
+	}
+	// Day buckets in tz, computed here (SQLite has no time zones).
 	rows, err := s.pool.Query(ctx, `
-SELECT to_char(date_trunc('day', created_at AT TIME ZONE $3), 'YYYY-MM-DD') AS day, count(*)
-FROM threads WHERE created_at >= $1 AND created_at < $2
-  AND (NOT $4 OR parent_thread_id IS NULL)
-GROUP BY day ORDER BY day`, from, to, tz, excludeSubagents)
+SELECT created_at FROM threads WHERE created_at >= $1 AND created_at < $2
+  AND (NOT $3 OR parent_thread_id IS NULL)`, from, to, excludeSubagents)
 	if err != nil {
 		return st, err
 	}
+	byDay := map[string]int{}
 	for rows.Next() {
-		var d DayCount
-		if err := rows.Scan(&d.Day, &d.Count); err != nil {
+		var at time.Time
+		if err := rows.Scan(&at); err != nil {
 			rows.Close()
 			return st, err
 		}
-		st.ThreadsByDay = append(st.ThreadsByDay, d)
+		byDay[at.In(loc).Format(time.DateOnly)]++
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return st, err
+	}
+	for _, day := range slices.Sorted(maps.Keys(byDay)) {
+		st.ThreadsByDay = append(st.ThreadsByDay, DayCount{Day: day, Count: byDay[day]})
 	}
 
 	rows, err = s.pool.Query(ctx, `

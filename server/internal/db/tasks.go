@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -21,8 +19,8 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
   t.origin_thread_id, oth.title, t.after_thread_id, ath.title, t.handoff,
-  COALESCE(LEAST(th.pending_question_count, th.pending_request_count), 0),
-  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
+  COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
+  COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
@@ -32,7 +30,7 @@ LEFT JOIN schedules sc ON sc.id = t.schedule_id
 LEFT JOIN threads oth ON oth.t3_thread_id = t.origin_thread_id
 LEFT JOIN threads ath ON ath.t3_thread_id = t.after_thread_id`
 
-func scanTask(row pgx.Row) (Task, error) {
+func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
@@ -53,7 +51,7 @@ func scanTask(row pgx.Row) (Task, error) {
 	return t, nil
 }
 
-func collectTasks(rows pgx.Rows, err error) ([]Task, error) {
+func collectTasks(rows *rowSet, err error) ([]Task, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -88,14 +86,14 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
 	}
 	if len(f.States) > 0 {
-		w.add("t.state = ANY(" + w.arg(f.States) + ")")
+		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
 	}
 	if f.Tag != "" {
-		w.add(w.arg(f.Tag) + " = ANY(t.tags)")
+		w.add("EXISTS (SELECT 1 FROM json_each(t.tags) WHERE value = " + w.arg(f.Tag) + ")")
 	}
 	if f.Q != "" {
 		p := w.arg(likePattern(f.Q))
-		w.add("(t.title ILIKE " + p + " OR t.prompt ILIKE " + p + ")")
+		w.add("(" + likeSQL("t.title", p) + " OR " + likeSQL("t.prompt", p) + ")")
 	}
 	if f.From != nil {
 		w.add("t.created_at >= " + w.arg(*f.From))
@@ -124,9 +122,9 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
-  OR (t.state = 'done' AND ($1::boolean OR t.updated_at > now() - interval '1 hour'))
+  OR (t.state = 'done' AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
-    t.updated_at > now() - interval '10 minutes'
+    t.updated_at > `+nowPlusSQL("-10 minutes")+`
     OR (NOT th.settled AND (th.pending_request_count > 0
       OR th.status IN ('preparing', 'queued', 'starting', 'running', 'waiting'))))))
 ORDER BY t.id`, includeStale)
@@ -198,9 +196,9 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
 }
 
 // createTask is CreateTask with extra run inside the insert transaction.
-func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx pgx.Tx, id int64) error) (Task, error) {
+func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx *Tx, id int64) error) (Task, error) {
 	var id int64
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
 		var err error
 		id, err = insertTask(ctx, tx, in, extra)
 		return err
@@ -212,7 +210,7 @@ func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx pgx.Tx
 }
 
 // insertTask is createTask's insert, inside tx.
-func insertTask(ctx context.Context, tx pgx.Tx, in NewTask, extra func(tx pgx.Tx, id int64) error) (int64, error) {
+func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id int64) error) (int64, error) {
 	if in.StartAt != nil && in.AfterTaskID != nil {
 		return 0, errStartAndAfter
 	}
@@ -259,7 +257,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true)) 
 	return id, err
 }
 
-func projectExists(ctx context.Context, tx pgx.Tx, id int64) error {
+func projectExists(ctx context.Context, tx *Tx, id int64) error {
 	var one int
 	err := tx.QueryRow(ctx, `SELECT 1 FROM projects WHERE id = $1`, id).Scan(&one)
 	if err != nil {
@@ -303,13 +301,13 @@ func (p TaskPatch) restrictedSet() bool {
 // UpdateTask applies a validated patch. Outside backlog only title, tags and
 // notes may change (Conflict otherwise).
 func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, error) {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
 		var provider, model *string
 		var startAt *time.Time
 		var after *int64
 		var afterThread *string
-		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, start_at, after_task_id, after_thread_id FROM tasks WHERE id = $1 FOR UPDATE`, id).
+		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, start_at, after_task_id, after_thread_id FROM tasks WHERE id = $1`, id).
 			Scan(&state, &provider, &model, &startAt, &after, &afterThread)
 		if err != nil {
 			return notFound(err)
@@ -428,7 +426,7 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AfterThreadID.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
-		sets = append(sets, "updated_at = now()")
+		sets = append(sets, "updated_at = "+nowSQL)
 		_, err = tx.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
 		return err
 	})
@@ -441,13 +439,10 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 // DeleteTask removes a task unless a thread is active (Conflict). Its follower
 // is spliced onto its predecessor (A→X→B becomes A→B).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := lockLinks(ctx, tx); err != nil {
-			return err
-		}
+	return s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
 		var after *int64
-		if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state, &after); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1`, id).Scan(&state, &after); err != nil {
 			return notFound(err)
 		}
 		if state.Active() {
@@ -457,7 +452,7 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = NULL WHERE id = $1`, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = $2, updated_at = now() WHERE after_task_id = $1`, id, after); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = $2, updated_at = `+nowSQL+` WHERE after_task_id = $1`, id, after); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
@@ -472,7 +467,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	copyImages := func(tx pgx.Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
+	copyImages := func(tx *Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
@@ -483,7 +478,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 
 // TouchTask bumps updated_at (re-arms polling of failed/interrupted tasks).
 func (s *Store) TouchTask(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET updated_at = now() WHERE id = $1`, id)
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET updated_at = `+nowSQL+` WHERE id = $1`, id)
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
@@ -525,8 +520,8 @@ type TransitionResult struct {
 // entry into a finished state, settledAt on settled) and a task_events row.
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT state, launch_attempt, COALESCE(launch_request_id, '') FROM tasks WHERE id = $1 FOR UPDATE`, t.TaskID).
+	err := s.inTx(ctx, func(tx *Tx) error {
+		err := tx.QueryRow(ctx, `SELECT state, launch_attempt, COALESCE(launch_request_id, '') FROM tasks WHERE id = $1`, t.TaskID).
 			Scan(&res.From, &res.Attempt, &res.RequestID)
 		if err != nil {
 			return notFound(err)
@@ -537,28 +532,28 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 		err = tx.QueryRow(ctx, `
 UPDATE tasks SET
   state = $2,
-  launch_attempt = launch_attempt + CASE WHEN $3::boolean AND NOT launch_reuse THEN 1 ELSE 0 END,
-  launch_request_id = CASE WHEN $3::boolean AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
-                           THEN 'task-' || id || '-' || gen_random_uuid() ELSE launch_request_id END,
-  launch_reuse = CASE WHEN $3::boolean THEN false WHEN $7::boolean THEN true
-                      WHEN $4::text IS NOT NULL THEN false ELSE launch_reuse END,
-  t3_thread_id = CASE WHEN $3::boolean THEN NULL WHEN $4::text IS NOT NULL THEN $4::text ELSE t3_thread_id END,
-  launched_at = CASE WHEN $4::text IS NOT NULL THEN now() ELSE launched_at END,
-  last_error = CASE WHEN $3::boolean THEN NULL WHEN $5::text IS NOT NULL THEN $5::text ELSE last_error END,
-  finished_at = CASE WHEN $3::boolean THEN NULL
-                     WHEN $6::boolean AND finished_at IS NULL THEN now() ELSE finished_at END,
-  settled_at = CASE WHEN $3::boolean THEN NULL WHEN $2 = 'settled' THEN now() ELSE settled_at END,
-  start_at = CASE WHEN $3::boolean THEN NULL ELSE start_at END,
-  start_tz = CASE WHEN $3::boolean THEN NULL ELSE start_tz END,
-  after_task_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
+  launch_attempt = launch_attempt + CASE WHEN $3 AND NOT launch_reuse THEN 1 ELSE 0 END,
+  launch_request_id = CASE WHEN $3 AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
+                           THEN 'task-' || id || '-' || $9 ELSE launch_request_id END,
+  launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
+                      WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
+  t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
+  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE launched_at END,
+  last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
+  finished_at = CASE WHEN $3 THEN NULL
+                     WHEN $6 AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
+  settled_at = CASE WHEN $3 THEN NULL WHEN $2 = 'settled' THEN `+nowSQL+` ELSE settled_at END,
+  start_at = CASE WHEN $3 THEN NULL ELSE start_at END,
+  start_tz = CASE WHEN $3 THEN NULL ELSE start_tz END,
+  after_task_id = CASE WHEN $8 AND state = 'backlog' AND NOT EXISTS (
       SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state = 'settled')
     THEN NULL ELSE after_task_id END,
-  after_thread_id = CASE WHEN $8::boolean AND state = 'backlog' AND NOT EXISTS (
+  after_thread_id = CASE WHEN $8 AND state = 'backlog' AND NOT EXISTS (
       SELECT 1 FROM threads th WHERE th.t3_thread_id = tasks.after_thread_id AND `+threadPassedSQL+`)
     THEN NULL ELSE after_thread_id END,
-  updated_at = now()
+  updated_at = `+nowSQL+`
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting,
+			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting, newUUID(),
 		).Scan(&res.Attempt, &res.RequestID)
 		if err != nil {
 			return err

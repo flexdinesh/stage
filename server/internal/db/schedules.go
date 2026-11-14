@@ -2,12 +2,11 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/flexdinesh/stage/server/internal/cronexpr"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -65,14 +64,15 @@ const scheduleSelect = `
 SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s.model, s.model_options,
   s.runtime_mode, s.interaction_mode, s.workspace, s.tags, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
   (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
-  lt.id, lt.state, s.origin_thread_id, s.created_at, s.updated_at,
-  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
+  (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
+  (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
+  s.origin_thread_id, s.created_at, s.updated_at,
+  COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]')
 FROM schedules s
-JOIN projects p ON p.id = s.project_id
-LEFT JOIN LATERAL (SELECT t.id, t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1) lt ON true`
+JOIN projects p ON p.id = s.project_id`
 
-func scanSchedule(row pgx.Row) (Schedule, error) {
+func scanSchedule(row rowScanner) (Schedule, error) {
 	var s Schedule
 	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
 		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Tags, &s.Notes, &s.Cron, &s.Tz,
@@ -166,7 +166,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		return Schedule{}, err
 	}
 	var id int64
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = s.inTx(ctx, func(tx *Tx) error {
 		if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 			return err
 		}
@@ -215,11 +215,11 @@ type SchedulePatch struct {
 // UpdateSchedule applies a validated patch. Changing cron, tz or paused
 // recomputes next_run_at from now (a resume never fires a missed time).
 func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (Schedule, error) {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
 		var provider, model *string
 		var cron, tz string
 		var paused bool
-		err := tx.QueryRow(ctx, `SELECT provider_instance_id, model, cron, tz, paused FROM schedules WHERE id = $1 FOR UPDATE`, id).
+		err := tx.QueryRow(ctx, `SELECT provider_instance_id, model, cron, tz, paused FROM schedules WHERE id = $1`, id).
 			Scan(&provider, &model, &cron, &tz, &paused)
 		if err != nil {
 			return notFound(err)
@@ -300,7 +300,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		if len(sets) == 0 && !p.AttachmentIDs.Set {
 			return nil
 		}
-		sets = append(sets, "updated_at = now()")
+		sets = append(sets, "updated_at = "+nowSQL)
 		_, err = tx.Exec(ctx, `UPDATE schedules SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
 		return err
 	})
@@ -328,7 +328,7 @@ WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
-	runs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ScheduleRun, error) {
+	runs, err := collectRows(rows, func(row rowScanner) (ScheduleRun, error) {
 		var r ScheduleRun
 		err := row.Scan(&r.ID, &r.ScheduleID, &r.FireAt, &r.Outcome, &r.TaskID, &r.Detail, &r.At)
 		return r, err
@@ -345,7 +345,7 @@ WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 	if len(ids) == 0 {
 		return runs, nil
 	}
-	tasks, err := collectTasks(s.pool.Query(ctx, taskSelect+` WHERE t.id = ANY($1)`, ids))
+	tasks, err := collectTasks(s.pool.Query(ctx, taskSelect+` WHERE t.id IN (SELECT value FROM json_each($1))`, jsonArray(ids)))
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 }
 
 // spawnTask inserts a backlog task from schedule id's config and images.
-func spawnTask(ctx context.Context, tx pgx.Tx, id int64, startAt *time.Time) (int64, error) {
+func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64, error) {
 	var in NewTask
 	var tz string
 	err := tx.QueryRow(ctx, `
@@ -380,12 +380,12 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 	if startAt != nil {
 		in.StartAt, in.StartTz = startAt, &tz
 	}
-	return insertTask(ctx, tx, in, func(tx pgx.Tx, task int64) error {
+	return insertTask(ctx, tx, in, func(tx *Tx, task int64) error {
 		return copyScheduleAttachments(ctx, tx, id, task)
 	})
 }
 
-func insertRun(ctx context.Context, tx pgx.Tx, id int64, fireAt time.Time, outcome string, taskID *int64, detail string) error {
+func insertRun(ctx context.Context, tx *Tx, id int64, fireAt time.Time, outcome string, taskID *int64, detail string) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id, detail) VALUES ($1, $2, $3, $4, $5)`,
 		id, fireAt, outcome, taskID, detail)
@@ -399,7 +399,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]int64, error
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[int64])
+	return collectRows(rows, rowTo[int64])
 }
 
 // DueTask is a backlog task whose one-shot start has come.
@@ -415,7 +415,7 @@ SELECT id, start_at FROM tasks WHERE state = 'backlog' AND start_at <= $1 ORDER 
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (DueTask, error) {
+	return collectRows(rows, func(row rowScanner) (DueTask, error) {
 		var d DueTask
 		err := row.Scan(&d.ID, &d.StartAt)
 		return d, err
@@ -435,11 +435,11 @@ type FireResult struct {
 // next_run_at always advances past now.
 func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace time.Duration) (FireResult, error) {
 	var res FireResult
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
 		var cron, tz string
 		var paused bool
 		var next *time.Time
-		err := tx.QueryRow(ctx, `SELECT cron, tz, paused, next_run_at FROM schedules WHERE id = $1 FOR UPDATE`, id).
+		err := tx.QueryRow(ctx, `SELECT cron, tz, paused, next_run_at FROM schedules WHERE id = $1`, id).
 			Scan(&cron, &tz, &paused, &next)
 		if err != nil {
 			return notFound(err)
@@ -476,7 +476,7 @@ ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
 			case err == nil:
 				res.Outcome = RunSkipped
 				err = insertRun(ctx, tx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)))
-			case errors.Is(err, pgx.ErrNoRows):
+			case errors.Is(err, sql.ErrNoRows):
 				var task int64
 				if task, err = spawnTask(ctx, tx, id, &fireAt); err != nil {
 					return err
@@ -513,9 +513,9 @@ func stateWords(s TaskState) string {
 // records a manual run; the caller starts it.
 func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 	var task int64
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
 		var one int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM schedules WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT 1 FROM schedules WHERE id = $1`, id).Scan(&one); err != nil {
 			return notFound(err)
 		}
 		var err error

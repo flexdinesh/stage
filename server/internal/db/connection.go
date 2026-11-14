@@ -39,7 +39,7 @@ func (s *Store) SaveToken(ctx context.Context, tok t3.StoredToken) error {
 		expires = &tok.ExpiresAt
 	}
 	_, err := s.pool.Exec(ctx,
-		`UPDATE t3_connection SET client_id = $1, token = $2, expires_at = $3, updated_at = now() WHERE id = 1`,
+		`UPDATE t3_connection SET client_id = $1, token = $2, expires_at = $3, updated_at = `+nowSQL+` WHERE id = 1`,
 		nullIfEmpty(tok.ClientID), nullIfEmpty(tok.Token), expires)
 	return err
 }
@@ -47,7 +47,7 @@ func (s *Store) SaveToken(ctx context.Context, tok t3.StoredToken) error {
 // SetLastError implements t3.TokenStore ("" clears).
 func (s *Store) SetLastError(ctx context.Context, msg string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE t3_connection SET last_error = $1, updated_at = now() WHERE id = 1`, nullIfEmpty(msg))
+		`UPDATE t3_connection SET last_error = $1, updated_at = `+nowSQL+` WHERE id = 1`, nullIfEmpty(msg))
 	return err
 }
 
@@ -67,6 +67,6 @@ func (s *Store) GetConnection(ctx context.Context) (Connection, error) {
 
 func (s *Store) SetLastFullSync(ctx context.Context, at time.Time) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE t3_connection SET last_full_sync_at = $1, updated_at = now() WHERE id = 1`, at)
+		`UPDATE t3_connection SET last_full_sync_at = $1, updated_at = `+nowSQL+` WHERE id = 1`, at)
 	return err
 }

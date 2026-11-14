@@ -2,11 +2,11 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
-	"github.com/jackc/pgx/v5"
 )
 
 // VAPIDKeys is the server's Web Push key pair (base64url).
@@ -23,7 +23,7 @@ func (s *Store) VAPIDKeys(ctx context.Context) (VAPIDKeys, error) {
 	if err == nil {
 		return k, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return k, err
 	}
 	priv, pub, err := webpush.GenerateVAPIDKeys()
@@ -54,7 +54,7 @@ type PushSubscription struct {
 const pushSubSelect = `SELECT id, endpoint, p256dh, auth, user_agent, created_at, updated_at,
   last_success_at, last_error FROM push_subscriptions`
 
-func scanPushSub(row pgx.Row) (PushSubscription, error) {
+func scanPushSub(row rowScanner) (PushSubscription, error) {
 	var p PushSubscription
 	err := row.Scan(&p.ID, &p.Endpoint, &p.P256dh, &p.Auth, &p.UserAgent, &p.CreatedAt, &p.UpdatedAt,
 		&p.LastSuccessAt, &p.LastError)
@@ -66,7 +66,7 @@ func (s *Store) UpsertPushSubscription(ctx context.Context, endpoint, p256dh, au
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent) VALUES ($1, $2, $3, $4)
 ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
-  user_agent = EXCLUDED.user_agent, updated_at = now()`, endpoint, p256dh, auth, userAgent)
+  user_agent = EXCLUDED.user_agent, updated_at = `+nowSQL+``, endpoint, p256dh, auth, userAgent)
 	return err
 }
 
@@ -100,7 +100,7 @@ func (s *Store) ListPushSubscriptions(ctx context.Context) ([]PushSubscription, 
 
 // RecordPushResult stores a send outcome: errMsg nil = success.
 func (s *Store) RecordPushResult(ctx context.Context, endpoint string, errMsg *string) error {
-	q := `UPDATE push_subscriptions SET last_success_at = now(), last_error = NULL WHERE endpoint = $1`
+	q := `UPDATE push_subscriptions SET last_success_at = ` + nowSQL + `, last_error = NULL WHERE endpoint = $1`
 	args := []any{endpoint}
 	if errMsg != nil {
 		q = `UPDATE push_subscriptions SET last_error = $2 WHERE endpoint = $1`
@@ -114,18 +114,18 @@ func (s *Store) RecordPushResult(ctx context.Context, endpoint string, errMsg *s
 // threads?needsInput=1). Needs th + LEFT JOIN tasks tk. Subagents excluded,
 // forks included.
 const externalNeedsInput = `th.observed_state = 'needs_input' AND NOT th.settled
-  AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
+  AND th.relationship IS NOT 'subagent' AND tk.id IS NULL`
 
 // externalRunning: external threads observed running (dashboard,
 // threads?running=1). Same scope as externalNeedsInput.
 const externalRunning = `th.observed_state = 'running' AND NOT th.settled
-  AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
+  AND th.relationship IS NOT 'subagent' AND tk.id IS NULL`
 
 // externalSettled: external threads whose mirror state is settled
 // (dashboard, threads?settledFrom=). Same scope as externalNeedsInput;
 // archived threads included.
 const externalSettled = `(` + threadStateSQL + `) = 'settled'
-  AND th.relationship IS DISTINCT FROM 'subagent' AND tk.id IS NULL`
+  AND th.relationship IS NOT 'subagent' AND tk.id IS NULL`
 
 // NeedsInputCount: tasks in needs_input + external threads needing input.
 func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
@@ -144,7 +144,7 @@ func (s *Store) WatchedThreadIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT th.t3_thread_id FROM threads th
 WHERE (th.observed_state IN ('running', 'needs_input', 'done') OR (`+threadStateSQL+`) IN ('running','needs_input'))
-  AND th.relationship IS DISTINCT FROM 'subagent'
+  AND th.relationship IS NOT 'subagent'
 ORDER BY th.created_at`)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ type ThreadObservation struct {
 func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.t3_thread_id = i.id)
-FROM unnest($1::text[]) AS i(id) LEFT JOIN threads th ON th.t3_thread_id = i.id`, ids)
+FROM (SELECT value AS id FROM json_each($1)) AS i LEFT JOIN threads th ON th.t3_thread_id = i.id`, jsonArray(ids))
 	if err != nil {
 		return nil, err
 	}

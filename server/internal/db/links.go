@@ -2,31 +2,22 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
-
-	"github.com/jackc/pgx/v5"
 )
 
-// linksLock serializes link mutations (pg_advisory_xact_lock key).
-const linksLock = 0x7433_6c6e // "t3ln"
-
-func lockLinks(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(linksLock))
-	return err
-}
+// Link mutations run inside Store.inTx (BEGIN IMMEDIATE), which serializes
+// them with every other write, so link checks and updates are atomic.
 
 // setAfter links task id to run after `after` (nil unlinks). Linking rules
 // (409 Conflict): the task is backlog; the predecessor exists (404), is not
 // the task, is not settled, has no other follower, and is not
 // downstream of the task (no cycles). Links may span projects.
-func setAfter(ctx context.Context, tx pgx.Tx, id int64, after *int64) error {
-	if err := lockLinks(ctx, tx); err != nil {
-		return err
-	}
+func setAfter(ctx context.Context, tx *Tx, id int64, after *int64) error {
 	var state TaskState
 	var cur *int64
-	if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state, &cur); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1`, id).Scan(&state, &cur); err != nil {
 		return notFound(err)
 	}
 	if after == nil {
@@ -80,7 +71,7 @@ SELECT EXISTS (SELECT 1 FROM down WHERE id = $2)`, id, *after).Scan(&cycle); err
 // link (setAfter rules). Otherwise (409 Conflict): the task is backlog; the
 // thread is mirrored (404) and has not passed (threadPassedSQL). Many
 // tasks may wait on one thread.
-func setAfterThread(ctx context.Context, tx pgx.Tx, id int64, threadID *string) error {
+func setAfterThread(ctx context.Context, tx *Tx, id int64, threadID *string) error {
 	if threadID == nil {
 		_, err := tx.Exec(ctx, `UPDATE tasks SET after_thread_id = NULL WHERE id = $1`, id)
 		return err
@@ -93,11 +84,11 @@ func setAfterThread(ctx context.Context, tx pgx.Tx, id int64, threadID *string) 
 			return err
 		}
 		return setAfter(ctx, tx, id, &owner)
-	case !errors.Is(err, pgx.ErrNoRows):
+	case !errors.Is(err, sql.ErrNoRows):
 		return err
 	}
 	var state TaskState
-	if err := tx.QueryRow(ctx, `SELECT state FROM tasks WHERE id = $1 FOR UPDATE`, id).Scan(&state); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT state FROM tasks WHERE id = $1`, id).Scan(&state); err != nil {
 		return notFound(err)
 	}
 	if state != StateBacklog {
@@ -143,7 +134,7 @@ ORDER BY 1`)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[int64])
+	return collectRows(rows, rowTo[int64])
 }
 
 // LinkedThreadIDs: sessions that backlog tasks wait on and that have not
@@ -158,5 +149,5 @@ ORDER BY 1`)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+	return collectRows(rows, rowTo[string])
 }

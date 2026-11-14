@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,17 +12,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_db")
-	if testDB.Skip != "" {
-		fmt.Println("db integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 func setup(t *testing.T) (*db.Store, context.Context) {
 	return db.NewStore(testDB.Reset(t)), context.Background()
@@ -219,7 +207,7 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 		}
 		ids[name] = task.ID
 	}
-	if _, err := pool.Exec(ctx, `UPDATE tasks SET updated_at = now() - interval '2 hours', finished_at = now() - interval '2 hours' WHERE id = $1`, ids["stale"]); err != nil {
+	if _, err := pool.ExecContext(ctx, `UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-2 hours'), finished_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-2 hours') WHERE id = $1`, ids["stale"]); err != nil {
 		t.Fatal(err)
 	}
 	titles := func(includeStale bool) []string {
@@ -728,8 +716,8 @@ func TestSweepStagedAttachments(t *testing.T) {
 		Workspace: db.Workspace{Type: "root"}, AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testDB.Pool.Exec(ctx, `UPDATE task_attachments SET created_at = now() - interval '25 hours' WHERE id = ANY($1)`,
-		[]int64{old.ID, attachedOld.ID}); err != nil {
+	if _, err := testDB.Pool.ExecContext(ctx, `UPDATE task_attachments SET created_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-25 hours') WHERE id IN ($1, $2)`,
+		old.ID, attachedOld.ID); err != nil {
 		t.Fatal(err)
 	}
 	n, err := s.SweepStagedAttachments(ctx, 24*time.Hour)
@@ -744,71 +732,40 @@ func TestSweepStagedAttachments(t *testing.T) {
 	}
 }
 
-func TestSnippetsMigration(t *testing.T) {
-	old := dbtest.OpenAt("stage_test_migrate_snippets", 9)
-	defer old.Close()
-	if old.Pool == nil {
-		t.Skip(old.Skip)
-	}
-	pool := old.Pool
-	ctx := context.Background()
-	_, err := pool.Exec(ctx, `
-INSERT INTO templates (name, prompt, model, interaction_mode) VALUES
-  ('keep', 'review the diff', 'm1', 'plan'),
-  ('preset-only', '', 'm2', 'default')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	got, err := db.NewStore(pool).ListSnippets(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Name != "keep" || got[0].Body != "review the diff" || got[0].ProjectID != nil {
-		t.Fatalf("migrated %+v", got)
-	}
-}
-
-func TestLaunchRequestIDMigration(t *testing.T) {
-	old := dbtest.OpenAt("stage_test_migrate_launch_request", 10)
-	defer old.Close()
-	if old.Pool == nil {
-		t.Skip(old.Skip)
-	}
-	pool := old.Pool
-	ctx := context.Background()
-	var projectID, launched, reused, fresh int64
-	if err := pool.QueryRow(ctx, `INSERT INTO projects (t3_project_id, title, workspace_root, source) VALUES ('tp', 'p', '/w/p', 'app') RETURNING id`).Scan(&projectID); err != nil {
-		t.Fatal(err)
-	}
-	insert := `INSERT INTO tasks (project_id, title, prompt, launch_attempt, launch_reuse) VALUES ($1, 't', 'p', $2, $3) RETURNING id`
-	for _, c := range []struct {
-		id      *int64
-		attempt int
-		reuse   bool
-	}{{&launched, 2, false}, {&reused, 1, true}, {&fresh, 0, false}} {
-		if err := pool.QueryRow(ctx, insert, projectID, c.attempt, c.reuse).Scan(c.id); err != nil {
-			t.Fatal(err)
+// Link writes serialize (BEGIN IMMEDIATE): racing followers of one
+// predecessor get exactly one link and Conflicts, never a raw constraint
+// error or SQLITE_BUSY.
+func TestConcurrentLinksSerialize(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "p-race").ID
+	for round := range 5 {
+		head := mustTask(t, s, ctx, p, fmt.Sprintf("head-%d", round), nil)
+		const n = 8
+		followers := make([]int64, n)
+		for i := range followers {
+			followers[i] = mustTask(t, s, ctx, p, fmt.Sprintf("f-%d-%d", round, i), nil).ID
 		}
-	}
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	s := db.NewStore(pool)
-	// A pending reuse keeps the pre-migration clientRequestId (T3 may hold
-	// a thread for it).
-	res, err := s.TransitionTask(ctx, db.Transition{TaskID: reused, To: db.StateLaunching, BeginAttempt: true})
-	if err != nil || res.Attempt != 1 || res.RequestID != fmt.Sprintf("task-%d-1", reused) {
-		t.Fatalf("reused %+v, %v", res, err)
-	}
-	// Otherwise a new attempt gets a fresh task-<id>-<uuid>.
-	for id, attempt := range map[int64]int{launched: 3, fresh: 1} {
-		res, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true})
-		prefix := fmt.Sprintf("task-%d-", id)
-		if err != nil || res.Attempt != attempt || !strings.HasPrefix(res.RequestID, prefix) || len(res.RequestID) != len(prefix)+36 {
-			t.Fatalf("task %d %+v, %v", id, res, err)
+		errs := make(chan error, n)
+		for _, id := range followers {
+			go func() {
+				_, err := s.UpdateTask(ctx, id, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: head.ID}})
+				errs <- err
+			}()
+		}
+		linked := 0
+		for range n {
+			err := <-errs
+			var conflict *db.ConflictError
+			switch {
+			case err == nil:
+				linked++
+			case errors.As(err, &conflict):
+			default:
+				t.Fatalf("round %d: unexpected error %v", round, err)
+			}
+		}
+		if linked != 1 {
+			t.Fatalf("round %d: %d followers linked, want 1", round, linked)
 		}
 	}
 }

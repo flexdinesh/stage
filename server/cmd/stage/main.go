@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -51,19 +53,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return fmt.Errorf("data dir: %w", err)
+	}
+	dbPath := filepath.Join(cfg.DataDir, db.DBFile)
+	pool, err := db.Open(ctx, dbPath)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
 	if err := db.Migrate(ctx, pool); err != nil {
 		return err
 	}
 
 	logger := slog.Default()
+	logger.Info("database", "path", dbPath)
 	store := db.NewStore(pool)
 	var wg sync.WaitGroup
 	var closeT3 func()

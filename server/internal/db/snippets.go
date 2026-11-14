@@ -3,13 +3,14 @@ package db
 import (
 	"context"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const snippetCols = `s.id, s.name, s.body, s.project_id, s.created_at, s.updated_at`
 
-func scanSnippet(row pgx.Row) (Snippet, error) {
+// snippetReturning is snippetCols for RETURNING (SQLite allows no alias there).
+const snippetReturning = `id, name, body, project_id, created_at, updated_at`
+
+func scanSnippet(row rowScanner) (Snippet, error) {
 	var sn Snippet
 	err := row.Scan(&sn.ID, &sn.Name, &sn.Body, &sn.ProjectID, &sn.CreatedAt, &sn.UpdatedAt)
 	if err != nil {
@@ -62,7 +63,7 @@ func (s *Store) GetSnippet(ctx context.Context, id int64) (Snippet, error) {
 
 func (s *Store) CreateSnippet(ctx context.Context, p SnippetPatch) (Snippet, error) {
 	sn, err := scanSnippet(s.pool.QueryRow(ctx, `
-INSERT INTO snippets AS s (name, body, project_id) VALUES ($1, $2, $3) RETURNING `+snippetCols,
+INSERT INTO snippets (name, body, project_id) VALUES ($1, $2, $3) RETURNING `+snippetReturning,
 		p.Name.V, p.Body.V, p.ProjectID.Ptr()))
 	return snippetWriteErr(sn, err, p.Name.V)
 }
@@ -84,9 +85,9 @@ func (s *Store) UpdateSnippet(ctx context.Context, id int64, p SnippetPatch) (Sn
 	if len(sets) == 0 {
 		return s.GetSnippet(ctx, id)
 	}
-	sets = append(sets, "updated_at = now()")
+	sets = append(sets, "updated_at = "+nowSQL)
 	sn, err := scanSnippet(s.pool.QueryRow(ctx,
-		`UPDATE snippets AS s SET `+strings.Join(sets, ", ")+` WHERE s.id = $1 RETURNING `+snippetCols, w.args...))
+		`UPDATE snippets SET `+strings.Join(sets, ", ")+` WHERE id = $1 RETURNING `+snippetReturning, w.args...))
 	return snippetWriteErr(sn, err, p.Name.V)
 }
 

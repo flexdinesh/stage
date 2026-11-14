@@ -1,6 +1,6 @@
 # stage
 
-Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, and see history across all projects. Go + Postgres + React. Talks to T3 via its MCP endpoint (`T3_URL/mcp`).
+Task manager for T3 Code. Queue tasks, launch them as T3 threads, track status, and see history across all projects. Go + SQLite + React, shipped as a single binary. Talks to T3 via its MCP endpoint (`T3_URL/mcp`).
 
 ## Features
 
@@ -48,7 +48,7 @@ Runs on the same machine as T3. Requires Docker with compose.
    docker compose up -d --build
    ```
 
-   UI at `http://<host>:7380`, bound to `0.0.0.0`. Postgres listens on `127.0.0.1:5439` and stores data in the `pgdata` volume.
+   UI at `http://<host>:7380`, bound to `0.0.0.0`. The SQLite database (`stage.db`) lives in the `stagedata` volume (`STAGE_DATA_DIR=/data`). Outside Docker it defaults to `$XDG_DATA_HOME/stage` (else `~/.local/share/stage`; macOS `~/Library/Application Support/stage`).
 
 Update: `git pull && docker compose up -d --build`.
 
@@ -106,16 +106,16 @@ stage sessions search "token refresh" --project stage                          #
 
 ## Develop
 
-Development never touches production. Dev and tests run on their own Postgres (`compose.dev.yaml`, `127.0.0.1:5440`, volume `stage-dev_pgdata`). The prod stack is `compose.yaml` (`5439`), and only `mise run up` / `mise run down` touch it.
+Development never touches production. Dev uses a SQLite file per branch (`.scratch/dev/<branch>/stage.db`); tests use a temp file per test. The prod stack is `compose.yaml`, and only `mise run up` / `mise run down` touch it.
 
 Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise tasks` lists them.
 
-- `mise run dev`: dev Postgres, a database per branch (`stage_dev_<branch>`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`; prod is `stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `DATABASE_URL` itself.
-- `mise run test`: Go tests in throwaway `stage_test_*` databases on the dev Postgres, web typecheck/lint, and session semantic/API contract tests.
+- `mise run dev`: a database per branch (`.scratch/dev/<branch>/stage.db`), the Go server on `:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`; prod is `stage`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself.
+- `mise run test`: Go tests (a throwaway SQLite file per test), web typecheck/lint, and session semantic/API contract tests.
 - `node --test web/tests/sessions.test.mjs`: session eligibility, continuation editing/delivery preview, URL encoding and HTTP contract tests.
 - `node --test web/tests/palette-search.test.mjs`: palette session search merge, dedupe, labels and T3 offline note.
 - `node --test web/tests/tasks.test.mjs`: session batch helpers (selection, Start chain, reorder, progress) and the order HTTP contract.
 - `mise run check`: everything CI-like (go vet, go test, web install/test/typecheck/lint). Run before a PR.
-- `mise run dev-down` stops the dev Postgres. Other tasks: `mise run build`, `mise run install-cli`, `mise run up`, `mise run down`. API contract: `docs/api.md`.
+- Other tasks: `mise run build`, `mise run install-cli`, `mise run up`, `mise run down`. API contract: `docs/api.md`.
 
-Guards: with `APP_ENV=dev` (set by `mise run dev`) the server refuses the prod database (port `5439` or name `stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.
+Guards: with `APP_ENV=dev` (set by `mise run dev`) the server refuses the default (production) data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

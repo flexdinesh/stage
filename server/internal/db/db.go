@@ -2,44 +2,55 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// Open creates a pool whose timestamptz values scan as UTC (API emits "Z").
-func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+// DBFile is the database file name inside the data directory.
+const DBFile = "stage.db"
+
+// busyTimeoutMs: how long a writer waits for the write lock (BEGIN
+// IMMEDIATE or an autocommit write) before SQLITE_BUSY.
+const busyTimeoutMs = 10000
+
+// Open opens (creating when absent) the SQLite database at path: WAL,
+// busy_timeout, foreign keys on, and every transaction started as BEGIN
+// IMMEDIATE so writers serialize (one writer at a time).
+func Open(ctx context.Context, path string) (*sql.DB, error) {
+	q := url.Values{}
+	q.Set("_txlock", "immediate")
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMs))
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
+	pool, err := sql.Open("sqlite", u.String())
 	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
-	cfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
-		conn.TypeMap().RegisterType(&pgtype.Type{
-			Name:  "timestamptz",
-			OID:   pgtype.TimestamptzOID,
-			Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC},
-		})
-		return nil
+	if err := pool.PingContext(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	return pgxpool.NewWithConfig(ctx, cfg)
+	return pool, nil
 }
 
-// Store is hand-written data access over a pgx pool.
+// Store is hand-written data access over a SQLite pool.
 type Store struct {
-	pool *pgxpool.Pool
+	pool conn
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *sql.DB) *Store { return &Store{pool: conn{pool}} }
 
-func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+func (s *Store) Ping(ctx context.Context) error { return s.pool.db.PingContext(ctx) }
 
 // App errors shared by db, sync, links and api (api maps them to statuses).
 var ErrNotFound = errors.New("not found")
@@ -72,18 +83,25 @@ type T3Error struct{ Err error }
 func (e *T3Error) Error() string { return e.Err.Error() }
 func (e *T3Error) Unwrap() error { return e.Err }
 
+func sqliteCode(err error) int {
+	var e *sqlite.Error
+	if errors.As(err, &e) {
+		return e.Code()
+	}
+	return 0
+}
+
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	c := sqliteCode(err)
+	return c == sqlite3.SQLITE_CONSTRAINT_UNIQUE || c == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }
 
 func isForeignKeyViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+	return sqliteCode(err) == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY
 }
 
 func notFound(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	return err
@@ -109,10 +127,17 @@ func (w *where) sql() string {
 	return " WHERE " + strings.Join(w.conds, " AND ")
 }
 
-// likePattern escapes LIKE metacharacters for a substring match.
+// likePattern escapes LIKE metacharacters (escape character \) for a
+// substring match; use the placeholder with likeSQL.
 func likePattern(q string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return "%" + r.Replace(q) + "%"
+}
+
+// likeSQL matches col against a likePattern placeholder, case-insensitively
+// (SQLite lower() folds ASCII only).
+func likeSQL(col, pattern string) string {
+	return "lower(" + col + ") LIKE lower(" + pattern + `) ESCAPE '\'`
 }
 
 func nullIfEmpty(s string) *string {

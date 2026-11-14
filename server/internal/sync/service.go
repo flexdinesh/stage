@@ -38,7 +38,7 @@ type CatalogSnapshot struct {
 // ErrSyncRunning: a full sync is already in progress (409).
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
-// Service runs the T3 <-> Postgres loops. Set the hooks before Run.
+// Service runs the T3 <-> database loops. Set the hooks before Run.
 type Service struct {
 	store *db.Store
 	t3    t3.Client

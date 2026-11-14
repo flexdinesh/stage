@@ -52,17 +52,17 @@ type NotificationCursor struct {
 // The task URL survives ON DELETE SET NULL and restarts onto a different thread.
 // Titles are snapshots and cannot identify a task or an external thread.
 const notificationKeySQL = `CASE
-  WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id::text
-  WHEN n.url ~ '^/tasks/[0-9]+$' THEN 'task:' || substring(n.url FROM '[0-9]+$')
+  WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
+  WHEN n.url GLOB '/tasks/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'task:' || substr(n.url, 8)
   WHEN n.t3_thread_id IS NOT NULL THEN 'thread:' || n.t3_thread_id
-  ELSE 'notification:' || n.id::text END`
+  ELSE 'notification:' || n.id END`
 
 const notificationColumns = `n.id, n.event, n.task_id, COALESCE(tk.t3_thread_id, n.t3_thread_id), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
        WHEN th.settled THEN 'settled'
        ELSE th.observed_state END AS current_state,
-  COALESCE(LEAST(COALESCE(tth.pending_question_count, th.pending_question_count),
+  COALESCE(min(COALESCE(tth.pending_question_count, th.pending_question_count),
     COALESCE(tth.pending_request_count, th.pending_request_count)), 0) AS pending_question_count`
 
 const notificationJoins = `
@@ -94,8 +94,8 @@ func (s *Store) ListNotificationHistory(ctx context.Context, key string, limit i
 func (s *Store) listNotificationEvents(ctx context.Context, limit int, beforeID *int64, key *string) ([]Notification, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+notificationColumns+`
 FROM notifications n`+notificationJoins+`
-WHERE ($2::bigint IS NULL OR n.id < $2)
-  AND ($3::text IS NULL OR (`+notificationKeySQL+`) = $3)
+WHERE ($2 IS NULL OR n.id < $2)
+  AND ($3 IS NULL OR (`+notificationKeySQL+`) = $3)
 ORDER BY n.id DESC
 LIMIT $1`, limit, beforeID, key)
 	if err != nil {
@@ -141,7 +141,7 @@ WITH keyed AS (
   FROM grouped g JOIN notifications n ON n.id = g.id`+notificationJoins+`
 )
 SELECT * FROM resolved
-WHERE $2::boolean IS NULL OR (COALESCE(current_state = 'needs_input', false), id) < ($2::boolean, $3::bigint)
+WHERE $2 IS NULL OR (COALESCE(current_state = 'needs_input', false), id) < ($2, $3)
 ORDER BY COALESCE(current_state = 'needs_input', false) DESC, id DESC
 LIMIT $1`, limit, waiting, beforeID, upToID)
 	if err != nil {
@@ -169,14 +169,14 @@ func (s *Store) UnreadNotificationCount(ctx context.Context) (int, error) {
 
 // MarkNotificationsRead marks every unread entry with id <= upTo as read.
 func (s *Store) MarkNotificationsRead(ctx context.Context, upTo int64) error {
-	_, err := s.pool.Exec(ctx, `UPDATE notifications SET read_at = now() WHERE read_at IS NULL AND id <= $1`, upTo)
+	_, err := s.pool.Exec(ctx, `UPDATE notifications SET read_at = `+nowSQL+` WHERE read_at IS NULL AND id <= $1`, upTo)
 	return err
 }
 
 // MarkNotificationGroupsRead marks every unread entry in the given groups read.
 func (s *Store) MarkNotificationGroupsRead(ctx context.Context, groupKeys []string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE notifications n SET read_at = now()
-WHERE n.read_at IS NULL AND (`+notificationKeySQL+`) = ANY($1)`, groupKeys)
+	_, err := s.pool.Exec(ctx, `UPDATE notifications AS n SET read_at = `+nowSQL+`
+WHERE n.read_at IS NULL AND (`+notificationKeySQL+`) IN (SELECT value FROM json_each($1))`, jsonArray(groupKeys))
 	return err
 }
 

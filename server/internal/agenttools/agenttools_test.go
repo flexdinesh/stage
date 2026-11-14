@@ -29,17 +29,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-var testDB *dbtest.DB
-
-func TestMain(m *testing.M) {
-	testDB = dbtest.Open("stage_test_agenttools")
-	if testDB.Skip != "" {
-		fmt.Println("agenttools integration tests skipped:", testDB.Skip)
-	}
-	code := m.Run()
-	testDB.Close()
-	os.Exit(code)
-}
+var testDB dbtest.DB
 
 type env struct {
 	t      *testing.T
@@ -51,9 +41,6 @@ type env struct {
 }
 
 func newEnv(t *testing.T) *env {
-	if testDB.Skip != "" {
-		t.Skip(testDB.Skip)
-	}
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	fake := t3.NewFake()

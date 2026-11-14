@@ -5,16 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
-	"strings"
 )
 
 type Config struct {
 	Host         string // APP_HOST, default 0.0.0.0
 	Port         int    // APP_PORT, default 7380
-	DatabaseURL  string // DATABASE_URL, required; with APP_ENV=dev never the prod db (see ProdDatabase)
+	DataDir      string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With APP_ENV=dev never the default.
 	T3URL        string // T3_URL, default http://127.0.0.1:3773 (server-side MCP/OAuth calls)
 	T3PublicURL  string // T3_PUBLIC_URL, default http://controlbox:3773 (browser "Open in T3" links)
 	T3AdminToken string // T3_ADMIN_TOKEN, optional; enables OAuth auto-renew
@@ -27,7 +27,6 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Host:         env("APP_HOST", "0.0.0.0"),
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
 		T3URL:        env("T3_URL", "http://127.0.0.1:3773"),
 		T3PublicURL:  env("T3_PUBLIC_URL", "http://controlbox:3773"),
 		T3AdminToken: os.Getenv("T3_ADMIN_TOKEN"),
@@ -42,30 +41,38 @@ func Load() (Config, error) {
 		return Config{}, errors.New("APP_PORT must be a valid port number")
 	}
 	cfg.Port = port
-	if cfg.DatabaseURL == "" {
-		return Config{}, errors.New("DATABASE_URL is required")
+	defaultDir, err := DefaultDataDir()
+	if err != nil {
+		return Config{}, err
 	}
-	if os.Getenv("APP_ENV") == "dev" && ProdDatabase(cfg.DatabaseURL) {
-		return Config{}, fmt.Errorf("APP_ENV=dev refuses the production database (port %s or name %q); use `mise run dev`", ProdPort, ProdDBName)
+	cfg.DataDir = defaultDir
+	if v := os.Getenv("STAGE_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
+	if cfg.DataDir, err = filepath.Abs(cfg.DataDir); err != nil {
+		return Config{}, fmt.Errorf("STAGE_DATA_DIR: %w", err)
+	}
+	if os.Getenv("APP_ENV") == "dev" && cfg.DataDir == defaultDir {
+		return Config{}, fmt.Errorf("APP_ENV=dev refuses the default (production) data dir %s; set STAGE_DATA_DIR or use `mise run dev`", defaultDir)
 	}
 	return cfg, nil
 }
 
-// The production database (compose.yaml): published on ProdPort, named
-// ProdDBName. Dev and tests use compose.dev.yaml (5440).
-const (
-	ProdPort   = "5439"
-	ProdDBName = "stage"
-)
-
-// ProdDatabase reports whether a Postgres URL points at the production
-// port or database name. Unparseable URLs count as production.
-func ProdDatabase(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return true
+// DefaultDataDir is where the production database lives:
+// $XDG_DATA_HOME/stage, else ~/Library/Application Support/stage on macOS,
+// else ~/.local/share/stage. Absolute.
+func DefaultDataDir() (string, error) {
+	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
+		return filepath.Abs(filepath.Join(x, "stage"))
 	}
-	return u.Port() == ProdPort || strings.TrimPrefix(u.Path, "/") == ProdDBName
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("data dir: %w (set STAGE_DATA_DIR)", err)
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "Application Support", "stage"), nil
+	}
+	return filepath.Join(home, ".local", "share", "stage"), nil
 }
 
 // Addr is the HTTP listen address.

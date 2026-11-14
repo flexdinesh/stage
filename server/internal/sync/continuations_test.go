@@ -291,7 +291,7 @@ func TestContinuationCrashAroundSend(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := testDB.Pool.Exec(e.ctx, `UPDATE continuations SET claim_expires_at=now()-interval '1 second' WHERE id=$1`, c.ID); err != nil {
+			if _, err := testDB.Pool.ExecContext(e.ctx, `UPDATE continuations SET claim_expires_at=strftime('%Y-%m-%dT%H:%M:%f000Z','now','-1 second') WHERE id=$1`, c.ID); err != nil {
 				t.Fatal(err)
 			}
 			e.run()
@@ -339,7 +339,7 @@ func TestContinuationConcurrentWorkersAndClaimedMutation(t *testing.T) {
 		t.Fatalf("duplicate sends=%v", e.client.Sent)
 	}
 	var events int
-	if err := testDB.Pool.QueryRow(e.ctx, `SELECT count(*) FROM continuation_events WHERE continuation_id=$1`, c.ID).Scan(&events); err != nil || events < 3 {
+	if err := testDB.Pool.QueryRowContext(e.ctx, `SELECT count(*) FROM continuation_events WHERE continuation_id=$1`, c.ID).Scan(&events); err != nil || events < 3 {
 		t.Fatalf("events=%d err=%v", events, err)
 	}
 }
