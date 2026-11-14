@@ -194,3 +194,72 @@ func TestScheduleOriginInherited(t *testing.T) {
 		t.Fatalf("spawned %+v", spawned)
 	}
 }
+
+type createdTasks struct {
+	Chains      [][]agentTask `json:"chains"`
+	Independent []agentTask   `json:"independent"`
+}
+
+func batchIDs(c createdTasks) ([][]int64, []int64) {
+	chains := make([][]int64, len(c.Chains))
+	for i, ch := range c.Chains {
+		for _, t := range ch {
+			chains[i] = append(chains[i], t.ID)
+		}
+	}
+	var ind []int64
+	for _, t := range c.Independent {
+		ind = append(ind, t.ID)
+	}
+	return chains, ind
+}
+
+func TestSessionBatchAndOrder(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/batch")
+	s := runningSession(t, e, p.T3ProjectID, "Planner")
+	a := e.agentTask(p.ID, "a", map[string]any{"originThreadId": s, "afterThreadId": s}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"originThreadId": s}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"originThreadId": s}, 201)
+	solo := e.agentTask(p.ID, "solo", nil, 201)
+
+	var empty struct {
+		CreatedTasks createdTasks `json:"createdTasks"`
+	}
+	e.must("GET", "/api/threads/"+runningSession(t, e, p.T3ProjectID, "Other"), nil, 200, &empty)
+	if empty.CreatedTasks.Chains == nil || empty.CreatedTasks.Independent == nil {
+		t.Fatalf("createdTasks must be empty arrays: %+v", empty)
+	}
+
+	var ord struct {
+		Tasks []agentTask `json:"tasks"`
+	}
+	e.must("POST", "/api/tasks/order", map[string]any{"taskIds": []int64{a.ID, c.ID}}, 200, &ord)
+	if len(ord.Tasks) != 2 || ord.Tasks[0].ID != a.ID || ord.Tasks[1].ID != c.ID || ord.Tasks[1].AfterTaskID == nil {
+		t.Fatalf("order %+v", ord)
+	}
+	e.must("POST", "/api/tasks/order", map[string]any{"taskIds": []int64{a.ID}}, 400, nil)
+	e.must("POST", "/api/tasks/order", map[string]any{"taskIds": []int64{a.ID, 99999}}, 404, nil)
+
+	var detail struct {
+		CreatedTasks createdTasks `json:"createdTasks"`
+	}
+	e.must("GET", "/api/threads/"+s, nil, 200, &detail)
+	chains, ind := batchIDs(detail.CreatedTasks)
+	if fmt.Sprint(chains) != fmt.Sprint([][]int64{{a.ID, c.ID}}) || fmt.Sprint(ind) != fmt.Sprint([]int64{b.ID}) {
+		t.Fatalf("createdTasks %v %v", chains, ind)
+	}
+
+	var td struct {
+		Batch *createdTasks `json:"batch"`
+	}
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", b.ID), nil, 200, &td)
+	if td.Batch == nil || len(td.Batch.Chains) != 1 || len(td.Batch.Independent) != 1 {
+		t.Fatalf("task batch %+v", td.Batch)
+	}
+	td.Batch = nil
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", solo.ID), nil, 200, &td)
+	if td.Batch != nil {
+		t.Fatalf("no origin: batch must be null, got %+v", td.Batch)
+	}
+}

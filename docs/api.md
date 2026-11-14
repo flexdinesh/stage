@@ -213,7 +213,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null }`. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "sequence": Task[], "batch": CreatedTasks | null }`. `sequence`: see "Link rules". `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
 
 ### `GET /api/tasks`
 Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
@@ -253,6 +253,9 @@ Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId mode
 In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8). `afterTaskId`: set links per "Link rules" (409 / 404); `null` unlinks (any state). "Then run" on task A = `PATCH` the follower with `afterTaskId: A`.
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it. The resulting task must wait on at most one of a start time, `afterTaskId`, `afterThreadId` (400); switch in one request (e.g. `{ "startLocal": null, "startTz": null, "afterTaskId": 12 }`, `{ "afterTaskId": null, "afterThreadId": "thread-x" }`). `afterThreadId`: set links per "Link rules"; `null` unlinks.
 200 `Task`. 404.
+
+### `POST /api/tasks/order`
+Body `{ "taskIds": number[] }`: link the tasks to run in that order (each after the previous one), in one transaction. Rules in "Session batch". 200 `{ "tasks": Task[] }`: the resulting run order, head first (including linked tasks outside the list). 400 fewer than two ids or a duplicate id. 404 missing task. 409 a listed task is not `backlog`, or a link rule is broken (nothing changes).
 
 ### `DELETE /api/tasks/:id`
 204. 409 when state is `launching|running|needs_input` (stop first). Its follower is relinked to its predecessor (A→X→B becomes A→B; B unlinked when X had none).
@@ -461,7 +464,7 @@ Results: stage matches first, then T3 matches whose thread is not already listed
 
 ### `GET /api/threads/:id`
 
-200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null }`. Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
+200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null, "createdTasks": CreatedTasks }`. `createdTasks`: the tasks this session created (see "Session batch"; empty arrays when none). Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
 
 ## Queued continuations
 
@@ -703,13 +706,35 @@ Session links (`afterThreadId`, "run after me" from the agent interface):
 - Otherwise (409 / 404): the task is `backlog`; the session is mirrored (404) and has not passed. Many tasks may wait on one session.
 - A session is passed when it is settled in T3 with no pending requests and no active run (the raw settled flag: a settled session whose last run was cancelled passes). The link runner launches every `backlog` task whose session has passed; failed, interrupted, cancelled, running or done-but-unsettled keep it waiting. The watcher refreshes every session that a backlog task waits on each 5s pass (subagents included, no notifications), and a session settling kicks the runner. The link stays (history); it is not part of `sequence`.
 
+## Session batch
+
+A session batch is the set of tasks one session created (`originThreadId`), usually a plan an agent broke into tasks.
+
+`CreatedTasks`:
+```jsonc
+{
+  "chains": [[Task, Task, Task]], // runs of batch tasks linked by afterTaskId, head first; ordered by head id
+  "independent": [Task]           // batch tasks with no batch predecessor or follower, by id
+}
+```
+- A chain stops at the batch boundary: a batch task whose predecessor is outside the batch heads its chain (or is independent) and keeps its `afterTaskId`; an outside follower shows as the last step's `nextTaskId`.
+- Starting a chain = `POST /api/tasks/:id/start` on its head; followers already wait. A head waiting on a task or session is unlinked first ("Start now").
+
+`POST /api/tasks/order` (`order_tasks`, `stage task order`) rules:
+- At least two distinct tasks (400), all `backlog` (409).
+- Links between listed tasks are replaced; `taskIds[i]` runs after `taskIds[i-1]`. Followers lose their start time and session wait.
+- The first task keeps its own wait (start time, session, or a task outside the list).
+- Reorder: when the listed tasks already form exactly one chain, a new head without a wait takes the old head's wait, and the old tail's follower outside the list moves to the new tail.
+- Each link follows "Link rules" (e.g. 409 when an outside follower of a middle task would give it two followers, or a task belongs to a queued continuation order).
+
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session`. `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task order_tasks unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session`. `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.
 - Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
+- `get_session` returns `createdTasks` (see "Session batch"); `get_task` returns `batch`. `order_tasks` takes `taskIds` and returns `{ "tasks": Task[] }`.
 - `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `afterThreadId` of the caller session (error without one).
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.

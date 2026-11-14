@@ -7,6 +7,7 @@ import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
+import { CreatedTasksPanel } from "../components/CreatedTasks.tsx";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
@@ -22,7 +23,7 @@ export function SessionDetailPage() {
 }
 
 function SessionDetail({ data }: { data: ThreadDetail }) {
-  const { thread, children, continuations, task } = data;
+  const { thread, children, continuations, task, createdTasks } = data;
   const taskId = task?.id;
   // Viewing clears system notifications here and marks their groups read, so
   // other devices close theirs on their next sync.
@@ -40,6 +41,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-3.5">
           <LastWordPanel thread={thread} />
+          <CreatedTasksPanel threadId={thread.t3ThreadId} batch={createdTasks} />
           <RunOrderPanel thread={thread} entries={continuations} />
           <RunsPanel runs={thread.recentRuns ?? []} runCount={thread.runCount} />
           <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>

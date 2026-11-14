@@ -29,6 +29,22 @@ type taskDetailJSON struct {
 	Events   []db.TaskEvent `json:"events"`
 	Thread   *threadJSON    `json:"thread"`
 	Sequence []taskJSON     `json:"sequence"` // linked run order containing the task (head first)
+	// Batch: the tasks the task's origin session created (null without one).
+	Batch *createdTasksJSON `json:"batch"`
+}
+
+// createdTasksJSON is db.CreatedTasks with API task shapes.
+type createdTasksJSON struct {
+	Chains      [][]taskJSON `json:"chains"`
+	Independent []taskJSON   `json:"independent"`
+}
+
+func (s *server) createdTasks(env string, c db.CreatedTasks) createdTasksJSON {
+	out := createdTasksJSON{Chains: make([][]taskJSON, len(c.Chains)), Independent: s.tasks(env, c.Independent)}
+	for i, chain := range c.Chains {
+		out.Chains[i] = s.tasks(env, chain)
+	}
+	return out
 }
 
 // webURL = T3_PUBLIC_URL/<environmentId>/<threadId> (path-escaped: provider

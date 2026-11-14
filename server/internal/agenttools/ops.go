@@ -581,6 +581,21 @@ func (o *Ops) LinkTask(ctx context.Context, a LinkTaskArgs) (client.Task, error)
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
 
+// OrderTasksArgs is order_tasks.
+type OrderTasksArgs struct {
+	TaskIDs []int64 `json:"taskIds" jsonschema:"backlog tasks in run order (at least two); each runs after the previous one settles"`
+}
+
+// OrderTasksOut is order_tasks.
+type OrderTasksOut struct {
+	Tasks []client.Task `json:"tasks" jsonschema:"resulting run order, head first"`
+}
+
+func (o *Ops) OrderTasks(ctx context.Context, a OrderTasksArgs) (OrderTasksOut, error) {
+	ts, err := o.Client.OrderTasks(ctx, a.TaskIDs)
+	return OrderTasksOut{Tasks: ts}, err
+}
+
 func (o *Ops) UnlinkTask(ctx context.Context, a IDArgs) (client.Task, error) {
 	return o.Client.UpdateTask(ctx, a.ID, client.Patch{"afterTaskId": nil, "afterThreadId": nil})
 }

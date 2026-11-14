@@ -171,7 +171,7 @@ func TestToolList(t *testing.T) {
 	}
 	want := []string{
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
-		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "unlink_task",
+		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "order_tasks", "unlink_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
 		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session",
 	}
@@ -383,6 +383,43 @@ func TestSearchSessionsTool(t *testing.T) {
 	}
 }
 
+// A planning session queues tasks, orders them, then verifies the batch.
+func TestPlanningSessionBatch(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/plan")
+	s := e.session(p, "Planner")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
+	var a, b, c client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "do a", "afterMe": true}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "do b"}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"title": "c", "prompt": "do c"}, &c)
+
+	var ord agenttools.OrderTasksOut
+	mustCall(t, cs, "order_tasks", map[string]any{"taskIds": []int64{a.ID, b.ID}}, &ord)
+	if len(ord.Tasks) != 2 || ord.Tasks[0].ID != a.ID || ord.Tasks[1].ID != b.ID {
+		t.Fatalf("order %+v", ord)
+	}
+	if msg := call(t, cs, "order_tasks", map[string]any{"taskIds": []int64{c.ID}}, nil); !strings.Contains(msg, "at least two") {
+		t.Fatalf("one id: %q", msg)
+	}
+
+	var sd client.ThreadDetail
+	mustCall(t, cs, "get_session", map[string]any{"id": s}, &sd)
+	ct := sd.CreatedTasks
+	if len(ct.Chains) != 1 || len(ct.Chains[0]) != 2 || ct.Chains[0][0].ID != a.ID || ct.Chains[0][1].ID != b.ID ||
+		len(ct.Independent) != 1 || ct.Independent[0].ID != c.ID {
+		t.Fatalf("createdTasks %+v", ct)
+	}
+	if h := ct.Chains[0][0]; h.AfterThreadID == nil || *h.AfterThreadID != s {
+		t.Fatalf("head keeps after-me wait: %+v", h)
+	}
+	var td client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &td)
+	if td.Batch == nil || len(td.Batch.Chains) != 1 || len(td.Batch.Independent) != 1 {
+		t.Fatalf("task batch %+v", td.Batch)
+	}
+}
+
 func TestScheduleTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched")
@@ -458,7 +495,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 25 {
+	if err != nil || len(res.Tools) != 26 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

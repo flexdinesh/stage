@@ -102,6 +102,12 @@ export const IconChevronDown = (p: IconProps) => (
   </Svg>
 );
 
+export const IconChevronUp = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 10l4-4 4 4" />
+  </Svg>
+);
+
 /** Theme: square split half filled (system), sun (light), moon (dark). */
 export const IconThemeSystem = (p: IconProps) => (
   <Svg {...p}>

@@ -65,6 +65,14 @@ type TaskDetail struct {
 	Events   []db.TaskEvent `json:"events"`
 	Thread   *Thread        `json:"thread"`
 	Sequence []Task         `json:"sequence"`
+	Batch    *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
+}
+
+// CreatedTasks is a session batch: tasks one session created, grouped by run
+// order (chains head first, then independent tasks).
+type CreatedTasks struct {
+	Chains      [][]Task `json:"chains"`
+	Independent []Task   `json:"independent"`
 }
 
 // Thread is the API Thread (session) shape.
@@ -80,6 +88,7 @@ type ThreadDetail struct {
 	Children      []Thread          `json:"children"`
 	Continuations []json.RawMessage `json:"continuations"`
 	Task          *Task             `json:"task"`
+	CreatedTasks  CreatedTasks      `json:"createdTasks"` // tasks this session created
 }
 
 // ThreadPage is GET /api/threads.
@@ -378,6 +387,16 @@ func (c *Client) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "duplicate"), nil, &out)
 	return out, err
+}
+
+// OrderTasks links tasks to run in the given order (POST /api/tasks/order)
+// and returns the resulting run order, head first.
+func (c *Client) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
+	var out struct {
+		Tasks []Task `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/tasks/order", map[string]any{"taskIds": ids}, &out)
+	return out.Tasks, err
 }
 
 func schedulePath(id int64, action string) string {

@@ -251,6 +251,21 @@ export interface TaskDetail extends Task {
   thread: Thread | null;
   /** Linked run order containing this task, head first (just this task when unlinked). */
   sequence: Task[];
+  /** Tasks the task's origin session created; null without an origin session. */
+  batch: CreatedTasks | null;
+}
+
+/** A session batch: tasks one session created, grouped by run order. */
+export interface CreatedTasks {
+  /** Runs of batch tasks linked by run order, head first; ordered by head id. */
+  chains: Task[][];
+  /** Batch tasks with no batch predecessor or follower. */
+  independent: Task[];
+}
+
+export interface OrderTasksResponse {
+  /** Resulting run order, head first. */
+  tasks: Task[];
 }
 
 export interface TaskList {
@@ -564,6 +579,8 @@ export interface ThreadDetail {
   children: Thread[];
   continuations: Continuation[];
   task: Task | null;
+  /** Tasks this session created (agent CLI/MCP). */
+  createdTasks: CreatedTasks;
 }
 
 // ---- Snippets ----

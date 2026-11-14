@@ -62,7 +62,7 @@ Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cer
 
 Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks. Three front ends share one set of operations over the REST API:
 
-- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|unlink|wait`, `schedule ...`, `sessions ls|search|show`, `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents/scripts. `stage help` lists everything.
+- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show`, `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents/scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
 - **HTTP MCP**: `http://<host>:7380/mcp` (streamable HTTP, served by the running app; no install). Cannot read local files, so no `imagePaths`.
 
@@ -82,8 +82,9 @@ Caller context: T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI an
 - Model: explicit > pinned default > last used (like the New task form).
 - Provenance: tasks and schedules record the creating session (`originThreadId`; spawned schedule tasks inherit it), shown as "Created by" on task detail and "by agent" on task rows.
 - Run after me: `--after-me` / `afterMe` starts the task when the calling session is settled in T3. A session owned by a task becomes a normal task link; any other session is a session link (`afterThreadId`, many tasks may wait on one session).
+- Session batch: the tasks a session created, grouped into run-order chains (head first) and independent tasks. `get_session` / `stage sessions show` return it (`createdTasks`) so a planning agent can check what it queued; `order_tasks` / `stage task order ID ID...` links several backlog tasks in order in one step. In the web UI, session detail lists the batch ("Created tasks": start a chain, start a task, link selected tasks in order, reorder an unstarted chain, edit) and task detail shows it as a compact Batch panel.
 
-MCP tools: `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `link_task`, `unlink_task`, `wait_task`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`. No gating: agents get the same access as the web UI.
+MCP tools: `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `link_task`, `order_tasks`, `unlink_task`, `wait_task`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`. No gating: agents get the same access as the web UI.
 
 ```sh
 stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog
@@ -91,6 +92,8 @@ stage task add --title "Deploy" --prompt-file deploy.md --after-me             #
 echo "..." | stage task add --title "Refactor" --prompt - --base-ref origin/main --start
 stage task ls --state backlog --json
 stage task wait 42 --until done,settled --timeout 30m                          # exit 3 on timeout
+stage task order 41 43 42                                                      # 43 runs after 41, 42 after 43
+stage sessions show "$T3CODE_THREAD_ID"                                         # this session's batch
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Asia/Kolkata
 stage sessions search "token refresh" --project stage                          # titles, then message text via T3
 ```
@@ -103,6 +106,7 @@ Development never touches production. Dev and tests run on their own Postgres (`
 - `make test`: Go tests in throwaway `stage_test_*` databases on the dev Postgres, web typecheck/lint, and session semantic/API contract tests.
 - `node --test web/tests/sessions.test.mjs`: session eligibility, continuation editing/delivery preview, URL encoding and HTTP contract tests.
 - `node --test web/tests/palette-search.test.mjs`: palette session search merge, dedupe, labels and T3 offline note.
+- `node --test web/tests/tasks.test.mjs`: session batch helpers (selection, Start chain, reorder, progress) and the order HTTP contract.
 - `make dev-down` stops the dev Postgres. Other targets: `make build`, `make install-cli`, `make up`, `make down`. API contract: `docs/api.md`.
 
 Guards: with `APP_ENV=dev` (set by `make dev`) the server refuses the prod database (port `5439` or name `stage`); test setup panics on it. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

@@ -104,6 +104,7 @@ Usage:
   stage task rm|start|stop|dup|unlink ID
   stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
   stage task link ID --after-me|--after-task ID|--after-thread ID
+  stage task order ID ID...           link backlog tasks to run in this order
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
   stage schedule ls [--project P]
   stage schedule show ID
