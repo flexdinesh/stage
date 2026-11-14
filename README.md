@@ -76,7 +76,7 @@ Server (`stage serve`):
 |---|---|---|
 | `STAGE_LISTEN` | `127.0.0.1:7380` | Listen address: `host:port`, or `unix:/abs/path.sock` for a unix socket. `stage serve --listen ADDR` overrides it. Compose sets `0.0.0.0:7380` inside the container. |
 | `STAGE_DATA_DIR` | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS: `~/Library/Application Support/stage`) | Directory holding `stage.db`. Compose sets `/data`. |
-| `STAGE_PUBLIC_URL` | unset | HTTPS URL the PWA is served at. When it is `https`, it is the Web Push VAPID subject; otherwise a fallback subject is used. |
+| `STAGE_PUBLIC_URL` | unset | Optional HTTPS URL the PWA is served at. Only used as the Web Push VAPID subject when it is `https`; otherwise a fallback subject is used. Push works without it. |
 | `T3_URL` | `http://127.0.0.1:3773` | T3 server stage calls (MCP, OAuth, uploads). Compose defaults to `http://host.docker.internal:3773`. |
 | `T3_PUBLIC_URL` | `T3_URL` | T3 address browsers use for "Open in T3" links. Set it under compose. |
 | `T3_ADMIN_TOKEN` | unset | Admin token for minting and auto-renewing stage's T3 access. Unset: pair manually in Settings. |
@@ -104,13 +104,15 @@ The path must be absolute. The socket is created with mode `0660`, so file permi
 
 stage has no authentication. Anyone who can reach its port can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
 
-- It binds `127.0.0.1` by default, and compose publishes the port on host loopback only.
-- Before exposing it to a network, put authentication in front: a tailnet limited to your devices, a reverse proxy with auth, or a socket with tight permissions.
+- It binds `127.0.0.1` by default, and compose publishes the port on host loopback only. This keeps other machines out, not browsers: loopback alone is not sufficient protection.
+- `/api` has no Origin, Host or CSRF check and parses `text/plain` request bodies as JSON. Any web page open in a browser on a machine that can reach stage (directly, or through DNS rebinding) can `POST /api/tasks` with `start: true` and launch an agent.
+- On a host where stage is reachable, do not browse untrusted sites, or put an authenticating reverse proxy in front and keep stage itself unreachable except through it (e.g. a unix socket with tight permissions).
+- Before exposing it to a network, put authentication in front. A tailnet limits who can connect, but every page open in a browser on those devices can still reach it.
 - `.env` holds `T3_ADMIN_TOKEN`; keep it private.
 
 ## HTTPS and push notifications
 
-Push notifications and installing the PWA need a secure context. `http://localhost` is one, so both work in a browser on the same machine with no setup. Other devices (phone, laptop) need HTTPS with a certificate they trust. Set `STAGE_PUBLIC_URL` to the HTTPS URL. Settings, Notifications says "needs https" when a page is opened over plain HTTP from another address.
+Push notifications and installing the PWA need a secure context. `http://localhost` is one, so both work in a browser on the same machine with no setup. Other devices (phone, laptop) need HTTPS with a certificate they trust. Optionally set `STAGE_PUBLIC_URL` to the HTTPS URL: it is only the Web Push VAPID subject (a fallback is used otherwise). Settings, Notifications says "needs https" when a page is opened over plain HTTP from another address.
 
 The server only makes outbound requests to the browser push services (Apple, Google, Mozilla), so the URL can stay private (LAN or tailnet). Devices need internet to receive pushes.
 
@@ -136,6 +138,8 @@ Options, easiest first:
 
 - **Any reverse proxy** that terminates TLS and forwards to `127.0.0.1:7380`, with the streaming settings below.
 
+Behind a proxy that forwards to `127.0.0.1`, HTTP MCP (`/mcp`) returns 403; agents use stdio MCP or the CLI with `STAGE_URL`. See [Agents](#agents).
+
 The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript/stream`). Caddy's `reverse_proxy` flushes it immediately; if your config uses `encode`, exclude that path so events are not buffered. Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
 
 Install and enable:
@@ -150,7 +154,7 @@ Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks.
 
 - **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show|questions` (questions is read-only), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
-- **HTTP MCP**: `http://<host>:7380/mcp` (streamable HTTP, served in-process by the running app; no install). Cannot read local files, so no `imagePaths`.
+- **HTTP MCP**: `/mcp` on the running app (streamable HTTP, served in-process; no install). Cannot read local files, so no `imagePaths`. Reachable only where the MCP SDK's DNS rebinding check passes: directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address (compose, or `STAGE_LISTEN=0.0.0.0:7380` reached by its network address). A request that arrives on loopback with another Host gets `403 Forbidden: invalid Host header`, so a reverse proxy (Tailscale serve, Caddy) forwarding to `127.0.0.1:7380` cannot serve it. Through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
 Install the binary on the T3 host (the compose image does not install it; rerun after updates) and register it:
 

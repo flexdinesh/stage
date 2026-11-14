@@ -116,6 +116,12 @@ export async function syncSystemNotifications(): Promise<void> {
   }
 }
 
+/** Notifications drawer footer for a push state; null when push is on (or not yet known). */
+export function pushFooterNote(state: PushState | undefined): string | null {
+  if (state === undefined || state === "on") return null;
+  return state === "insecure" ? "Push needs HTTPS or localhost" : "Push is off on this device";
+}
+
 async function currentSubscription(): Promise<PushSubscription | null> {
   const reg = await registration();
   return reg === null ? null : reg.pushManager.getSubscription();
