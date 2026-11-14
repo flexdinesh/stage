@@ -12,8 +12,8 @@ import {
 } from "../api/types.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { taskStateTone } from "../components/StateBadge.tsx";
-import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
-import { disablePush, enablePush, getPushState, sendTestPush, type PushState } from "../lib/push.ts";
+import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { HTTPS_DOCS_URL, disablePush, enablePush, getPushState, sendTestPush, type PushState } from "../lib/push.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
@@ -197,6 +197,7 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
 const PUSH_KEY = ["pushState"];
 
 const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
+  insecure: { tone: "idle", label: "needs https" },
   unsupported: { tone: "idle", label: "unsupported" },
   "ios-install": { tone: "idle", label: "install first" },
   blocked: { tone: "bad", label: "blocked" },
@@ -293,6 +294,18 @@ function NotificationsCard() {
           </h3>
           <Muted>Web Push to this browser for the checked events.</Muted>
           <QueryState isPending={state.isPending} error={state.error}>
+            {state.data === "insecure" ? (
+              <Alert
+                tone="plain"
+                actions={
+                  <ExternalButton href={HTTPS_DOCS_URL} small>
+                    HTTPS setup
+                  </ExternalButton>
+                }
+              >
+                Push needs HTTPS, or http://localhost on this machine. This page is served over plain HTTP.
+              </Alert>
+            ) : null}
             {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
             {state.data === "ios-install" ? (
               <Alert tone="plain">

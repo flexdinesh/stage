@@ -10,6 +10,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
+- Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
 - Errors: non-2xx responses have body `{ "error": string }`. Some 409s add a machine-readable `"code"` (see "Pending questions").
 
 | Status | Meaning |
@@ -55,6 +56,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ```json
 { "status": "ok", "db": "ok" }
 ```
+503 (DB ping failed): `{ "status": "error", "db": "error" }`.
 
 ## T3 connection, sync, catalog
 
@@ -179,11 +181,13 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "originThreadTitle": null,
   "afterThreadId": null,
   "afterThreadTitle": null,
+  "handoff": true,
   "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
   "t3WebUrl": "http://t3.example.com:3773/env_123/thread_abc",
   "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
+  "t3DeepLink": "t3code://threads/env_123/thread_abc",
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
@@ -205,7 +209,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `afterThreadId` / `afterThreadTitle`: runs after that T3 session (launches when it is settled; see "Link rules"). A task waits on at most one of `startAt`, `afterTaskId`, `afterThreadId`.
 - `handoff`: append the settled predecessor's handoff block to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
-- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread).
+- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread). `t3DeepLink` = `t3code://threads/<environmentId>/<t3ThreadId>` (T3 desktop/mobile app; null without thread or environment id). Thread carries the same three.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
@@ -303,7 +307,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "modelOptions": [],
   "runtimeMode": "full-access",
   "interactionMode": "default",
-  "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null },
+  "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null, "base": "ref" },
   "tags": ["deps"],
   "notes": "",
   "attachments": [],
@@ -361,7 +365,7 @@ Body `{ "cron": "0 2 * * 1-5", "tz": "America/New_York" }`. 200 `{ "next": [ISO,
 ### Schedule rules
 - The scheduler ticks every 15s (and on start).
 - One-shot: a `backlog` task with `startAt <= now` is launched (link runner path, `startAt` cleared); the `launching` event detail reads `scheduled start` or `scheduled start, late by 12m` when more than a minute late (e.g. server was down: late starts are not skipped). Manual Start now also clears `startAt`.
-- Recurring, per unpaused schedule with `nextRunAt <= now`, in one transaction (row locked):
+- Recurring, per unpaused schedule with `nextRunAt <= now`, in one transaction (holds the database write lock):
   - `now - nextRunAt > 2m` (server was down): record one `missed` run (`detail`: `missed N fires`), advance `nextRunAt` to the first fire after now. Nothing starts.
   - A previous spawned task still `backlog` (pending launch), `launching`, `running` or `needs_input`: record `skipped` (`detail`: `#41 still running`), advance. `done` but unsettled does not block.
   - Else spawn a task (config + images copied, `scheduleId`, `startAt = fireAt`, `startTz = tz`), record `started`, advance. The one-shot pass then launches it (a crash in between still launches it on restart).
@@ -392,6 +396,10 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "projectTitle": "stage",
   "title": "Say OK",
   "status": "completed",
+  "state": "done",
+  "archived": false,
+  "activeRunId": null,
+  "latestRunId": "run_2",
   "settled": false,
   "settledAt": null,
   "runStartedAt": "2026-11-08T10:00:00Z",
@@ -415,6 +423,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "taskId": 7,
   "t3WebUrl": "http://t3.example.com:3773/env_123/thread_abc",
   "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
+  "t3DeepLink": "t3code://threads/env_123/thread_abc",
   "createdAt": "2026-11-08T10:00:00Z",
   "updatedAt": "2026-11-08T10:01:00Z",
   "syncedAt": "2026-11-08T10:01:05Z",
@@ -661,7 +670,7 @@ Body: `{ "events": NotificationEvent[] }` (`needs_input|failed|done|settled`; du
 ## Stats
 
 ### `GET /api/stats`
-Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz` (IANA zone for day buckets, default `UTC`), `subagents` (`include|exclude`, default `include`; `exclude` drops subagent threads from all thread counts). Thread counts use mirrored threads by `createdAt` in range; task counts are current totals (not range-filtered).
+Query: `from`, `to` (default last 30 days: `to` = now, `from` = `to` - 30d), `tz` (IANA zone for day buckets, default `UTC`), `subagents` (`include|exclude`, default `include`; `exclude` drops subagent threads from all thread counts). Thread counts use mirrored threads by `createdAt` in range; task counts are current totals (not range-filtered).
 200 `Stats`:
 ```json
 {
@@ -874,7 +883,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST|GET /mcp` (streamable HTTP MCP, stateless, served by the app) expose the same operations, all through this REST API (HTTP MCP calls the app's own `/api` on loopback). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task order_tasks unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions` (`get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST /mcp` (streamable HTTP MCP, stateless, served by the app; other methods 405) expose the same operations, all through this REST API (HTTP MCP serves `/api` in-process, no network dial). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task order_tasks unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions` (`get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.

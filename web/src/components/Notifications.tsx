@@ -6,7 +6,7 @@ import { keys, latestNotificationsKey, useNotificationHistory, useNotificationIn
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
-import { closeSystemNotifications, getPushState, syncSystemNotifications } from "../lib/push.ts";
+import { closeSystemNotifications, getPushState, pushFooterNote, syncSystemNotifications } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
@@ -350,10 +350,11 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
       return next;
     });
 
+  const note = pushFooterNote(push.data);
   const footer =
-    push.data === undefined || push.data === "on" ? null : (
+    note === null ? null : (
       <p className="font-mono text-meta text-muted">
-        Push is off on this device ·{" "}
+        {note} ·{" "}
         <Link to="/settings" onClick={onClose} className="text-fg underline underline-offset-2">
           Settings
         </Link>

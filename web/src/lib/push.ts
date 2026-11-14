@@ -2,12 +2,40 @@ import { api } from "../api/client.ts";
 import type { PushSubscriptionBody } from "../api/types.ts";
 
 /**
+ * - `insecure`: not a secure context (plain HTTP on a non-localhost origin); push needs HTTPS or localhost
  * - `unsupported`: no service worker / Push API / Notification API
  * - `ios-install`: iOS/iPadOS browser tab; Web Push needs the Home Screen app
  * - `blocked`: permission denied (only the OS/browser settings can undo it)
  * - `off` / `on`: whether this browser has a push subscription
  */
-export type PushState = "unsupported" | "ios-install" | "blocked" | "off" | "on";
+export type PushState = "insecure" | "unsupported" | "ios-install" | "blocked" | "off" | "on";
+
+/** README section on serving stage over HTTPS (needed for push on other devices). */
+export const HTTPS_DOCS_URL = "https://github.com/flexdinesh/stage#https-and-push-notifications";
+
+/** Browser facts the push state derives from. */
+export interface PushEnv {
+  secure: boolean;
+  ios: boolean;
+  standalone: boolean;
+  supported: boolean;
+  permission: NotificationPermission;
+}
+
+/**
+ * Push state without the subscription lookup; null means permission is
+ * granted, so `on`/`off` depends on whether a subscription exists. An insecure
+ * context comes first: browsers hide the push APIs there, and installing to
+ * the Home Screen would not help.
+ */
+export function pushStateFor(env: PushEnv): Exclude<PushState, "on"> | null {
+  if (!env.secure) return "insecure";
+  if (env.ios && !env.standalone) return "ios-install";
+  if (!env.supported) return "unsupported";
+  if (env.permission === "denied") return "blocked";
+  if (env.permission !== "granted") return "off";
+  return null;
+}
 
 function isIos(): boolean {
   const ua = navigator.userAgent;
@@ -88,16 +116,27 @@ export async function syncSystemNotifications(): Promise<void> {
   }
 }
 
+/** Notifications drawer footer for a push state; null when push is on (or not yet known). */
+export function pushFooterNote(state: PushState | undefined): string | null {
+  if (state === undefined || state === "on") return null;
+  return state === "insecure" ? "Push needs HTTPS or localhost" : "Push is off on this device";
+}
+
 async function currentSubscription(): Promise<PushSubscription | null> {
   const reg = await registration();
   return reg === null ? null : reg.pushManager.getSubscription();
 }
 
 export async function getPushState(): Promise<PushState> {
-  if (isIos() && !isStandalone()) return "ios-install";
-  if (!supported()) return "unsupported";
-  if (Notification.permission === "denied") return "blocked";
-  if (Notification.permission !== "granted") return "off";
+  const ok = supported();
+  const state = pushStateFor({
+    secure: window.isSecureContext,
+    ios: isIos(),
+    standalone: isStandalone(),
+    supported: ok,
+    permission: ok ? Notification.permission : "default",
+  });
+  if (state !== null) return state;
   return (await currentSubscription()) === null ? "off" : "on";
 }
 
