@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -32,12 +33,13 @@ import (
 var testDB dbtest.DB
 
 type env struct {
-	t      *testing.T
-	fake   *t3.Fake
-	sync   *t3sync.Service
-	runner *links.Runner
-	client *client.Client
-	url    string
+	t       *testing.T
+	handler http.Handler // the /api router
+	fake    *t3.Fake
+	sync    *t3sync.Service
+	runner  *links.Runner
+	client  *client.Client
+	url     string
 }
 
 func newEnv(t *testing.T) *env {
@@ -54,7 +56,7 @@ func newEnv(t *testing.T) *env {
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &env{t: t, fake: fake, sync: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
+	return &env{t: t, handler: h, fake: fake, sync: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
 }
 
 func (e *env) project(root string) db.Project {
@@ -610,5 +612,47 @@ func TestBaseTools(t *testing.T) {
 	}
 	if msg := call(t, cs, "create_task", map[string]any{"title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatal("create_task base without baseRef must fail")
+	}
+}
+
+// The server's HTTP /mcp endpoint serves tools from the /api router
+// in-process: no TCP listener is involved anywhere (the MCP client also
+// reaches /mcp in-process).
+func TestHTTPMCPWithoutListener(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/http-mcp")
+	mux := http.NewServeMux()
+	mux.Handle("/api/", e.handler)
+	mux.Handle("/mcp", agenttools.HTTPHandler(&agenttools.Ops{Client: client.NewInProcess(e.handler, "unix:///run/stage.sock")}))
+	// Nothing listens here; reaching it would fail the calls below.
+	mux.Handle("/", http.NotFoundHandler())
+
+	ctx := context.Background()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             "http://stage/mcp",
+		HTTPClient:           &http.Client{Transport: client.HandlerTransport(mux)},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	var cx agenttools.ContextOut
+	mustCall(t, cs, "get_context", nil, &cx)
+	if cx.APIURL != "unix:///run/stage.sock" {
+		t.Fatalf("apiUrl %q", cx.APIURL)
+	}
+	var created struct {
+		ID    int64  `json:"id"`
+		Title string `json:"title"`
+	}
+	mustCall(t, cs, "create_task", map[string]any{"project": p.Title, "title": "via http mcp", "prompt": "go"}, &created)
+	if created.ID == 0 || created.Title != "via http mcp" {
+		t.Fatalf("create_task %+v", created)
+	}
+	got, err := e.client.Task(ctx, created.ID)
+	if err != nil || got.Title != "via http mcp" {
+		t.Fatalf("task not stored: %+v, %v", got, err)
 	}
 }

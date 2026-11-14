@@ -16,7 +16,7 @@ A self-hosted stage manager for T3 Code. It queues tasks (prompt + provider/mode
 Sits beside T3 rather than replacing it: T3 remains where conversations happen ("Open in T3"); stage owns the queue, run order, and the cross-project view T3 does not provide. The one exception is a session's pending question: stage shows it and lets the user answer it in place, so a needs-input thread can be unblocked from a phone in one step.
 
 ## Operating Context
-- Self-hosted on the T3 host via docker compose, bound to 0.0.0.0:7380 on a trusted private network, no auth.
+- Self-hosted on the T3 host via docker compose, listening on 127.0.0.1:7380 by default (compose publishes it on host loopback; expose it only on a trusted private network or behind a proxy), no auth.
 - Talks to T3 only through T3's MCP endpoint; polls active tasks every 5s, full sync every 5 min, watched transcripts every 2s while their run is active.
 - Settling a thread happens in T3, not here; linked tasks wait for it.
 

@@ -7,13 +7,21 @@ services:
     build: .
     # Above the app's 100s shutdown wait for in-flight launches.
     stop_grace_period: 2m
-    network_mode: host
     restart: unless-stopped
+    # Published on the host's loopback only (no auth). Change the host side
+    # (e.g. "7380:7380") to expose it, ideally behind an HTTPS reverse proxy.
+    ports:
+      - "127.0.0.1:7380:7380"
+    # T3 on the Docker host, reachable from the container.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false
     environment:
+      STAGE_LISTEN: 0.0.0.0:7380
       STAGE_DATA_DIR: /data
+      T3_URL: ${T3_URL:-http://host.docker.internal:3773}
     volumes:
       - stagedata:/data
 

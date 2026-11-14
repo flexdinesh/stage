@@ -54,7 +54,7 @@ Update: `git pull && docker compose up -d --build`.
 
 ## Install as an app (PWA) and notifications
 
-Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `APP_PUBLIC_URL` to that URL (it is also the VAPID subject). The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
+Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `STAGE_PUBLIC_URL` to that URL (it is also the VAPID subject). The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
 
 The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript/stream`). Caddy's `reverse_proxy` flushes it immediately; if your config uses `encode`, exclude that path so events aren't buffered. Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
 
@@ -118,4 +118,4 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise
 - `mise run check`: everything CI-like (go vet, go test, web install/test/typecheck/lint). Run before a PR.
 - Other tasks: `mise run build`, `mise run install-cli`, `mise run up`, `mise run down`. API contract: `docs/api.md`.
 
-Guards: with `APP_ENV=dev` (set by `mise run dev`) the server refuses the default (production) data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.
+Guards: with `STAGE_ENV=dev` (set by `mise run dev`) the server refuses the default (production) data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 can't collide with prod launches. `T3_FAKE=1` still swaps in a fake T3.

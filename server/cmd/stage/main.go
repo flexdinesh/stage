@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/links"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
@@ -39,20 +39,44 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
-	if err := run(); err != nil {
+	var args []string
+	if len(os.Args) > 1 {
+		args = os.Args[2:]
+	}
+	if err := run(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// run is `stage` or `stage serve [--listen ADDR]`.
+func run(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	listenFlag := fs.String("listen", "", "listen address: host:port or unix:/abs/path.sock (overrides STAGE_LISTEN; default "+listen.Default+")")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("serve: unexpected argument %q", fs.Arg(0))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load()
+	cfg, err := config.Load(*listenFlag)
 	if err != nil {
 		return err
 	}
+	// Bind first: an instance that cannot listen (e.g. a second one) exits
+	// before touching the database or T3. Shutdown closes ln, which also
+	// removes a unix socket file; the defer covers earlier error returns.
+	ln, err := cfg.Listen.Listen()
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", cfg.Listen, err)
+	}
+	defer ln.Close()
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return fmt.Errorf("data dir: %w", err)
 	}
@@ -129,21 +153,23 @@ func run() error {
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
-	mux.Handle("/api/", api.NewRouter(api.Deps{
+	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
-	}))
-	// Streamable HTTP MCP: the agent tools over this server's own REST API
-	// (loopback), so validation stays in one place. No local file access.
+	})
+	mux.Handle("/api/", apiHandler)
+	// Streamable HTTP MCP: the agent tools over this server's own REST API,
+	// served in-process (no dial back to the listener, tcp or unix), so
+	// validation stays in one place. No local file access.
 	mux.Handle("/mcp", agenttools.HTTPHandler(&agenttools.Ops{
-		Client: client.New("http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))),
+		Client: client.NewInProcess(apiHandler, cfg.Listen.URL()),
 	}))
 	mux.Handle("/", webui.Handler())
 
-	srv := &http.Server{Addr: cfg.Addr(), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", cfg.Addr())
-		errCh <- srv.ListenAndServe()
+		slog.Info("listening", "addr", cfg.Listen.String())
+		errCh <- srv.Serve(ln)
 	}()
 	select {
 	case err := <-errCh:

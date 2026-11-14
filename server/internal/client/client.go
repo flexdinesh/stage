@@ -11,31 +11,99 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // DefaultURL is the server address when STAGE_URL is unset.
 const DefaultURL = "http://127.0.0.1:7380"
 
+// socketBase is the request URL base for unix socket and in-process clients
+// (Host "stage").
+const socketBase = "http://stage"
+
 // Client calls the REST API at BaseURL.
 type Client struct {
+	// BaseURL is the server address as configured (reported to agents and
+	// in errors): http(s)://host:port or unix:///abs/path.sock.
 	BaseURL string
 	HTTP    *http.Client
+	// base prefixes request paths (BaseURL, or socketBase).
+	base string
+	// err is an invalid BaseURL, returned by every request.
+	err error
 }
 
-// New returns a client for baseURL (DefaultURL when empty).
+// New returns a client for baseURL (DefaultURL when empty): http(s)://host:port,
+// or unix:///abs/path.sock (same syntax as STAGE_LISTEN) to dial a unix
+// socket. An invalid socket address makes every request fail with its error.
 func New(baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	baseURL = strings.TrimRight(baseURL, "/")
+	c := &Client{BaseURL: baseURL, base: baseURL, HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	if strings.HasPrefix(baseURL, "unix:") {
+		a, err := listen.Parse(baseURL)
+		if err != nil {
+			c.err = fmt.Errorf("stage URL: %w", err)
+			return c
+		}
+		path := a.Address
+		c.base = socketBase
+		c.HTTP.Transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", path)
+			},
+		}
+	}
+	return c
+}
+
+// NewInProcess returns a client whose requests h serves directly, with no
+// network: the server's own HTTP MCP endpoint uses it with the /api router.
+// baseURL is only reported (BaseURL).
+func NewInProcess(h http.Handler, baseURL string) *Client {
+	return &Client{
+		BaseURL: baseURL, base: socketBase,
+		HTTP: &http.Client{Timeout: 2 * time.Minute, Transport: HandlerTransport(h)},
+	}
+}
+
+// HandlerTransport is an http.RoundTripper that serves each request with h
+// in the calling goroutine and returns the buffered response.
+func HandlerTransport(h http.Handler) http.RoundTripper { return handlerTransport{h} }
+
+type handlerTransport struct{ h http.Handler }
+
+func (t handlerTransport) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	r := req.Clone(req.Context())
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
+	defer r.Body.Close()
+	r.RequestURI = r.URL.RequestURI()
+	if r.Host == "" {
+		r.Host = r.URL.Host
+	}
+	rec := httptest.NewRecorder()
+	defer func() {
+		if p := recover(); p != nil {
+			res, err = nil, fmt.Errorf("in-process %s %s: panic: %v", r.Method, r.URL.Path, p)
+		}
+	}()
+	t.h.ServeHTTP(rec, r)
+	return rec.Result(), nil
 }
 
 // Error is a non-2xx API response ({"error": msg}).
@@ -249,7 +317,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		}
 		r = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, r)
 	if err != nil {
 		return err
 	}
@@ -260,6 +328,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 }
 
 func (c *Client) send(req *http.Request, out any) error {
+	if c.err != nil {
+		return c.err
+	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("stage unreachable at %s (set STAGE_URL): %w", c.BaseURL, err)
@@ -546,7 +617,7 @@ func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attac
 	if err := mw.Close(); err != nil {
 		return db.Attachment{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/uploads", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/uploads", &buf)
 	if err != nil {
 		return db.Attachment{}, err
 	}

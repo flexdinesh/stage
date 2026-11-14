@@ -23,4 +23,6 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=server /out/stage /stage
 COPY --from=server --chown=65532:65532 /out/data /data
 ENV STAGE_DATA_DIR=/data
+# Reachable through a published port (the default is container loopback).
+ENV STAGE_LISTEN=0.0.0.0:7380
 ENTRYPOINT ["/stage"]

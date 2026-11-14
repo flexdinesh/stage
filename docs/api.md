@@ -679,7 +679,7 @@ Query: `from`, `to` (default last 30 days: `to` = now, `from` = now - 30d), `tz`
 
 ## Notifications (Web Push)
 
-The server sends Web Push (VAPID, RFC 8291 aes128gcm) to every subscribed browser. The VAPID key pair is generated on first start and stored in the database; the VAPID subject is `APP_PUBLIC_URL`.
+The server sends Web Push (VAPID, RFC 8291 aes128gcm) to every subscribed browser. The VAPID key pair is generated on first start and stored in the database; the VAPID subject is `STAGE_PUBLIC_URL` when it is https, else `https://github.com/flexdinesh/stage`.
 
 ### `GET /api/push/config`
 200 `{ "publicKey": string }` (VAPID public key, base64url, uncompressed P-256 point; the browser's `applicationServerKey`).

@@ -71,7 +71,7 @@ const queueSize = 256
 type Notifier struct {
 	store   *db.Store
 	log     *slog.Logger
-	subject string // VAPID subject (APP_PUBLIC_URL)
+	subject string // VAPID subject (STAGE_PUBLIC_URL, else FallbackSubject)
 	events  chan event
 
 	// HTTPClient sends push requests (tests inject).
@@ -80,15 +80,21 @@ type Notifier struct {
 	SendTimeout time.Duration
 }
 
-// New returns a Notifier. subject must be an https: URL (webpush-go sends it
-// as-is; anything else is treated as an e-mail and prefixed with mailto:).
-func New(store *db.Store, subject string, log *slog.Logger) *Notifier {
+// FallbackSubject is the VAPID subject when STAGE_PUBLIC_URL is not https.
+const FallbackSubject = "https://github.com/flexdinesh/stage"
+
+// New returns a Notifier. publicURL (STAGE_PUBLIC_URL) is the VAPID subject
+// when it is an https: URL (webpush-go sends anything else as mailto:);
+// otherwise FallbackSubject, with a warning.
+func New(store *db.Store, publicURL string, log *slog.Logger) *Notifier {
 	if log == nil {
 		log = slog.Default()
 	}
 	log = log.With("component", "notify")
+	subject := publicURL
 	if !strings.HasPrefix(subject, "https:") {
-		log.Warn("APP_PUBLIC_URL is not https; VAPID subject will be sent as mailto:", "url", subject)
+		subject = FallbackSubject
+		log.Warn("STAGE_PUBLIC_URL is not an https URL; using the fallback VAPID subject (push and install need HTTPS)", "url", publicURL, "subject", subject)
 	}
 	return &Notifier{
 		store: store, log: log, subject: subject,
