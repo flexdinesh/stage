@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "./ui.tsx";
 
 /** Clipboard API needs a secure context; over plain-http LAN fall back to a hidden textarea + execCommand. */
-async function copyText(text: string): Promise<void> {
+export async function copyText(text: string): Promise<void> {
   if (window.isSecureContext) {
     await navigator.clipboard.writeText(text);
     return;

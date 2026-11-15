@@ -110,6 +110,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("PATCH /api/snippets/{id}", s.updateSnippet)
 	h("DELETE /api/snippets/{id}", s.deleteSnippet)
 
+	h("GET /api/refs/resolve", s.resolveRef)
+
 	h("GET /api/stats", s.stats)
 
 	h("GET /api/preferences", s.getPreferences)

@@ -25,6 +25,7 @@ Use it to:
 - Check progress: list_tasks, get_task, wait_task, list_sessions.
 - Find a past session by what was said in it: search_sessions.
 - See what a session is asking its owner: get_session_questions (read-only; the owner answers in stage or T3).
+- References: a prompt may point at other work with a stage link, e.g. "[stage task #12: Fix login](http://host:7380/tasks/12)" or ".../sessions/<id>" (any host), or a T3 thread link. Before acting on it, call read_ref with the link (CLI: stage show LINK); for the full conversation, use t3_thread_read on the returned session id.
 
 Rules:
 - Prompts must be self-contained: the new thread does not see your conversation (a linked task also gets the handoff).
@@ -72,6 +73,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, "list_sessions", "List T3 sessions (root threads) across projects, newest first.", ro, o.ListSessions)
 	add(s, "search_sessions", "Find T3 sessions by title, branch, PR or project, then by message text (via T3; falls back to stage titles when T3 is offline, see t3).", ro, o.SearchSessions)
 	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, continuations, task, and the tasks it created (createdTasks: run-order chains head first, then independent tasks).", ro, o.GetSession)
+	add(s, "read_ref", "Read the stage task or session a pasted reference names: a stage link (…/tasks/<id>, …/sessions/<id>, any host, markdown link ok), a T3 thread link, #<task id> or a thread id. Returns the task (prompt, state, handoff, runs) and/or its session (latest reply, PRs, branch, runs, children) and how to read the full conversation.", ro, o.ReadRef)
 	add(s, "get_session_questions", "Read the questions a T3 session is waiting on its owner to answer (read-only). Approvals are only counted; they are handled in T3.", ro, o.GetSessionQuestions)
 	return s
 }

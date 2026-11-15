@@ -5,6 +5,7 @@ import { api } from "../api/client.ts";
 import { useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { RefText } from "../components/StageLinks.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
@@ -120,7 +121,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
             <ConfigPanel schedule={s} />
             <Panel title="Prompt" actions={<CopyButton text={s.prompt} label="Copy" />}>
               <div className="flex flex-col gap-3">
-                <pre className="max-h-80 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">{s.prompt}</pre>
+                <pre className="max-h-80 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap"><RefText text={s.prompt} /></pre>
                 <ImageStrip attachments={s.attachments} label="Prompt images" />
               </div>
             </Panel>

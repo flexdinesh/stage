@@ -9,6 +9,7 @@ import { PrChips } from "../components/PullRequests.tsx";
 import { ThreadStatusBadge, threadStatusLabel } from "../components/StateBadge.tsx";
 import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Segmented, Select, cx } from "../components/ui.tsx";
 import { dateTime, localDateToIso, localMidnight, pick } from "../lib/format.ts";
+import { RowCopyLink } from "../components/StageLinks.tsx";
 
 const PAGE_SIZE = 50;
 const PRESETS = ["today", "7d", "30d", "all", "custom"] as const;
@@ -460,7 +461,7 @@ function DayBars({ days }: { days: Day[] }) {
 
 // ---- Thread list ----
 
-const COLS = "md:grid-cols-[64px_minmax(0,1fr)_110px_120px_120px_56px_24px]";
+const COLS = "md:grid-cols-[64px_minmax(0,1fr)_110px_120px_120px_56px_52px]";
 
 function ThreadList({ data }: { data: Thread[] }) {
   if (data.length === 0) {
@@ -478,7 +479,7 @@ function ThreadList({ data }: { data: Thread[] }) {
             {h}
           </span>
         ))}
-        <span className="sr-only">open in T3</span>
+        <span className="sr-only">copy link, open in T3</span>
       </div>
       <ul>
         {data.map((t) => (
@@ -514,7 +515,7 @@ function ThreadRow({ t }: { t: Thread }) {
   return (
     <li
       className={cx(
-        "border-b border-line px-3 py-2 text-small last:border-b-0 hover:bg-panel md:grid md:items-center md:gap-3",
+        "group/row border-b border-line px-3 py-2 text-small last:border-b-0 hover:bg-panel md:grid md:items-center md:gap-3",
         COLS,
       )}
     >
@@ -535,7 +536,8 @@ function ThreadRow({ t }: { t: Thread }) {
         {model}
       </span>
       <span className="hidden font-mono text-meta text-muted md:block">{t.source}</span>
-      <span className="hidden md:block">
+      <span className="hidden items-center justify-end gap-1 md:flex">
+        <RowCopyLink subject={{ kind: "session", id: t.t3ThreadId, title: t.title }} />
         <T3Link t={t} />
       </span>
 

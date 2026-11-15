@@ -15,6 +15,7 @@ import { PrChips } from "./PullRequests.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
+import { RowCopyLink } from "./StageLinks.tsx";
 
 /** Standalone bordered task list. Inside a `Panel flush`, use `TaskRows` instead. */
 export function TaskList({ tasks, emptyText = "No tasks." }: { tasks: Task[]; emptyText?: string }) {
@@ -185,7 +186,7 @@ export function TaskRow({
   return (
     <div
       className={cx(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
+        "group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
         showProject
           ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]"
           : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
@@ -253,22 +254,21 @@ export function TaskRow({
         )}
       </div>
 
-      {hasActions ? (
-        <div className="order-4 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
-          {showStart ? (
-            <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-              {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
-            </Button>
-          ) : null}
-          {answerable ? <AnswerButton to={`/tasks/${task.id}`} /> : null}
-          {task.t3DeepLink === null ? null : (
-            <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={task.t3DeepLink}>
-              Open in app
-            </AppButton>
-          )}
-          {extra}
-        </div>
-      ) : null}
+      <div className={cx("order-4 col-span-2 flex-wrap items-center gap-1.5 md:col-span-1 md:flex md:justify-end", hasActions ? "flex" : "hidden")}>
+        {showStart ? (
+          <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
+            {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
+          </Button>
+        ) : null}
+        {answerable ? <AnswerButton to={`/tasks/${task.id}`} /> : null}
+        {task.t3DeepLink === null ? null : (
+          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={task.t3DeepLink}>
+            Open in app
+          </AppButton>
+        )}
+        {extra}
+        <RowCopyLink subject={{ kind: "task", id: task.id, title: task.title }} />
+      </div>
 
       {task.lastError === null ? null : (
         <p className={cx("order-5 col-span-2 truncate font-mono text-meta text-bad", underTitle)} title={task.lastError}>
@@ -332,7 +332,7 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
   return (
     <div
       className={cx(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2",
+        "group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2",
         needsInput ? "border-l-need" : "border-l-transparent",
       )}
     >
@@ -363,16 +363,15 @@ function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalT
 
       <LastWordLine state={state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
 
-      {href === null && !answerable ? null : (
-        <div className="order-3 col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:justify-end">
-          {answerable ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
-          {href === null ? null : (
-            <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={href}>
-              Open in app
-            </AppButton>
-          )}
-        </div>
-      )}
+      <div className={cx("order-3 col-span-2 flex-wrap items-center gap-1.5 md:col-span-1 md:flex md:justify-end", href === null && !answerable ? "hidden" : "flex")}>
+        {answerable ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
+        {href === null ? null : (
+          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={href}>
+            Open in app
+          </AppButton>
+        )}
+        <RowCopyLink subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} />
+      </div>
     </div>
   );
 }

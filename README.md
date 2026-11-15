@@ -20,6 +20,7 @@ Full behavior: [docs/features.md](docs/features.md).
 - **Ctrl K palette**: jump to tasks, projects and sessions by title, or find a session by what was said in it.
 - **Snippets and model defaults**: reusable prompt text via `/`; new tasks prefill a pinned or last-used model.
 - **Notifications**: installable PWA with Web Push for needs input, failed, done and settled; app icon badge. See [HTTPS and push notifications](#https-and-push-notifications).
+- **References**: copy a link to any task or session and paste it into a prompt in stage or T3; agents read it with `read_ref`, and stage shows pasted links as live chips.
 - **Agents**: agents create and manage tasks via the `stage` CLI or MCP (stdio or HTTP). See [Agents](#agents).
 
 ## Quick start: Docker
@@ -152,7 +153,7 @@ Install and enable:
 
 Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks. Three front ends share one set of operations over the REST API:
 
-- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show|questions` (questions is read-only), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
+- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show|questions` (questions is read-only), `show REF` (any stage link, T3 thread link, `#ID` or thread id), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
 - **HTTP MCP**: `/mcp` on the running app (streamable HTTP, served in-process; no install). Cannot read local files, so no `imagePaths`. Reachable only where the MCP SDK's DNS rebinding check passes: directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address (compose, or `STAGE_LISTEN=0.0.0.0:7380` reached by its network address). A request that arrives on loopback with another Host gets `403 Forbidden: invalid Host header`, so a reverse proxy (Tailscale serve, Caddy) forwarding to `127.0.0.1:7380` cannot serve it. Through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
@@ -174,9 +175,10 @@ Caller context: T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI an
 - Run after me: `--after-me` / `afterMe` starts the task when the calling session is settled in T3. A session owned by a task becomes a normal task link; any other session is a session link (`afterThreadId`, many tasks may wait on one session).
 - Handoff: a linked task's launch prompt gets its predecessor's final reply, PRs, branch/worktree and thread id (default on; `--handoff=false` / `handoff: false` turns it off on add, edit or link).
 - Predecessor base: `--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a linked task's worktree from its predecessor's branch (`--base-ref` is the fallback); `task show` / `get_task` show the base the launch used.
+- References: task and session pages (and laptop rows, and Alt C in the Ctrl K palette) copy a self-describing markdown link, `[stage task #12: Fix login](http://host:7380/tasks/12)`; detail pages also copy the bare URL. Paste it into a prompt in stage or T3: agents call `read_ref` / `stage show LINK` (any host, T3 thread links, `#12` or a thread id also work) and get the task and/or session (prompt, latest reply, PRs, branch, runs), then `t3_thread_read` for the full conversation. Rerun `stage setup instructions` to add this rule to an existing CLAUDE.md / AGENTS.md block. stage renders pasted stage links as live chips (title and state) in prompts, transcripts, last word and handoff text.
 - Session batch: the tasks a session created, grouped into run-order chains (head first) and independent tasks. `get_session` / `stage sessions show` return it (`createdTasks`) so a planning agent can check what it queued; `order_tasks` / `stage task order ID ID...` links several backlog tasks in order in one step. In the web UI, session detail lists the batch ("Created tasks": start a chain, start a task, link selected tasks in order, reorder an unstarted chain, edit) and task detail shows it as a compact Batch panel.
 
-MCP tools: `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `link_task`, `order_tasks`, `unlink_task`, `wait_task`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`. No gating: agents get the same access as the web UI.
+MCP tools: `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `link_task`, `order_tasks`, `unlink_task`, `wait_task`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`, `read_ref`. No gating: agents get the same access as the web UI.
 
 ```sh
 stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog

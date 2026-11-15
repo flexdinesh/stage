@@ -319,7 +319,7 @@ function TranscriptRow({ threadId, item }: { threadId: string; item: TranscriptI
       </div>
       <div ref={box} className={cx("min-w-0", !expanded && "max-h-[23.2em] overflow-hidden", clamped && "transcript-clamp")}>
         <div ref={content}>
-          <ReplyMarkdown text={text} />
+          <ReplyMarkdown text={text} refs={item.kind === "user"} />
         </div>
       </div>
       {canToggle ? (

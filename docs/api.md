@@ -569,6 +569,15 @@ Idempotent: resending the answers stage already sent for a request returns the f
 | 502 | | other T3 failure |
 | 503 | | T3 not connected |
 
+## References
+
+### `GET /api/refs/resolve?ref=`
+What a pasted reference names. `ref` accepts: a stage task or session link (`…/tasks/<id>`, `…/sessions/<id>`; any host, query and fragment ignored, a sub-path prefix allowed), the markdown link the web UI copies (`[stage task #12: Title](…/tasks/12)`), a T3 web thread link (`T3_PUBLIC_URL/<environmentId>/<threadId>`, matched only on that host), a `t3code://threads/<environmentId>/<threadId>` app link, `#12` or `12` (task), or any other single token (T3 thread id). Stage paths win over T3 links on the same host. 200:
+```json
+{ "kind": "task", "taskId": 12, "threadId": "th-1" }
+```
+A task's `threadId` is its T3 thread (null before launch); a session's `taskId` is the task that owns it (null for sessions started outside stage). A session stage has not mirrored yet is read from T3 once when connected. 400 not a reference; 404 unknown task or session.
+
 ## Queued continuations
 
 A continuation sends a saved prompt into an existing top-level, unarchived session. It never launches a replacement thread, steers or interrupts current work. Saving and resuming only check readiness; the background runner owns delivery.
@@ -886,7 +895,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST /mcp` (streamable HTTP MCP, stateless, served by the app; other methods 405) expose the same operations, all through this REST API (HTTP MCP serves `/api` in-process, no network dial). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task order_tasks unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions` (`get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST /mcp` (streamable HTTP MCP, stateless, served by the app; other methods 405) expose the same operations, all through this REST API (HTTP MCP serves `/api` in-process, no network dial). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task link_task order_tasks unlink_task wait_task list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions read_ref` (`read_ref` / `stage show REF` resolve a pasted reference via `GET /api/refs/resolve` and return `{ kind, task: TaskDetail|null, session: ThreadDetail|null, next }`: a task reference carries its session, a session reference its owning task, `next` points at `t3_thread_read` for the full conversation; `get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` and `list_sessions` rows carry `lastWordPreview`, `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.

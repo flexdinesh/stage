@@ -312,6 +312,23 @@ func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	printLastWord(w, t.LastWord)
 }
 
+// printRef prints what a reference names: a task (with its session id) or
+// a session (with its task), then how to read the full conversation.
+func printRef(w io.Writer, r agenttools.RefOut) {
+	switch {
+	case r.Kind == "session" && r.Session != nil:
+		printSessionDetail(w, *r.Session)
+	case r.Task != nil:
+		printTaskDetail(w, *r.Task)
+		if r.Session != nil {
+			fmt.Fprintf(w, "\nsession %s\n", r.Session.Thread.T3ThreadID)
+		}
+	}
+	if r.Next != "" {
+		fmt.Fprintf(w, "\n%s\n", r.Next)
+	}
+}
+
 func printPullRequests(w io.Writer, prs []t3.PullRequest) {
 	if len(prs) == 0 {
 		return

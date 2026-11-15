@@ -32,7 +32,7 @@ export function LastWordPanel({ thread }: { thread: Thread }) {
       actions={<CopyButton text={word.text} label="Copy" />}
     >
       <Suspense fallback={<div className="prose-reply whitespace-pre-wrap">{word.text}</div>}>
-        <ReplyMarkdown text={word.text} />
+        <ReplyMarkdown text={word.text} refs />
       </Suspense>
       {word.truncated ? (
         <p className="mt-3 border-t border-line pt-2.5 font-mono text-meta text-muted">

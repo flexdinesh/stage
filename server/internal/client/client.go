@@ -588,6 +588,20 @@ func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	return out, err
 }
 
+// Ref is GET /api/refs/resolve: what a pasted reference names.
+type Ref struct {
+	Kind     string  `json:"kind"` // task | session
+	TaskID   *int64  `json:"taskId"`
+	ThreadID *string `json:"threadId"`
+}
+
+// ResolveRef reads a stage link, T3 thread link, #task id or thread id.
+func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
+	var out Ref
+	err := c.do(ctx, http.MethodGet, withQuery("/api/refs/resolve", url.Values{"ref": {ref}}), nil, &out)
+	return out, err
+}
+
 // PendingQuestions is GET /api/threads/:id/questions: answerable questions
 // plus approvals stage cannot resolve (handled in T3).
 type PendingQuestions struct {
