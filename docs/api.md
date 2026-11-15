@@ -1,6 +1,6 @@
 # stage REST API
 
-Base path `/api`. JSON in and out (`Content-Type: application/json`). Field names camelCase. TypeScript mirror: `web/src/api/types.ts` (change both together).
+Base path `/api`. JSON in and out (`Content-Type: application/json`). Field names camelCase. TypeScript mirror: `app/src/api/types.ts` (change both together).
 
 ## Conventions
 

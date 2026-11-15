@@ -7,7 +7,7 @@ node = "26"     # Dockerfile
 pnpm = "12.15.0" # Dockerfile
 
 [tasks.dev]
-description = "Branch db + Go server (:7390, real T3) + Vite dev server (proxies /api)"
+description = "Branch db + Go server (:7390, real T3) + browser host on Vite (proxies /api)"
 raw = true
 run = '''
 #!/usr/bin/env bash
@@ -25,14 +25,14 @@ echo "dev db $DEV_DIR/stage.db, server $STAGE_LISTEN"
 kill_tree() { local c; for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null || true; }
 trap 'for p in $(jobs -p); do kill_tree "$p"; done' EXIT
 (cd server && go run ./cmd/stage) &
-(cd web && pnpm install && pnpm dev) &
+(pnpm install && cd web && pnpm dev) &
 wait
 '''
 
 [tasks.build]
-description = "Web bundle embedded into a single Go binary at bin/stage"
+description = "Browser host bundle (web/dist) embedded into a single Go binary at bin/stage"
 run = [
-  "cd web && pnpm install --frozen-lockfile && pnpm build",
+  "pnpm install --frozen-lockfile && pnpm --filter stage-web build",
   "find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete",
   "cp -r web/dist/. server/internal/webui/dist/",
   "cd server && CGO_ENABLED=0 go build -o ../bin/stage ./cmd/stage",
@@ -46,14 +46,14 @@ run = [
 ]
 
 [tasks.test]
-description = "Go tests + web tests/typecheck/lint"
+description = "Go tests + app/web tests, typecheck, lint"
 run = [
   "cd server && go vet ./... && go test ./...",
-  "cd web && pnpm test && pnpm typecheck && pnpm lint",
+  "pnpm -r test && pnpm -r typecheck && pnpm -r lint",
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, web install + test/typecheck/lint, desktop fixture Go tests"
+description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture Go tests"
 depends = ["check:go", "check:web", "check:fixture"]
 
 [tasks."check:go"]
@@ -61,8 +61,8 @@ description = "go vet + go test"
 run = "cd server && go vet ./... && go test ./..."
 
 [tasks."check:web"]
-description = "Web install (frozen lockfile) + test/typecheck/lint"
-run = "cd web && pnpm install --frozen-lockfile && pnpm test && pnpm typecheck && pnpm lint"
+description = "Workspace install (frozen lockfile) + app and web host test/typecheck/lint"
+run = "pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm -r lint"
 
 [tasks."check:fixture"]
 description = "Desktop fixture (desktop/fixture): go vet (with and without e2e tag) + go test; no webview needed"

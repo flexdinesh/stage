@@ -196,15 +196,17 @@ stage sessions search "token refresh" --project stage                          #
 
 Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise tasks` lists them. Development never touches a deployed stack: dev uses a SQLite file per branch (`.scratch/dev/<branch>/stage.db`), tests use a temp file per test, and only `mise run up` / `mise run down` touch the compose stack.
 
-- `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. Set `T3_FAKE=1` in `.env.dev` to work without T3.
-- `mise run test`: Go vet and tests, web tests, typecheck and lint.
-- `mise run check`: everything CI-like (Go vet and tests, web install with a frozen lockfile, tests, typecheck, lint). Run before a PR.
-- `mise run build`: the web bundle embedded into `bin/stage`.
+- `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and the browser host on Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. Set `T3_FAKE=1` in `.env.dev` to work without T3.
+- `mise run test`: Go vet and tests; app and web host tests, typecheck and lint.
+- `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, desktop fixture Go tests). Run before a PR.
+- `mise run build`: the browser bundle (`web/dist`) embedded into `bin/stage`.
 - `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`.
 - `mise run up` / `mise run down`: build and run, or stop, the compose stack (data volume kept).
-- Single web test files: `node --test web/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `palette-search`, `push-state`).
+- Single test files: `node --test app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
 
-API contract: [docs/api.md](docs/api.md) (TypeScript mirror: `web/src/api/types.ts`).
+Layout: `server/` (Go server, CLI, MCP), `app/` (the shared React app, `@stage/app`), `web/` (browser host), one pnpm workspace. Ownership and the platform contract: [docs/architecture.md](docs/architecture.md).
+
+API contract: [docs/api.md](docs/api.md) (TypeScript mirror: `app/src/api/types.ts`).
 
 Guards: with `STAGE_ENV=dev` the server refuses the default data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 cannot collide with a deployed instance's launches.
 

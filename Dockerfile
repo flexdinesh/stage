@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1
 
+# pnpm workspace: the shared app (app/) and the browser host (web/), one lockfile.
 FROM node:26-alpine AS web
-WORKDIR /src/web
+WORKDIR /src
 RUN npm install -g pnpm@12.15.0
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY app/package.json app/
+COPY web/package.json web/
 RUN pnpm install --frozen-lockfile
-COPY web/ ./
-RUN pnpm build
+COPY app/ app/
+COPY web/ web/
+RUN pnpm --filter stage-web build
 
 FROM golang:1.27-alpine AS server
 WORKDIR /src/server

@@ -1,7 +1,8 @@
 # Agents
 
 - Use `mise run <task>` for dev, tests and checks (`mise tasks` lists them; tools pinned in `mise.toml`).
-- Run `mise run check` before opening a PR (includes `check:fixture`, the desktop fixture's Go tests).
+- Run `mise run check` before opening a PR (includes `check:fixture`, the desktop fixture's Go tests). Touching `app/` or `web/`: also run `mise run build` (the browser bundle and the embedded binary); touching the `Dockerfile` or workspace manifests: also `docker build -t stage-verify .` then `docker rmi stage-verify` (never compose).
+- Ownership (see `docs/architecture.md`): UI and product logic go in `app/` (`@stage/app`); `web/` is the browser host only (mount, service worker, manifest, browser adapters). Product code reaches the host through `usePlatform()`/`useApi()`, never browser globals at a platform boundary, MyGo, or platform branches (`app/tests/boundaries.test.mjs` enforces it). One pnpm workspace and lockfile at the root; `desktop/fixture/web` stays outside it.
 - Touching `desktop/fixture/`: also run `pnpm test && pnpm lint && pnpm build` in `desktop/fixture/web`, and `mise run fixture:e2e` where a display + WebKitGTK 4.1 (or macOS) exists; otherwise say it was not run. Rerun `go tool mygo generate` there after changing the bound Go service. See `desktop/fixture/CHECKS.md` and `docs/adr/0001-desktop-shell.md`.
 - Never touch the prod stack (compose project `stage`, `compose.yaml`, its `stagedata` volume and `stage.db`) or the default data dir (`~/.local/share/stage`): no `mise run up`/`down`, no `docker compose` on it, no writes to its database. Dev uses `.scratch/dev/<branch>/stage.db`; tests use temp files.
 - Don't run `mise run install-cli` unless the user asks: it overwrites the live `~/.local/bin/stage` every agent uses.
