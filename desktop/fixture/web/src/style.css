@@ -1,0 +1,87 @@
+:root {
+  color-scheme: light dark;
+  --ink: #1f2328;
+  --paper: #fbfaf7;
+  --rule: #d8d4cc;
+  --ok: #1a7f37;
+  --fail: #cf222e;
+  font: 14px/1.45 system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6e1d8;
+    --paper: #16181b;
+    --rule: #34383d;
+    --ok: #4ac26b;
+    --fail: #ff7b72;
+  }
+}
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--paper);
+  color: var(--ink);
+}
+h1 {
+  margin: 0;
+  font-size: 18px;
+}
+h2 {
+  font-size: 14px;
+  margin: 24px 0 8px;
+}
+.meta,
+.status {
+  margin: 4px 0;
+  opacity: 0.75;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+button,
+.actions a {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--rule);
+  padding: 4px 10px;
+  cursor: pointer;
+  text-decoration: none;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  padding: 4px 8px 4px 0;
+  vertical-align: top;
+}
+tr.ok td:nth-child(2) {
+  color: var(--ok);
+}
+tr.fail td:nth-child(2) {
+  color: var(--fail);
+  font-weight: 600;
+}
+.env {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 16px;
+  margin: 0;
+}
+.env dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.gallery img {
+  width: 48px;
+  image-rendering: pixelated;
+  border: 1px solid var(--rule);
+  margin-top: 16px;
+}
