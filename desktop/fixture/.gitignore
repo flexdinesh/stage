@@ -1,0 +1,6 @@
+# Probe page build output (embedded by go:embed); .gitkeep keeps the dir.
+/dist/*
+!/dist/.gitkeep
+/build/
+/.mygo/
+/web/node_modules/

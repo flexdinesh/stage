@@ -1,0 +1,23 @@
+{
+  "name": "stage-desktop-fixture-probe",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@12.15.0",
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "build": "tsc && vite build",
+    "typecheck": "tsc",
+    "lint": "oxlint --deny-warnings"
+  },
+  "dependencies": {
+    "@mygo-plugins/fetch": "0.9.0",
+    "mygo-runtime": "0.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "1.91.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}

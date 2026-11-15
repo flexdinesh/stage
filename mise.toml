@@ -53,8 +53,8 @@ run = [
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, web install + test/typecheck/lint"
-depends = ["check:go", "check:web"]
+description = "Everything CI-like: go vet + go test, web install + test/typecheck/lint, desktop fixture Go tests"
+depends = ["check:go", "check:web", "check:fixture"]
 
 [tasks."check:go"]
 description = "go vet + go test"
@@ -63,6 +63,25 @@ run = "cd server && go vet ./... && go test ./..."
 [tasks."check:web"]
 description = "Web install (frozen lockfile) + test/typecheck/lint"
 run = "cd web && pnpm install --frozen-lockfile && pnpm test && pnpm typecheck && pnpm lint"
+
+[tasks."check:fixture"]
+description = "Desktop fixture (desktop/fixture): go vet (with and without e2e tag) + go test; no webview needed"
+run = "cd desktop/fixture && go vet ./... && go vet -tags e2e ./... && go test ./..."
+
+[tasks."fixture:e2e"]
+description = "Desktop fixture webview e2e: needs a display + WebKitGTK 4.1, or macOS. STAGE_FIXTURE_REAL_UI=1 adds the real Stage UI"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -e
+cd desktop/fixture
+find dist -mindepth 1 ! -name .gitkeep -delete
+(cd web && pnpm install --frozen-lockfile && pnpm test && pnpm lint && pnpm build)
+if [ "${STAGE_FIXTURE_REAL_UI:-}" = 1 ]; then
+  (cd ../../web && pnpm install --frozen-lockfile && pnpm build)
+fi
+go test -tags e2e -count=1 -v ./e2e
+'''
 
 [tasks.up]
 description = "Build and run the production stack in compose"

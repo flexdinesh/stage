@@ -1,0 +1,15 @@
+{
+  "name": "Stage Fixture",
+  "slug": "stage-fixture",
+  "identifier": "io.github.flexdinesh.stage.fixture",
+  "version": "0.0.0",
+  "buildCommand": "pnpm --dir web install --frozen-lockfile && pnpm --dir web build",
+  "frontendDist": "dist",
+  "bindings": "web/src/mygo.ts",
+  "out": "build",
+  "linux": {
+    "formats": [
+      "deb"
+    ]
+  }
+}
