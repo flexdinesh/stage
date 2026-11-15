@@ -95,6 +95,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/threads/{id}", s.getThread)
 	h("GET /api/threads/{id}/transcript", s.getTranscript)
 	h("GET /api/threads/{id}/transcript/items/{itemId}", s.getTranscriptItem)
+	h("GET /api/threads/{id}/transcript/opening", s.getTranscriptOpening)
 	h("GET /api/threads/{id}/transcript/stream", s.streamTranscript)
 	h("GET /api/threads/{id}/questions", s.listQuestions)
 	h("POST /api/threads/{id}/questions/{requestId}/answer", s.answerQuestion)

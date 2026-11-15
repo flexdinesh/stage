@@ -189,6 +189,21 @@ func (r Reader) Tail(ctx context.Context, threadID string, before *int, limit in
 	return page, nil
 }
 
+// Opening returns the session's first own user message (inherited fork
+// history skipped): the prompt that started it. Nil when there is none yet.
+func (r Reader) Opening(ctx context.Context, threadID string) (*Item, error) {
+	var found *Item
+	_, err := r.scan(ctx, threadID, -1, func(int) bool { return found != nil }, func(it Item) {
+		if found == nil && it.Kind == "user" && !it.Inherited {
+			found = &it
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
 // ErrItemNotFound: the item is not in the session's messages view.
 var ErrItemNotFound = errors.New("transcript item not found")
 

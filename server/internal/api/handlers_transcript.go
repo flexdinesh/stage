@@ -106,6 +106,21 @@ func (s *server) getTranscriptItem(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+// getTranscriptOpening: the session's first own user message (null before
+// one exists).
+func (s *server) getTranscriptOpening(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.transcriptReady(r)
+	if err != nil {
+		return err
+	}
+	item, err := s.Transcript.Reader().Opening(r.Context(), id)
+	if err != nil {
+		return transcriptErr(err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	return nil
+}
+
 // streamCursor: Last-Event-ID (browser reconnect) wins over ?after.
 func streamCursor(r *http.Request) (int, error) {
 	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))

@@ -835,6 +835,8 @@ func (f *Fake) SeedDemo() {
 	p := f.AddProject("demo", "/demo")
 	launch := func(title string) string {
 		r, _ := f.LaunchThread(ctx, LaunchInput{ProjectID: p.ID, Title: title})
+		// The opening prompt, as T3 records it (session detail Prompt panel).
+		f.AddItem(r.ThreadID, TimelineItem{Type: "user_message", Text: title + ".\n\nRead the relevant code first, keep the change minimal, and ask before anything destructive.", CreatedBy: "user"})
 		return r.ThreadID
 	}
 	asks := launch("Pick the rollout plan for the sync rewrite")

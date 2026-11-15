@@ -7,6 +7,7 @@ import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
+import { SessionPromptPanel } from "../components/PromptPanel.tsx";
 import { CreatedTasksPanel } from "../components/CreatedTasks.tsx";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
@@ -45,6 +46,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-3.5">
           {view === "transcript" ? <Transcript threadId={thread.t3ThreadId} jumpOffset="session" /> : <>
+            <SessionPromptPanel detail={data} live={isLiveState(thread.state)} />
             <LastWordPanel thread={thread} />
             <CreatedTasksPanel threadId={thread.t3ThreadId} batch={createdTasks} />
             <RunOrderPanel thread={thread} entries={continuations} />
