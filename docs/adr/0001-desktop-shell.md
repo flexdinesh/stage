@@ -145,3 +145,4 @@ the developer installation.
 
 - The shipping shell reuses the bridge-B handler and policy, the CSP, the close/Quit/notification wiring and the single-instance handover from `desktop/fixture/`. Rewrite them in the real desktop module; do not import the fixture.
 - Keep the fixture until the shell has its own e2e coverage. Its checks are the regression suite for MyGo bumps.
+- The UI is now `@stage/app` (`app/`) behind a platform contract, with `web/` as the browser host ([architecture.md](../architecture.md)). The desktop host renders `StageApp` with its own adapters (`links.appOrigin` from a configured public URL, native `notifications` and `attention`); bridge B lets it reuse the browser `transport` as is.

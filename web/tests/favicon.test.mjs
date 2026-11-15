@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FAVICON_IDLE, FAVICON_NEED, faviconHref } from "../src/lib/favicon.ts";
+import { FAVICON_IDLE, FAVICON_NEED, faviconHref } from "../src/platform/attention.ts";
 
 test("favicon is idle while the count is unknown or zero", () => {
   assert.equal(faviconHref(undefined), FAVICON_IDLE);

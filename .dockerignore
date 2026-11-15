@@ -2,6 +2,6 @@
 .scratch
 .env
 bin
-web/node_modules
+**/node_modules
 web/dist
 server/internal/webui/dist

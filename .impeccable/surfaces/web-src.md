@@ -1,12 +1,12 @@
 ---
 version: 1
 slug: "web-src"
-primary_target: "web/src"
-related_targets: []
+primary_target: "app/src"
+related_targets: ["web/src"]
 ---
 
 ## Scope
-Whole stage web app (web/src): Dashboard, Projects, Project detail, Task detail (with Run order, Runs and Pull requests panels), Sessions, Session detail (with continuation Run order, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task and Queue continuation drawers, Ctrl K palette. Mode: Operate.
+Whole stage web app (shared app in app/src, browser host in web/src): Dashboard, Projects, Project detail, Task detail (with Run order, Runs and Pull requests panels), Sessions, Session detail (with continuation Run order, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task and Queue continuation drawers, Ctrl K palette. Mode: Operate.
 
 ## Audience and task
 A developer, on laptop and phone, queueing T3 tasks and continuations of existing sessions, catching needs-input, watching running/completed work from every starting point, browsing history. Session state remains independent from a waiting continuation; run-order entries explain each condition before delivery.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pushFooterNote, pushStateFor } from "../src/lib/push.ts";
+import { pushStateFor } from "../src/platform/webPush.ts";
 
 /** A secure desktop browser with push support and no permission decision yet. */
 const base = { secure: true, ios: false, standalone: false, supported: true, permission: "default" };
@@ -29,13 +29,4 @@ test("permission maps to blocked, off, or a subscription lookup", () => {
   assert.equal(pushStateFor({ ...base, permission: "denied" }), "blocked");
   assert.equal(pushStateFor(base), "off");
   assert.equal(pushStateFor({ ...base, permission: "granted" }), null);
-});
-
-test("drawer footer names the HTTPS reason only for an insecure context", () => {
-  assert.equal(pushFooterNote("insecure"), "Push needs HTTPS or localhost");
-  for (const state of ["unsupported", "ios-install", "blocked", "off"]) {
-    assert.equal(pushFooterNote(state), "Push is off on this device");
-  }
-  assert.equal(pushFooterNote("on"), null);
-  assert.equal(pushFooterNote(undefined), null);
 });

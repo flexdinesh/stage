@@ -1,0 +1,5 @@
+# One lockfile for the shared app (app/) and the browser host (web/).
+# desktop/fixture/web is an isolated probe with its own lockfile; it stays out.
+packages:
+  - app
+  - web
