@@ -162,7 +162,7 @@ func TestToolList(t *testing.T) {
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
 		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "order_tasks", "unlink_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
-		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions",
+		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -170,7 +170,7 @@ func TestToolList(t *testing.T) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
 	init := cs.InitializeResult()
-	if init == nil || !strings.Contains(init.Instructions, "afterMe") {
+	if init == nil || !strings.Contains(init.Instructions, "afterMe") || !strings.Contains(init.Instructions, "read_ref") {
 		t.Fatalf("instructions missing: %+v", init)
 	}
 }
@@ -494,7 +494,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 27 {
+	if err != nil || len(res.Tools) != 28 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut
@@ -654,5 +654,61 @@ func TestHTTPMCPWithoutListener(t *testing.T) {
 	got, err := e.client.Task(ctx, created.ID)
 	if err != nil || got.Title != "via http mcp" {
 		t.Fatalf("task not stored: %+v, %v", got, err)
+	}
+}
+
+func TestReadRefTool(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/refs")
+	cs := connect(t, &agenttools.Ops{Client: e.client})
+
+	var tk client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "Fix login", "prompt": "fix it", "project": p.Title}, &tk)
+
+	// Backlog task: no session yet.
+	var r agenttools.RefOut
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("[stage task #%d: Fix login](http://phone.lan:7380/tasks/%d)", tk.ID, tk.ID)}, &r)
+	if r.Kind != "task" || r.Task == nil || r.Task.ID != tk.ID || r.Task.Prompt != "fix it" || r.Session != nil || !strings.Contains(r.Next, "Not launched") {
+		t.Fatalf("backlog ref %+v", r)
+	}
+
+	mustCall(t, cs, "start_task", map[string]any{"id": tk.ID}, &tk)
+	threadID := *tk.T3ThreadID
+	if err := e.fake.SetReply(threadID, t3.Reply{Text: "Fixed the token refresh."}); err != nil {
+		t.Fatal(err)
+	}
+	_ = e.fake.SetStatus(threadID, t3.StatusCompleted)
+	if err := e.sync.PollActive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Task ref carries its session; session ref carries its task.
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("#%d", tk.ID)}, &r)
+	if r.Kind != "task" || r.Task == nil || r.Session == nil || r.Session.Thread.T3ThreadID != threadID || !strings.Contains(r.Next, "t3_thread_read "+threadID) {
+		t.Fatalf("task ref %+v", r)
+	}
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": "http://127.0.0.1:7380/sessions/" + threadID}, &r)
+	if r.Kind != "session" || r.Session == nil || r.Task == nil || r.Task.ID != tk.ID {
+		t.Fatalf("session ref %+v", r)
+	}
+	if r.Session.Thread.LastWord == nil || !strings.Contains(r.Session.Thread.LastWord.Text, "token refresh") {
+		t.Fatalf("session last word %+v", r.Session.Thread.LastWord)
+	}
+
+	// External session: no task.
+	ext := e.session(p, "Outside")
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": ext}, &r)
+	if r.Kind != "session" || r.Task != nil || r.Session == nil || r.Session.Thread.Title != "Outside" {
+		t.Fatalf("external ref %+v", r)
+	}
+
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": "https://github.com/o/r/pull/3"}, nil); !strings.Contains(msg, "not a stage task or session reference") {
+		t.Fatalf("bad ref error %q", msg)
+	}
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": "#99999"}, nil); !strings.Contains(msg, "task 99999 not found") {
+		t.Fatalf("missing task error %q", msg)
 	}
 }

@@ -6,6 +6,7 @@ import { api } from "../api/client.ts";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
@@ -152,6 +153,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
     <div className={cx(phoneBar && "pb-16 md:pb-0")}>
       <PageHeader
         title={task.title}
+        actions={<CopyLinkPair subject={{ kind: "task", id: task.id, title: task.title }} />}
         meta={
           <>
             <Link to={`/projects/${task.projectId}`} className={linkClass}>

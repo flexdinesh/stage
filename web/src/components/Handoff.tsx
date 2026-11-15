@@ -4,6 +4,7 @@ import { dateTime } from "../lib/format.ts";
 import { handoffSummary, recordedSource } from "../lib/handoff.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { CopyButton } from "./CopyButton.tsx";
+import { RefText } from "./StageLinks.tsx";
 import { Checkbox } from "./ui.tsx";
 
 /** "Hand off context" checkbox row: the whole row is the label (44px phone, 32px laptop), mono hint below. */
@@ -51,7 +52,7 @@ export function HandoffRecord({ handoff }: { handoff: Handoff }) {
       <p className="font-mono text-meta text-muted">{handoffSummary(handoff)}</p>
       <details>
         <summary className="cursor-pointer text-small text-muted hover:text-fg">Handoff text</summary>
-        <pre className="mt-2 max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">{handoff.text}</pre>
+        <pre className="mt-2 max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap"><RefText text={handoff.text} /></pre>
       </details>
     </section>
   );

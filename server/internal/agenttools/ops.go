@@ -929,3 +929,46 @@ func (o *Ops) GetSession(ctx context.Context, a SessionArgs) (client.ThreadDetai
 func (o *Ops) GetSessionQuestions(ctx context.Context, a SessionArgs) (client.PendingQuestions, error) {
 	return o.Client.Questions(ctx, a.ID)
 }
+
+// RefArgs is read_ref.
+type RefArgs struct {
+	Ref string `json:"ref" jsonschema:"what the user pasted: a stage task or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
+}
+
+// RefOut is read_ref: the task and/or session a reference names. A task
+// reference includes its session (once launched); a session reference
+// includes the task that owns it (if any).
+type RefOut struct {
+	Kind    string               `json:"kind"` // task | session
+	Task    *client.TaskDetail   `json:"task"`
+	Session *client.ThreadDetail `json:"session"`
+	// Next: how to read the full conversation.
+	Next string `json:"next,omitempty"`
+}
+
+// ReadRef resolves a pasted reference and reads what it names.
+func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
+	r, err := o.Client.ResolveRef(ctx, a.Ref)
+	if err != nil {
+		return RefOut{}, err
+	}
+	out := RefOut{Kind: r.Kind}
+	if r.TaskID != nil {
+		t, err := o.Client.Task(ctx, *r.TaskID)
+		if err != nil {
+			return RefOut{}, err
+		}
+		out.Task = &t
+	}
+	if r.ThreadID != nil {
+		s, err := o.Client.Thread(ctx, *r.ThreadID)
+		if err != nil {
+			return RefOut{}, err
+		}
+		out.Session = &s
+		out.Next = "Full conversation: t3_thread_read " + *r.ThreadID + " (T3 MCP). The session's lastWord is its latest reply (4000-char excerpt)."
+	} else if out.Task != nil {
+		out.Next = "Not launched yet: no session or conversation. The task's prompt is what it will send."
+	}
+	return out, nil
+}

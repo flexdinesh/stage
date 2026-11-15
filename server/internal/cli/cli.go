@@ -95,6 +95,8 @@ Usage:
   stage serve [--listen ADDR]         run the server (also: stage with no args); ADDR host:port or
                                       unix:/abs/path.sock (env STAGE_LISTEN, default 127.0.0.1:7380)
   stage context                       your session, cwd and resolved project
+  stage show REF                      the task or session a stage link, T3 thread link,
+                                      #TASK_ID or thread id names (with its session/task)
   stage projects ls
   stage models ls
   stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
@@ -210,6 +212,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return nil
 	case "context":
 		return runContext(ctx, env, sub)
+	case "show":
+		return runShow(ctx, env, sub)
 	case "projects":
 		return runProjects(ctx, env, sub)
 	case "models":
@@ -248,6 +252,21 @@ func runContext(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	return c.out(res, func(w io.Writer) { printContext(w, res) })
+}
+
+func runShow(ctx context.Context, env Env, args []string) error {
+	c := newCmd(env, "show")
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	if len(c.pos) != 1 {
+		return usagef("show: want one reference (stage link, T3 thread link, #TASK_ID or thread id)")
+	}
+	res, err := c.ops().ReadRef(ctx, agenttools.RefArgs{Ref: c.pos[0]})
+	if err != nil {
+		return err
+	}
+	return c.out(res, func(w io.Writer) { printRef(w, res) })
 }
 
 func runProjects(ctx context.Context, env Env, args []string) error {

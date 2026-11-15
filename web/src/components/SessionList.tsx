@@ -5,6 +5,7 @@ import { sessionPath } from "../lib/sessions.ts";
 import { LastWordLine } from "./LastWord.tsx";
 import { PrChips } from "./PullRequests.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
+import { RowCopyLink } from "./StageLinks.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, ExternalButton, cx } from "./ui.tsx";
 
@@ -23,7 +24,7 @@ export function SessionRows({ threads, emptyText = "No sessions match. Clear fil
   return (
     <ul>
       {threads.map((thread) => (
-        <li key={thread.t3ThreadId} className={cx("grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 border-b border-l-2 border-l-transparent border-line px-3 py-2.5 last:border-b-0 md:grid-cols-[118px_minmax(0,1fr)_auto] md:items-center", thread.state === "needs_input" && "border-l-need bg-need/5")}>
+        <li key={thread.t3ThreadId} className={cx("group/row grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 border-b border-l-2 border-l-transparent border-line px-3 py-2.5 last:border-b-0 md:grid-cols-[118px_minmax(0,1fr)_auto] md:items-center", thread.state === "needs_input" && "border-l-need bg-need/5")}>
           <span className="order-2 md:order-1"><TaskStateBadge state={thread.state} /></span>
           <div className="order-1 min-w-0 md:order-2">
             <Link to={sessionPath(thread.t3ThreadId)} className="text-body font-medium break-words hover:underline">{thread.title}</Link>
@@ -42,6 +43,7 @@ export function SessionRows({ threads, emptyText = "No sessions match. Clear fil
           <div className="order-3 col-span-2 flex flex-wrap gap-2 md:col-span-1">
             {answerable(thread) ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
             <SessionOpenButton thread={thread} />
+            <RowCopyLink subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} />
           </div>
         </li>
       ))}

@@ -6,6 +6,7 @@ import { RunOrderPanel } from "../components/Continuations.tsx";
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { SessionPromptPanel } from "../components/PromptPanel.tsx";
 import { CreatedTasksPanel } from "../components/CreatedTasks.tsx";
@@ -38,7 +39,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
     markViewed(taskId === undefined ? [`thread:${thread.t3ThreadId}`] : [`thread:${thread.t3ThreadId}`, `task:${taskId}`]);
   }, [thread.t3ThreadId, taskId, markViewed]);
   return <>
-    <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
+    <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><CopyLinkPair subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} /><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
     <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
     <div className="mb-3.5"><DetailViewTabs view={view} onChange={setView} live={isLiveState(thread.state)} /></div>
     <div className="flex flex-col gap-3.5">

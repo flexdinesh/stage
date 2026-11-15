@@ -8,6 +8,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPromptSource } from "../lib/prompt.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { ImageStrip } from "./Images.tsx";
+import { RefText } from "./StageLinks.tsx";
 import { Alert, Button, Muted, Panel, cx, errorText } from "./ui.tsx";
 
 /** A truncated T3 preview: the full text loads from the transcript item route. */
@@ -70,7 +71,7 @@ export function PromptPanel({
         <div>
           <div ref={box} className={cx("min-w-0", !expanded && "max-h-[9.75em] overflow-hidden", clamped && "transcript-clamp")}>
             <pre ref={content} className="font-mono text-small leading-relaxed break-words whitespace-pre-wrap">
-              {shown}
+              <RefText text={shown} />
             </pre>
           </div>
           {canToggle ? (

@@ -8,6 +8,7 @@ import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from 
 import { sessionPath } from "../lib/sessions.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { IconSearch } from "./icons.tsx";
+import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
 import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
 import { Kbd, cx } from "./ui.tsx";
 
@@ -24,6 +25,8 @@ interface Item {
   run: () => void;
   /** Ctrl+Enter target. */
   t3Url?: string | null;
+  /** Alt+C copies a link to it. */
+  link?: LinkSubject;
 }
 
 const PAGES: [string, string][] = [
@@ -67,6 +70,8 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const { setTheme } = useTheme();
   const invalidate = useInvalidateWork();
   const sync = useMutation({ mutationFn: api.sync, onSettled: invalidate });
+  const [copyStatus, copy] = useCopy();
+  const [copiedName, setCopiedName] = useState("");
 
   const q = query.trim().toLowerCase();
   const debounced = useDebounced(q, 200);
@@ -108,6 +113,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           badge: <TaskStateBadge state={t.state} />,
           run: go(t.t3ThreadId === null ? `/tasks/${t.id}` : sessionPath(t.t3ThreadId)),
           t3Url: t.t3DeepLink,
+          link: { kind: "task", id: t.id, title: t.title },
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
@@ -128,6 +134,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           badge: th === null ? undefined : <ThreadStatusBadge status={th.status} settled={th.settled} />,
           run: go(sessionPath(hit.id)),
           t3Url: hit.t3DeepLink,
+          link: { kind: "session", id: hit.id, title: hit.title },
         };
       };
       for (const hit of sessions) out.push(sessionItem(hit, "Sessions"));
@@ -169,6 +176,14 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       move(-1);
+    } else if (e.altKey && e.code === "KeyC") {
+      // e.code: Option+C on macOS types "ç" in e.key.
+      e.preventDefault();
+      const link = items[active]?.link;
+      if (link === undefined) return;
+      const { markdown, name } = subjectLinks(link);
+      setCopiedName(name);
+      copy(markdown);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = items[active];
@@ -264,7 +279,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           )}
           {note === null ? null : <p className="px-4 pt-2 pb-3 font-mono text-meta-sm text-muted md:hidden">{note}</p>}
         </div>
-        <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm text-muted md:flex">
+        <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm whitespace-nowrap text-muted md:flex">
           <span>
             <Kbd>↑↓</Kbd> move
           </span>
@@ -275,9 +290,14 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             <Kbd>Ctrl ↵</Kbd> open in T3
           </span>
           <span>
+            <Kbd>Alt C</Kbd> copy link
+          </span>
+          <span>
             <Kbd>Esc</Kbd> close
           </span>
-          {note === null ? null : <span className="ml-auto">{note}</span>}
+          <span className="ml-auto min-w-0 truncate" aria-live="polite">
+            {copyStatus === "copied" ? <span className="text-fg">Copied {copiedName}</span> : copyStatus === "failed" ? <span className="text-bad">Copy failed</span> : note}
+          </span>
         </div>
       </div>
     </div>,
