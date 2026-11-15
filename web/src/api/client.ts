@@ -48,6 +48,7 @@ import type {
   ThreadSearch,
   ThreadListQuery,
   TranscriptItemText,
+  TranscriptOpening,
   TranscriptPage,
   TranscriptQuery,
   UnreadNotificationTags,
@@ -208,6 +209,7 @@ export const api = {
     apiFetch<TranscriptPage>(`/threads/${encodeURIComponent(id)}/transcript${toQuery({ before: q.before, limit: q.limit })}`),
   transcriptItem: (id: string, itemId: string) =>
     apiFetch<TranscriptItemText>(`/threads/${encodeURIComponent(id)}/transcript/items/${encodeURIComponent(itemId)}`),
+  transcriptOpening: (id: string) => apiFetch<TranscriptOpening>(`/threads/${encodeURIComponent(id)}/transcript/opening`),
   /** SSE URL (not fetched: opened with EventSource). */
   transcriptStreamUrl: (id: string, after: number) =>
     `/api/threads/${encodeURIComponent(id)}/transcript/stream${toQuery({ after })}`,

@@ -294,3 +294,29 @@ func TestTranscriptStreamResetAndErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestTranscriptOpening(t *testing.T) {
+	e := newEnv(t)
+	id, run := transcriptSession(t, e)
+	base := "/api/threads/" + url.PathEscape(id) + "/transcript/opening"
+	var got struct {
+		Item *transcript.Item `json:"item"`
+	}
+	e.must("GET", base, nil, 200, &got)
+	if got.Item != nil {
+		t.Fatalf("no messages yet: item = %+v", got.Item)
+	}
+
+	e.fake.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "parent ask", Visibility: "inherited"})
+	e.fake.AddItem(id, t3.TimelineItem{Type: "assistant_message", Text: "hi", RunID: run})
+	e.fake.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "build it", RunID: run, ItemID: "first", CreatedBy: "user"})
+	e.fake.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "and test it", RunID: run})
+	e.must("GET", base, nil, 200, &got)
+	if got.Item == nil || got.Item.ItemID != "first" || got.Item.Text != "build it" || got.Item.Kind != "user" || got.Item.Inherited {
+		t.Fatalf("item = %+v", got.Item)
+	}
+
+	e.must("GET", "/api/threads/unknown/transcript/opening", nil, 404, nil)
+	e.fake.RemoveThread(id)
+	e.must("GET", base, nil, 404, nil)
+}

@@ -389,3 +389,41 @@ func TestHubReportsT3ErrorsAndRecovers(t *testing.T) {
 	until(t, s, "error state", func(ev Event) bool { return ev.State != nil && ev.State.Error != nil })
 	s.Close()
 }
+
+func TestOpeningSkipsInheritedAndStopsEarly(t *testing.T) {
+	f, id := newThread(t)
+	r := Reader{T3: f}
+	ctx := context.Background()
+
+	got, err := r.Opening(ctx, id)
+	if err != nil || got != nil {
+		t.Fatalf("empty thread: %+v, %v", got, err)
+	}
+
+	for range 150 { // inherited fork history spans more than one T3 page
+		f.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "parent", Visibility: "inherited"})
+	}
+	f.AddItem(id, t3.TimelineItem{Type: "command_execution", Text: "ls"})
+	f.AddItem(id, t3.TimelineItem{Type: "assistant_message", Text: "a"})
+	long := strings.Repeat("p", PreviewChars+5)
+	want := f.AddItem(id, t3.TimelineItem{Type: "user_message", Text: long})
+	for range 300 {
+		f.AddItem(id, t3.TimelineItem{Type: "user_message", Text: "later"})
+	}
+
+	before := f.ItemReads()
+	got, err = r.Opening(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads := f.ItemReads() - before; reads != 2 {
+		t.Fatalf("t3 reads = %d, want 2 (stop at the page holding the match)", reads)
+	}
+	if got == nil || got.Position != want || got.Inherited || !got.Truncated || len(got.Text) != PreviewChars {
+		t.Fatalf("opening = %+v", got)
+	}
+
+	if _, err := r.Opening(ctx, "missing"); err == nil {
+		t.Fatal("missing thread: want error")
+	}
+}

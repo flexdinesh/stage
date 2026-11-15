@@ -9,6 +9,7 @@ import { CopyButton } from "../components/CopyButton.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
+import { PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
@@ -273,20 +274,15 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </div>
           ) : (
           <div className="flex min-w-0 flex-col gap-3.5">
+            <PromptPanel text={task.prompt}>
+              {pendingHandoffNote(task) === null ? null : (
+                <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
+              )}
+              {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
+              <ImageStrip attachments={task.attachments} label="Prompt images" />
+              {task.currentHandoff === null ? null : <HandoffRecord handoff={task.currentHandoff} />}
+            </PromptPanel>
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
-            <Panel title="Prompt" actions={<CopyButton text={task.prompt} label="Copy" />}>
-              <div className="flex flex-col gap-3">
-                <pre className="max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap">
-                  {task.prompt}
-                </pre>
-                {pendingHandoffNote(task) === null ? null : (
-                  <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
-                )}
-                {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
-                <ImageStrip attachments={task.attachments} label="Prompt images" />
-                {task.currentHandoff === null ? null : <HandoffRecord handoff={task.currentHandoff} />}
-              </div>
-            </Panel>
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
             {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
             <TimelinePanel events={task.events} />

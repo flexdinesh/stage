@@ -663,6 +663,11 @@ export interface TranscriptPage {
   status: ThreadStatus;
 }
 
+/** The session's first own user message; null before one exists. */
+export interface TranscriptOpening {
+  item: TranscriptItem | null;
+}
+
 export interface TranscriptQuery {
   before?: number;
   limit?: number;
