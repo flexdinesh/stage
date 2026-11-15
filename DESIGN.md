@@ -208,7 +208,7 @@ Motion is quiet: 150ms color, opacity and border transitions on state change, a 
 **Key Characteristics:**
 - Zero radius on every element, including chips, markers, spinners and focus outlines.
 - 1px hairlines (11% ink) separate rows and regions; 20% ink outlines controls.
-- Ink accent that inverts per theme; no brand hue in chrome.
+- Ink accent that inverts per theme; no brand hue in chrome (the mark's yellow top step is a needs-input marker, not brand color).
 - Six state tones (need, run, done, ok, bad, idle) drawn as tinted borders, square markers and colored text.
 - Uppercase JetBrains Mono panel headers on a light-gray bar.
 - Drawers and full-screen sheets instead of modals.
@@ -218,7 +218,7 @@ Motion is quiet: 150ms color, opacity and border transitions on state change, a 
 An ink-and-paper neutral system with a strictly semantic state palette; nothing else is colored.
 
 ### Primary
-- **Ink** (`accent` / `accent-dark`): the primary action color. Black (#0b0d14) on white in light mode, near-white (#eef0f5) on deep slate in dark. Fills primary buttons (New task, Start, Open in T3 on a needs-input row), the active nav underline, the selected segmented option, the brand square, text selection, focus outlines and the history bar chart. Paired with `on-accent` for text on it.
+- **Ink** (`accent` / `accent-dark`): the primary action color. Black (#0b0d14) on white in light mode, near-white (#eef0f5) on deep slate in dark. Fills primary buttons (New task, Start, Open in T3 on a needs-input row), the active nav underline, the selected segmented option, the brand glyph, text selection, focus outlines and the history bar chart. Paired with `on-accent` for text on it.
 
 ### Neutral
 - **Paper** (`bg`, `surface`): the ground and panel bodies. Both pure white in light; in dark the ground is #1a1d23 and panel bodies lift one step to #1f2229.
@@ -238,7 +238,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 - **Idle Gray** (`idle`): backlog, cancelled, idle, rolled back.
 
 ### Named Rules
-**The State Earns Color Rule.** Hue appears only on a state: a chip, a square marker, a stat count, an alert, or the needs-input row edge. Chrome, navigation, links and primary buttons stay ink.
+**The State Earns Color Rule.** Hue appears only on a state: a chip, a square marker, a stat count, an alert, the needs-input row edge, or the mark's top step while anything needs input. Chrome, navigation, links and primary buttons stay ink.
 
 **The Two-Token Tone Rule.** Every tone sets a marker/border color and a text color. Borders mix the tone at 45-55% into transparent, fills at 8-14%; the need chip fills at 14% so yellow reads at a glance. Never invent a tone outside the six.
 
@@ -299,7 +299,7 @@ Flat. Depth comes from tone and line, not shadow: a Bench Gray header bar over a
 
 ## Shapes
 
-Every corner is square (0px): buttons, inputs, chips, panels, drawers, keycaps, skeleton bars, the busy spinner, and state markers. Borders are always 1px; the only 2px strokes are the active-tab underline, the stat selection bar, the focus outline and the needs-input row edge. State markers are 6px squares (7px in alerts, 8px on the phone tab); the brand mark is a 10px ink square. Run order steps are bordered cells joined by 1px connectors; unstarted steps use a dashed border, the current step adds a 1px Ink Text outline offset 1px.
+Every corner is square (0px): buttons, inputs, chips, panels, drawers, keycaps, skeleton bars, the busy spinner, and state markers. Borders are always 1px; the only 2px strokes are the active-tab underline, the stat selection bar, the focus outline and the needs-input row edge. State markers are 6px squares (7px in alerts, 8px on the phone tab); the brand mark is a 16px stepped-bars glyph (see Brand mark). Run order steps are bordered cells joined by 1px connectors; unstarted steps use a dashed border, the current step adds a 1px Ink Text outline offset 1px.
 
 Icons are authored 16px SVGs on a 16-unit grid: 1.5 stroke, square caps, miter joins, currentColor, so they share the sharp geometry of the grid.
 
@@ -339,6 +339,13 @@ Every project picker (task form, snippet scope, Dashboard/Sessions/History/conti
 
 ### Segmented control
 Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall (40px on phone), matching buttons and inputs it sits beside; small (follow-up send mode) is 26px (34px on phone). Used for runtime mode, time window, follow-up mode, theme, project sort/archive filter.
+
+### Brand mark
+Three stepped square bars, widest at the bottom, on the 16-unit grid; no rounded corners, no circle.
+- **Top bar glyph** (both bars): 16px, bars 3 units tall with 1-unit gaps (x 1/3/5, widths 14/10/6) in `currentColor`: bottom solid, middle at 72%, top step at 44%. While anything needs input the top step fills Waiting Yellow (`need`), 150ms fill transition, none with reduced motion. Followed by the bold `stage` wordmark, 8px gap. Decorative (`aria-hidden`): the Dashboard count chip and the phone Stage tab marker announce the state.
+- **Tab favicon:** `favicon.svg` (idle: full-bleed #0b0d14 tile, white bars, top step at 44%) swaps to `favicon-need.svg` (top step #e3c341) while anything needs input. Bars are 2 units tall with 2-unit gaps so they hold at 16px. Fixed ink tile in both themes.
+- **App icons:** `logo.svg` is the brand source: square #0b0d14 tile, white bottom bar, middle at 72%, static #e3c341 top step (outside app chrome, so the yellow is brand, not state). Bars sit inside the maskable 80% safe zone; the OS applies its own mask.
+- **Raster provenance:** every PNG in `web/public/icons` is generated from `logo.svg` (run in `web/public`): `magick -background none -density 96 logo.svg -resize 192x192 PNG32:icons/icon-192.png` (same at 512 for `icon-512.png`); `magick -background '#0b0d14' -density 96 logo.svg -resize 512x512 -flatten -alpha off PNG24:icons/icon-maskable-512.png` (same at 180 for `apple-touch-icon.png`).
 
 ### Navigation
 - **Laptop:** text tabs at 13px, Slate at rest, Ink Text with a 2px Ink underline when active, full bar height.
