@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useBadge, useT3Status } from "../api/queries.ts";
+import { faviconHref } from "../lib/favicon.ts";
 import { relativeTime } from "../lib/format.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
@@ -99,10 +100,24 @@ const THEME_ICON: Record<Theme, ReactNode> = {
   dark: <IconMoon />,
 };
 
-function Mark() {
+/** Stepped-bars glyph + wordmark; the top step turns Waiting Yellow while anything needs input. */
+function Mark({ needsInput }: { needsInput: number }) {
   return (
     <Link to="/" className="flex shrink-0 items-center gap-2 font-bold tracking-[-0.02em] whitespace-nowrap">
-      <span className="size-2.5 bg-accent" />
+      <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden className="shrink-0 fill-current">
+        <rect x={1} y={11} width={14} height={3} />
+        <rect x={3} y={7} width={10} height={3} opacity={0.72} />
+        <rect
+          x={5}
+          y={3}
+          width={6}
+          height={3}
+          className={cx(
+            "transition-[fill,opacity] duration-150 motion-reduce:transition-none",
+            needsInput > 0 ? "fill-need" : "opacity-44",
+          )}
+        />
+      </svg>
       stage
     </Link>
   );
@@ -195,9 +210,18 @@ function useAppBadge(count: number | undefined) {
   }, [count]);
 }
 
+/** Swaps the tab favicon to its yellow-step variant while anything needs input. */
+function useLiveFavicon(count: number | undefined) {
+  useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (link !== null) link.href = faviconHref(count);
+  }, [count]);
+}
+
 function Shell() {
   const badge = useBadge().data?.needsInput;
   useAppBadge(badge);
+  useLiveFavicon(badge);
   usePushRefresh();
   useSystemNotificationSync();
   const needsInput = badge ?? 0;
@@ -236,7 +260,7 @@ function Shell() {
       {/* Laptop top bar */}
       <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex">
         <div className="flex items-center">
-          <Mark />
+          <Mark needsInput={needsInput} />
         </div>
         <nav className="flex items-stretch overflow-x-auto" aria-label="Main">
           {NAV.map((item) => (
@@ -275,7 +299,7 @@ function Shell() {
 
       {/* Phone top bar */}
       <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] md:hidden">
-        <Mark />
+        <Mark needsInput={needsInput} />
         <div className="ml-auto flex items-center gap-2">
           <ConnectionStatus />
           <NotificationsBell onOpen={openInbox} />
