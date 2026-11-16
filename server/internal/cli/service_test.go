@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/service"
 )
 
@@ -71,7 +72,7 @@ func TestServiceNoManager(t *testing.T) {
 func TestVersionJSON(t *testing.T) {
 	code, out, _ := runService(t, &noManager{}, "version", "--json")
 	var bi service.BuildInfo
-	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 1 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" {
+	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 1 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" || bi.Schema != db.MaxVersion() {
 		t.Fatalf("version: %d %s", code, out)
 	}
 }

@@ -6,12 +6,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/png"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -131,7 +134,11 @@ func expectedName(a Artifact, b build) string {
 }
 
 func verifyArtifact(dir string, a Artifact, b build, sums map[string]string, m *Manifest, cliBins map[string][]byte) error {
-	if want := expectedName(a, b); a.Name != want {
+	if a.Format == FormatPNG {
+		if _, ok := iconSize(a.Name, b.slug()); !ok || a.Kind != KindDesktop || a.OS != "linux" || a.Arch != "" {
+			return fmt.Errorf("a png is a linux desktop %s-<n>x<n>.png for any arch, not %s %s/%s", b.slug(), a.Kind, a.OS, a.Arch)
+		}
+	} else if want := expectedName(a, b); a.Name != want {
 		return fmt.Errorf("name for %s %s %s/%s should be %q", a.Kind, a.Format, a.OS, a.Arch, want)
 	}
 	p := filepath.Join(dir, a.Name)
@@ -156,6 +163,8 @@ func verifyArtifact(dir string, a Artifact, b build, sums map[string]string, m *
 		return verifyDeb(p, a, b, cliBins)
 	case a.Format == FormatPKGBUILD:
 		return verifyPKGBUILD(p, a, b, m)
+	case a.Format == FormatPNG:
+		return verifyIcon(p, a, b)
 	}
 	// rpm (its name carries the version and it packs the same staged files
 	// as the tarball and deb), dmg and install.sh: name and hash only.
@@ -431,20 +440,98 @@ func verifyPKGBUILD(p string, a Artifact, b build, m *Manifest) error {
 	}
 	tar := Artifact{Kind: KindDesktop, Format: FormatTarGz, OS: a.OS, Arch: a.Arch}
 	tarName := expectedName(tar, b)
-	var tarSum string
+	// Its sources are the tarball, then every icon of the release, each
+	// with its checksum: makepkg finds them beside the PKGBUILD.
+	want := map[string]string{}
+	var icons []string
 	for _, x := range m.Artifacts {
-		if x.Name == tarName {
-			tarSum = x.SHA256
+		switch {
+		case x.Name == tarName:
+			want[x.Name] = x.SHA256
+		case x.Format == FormatPNG:
+			want[x.Name] = x.SHA256
+			icons = append(icons, x.Name)
 		}
 	}
-	if tarSum == "" {
+	if want[tarName] == "" {
 		return fmt.Errorf("its source %s is not in the release", tarName)
 	}
 	s := string(data)
-	for _, want := range []string{"pkgver='" + archVersion(b.Version) + "'", "source=('" + tarName + "')", "sha256sums=('" + tarSum + "')"} {
-		if !strings.Contains(s, want) {
-			return fmt.Errorf("does not contain %s", want)
+	if v := "pkgver='" + archVersion(b.Version) + "'"; !strings.Contains(s, v) {
+		return fmt.Errorf("does not contain %s", v)
+	}
+	sources, sha256sums := pkgbuildArray(s, "source"), pkgbuildArray(s, "sha256sums")
+	if len(sources) == 0 || sources[0] != tarName {
+		return fmt.Errorf("does not contain source=('%s' ...)", tarName)
+	}
+	if len(sha256sums) != len(sources) {
+		return fmt.Errorf("has %d sources and %d sha256sums", len(sources), len(sha256sums))
+	}
+	got := slices.Sorted(slices.Values(sources[1:]))
+	slices.Sort(icons)
+	if !slices.Equal(got, icons) {
+		return fmt.Errorf("names icons %q, the release has %q", got, icons)
+	}
+	for i, name := range sources {
+		if sha256sums[i] != want[name] {
+			return fmt.Errorf("sha256sums for %s is %q, the release has %s", name, sha256sums[i], want[name])
 		}
+	}
+	return nil
+}
+
+// pkgbuildArray returns the single-quoted words of a one-line array of a
+// PKGBUILD, as source=('a' 'b'), or nil without it.
+func pkgbuildArray(s, key string) []string {
+	for line := range strings.Lines(s) {
+		v, ok := strings.CutPrefix(strings.TrimRight(line, "\n"), key+"=(")
+		if !ok {
+			continue
+		}
+		v, ok = strings.CutSuffix(v, ")")
+		if !ok {
+			return nil
+		}
+		var words []string
+		for _, w := range strings.Fields(v) {
+			w, ok := strings.CutPrefix(w, "'")
+			if w, ok2 := strings.CutSuffix(w, "'"); ok && ok2 && w != "" && !strings.Contains(w, "'") {
+				words = append(words, w)
+				continue
+			}
+			return nil
+		}
+		return words
+	}
+	return nil
+}
+
+var iconRe = regexp.MustCompile(`^(.+)-([1-9][0-9]*)x([1-9][0-9]*)\.png$`)
+
+// iconSize returns n of an icon named <slug>-<n>x<n>.png.
+func iconSize(name, slug string) (int, bool) {
+	g := iconRe.FindStringSubmatch(name)
+	if g == nil || g[1] != slug || g[2] != g[3] {
+		return 0, false
+	}
+	n, err := strconv.Atoi(g[2])
+	return n, err == nil
+}
+
+// verifyIcon requires a PNG of the size its name says.
+func verifyIcon(p string, a Artifact, b build) error {
+	n, _ := iconSize(a.Name, b.slug())
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	cfg, format, err := image.DecodeConfig(f)
+	if err != nil {
+		return err
+	}
+	if format != "png" || cfg.Width != n || cfg.Height != n {
+		return fmt.Errorf("is a %dx%d %s, want a %dx%d png", cfg.Width, cfg.Height, format, n, n)
 	}
 	return nil
 }

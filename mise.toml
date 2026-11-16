@@ -124,8 +124,21 @@ description = "Verify an asset directory (DIR=...): manifest, checksums, names, 
 run = 'scripts/release.sh verify "${DIR:?set DIR to an asset directory}"'
 
 [tasks."check:release"]
-description = "Release tool (tools/release) go vet + go test, shellcheck of scripts/release.sh"
-run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh"
+description = "Release tool (tools/release) go vet + go test (incl. scripts/install.sh against fixture releases), shellcheck of scripts/*.sh"
+run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh && shellcheck -s sh scripts/install.sh scripts/install-dev.sh"
+
+[tasks."install:smoke"]
+description = "Installer smoke check: real binaries + systemd --user with the isolated stage-svctest identity (install, stage update, rollback, uninstall), then a real dist build installed into a temp home with no service manager"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -e
+OUT="$PWD/.scratch/installtest/dist"
+rm -rf "$OUT" && mkdir -p "$OUT"
+STAGE_DIST_OUT="$OUT" mise run dist
+cd server
+STAGE_INSTALL_SMOKE=1 STAGE_INSTALL_SMOKE_DIST="$OUT" go test -tags smoke -count=1 -v -timeout 15m -run '^TestInstallSmoke' ./internal/install
+'''
 
 [tasks."desktop:e2e"]
 description = "Desktop app webview e2e: needs a display + WebKitGTK 4.1, or macOS; builds the UI first, uses a temp foreground server (no OS service)"

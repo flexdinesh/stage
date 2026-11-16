@@ -30,11 +30,34 @@ func runVersion(env Env, args []string) error {
 		return usagef("version: unexpected argument %q", fs.Arg(0))
 	}
 	bi := service.ThisBuild()
-	if *asJSON {
-		return writeJSON(env.Stdout, bi)
+	v := versionInfo{BuildInfo: bi}
+	if rec := installInfo(env); rec != nil {
+		v.Install = &installSummary{Mode: rec.Mode, Version: rec.Version, Channel: rec.Channel, App: rec.App, CLI: rec.CLI, Link: rec.Link}
 	}
-	fmt.Fprintf(env.Stdout, "stage %s (identity %s, commit %s, api v%d)\n", bi.Version, bi.Identity, orNone(bi.Commit), bi.APIVersion)
+	if *asJSON {
+		return writeJSON(env.Stdout, v)
+	}
+	fmt.Fprintf(env.Stdout, "stage %s (identity %s, commit %s, api v%d, schema %d)\n", bi.Version, bi.Identity, orNone(bi.Commit), bi.APIVersion, bi.Schema)
+	if v.Install != nil {
+		fmt.Fprintf(env.Stdout, "installed %s mode at %s (%s)\n", v.Install.Mode, v.Install.App, v.Install.Link)
+	}
 	return nil
+}
+
+// versionInfo is `stage version --json`: the build, plus the installation
+// this binary belongs to when the installer installed it.
+type versionInfo struct {
+	service.BuildInfo
+	Install *installSummary `json:"install,omitempty"`
+}
+
+type installSummary struct {
+	Mode    string `json:"mode"`
+	Version string `json:"version"`
+	Channel string `json:"channel"`
+	App     string `json:"app"`
+	CLI     string `json:"cli"`
+	Link    string `json:"link"`
 }
 
 func orNone(s string) string {

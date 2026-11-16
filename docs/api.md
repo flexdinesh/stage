@@ -71,13 +71,14 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   "apiVersion": 1,
   "instanceId": "9f2c4e1a7b3d5c60",
   "startedAt": "2026-11-16T09:00:00Z",
+  "schema": 4,
   "publicUrl": "https://stage.example.ts.net",
   "t3": { "connected": false, "lastError": "dial tcp 127.0.0.1:3773: connection refused" }
 }
 ```
 - A live Stage server answers 200 whenever its database works; T3 being offline is still 200 with `t3.connected: false`.
-- 503: the DB ping failed (`status` and `db` are `"error"`; the other fields are still present).
-- `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `t3.lastError` is nullable.
+- 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
+- `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `t3.lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
 
 ## T3 connection, sync, catalog

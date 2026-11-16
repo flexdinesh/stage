@@ -181,6 +181,8 @@ type Health struct {
 	APIVersion int        `json:"apiVersion"`
 	InstanceID string     `json:"instanceId"`
 	StartedAt  *time.Time `json:"startedAt"`
+	// Schema is the database's migration version (0 when unreachable).
+	Schema int64 `json:"schema"`
 	// PublicURL is STAGE_PUBLIC_URL, null when unset: the address copied
 	// Stage links use on hosts whose own origin is not shareable (desktop).
 	PublicURL *string  `json:"publicUrl"`
@@ -214,8 +216,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status := http.StatusOK
-	if err := s.Store.Ping(r.Context()); err != nil {
+	if v, err := s.Store.SchemaVersion(r.Context()); err != nil {
 		h.Status, h.DB, status = "error", "error", http.StatusServiceUnavailable
+	} else {
+		h.Schema = v
 	}
 	writeJSON(w, status, h)
 }

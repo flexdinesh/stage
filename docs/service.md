@@ -205,7 +205,16 @@ temporary and build-cache locations (`go run`), macOS App Translocation and
 the Trash are refused. It never depends on the caller's cwd or `PATH`; the
 manager tools are found by absolute path (`/bin/launchctl`, `systemctl` via
 `PATH` then the system dirs). A server version different from the CLI is a
-note only; a later updater coordinates restarts.
+note only; `stage update` coordinates restarts.
+
+**Updates** ([install.md](install.md#update)). An installer install keeps
+the service's executable at a stable path (the app's `bin/stage`, or the
+`~/.local/bin` link when `stage service start` ran from it). `stage update`
+swaps the app at that path and, only when the service ran this install,
+runs `restart --exe <app>/bin/stage` and checks that the new server reports
+the new version; a stopped or not-installed service is left so. `stage
+uninstall` runs `uninstall` first. Neither touches a service that runs
+another executable.
 
 ## Lifecycle
 

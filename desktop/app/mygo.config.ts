@@ -30,6 +30,11 @@ export default {
   buildCommand: "pnpm --filter stage-desktop build",
   bindings: "ui/src/mygo.ts",
   out: "build",
+  // The brand mark (web/public/logo.svg) rendered by rsvg-convert, outside
+  // resources/ (scripts/release.sh recreates that per build). Linux ships it
+  // as <slug>.png beside the .desktop entry (Icon=<slug>); macOS uses
+  // icon.icns. Regenerate both from logo.svg as docs/desktop.md#app-icon says.
+  icon: "icon/icon.png",
   // MyGo's default Linux formats: the tarball with install.sh, deb, rpm and
   // a PKGBUILD (docs/release.md lists the release assets).
   linux: {
@@ -39,6 +44,7 @@ export default {
   },
   macos: {
     minimumSystemVersion: "12.0",
+    icon: "icon/icon.icns",
     ...(signingIdentity ? { signingIdentity } : {}),
     ...(notaryProfile ? { notarize: { keychainProfile: notaryProfile } } : {}),
   },
