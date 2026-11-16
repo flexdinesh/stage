@@ -92,8 +92,11 @@ func Run(ctx context.Context, args []string, env Env) int {
 const usage = `stage: stage server and agent CLI
 
 Usage:
-  stage serve [--listen ADDR]         run the server (also: stage with no args); ADDR host:port or
-                                      unix:/abs/path.sock (env STAGE_LISTEN, default 127.0.0.1:7380)
+  stage serve [--listen ADDR]...      run the server (also: stage with no args); ADDR host:port,
+                                      unix:/abs/path.sock or unix (private default socket); repeat or
+                                      comma-separate for several (env STAGE_LISTEN, default 127.0.0.1:7380)
+  stage status [--wait DUR]           the server this CLI reaches: version, readiness, T3 state
+                                      (exit 1 unreachable or API mismatch, 3 --wait timeout)
   stage context                       your session, cwd and resolved project
   stage show REF                      the task or session a stage link, T3 thread link,
                                       #TASK_ID or thread id names (with its session/task)
@@ -127,7 +130,8 @@ Usage:
 Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
         --mode default|plan --base-ref REF --branch NAME --tag T... --notes TEXT
         --prompt-file PATH --image PATH...
-Global: --url URL (env STAGE_URL, default http://127.0.0.1:7380; unix:///abs/path.sock for a socket) --json
+Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
+        socket when a server owns it, else http://127.0.0.1:7380) --json
 Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
 and enable --after-me.
 `
@@ -179,10 +183,7 @@ func (c *cmd) set(name string) bool {
 }
 
 func (c *cmd) ops() *agenttools.Ops {
-	u := c.url
-	if u == "" {
-		u = c.env.Getenv(URLEnv)
-	}
+	u := client.Resolve(c.url, c.env.Getenv).URL
 	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, LocalFiles: true}
 }
 
@@ -212,6 +213,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return nil
 	case "context":
 		return runContext(ctx, env, sub)
+	case "status":
+		return runStatus(ctx, env, sub)
 	case "show":
 		return runShow(ctx, env, sub)
 	case "projects":

@@ -51,6 +51,10 @@ Not part of the contract: plain DOM and layout (`document` visibility,
   forwards `/api` to the server's Unix socket (ADR 0001, bridge B), so the
   browser transport works unchanged there. A different bridge would only
   need another `Transport`.
+- Server side: one `stage serve` process serves every listener (TCP and/or
+  Unix sockets) with one store and runtime, owns its data dir through a lock,
+  and applies the request origin policy to `/api` and `/mcp`
+  ([runtime.md](runtime.md)).
 
 ## Builds and legacy paths
 

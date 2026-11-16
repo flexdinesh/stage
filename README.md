@@ -75,9 +75,10 @@ Server (`stage serve`):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STAGE_LISTEN` | `127.0.0.1:7380` | Listen address: `host:port`, or `unix:/abs/path.sock` for a unix socket. `stage serve --listen ADDR` overrides it. Compose sets `0.0.0.0:7380` inside the container. |
+| `STAGE_LISTEN` | `127.0.0.1:7380` | Listen addresses, comma-separated: `host:port`, `unix:/abs/path.sock`, or `unix` (the private default socket). One process serves all of them. `stage serve --listen ADDR` (repeatable) overrides it. Compose sets `0.0.0.0:7380` inside the container. See [docs/runtime.md](docs/runtime.md). |
 | `STAGE_DATA_DIR` | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS: `~/Library/Application Support/stage`) | Directory holding `stage.db`. Compose sets `/data`. |
-| `STAGE_PUBLIC_URL` | unset | Optional HTTPS URL the PWA is served at. Only used as the Web Push VAPID subject when it is `https`; otherwise a fallback subject is used. Push works without it. |
+| `STAGE_PUBLIC_URL` | unset | Optional HTTPS URL the PWA is served at. Its origin is trusted by the request-origin policy (see [Security](#security)). It is the Web Push VAPID subject when `https`; otherwise a fallback subject is used. Push works without it. |
+| `STAGE_ALLOWED_ORIGINS` | unset | Comma list of extra browser origins (`https://host[:port]`) to trust, e.g. a Tailscale serve or Caddy hostname other than `STAGE_PUBLIC_URL`. Their hosts pass the Host check. |
 | `T3_URL` | `http://127.0.0.1:3773` | T3 server stage calls (MCP, OAuth, uploads). Compose defaults to `http://host.docker.internal:3773`. |
 | `T3_PUBLIC_URL` | `T3_URL` | T3 address browsers use for "Open in T3" links. Set it under compose. |
 | `T3_ADMIN_TOKEN` | unset | Admin token for minting and auto-renewing stage's T3 access. Unset: pair manually in Settings. |
@@ -89,26 +90,30 @@ Client (CLI, `stage mcp`):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STAGE_URL` | `http://127.0.0.1:7380` | Server address: an `http(s)` URL, or `unix:///abs/path.sock`. `--url` overrides it. |
+| `STAGE_URL` | the private default socket when a server owns it, else `http://127.0.0.1:7380` | Server address: an `http(s)` URL, or `unix:///abs/path.sock`. `--url` overrides it. `stage status` shows which server the CLI reaches. |
 | `T3CODE_THREAD_ID` | set by T3 | The calling T3 session; picks the project, records provenance, enables `--after-me`. |
 
 ### Unix socket
 
 ```sh
-STAGE_LISTEN=unix:/run/user/1000/stage/stage.sock stage serve
-STAGE_URL=unix:///run/user/1000/stage/stage.sock stage task ls
+stage serve --listen unix                       # private socket, e.g. /run/user/1000/stage/stage.sock (0600)
+stage serve --listen unix,127.0.0.1:7380        # the socket and TCP, one process
+stage status                                    # the CLI finds the private socket by itself
+STAGE_LISTEN=unix:/run/stage/stage.sock stage serve   # an explicit socket (0660)
+STAGE_URL=unix:///run/stage/stage.sock stage task ls
 ```
 
-The path must be absolute. The socket is created with mode `0660`, so file permissions decide who can reach it. On start a stale socket file is removed; a live one (another server) is refused. Browsers need a reverse proxy in front (e.g. Caddy `reverse_proxy unix//run/user/1000/stage/stage.sock`). `stage setup mcp` passes a non-default `STAGE_URL` to the stdio server; `--http` needs an `http(s)` URL, so use stdio with a socket.
+Explicit paths must be absolute and fit the OS socket path limit. Only one server can own a socket path or a data dir: a second one exits with the holder's pid and listeners, and a socket left by a crashed server is replaced. Browsers need a reverse proxy in front of a socket (e.g. Caddy `reverse_proxy unix//run/stage/stage.sock`). `stage setup mcp` passes an explicit `STAGE_URL` to the stdio server; `--http` needs an `http(s)` URL, so use stdio with a socket. Paths, locks, readiness and the health/version contract: [docs/runtime.md](docs/runtime.md).
 
 ## Security
 
 stage has no authentication. Anyone who can reach its port can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
 
-- It binds `127.0.0.1` by default, and compose publishes the port on host loopback only. This keeps other machines out, not browsers: loopback alone is not sufficient protection.
-- `/api` has no Origin, Host or CSRF check and parses `text/plain` request bodies as JSON. Any web page open in a browser on a machine that can reach stage (directly, or through DNS rebinding) can `POST /api/tasks` with `start: true` and launch an agent.
-- On a host where stage is reachable, do not browse untrusted sites, or put an authenticating reverse proxy in front and keep stage itself unreachable except through it (e.g. a unix socket with tight permissions).
-- Before exposing it to a network, put authentication in front. A tailnet limits who can connect, but every page open in a browser on those devices can still reach it.
+- It binds `127.0.0.1` by default, and compose publishes the port on host loopback only. This keeps other machines out, not browsers.
+- `/api` and `/mcp` reject requests that browsers send on behalf of other sites: a Host other than an IP, `localhost` or a trusted origin's host (DNS rebinding), cross-site and same-site requests (`Sec-Fetch-Site`, Origin), and form-encodable bodies (`text/plain`, urlencoded). Trusted origins are `STAGE_PUBLIC_URL`'s and those in `STAGE_ALLOWED_ORIGINS`. Details: [docs/runtime.md](docs/runtime.md#request-origin-policy).
+- That policy is not authentication. Any process or person that can reach a listener directly has full access. A private socket (`--listen unix`, mode `0600`) limits that to your user.
+- Before exposing it to a network, put an authenticating HTTPS reverse proxy in front and keep stage itself unreachable except through it. A tailnet limits who can connect, not what they can do.
+- Upgrading: a proxy hostname other than `STAGE_PUBLIC_URL`'s now gets `403 host … not allowed`; add its origin to `STAGE_ALLOWED_ORIGINS`.
 - `.env` holds `T3_ADMIN_TOKEN`; keep it private.
 
 ## HTTPS and push notifications
@@ -165,7 +170,7 @@ stage setup mcp                    # claude mcp add --scope user + codex mcp add
 stage setup instructions           # idempotent usage block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 ```
 
-`STAGE_URL` (or `--url`) points at the server, default `http://127.0.0.1:7380`; `unix:///abs/path.sock` for a socket.
+`STAGE_URL` (or `--url`) points at the server; `unix:///abs/path.sock` for a socket. Unset, the CLI uses the private default socket when a server owns it, else `http://127.0.0.1:7380`; `stage status` shows which.
 
 Caller context: T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read it and the cwd; HTTP MCP tools take `callerThreadId` / `cwd` arguments instead.
 

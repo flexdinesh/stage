@@ -19,7 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -30,6 +33,54 @@ const DefaultURL = "http://127.0.0.1:7380"
 // socketBase is the request URL base for unix socket and in-process clients
 // (Host "stage").
 const socketBase = "http://stage"
+
+// Resolution is the server URL a client uses and where it came from.
+type Resolution struct {
+	URL string
+	// Source: "--url", "STAGE_URL", "default socket" or "default".
+	Source string
+}
+
+// Resolve picks the server URL: flagURL (--url), else STAGE_URL, else the
+// private default socket of the data dir getenv selects (STAGE_DATA_DIR or
+// the installation's default) when a live server owns it (its lock is
+// held), else DefaultURL. A stale socket file left by a crashed server is
+// skipped, not dialed.
+func Resolve(flagURL string, getenv func(string) string) Resolution {
+	if flagURL != "" {
+		return Resolution{URL: flagURL, Source: "--url"}
+	}
+	if v := getenv("STAGE_URL"); v != "" {
+		return Resolution{URL: v, Source: "STAGE_URL"}
+	}
+	if sock, ok := liveDefaultSocket(getenv); ok {
+		return Resolution{URL: "unix://" + sock, Source: "default socket"}
+	}
+	return Resolution{URL: DefaultURL, Source: "default"}
+}
+
+func liveDefaultSocket(getenv func(string) string) (string, bool) {
+	dir, err := config.DataDirFrom(getenv)
+	if err != nil {
+		return "", false
+	}
+	sock, err := config.DefaultSocket(getenv, dir)
+	if err != nil {
+		return "", false
+	}
+	held, err := filelock.Held(listen.LockPath(sock))
+	return sock, err == nil && held
+}
+
+// VersionError: the server speaks another API version than this client.
+type VersionError struct {
+	BaseURL string
+	Server  string // the server's Stage-Api-Version
+}
+
+func (e *VersionError) Error() string {
+	return fmt.Sprintf("stage server at %s speaks API v%s, this client v%d: install the CLI and server from the same release", e.BaseURL, e.Server, buildinfo.APIVersion)
+}
 
 // Client calls the REST API at BaseURL.
 type Client struct {
@@ -336,6 +387,9 @@ func (c *Client) send(req *http.Request, out any) error {
 		return fmt.Errorf("stage unreachable at %s (set STAGE_URL): %w", c.BaseURL, err)
 	}
 	defer res.Body.Close()
+	if err := c.checkVersion(res); err != nil {
+		return err
+	}
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
@@ -353,6 +407,63 @@ func (c *Client) send(req *http.Request, out any) error {
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+// checkVersion refuses a response from a server on another API version.
+// A response without the header (a server predating it) is accepted.
+func (c *Client) checkVersion(res *http.Response) error {
+	if v := res.Header.Get(buildinfo.APIVersionHeader); v != "" && v != strconv.Itoa(buildinfo.APIVersion) {
+		return &VersionError{BaseURL: c.BaseURL, Server: v}
+	}
+	return nil
+}
+
+// Health is GET /api/health (docs/api.md).
+type Health struct {
+	Status     string     `json:"status"`
+	DB         string     `json:"db"`
+	Service    string     `json:"service"`
+	Identity   string     `json:"identity"`
+	Version    string     `json:"version"`
+	Commit     string     `json:"commit"`
+	APIVersion int        `json:"apiVersion"`
+	InstanceID string     `json:"instanceId"`
+	StartedAt  *time.Time `json:"startedAt"`
+	T3         struct {
+		Connected bool    `json:"connected"`
+		LastError *string `json:"lastError"`
+	} `json:"t3"`
+}
+
+// Health fetches GET /api/health. A 503 (database down) still returns the
+// decoded body, with the *Error. A response that is not a Stage server's
+// health is an error. It does not apply the API version check, so callers
+// can report a mismatch.
+func (c *Client) Health(ctx context.Context) (Health, error) {
+	var h Health
+	if c.err != nil {
+		return h, c.err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/api/health", nil)
+	if err != nil {
+		return h, err
+	}
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return h, fmt.Errorf("stage unreachable at %s: %w", c.BaseURL, err)
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		return h, err
+	}
+	if json.Unmarshal(data, &h) != nil || (h.Service != buildinfo.Service && h.Status == "") {
+		return h, fmt.Errorf("%s did not answer as a stage server (HTTP %d)", c.BaseURL, res.StatusCode)
+	}
+	if res.StatusCode != http.StatusOK {
+		return h, &Error{Status: res.StatusCode, Msg: "database " + h.DB}
+	}
+	return h, nil
 }
 
 func setID(q url.Values, key string, id *int64) {

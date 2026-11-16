@@ -302,10 +302,21 @@ func (e *env) getTask(id int64) task {
 
 func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
-	var h map[string]string
+	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h["status"] != "ok" || h["db"] != "ok" {
-		t.Fatalf("health %v", h)
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 1 || h.Version == "" || !h.T3.Connected {
+		t.Fatalf("health %+v", h)
+	}
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "1" {
+		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
+	}
+	// T3 offline: still a healthy Stage server, with T3 reported down.
+	e.t3.offline.Store(true)
+	e.must("GET", "/api/health", nil, 200, &h)
+	if h.Status != "ok" || h.T3.Connected {
+		t.Fatalf("health with T3 offline %+v", h)
 	}
 	e.must("GET", "/api/nope", nil, 404, nil)
 	e.must("GET", "/api/tasks/abc", nil, 400, nil)
