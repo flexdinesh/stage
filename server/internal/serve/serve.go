@@ -181,7 +181,6 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
-	syncSvc.SetPublicURL(cfg.T3PublicURL)
 	runner := links.NewRunner(store, syncSvc, logger)
 	scheduler := schedule.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)

@@ -45,9 +45,6 @@ type Client interface {
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
 	// SendMessage calls t3_thread_send (follow-up).
 	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
-	// QueueContinuation always creates a new turn. A request ID is persisted
-	// for correlation, without assuming T3 deduplicates sends.
-	QueueContinuation(ctx context.Context, threadID, message, requestID string) (SendResult, error)
 	// UploadAttachment calls t3_attachment_prepare_upload, then POSTs data to
 	// the returned signed relativeUrl on T3_URL. The pending id is usable in
 	// LaunchInput.Attachments or SendAttachments until it expires (~10 min).
@@ -139,13 +136,6 @@ const (
 // turn, or queue. queue: new turn. steer: mid-turn update. restart: interrupt
 // and restart.
 type SendMode string
-
-type SendResult struct {
-	ThreadID  string `json:"threadId"`
-	RunID     string `json:"runId"`
-	MessageID string `json:"messageId"`
-	Delivery  string `json:"delivery"`
-}
 
 const (
 	SendAuto    SendMode = "auto"

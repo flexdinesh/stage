@@ -15,7 +15,6 @@ Full behavior: [docs/features.md](docs/features.md).
 - **Run order**: link a task to run after another task or session (across projects). Handoff appends the predecessor's final reply, PRs and branch to the prompt; stacked tasks can start from the predecessor's branch.
 - **Scheduled tasks**: one-shot start times or recurring schedules (presets or 5-field cron, per-schedule time zone).
 - **Sessions and history**: every T3 thread, including ones started outside stage, with filters, transcripts (live over SSE), last reply, linked PRs and runs.
-- **Queued continuations**: resume an existing session once another settles.
 - **Dashboard**: needs input first, then running, done, backlog, scheduled and recently settled work.
 - **Ctrl K palette**: jump to tasks, projects and sessions by title, or find a session by what was said in it.
 - **Snippets and model defaults**: reusable prompt text via `/`; new tasks prefill a pinned or last-used model.

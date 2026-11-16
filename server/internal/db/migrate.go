@@ -14,15 +14,24 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Migrate applies all pending goose migrations.
-func Migrate(ctx context.Context, pool *sql.DB) error {
+// newProvider is the goose provider over the embedded migrations.
+func newProvider(pool *sql.DB) (*goose.Provider, error) {
 	fsys, err := fs.Sub(migrations, "migrations")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	provider, err := goose.NewProvider(goose.DialectSQLite3, pool, fsys)
 	if err != nil {
-		return fmt.Errorf("goose provider: %w", err)
+		return nil, fmt.Errorf("goose provider: %w", err)
+	}
+	return provider, nil
+}
+
+// Migrate applies all pending goose migrations.
+func Migrate(ctx context.Context, pool *sql.DB) error {
+	provider, err := newProvider(pool)
+	if err != nil {
+		return err
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("migrate up: %w", err)

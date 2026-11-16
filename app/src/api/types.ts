@@ -599,44 +599,9 @@ export interface ThreadListQuery {
   offset?: number;
 }
 
-// ---- Session run order ----
-
-export type ContinuationState = "waiting" | "paused" | "blocked" | "sending" | "running" | "awaiting_settle" | "settled" | "cancelled" | "uncertain";
-export type WaitReason = "predecessor_unsettled" | "target_running" | "target_needs_input" | "predecessor_failed" | "target_failed" | "upstream_pending" | "upstream_cancelled" | "thread_missing" | "t3_offline" | "delivery_uncertain" | "legacy_conflict";
-
-export interface Continuation {
-  id: number;
-  afterThreadId: string;
-  targetThreadId: string;
-  previousContinuationId: number | null;
-  prompt: string;
-  state: ContinuationState;
-  waitReasons: WaitReason[];
-  lastError: string | null;
-  runId: string | null;
-  messageId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  sentAt: string | null;
-  settledAt: string | null;
-  afterThread: Thread;
-  targetThread: Thread;
-}
-
-export interface CreateContinuationRequest {
-  afterThreadId: string;
-  targetThreadId: string;
-  prompt: string;
-}
-
-export interface ContinuationList {
-  continuations: Continuation[];
-}
-
 export interface ThreadDetail {
   thread: Thread;
   children: Thread[];
-  continuations: Continuation[];
   task: Task | null;
   /** Tasks this session created (agent CLI/MCP). */
   createdTasks: CreatedTasks;

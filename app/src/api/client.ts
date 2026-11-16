@@ -3,9 +3,6 @@ import type {
   PendingQuestions,
   QuestionAnswer,
   Attachment,
-  Continuation,
-  ContinuationList,
-  CreateContinuationRequest,
   ThreadDetail,
   Badge,
   Catalog,
@@ -221,11 +218,6 @@ export function createApi(transport: Transport) {
         `/threads/${encodeURIComponent(id)}/questions/${encodeURIComponent(requestId)}/answer`,
         post({ answers }),
       ),
-    continuations: (thread?: string) => apiFetch<ContinuationList>(`/continuations${toQuery({ thread })}`),
-    createContinuation: (body: CreateContinuationRequest) => apiFetch<Continuation>("/continuations", post(body)),
-    updateContinuation: (id: number, prompt: string) => apiFetch<Continuation>(`/continuations/${id}`, patch({ prompt })),
-    continuationAction: (id: number, action: "pause" | "resume" | "cancel") =>
-      apiFetch<Continuation>(`/continuations/${id}/${action}`, post()),
 
     snippets: () => apiFetch<SnippetList>("/snippets"),
     createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),

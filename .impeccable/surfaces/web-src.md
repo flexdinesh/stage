@@ -6,10 +6,10 @@ related_targets: ["web/src"]
 ---
 
 ## Scope
-Whole stage web app (shared app in app/src, browser host in web/src): Dashboard, Projects, Project detail, Task detail (with Run order, Runs and Pull requests panels), Sessions, Session detail (with continuation Run order, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task and Queue continuation drawers, Ctrl K palette. Mode: Operate.
+Whole stage web app (shared app in app/src, browser host in web/src): Dashboard, Projects, Project detail, Task detail (with Run order, Runs and Pull requests panels), Sessions, Session detail (with Created tasks, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
 
 ## Audience and task
-A developer, on laptop and phone, queueing T3 tasks and continuations of existing sessions, catching needs-input, watching running/completed work from every starting point, browsing history. Session state remains independent from a waiting continuation; run-order entries explain each condition before delivery.
+A developer, on laptop and phone, queueing T3 tasks, catching needs-input, watching running/completed work from every starting point, browsing history.
 
 ## Direction contract
 THESIS: A workbench, not a dashboard of cards: one dense, ruled list per state where color appears only when a task's state earns it. Refuses the rounded-card SaaS dashboard and the neon-terminal costume.

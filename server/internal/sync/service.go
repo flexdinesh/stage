@@ -67,7 +67,6 @@ type Service struct {
 
 	started     time.Time   // threads first seen later notify only if created after this
 	watchSeeded atomic.Bool // first watcher pass done (it records silently)
-	publicURL   string
 }
 
 func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
@@ -105,7 +104,7 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
-	wg.Add(5)
+	wg.Add(4)
 	go loop("full sync", s.FullSyncEvery, func(ctx context.Context) error {
 		_, err := s.FullSync(ctx)
 		if errors.Is(err, ErrSyncRunning) {
@@ -115,16 +114,12 @@ func (s *Service) Run(ctx context.Context) {
 	})
 	go loop("poll", s.PollEvery, s.PollActive)
 	go loop("watch threads", s.PollEvery, s.WatchThreads)
-	go loop("continuations", s.PollEvery, s.ReconcileContinuations)
 	go loop("catalog refresh", s.CatalogEvery, func(ctx context.Context) error {
 		_, err := s.RefreshCatalog(ctx)
 		return err
 	})
 	wg.Wait()
 }
-
-// SetPublicURL configures canonical links in continuation envelopes before Run.
-func (s *Service) SetPublicURL(url string) { s.publicURL = url }
 
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
 // The launch may have reached T3, so the next start reuses the attempt's

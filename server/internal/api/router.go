@@ -100,10 +100,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/threads/{id}/transcript/stream", s.streamTranscript)
 	h("GET /api/threads/{id}/questions", s.listQuestions)
 	h("POST /api/threads/{id}/questions/{requestId}/answer", s.answerQuestion)
-	h("GET /api/continuations", s.listContinuations)
-	h("POST /api/continuations", s.createContinuation)
-	h("PATCH /api/continuations/{id}", s.updateContinuation)
-	h("POST /api/continuations/{id}/{action}", s.continuationAction)
 
 	h("GET /api/snippets", s.listSnippets)
 	h("POST /api/snippets", s.createSnippet)
