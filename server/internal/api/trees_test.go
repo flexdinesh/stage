@@ -20,7 +20,13 @@ type treeDetail struct {
 		TaskID int64 `json:"taskId"`
 		NeedID int64 `json:"needId"`
 	} `json:"edges"`
-	Levels [][]int64 `json:"levels"`
+	Levels         [][]int64 `json:"levels"`
+	StartedAt      *string   `json:"startedAt"`
+	LastActivityAt string    `json:"lastActivityAt"`
+	Events         []struct {
+		TaskID  int64  `json:"taskId"`
+		ToState string `json:"toState"`
+	} `json:"events"`
 }
 
 func treePath(id int64, rest ...string) string {
@@ -68,6 +74,9 @@ func TestTreesLifecycle(t *testing.T) {
 		fmt.Sprint(tr.Levels) != fmt.Sprint([][]int64{{a.ID}, {b.ID}, {c.ID}}) {
 		t.Fatalf("tree %+v", tr)
 	}
+	if tr.StartedAt != nil || tr.LastActivityAt == "" || len(tr.Events) != 3 || tr.Events[0].ToState != "backlog" {
+		t.Fatalf("tree times/events %+v", tr)
+	}
 
 	var list struct {
 		Trees []struct {
@@ -78,14 +87,15 @@ func TestTreesLifecycle(t *testing.T) {
 				Blocked int `json:"blocked"`
 				Ready   int `json:"ready"`
 			} `json:"counts"`
-			Levels   int      `json:"levels"`
-			Projects []string `json:"projects"`
+			Levels         int      `json:"levels"`
+			Projects       []string `json:"projects"`
+			LastActivityAt string   `json:"lastActivityAt"`
 		} `json:"trees"`
 	}
 	e.must("GET", "/api/trees", nil, 200, &list)
 	if len(list.Trees) != 1 || list.Trees[0].ID != tr.ID || list.Trees[0].Counts.Total != 3 || list.Trees[0].Counts.Backlog != 3 ||
 		list.Trees[0].Counts.Ready != 1 || list.Trees[0].Counts.Blocked != 2 || list.Trees[0].Levels != 3 ||
-		!slices.Equal(list.Trees[0].Projects, []string{p.Title}) {
+		!slices.Equal(list.Trees[0].Projects, []string{p.Title}) || list.Trees[0].LastActivityAt != tr.LastActivityAt {
 		t.Fatalf("list %+v", list)
 	}
 	e.must("GET", fmt.Sprintf("/api/trees?project=%d&all=1", p.ID+1), nil, 200, &list)

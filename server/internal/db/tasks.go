@@ -24,7 +24,8 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   t.origin_thread_id, oth.title, t.handoff,
   COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
+  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
@@ -41,7 +42,8 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments)
+		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
+		&t.StateSince, &t.ThreadUpdatedAt)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -149,16 +151,13 @@ func (s *Store) TaskEvents(ctx context.Context, taskID int64) ([]TaskEvent, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []TaskEvent{}
-	for rows.Next() {
-		var e TaskEvent
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return collectRows(rows, scanTaskEvent)
+}
+
+func scanTaskEvent(r rowScanner) (TaskEvent, error) {
+	var e TaskEvent
+	err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At)
+	return e, err
 }
 
 // NewTask is a validated create input.

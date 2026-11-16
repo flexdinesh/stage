@@ -225,9 +225,11 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "pullRequests": [],
   "pendingQuestionCount": 0,
   "createdAt": "2026-11-08T09:59:00Z",
-  "updatedAt": "2026-11-08T10:00:00Z"
+  "updatedAt": "2026-11-08T10:00:00Z",
+  "stateSince": "2026-11-08T10:00:00Z"
 }
 ```
+- `stateSince`: when the task entered its current `state` (its latest task event into that state); null without one.
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `treeId` / `treeTitle`: the task's tree (see "Trees"); null outside one. `needs`: tasks in the same tree this one needs (by id); `dependents`: tasks that need this one. Both `[]` outside a tree.
 - `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all settled (the `ready` notification); cleared when it stops being ready or launches.
@@ -328,12 +330,14 @@ A tree is a DAG of tasks: each member's `needs` are members that must settle bef
 ```json
 { "id": 3, "title": "Ship auth", "startMode": "auto", "createdAt": "2026-11-08T09:59:00Z", "updatedAt": "2026-11-08T10:00:00Z" }
 ```
-`TreeDetail` = `Tree` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id.
+`TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`).
 
-`TreeSummary` = `Tree` + `{ "counts": TreeCounts, "levels": number, "projects": string[] (member project titles, sorted), "settledAt": string | null }`. `counts`: `{ total, backlog, blocked, ready, launching, running, needsInput, done, settled, failed, interrupted, cancelled }` (`blocked` and `ready` split `backlog`). `settledAt`: the latest member settle once every member is settled, else null.
+`TreeTimes` = `{ "startedAt": string | null, "lastActivityAt": string }`. `startedAt`: the earliest member `launchedAt` (null before any launch). `lastActivityAt`: the latest of the tree's `createdAt`, a member's `updatedAt` and its thread's `updatedAt` (so a member's agent working counts as activity).
+
+`TreeSummary` = `Tree` + `TreeTimes` + `{ "counts": TreeCounts, "levels": number, "projects": string[] (member project titles, sorted), "settledAt": string | null }`. `counts`: `{ total, backlog, blocked, ready, launching, running, needsInput, done, settled, failed, interrupted, cancelled }` (`blocked` and `ready` split `backlog`). `settledAt`: the latest member settle once every member is settled, else null.
 
 ### `GET /api/trees`
-Query (all optional): `all=1` (every tree), `settledFrom` (also completed trees whose latest settle is at or after it), `project` (a member is in that project). Default: active trees (a member not settled). 200 `{ "trees": TreeSummary[] }`, most recent member activity first.
+Query (all optional): `all=1` (every tree), `settledFrom` (also completed trees whose latest settle is at or after it), `project` (a member is in that project). Default: active trees (a member not settled). 200 `{ "trees": TreeSummary[] }`, `lastActivityAt` desc.
 
 ### `POST /api/trees`
 Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, "needs"?: number[] }] }`: creates the tree, moves each listed task into it (a member of another tree is spliced out there), then sets each listed `needs` (omitted keeps the task's needs). One transaction. 201 `TreeDetail`. 400 blank title, no tasks, a task listed twice, bad `startMode`. 404 task / need. 409 tree rule broken.

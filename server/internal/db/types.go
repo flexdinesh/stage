@@ -167,13 +167,17 @@ type Task struct {
 	LastWordAt        *time.Time       `json:"lastWordAt"`
 	PullRequests      []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
 	// PendingQuestionCount: the thread's answerable pending questions.
-	PendingQuestionCount int          `json:"pendingQuestionCount"`
-	CreatedAt            time.Time    `json:"createdAt"`
-	UpdatedAt            time.Time    `json:"updatedAt"`
-	Attachments          []Attachment `json:"attachments"` // images, upload order
-	T3ProjectID          string       `json:"-"`           // project's T3 id (for launch)
-	ThreadLink           *string      `json:"-"`           // mirrored thread link
-	TreeStartMode        *StartMode   `json:"-"`           // the tree's start mode (batch grouping)
+	PendingQuestionCount int       `json:"pendingQuestionCount"`
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
+	// StateSince: when the task entered its current state (latest task event
+	// into it; nil without one).
+	StateSince      *time.Time   `json:"stateSince"`
+	Attachments     []Attachment `json:"attachments"` // images, upload order
+	ThreadUpdatedAt *time.Time   `json:"-"`           // mirrored thread's updatedAt (tree activity)
+	T3ProjectID     string       `json:"-"`           // project's T3 id (for launch)
+	ThreadLink      *string      `json:"-"`           // mirrored thread link
+	TreeStartMode   *StartMode   `json:"-"`           // the tree's start mode (batch grouping)
 }
 
 type TaskEvent struct {

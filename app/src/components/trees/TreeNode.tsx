@@ -1,11 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type ReactNode, type Ref } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { canStart } from "../../lib/tasks.ts";
-import { nodeState } from "../../lib/trees.ts";
+import { dateTime, duration } from "../../lib/format.ts";
+import { inState, nodeState } from "../../lib/trees.ts";
 import { AnswerButton } from "../NeedsInputPanel.tsx";
 import { TaskStateBadge } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
@@ -13,15 +14,15 @@ import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
 /** Ready / blocked for backlog members with readiness, else the task state chip. */
-export function NodeChip({ task }: { task: Pick<Task, "state" | "readiness"> }) {
+export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness">; className?: string | undefined }) {
   const s = nodeState(task);
   if (s === "ready" || s === "blocked")
     return (
-      <Chip tone="idle" dot>
+      <Chip tone="idle" dot className={className}>
         {s}
       </Chip>
     );
-  return <TaskStateBadge state={s} />;
+  return <TaskStateBadge state={s} className={className} />;
 }
 
 /** Needs that keep a task blocked (not settled yet), and those among them that failed. */
@@ -97,34 +98,43 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
 }
 
 /**
- * Square card for one member: state chip and mono id, title (2 lines), mono project, a plain `manual` chip when it
- * starts by hand, one action. Needs input takes the yellow edge; not-started members are dashed. The whole card selects
- * the node on lg+ (side panel) and opens the task below lg.
+ * One member as a graph list row: level (first row of a level only; laptop), state chip, `#id` and title (project when the
+ * tree spans projects), needs (failed ones red), time in state, one action. Laptop rows sit on the list's subgrid;
+ * phone rows wrap to two lines. Needs input takes the yellow edge; the selected row an inset Ink outline. The title
+ * selects the row on lg+ (side panel) and opens the task below lg.
  */
 export function TreeNode({
   task,
   byId,
+  level,
+  firstOfLevel,
+  endsLevel,
+  showProject,
   selected,
   dimmed,
   onSelect,
   onHot,
-  nodeRef,
 }: {
   task: Task;
   byId: ReadonlyMap<number, Task>;
+  /** 0-based level. */
+  level: number;
+  firstOfLevel: boolean;
+  /** The next row starts another level (stronger rule under this one). */
+  endsLevel: boolean;
+  showProject: boolean;
   selected: boolean;
   dimmed: boolean;
   onSelect: (id: number) => void;
   /** Hover / focus enters (id) or leaves (null). */
   onHot: (kind: "hover" | "focus", id: number | null) => void;
-  nodeRef: Ref<HTMLLIElement>;
 }) {
   const { pending, failed } = pendingNeeds(task, byId);
-  const notStarted = task.state === "backlog";
-  const manual = task.effectiveStartMode === "manual";
+  const when = inState(task);
+  const ran = task.state === "done" || task.state === "settled" ? duration(task.runStartedAt, task.runEndedAt) : null;
+  const titleCls = "min-w-0 truncate text-left text-ui font-medium after:absolute after:inset-0 hover:underline";
   return (
     <li
-      ref={nodeRef}
       data-node={task.id}
       onMouseEnter={() => onHot("hover", task.id)}
       onMouseLeave={() => onHot("hover", null)}
@@ -133,47 +143,61 @@ export function TreeNode({
         if (!e.currentTarget.contains(e.relatedTarget)) onHot("focus", null);
       }}
       className={cx(
-        "relative z-[1] min-w-0 border bg-surface px-3 py-2.5 transition-[border-color,outline-color] duration-150 motion-reduce:transition-none md:w-[216px]",
-        notStarted && "border-dashed",
-        dimmed ? "border-line" : "border-line-strong",
+        "relative flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 last:border-b-0 md:col-span-6 md:grid md:min-h-[34px] md:grid-cols-subgrid md:gap-0 md:px-0 md:py-0",
+        "transition-opacity duration-150 motion-reduce:transition-none",
+        endsLevel ? "border-line-strong" : "border-line",
         task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",
-        selected ? "outline outline-1 outline-offset-1 outline-fg" : "outline-transparent",
+        selected && "outline outline-1 -outline-offset-2 outline-fg",
+        dimmed && "opacity-45",
       )}
     >
-      {/* Dimming fades the content, not the card, so connectors behind it stay hidden. */}
-      <div className={cx("flex min-w-0 flex-col gap-2 transition-opacity duration-150 motion-reduce:transition-none", dimmed && "opacity-45")}>
-        <div className="flex items-center justify-between gap-2">
-          <NodeChip task={task} />
-          <span className="font-mono text-meta text-muted tabular">#{task.id}</span>
-        </div>
-        <button
-          type="button"
-          aria-pressed={selected}
-          onClick={() => onSelect(task.id)}
-          className="line-clamp-2 text-left text-ui leading-snug font-medium break-words after:absolute after:inset-0 hover:underline max-lg:hidden"
-        >
+      <span className="font-mono text-meta-sm text-muted tabular max-md:hidden md:pl-3">{firstOfLevel ? `L${level + 1}` : null}</span>
+      <span className="order-3 md:order-none md:px-2">
+        <NodeChip task={task} className={task.state === "backlog" ? "border-dashed" : undefined} />
+      </span>
+      <span className="order-1 flex min-w-0 basis-full items-baseline gap-1.5 md:order-none md:basis-auto md:px-2">
+        <span className="shrink-0 font-mono text-meta text-muted tabular">#{task.id}</span>
+        <button type="button" aria-pressed={selected} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
           {task.title}
         </button>
-        <Link
-          to={`/tasks/${task.id}`}
-          className="line-clamp-2 text-ui leading-snug font-medium break-words after:absolute after:inset-0 hover:underline lg:hidden"
-        >
+        <Link to={`/tasks/${task.id}`} className={cx(titleCls, "lg:hidden")}>
           {task.title}
         </Link>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-meta text-muted">
-          <span className="min-w-0 truncate" title={task.projectTitle}>
+        {showProject ? (
+          <span className="shrink-0 truncate font-mono text-meta text-muted max-md:hidden" title={task.projectTitle}>
             {task.projectTitle}
           </span>
-          {manual ? <Chip className="text-meta-sm leading-4">manual</Chip> : null}
-          {task.needs.length === 0 ? null : (
-            <Chip className="text-meta-sm leading-4 tabular md:hidden">needs {task.needs.map((id) => `#${id}`).join(" ")}</Chip>
-          )}
-        </div>
-        {notStarted && failed.length > 0 ? (
-          <p className="font-mono text-meta text-bad tabular">blocked by failed {ids(failed)}</p>
         ) : null}
+      </span>
+      <span
+        className="order-4 font-mono text-meta text-muted tabular md:order-none md:truncate md:px-2"
+        title={failed.length > 0 ? `blocked by failed ${ids(failed)}` : undefined}
+      >
+        {task.needs.length === 0 ? (
+          <span className="max-md:hidden">root</span>
+        ) : (
+          <>
+            <span className="md:hidden">needs </span>
+            {task.needs.map((id, i) => (
+              <span key={id} className={cx(failed.includes(id) && "text-bad")}>
+                {i === 0 ? "" : " "}#{id}
+              </span>
+            ))}
+          </>
+        )}
+      </span>
+      <span
+        className={cx(
+          "order-5 font-mono text-meta tabular md:order-none md:px-2 md:text-right",
+          task.state === "needs_input" ? "text-need-fg" : "text-fg",
+        )}
+        title={`${dateTime(when.at)}${ran === null ? "" : ` · ran ${ran}`}`}
+      >
+        {when.text}
+      </span>
+      <span className="order-6 ml-auto flex justify-end md:order-none md:ml-0 md:pr-3 md:pl-2">
         <NodeAction task={task} pending={pending} />
-      </div>
+      </span>
     </li>
   );
 }

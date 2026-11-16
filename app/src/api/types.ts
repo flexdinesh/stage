@@ -251,6 +251,8 @@ export interface Task {
   pendingQuestionCount: number;
   createdAt: string;
   updatedAt: string;
+  /** When the task entered its current state (latest event into it); null without one. */
+  stateSince: string | null;
 }
 
 /** A pull request T3 associates with a thread. `state` is T3's string (open, merged, closed, draft, ...). */
@@ -362,11 +364,21 @@ export interface TreeEdge {
   needId: number;
 }
 
-export interface TreeDetail extends Tree {
+/** Tree roll-up times. */
+export interface TreeTimes {
+  /** First member launch; null before any. */
+  startedAt: string | null;
+  /** Latest of the tree's creation, a member's updatedAt and its thread's updatedAt. */
+  lastActivityAt: string;
+}
+
+export interface TreeDetail extends Tree, TreeTimes {
   tasks: Task[];
   edges: TreeEdge[];
   /** Task ids per level (longest need path from a root), roots first; each level by id. */
   levels: number[][];
+  /** The members' 50 newest task events, newest first. */
+  events: TaskEvent[];
 }
 
 /** Member counts by state; blocked and ready split backlog. */
@@ -385,7 +397,7 @@ export interface TreeCounts {
   cancelled: number;
 }
 
-export interface TreeSummary extends Tree {
+export interface TreeSummary extends Tree, TreeTimes {
   counts: TreeCounts;
   levels: number;
   /** Member project titles, sorted. */

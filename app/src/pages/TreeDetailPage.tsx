@@ -9,10 +9,12 @@ import { IconBack, IconChevronDown, IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer.tsx";
 import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
+import { TreeActivity } from "../components/trees/TreeActivity.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { Alert, Button, Chip, ErrorText, Input, Muted, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
+import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
+import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { treeMeta, treeSettled } from "../lib/trees.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -185,7 +187,10 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
         title={renaming ? <span className="sr-only">{tree.title}</span> : tree.title}
         meta={
           <>
-            {treeMeta(tree)}
+            {treeMeta(tree)} · <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span> ·{" "}
+            <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
+              active {relativeTime(tree.lastActivityAt)}
+            </span>
             {settled ? (
               <Chip tone="ok" dot className="ml-2">
                 settled
@@ -243,24 +248,23 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
           </Alert>
         )}
 
-        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <Panel
             title="Tree"
             flush
             meta={
               <>
-                <span className="max-lg:hidden">hover to trace needs · click to edit</span>
+                <span className="max-lg:hidden">hover to trace needs · click a task to edit</span>
                 <span className="lg:hidden">tap a task to open it</span>
               </>
             }
           >
             <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
           </Panel>
+          <TreeActivity tree={tree} className="lg:hidden" />
           <div className="flex min-w-0 flex-col gap-3.5 max-lg:hidden">
             {selected === null ? (
-              <Panel title="Task">
-                <Muted>Select a task to edit its needs, start mode, worktree base and handoff.</Muted>
-              </Panel>
+              <TreeActivity tree={tree} onSelect={setPicked} />
             ) : (
               <TreeNodePanel key={selected.id} tree={tree} task={selected} onSelect={setPicked} onClose={() => setPicked(null)} />
             )}

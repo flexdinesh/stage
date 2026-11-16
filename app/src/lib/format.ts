@@ -37,6 +37,68 @@ export function duration(fromIso: string | null, toIso: string | null): string |
   return h % 24 === 0 ? `${d}d` : `${d}d ${h % 24}h`;
 }
 
+/** Compact age of an instant, largest unit only: "45s", "18m", "3h", "2d" ("now" under a second; "-" when invalid). */
+export function age(iso: string | null, now: number = Date.now()): string {
+  const rel = relativeTime(iso, now);
+  return rel.endsWith(" ago") ? rel.slice(0, -4) : rel.startsWith("in ") ? "now" : rel;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Local calendar day of `ms` as days since the epoch (DST-safe day comparisons). */
+const dayNumber = (d: Date) => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000);
+
+const validDate = (iso: string | null): Date | null => {
+  if (iso === null) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Local 24h clock time: "14:54". */
+export function clockTime(iso: string | null): string {
+  const d = validDate(iso);
+  return d === null ? "-" : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Local date anchor: "today 10:20", "yesterday 16:20", "Nov 14" (this year), "Oct 3, 2025". */
+export function shortDate(iso: string | null, now: number = Date.now()): string {
+  const d = validDate(iso);
+  if (d === null) return "-";
+  const n = new Date(now);
+  const days = dayNumber(n) - dayNumber(d);
+  if (days === 0) return `today ${clockTime(iso)}`;
+  if (days === 1) return `yesterday ${clockTime(iso)}`;
+  const md = `${MONTHS[d.getMonth()] ?? ""} ${d.getDate()}`;
+  return d.getFullYear() === n.getFullYear() ? md : `${md}, ${d.getFullYear()}`;
+}
+
+/** Local day heading: "Today · Mon Nov 16", "Yesterday · Sun Nov 15", "Sat Nov 14", "Fri Oct 3, 2025". */
+export function dayLabel(iso: string | null, now: number = Date.now()): string {
+  const d = validDate(iso);
+  if (d === null) return "-";
+  const n = new Date(now);
+  const base = `${WEEKDAYS[d.getDay()] ?? ""} ${MONTHS[d.getMonth()] ?? ""} ${d.getDate()}`;
+  const days = dayNumber(n) - dayNumber(d);
+  if (days === 0) return `Today · ${base}`;
+  if (days === 1) return `Yesterday · ${base}`;
+  return d.getFullYear() === n.getFullYear() ? base : `${base}, ${d.getFullYear()}`;
+}
+
+/** Items (newest first) grouped by local day, order kept; each group carries its dayLabel. */
+export function groupByDay<T extends { at: string }>(items: readonly T[], now: number = Date.now()): { label: string; items: T[] }[] {
+  const out: { key: number; label: string; items: T[] }[] = [];
+  for (const item of items) {
+    const d = validDate(item.at);
+    const key = d === null ? Number.NaN : dayNumber(d);
+    const last = out.at(-1);
+    if (last !== undefined && last.key === key) last.items.push(item);
+    else out.push({ key, label: dayLabel(item.at, now), items: [item] });
+  }
+  return out.map(({ label, items: list }) => ({ label, items: list }));
+}
+
 export function dateTime(iso: string | null): string {
   if (iso === null) return "-";
   const d = new Date(iso);

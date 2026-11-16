@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import type { Task, TreeDetail } from "../../api/types.ts";
+import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { layoutLevels, nodeState, treeMeta } from "../../lib/trees.ts";
 import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
 import { Button, Muted, Panel, buttonClass, cx, toneClass } from "../ui.tsx";
@@ -70,6 +71,12 @@ export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
             {tree.title}
           </Link>
           <p className="mt-0.5 font-mono text-meta text-muted tabular">{treeMeta(tree)}</p>
+          <p className="font-mono text-meta text-muted tabular">
+            <span title={dateTime(tree.createdAt)}>created {shortDate(tree.createdAt)}</span> ·{" "}
+            <span title={dateTime(tree.lastActivityAt)} className="text-fg">
+              active {relativeTime(tree.lastActivityAt)}
+            </span>
+          </p>
         </div>
         <MiniLevels tree={tree} current={task.id} />
       </div>
