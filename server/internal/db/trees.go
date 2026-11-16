@@ -67,9 +67,44 @@ type TreeEdge struct {
 // per level, roots first; TreeLevels).
 type TreeDetail struct {
 	Tree
+	TreeTimes
 	Tasks  []Task     `json:"tasks"`
 	Edges  []TreeEdge `json:"edges"`
 	Levels [][]int64  `json:"levels"`
+	// Events: the members' newest task events (treeEventLimit), newest first.
+	Events []TaskEvent `json:"events"`
+}
+
+// TreeTimes: StartedAt is the first member launch (nil before any);
+// LastActivityAt the latest of the tree's creation, a member's updatedAt and
+// its thread's updatedAt (ListTrees orders by it).
+type TreeTimes struct {
+	StartedAt      *time.Time `json:"startedAt"`
+	LastActivityAt time.Time  `json:"lastActivityAt"`
+}
+
+// treeEventLimit caps TreeDetail.Events.
+const treeEventLimit = 50
+
+// treeActivitySQL is TreeTimes.LastActivityAt for tree tr in SQL.
+const treeActivitySQL = `max(tr.created_at, COALESCE((SELECT max(max(m.updated_at, COALESCE(th.updated_at, '')))
+ FROM tasks m LEFT JOIN threads th ON th.t3_thread_id = m.t3_thread_id WHERE m.tree_id = tr.id), ''))`
+
+func treeTimes(t Tree, members []Task) TreeTimes {
+	tt := TreeTimes{LastActivityAt: t.CreatedAt}
+	later := func(v *time.Time) {
+		if v != nil && v.After(tt.LastActivityAt) {
+			tt.LastActivityAt = *v
+		}
+	}
+	for _, m := range members {
+		if m.LaunchedAt != nil && (tt.StartedAt == nil || m.LaunchedAt.Before(*tt.StartedAt)) {
+			tt.StartedAt = m.LaunchedAt
+		}
+		later(&m.UpdatedAt)
+		later(m.ThreadUpdatedAt)
+	}
+	return tt
 }
 
 // TreeCounts counts a tree's members by state; Blocked and Ready split
@@ -92,6 +127,7 @@ type TreeCounts struct {
 // TreeSummary is a tree list row with its member roll-up.
 type TreeSummary struct {
 	Tree
+	TreeTimes
 	Counts   TreeCounts `json:"counts"`
 	Levels   int        `json:"levels"`
 	Projects []string   `json:"projects"` // member project titles, sorted
@@ -238,7 +274,18 @@ func (s *Store) GetTree(ctx context.Context, id int64) (TreeDetail, error) {
 	if err != nil {
 		return TreeDetail{}, err
 	}
-	return TreeDetail{Tree: tree, Tasks: tasks, Edges: edges, Levels: TreeLevels(idsOf(tasks), edges)}, nil
+	erows, err := s.pool.Query(ctx, `
+SELECT e.id, e.task_id, e.from_state, e.to_state, e.detail, e.at FROM task_events e JOIN tasks t ON t.id = e.task_id
+WHERE t.tree_id = $1 ORDER BY e.at DESC, e.id DESC LIMIT $2`, id, treeEventLimit)
+	if err != nil {
+		return TreeDetail{}, err
+	}
+	events, err := collectRows(erows, scanTaskEvent)
+	if err != nil {
+		return TreeDetail{}, err
+	}
+	return TreeDetail{Tree: tree, TreeTimes: treeTimes(tree, tasks), Tasks: tasks, Edges: edges,
+		Levels: TreeLevels(idsOf(tasks), edges), Events: events}, nil
 }
 
 func idsOf(tasks []Task) []int64 {
@@ -279,7 +326,7 @@ func (s *Store) ListTrees(ctx context.Context, f TreeFilter) ([]TreeSummary, err
 		w.add(active)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+treeColumns+` FROM task_trees tr`+w.sql()+`
-ORDER BY (SELECT max(m.updated_at) FROM tasks m WHERE m.tree_id = tr.id) DESC, tr.id DESC`, w.args...)
+ORDER BY `+treeActivitySQL+` DESC, tr.id DESC`, w.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +363,7 @@ ORDER BY (SELECT max(m.updated_at) FROM tasks m WHERE m.tree_id = tr.id) DESC, t
 
 // summarize rolls up a tree's members.
 func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
-	sum := TreeSummary{Tree: t, Projects: []string{}}
+	sum := TreeSummary{Tree: t, TreeTimes: treeTimes(t, members), Projects: []string{}}
 	c := &sum.Counts
 	var latest *time.Time
 	for _, m := range members {

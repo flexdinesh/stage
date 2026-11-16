@@ -1,15 +1,8 @@
 import type { StartMode, Task, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
+import { age, relativeTime, shortDate } from "./format.ts";
 
 /** What layout and graph helpers need of a member. */
 type Node = Pick<Task, "id" | "needs">;
-
-/** A node's box relative to the tree view (CSS pixels). */
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 
 /** Needs restricted to members of `nodes` (ids outside the set are ignored). */
 function needsWithin<T extends Node>(nodes: readonly T[]): Map<number, number[]> {
@@ -95,53 +88,6 @@ export function related<T extends Node>(nodes: readonly T[], id: number): Set<nu
   for (const need of needs.get(id) ?? []) out.add(need);
   for (const [other, list] of needs) if (list.includes(id)) out.add(other);
   return out;
-}
-
-export interface Connector {
-  /** The need (edge starts under it). */
-  from: number;
-  /** The dependent (edge ends on top of it). */
-  to: number;
-  d: string;
-}
-
-/** Centre a 1px stroke on the pixel grid. */
-const crisp = (v: number) => Math.round(v - 0.5) + 0.5;
-
-/**
- * Orthogonal 1px connectors for every need edge with both boxes measured: down from the need's bottom centre, across
- * in a lane `lane` px above the top of the dependent's band (its highest box), then down into the dependent's top
- * centre. Straight down when the centres line up.
- */
-export function connectorPaths<T extends Node>(
-  nodes: readonly T[],
-  rects: ReadonlyMap<number, Rect>,
-  lane = 10,
-): Connector[] {
-  const level = levelsById(nodes);
-  const bandTop = new Map<number, number>();
-  for (const [id, r] of rects) {
-    const l = level.get(id);
-    if (l === undefined) continue;
-    bandTop.set(l, Math.min(bandTop.get(l) ?? r.y, r.y));
-  }
-  const out: Connector[] = [];
-  for (const [to, needs] of needsWithin(nodes)) {
-    const dep = rects.get(to);
-    if (dep === undefined) continue;
-    const ex = crisp(dep.x + dep.width / 2);
-    const ey = Math.round(dep.y);
-    const top = bandTop.get(level.get(to) ?? 0) ?? dep.y;
-    for (const from of needs) {
-      const need = rects.get(from);
-      if (need === undefined) continue;
-      const sx = crisp(need.x + need.width / 2);
-      const sy = Math.round(need.y + need.height);
-      const mid = crisp(Math.max(sy, top - lane));
-      out.push({ from, to, d: sx === ex ? `M${sx} ${sy}V${ey}` : `M${sx} ${sy}V${mid}H${ex}V${ey}` });
-    }
-  }
-  return out.toSorted((a, b) => a.to - b.to || a.from - b.from);
 }
 
 // ---- Roll-up ----
@@ -285,6 +231,50 @@ export type NodeState = Task["state"] | "ready" | "blocked";
 export function nodeState(t: Pick<Task, "state" | "readiness">): NodeState {
   if (t.state === "backlog" && t.readiness !== null) return t.readiness;
   return t.state;
+}
+
+/** What inState reads of a member. */
+type Timed = Pick<Task, "state" | "readiness" | "stateSince" | "readyAt" | "createdAt" | "launchedAt" | "finishedAt" | "settledAt">;
+
+/**
+ * A member's time in its current state, for tree rows: "running 18m", "waiting 6m", "done 22h ago", "settled Nov 15",
+ * "ready 3h", "queued 2d". `at` is the instant it counts from (exact time on hover).
+ */
+export function inState(t: Timed, now: number = Date.now()): { text: string; at: string } {
+  const since = (fallback: string | null) => t.stateSince ?? fallback ?? t.createdAt;
+  switch (t.state) {
+    case "settled": {
+      const at = t.settledAt ?? since(null);
+      return { text: `settled ${shortDate(at, now)}`, at };
+    }
+    case "done": {
+      const at = t.finishedAt ?? since(null);
+      return { text: `done ${relativeTime(at, now)}`, at };
+    }
+    case "launching":
+    case "running": {
+      const at = since(t.launchedAt);
+      return { text: `${t.state} ${age(at, now)}`, at };
+    }
+    case "needs_input": {
+      const at = since(null);
+      return { text: `waiting ${age(at, now)}`, at };
+    }
+    case "failed":
+    case "interrupted":
+    case "cancelled": {
+      const at = since(t.finishedAt);
+      return { text: `${t.state} ${relativeTime(at, now)}`, at };
+    }
+    case "backlog": {
+      if (t.readiness === "ready") {
+        const at = t.readyAt ?? since(null);
+        return { text: `ready ${age(at, now)}`, at };
+      }
+      const at = since(null);
+      return { text: `queued ${age(at, now)}`, at };
+    }
+  }
 }
 
 /** Every member settled. */

@@ -35,7 +35,7 @@ export function Chip({
   tone?: ChipTone;
   dot?: boolean;
   title?: string;
-  className?: string;
+  className?: string | undefined;
   children: ReactNode;
 }) {
   return (

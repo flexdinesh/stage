@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   baseCandidates,
-  connectorPaths,
   countMembers,
+  inState,
   layoutLevels,
   needCandidates,
   nextActionText,
@@ -65,35 +65,6 @@ test("related is direct needs plus direct dependents", () => {
   assert.deepEqual([...related(diamond, 3)].toSorted(), [1, 2, 5]);
   assert.deepEqual([...related(diamond, 1)].toSorted(), [3, 4]);
   assert.deepEqual([...related(diamond, 5)].toSorted(), [3, 4]);
-});
-
-test("connectors run down, across in the lane above the dependent band, and down", () => {
-  const rects = new Map([
-    [1, { x: 0, y: 0, width: 100, height: 50 }],
-    [2, { x: 200, y: 0, width: 100, height: 50 }],
-    [3, { x: 0, y: 100, width: 100, height: 60 }],
-    [4, { x: 200, y: 110, width: 100, height: 50 }],
-  ]);
-  const nodes = [node(1), node(2), node(3, [1, 2]), node(4, [1])];
-  const paths = connectorPaths(nodes, rects, 10);
-  assert.deepEqual(
-    paths.map((p) => [p.from, p.to]),
-    [
-      [1, 3],
-      [2, 3],
-      [1, 4],
-    ],
-  );
-  // Same centre: one straight drop from the need's bottom to the dependent's top.
-  assert.equal(paths[0].d, "M50.5 50V100");
-  // Lane is 10px above the band top (y 100, the highest box in level 1), not above the lower box.
-  assert.equal(paths[1].d, "M250.5 50V90.5H50.5V100");
-  assert.equal(paths[2].d, "M50.5 50V90.5H250.5V110");
-});
-
-test("connectors skip unmeasured nodes", () => {
-  const rects = new Map([[1, { x: 0, y: 0, width: 100, height: 50 }]]);
-  assert.deepEqual(connectorPaths([node(1), node(2, [1])], rects), []);
 });
 
 const member = (state, readiness = null) => ({ state, readiness });
@@ -197,4 +168,23 @@ test("new tree members: parallel roots, or a chain in the given order", () => {
   assert.deepEqual(treeMembers(order, "parallel"), [{ taskId: 5 }, { taskId: 2 }, { taskId: 9 }]);
   assert.deepEqual(treeMembers(order, "chain"), [{ taskId: 5 }, { taskId: 2, needs: [5] }, { taskId: 9, needs: [2] }]);
   assert.deepEqual(treeMembers([], "chain"), []);
+});
+
+const nov = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+
+test("time in state reads per state from when it was entered", () => {
+  const now = new Date(2026, 10, 16, 15, 0).getTime();
+  const base = { readiness: null, stateSince: null, readyAt: null, createdAt: nov(14, 9, 12), launchedAt: null, finishedAt: null, settledAt: null };
+  const t = (extra) => inState({ ...base, ...extra }, now);
+  assert.deepEqual(t({ state: "running", stateSince: nov(16, 14, 42) }), { text: "running 18m", at: nov(16, 14, 42) });
+  // No running event yet: falls back to the launch.
+  assert.equal(t({ state: "running", launchedAt: nov(16, 14, 30) }).text, "running 30m");
+  assert.equal(t({ state: "needs_input", stateSince: nov(16, 14, 54) }).text, "waiting 6m");
+  assert.equal(t({ state: "done", finishedAt: nov(15, 17, 0), stateSince: nov(15, 17, 5) }).text, "done 22h ago");
+  assert.equal(t({ state: "settled", settledAt: nov(15, 10, 5) }).text, "settled yesterday 10:05");
+  assert.equal(t({ state: "settled", settledAt: nov(12, 10, 5) }).text, "settled Nov 12");
+  assert.equal(t({ state: "failed", stateSince: nov(16, 12, 0) }).text, "failed 3h ago");
+  assert.equal(t({ state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }).text, "ready 3h");
+  // Blocked or plain backlog counts from creation when there is no later backlog event.
+  assert.deepEqual(t({ state: "backlog", readiness: "blocked" }), { text: "queued 2d", at: nov(14, 9, 12) });
 });

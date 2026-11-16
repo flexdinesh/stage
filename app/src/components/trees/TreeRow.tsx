@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import type { TreeSummary } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { dateTime, relativeTime } from "../../lib/format.ts";
+import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { nextActionText, rollupLabel, treeMeta, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { Button, Chip, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
@@ -37,7 +37,29 @@ export function TreeStateBar({ rollup, className }: { rollup: Rollup; className?
   );
 }
 
-/** A tree in a ruled list: title and mono meta, the state bar with its next step, and one action. */
+/** Last activity (relative) and creation (date anchor), exact times on hover. */
+function TreeWhen({ tree, inline = false }: { tree: TreeSummary; inline?: boolean }) {
+  const active = (
+    <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
+      active {relativeTime(tree.lastActivityAt)}
+    </span>
+  );
+  const created = <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span>;
+  if (inline)
+    return (
+      <p className="font-mono text-meta text-muted tabular lg:hidden">
+        {active} · {created}
+      </p>
+    );
+  return (
+    <p className="flex flex-col items-end font-mono text-meta whitespace-nowrap text-muted tabular max-lg:hidden">
+      {active}
+      {created}
+    </p>
+  );
+}
+
+/** A tree in a ruled list: title and mono meta, its times, the state bar with its next step, and one action. */
 export function TreeRow({ tree }: { tree: TreeSummary }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
@@ -49,7 +71,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]">
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <Link to={to} className="min-w-0 text-body font-medium break-words hover:underline">
@@ -64,7 +86,10 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
         <p className="mt-0.5 font-mono text-meta text-muted tabular" title={tree.projects.join(", ")}>
           {treeMeta(tree)}
         </p>
+        <TreeWhen tree={tree} inline />
       </div>
+
+      <TreeWhen tree={tree} />
 
       <div className="order-3 col-span-2 flex min-w-0 flex-col gap-1.5 md:order-none md:col-span-1">
         <TreeStateBar rollup={rollup} />

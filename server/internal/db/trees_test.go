@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.TaskState) {
@@ -567,6 +568,74 @@ func TestListTreesRollup(t *testing.T) {
 	}
 	if got := list(db.TreeFilter{All: true, ProjectID: &p.ID}); !slices.Equal(ids(got), []int64{active}) {
 		t.Fatalf("project alpha %v", ids(got))
+	}
+}
+
+// Tree times: startedAt is the first member launch; lastActivityAt follows
+// member and thread updates and orders the list. Detail carries the members'
+// events newest first, and each task when it entered its state.
+func TestTreeTimesAndEvents(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "alpha").ID
+	a := mustTask(t, s, ctx, p, "a", nil)
+	b := mustTask(t, s, ctx, p, "b", []int64{a.ID})
+	x := mustTask(t, s, ctx, p, "x", nil)
+	y := mustTask(t, s, ctx, p, "y", []int64{x.ID})
+	first, second := *b.TreeID, *y.TreeID
+	list := func() []db.TreeSummary {
+		t.Helper()
+		out, err := s.ListTrees(ctx, db.TreeFilter{All: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	got := list()
+	if len(got) != 2 || got[0].ID != second || got[0].StartedAt != nil || got[0].LastActivityAt.Before(got[0].CreatedAt) {
+		t.Fatalf("newest tree first, not started: %+v", got)
+	}
+
+	thread := "th-a"
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}}); err != nil {
+		t.Fatal(err)
+	}
+	setState(t, s, ctx, x.ID, db.StateRunning) // member update, older than the thread's
+	got = list()
+	if got[0].ID != first || got[0].StartedAt == nil || !got[0].LastActivityAt.Equal(later) {
+		t.Fatalf("thread activity leads: %+v", got)
+	}
+
+	tree, err := s.GetTree(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tree.LastActivityAt.Equal(later) || tree.StartedAt == nil {
+		t.Fatalf("detail times %+v", tree.TreeTimes)
+	}
+	states := []db.TaskState{}
+	for _, e := range tree.Events {
+		if e.TaskID != a.ID && e.TaskID != b.ID {
+			t.Fatalf("foreign event %+v", e)
+		}
+		states = append(states, e.ToState)
+	}
+	if len(states) < 4 || states[0] != db.StateRunning || states[1] != db.StateLaunching {
+		t.Fatalf("events newest first %v", states)
+	}
+	for _, m := range tree.Tasks {
+		if m.StateSince == nil {
+			t.Fatalf("task %d stateSince nil", m.ID)
+		}
+		if m.ID == a.ID && !m.StateSince.Equal(tree.Events[0].At) {
+			t.Fatalf("running since %v, event %v", m.StateSince, tree.Events[0].At)
+		}
 	}
 }
 

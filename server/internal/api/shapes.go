@@ -43,13 +43,16 @@ type taskDetailJSON struct {
 // treeDetailJSON is db.TreeDetail with API task shapes.
 type treeDetailJSON struct {
 	db.Tree
-	Tasks  []taskJSON    `json:"tasks"`
-	Edges  []db.TreeEdge `json:"edges"`
-	Levels [][]int64     `json:"levels"`
+	db.TreeTimes
+	Tasks  []taskJSON     `json:"tasks"`
+	Edges  []db.TreeEdge  `json:"edges"`
+	Levels [][]int64      `json:"levels"`
+	Events []db.TaskEvent `json:"events"`
 }
 
 func (s *server) treeDetail(env string, t db.TreeDetail) treeDetailJSON {
-	return treeDetailJSON{Tree: t.Tree, Tasks: s.tasks(env, t.Tasks), Edges: t.Edges, Levels: t.Levels}
+	return treeDetailJSON{Tree: t.Tree, TreeTimes: t.TreeTimes, Tasks: s.tasks(env, t.Tasks), Edges: t.Edges,
+		Levels: t.Levels, Events: t.Events}
 }
 
 // createdTasksJSON is db.CreatedTasks with API task shapes.
