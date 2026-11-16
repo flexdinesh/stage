@@ -12,11 +12,14 @@ export interface AppInfo {
   apiVersion: number;
 }
 
+/** Kind is where a target runs. */
+export type Kind = "local" | "remote";
+
 /**
  * Phase is where the connection to the Stage server stands (the TS
  * HostPhase of app/src/platform/index.ts).
  */
-export type Phase = "starting" | "ready" | "reconnecting" | "stopped" | "failed" | "unsupported" | "misconfigured" | "conflict" | "incompatible";
+export type Phase = "starting" | "ready" | "reconnecting" | "stopped" | "failed" | "unsupported" | "misconfigured" | "conflict" | "incompatible" | "unreachable";
 
 /** Problem is one diagnostic of `stage service status`. */
 export interface Problem {
@@ -27,12 +30,17 @@ export interface Problem {
 
 /** Server is the last Stage server the app reached. */
 export interface Server {
+  /**
+   * ID is the target (saved server) id it belongs to: "local" or a
+   * remote's.
+   */
+  id: string;
   version: string;
   apiVersion: number;
   identity: string;
   /** PublicURL is the server's STAGE_PUBLIC_URL, null when unset. */
   publicUrl: string | null;
-  /** Socket is the Unix socket path the app talks to. */
+  /** Socket is the Unix socket path the app talks to, "" for a remote. */
   socket: string;
   /**
    * Managed: supervised by the per-user service (false: started from a
@@ -40,6 +48,57 @@ export interface Server {
    */
   managed: boolean;
   pid: number | null;
+}
+
+/**
+ * ServerEntry is one Stage server as the Settings page and the top-bar
+ * menu list it (docs/desktop.md, Servers).
+ */
+export interface ServerEntry {
+  id: string;
+  name: string;
+  kind: Kind;
+  /** URL is a remote's base URL, "" for this machine. */
+  url: string;
+  /** Active: the app shows this server. */
+  active: boolean;
+  /**
+   * NeedsInput is the server's needs-input count from its notification
+   * stream, null until its stream answered.
+   */
+  needsInput: number | null;
+}
+
+/** ServerInput is a remote server to save. */
+export interface ServerInput {
+  name: string;
+  url: string;
+}
+
+/**
+ * ServerTest is the result of testing a server URL before saving it
+ * (Settings, Add server): whether a Stage server answered, what it is,
+ * and what to do when it is not usable.
+ */
+export interface ServerTest {
+  /** Reachable: something answered at the URL (even a refusal). */
+  reachable: boolean;
+  /**
+   * APIVersion, Identity and Version are its /api/health; zero values
+   * when it did not answer as a Stage server.
+   */
+  apiVersion: number;
+  identity: string;
+  version: string;
+  /** Error is why the server is not usable, "" when it is. */
+  error: string;
+  /** Hint says what to do about Error, "". */
+  hint: string;
+  /**
+   * Command is a setting or command that fixes it, to copy (for a
+   * refused hostname: STAGE_ALLOWED_ORIGINS=<url>), or "".
+   */
+  command: string;
 }
 
 /**
@@ -70,11 +129,18 @@ export interface State {
   foreground: boolean;
   /** VersionSkew: the server build differs from the app's bundled server. */
   versionSkew: boolean;
+  /** Target is the active server (id, name, kind, url). */
+  target: Target;
   /**
    * Epoch increments each time the connection becomes ready, so live
    * streams reopen.
    */
   epoch: number;
+  /**
+   * ServerEpoch counts the readies of the active server; a switch resets
+   * it to 0 (the app was never ready on the new server yet).
+   */
+  serverEpoch: number;
   /** Busy: a retry, start or restart is running. */
   busy: boolean;
   /** Dev: development run against a foreground dev server. */
@@ -84,6 +150,18 @@ export interface State {
 /** Step is the progress while starting. */
 export type Step = "service" | "server" | "api";
 
+/** Target is one Stage server. */
+export interface Target {
+  id: string;
+  name: string;
+  kind: Kind;
+  /**
+   * URL is a remote server's base URL (http(s)://host[:port]), "" for
+   * the local one.
+   */
+  url: string;
+}
+
 // ---- Services ----
 
 /**
@@ -92,9 +170,13 @@ export type Step = "service" | "server" | "api";
  * navigation lock keeps other content out of that frame.
  */
 export const Desktop = {
+  /** AddServer saves a remote Stage server (it does not switch to it). */
+  addServer(input: ServerInput): Promise<ServerEntry> {
+    return call("Desktop.AddServer", input);
+  },
   /**
-   * CloseNotifications closes the shown notification with tag (task-12,
-   * thread-x), or all of them for "".
+   * CloseNotifications closes the active server's shown notification with
+   * tag (task-12, thread-x), or all of its notifications for "".
    */
   closeNotifications(tag: string): Promise<void> {
     return call("Desktop.CloseNotifications", tag);
@@ -154,8 +236,16 @@ export const Desktop = {
     return call("Desktop.OpenNotificationSettings");
   },
   /**
+   * RemoveServer deletes a saved server and its notification state; when it
+   * was active, the app switches to this machine first. This machine's
+   * cannot be removed.
+   */
+  removeServer(id: string): Promise<void> {
+    return call("Desktop.RemoveServer", id);
+  },
+  /**
    * RestartServer restarts the Stage service onto the server bundled with
-   * this app.
+   * this app; this machine only.
    */
   restartServer(): Promise<void> {
     return call("Desktop.RestartServer");
@@ -165,13 +255,24 @@ export const Desktop = {
     return call("Desktop.Retry");
   },
   /**
+   * Servers lists the Stage servers: this machine first, then the saved
+   * remotes, with the active one and each one's needs-input count.
+   */
+  servers(): Promise<ServerEntry[]> {
+    return call("Desktop.Servers");
+  },
+  /**
    * SetLoginStartup turns "Open Stage at login" on or off: the app (hidden)
-   * and the Stage service.
+   * and the Stage service; this machine only (an error while a remote is
+   * active).
    */
   setLoginStartup(on: boolean): Promise<void> {
     return call("Desktop.SetLoginStartup", on);
   },
-  /** StartServer starts the Stage service (when stopped) and connects. */
+  /**
+   * StartServer starts the Stage service (when stopped) and connects; this
+   * machine only (an error while a remote is active).
+   */
   startServer(): Promise<void> {
     return call("Desktop.StartServer");
   },
@@ -180,8 +281,16 @@ export const Desktop = {
     return call("Desktop.State");
   },
   /**
+   * SwitchServer makes a server active: open requests and streams end, the
+   * state starts over for that server (serverEpoch 0) and its connection
+   * follows in host:state.
+   */
+  switchServer(id: string): Promise<void> {
+    return call("Desktop.SwitchServer", id);
+  },
+  /**
    * SyncNotifications closes shown notifications whose groups were read on
-   * any device.
+   * any device (every server).
    */
   syncNotifications(): Promise<void> {
     return call("Desktop.SyncNotifications");
@@ -196,6 +305,21 @@ export const Desktop = {
   /** TestNotification shows a test notification on this device. */
   testNotification(): Promise<void> {
     return call("Desktop.TestNotification");
+  },
+  /**
+   * TestServer checks a remote server URL before saving it: whether a Stage
+   * server answers there over TCP, its version and API, and what to change
+   * when it refuses this app (STAGE_ALLOWED_ORIGINS).
+   */
+  testServer(url: string): Promise<ServerTest> {
+    return call("Desktop.TestServer", url);
+  },
+  /**
+   * UpdateServer renames a saved server or changes its URL; the active one
+   * reconnects when its URL changed. This machine's cannot be changed.
+   */
+  updateServer(id: string, input: ServerInput): Promise<ServerEntry> {
+    return call("Desktop.UpdateServer", id, input);
   },
 } as const;
 
@@ -215,8 +339,14 @@ export const events = {
   hostNavigate: event<string>("host:navigate"),
   /**
    * NotificationDelivered is broadcast with the newest notification id each
-   * time the stream delivers notifications (shown or not), so the page
-   * refetches its inbox at once.
+   * time the active server's stream delivers notifications (shown or not),
+   * so the page refetches its inbox at once.
    */
   notificationsDelivered: event<number>("notifications:delivered"),
+  /**
+   * ServersChanged is broadcast with the server list whenever it changes:
+   * a server added, edited or removed, a switch, or a server's needs-input
+   * count.
+   */
+  serversChanged: event<ServerEntry[]>("servers:changed"),
 } as const;

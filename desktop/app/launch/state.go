@@ -1,5 +1,7 @@
 package launch
 
+import "github.com/flexdinesh/stage/desktop/app/target"
+
 // Phase is where the connection to the Stage server stands (the TS
 // HostPhase of app/src/platform/index.ts).
 type Phase string
@@ -24,6 +26,9 @@ const (
 	PhaseConflict Phase = "conflict"
 	// PhaseIncompatible: the server speaks another API version.
 	PhaseIncompatible Phase = "incompatible"
+	// PhaseUnreachable: a remote server does not answer (or refuses this
+	// app); polling continues.
+	PhaseUnreachable Phase = "unreachable"
 )
 
 // Step is the progress while starting.
@@ -53,12 +58,15 @@ type AppInfo struct {
 
 // Server is the last Stage server the app reached.
 type Server struct {
+	// ID is the target (saved server) id it belongs to: "local" or a
+	// remote's.
+	ID         string `json:"id"`
 	Version    string `json:"version"`
 	APIVersion int    `json:"apiVersion"`
 	Identity   string `json:"identity"`
 	// PublicURL is the server's STAGE_PUBLIC_URL, null when unset.
 	PublicURL *string `json:"publicUrl"`
-	// Socket is the Unix socket path the app talks to.
+	// Socket is the Unix socket path the app talks to, "" for a remote.
 	Socket string `json:"socket"`
 	// Managed: supervised by the per-user service (false: started from a
 	// terminal).
@@ -90,9 +98,14 @@ type State struct {
 	Foreground bool `json:"foreground"`
 	// VersionSkew: the server build differs from the app's bundled server.
 	VersionSkew bool `json:"versionSkew"`
+	// Target is the active server (id, name, kind, url).
+	Target target.Target `json:"target"`
 	// Epoch increments each time the connection becomes ready, so live
 	// streams reopen.
 	Epoch int `json:"epoch"`
+	// ServerEpoch counts the readies of the active server; a switch resets
+	// it to 0 (the app was never ready on the new server yet).
+	ServerEpoch int `json:"serverEpoch"`
 	// Busy: a retry, start or restart is running.
 	Busy bool `json:"busy"`
 	// Dev: development run against a foreground dev server.

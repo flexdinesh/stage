@@ -11,8 +11,9 @@ import (
 )
 
 // Diagnostics is a plain-text report for support: app, CLI and server
-// versions, identity, the connection state, `service status --json`
-// without secrets, and the last 50 server log lines.
+// versions, identity, the active server, the connection state, and for
+// this machine's server `service status --json` without secrets and the
+// last 50 server log lines.
 func (l *Launcher) Diagnostics(ctx context.Context) string {
 	st := l.State()
 	var b strings.Builder
@@ -21,6 +22,11 @@ func (l *Launcher) Diagnostics(ctx context.Context) string {
 	fmt.Fprintf(&b, "cli        %s\n", l.cfg.CLI)
 	if l.devMode() {
 		fmt.Fprintf(&b, "dev        socket %s (STAGE_DESKTOP_SOCKET)\n", l.cfg.DevSocket)
+	}
+	if t := st.Target; t.Remote() {
+		fmt.Fprintf(&b, "target     %s (%s), remote %s\n", t.Name, t.ID, t.URL)
+	} else {
+		fmt.Fprintf(&b, "target     this machine\n")
 	}
 	l.mu.Lock()
 	info := l.info
@@ -38,9 +44,11 @@ func (l *Launcher) Diagnostics(ctx context.Context) string {
 			pid = fmt.Sprint(*s.PID)
 		}
 		fmt.Fprintf(&b, "server     stage %s (identity %s, api v%d), managed %v, pid %s, public URL %s\n", s.Version, s.Identity, s.APIVersion, s.Managed, pid, pub)
-		fmt.Fprintf(&b, "socket     %s\n", s.Socket)
+		if s.Socket != "" {
+			fmt.Fprintf(&b, "socket     %s\n", s.Socket)
+		}
 	}
-	fmt.Fprintf(&b, "state      %s (epoch %d, foreground %v, version skew %v)\n", st.Phase, st.Epoch, st.Foreground, st.VersionSkew)
+	fmt.Fprintf(&b, "state      %s (epoch %d, server epoch %d, foreground %v, version skew %v)\n", st.Phase, st.Epoch, st.ServerEpoch, st.Foreground, st.VersionSkew)
 	for _, line := range []struct{ k, v string }{{"title", st.Title}, {"message", st.Message}, {"fix", st.Fix}, {"command", st.Command}} {
 		if line.v != "" {
 			fmt.Fprintf(&b, "%-10s %s\n", line.k, line.v)
@@ -49,7 +57,7 @@ func (l *Launcher) Diagnostics(ctx context.Context) string {
 	for _, p := range st.Problems {
 		fmt.Fprintf(&b, "problem    %s: %s (%s)\n", p.Code, p.Message, p.Fix)
 	}
-	if l.devMode() {
+	if l.devMode() || st.Target.Remote() {
 		return b.String()
 	}
 	b.WriteString("\n--- stage service status --json ---\n")
@@ -134,8 +142,12 @@ func (l *Launcher) LoginStartup() bool {
 
 // SetLoginStartup turns "Open Stage at login" on or off: the app's login
 // item and the service's login startup (`service enable|disable`). A
-// development run changes the login item only.
+// development run changes the login item only. ErrRemote while a remote
+// is active (it concerns this machine's service).
 func (l *Launcher) SetLoginStartup(ctx context.Context, on bool) error {
+	if l.remote() {
+		return ErrRemote
+	}
 	var errs []error
 	if l.cfg.SetOpenAtLogin != nil {
 		if err := l.cfg.SetOpenAtLogin(on); err != nil {

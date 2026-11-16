@@ -36,7 +36,8 @@ func (d *Desktop) Retry() error {
 	return d.h.l.Retry()
 }
 
-// StartServer starts the Stage service (when stopped) and connects.
+// StartServer starts the Stage service (when stopped) and connects; this
+// machine only (an error while a remote is active).
 func (d *Desktop) StartServer() error {
 	if d.h.l == nil {
 		return errNotRunning
@@ -45,7 +46,7 @@ func (d *Desktop) StartServer() error {
 }
 
 // RestartServer restarts the Stage service onto the server bundled with
-// this app.
+// this app; this machine only.
 func (d *Desktop) RestartServer() error {
 	if d.h.l == nil {
 		return errNotRunning
@@ -100,7 +101,8 @@ func (d *Desktop) LoginStartup() bool {
 }
 
 // SetLoginStartup turns "Open Stage at login" on or off: the app (hidden)
-// and the Stage service.
+// and the Stage service; this machine only (an error while a remote is
+// active).
 func (d *Desktop) SetLoginStartup(ctx context.Context, on bool) error {
 	if d.h.l == nil {
 		return errNotRunning
@@ -148,19 +150,19 @@ func (d *Desktop) TestNotification(ctx context.Context) error {
 	return d.h.alerts.Test(ctx)
 }
 
-// CloseNotifications closes the shown notification with tag (task-12,
-// thread-x), or all of them for "".
+// CloseNotifications closes the active server's shown notification with
+// tag (task-12, thread-x), or all of its notifications for "".
 func (d *Desktop) CloseNotifications(tag string) {
 	if d.h.alerts != nil {
-		d.h.alerts.CloseShown(tag)
+		d.h.alerts.CloseShown(d.h.activeID(), tag)
 	}
 }
 
 // SyncNotifications closes shown notifications whose groups were read on
-// any device.
+// any device (every server).
 func (d *Desktop) SyncNotifications() {
 	if d.h.alerts != nil {
-		d.h.alerts.Sync()
+		d.h.alerts.Sync("")
 	}
 }
 

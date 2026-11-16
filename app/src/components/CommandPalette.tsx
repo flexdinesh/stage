@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 import { keys, useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
 import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from "../lib/paletteSearch.ts";
 import { sessionPath } from "../lib/sessions.ts";
@@ -78,6 +79,7 @@ function useDebounced(value: string, ms: number): string {
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
   const api = useApi();
   const { links } = usePlatform();
+  const showT3 = useShowT3Links();
   const [query, setQuery] = useState("");
   /** Highlighted item by key, so late results never move the highlight; null = first. */
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -213,7 +215,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       e.preventDefault();
       const item = items[active];
       if (item === undefined) return;
-      if ((e.ctrlKey || e.metaKey) && typeof item.t3Url === "string") {
+      if ((e.ctrlKey || e.metaKey) && showT3 && typeof item.t3Url === "string") {
         links.openApp(item.t3Url);
         onClose();
       } else item.run();
@@ -311,9 +313,11 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           <span>
             <Kbd>↵</Kbd> open
           </span>
-          <span>
-            <Kbd>Ctrl ↵</Kbd> open in T3
-          </span>
+          {showT3 ? (
+            <span>
+              <Kbd>Ctrl ↵</Kbd> open in T3
+            </span>
+          ) : null}
           <span>
             <Kbd>Alt C</Kbd> copy link
           </span>

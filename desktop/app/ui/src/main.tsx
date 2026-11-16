@@ -1,5 +1,6 @@
-// Desktop host: the shared app (@stage/app) in the MyGo webview. /api goes over the app's bridge to the Stage
-// server's Unix socket; the shell owns the connection, links, clipboard and login startup (docs/desktop.md).
+// Desktop host: the shared app (@stage/app) in the MyGo webview. /api goes over the app's bridge to the active
+// Stage server (this machine's Unix socket, or a saved remote over TCP); the shell owns the connection, server
+// switching, links, clipboard and login startup (docs/desktop.md).
 // No service worker and no Web Push: the Go process shows native notifications and owns the app badge.
 import { StageApp } from "@stage/app";
 import "@stage/app/index.css";
@@ -9,7 +10,7 @@ import { Desktop, events } from "./mygo.ts";
 import { desktopClipboard } from "./platform/clipboard.ts";
 import { desktopHost } from "./platform/host.ts";
 import { desktopLinks } from "./platform/links.ts";
-import type { DesktopNative, NativeNotifications } from "./platform/native.ts";
+import type { DesktopNative, NativeNotifications, NativeServers } from "./platform/native.ts";
 import { desktopNotifications } from "./platform/notifications.ts";
 import { desktopStorage } from "./platform/storage.ts";
 import { desktopTransport } from "./platform/transport.ts";
@@ -41,7 +42,17 @@ const nativeNotifications: NativeNotifications = {
   onNotificationDelivered: (listener) => events.notificationsDelivered.on(() => listener()),
 };
 
-const host = desktopHost(native);
+const nativeServers: NativeServers = {
+  servers: () => Desktop.servers(),
+  addServer: (input) => Desktop.addServer(input),
+  updateServer: (id, input) => Desktop.updateServer(id, input),
+  removeServer: (id) => Desktop.removeServer(id),
+  switchServer: (id) => Desktop.switchServer(id),
+  testServer: (url) => Desktop.testServer(url),
+  onServers: (listener) => events.serversChanged.on(listener),
+};
+
+const host = desktopHost(native, nativeServers);
 const platform: Platform = {
   transport: desktopTransport(),
   clipboard: desktopClipboard(native),

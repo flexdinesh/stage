@@ -16,7 +16,7 @@ import {
   type TranscriptModel,
 } from "../lib/transcript.ts";
 // This chunk is already lazy, so the shared renderer (marked + DOMPurify) loads with it.
-import { useHostEpoch } from "./Host.tsx";
+import { useHostEpoch } from "../lib/hostState.ts";
 import ReplyMarkdown from "./ReplyMarkdown.tsx";
 import { Alert, Button, Chip, Panel, cx, errorText } from "./ui.tsx";
 

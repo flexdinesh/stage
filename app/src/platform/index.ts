@@ -108,6 +108,10 @@ export interface PreferenceStorage {
  * - `misconfigured`: invalid configuration, permissions or app location
  * - `conflict`: another (terminal) server owns the data and cannot be used
  * - `incompatible`: the server speaks another API version
+ * - `unreachable`: a remote server does not answer, or refuses this app (polling continues)
+ *
+ * For a remote target (`HostState.target.kind === "remote"`) only `starting` (steps `server`, `api`),
+ * `ready`, `reconnecting`, `unreachable` and `incompatible` occur: the host never manages a remote server.
  */
 export type HostPhase =
   | "starting"
@@ -118,7 +122,8 @@ export type HostPhase =
   | "unsupported"
   | "misconfigured"
   | "conflict"
-  | "incompatible";
+  | "incompatible"
+  | "unreachable";
 
 export interface HostProblem {
   code: string;
@@ -128,16 +133,29 @@ export interface HostProblem {
 
 /** The last Stage server the host reached. */
 export interface HostServer {
+  /** The target (saved server) id it belongs to: `local` or a remote's. */
+  id: string;
   version: string;
   apiVersion: number;
   identity: string;
   /** STAGE_PUBLIC_URL of the server, when configured. */
   publicUrl: string | null;
-  /** Unix socket path the host talks to. */
+  /** Unix socket path the host talks to; "" for a remote. */
   socket: string;
   /** Supervised by the per-user service (false: started from a terminal). */
   managed: boolean;
   pid: number | null;
+}
+
+/** The Stage server the host connects to: this machine's (`local`) or a saved remote. */
+export interface HostTarget {
+  /** `local` for this machine; a saved remote's id otherwise. */
+  id: string;
+  /** "This machine" for local; the user's name for a remote. */
+  name: string;
+  kind: "local" | "remote";
+  /** A remote's base URL (`http(s)://host[:port]`); "" for local. */
+  url: string;
 }
 
 export interface HostState {
@@ -161,8 +179,12 @@ export interface HostState {
   foreground: boolean;
   /** Server build differs from the app's bundled server. */
   versionSkew: boolean;
+  /** The active server. A change of `target.id` is a server switch: the app's data belongs to another server. */
+  target: HostTarget;
   /** Increments each time the connection becomes ready, so live streams reopen. */
   epoch: number;
+  /** Readies of the active server; a switch resets it to 0 (the app was never ready on the new server yet). */
+  serverEpoch: number;
   /** A retry, start or restart is running. */
   busy: boolean;
   /** Development run against a foreground dev server. */
@@ -188,10 +210,68 @@ export interface LoginStartup {
   set(enabled: boolean): Promise<void>;
 }
 
+/** One Stage server the host can connect to, as listed for switching. */
+export interface HostServerEntry {
+  id: string;
+  name: string;
+  kind: "local" | "remote";
+  /** A remote's base URL; "" for local. */
+  url: string;
+  /** The host shows this server. */
+  active: boolean;
+  /** The server's needs-input count from its notification stream; null until known. */
+  needsInput: number | null;
+}
+
+/** A remote server to save. */
+export interface HostServerInput {
+  name: string;
+  /** `http(s)://host[:port]`, no path. */
+  url: string;
+}
+
+/** Result of testing a server URL before saving it. */
+export interface HostServerTest {
+  /** Something answered at the URL (even a refusal). */
+  reachable: boolean;
+  /** Its `/api/health`; 0 / "" when it did not answer as a Stage server. */
+  apiVersion: number;
+  identity: string;
+  version: string;
+  /** Why the server is not usable; "" when it is. */
+  error: string;
+  /** What to do about `error`; "". */
+  hint: string;
+  /** A setting or command to copy that fixes it (`STAGE_ALLOWED_ORIGINS=<url>` for a refused hostname); "". */
+  command: string;
+}
+
+/**
+ * The servers a native host can switch between: this machine's (always first, not editable or removable)
+ * and saved remotes on a trusted network (no auth). Methods reject with the host's message on invalid input.
+ */
+export interface HostServers {
+  list(): Promise<HostServerEntry[]>;
+  /** Saves a remote server; does not switch to it. */
+  add(input: HostServerInput): Promise<HostServerEntry>;
+  /** Renames a remote or changes its URL (the active one reconnects on a new URL). */
+  update(id: string, input: HostServerInput): Promise<HostServerEntry>;
+  /** Removes a remote (switching to this machine first when it is active). */
+  remove(id: string): Promise<void>;
+  /** Makes a server active; the connection state follows (`HostState.target`, `serverEpoch` 0). */
+  switch(id: string): Promise<void>;
+  /** Checks a URL without saving it. Never rejects for an unreachable server. */
+  test(url: string): Promise<HostServerTest>;
+  /** Runs `listener` with the new list on every change (edits, switches, needs-input counts). Returns an unsubscribe. */
+  subscribe(listener: (servers: HostServerEntry[]) => void): () => void;
+}
+
 /** Host-owned services of a native shell. */
 export interface HostServices {
   connection: HostConnection;
   loginStartup: LoginStartup;
+  /** Switching between Stage servers; absent when the host connects to one server only. */
+  servers?: HostServers;
   /** Paths the host asks the app to show (deep links, menu items). Returns an unsubscribe. */
   onNavigate(listener: (path: string) => void): () => void;
 }

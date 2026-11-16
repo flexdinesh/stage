@@ -1,40 +1,25 @@
 // Host-managed connection UI (desktop): the connection screen shown until the
-// Stage server first answers, the banner for later trouble, and the Settings
-// panel for the desktop app. A host without `platform.host` (the browser)
-// renders none of it.
+// active Stage server first answers, the banner for later trouble, and the
+// Settings panel for the desktop app. A host without `platform.host` (the
+// browser) renders none of it. Server switching: Servers.tsx.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ACTION_LABEL, STEPS, gateView, primaryAction, stepNote, stepStatus, type HostAction } from "../lib/host.ts";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { ACTION_LABEL, gateView, primaryAction, stepNote, stepStatus, visibleSteps, type HostAction } from "../lib/host.ts";
+import { useHostState } from "../lib/hostState.ts";
 import type { HostServices, HostState } from "../platform/index.ts";
 import { usePlatform } from "../platform/context.tsx";
+import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
 import { CommandBox, CopyAction, Step, Steps } from "./Steps.tsx";
 import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel } from "./ui.tsx";
-
-const unsubscribed = () => {};
-
-/** The host's connection state; null without a host-managed connection. */
-export function useHostState(): HostState | null {
-  const { host } = usePlatform();
-  const subscribe = useCallback(
-    (listener: () => void) => (host === undefined ? unsubscribed : host.connection.subscribe(listener)),
-    [host],
-  );
-  const snapshot = useCallback(() => (host === undefined ? null : host.connection.current()), [host]);
-  return useSyncExternalStore(subscribe, snapshot);
-}
-
-/** Increments each time the host's connection becomes ready again; 0 without a host. Live streams reopen on change. */
-export function useHostEpoch(): number {
-  return useHostState()?.epoch ?? 0;
-}
 
 /** Delay before the starting screen appears, so a fast start shows no flash. */
 const STARTING_DELAY_MS = 400;
 
 /**
- * Renders the app once the host's connection has been ready, and the
- * connection screen before that (or while the server speaks another API).
- * Later trouble keeps the app mounted (drafts survive) and shows HostBanner.
+ * Renders the app once the active server has been ready, and the connection
+ * screen before that (or while the server speaks another API). Later trouble
+ * keeps the app mounted (drafts survive) and shows HostBanner. A server switch
+ * starts over (StageApp drops the old server's data and opens `/`).
  */
 export function HostGate({ children }: { children: ReactNode }) {
   const { host } = usePlatform();
@@ -48,13 +33,20 @@ export function HostGate({ children }: { children: ReactNode }) {
     lastEpoch.current = epoch;
   }, [epoch, qc]);
 
+  // The 400ms grace runs again for each server: a switch starts from the blank ground.
+  const targetId = state?.target.id ?? "";
   const [late, setLate] = useState(false);
-  const starting = state?.phase === "starting" && epoch === 0;
+  const [lateTarget, setLateTarget] = useState(targetId);
+  if (lateTarget !== targetId) {
+    setLateTarget(targetId);
+    setLate(false);
+  }
+  const startingTarget = state?.phase === "starting" && state.serverEpoch === 0 ? targetId : null;
   useEffect(() => {
-    if (!starting) return;
+    if (startingTarget === null) return;
     const t = setTimeout(() => setLate(true), STARTING_DELAY_MS);
     return () => clearTimeout(t);
-  }, [starting]);
+  }, [startingTarget]);
 
   const view = host === undefined ? "app" : gateView(state, late);
   if (view === "app" || host === undefined || state === null) return children;
@@ -147,7 +139,10 @@ function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] 
 
 /** Full-window state before the app can run: what is happening, what failed and how to fix it. */
 export function ConnectionScreen({ state, host }: { state: HostState; host: HostServices }) {
-  const primary = primaryAction(state.phase);
+  const remote = state.target.kind === "remote";
+  const primary = primaryAction(state.phase, state.target.kind);
+  const canSwitch = useCanSwitchServer();
+  const [picker, setPicker] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   const run = (action: (h: HostServices) => Promise<void>) => {
     setActionError(null);
@@ -161,9 +156,9 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
         <div className="mt-6" aria-live="polite">
           <PageHeader title={state.title} meta={meta} />
         </div>
-        <Panel title="Stage server" meta={state.app.identity} flush>
+        <Panel title={remote ? state.target.name : "Stage server"} meta={<span className="break-all">{remote ? state.target.url : state.app.identity}</span>} flush>
           <Steps label="Startup steps">
-            {STEPS.map((key) => {
+            {visibleSteps(state).map((key) => {
               const status = stepStatus(state, key);
               return <Step key={key} label={key} note={stepNote(state, key, status)} status={status} />;
             })}
@@ -171,22 +166,24 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
         </Panel>
         <Remedy state={state} />
         <ErrorText error={actionError} />
-        {primary === null && state.phase !== "incompatible" ? null : (
+        {primary === null && state.phase !== "incompatible" && !canSwitch ? null : (
           <div className="flex flex-wrap gap-2">
             {primary === null ? null : (
               <Button variant="primary" busy={state.busy} onClick={() => run(ACTIONS[primary])}>
                 {ACTION_LABEL[primary]}
               </Button>
             )}
-            {state.phase === "incompatible" ? (
+            {state.phase === "incompatible" && primary !== "retry" ? (
               <Button disabled={state.busy} onClick={() => run((h) => h.connection.retry())}>
                 Retry
               </Button>
             ) : null}
+            {canSwitch ? <Button onClick={() => setPicker(true)}>Switch server</Button> : null}
           </div>
         )}
-        {state.phase === "starting" ? null : <Diagnostics host={host} logTail={state.logTail} />}
+        {state.phase === "starting" ? null : <Diagnostics host={host} logTail={remote ? [] : state.logTail} />}
       </div>
+      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
     </main>
   );
 }
@@ -197,9 +194,18 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
 export function HostBanner() {
   const { host } = usePlatform();
   const state = useHostState();
+  const canSwitch = useCanSwitchServer();
+  const [picker, setPicker] = useState(false);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [actionError, setActionError] = useState<unknown>(null);
-  if (host === undefined || state === null || state.epoch === 0) return null;
+  if (host === undefined || state === null || state.serverEpoch === 0) return null;
+  const remote = state.target.kind === "remote";
+  const switchButton =
+    remote && canSwitch ? (
+      <Button small variant="ghost" onClick={() => setPicker(true)}>
+        Switch server
+      </Button>
+    ) : null;
   const run = (action: (h: HostServices) => Promise<void>) => {
     setActionError(null);
     action(host).catch((err: unknown) => setActionError(err));
@@ -209,33 +215,50 @@ export function HostBanner() {
 
   if (state.phase === "reconnecting") {
     items.push(
-      <Alert key="conn" tone="plain" actions={<Button small onClick={() => run((h) => h.connection.retry())}>Retry now</Button>}>
+      <Alert
+        key="conn"
+        tone="plain"
+        actions={
+          <>
+            <Button small onClick={() => run((h) => h.connection.retry())}>
+              Retry now
+            </Button>
+            {switchButton}
+          </>
+        }
+      >
         <span className="font-medium">{state.title}</span>
         {state.message === "" ? null : <span className="text-muted"> {state.message}</span>}
       </Alert>,
     );
   } else if (state.phase !== "ready" && state.phase !== "starting") {
-    const primary = primaryAction(state.phase);
+    const primary = primaryAction(state.phase, state.target.kind);
     items.push(
       <Alert
         key="conn"
         tone="bad"
         actions={
-          primary === null ? undefined : (
-            <Button small busy={state.busy} onClick={() => run(ACTIONS[primary])}>
-              {ACTION_LABEL[primary]}
-            </Button>
+          primary === null && switchButton === null ? undefined : (
+            <>
+              {primary === null ? null : (
+                <Button small busy={state.busy} onClick={() => run(ACTIONS[primary])}>
+                  {ACTION_LABEL[primary]}
+                </Button>
+              )}
+              {switchButton}
+            </>
           )
         }
       >
         <span className="font-medium">{state.title}</span>
         {state.message === "" ? null : <span> {state.message}</span>}
         {state.fix === "" ? null : <span className="block font-mono text-meta">{state.fix}</span>}
+        {state.command === "" ? null : <code className="mt-1 block font-mono text-meta break-all">{state.command}</code>}
       </Alert>,
     );
   }
 
-  if (state.phase === "ready" && state.foreground && !dismissed.has("foreground")) {
+  if (state.phase === "ready" && !remote && state.foreground && !dismissed.has("foreground")) {
     const pid = state.server?.pid ?? null;
     items.push(
       <Alert key="foreground" tone="plain" actions={<Button small variant="ghost" onClick={() => dismiss("foreground")}>Dismiss</Button>}>
@@ -245,7 +268,7 @@ export function HostBanner() {
   }
 
   const skewKey = `skew:${state.server?.version ?? ""}`;
-  if (state.phase === "ready" && state.versionSkew && !state.foreground && !dismissed.has(skewKey)) {
+  if (state.phase === "ready" && !remote && state.versionSkew && !state.foreground && !dismissed.has(skewKey)) {
     items.push(
       <Alert
         key="skew"
@@ -271,6 +294,7 @@ export function HostBanner() {
     <div className="mb-3.5 flex flex-col gap-2" role="status">
       {items}
       <ErrorText error={actionError} />
+      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
     </div>
   );
 }
@@ -279,7 +303,7 @@ export function HostBanner() {
 
 const LOGIN_KEY = ["hostLoginStartup"];
 
-/** Settings panel of the desktop app: login startup, versions, diagnostics. */
+/** Settings panel of the desktop app: login startup (this machine's server only), versions, diagnostics. */
 export function DesktopAppCard() {
   const { host } = usePlatform();
   const state = useHostState();
@@ -312,25 +336,30 @@ export function DesktopAppCard() {
       });
   };
   const server = state.server;
+  const remote = state.target.kind === "remote";
+  const serverLine =
+    server === null || server.id !== state.target.id
+      ? state.target.name
+      : `${state.target.name} · ${server.version}${remote ? "" : ` · ${server.managed ? "per-user service" : "started from a terminal"}`}`;
   return (
     <Panel title="Desktop app" meta={`${state.app.name} ${state.app.version}`}>
       <div className="flex flex-col gap-4">
-        <label className="flex min-h-11 cursor-pointer items-center gap-3 border-y border-line transition-colors duration-150 hover:bg-panel md:min-h-8">
-          <Checkbox
-            checked={login.data === true}
-            disabled={login.isPending || saving}
-            onChange={(e) => toggle(e.target.checked)}
-          />
-          <span className="text-small text-fg">Open Stage at login</span>
-          <span className="ml-auto font-mono text-meta text-muted">starts hidden, with the server</span>
-        </label>
+        {remote ? null : (
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 border-y border-line transition-colors duration-150 hover:bg-panel md:min-h-8">
+            <Checkbox
+              checked={login.data === true}
+              disabled={login.isPending || saving}
+              onChange={(e) => toggle(e.target.checked)}
+            />
+            <span className="text-small text-fg">Open Stage at login</span>
+            <span className="ml-auto font-mono text-meta text-muted">starts hidden, with the server</span>
+          </label>
+        )}
         <ErrorText error={saveError ?? login.error} />
         <Details>
           <Detail label="App">{`${state.app.name} ${state.app.version}`}</Detail>
-          <Detail label="Server">
-            {server === null ? "-" : `${server.version} · ${server.managed ? "per-user service" : "started from a terminal"}`}
-          </Detail>
-          <Detail label="Socket">{server?.socket ?? "-"}</Detail>
+          <Detail label="Server">{serverLine}</Detail>
+          {remote ? <Detail label="URL">{state.target.url}</Detail> : <Detail label="Socket">{server?.socket ?? "-"}</Detail>}
           <Detail label="Identity">{state.app.identity}</Detail>
         </Details>
         {diagnostics.data === undefined || diagnostics.data === "" ? null : (

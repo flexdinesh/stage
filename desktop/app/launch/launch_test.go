@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // fakeCLI is a shell script standing in for the bundled stage CLI. Each
@@ -120,7 +122,7 @@ func (s *fakeServer) start(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != apiHost {
+		if r.Host != target.SocketHost {
 			http.Error(w, "bad host", 403)
 			return
 		}
@@ -174,7 +176,7 @@ func newLauncher(t *testing.T, cli *fakeCLI, mutate func(*Config)) *harness {
 		CLI: cli.exe, AppName: "Stage Test", AppVersion: "1.2.0",
 		TempDirs: []string{"/nonexistent-temp"},
 		Timing:   fastTiming(),
-		OnSocket: func(s string) { h.sockets <- s },
+		OnTarget: func(t target.Target) { h.sockets <- t.Socket },
 		Logf:     t.Logf,
 	}
 	if mutate != nil {
@@ -249,7 +251,10 @@ func TestReady(t *testing.T) {
 		t.Fatalf("app %+v", s.App)
 	}
 	if got := <-h.sockets; got != srv.sock {
-		t.Fatalf("OnSocket %q", got)
+		t.Fatalf("OnTarget %q", got)
+	}
+	if s.Target.ID != target.LocalID || s.ServerEpoch != 1 || s.Server.ID != target.LocalID {
+		t.Fatalf("target %+v serverEpoch %d server %+v", s.Target, s.ServerEpoch, s.Server)
 	}
 	if !cli.called("service start --exe " + cli.exe + " --wait 30s --json") {
 		t.Fatalf("calls %v", cli.calls())
@@ -269,7 +274,7 @@ func TestStateJSON(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "epoch", "busy", "dev"}
+	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "target", "epoch", "serverEpoch", "busy", "dev"}
 	if len(m) != len(want) {
 		t.Fatalf("fields %v, want %v", m, want)
 	}
@@ -282,8 +287,12 @@ func TestStateJSON(t *testing.T) {
 		t.Fatalf("initial %s", b)
 	}
 	srv, _ := json.Marshal(Server{})
-	if string(srv) != `{"version":"","apiVersion":0,"identity":"","publicUrl":null,"socket":"","managed":false,"pid":null}` {
+	if string(srv) != `{"id":"","version":"","apiVersion":0,"identity":"","publicUrl":null,"socket":"","managed":false,"pid":null}` {
 		t.Fatalf("server JSON %s", srv)
+	}
+	tg, _ := json.Marshal(m["target"])
+	if string(tg) != `{"id":"local","kind":"local","name":"This machine","url":""}` {
+		t.Fatalf("target JSON %s", tg)
 	}
 }
 

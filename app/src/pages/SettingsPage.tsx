@@ -11,6 +11,7 @@ import {
   type T3Status,
 } from "../api/types.ts";
 import { DesktopAppCard } from "../components/Host.tsx";
+import { ServersCard } from "../components/Servers.tsx";
 import { PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
 import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
@@ -399,10 +400,11 @@ export function SettingsPage() {
     <>
       <PageHeader title="Settings" meta="T3 connection, sync, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
-        <div className="lg:row-span-5">
+        <div className="flex flex-col gap-3.5 lg:row-span-5">
           <QueryState isPending={status.isPending} error={status.error}>
             {status.data === undefined ? null : <StatusCard status={status.data} />}
           </QueryState>
+          <ServersCard />
         </div>
         <SyncCard />
         <DefaultModelCard />

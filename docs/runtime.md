@@ -232,7 +232,8 @@ trusted.
 | CLI over TCP, HTTP MCP clients | loopback IP Host; no Origin. `/mcp` also keeps the MCP SDK's own localhost check, so HTTP MCP through a proxy still gets 403. |
 | Browser / PWA, same origin | `Sec-Fetch-Site: same-origin` |
 | Vite dev proxy | Host `localhost:5173`; same origin |
-| Desktop webview (bridge B) | Host `stage.invalid`, Origin `mygo://localhost`, on the socket |
+| Desktop webview (bridge B), this machine | Host `stage.invalid` on the socket; the bridge strips `Origin` and `Sec-Fetch-*` after checking them itself (a cross-site request or another page origin never reaches the server) |
+| Desktop webview (bridge B), remote server | the saved URL's Host over TCP, no `Origin` or `Sec-Fetch-*` (stripped as above): passes when that host is an IP literal, `localhost`, in `STAGE_ALLOWED_ORIGINS` or `STAGE_PUBLIC_URL`'s; otherwise 403, which the desktop explains ([desktop.md](desktop.md#servers)) |
 | Tailscale serve / Caddy | its origin is `STAGE_PUBLIC_URL` or listed in `STAGE_ALLOWED_ORIGINS` |
 
 **Upgrade note:** a proxied hostname that is neither `STAGE_PUBLIC_URL`'s host

@@ -18,6 +18,7 @@ import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, errorText, toneClass } from "./ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -216,6 +217,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
+  const showT3 = useShowT3Links();
   const sticky = n.event === "needs_input";
   const [paused, setPaused] = useState(false);
   const remaining = useRef(TOAST_MS);
@@ -263,7 +265,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onDismiss} /> : <ToastView n={n} onDismiss={onDismiss} />}
-          {n.t3DeepLink === null ? null : (
+          {n.t3DeepLink === null || !showT3 ? null : (
             <AppButton small variant={stillWaiting(n) && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
               Open in app
             </AppButton>
@@ -458,6 +460,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   onNavigate: () => void;
 }) {
   const historyId = useId();
+  const showT3 = useShowT3Links();
   const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
   // A ready task still in backlog reads "ready": that is its current state, not a change.
@@ -515,7 +518,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
           {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onNavigate} /> : null}
-          {n.t3DeepLink === null ? null : (
+          {n.t3DeepLink === null || !showT3 ? null : (
             <AppButton small variant={waiting && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
               Open in app
             </AppButton>

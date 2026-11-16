@@ -17,6 +17,7 @@ import { TaskStateBadge } from "./StateBadge.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
@@ -197,7 +198,8 @@ export function TaskRow({
   const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
   const answerable = needsInput && task.pendingQuestionCount > 0;
-  const hasActions = showStart || answerable || task.t3DeepLink !== null || extra !== undefined;
+  const appLink = useShowT3Links() ? task.t3DeepLink : null;
+  const hasActions = showStart || answerable || appLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -279,8 +281,8 @@ export function TaskRow({
           </Button>
         ) : null}
         {answerable ? <AnswerButton to={`/tasks/${task.id}`} /> : null}
-        {task.t3DeepLink === null ? null : (
-          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={task.t3DeepLink}>
+        {appLink === null ? null : (
+          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={appLink}>
             Open in app
           </AppButton>
         )}
@@ -345,7 +347,7 @@ export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyT
 }
 
 function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalThreadState }) {
-  const href = thread.t3DeepLink;
+  const href = useShowT3Links() ? thread.t3DeepLink : null;
   const project = thread.projectTitle ?? thread.t3ProjectId;
   const needsInput = state === "needs_input";
   const answerable = needsInput && thread.pendingQuestionCount > 0;

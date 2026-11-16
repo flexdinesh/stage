@@ -10,6 +10,7 @@ import { inState, nodeState } from "../../lib/trees.ts";
 import { AnswerButton } from "../NeedsInputPanel.tsx";
 import { TaskStateBadge } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
+import { useShowT3Links } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
@@ -48,13 +49,14 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
+  const appLink = useShowT3Links() ? task.t3DeepLink : null;
   let action: ReactNode = null;
   if (task.state === "needs_input") {
     action =
       task.pendingQuestionCount > 0 ? (
         <AnswerButton to={`/tasks/${task.id}`} className={cls} />
-      ) : task.t3DeepLink === null ? null : (
-        <AppButton small variant="primary" href={task.t3DeepLink} className={cls}>
+      ) : appLink === null ? null : (
+        <AppButton small variant="primary" href={appLink} className={cls}>
           Open in app
         </AppButton>
       );
@@ -79,9 +81,9 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
         {task.state === "backlog" ? (task.startAt === null ? "Start" : "Start now") : "Retry"}
       </Button>
     );
-  } else if (task.t3DeepLink !== null) {
+  } else if (appLink !== null) {
     action = (
-      <AppButton small href={task.t3DeepLink} className={cls}>
+      <AppButton small href={appLink} className={cls}>
         Open in app
       </AppButton>
     );

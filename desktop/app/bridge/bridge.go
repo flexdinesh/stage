@@ -1,13 +1,16 @@
-// Package bridge connects the desktop webview to the Stage server over a
-// Unix domain socket, with no TCP listener (bridge B of
-// docs/adr/0001-desktop-shell.md): the page's own scheme
+// Package bridge connects the desktop webview to the Stage server (bridge
+// B of docs/adr/0001-desktop-shell.md): the page's own scheme
 // (mygo://localhost) serves the frontend and reverse-proxies /api/* to the
-// socket, so relative fetch, EventSource and <img> work unchanged.
+// active target, so relative fetch, EventSource and <img> work unchanged.
+// The target is this machine's server over its Unix socket (no TCP
+// listener anywhere) or a saved remote server over TCP/TLS
+// (docs/desktop.md, Servers).
 //
-// The socket is swappable: the launcher sets it once the server is ready
-// and may change it later (a restart, a foreground server). Until then,
-// and while the socket refuses connections, JSON requests get 503 and
-// event streams wait for it (APIProxy).
+// The target is swappable: the launcher sets it once the server is ready
+// and may change it later (a restart, a foreground server, a switch to
+// another server, which ends every open request and stream of the old
+// one). Until then, and while the target refuses connections, JSON
+// requests get 503 and event streams wait for it (APIProxy).
 //
 // The package does not import MyGo: it is plain net/http and unit-tested
 // without a webview.
@@ -20,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -28,12 +30,19 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
-// Host is the synthetic Host of every proxied request. The server's
-// origin policy accepts it on Unix listeners only (docs/runtime.md); the
-// .invalid TLD (RFC 2606) never resolves.
-const Host = "stage.invalid"
+// Host is the synthetic Host of every request proxied to the local
+// socket. The server's origin policy accepts it on Unix listeners only
+// (docs/runtime.md); the .invalid TLD (RFC 2606) never resolves. Remote
+// requests carry the remote URL's host.
+const Host = target.SocketHost
+
+// PageOrigin is the webview page's origin, the only Origin the bridge
+// forwards for.
+const PageOrigin = "mygo://localhost"
 
 // APIPrefix is the only path prefix the bridge forwards.
 const APIPrefix = "/api/"
@@ -50,17 +59,11 @@ const CSP = "default-src 'self' mygo://localhost; " +
 	"object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
 
 // ErrRedirect is returned for any redirect: the Stage API never redirects,
-// so one is refused rather than followed off the socket.
+// so one is refused rather than followed off the target.
 var ErrRedirect = errors.New("bridge: redirects are not followed")
 
-// errNotReady: no socket is set yet (the server is starting).
-var errNotReady = errors.New("bridge: the Stage server is starting")
-
-// dialError is a failure to connect to the socket.
-type dialError struct{ err error }
-
-func (e *dialError) Error() string { return "bridge: Stage server unavailable: " + e.err.Error() }
-func (e *dialError) Unwrap() error { return e.err }
+// errSwitched: the request was cut because the app switched servers.
+var errSwitched = errors.New("bridge: switched to another Stage server")
 
 // methods are the HTTP methods the Stage API uses.
 var methods = map[string]bool{
@@ -97,53 +100,83 @@ func Permit(method string, u *url.URL) error {
 }
 
 // DefaultStreamWait bounds how long an event stream request waits for the
-// socket before it is answered with an empty stream (which EventSource
+// target before it is answered with an empty stream (which EventSource
 // retries).
 const DefaultStreamWait = 25 * time.Second
 
-// APIProxy is the /api/* half of bridge B: a reverse proxy to the Stage
-// server on the current socket. It applies Permit, flushes every write at
-// once (SSE), forwards cancellation (the scheme request's context ends
-// when the webview drops it), refuses redirects with 502 rather than
-// letting the webview follow them, and drops cookies.
-//
-// Without a usable socket, JSON requests get 503 {error, code} with code
-// "starting" (no socket yet) or "unavailable" (it refuses connections).
-// Event streams (Accept: text/event-stream) never get an HTTP error, which
-// would close an EventSource for good: they wait for the socket up to
-// StreamWait without sending headers, then proxy. If it does not come
-// back, they get an empty 200 stream with a short retry, so EventSource
-// reconnects (with Last-Event-ID) and waits again. A handler cannot fail
-// a MyGo scheme request as a network error: a panic before the headers
-// becomes a 500.
-type APIProxy struct {
-	socket atomic.Pointer[string]
-	rp     *httputil.ReverseProxy
+// conn is one target with its transport and the context that ends every
+// request to it when the target changes.
+type conn struct {
+	t      target.Target
 	tr     *http.Transport
-	// StreamWait bounds an event stream's wait for the socket (default
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// reqKey carries the request's conn and the page's own context to the
+// proxy's hooks.
+type reqKey struct{}
+
+type reqInfo struct {
+	c    *conn
+	page context.Context
+}
+
+// APIProxy is the /api/* half of bridge B: a reverse proxy to the Stage
+// server of the current target. It applies Permit and the page-origin
+// check, flushes every write at once (SSE), forwards cancellation (the
+// scheme request's context ends when the webview drops it), refuses
+// redirects with 502 rather than letting the webview follow them, and
+// drops cookies.
+//
+// Requests reach the server as a non-browser client: Host is the target's
+// (stage.invalid on the socket, the remote's host over TCP) and Cookie,
+// Origin and Sec-Fetch-* are stripped, so the server's cross-origin checks
+// pass for a remote too (its hostname still needs STAGE_ALLOWED_ORIGINS
+// or STAGE_PUBLIC_URL there, docs/runtime.md). The bridge enforces the
+// page origin itself first: a cross-site request, or an unsafe method
+// whose Origin is not the page's, gets 403.
+//
+// Without a usable target, JSON requests get 503 {error, code} with code
+// "starting" (no target yet) or "unavailable" (it refuses connections, or
+// the app switched servers mid-request). Event streams (Accept:
+// text/event-stream) never get an HTTP error, which would close an
+// EventSource for good: they wait for the target up to StreamWait without
+// sending headers, then proxy. If it does not come back, they get an
+// empty 200 stream with a short retry, so EventSource reconnects (with
+// Last-Event-ID) and waits again. SetTarget to another server ends every
+// open request and stream to the old one. A handler cannot fail a MyGo
+// scheme request as a network error: a panic before the headers becomes
+// a 500.
+type APIProxy struct {
+	cur atomic.Pointer[conn]
+	rp  *httputil.ReverseProxy
+	// StreamWait bounds an event stream's wait for the target (default
 	// DefaultStreamWait).
 	StreamWait time.Duration
 }
 
-// NewAPIProxy proxies to socket; "" leaves it unset until SetSocket.
-func NewAPIProxy(socket string) *APIProxy {
+// NewAPIProxy proxies to t; a zero Target leaves it unset until
+// SetTarget.
+func NewAPIProxy(t target.Target) *APIProxy {
 	p := &APIProxy{StreamWait: DefaultStreamWait}
-	p.socket.Store(&socket)
-	p.tr = &http.Transport{
-		Proxy:                 nil, // HTTP_PROXY and the like never apply
-		DialContext:           func(ctx context.Context, _, _ string) (net.Conn, error) { return p.dial(ctx) },
-		MaxIdleConns:          16,
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 0, // SSE streams send headers at once, then idle between pings
-	}
+	p.cur.Store(newConn(t))
 	p.rp = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.Out.URL.Scheme = "http"
-			pr.Out.URL.Host = Host
-			pr.Out.Host = Host
+			c := infoOf(pr.In).c
+			base, _ := url.Parse(c.t.BaseURL())
+			pr.Out.URL.Scheme = base.Scheme
+			pr.Out.URL.Host = base.Host
+			pr.Out.Host = c.t.Host()
+			for k := range pr.Out.Header {
+				if strings.HasPrefix(http.CanonicalHeaderKey(k), "Sec-Fetch-") {
+					pr.Out.Header.Del(k)
+				}
+			}
 			pr.Out.Header.Del("Cookie")
+			pr.Out.Header.Del("Origin")
 		},
-		Transport:     p.tr,
+		Transport:     roundTripper{},
 		FlushInterval: -1,
 		ModifyResponse: func(res *http.Response) error {
 			if res.StatusCode >= 300 && res.StatusCode < 400 && res.StatusCode != http.StatusNotModified {
@@ -161,49 +194,76 @@ func NewAPIProxy(socket string) *APIProxy {
 	return p
 }
 
-// SetSocket points the proxy at socket ("" unsets it) and drops idle
-// connections to the previous one.
-func (p *APIProxy) SetSocket(socket string) {
-	if old := p.socket.Swap(&socket); old != nil && *old != socket {
-		p.tr.CloseIdleConnections()
+func newConn(t target.Target) *conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &conn{t: t, ctx: ctx, cancel: cancel}
+	if !t.IsZero() {
+		c.tr = t.Transport()
+	}
+	return c
+}
+
+// roundTripper sends each request over its conn's transport.
+type roundTripper struct{}
+
+func (roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	c := infoOf(r).c
+	if c.tr == nil {
+		return nil, &target.DialError{Err: target.ErrNoSocket}
+	}
+	return c.tr.RoundTrip(r)
+}
+
+func infoOf(r *http.Request) reqInfo {
+	if v, ok := r.Context().Value(reqKey{}).(reqInfo); ok {
+		return v
+	}
+	return reqInfo{c: &conn{ctx: context.Background()}, page: r.Context()}
+}
+
+// SetTarget points the proxy at t (a zero Target unsets it). Another
+// server (or the same one at another address) ends every open request
+// and stream to the previous one and drops its idle connections; the same
+// target again changes nothing.
+func (p *APIProxy) SetTarget(t target.Target) {
+	if old := p.cur.Load(); old != nil && old.t.Same(t) {
+		return
+	}
+	old := p.cur.Swap(newConn(t))
+	if old != nil {
+		old.cancel()
+		if old.tr != nil {
+			old.tr.CloseIdleConnections()
+		}
 	}
 }
 
-// Socket is the current socket, "" when unset.
-func (p *APIProxy) Socket() string {
-	if s := p.socket.Load(); s != nil {
-		return *s
+// Target is the current target, zero when unset.
+func (p *APIProxy) Target() target.Target {
+	if c := p.cur.Load(); c != nil {
+		return c.t
 	}
-	return ""
-}
-
-func (p *APIProxy) dial(ctx context.Context) (net.Conn, error) {
-	s := p.Socket()
-	if s == "" {
-		return nil, errNotReady
-	}
-	var d net.Dialer
-	c, err := d.DialContext(ctx, "unix", s)
-	if err != nil {
-		return nil, &dialError{err}
-	}
-	return c, nil
+	return target.Target{}
 }
 
 func (p *APIProxy) proxyError(w http.ResponseWriter, r *http.Request, err error) {
-	if r.Context().Err() != nil {
+	info := infoOf(r)
+	if info.page.Err() != nil {
 		return // the page went away; nobody reads the answer
 	}
-	var de *dialError
+	if info.c.ctx.Err() != nil {
+		err = errSwitched
+	}
+	var de *target.DialError
 	switch {
 	case errors.Is(err, ErrRedirect):
 		WriteError(w, http.StatusBadGateway, err.Error(), "redirect")
 	case isEventStream(r):
 		writeRetry(w)
-	case errors.Is(err, errNotReady):
-		WriteError(w, http.StatusServiceUnavailable, err.Error(), "starting")
-	case errors.As(err, &de):
-		WriteError(w, http.StatusServiceUnavailable, err.Error(), "unavailable")
+	case errors.Is(err, target.ErrNoSocket), info.c.t.IsZero():
+		WriteError(w, http.StatusServiceUnavailable, "bridge: the Stage server is starting", "starting")
+	case errors.As(err, &de), errors.Is(err, errSwitched):
+		WriteError(w, http.StatusServiceUnavailable, "bridge: "+err.Error(), "unavailable")
 	default:
 		WriteError(w, http.StatusBadGateway, err.Error(), "unavailable")
 	}
@@ -230,18 +290,54 @@ func (p *APIProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusForbidden, err.Error(), "denied")
 		return
 	}
-	if isEventStream(r) && !p.waitSocket(r.Context()) {
-		if r.Context().Err() == nil {
-			writeRetry(w)
-		}
+	if reason := crossOrigin(r); reason != "" {
+		WriteError(w, http.StatusForbidden, "bridge: "+reason, "denied")
 		return
 	}
-	p.rp.ServeHTTP(w, r)
+	c := p.cur.Load()
+	if isEventStream(r) {
+		if c = p.waitTarget(r.Context()); c == nil {
+			if r.Context().Err() == nil {
+				writeRetry(w)
+			}
+			return
+		}
+	}
+	// The request ends with the page or when the target changes.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	stop := context.AfterFunc(c.ctx, cancel)
+	defer stop()
+	ctx = context.WithValue(ctx, reqKey{}, reqInfo{c: c, page: r.Context()})
+	p.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// waitSocket reports whether the socket accepts connections, waiting up to
-// StreamWait for it.
-func (p *APIProxy) waitSocket(ctx context.Context) bool {
+// crossOrigin is why the request did not come from the app's own page, ""
+// when it did: Sec-Fetch-Site cross-site or same-site, or an unsafe
+// method with another Origin (the server's guard does the same for
+// unstripped requests, docs/runtime.md).
+func crossOrigin(r *http.Request) string {
+	origin := r.Header.Get("Origin")
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "cross-site", "same-site":
+		if origin != PageOrigin {
+			return "cross-site request rejected"
+		}
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		return ""
+	}
+	if origin != "" && origin != PageOrigin {
+		return "cross-origin request rejected"
+	}
+	return ""
+}
+
+// waitTarget returns the current target once it accepts connections,
+// waiting up to StreamWait for it (following target changes); nil when
+// the wait runs out or ctx ends.
+func (p *APIProxy) waitTarget(ctx context.Context) *conn {
 	wait := p.StreamWait
 	if wait <= 0 {
 		wait = DefaultStreamWait
@@ -250,15 +346,21 @@ func (p *APIProxy) waitSocket(ctx context.Context) bool {
 	defer deadline.Stop()
 	delay := 100 * time.Millisecond
 	for {
-		if c, err := p.dial(ctx); err == nil {
-			_ = c.Close()
-			return true
+		c := p.cur.Load()
+		if !c.t.IsZero() {
+			dctx, cancel := context.WithTimeout(ctx, max(wait/2, time.Second))
+			conn, err := c.t.Dial(dctx)
+			cancel()
+			if err == nil {
+				_ = conn.Close()
+				return c
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
 		case <-deadline.C:
-			return false
+			return nil
 		case <-time.After(delay):
 		}
 		delay = min(delay*2, time.Second)

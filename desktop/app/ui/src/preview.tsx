@@ -1,18 +1,21 @@
 // Dev-only preview (`pnpm --filter stage-desktop dev`, then /preview.html?state=<name>): renders the
 // desktop host's connection states with a fake shell, for visual checks in a browser. Not part of the build
 // (vite builds index.html only). With STAGE_DESKTOP_DEV_SOCKET set, "ready" states reach a real dev server.
+// The fake shell saves three servers (this machine, "Studio", "Lab"); switching plays a short connect, Lab
+// stays unreachable, and testing a `.lan` URL answers like a refused hostname.
 import { StageApp } from "@stage/app";
 import "@stage/app/index.css";
-import type { HostState, Platform } from "@stage/app/platform";
+import type { HostServerEntry, HostState, HostTarget, Platform } from "@stage/app/platform";
 import { createRoot } from "react-dom/client";
 import { desktopHost } from "./platform/host.ts";
 import { desktopLinks } from "./platform/links.ts";
-import { INITIAL_STATE, type DesktopNative } from "./platform/native.ts";
+import { INITIAL_STATE, type DesktopNative, type NativeServers } from "./platform/native.ts";
 import { desktopStorage } from "./platform/storage.ts";
 import { desktopTransport } from "./platform/transport.ts";
 
 const app = { name: "Stage Dev", version: "0.9.0-12-gabc1234", identity: "stage-dev", apiVersion: 1 };
 const server = {
+  id: "local",
   version: "0.9.0-12-gabc1234",
   apiVersion: 1,
   identity: "stage-dev",
@@ -22,6 +25,11 @@ const server = {
   pid: 4242,
 };
 const base: HostState = { ...INITIAL_STATE, app };
+const box: HostTarget = { id: "s-1a2b3c4d", name: "Studio", kind: "remote", url: "http://192.168.1.20:7380" };
+const lab: HostTarget = { id: "s-5e6f7a8b", name: "Lab", kind: "remote", url: "http://10.0.0.7:7380" };
+const local: HostTarget = INITIAL_STATE.target;
+const remote: HostState = { ...base, target: box };
+const remoteServer = { ...server, id: box.id, socket: "", managed: false, pid: null };
 const log = [
   "level=INFO msg=\"listening\" addr=unix:///run/user/1000/stage-dev/stage.sock",
   "level=ERROR msg=\"open database\" err=\"disk I/O error\"",
@@ -86,14 +94,50 @@ const STATES: Record<string, HostState> = {
   "ready-foreground": { ...base, phase: "ready", title: "Stage is ready", server: { ...server, managed: false, pid: 31337 }, foreground: true, epoch: 1 },
   reconnecting: { ...base, phase: "reconnecting", title: "Reconnecting to the Stage server", message: "It stopped answering 6s ago.", server, epoch: 1 },
   "stopped-after": { ...base, phase: "stopped", title: "Stage server stopped", message: "It has not answered for 30s.", server, epoch: 1 },
+  "remote-starting": { ...remote, step: "server", title: `Connecting to ${box.name}` },
+  unreachable: {
+    ...remote,
+    phase: "unreachable",
+    title: `Can't reach ${box.name}`,
+    message: `No Stage server answers at ${box.url}: dial tcp 192.168.1.20:7380: connect: connection refused`,
+    fix: "Check that Stage runs on that machine and listens on an address this machine can reach (stage serve --listen 0.0.0.0:7380), then Retry.",
+    epoch: 1,
+  },
+  "unreachable-refused": {
+    ...remote,
+    target: { ...box, url: "http://studio.lan:7380" },
+    phase: "unreachable",
+    title: `${box.name} refused the connection`,
+    message: 'The Stage server at http://studio.lan:7380 refused this app: host "studio.lan:7380" not allowed: add its origin to STAGE_ALLOWED_ORIGINS (or set STAGE_PUBLIC_URL) if it is a trusted proxy',
+    fix: "On that server, allow this address, restart it, then Retry:",
+    command: "STAGE_ALLOWED_ORIGINS=http://studio.lan:7380",
+  },
+  "remote-ready": { ...remote, phase: "ready", step: null, title: "Connected", server: remoteServer, epoch: 2, serverEpoch: 1 },
+  "remote-reconnecting": {
+    ...remote,
+    phase: "reconnecting",
+    title: "Reconnecting to Stage server",
+    message: "It stopped answering 6s ago.",
+    server: remoteServer,
+    epoch: 2,
+    serverEpoch: 1,
+  },
 };
 
 const name = new URLSearchParams(location.search).get("state") ?? "starting-service";
-const state = STATES[name] ?? STATES["starting-service"] ?? base;
+let state = STATES[name] ?? STATES["starting-service"] ?? base;
+const stateListeners = new Set<(s: HostState) => void>();
+const emitState = (next: HostState) => {
+  state = next;
+  for (const l of stateListeners) l(next);
+};
 const wait = () => new Promise<void>((resolve) => setTimeout(resolve, 800));
 const native: DesktopNative = {
   state: () => Promise.resolve(state),
-  onState: () => () => {},
+  onState: (listener) => {
+    stateListeners.add(listener);
+    return () => stateListeners.delete(listener);
+  },
   onNavigate: () => () => {},
   takeNavigation: () => Promise.resolve(""),
   retry: wait,
@@ -107,7 +151,79 @@ const native: DesktopNative = {
   setLoginStartup: () => Promise.resolve(),
 };
 
-const host = desktopHost(native);
+let entries: HostServerEntry[] = [local, box, lab].map((t) => ({
+  ...t,
+  active: state.target.id === t.id,
+  needsInput: t.id === local.id ? 2 : t.id === box.id ? 3 : null,
+}));
+const serverListeners = new Set<(list: HostServerEntry[]) => void>();
+const emitServers = () => {
+  for (const l of serverListeners) l(entries);
+};
+
+/** Where a switch lands: this machine and Studio connect, Lab stays unreachable. */
+function connected(target: HostTarget, epoch: number): HostState {
+  if (target.id === lab.id) {
+    return {
+      ...base,
+      target,
+      phase: "unreachable",
+      title: `Can't reach ${target.name}`,
+      message: `No Stage server answers at ${target.url}: dial tcp 10.0.0.7:7380: i/o timeout`,
+      fix: "Check that Stage runs on that machine and listens on an address this machine can reach (stage serve --listen 0.0.0.0:7380), then Retry.",
+      epoch,
+    };
+  }
+  const srv = target.kind === "local" ? server : { ...remoteServer, id: target.id };
+  return { ...base, target, phase: "ready", step: null, title: "Stage is ready", server: srv, epoch: epoch + 1, serverEpoch: 1 };
+}
+
+const servers: NativeServers = {
+  servers: () => Promise.resolve(entries),
+  addServer: (input) => {
+    const added: HostServerEntry = { id: `s-${entries.length}`, name: input.name, kind: "remote", url: input.url, active: false, needsInput: null };
+    entries = [...entries, added];
+    emitServers();
+    return Promise.resolve(added);
+  },
+  updateServer: (id, input) => {
+    entries = entries.map((e) => (e.id === id ? { ...e, ...input } : e));
+    emitServers();
+    const updated = entries.find((e) => e.id === id);
+    return updated === undefined ? Promise.reject(new Error("no such server")) : Promise.resolve(updated);
+  },
+  removeServer: (id) => {
+    entries = entries.filter((e) => e.id !== id);
+    emitServers();
+    return Promise.resolve();
+  },
+  switchServer: (id) => {
+    const entry = entries.find((e) => e.id === id);
+    if (entry === undefined) return Promise.reject(new Error("no such server"));
+    if (entry.active) return Promise.resolve();
+    const target: HostTarget = { id: entry.id, name: entry.name, kind: entry.kind, url: entry.url };
+    const epoch = state.epoch;
+    emitState({ ...base, target, step: target.kind === "remote" ? "server" : "service", title: `Connecting to ${target.name}`, epoch });
+    entries = entries.map((e) => ({ ...e, active: e.id === id }));
+    emitServers();
+    void wait().then(() => {
+      if (state.target.id === id) emitState(connected(target, epoch));
+    });
+    return Promise.resolve();
+  },
+  testServer: async (url) => {
+    await wait();
+    return url.includes(".lan")
+      ? { reachable: true, apiVersion: 0, identity: "", version: "", error: "host not allowed", hint: "Add it to STAGE_ALLOWED_ORIGINS on that server.", command: `STAGE_ALLOWED_ORIGINS=${url}` }
+      : { reachable: true, apiVersion: 1, identity: "stage", version: server.version, error: "", hint: "", command: "" };
+  },
+  onServers: (listener) => {
+    serverListeners.add(listener);
+    return () => serverListeners.delete(listener);
+  },
+};
+
+const host = desktopHost(native, servers);
 const platform: Platform = {
   transport: desktopTransport(),
   clipboard: { writeText: (text) => native.copyText(text) },
