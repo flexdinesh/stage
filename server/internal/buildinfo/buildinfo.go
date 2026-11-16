@@ -41,6 +41,13 @@ var Version = "dev"
 // embedded at build time, or "".
 var Commit = ""
 
+// Stamp is set by release builds (scripts/release.sh) to
+// "stage-build/1 identity=<id> version=<v> commit=<sha>;" (docs/release.md).
+// Go omits -ldflags from the embedded build info under -trimpath, so
+// release verification finds this marker in binaries it cannot run (other
+// architectures). `stage version --json` reports it as "build".
+var Stamp = ""
+
 // APIVersion is the /api contract version. It changes only on breaking
 // API changes; clients refuse a server that reports a different one.
 const APIVersion = 1

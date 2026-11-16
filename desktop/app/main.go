@@ -7,6 +7,9 @@
 //	STAGE_DESKTOP_SOCKET=/run/user/1000/stage-desktopdev/x.sock
 //	    development builds only (mise run desktop:dev): talk to this
 //	    foreground dev server instead of the service
+//	STAGE_DESKTOP_SELFCHECK=1
+//	    print how the bundled CLI resolves and exit (release verification,
+//	    docs/release.md)
 package main
 
 import (
@@ -23,7 +26,7 @@ import (
 	"github.com/flexdinesh/stage/desktop/app/launch"
 )
 
-// Set by `mise run desktop:package` through MYGO_LDFLAGS
+// Set by `mise run dist` / `mise run release` through MYGO_LDFLAGS
 // (-X main.appName=Stage ...); the defaults are the developer app's.
 var (
 	appName       = "Stage Dev"
@@ -31,6 +34,10 @@ var (
 	// appIdentity is the deep-link scheme until the bundled CLI reports
 	// its identity (they match in a packaged app: mygo.config.ts urlSchemes).
 	appIdentity = "stage-dev"
+	// appBuild is the release build stamp ("stage-build/1 identity=...
+	// version=... commit=...;", docs/release.md), which release
+	// verification reads from the executable; empty in unstamped builds.
+	appBuild = ""
 )
 
 // dist is the UI build (desktop/app/ui, vite outDir ../dist).
@@ -52,6 +59,9 @@ var Navigate = mygo.NewEvent[string]("host:navigate")
 var NotificationDelivered = mygo.NewEvent[int64]("notifications:delivered")
 
 func main() {
+	if os.Getenv(selfcheckEnv) == "1" {
+		os.Exit(selfcheck(os.Stdout, os.Stderr))
+	}
 	ui, err := fs.Sub(dist, "dist")
 	if err != nil {
 		log.Fatal(err)

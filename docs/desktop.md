@@ -20,6 +20,7 @@ Decisions: [ADR 0001](adr/0001-desktop-shell.md).
 | `alerts/` | Native notifications: the server's notification stream over the socket, catch-up and foreground policy, device preferences (`notifications.json`), cleanup, badge, the OS settings opener. No MyGo import. |
 | `main.go`, `shell.go`, `service.go` | Windows, menus, tray, single instance, close/Quit, login startup, notification clicks, the bound `Desktop` service and its events. |
 | `notifications.go` | The MyGo side of `alerts`: OS notifications and the Dock/launcher badge. |
+| `selfcheck.go` | `STAGE_DESKTOP_SELFCHECK=1`: print how the bundled CLI resolves, then exit (release verification). |
 | `mygo.config.ts` | Build config per identity (`IDENTITY=stage` or `stage-dev`). |
 | `ui/` | pnpm workspace package `stage-desktop`: the desktop host frontend (mount, adapters, generated `src/mygo.ts`). Builds into `desktop/app/dist`. |
 | `itest/`, `e2e/` | Headless integration test against a real `stage serve`; webview e2e (build tag `e2e`). |
@@ -168,7 +169,8 @@ App identifiers end in `.desktop` because `io.github.flexdinesh.<id>` is the ser
 
 - `mise run desktop:dev`: builds a `stage-dev` CLI into `.scratch/dev/<branch>/bin`, runs a foreground `stage serve` on a short socket under `$XDG_RUNTIME_DIR/stage-desktopdev/` with data in `.scratch/dev/<branch>/desktop` (`.env.dev`, `T3_FAKE=1` to work without T3), and `go tool mygo dev` with the UI's Vite server on `localhost:5174`, which proxies `/api` to that socket. The dev-only `STAGE_DESKTOP_SOCKET` override skips the bundled CLI and the service (identity and API version come from the dev server's health) and is ignored by `mygo build` builds. No OS service is touched.
 - Preview of every connection state in a browser: `pnpm --filter stage-desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`).
-- `mise run desktop:package [IDENTITY=stage|stage-dev]` (default `stage-dev`): cross-builds the CLI with the identity and version into `desktop/app/resources/<os>-<arch>/bin/stage` (MyGo merges the darwin pair into a universal binary), then `go tool mygo build -platform linux/amd64,linux/arm64,darwin/universal` into `desktop/app/build/`: a `.deb`, a tarball with `install.sh` and a `.desktop` file (scheme handler) per Linux arch, and `<Name>.app` (`CFBundleURLTypes`, `LSMinimumSystemVersion 12.0`). The `.dmg` needs macOS. No app icon ships yet (the `.desktop` file names `Icon=<name>`; the tray uses a generated ink square). Installing is a later task.
+- `mise run dist [TARGETS=host|all]`: a `stage-dev` developer build ([release.md](release.md)). It builds the CLI/server (web UI embedded) per target, copies it to `desktop/app/resources/<os>-<arch>/bin/stage` with `LICENSE` (MyGo merges the darwin pair into a universal binary), runs `go tool mygo build` (the `desktop/app/build/` outputs: per Linux arch a tarball with `install.sh`, a `.deb`, an `.rpm`, a `PKGBUILD` and a `.desktop` file (scheme handler); `<Name>.app` with `CFBundleURLTypes` and `LSMinimumSystemVersion 12.0`), then assembles and verifies the assets in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z` is the `stage` build of a clean HEAD. The `.dmg` needs macOS. No app icon ships yet (the `.desktop` file names `Icon=<name>`; the tray uses a generated ink square). Installing is a later task.
+- `STAGE_DESKTOP_SELFCHECK=1 <app executable>` prints how the packaged app resolves its bundled CLI (`<resources>/bin/stage`, its `version --json`) and exits before the single-instance lock, windows or the service; release verification runs it.
 - `mise run check` includes `check:desktop` (Go vet, unit tests, the headless integration test); the UI package's tests, typecheck and lint run in `check:web`.
 - `mise run desktop:e2e`: the webview e2e (a display and WebKitGTK 4.1, or macOS).
 
@@ -178,7 +180,7 @@ See the PR and the plan's execution notes for the latest run. Covered without a 
 
 ### Manual notification checks
 
-Build with `mise run desktop:package` (`IDENTITY=stage-dev`, the default) and install or open the result from `desktop/app/build/`. A fresh profile means Quit Stage Dev, then delete `notifications.json` from `~/.config/io.github.flexdinesh.stage-dev.desktop/` (Linux) or `~/Library/Application Support/io.github.flexdinesh.stage-dev.desktop/` (macOS); macOS keeps its permission answer per bundle id. Empty cells: not run.
+Build with `mise run dist` (`TARGETS=all` for every platform) and install or open the result from `desktop/app/build/` (or the assets in `.scratch/dist/<version>`). A fresh profile means Quit Stage Dev, then delete `notifications.json` from `~/.config/io.github.flexdinesh.stage-dev.desktop/` (Linux) or `~/Library/Application Support/io.github.flexdinesh.stage-dev.desktop/` (macOS); macOS keeps its permission answer per bundle id. Empty cells: not run.
 
 | # | Check | Linux X11 | Linux Wayland | macOS packaged |
 | --- | --- | --- | --- | --- |

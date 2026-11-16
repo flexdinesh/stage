@@ -13,6 +13,7 @@ can render: the browser (PWA) and the MyGo desktop app
 | `web/` (`stage-web`) | Browser host: `index.html`, `src/main.tsx` (mount, service worker registration), `src/sw.ts`, `public/` (manifest, icons, favicons), Vite config, browser adapters (`src/platform/`) | Hold product UI or business logic |
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`stage-desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
 | `desktop/fixture/` | MyGo proof (ADR 0001). Separate Go module and its own pnpm lockfile, outside the workspace | Be imported by anything |
+| `tools/release/`, `scripts/release.sh` | Release builds ([release.md](release.md)): one version and commit for the desktop, its bundled CLI and the headless CLI; the manifest, checksums and verification. `tools/release` is its own Go module (standard library only) | Upload, tag, install or hold product logic |
 
 One pnpm workspace (`pnpm-workspace.yaml`: `app`, `web`, `desktop/app/ui`) with one lockfile at
 the root. `@stage/app` ships TypeScript source; the host's Vite build compiles

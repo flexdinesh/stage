@@ -21,6 +21,9 @@ type BuildInfo struct {
 	APIVersion   int    `json:"apiVersion"`
 	ServiceLabel string `json:"serviceLabel"`
 	ServiceUnit  string `json:"serviceUnit"`
+	// Build is the release build stamp (buildinfo.Stamp), absent when
+	// unstamped.
+	Build string `json:"build,omitempty"`
 }
 
 // ThisBuild describes this binary.
@@ -28,6 +31,7 @@ func ThisBuild() BuildInfo {
 	return BuildInfo{
 		Identity: buildinfo.Identity, Version: buildinfo.Version, Commit: buildinfo.Revision(),
 		APIVersion: buildinfo.APIVersion, ServiceLabel: buildinfo.Label(), ServiceUnit: UnitName(),
+		Build: buildinfo.Stamp,
 	}
 }
 

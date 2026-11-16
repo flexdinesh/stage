@@ -77,7 +77,8 @@ real `stage serve` (`procnet`).
 The desktop app and the server ship from one repository tag, and
 `/api/health` will report the server version. If the versions differ, the
 desktop shows a non-blocking banner. There is no cross-version compatibility
-guarantee.
+guarantee. One release carries one version and commit for the desktop, its
+bundled CLI and the headless CLI ([release.md](../release.md)).
 
 ### 6. Supported platforms (initial)
 
@@ -95,7 +96,8 @@ guarantee.
 
 Stable and developer installations are kept separate on five axes: app
 identifier, CLI name, service unit, socket and data dir. They never share
-state. The concrete names belong to the packaging task. MyGo's own `mygo dev`
+state. The names are in [desktop.md](../desktop.md#identities); release
+builds use `stage`, developer builds `stage-dev` ([release.md](../release.md)). MyGo's own `mygo dev`
 appends `.dev` to the bundle identifier; that only labels dev runs and is not
 the developer installation.
 

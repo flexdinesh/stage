@@ -1,0 +1,66 @@
+# Manual release (docs/release.md). Run it from the Actions tab on main with a
+# version; it builds that exact commit with `mise run release` (the same
+# command as a local release), verifies the assets and creates a DRAFT
+# GitHub release targeting the commit. Publishing the draft (which creates
+# the vX.Y.Z tag) is done by hand in the web UI. There are no push, tag or
+# pull request triggers and no secrets.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version X.Y.Z or X.Y.Z-pre (no leading v)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refuse a bad version or an existing release
+        run: |
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z]+(\.[0-9a-z]+)*)?$ ]] ||
+            { echo "version $VERSION is not X.Y.Z or X.Y.Z-pre"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "tag v$VERSION already exists"; exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release v$VERSION already exists (draft or published)"; exit 1
+          fi
+
+      # The smoke test runs the packaged linux/amd64 desktop app's selfcheck.
+      - name: Desktop runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0 libwebkit2gtk-4.1-0
+
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: 2026.10.18
+
+      - name: Build and verify
+        run: mise run release
+
+      - name: Create the draft release
+        run: |
+          dir=".scratch/release/v$VERSION"
+          pre=()
+          case "$VERSION" in *-*) pre=(--prerelease) ;; esac
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft \
+            --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes "${pre[@]}" "$dir"/*

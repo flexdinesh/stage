@@ -3,8 +3,9 @@
 
 [tools]
 go = "1.27.3"   # server/go.mod
-node = "26"     # Dockerfile
+node = "26.13.0" # Dockerfile (node:26)
 pnpm = "12.15.0" # Dockerfile
+shellcheck = "0.11.0" # scripts/release.sh (check:release)
 
 [tasks.dev]
 description = "Branch db + Go server (:7390, real T3) + browser host on Vite (proxies /api)"
@@ -54,8 +55,8 @@ run = [
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture and desktop app Go tests"
-depends = ["check:go", "check:web", "check:fixture", "check:desktop"]
+description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture and desktop app Go tests, release tool"
+depends = ["check:go", "check:web", "check:fixture", "check:desktop", "check:release"]
 
 [tasks."check:go"]
 description = "go vet (with and without the smoke tag) + go test"
@@ -108,38 +109,23 @@ pnpm install
 wait
 '''
 
-[tasks."desktop:package"]
-description = "Package the desktop app locally (IDENTITY=stage|stage-dev, default stage-dev): bundled stage CLI per platform + mygo build for linux/amd64, linux/arm64, darwin/universal into desktop/app/build"
-raw = true
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-IDENTITY="${IDENTITY:-stage-dev}"
-case "$IDENTITY" in
-  stage) NAME="Stage"; APPID=io.github.flexdinesh.stage.desktop ;;
-  stage-dev) NAME="Stage Dev"; APPID=io.github.flexdinesh.stage-dev.desktop ;;
-  *) echo "IDENTITY must be stage or stage-dev, not $IDENTITY" >&2; exit 2 ;;
-esac
-VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
-BI=github.com/flexdinesh/stage/server/internal/buildinfo
-RES="$PWD/desktop/app/resources"
-rm -rf "$RES"
-for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
-  os=${target%/*}; arch=${target#*/}
-  mkdir -p "$RES/$os-$arch/bin"
-  (cd server && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
-    -ldflags "-s -w -X $BI.Identity=$IDENTITY -X $BI.Version=$VERSION -X $BI.Commit=$COMMIT" \
-    -o "$RES/$os-$arch/bin/stage" ./cmd/stage)
-done
-pnpm install --frozen-lockfile
-cd desktop/app
-rm -rf build
-export IDENTITY STAGE_VERSION="${STAGE_VERSION:-0.0.0}"
-export MYGO_LDFLAGS="-X 'main.appName=$NAME' -X main.appIdentifier=$APPID -X main.appIdentity=$IDENTITY"
-go tool mygo build -platform linux/amd64,linux/arm64,darwin/universal
-echo "desktop:package: $NAME ($IDENTITY) in desktop/app/build"
-'''
+# Release assets (docs/release.md): scripts/release.sh builds, assembles
+# (tools/release) and verifies. Nothing uploads, tags or installs.
+[tasks.dist]
+description = "Developer build of the working tree (stage-dev, 0.0.0-dev.<branch>): CLI/server + desktop for this machine (TARGETS=all: every target), manifest, checksums, verify; out STAGE_DIST_OUT (.scratch/dist/<version>)"
+run = "scripts/release.sh dist"
+
+[tasks.release]
+description = "Release build of clean HEAD (VERSION=X.Y.Z, identity stage) from a git archive export: every target, manifest, checksums, verify; out STAGE_RELEASE_OUT (.scratch/release/v<version>)"
+run = "scripts/release.sh release"
+
+[tasks."release:verify"]
+description = "Verify an asset directory (DIR=...): manifest, checksums, names, versions, bundled CLI, no secrets, smoke on this machine"
+run = 'scripts/release.sh verify "${DIR:?set DIR to an asset directory}"'
+
+[tasks."check:release"]
+description = "Release tool (tools/release) go vet + go test, shellcheck of scripts/release.sh"
+run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh"
 
 [tasks."desktop:e2e"]
 description = "Desktop app webview e2e: needs a display + WebKitGTK 4.1, or macOS; builds the UI first, uses a temp foreground server (no OS service)"
