@@ -166,6 +166,10 @@ func newDevFixture(t *testing.T) *devFixture {
 	if err := os.WriteFile(filepath.Join(f.logs, "stage"), []byte(devCLI), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Never the developer's real gh login: not logged in here.
+	if err := os.WriteFile(filepath.Join(f.bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -211,6 +215,60 @@ func (f *devFixture) run(script string, extraEnv []string, args ...string) devRu
 	}
 	return devRun{code: code, out: string(out), mise: lines(filepath.Join(f.logs, "mise.log")),
 		cli: lines(filepath.Join(f.logs, "cli.log")), recorded: f.recorded()}
+}
+
+// runPiped runs the script as `curl ... | sh -s -- args` does: the script
+// on stdin, from dir (a temp dir outside any repository when ""), with
+// STAGE_DEV_REPO at the fixture origin and a gh that is not logged in.
+func (f *devFixture) runPiped(script, dir string, extraEnv []string, args ...string) devRun {
+	f.t.Helper()
+	for _, l := range []string{"mise.log", "cli.log"} {
+		_ = os.Remove(filepath.Join(f.logs, l))
+	}
+	body, err := os.ReadFile(filepath.Join(f.checkout, "scripts", script))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if dir == "" {
+		dir = f.t.TempDir()
+	}
+	cmd := exec.Command("sh", append([]string{"-s", "--"}, args...)...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(string(body))
+	cmd.Env = f.env(append([]string{"STAGE_DEV_REPO=" + f.origin}, extraEnv...)...)
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if xe, ok := err.(*exec.ExitError); ok {
+		code = xe.ExitCode()
+	} else if err != nil {
+		f.t.Fatal(err)
+	}
+	return devRun{code: code, out: string(out), mise: lines(filepath.Join(f.logs, "mise.log")),
+		cli: lines(filepath.Join(f.logs, "cli.log")), recorded: f.recorded()}
+}
+
+// cacheRepo is the piped mode's bare clone.
+func (f *devFixture) cacheRepo() string {
+	return filepath.Join(f.cache, "stage-install-dev", "repo.git")
+}
+
+// cleanPiped asserts a piped run left only the cache clone: no temp build
+// dir, no registered worktree, and the user's checkout unchanged.
+func (f *devFixture) cleanPiped(before string) {
+	f.t.Helper()
+	if after := f.state(); after != before {
+		f.t.Fatalf("checkout changed:\n%s\nwas:\n%s", after, before)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.cache, "stage-install-dev"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "repo.git" {
+		f.t.Fatalf("cache holds %v, want only repo.git", entries)
+	}
+	if wts := git(f.t, f.cacheRepo(), "worktree", "list", "--porcelain"); strings.Count(wts, "worktree ") != 1 {
+		f.t.Fatalf("worktrees left in the cache clone:\n%s", wts)
+	}
 }
 
 func (f *devFixture) recorded() string {
@@ -408,7 +466,122 @@ func TestInstallDevCheckAndWorkingTree(t *testing.T) {
 	f.clean(before)
 }
 
+func TestInstallDevPiped(t *testing.T) {
+	f := newDevFixture(t)
+	before := f.state()
+	// First run clones into the cache and installs origin/main.
+	r := f.runPiped("install-dev.sh", "", nil)
+	if r.code != 0 || r.recorded != f.main {
+		t.Fatalf("exit %d, installed %q, want origin/main %s:\n%s", r.code, r.recorded, f.main, r.out)
+	}
+	mustContain(t, r, "commit "+f.main)
+	if git(t, f.cacheRepo(), "rev-parse", "--is-bare-repository") != "true" ||
+		git(t, f.cacheRepo(), "remote", "get-url", "origin") != f.origin {
+		t.Fatal("cache clone is not a bare clone of STAGE_DEV_REPO")
+	}
+	wt := strings.TrimSuffix(r.mise[len(r.mise)-1], " run dist")
+	if !strings.HasPrefix(wt, filepath.Join(f.cache, "stage-install-dev")+"/build.") {
+		t.Fatalf("built in %s", wt)
+	}
+	f.cleanPiped(before)
+	marker := filepath.Join(f.cacheRepo(), "reused")
+	writeFile(t, marker, "x")
+
+	// Rerun: already installed, cache reused (not recloned).
+	r = f.runPiped("install-dev.sh", "", nil)
+	if r.code != 0 || len(r.mise) != 0 || len(r.cli) != 0 {
+		t.Fatalf("repeat: exit %d, mise %v, cli %v:\n%s", r.code, r.mise, r.cli, r.out)
+	}
+	mustContain(t, r, "already installed")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("cache clone was recreated")
+	}
+
+	// Explicit SHAs: off main, and a pull request head on no branch.
+	for _, sha := range []string{f.feature, f.pr} {
+		if r := f.runPiped("install-dev.sh", "", nil, sha); r.code != 0 || r.recorded != sha {
+			t.Fatalf("%s: exit %d, installed %q:\n%s", sha, r.code, r.recorded, r.out)
+		}
+		f.cleanPiped(before)
+	}
+
+	// A commit origin does not have; --working-tree has no checkout.
+	if r := f.runPiped("install-dev.sh", "", nil, f.localOnly); r.code != 10 || r.recorded != f.pr {
+		t.Fatalf("local only: exit %d:\n%s", r.code, r.out)
+	}
+	r = f.runPiped("install-dev.sh", "", nil, "--working-tree")
+	if r.code != 2 || len(r.mise) != 0 {
+		t.Fatalf("--working-tree: exit %d:\n%s", r.code, r.out)
+	}
+	mustContain(t, r, "--working-tree needs a checkout")
+	f.cleanPiped(before)
+
+	// --help needs no script file.
+	r = f.runPiped("install-dev.sh", "", nil, "--help")
+	if r.code != 0 {
+		t.Fatalf("--help: exit %d:\n%s", r.code, r.out)
+	}
+	mustContain(t, r, "sh -s --", "--working-tree")
+
+	// Unreachable origin: refused, the prior install kept.
+	r = f.runPiped("install-dev.sh", "", []string{"STAGE_DEV_REPO=" + filepath.Join(t.TempDir(), "gone.git")}, "--force")
+	if r.code != 10 || len(r.mise) != 0 || r.recorded != f.pr {
+		t.Fatalf("unreachable: exit %d, mise %v:\n%s", r.code, r.mise, r.out)
+	}
+	mustContain(t, r, "git fetch origin failed; nothing was built")
+	f.cleanPiped(before)
+}
+
+// Piped from inside a Stage checkout (where dirname "sh"/.. is the
+// checkout), the checkout is still not used: the cache clone is.
+func TestInstallDevPipedIgnoresCurrentRepository(t *testing.T) {
+	f := newDevFixture(t)
+	before := f.state()
+	r := f.runPiped("install-dev.sh", filepath.Join(f.checkout, "scripts"), nil, "--working-tree")
+	if r.code != 2 {
+		t.Fatalf("--working-tree from a checkout dir, piped: exit %d:\n%s", r.code, r.out)
+	}
+	r = f.runPiped("install-dev.sh", filepath.Join(f.checkout, "scripts"), nil, f.feature)
+	if r.code != 0 || r.recorded != f.feature {
+		t.Fatalf("exit %d, installed %q:\n%s", r.code, r.recorded, r.out)
+	}
+	if _, err := os.Stat(f.cacheRepo()); err != nil {
+		t.Fatal("did not use the cache clone")
+	}
+	f.cleanPiped(before)
+}
+
 // uninstall-dev.sh
+
+func TestUninstallDevPiped(t *testing.T) {
+	f := newDevFixture(t)
+	if r := f.runPiped("install-dev.sh", "", nil); r.code != 0 {
+		t.Fatalf("install: exit %d:\n%s", r.code, r.out)
+	}
+	f.dirs(t, devDirs...)
+	f.dirs(t, keptDirs...)
+	if r := f.runPiped("uninstall-dev.sh", "", nil, "--help"); r.code != 0 || !strings.Contains(r.out, "--purge") {
+		t.Fatalf("--help: exit %d:\n%s", r.code, r.out)
+	}
+	r := f.runPiped("uninstall-dev.sh", "", nil)
+	if r.code != 0 || len(r.cli) != 1 || r.cli[0] != "uninstall" || r.recorded != "" || !f.exists(devDirs[0]) {
+		t.Fatalf("uninstall: exit %d, cli %v:\n%s", r.code, r.cli, r.out)
+	}
+	r = f.runPiped("uninstall-dev.sh", "", nil, "--purge", "--yes")
+	if r.code != 0 {
+		t.Fatalf("purge: exit %d:\n%s", r.code, r.out)
+	}
+	for _, p := range devDirs {
+		if f.exists(p) {
+			t.Fatalf("%s kept by --purge", p)
+		}
+	}
+	for _, p := range keptDirs {
+		if !f.exists(p) {
+			t.Fatalf("--purge removed %s", p)
+		}
+	}
+}
 
 func (f *devFixture) dirs(t *testing.T, paths ...string) {
 	t.Helper()

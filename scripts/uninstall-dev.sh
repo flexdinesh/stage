@@ -8,7 +8,21 @@
 # touched.
 #
 #   scripts/uninstall-dev.sh [--purge] [--yes]
+#   curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/uninstall-dev.sh | sh [-s -- --purge --yes]
 set -eu
+
+usage() {
+  cat <<'EOF'
+Uninstalls Stage Dev (docs/development.md): app, CLI link, desktop entry
+and service; data is kept.
+
+  scripts/uninstall-dev.sh [--purge] [--yes]
+  curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/uninstall-dev.sh | sh [-s -- --purge --yes]
+
+  --purge  also delete Stage Dev's data, config, logs and preferences (asks first)
+  --yes    skip the --purge confirmation (needed when piped)
+EOF
+}
 
 fail() {
   printf 'uninstall-dev: %s\n' "$1" >&2
@@ -22,7 +36,7 @@ while [ $# -gt 0 ]; do
     --purge) PURGE=1 ;;
     --yes) YES=1 ;;
     -h | --help)
-      sed -n '2,10p' "$0"
+      usage
       exit 0
       ;;
     *) fail "unknown option $1" 2 ;;

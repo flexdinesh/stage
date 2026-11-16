@@ -6,13 +6,34 @@
 # is never changed) with `mise run dist`, then the built stage-dev CLI runs
 # `stage-dev install --from` on it, exactly as a release install does.
 # --working-tree builds this checkout's working tree instead (dirty marked).
-# Stage Dev has its own app, CLI, service, socket and data dir, and never
-# touches the stable install. Rerun it to update.
+# Piped (curl ... | sh), with no checkout, it builds from a cached bare
+# clone of $STAGE_DEV_REPO (default the GitHub repository, with gh's
+# credentials when gh is logged in). Stage Dev has its own app, CLI,
+# service, socket and data dir, and never touches the stable install.
+# Rerun it to update.
 #
 #   scripts/install-dev.sh [--headless] [--cli-name NAME] [--check] [--force] [--working-tree | SHA]
+#   curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install-dev.sh | sh -s -- [options] [SHA]
 set -eu
 
-SELF=$(cd "$(dirname "$0")/.." && pwd)
+usage() {
+  cat <<'EOF'
+Installs Stage Dev built from an exact commit (docs/development.md).
+
+  scripts/install-dev.sh [--headless] [--cli-name NAME] [--check] [--force] [--working-tree | SHA]
+  curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install-dev.sh | sh -s -- [options] [SHA]
+
+  SHA             full 40-character commit origin has (default: origin/main)
+  --headless      CLI/server only (no desktop app)
+  --cli-name NAME the CLI's name in ~/.local/bin (default stage-dev)
+  --check         run mise run check before building
+  --force         rebuild even if that commit is installed
+  --working-tree  build this checkout's working tree (checkout runs only)
+
+Piped, it builds from a cached clone of $STAGE_DEV_REPO
+(default https://github.com/flexdinesh/stage.git).
+EOF
+}
 
 fail() {
   printf 'install-dev: %s\n' "$1" >&2
@@ -33,7 +54,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1 ;;
     --working-tree) WORKING_TREE=1 ;;
     -h | --help)
-      sed -n '2,12p' "$0"
+      usage
       exit 0
       ;;
     -*) fail "unknown option $1" 2 ;;
@@ -72,7 +93,37 @@ case "$(uname -m)" in
   *) fail "unsupported CPU $(uname -m)" 7 ;;
 esac
 
-REPO=$(git -C "$SELF" rev-parse --show-toplevel 2>/dev/null) || fail "$SELF is not a git checkout" 7
+BASE="${XDG_CACHE_HOME:-$HOME/.cache}/stage-install-dev"
+
+# Checkout mode only when $0 is this script inside a git checkout. Piped,
+# $0 is the shell, so the current directory's repository is never used.
+REPO='' PIPED=1
+case "$0" in
+  install-dev.sh | */install-dev.sh)
+    if [ -f "$0" ]; then
+      SELF=$(cd "$(dirname "$0")/.." && pwd)
+      if REPO=$(git -C "$SELF" rev-parse --show-toplevel 2>/dev/null); then PIPED=0; fi
+    fi
+    ;;
+esac
+GH_CRED=0
+if [ "$PIPED" = 1 ]; then
+  [ "$WORKING_TREE" = 0 ] || fail "--working-tree needs a checkout; run scripts/install-dev.sh from one" 2
+  REPO="$BASE/repo.git"
+  URL=${STAGE_DEV_REPO:-https://github.com/flexdinesh/stage.git}
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then GH_CRED=1; fi
+fi
+
+# cgit: git with gh's credentials in piped mode when gh is logged in (the
+# repository may be private); plain git otherwise.
+cgit() {
+  if [ "$GH_CRED" = 1 ]; then
+    git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"
+  else
+    git "$@"
+  fi
+}
+
 RECORD="$HOME/.local/lib/stage-dev/install.json"
 WANT_CLI=${CLI_NAME:-stage-dev}
 
@@ -100,13 +151,23 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-BASE="${XDG_CACHE_HOME:-$HOME/.cache}/stage-install-dev"
 mkdir -p "$BASE"
 TMP=$(mktemp -d "$BASE/build.XXXXXX")
 
+if [ "$PIPED" = 1 ]; then
+  # A bare cache clone whose origin maps to refs/remotes/origin/*, so the
+  # rest is the same as in a checkout. Reused (fetched) by later runs.
+  [ -d "$REPO" ] || git init --quiet --bare "$REPO" || fail "could not create $REPO"
+  if ! have=$(git -C "$REPO" remote get-url origin 2>/dev/null); then
+    git -C "$REPO" remote add origin "$URL" || fail "could not set origin in $REPO"
+  elif [ "$have" != "$URL" ]; then
+    git -C "$REPO" remote set-url origin "$URL" || fail "could not set origin in $REPO"
+  fi
+fi
+
 if [ "$WORKING_TREE" = 0 ]; then
-  git -C "$REPO" remote get-url origin >/dev/null 2>&1 || fail "this checkout has no origin remote" 7
-  git -C "$REPO" fetch --quiet origin ||
+  git -C "$REPO" remote get-url origin >/dev/null 2>&1 || fail "$REPO has no origin remote" 7
+  cgit -C "$REPO" fetch --quiet origin ||
     fail "git fetch origin failed; nothing was built (local refs are never used instead)" 10
   if [ -z "$SHA" ]; then
     SHA=$(git -C "$REPO" rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}') ||
@@ -118,10 +179,10 @@ if [ "$WORKING_TREE" = 0 ]; then
     if ! git -C "$REPO" cat-file -e "$SHA^{commit}" 2>/dev/null ||
       [ -z "$(git -C "$REPO" for-each-ref --contains "$SHA" refs/remotes/origin 2>/dev/null)" ]; then
       git init --quiet "$TMP/probe" || fail "could not create $TMP/probe"
-      git -C "$TMP/probe" fetch --quiet --depth=1 "$(git -C "$REPO" remote get-url origin)" "$SHA" 2>/dev/null ||
+      cgit -C "$TMP/probe" fetch --quiet --depth=1 "$(git -C "$REPO" remote get-url origin)" "$SHA" 2>/dev/null ||
         fail "origin has no commit $SHA (push it first, or check the hash)" 10
       rm -rf "$TMP/probe"
-      git -C "$REPO" fetch --quiet origin "$SHA" 2>/dev/null || fail "could not fetch $SHA from origin" 10
+      cgit -C "$REPO" fetch --quiet origin "$SHA" 2>/dev/null || fail "could not fetch $SHA from origin" 10
     fi
     git -C "$REPO" cat-file -e "$SHA^{commit}" 2>/dev/null || fail "$SHA is not a commit" 10
   fi
