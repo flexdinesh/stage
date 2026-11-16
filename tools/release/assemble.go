@@ -459,7 +459,8 @@ func assembleMac(o assembleOpts, src string, cliBins map[string][]byte) ([]Artif
 }
 
 // checkUniversalCLI requires the bundled universal CLI's slices to be this
-// build's darwin-arm64 and darwin-amd64 binaries, byte for byte.
+// build's darwin-arm64 and darwin-amd64 binaries, apart from the ad-hoc
+// signature MyGo gives them on a Mac (sameCode).
 func checkUniversalCLI(cli []byte, cliBins map[string][]byte) error {
 	parts, err := machoSlices(cli)
 	if err != nil {
@@ -475,7 +476,7 @@ func checkUniversalCLI(cli []byte, cliBins map[string][]byte) error {
 		return errors.New("the bundled CLI is not a universal binary of this build's darwin-arm64 and darwin-amd64 CLIs")
 	}
 	for _, w := range want {
-		if !slices.ContainsFunc(parts, func(p []byte) bool { return bytes.Equal(p, w) }) {
+		if !slices.ContainsFunc(parts, func(p []byte) bool { return sameCode(p, w) }) {
 			return errors.New("a slice of the bundled universal CLI differs from this build's darwin CLI")
 		}
 	}

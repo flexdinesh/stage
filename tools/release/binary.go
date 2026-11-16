@@ -91,3 +91,76 @@ func machoSlices(b []byte) ([][]byte, error) {
 	}
 	return out, nil
 }
+
+// sameCode reports whether two Mach-O slices are the same file apart from
+// their code signatures. MyGo ad-hoc signs a macOS app's nested code on a
+// Mac, which re-signs both slices of the universal CLI (Go's linker signs
+// only darwin/arm64), so the bundled slices differ from the standalone CLIs
+// in their signature alone: the LC_CODE_SIGNATURE command, its blob at the
+// end of __LINKEDIT, and __LINKEDIT's sizes. Every other byte must match.
+func sameCode(a, b []byte) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	na, okA := withoutSignature(a)
+	nb, okB := withoutSignature(b)
+	return okA && okB && bytes.Equal(na, nb)
+}
+
+const lcCodeSignature = 0x1d
+
+// withoutSignature returns a copy of a thin 64-bit Mach-O with its code
+// signature taken out: LC_CODE_SIGNATURE removed from the load commands
+// (ncmds and sizeofcmds to match), __LINKEDIT's vmsize and filesize zeroed,
+// and the file cut where the signature blob starts, less the zero padding
+// before it.
+func withoutSignature(b []byte) ([]byte, bool) {
+	f, err := macho.NewFile(bytes.NewReader(b))
+	if err != nil || f.Magic != macho.Magic64 {
+		return nil, false
+	}
+	defer f.Close()
+	bo := f.ByteOrder
+	const header = 32 // mach_header_64
+	out := bytes.Clone(b)
+	ncmds, sizeofcmds := bo.Uint32(out[16:]), bo.Uint32(out[20:])
+	cmdsEnd := uint64(header) + uint64(sizeofcmds)
+	if cmdsEnd > uint64(len(out)) {
+		return nil, false
+	}
+	cut := uint64(len(out))
+	off := uint64(header)
+	for range ncmds {
+		if off+8 > cmdsEnd {
+			return nil, false
+		}
+		cmd, size := bo.Uint32(out[off:]), uint64(bo.Uint32(out[off+4:]))
+		if size < 8 || off+size > cmdsEnd {
+			return nil, false
+		}
+		switch {
+		case cmd == lcCodeSignature:
+			if size < 16 {
+				return nil, false
+			}
+			cut = min(cut, uint64(bo.Uint32(out[off+8:])))
+			// Close the gap; the freed tail becomes header padding.
+			copy(out[off:cmdsEnd], out[off+size:cmdsEnd])
+			clear(out[cmdsEnd-size : cmdsEnd])
+			cmdsEnd -= size
+			bo.PutUint32(out[16:], bo.Uint32(out[16:])-1)
+			bo.PutUint32(out[20:], uint32(cmdsEnd-header))
+			continue
+		case cmd == uint32(macho.LoadCmdSegment64) && size >= 72 &&
+			string(bytes.TrimRight(out[off+8:off+24], "\x00")) == "__LINKEDIT":
+			// segment_command_64: vmsize at 32, filesize at 48.
+			clear(out[off+32 : off+40])
+			clear(out[off+48 : off+56])
+		}
+		off += size
+	}
+	if cut < cmdsEnd {
+		return nil, false
+	}
+	return bytes.TrimRight(out[:cut], "\x00"), true
+}

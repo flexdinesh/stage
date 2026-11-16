@@ -23,7 +23,7 @@ tags; installing and updating (`scripts/install.sh`, `stage update`,
 - Pre-release versions use lowercase letters, digits and dots (`1.2.0-rc.1`); there is no build metadata, so package formats need no escaping.
 - Both run `scripts/release.sh`, which builds, then `tools/release assemble` and `tools/release verify -smoke`. `scripts/release.sh` and `tools/release` (Go standard library only) are the whole implementation.
 
-Both builds embed the web UI: `web/dist` is built once and copied into `server/internal/webui/dist` before the CLI/server is compiled (`CGO_ENABLED=0 -trimpath -ldflags "-s -w -X ..."`) for each target. The desktop's bundled CLI is the same file as the headless one for that target (byte for byte; a universal macOS CLI's two slices are the darwin binaries).
+Both builds embed the web UI: `web/dist` is built once and copied into `server/internal/webui/dist` before the CLI/server is compiled (`CGO_ENABLED=0 -trimpath -ldflags "-s -w -X ..."`) for each target. The desktop's bundled CLI is the same file as the headless one for that target (byte for byte; a universal macOS CLI's two slices are the darwin binaries, apart from the code signature: on a Mac, MyGo ad-hoc signs the bundled CLI, which re-signs both slices, and verification ignores only `LC_CODE_SIGNATURE`, its blob and `__LINKEDIT`'s sizes).
 
 ## Targets
 
@@ -105,7 +105,7 @@ Verification reads it from binaries it cannot run (other architectures, each sli
 
 - the manifest is valid, `checksums.txt` and the directory list exactly its artifacts, and every size and SHA-256 matches;
 - every name is the one the contract above derives;
-- every CLI/server and desktop executable carries this build's stamp; each bundled CLI is the headless binary for its target (universal: both slices);
+- every CLI/server and desktop executable carries this build's stamp; each bundled CLI is the headless binary for its target (universal: both slices, signature aside);
 - deb control (`Package`, `Version`, `Architecture`), PKGBUILD (`pkgver`, source, checksum) and `Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`) carry the version;
 - every tar.gz and the deb payload hold `LICENSE` and no denied path: `.env*`, `*.db`, `*.db-wal`, `*.db-shm`, `*.sqlite*`, `*.key`, `*.pem`, `*.p12`, `*.pfx`, SSH keys, `service.env`, `.netrc`, `.npmrc`, or anything under `.scratch`, `.git`, `node_modules`, `.mygo`. The rpm packs the same staged files as the tarball and deb and is checked by name and hash only;
 - `-smoke`, for this machine's targets: the headless `stage version --json`; `stage serve` on a temp socket with a temp `HOME`, XDG dirs and data dir and fake T3 (`/api/health` identity, version, commit, apiVersion, and `/` serving the embedded web app); and the desktop app with `STAGE_DESKTOP_SELFCHECK=1`, which resolves `<resources>/bin/stage` as the launcher does, runs it and exits before any window, lock or service (it needs no display).
