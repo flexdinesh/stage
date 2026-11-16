@@ -20,6 +20,8 @@ needs no install at all ([below](#stage-dev-vs-stable-vs-dev-runs)).
 
 Run from any Stage checkout (the script is in `scripts/`):
 
+Install script: https://github.com/flexdinesh/stage/blob/main/scripts/install-dev.sh
+
 ```sh
 scripts/install-dev.sh            # latest origin/main
 scripts/install-dev.sh <sha>      # that commit (full 40-hex SHA)
@@ -64,6 +66,8 @@ service runs. A `--working-tree` build is `0.0.0-dev.<branch>` with
 release; Gatekeeper is not bypassed.
 
 ## Uninstall
+
+Uninstall script: https://github.com/flexdinesh/stage/blob/main/scripts/uninstall-dev.sh
 
 ```sh
 scripts/uninstall-dev.sh           # app, CLI link, desktop entry, service; data kept
