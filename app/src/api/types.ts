@@ -97,16 +97,63 @@ export interface Health {
 
 // ---- T3 connection / sync / catalog ----
 
+/** Precedence: unreachable > unpaired > expired > rejected > connected. */
+export type T3State = "unreachable" | "unpaired" | "expired" | "rejected" | "connected";
+
+/** Where the T3 URL comes from; `env` (T3_URL) locks it. */
+export type T3UrlSource = "env" | "settings" | "default";
+
+/** Why the server cannot pair through the local t3 CLI. */
+export type AutoPairReason = "not_local" | "cli_not_found" | "fake";
+
+/** The T3 server that answered the last probe. */
+export interface T3Identity {
+  environmentId: string;
+  label: string;
+  serverVersion: string;
+}
+
+/** Background full sync; counts tick while it runs. */
+export interface T3SyncProgress {
+  running: boolean;
+  startedAt: string | null;
+  projects: number;
+  threads: number;
+}
+
+/** GET /api/t3/status (also the body of pair, auto-pair and set-URL). */
 export interface T3Status {
+  /** Holds a valid token (unchanged meaning). */
   connected: boolean;
+  state: T3State;
   t3Url: string;
   publicUrl: string;
+  t3UrlSource: T3UrlSource;
   environmentId: string | null;
   clientId: string | null;
   tokenExpiresAt: string | null;
   adminTokenConfigured: boolean;
   lastError: string | null;
   lastFullSyncAt: string | null;
+  /** Last probe of the T3 URL answered. */
+  reachable: boolean;
+  checkedAt: string | null;
+  probeError: string | null;
+  t3: T3Identity | null;
+  autoPair: { available: boolean; reason: AutoPairReason | null };
+  sync: T3SyncProgress;
+}
+
+/** T3Status as an older server may send it: fields added with onboarding can be missing. */
+export type T3StatusWire = Omit<
+  T3Status,
+  "state" | "t3UrlSource" | "reachable" | "checkedAt" | "probeError" | "t3" | "autoPair" | "sync"
+> &
+  Partial<Pick<T3Status, "state" | "t3UrlSource" | "reachable" | "checkedAt" | "probeError" | "t3" | "autoPair" | "sync">>;
+
+export interface SetT3UrlRequest {
+  /** null resets to the default. */
+  url: string | null;
 }
 
 export interface PairRequest {

@@ -5,9 +5,12 @@ import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
+import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
+import type { T3State } from "../api/types.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
+  IconChainLink,
   IconCheck,
   IconChevronDown,
   IconClose,
@@ -25,7 +28,7 @@ import {
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
-import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx";
+import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx, type ChipTone } from "./ui.tsx";
 
 const NAV = [
   { to: "/", label: "Dashboard" },
@@ -140,6 +143,14 @@ function StatusRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+const T3_LABEL: Record<T3State, string> = {
+  connected: "T3 connected",
+  unpaired: "T3 not paired",
+  expired: "T3 pairing expired",
+  unreachable: "T3 unreachable",
+  rejected: "T3 rejected the pairing",
+};
+
 /** Square T3 status control; links to Settings, hover/focus (pointer devices only) reveals details. */
 function ConnectionStatus() {
   const status = useT3Status();
@@ -147,18 +158,21 @@ function ConnectionStatus() {
   const data = status.data;
   // A data-less query returns to pending on every refetch; after the first error keep showing offline.
   const checking = status.isPending && status.errorUpdateCount === 0;
-  const state = checking ? "checking" : data?.connected === true ? "connected" : "offline";
-  const label = state === "checking" ? "Checking T3" : state === "connected" ? "T3 connected" : "T3 offline";
-  const lastError = data?.lastError ?? (status.isError ? status.error.message : null);
+  const state = checking ? "checking" : data === undefined ? "offline" : data.state;
+  const tone: ChipTone = state === "checking" ? "idle" : state === "offline" ? "bad" : T3_STATE_TONE[state];
+  const label = state === "checking" ? "Checking T3" : state === "offline" ? "T3 offline" : T3_LABEL[state];
+  const lastError =
+    (data?.state === "unreachable" ? data.probeError : null) ?? data?.lastError ?? (status.isError ? status.error.message : null);
   const tokenExpiresAt = data?.tokenExpiresAt ?? null;
+  const identity = data === undefined ? null : t3Identity(data);
   return (
     <div className="group relative shrink-0">
       <Link to="/settings" aria-label={label} aria-describedby={detailsId} className={cx(buttonClass("secondary"), "w-10 px-0 md:w-8")}>
         {state === "checking" ? (
           <span className="size-1.5 bg-idle" />
         ) : (
-          <span className={state === "connected" ? "text-ok" : "text-bad"}>
-            {state === "connected" ? <IconCheck /> : <IconClose />}
+          <span className={tone === "ok" ? "text-ok" : tone === "need" ? "text-need-fg" : "text-bad"}>
+            {tone === "ok" ? <IconCheck /> : tone === "need" ? <IconChainLink size={16} /> : <IconClose />}
           </span>
         )}
       </Link>
@@ -169,15 +183,16 @@ function ConnectionStatus() {
       >
         <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
           <span className="label-caps text-fg">T3 connection</span>
-          <Chip dot tone={state === "checking" ? "idle" : state === "connected" ? "ok" : "bad"} className="ml-auto">
+          <Chip dot tone={tone} className="ml-auto">
             {state}
           </Chip>
         </div>
         <div className="flex flex-col gap-1 px-3 py-2 font-mono text-meta">
           <dl className="flex flex-col gap-1">
+            <StatusRow label="T3">{identity ?? "-"}</StatusRow>
             <StatusRow label="URL">{data?.t3Url ?? "-"}</StatusRow>
             <StatusRow label="Last sync">{relativeTime(data?.lastFullSyncAt ?? null)}</StatusRow>
-            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `expires ${relativeTime(tokenExpiresAt)}`}</StatusRow>
+            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `${data?.state === "expired" ? "expired" : "expires"} ${relativeTime(tokenExpiresAt)}`}</StatusRow>
           </dl>
           {lastError === null ? null : <p className="line-clamp-2 break-words text-bad">{lastError}</p>}
         </div>

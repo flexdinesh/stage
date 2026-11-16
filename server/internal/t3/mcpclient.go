@@ -2,10 +2,8 @@ package t3
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -62,16 +60,25 @@ type MCPClient struct {
 	upHC  *http.Client
 	now   func() time.Time
 
-	authMu sync.Mutex // serializes token acquisition
+	// authMu serializes token acquisition and Reconfigure, so an OAuth
+	// flow never straddles two base URLs.
+	authMu sync.Mutex
 
 	mu         sync.Mutex // guards fields below
+	baseURL    string     // T3 URL, no trailing slash (base())
+	publicURL  string     // browser base for T3 web links
 	tok        StoredToken
 	loaded     bool
 	lastErr    string
 	lastFailAt time.Time
 	rejected   bool // T3 answered 401 to the current token
 	envID      string
-	envFailAt  time.Time
+
+	// probeMu guards the probe cache (lock order: probeMu, then mu).
+	probeMu  sync.Mutex
+	probe    Probe
+	probeGen uint64 // bumped by Reconfigure; older results are dropped
+	probeRun *probeRun
 
 	sessMu  sync.Mutex
 	session *mcp.ClientSession
@@ -104,14 +111,14 @@ func NewMCPClient(opts Options) *MCPClient {
 	if opts.ClientName == "" {
 		opts.ClientName = DefaultClientName
 	}
-	c := &MCPClient{opts: opts, log: log, now: time.Now}
+	c := &MCPClient{opts: opts, log: log, now: time.Now, baseURL: opts.BaseURL, publicURL: opts.PublicURL}
 	oauthHC := *base
 	if oauthHC.Timeout == 0 {
 		oauthHC.Timeout = oauthTimeout
 	}
 	// OAuth responses are JSON; T3 redirects are read, never followed.
 	oauthHC.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	c.oauth = &oauthFlow{http: &oauthHC, baseURL: opts.BaseURL, redirectURI: opts.RedirectURI, clientName: opts.ClientName, now: c.now}
+	c.oauth = &oauthFlow{http: &oauthHC, base: c.base, redirectURI: opts.RedirectURI, clientName: opts.ClientName, now: c.now}
 	envHC := *base
 	envHC.Timeout = envTimeout
 	c.envHC = &envHC
@@ -129,6 +136,7 @@ func NewMCPClient(opts Options) *MCPClient {
 // remain (or none/expired), retrying with backoff and recording errors via
 // Store.SetLastError. Without an AdminToken it only reports expiry.
 func (c *MCPClient) Run(ctx context.Context) {
+	c.startProbe() // learn reachability and the environment id early
 	backoff := time.Duration(0)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -194,18 +202,26 @@ func (c *MCPClient) Pair(ctx context.Context, code string) error {
 	return c.adoptLocked(ctx, tok)
 }
 
-// Status reports connection state. Never fails; may fetch the environment
-// id from T3 (unauthenticated, short timeout) when not yet known.
+// Status reports connection state from memory and the probe cache. Never
+// fails and never calls T3 (health polls it).
 func (c *MCPClient) Status(ctx context.Context) ConnectionStatus {
 	tok := c.current(ctx)
-	env := c.environmentID(ctx)
+	p := c.cachedProbe()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	env := c.envID
+	if env == "" && p.Identity != nil {
+		env = p.Identity.EnvironmentID
+	}
 	st := ConnectionStatus{
 		Connected:     c.valid(tok) && !c.rejected,
 		ClientID:      tok.ClientID,
 		LastError:     c.lastErr,
 		EnvironmentID: env,
+		HasToken:      tok.Token != "",
+		Expired:       tok.Token != "" && !c.valid(tok),
+		Rejected:      c.rejected,
+		Probe:         p,
 	}
 	if !tok.ExpiresAt.IsZero() {
 		exp := tok.ExpiresAt
@@ -214,12 +230,47 @@ func (c *MCPClient) Status(ctx context.Context) ConnectionStatus {
 	return st
 }
 
-// PublicURL is the browser base for T3 web links (Options.PublicURL).
-func (c *MCPClient) PublicURL() string { return c.opts.PublicURL }
+// PublicURL is the browser base for T3 web links.
+func (c *MCPClient) PublicURL() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.publicURL
+}
+
+// base is the current T3 URL (no trailing slash).
+func (c *MCPClient) base() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.baseURL
+}
+
+// Reconfigure implements Client. It waits for a running OAuth flow.
+// In-flight tool calls on the old session may fail (transport error).
+func (c *MCPClient) Reconfigure(base, public string) {
+	base = strings.TrimRight(base, "/")
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	c.mu.Lock()
+	changed := c.baseURL != base
+	c.baseURL, c.publicURL = base, public
+	if changed {
+		c.envID = ""
+	}
+	c.mu.Unlock()
+	if !changed {
+		return
+	}
+	c.Close()
+	c.probeMu.Lock()
+	c.probeGen++
+	c.probe, c.probeRun = Probe{}, nil
+	c.probeMu.Unlock()
+	c.log.Info("t3 url changed", "url", base)
+}
 
 // WebURL is the T3 web link for a thread, "" if the environment id is unknown.
 func (c *MCPClient) WebURL(ctx context.Context, threadID string) string {
-	return WebThreadURL(c.opts.PublicURL, c.environmentID(ctx), threadID)
+	return WebThreadURL(c.PublicURL(), c.environmentID(ctx), threadID)
 }
 
 // ---- token state ----
@@ -365,46 +416,19 @@ func (c *MCPClient) clearError(ctx context.Context) {
 
 // ---- environment id ----
 
+// environmentID is the known environment id, else the probe's (which may
+// call T3, bounded by envTimeout).
 func (c *MCPClient) environmentID(ctx context.Context) string {
 	c.mu.Lock()
-	env, failAt := c.envID, c.envFailAt
+	env := c.envID
 	c.mu.Unlock()
-	if env != "" || (!failAt.IsZero() && c.now().Sub(failAt) < 30*time.Second) {
+	if env != "" {
 		return env
 	}
-	env = c.fetchEnvironmentID(ctx)
-	if env == "" {
-		c.mu.Lock()
-		c.envFailAt = c.now()
-		c.mu.Unlock()
-		return ""
+	if p := c.Probe(ctx); p.Identity != nil {
+		return p.Identity.EnvironmentID
 	}
-	c.noteEnvironment(env)
-	return env
-}
-
-// fetchEnvironmentID reads GET /.well-known/t3/environment (unauthenticated
-// ExecutionEnvironmentDescriptor).
-func (c *MCPClient) fetchEnvironmentID(ctx context.Context) string {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.opts.BaseURL+"/.well-known/t3/environment", nil)
-	if err != nil {
-		return ""
-	}
-	resp, err := c.envHC.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	var d struct {
-		EnvironmentID string `json:"environmentId"`
-	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&d) != nil {
-		return ""
-	}
-	return d.EnvironmentID
+	return ""
 }
 
 func (c *MCPClient) noteEnvironment(env string) {
@@ -476,7 +500,7 @@ func (c *MCPClient) sessionFor(ctx context.Context) (*mcp.ClientSession, error) 
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "stage", Version: "0.1.0"}, nil)
 	transport := &mcp.StreamableClientTransport{
-		Endpoint:             c.opts.BaseURL + "/mcp",
+		Endpoint:             c.base() + "/mcp",
 		HTTPClient:           c.mcpHC,
 		DisableStandaloneSSE: true, // request/response only
 		MaxRetries:           -1,   // we reconnect ourselves

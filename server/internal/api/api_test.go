@@ -52,6 +52,10 @@ type flakyT3 struct {
 	// failReplyFor fails LatestReply for this thread only.
 	failReplyFor atomic.Pointer[string]
 
+	// listGate, when set, makes the next ListThreads signal reached and
+	// wait for gate.
+	listGate atomic.Pointer[listGate]
+
 	mu             gosync.Mutex
 	requestIDs     []string // clientRequestId of every launch call
 	launchMessages []string
@@ -80,6 +84,16 @@ func (f *flakyT3) LatestReply(ctx context.Context, in t3.LatestReplyInput) (t3.R
 		return t3.Reply{}, errors.New("t3 read timed out")
 	}
 	return f.Fake.LatestReply(ctx, in)
+}
+
+type listGate struct{ gate, reached chan struct{} }
+
+func (f *flakyT3) ListThreads(ctx context.Context, in t3.ListThreadsInput) (t3.ThreadPage, error) {
+	if g := f.listGate.Swap(nil); g != nil {
+		g.reached <- struct{}{}
+		<-g.gate
+	}
+	return f.Fake.ListThreads(ctx, in)
 }
 
 func (f *flakyT3) takeLost() bool {

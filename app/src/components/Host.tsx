@@ -4,11 +4,11 @@
 // renders none of it.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ACTION_LABEL, STEPS, gateView, primaryAction, stepNote, stepStatus, type HostAction, type StepStatus } from "../lib/host.ts";
+import { ACTION_LABEL, STEPS, gateView, primaryAction, stepNote, stepStatus, type HostAction } from "../lib/host.ts";
 import type { HostServices, HostState } from "../platform/index.ts";
 import { usePlatform } from "../platform/context.tsx";
-import { useCopy } from "./StageLinks.tsx";
-import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, cx, toneClass, type ChipTone } from "./ui.tsx";
+import { CommandBox, CopyAction, Step, Steps } from "./Steps.tsx";
+import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel } from "./ui.tsx";
 
 const unsubscribed = () => {};
 
@@ -64,24 +64,6 @@ export function HostGate({ children }: { children: ReactNode }) {
 
 // ---- Connection screen ----
 
-const STEP_TONE: Record<StepStatus, ChipTone> = { idle: "idle", active: "run", ok: "ok", bad: "bad" };
-
-function Step({ label, note, status }: { label: string; note: string; status: StepStatus }) {
-  return (
-    <li className="flex min-h-10 items-center gap-3 border-b border-line px-3 last:border-b-0 md:min-h-8">
-      <span aria-hidden className="flex size-2 shrink-0 items-center justify-center">
-        {status === "active" ? (
-          <span className="size-2 animate-spin border-[1.5px] border-run border-t-transparent motion-reduce:animate-none" />
-        ) : (
-          <span className={cx("size-1.5 bg-(--c) transition-colors duration-150", toneClass(STEP_TONE[status]))} />
-        )}
-      </span>
-      <span className="font-mono text-meta text-fg">{label}</span>
-      <span className={cx("ml-auto truncate font-mono text-meta", status === "bad" ? "text-bad" : "text-muted")}>{note}</span>
-    </li>
-  );
-}
-
 /** Three stepped bars, the brand glyph, with the wordmark (static: no needs-input state before the app runs). */
 function BrandMark() {
   return (
@@ -102,20 +84,6 @@ const ACTIONS: Record<HostAction, (h: HostServices) => Promise<void>> = {
   retry: (h) => h.connection.retry(),
 };
 
-function CopyButton({ text, label, small = true }: { text: string; label: string; small?: boolean }) {
-  const [status, copy] = useCopy();
-  return (
-    <>
-      <Button small={small} onClick={() => copy(text)}>
-        {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
-      </Button>
-      <span className="sr-only" aria-live="polite">
-        {status === "copied" ? `${label}: copied` : status === "failed" ? `${label}: copy failed` : ""}
-      </span>
-    </>
-  );
-}
-
 /** Problems, fix and remedy command the host reported. */
 function Remedy({ state }: { state: HostState }) {
   const hasProblems = state.problems.length > 0;
@@ -133,12 +101,7 @@ function Remedy({ state }: { state: HostState }) {
           ))}
         </ul>
       ) : null}
-      {state.command === "" ? null : (
-        <div className="flex items-start gap-2 border border-line bg-panel px-3 py-2">
-          <code className="min-w-0 flex-1 font-mono text-detail break-all text-fg">{state.command}</code>
-          <CopyButton text={state.command} label="Copy" />
-        </div>
-      )}
+      {state.command === "" ? null : <CommandBox command={state.command} />}
     </div>
   );
 }
@@ -158,7 +121,7 @@ function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] 
         <Button variant="ghost" small aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((o) => !o)}>
           {open ? "Hide details" : "Show details"}
         </Button>
-        {report.data === undefined ? null : <CopyButton text={report.data} label="Copy diagnostics" />}
+        {report.data === undefined ? null : <CopyAction text={report.data} label="Copy diagnostics" />}
       </div>
       {open ? (
         <div id={panelId} className="flex flex-col gap-2">
@@ -199,12 +162,12 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
           <PageHeader title={state.title} meta={meta} />
         </div>
         <Panel title="Stage server" meta={state.app.identity} flush>
-          <ol aria-label="Startup steps">
+          <Steps label="Startup steps">
             {STEPS.map((key) => {
               const status = stepStatus(state, key);
               return <Step key={key} label={key} note={stepNote(state, key, status)} status={status} />;
             })}
-          </ol>
+          </Steps>
         </Panel>
         <Remedy state={state} />
         <ErrorText error={actionError} />
@@ -372,7 +335,7 @@ export function DesktopAppCard() {
         </Details>
         {diagnostics.data === undefined || diagnostics.data === "" ? null : (
           <div>
-            <CopyButton text={diagnostics.data} label="Copy diagnostics" small={false} />
+            <CopyAction text={diagnostics.data} label="Copy diagnostics" small={false} />
           </div>
         )}
       </div>

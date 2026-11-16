@@ -23,7 +23,7 @@ const ServiceEnvFile = "service.env"
 // from the inherited environment: only from service.env.
 var ServiceEnvKeys = []string{
 	"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS",
-	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED",
+	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED", "T3_BIN",
 }
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in

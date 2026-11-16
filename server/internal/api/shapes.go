@@ -80,7 +80,7 @@ func (s *server) webURL(envID string, threadID *string) *string {
 	if threadID == nil {
 		return nil
 	}
-	u := t3.WebThreadURL(s.Config.T3PublicURL, envID, *threadID)
+	u := t3.WebThreadURL(s.Setup.Endpoint().PublicURL, envID, *threadID)
 	if u == "" {
 		return nil
 	}

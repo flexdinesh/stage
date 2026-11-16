@@ -400,7 +400,7 @@ func (c *MCPClient) UploadAttachment(ctx context.Context, in UploadInput) (Attac
 		return Attachment{}, fmt.Errorf("t3 upload: unexpected prepare_upload result %+v", prep)
 	}
 	// The relativeUrl is signed; T3 needs no auth header for it.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.opts.BaseURL+prep.RelativeURL, bytes.NewReader(in.Data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base()+prep.RelativeURL, bytes.NewReader(in.Data))
 	if err != nil {
 		return Attachment{}, err
 	}

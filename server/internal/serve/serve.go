@@ -27,6 +27,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/transcript"
 	"github.com/flexdinesh/stage/server/internal/webui"
 )
@@ -159,6 +160,12 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}()
 
+	// T3_URL wins over the URL saved in Settings, which wins over the default.
+	conn, err := store.GetConnection(ctx)
+	if err != nil {
+		return err
+	}
+	endpoint := t3setup.Resolve(cfg, conn.T3URL)
 	t3Client := o.T3
 	switch {
 	case t3Client != nil:
@@ -173,14 +180,14 @@ func Run(ctx context.Context, o Options) error {
 		logger.Info("using fake T3 client")
 	default:
 		mc := t3.NewMCPClient(t3.Options{
-			BaseURL: cfg.T3URL, AdminToken: cfg.T3AdminToken, PublicURL: cfg.T3PublicURL, ClientName: cfg.T3ClientName,
+			BaseURL: endpoint.URL, AdminToken: cfg.T3AdminToken, PublicURL: endpoint.PublicURL, ClientName: cfg.T3ClientName,
 			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
 		})
 		closeT3 = mc.Close
 		wg.Add(1)
 		go func() { defer wg.Done(); mc.Run(ctx) }()
 		t3Client = mc
-		logger.Info("using T3 MCP client", "url", cfg.T3URL)
+		logger.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
@@ -198,6 +205,10 @@ func Run(ctx context.Context, o Options) error {
 		inbox.Signal()
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
+	setup := t3setup.New(t3setup.Options{
+		Config: cfg, Store: store, Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
+		OnPaired: syncSvc.Kick, Logger: logger,
+	})
 	runner.OnReady = notifier.OnReady
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
@@ -215,7 +226,7 @@ func Run(ctx context.Context, o Options) error {
 	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
-		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick,
+		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick, Setup: setup,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

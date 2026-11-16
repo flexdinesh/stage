@@ -20,9 +20,9 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | 400 | invalid body or query (bad enum, missing required field, bad JSON) |
 | 403 | rejected by the request origin policy (Host, cross-site, cross-origin) |
 | 404 | resource not found |
-| 409 | conflict: action not allowed in current state, duplicate unique value |
+| 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (URL locked, other T3 environment, auto-pair unavailable) |
 | 415 | write body not `application/json` / `multipart/form-data` |
-| 502 | T3 call failed (T3 error message in `error`) |
+| 502 | T3 call failed (T3 error message in `error`), or the `t3` CLI failed (auto-pair) |
 | 503 | T3 not connected (no valid token) or DB unavailable |
 | 500 | unexpected |
 
@@ -40,6 +40,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | NotificationEvent | `needs_input` `failed` `ready` `done` `settled` |
 | ProjectSource | `app` (created via stage) `t3` (imported from T3) |
 | ThreadSource | `app` (thread belongs to a task) `t3` (any other thread) |
+| T3State | `unreachable` `unpaired` `expired` `rejected` `connected` (see `GET /api/t3/status`) |
 
 ## Shared shapes
 
@@ -76,7 +77,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   "t3": { "connected": false, "lastError": "dial tcp 127.0.0.1:3773: connection refused" }
 }
 ```
-- A live Stage server answers 200 whenever its database works; T3 being offline is still 200 with `t3.connected: false`.
+- A live Stage server answers 200 whenever its database works; T3 being offline is still 200 with `t3.connected: false`. `t3.connected` means a valid token T3 has not rejected; health never calls T3 (reachability and the setup state are in `GET /api/t3/status`).
 - 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
 - `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `t3.lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
@@ -88,21 +89,44 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ```json
 {
   "connected": true,
+  "state": "connected",
   "t3Url": "http://127.0.0.1:3773",
   "publicUrl": "http://t3.example.com:3773",
+  "t3UrlSource": "default",
   "environmentId": "env_123",
   "clientId": "mcp_client_abc",
   "tokenExpiresAt": "2026-12-08T10:00:00Z",
   "adminTokenConfigured": true,
   "lastError": null,
-  "lastFullSyncAt": "2026-11-08T10:00:00Z"
+  "lastFullSyncAt": "2026-11-08T10:00:00Z",
+  "reachable": true,
+  "checkedAt": "2026-11-08T10:00:05Z",
+  "probeError": null,
+  "t3": { "environmentId": "env_123", "label": "controlbox", "serverVersion": "0.1.9" },
+  "autoPair": { "available": true, "reason": null },
+  "sync": { "running": false, "startedAt": null, "projects": 0, "threads": 0 }
 }
 ```
-`environmentId`, `clientId`, `tokenExpiresAt`, `lastError`, `lastFullSyncAt` are nullable.
+`environmentId`, `clientId`, `tokenExpiresAt`, `lastError`, `lastFullSyncAt`, `checkedAt`, `probeError`, `t3`, `autoPair.reason` and `sync.startedAt` are nullable.
+
+- `connected`: a valid token T3 has not rejected (same as `/api/health` `t3.connected`).
+- `state` (T3State), the first problem in this order: `unreachable` (nothing answered as T3 at `t3Url`), `unpaired` (no token), `expired` (token past expiry), `rejected` (T3 answered 401 to the token), else `connected`.
+- `t3UrlSource`: `env` (`T3_URL`, which locks the setting), `settings` (saved with `PUT /api/t3/url`), `default` (`http://127.0.0.1:3773`). `publicUrl` is `T3_PUBLIC_URL` when set, else `t3Url`.
+- `reachable`, `checkedAt`, `probeError`, `t3`: the last unauthenticated probe of `{t3Url}/.well-known/t3/environment` (`probeError` is a short reason such as `connection refused`, `timed out`, `not a T3 server (HTTP 404)`). Probes are cached 10s, success or failure, and concurrent refreshes share one request. This endpoint refreshes a stale probe (waiting at most 3s); `/api/health` never probes.
+- `autoPair`: whether `POST /api/t3/pair/auto` can work. `reason` when not: `not_local` (`t3Url` is not loopback: `localhost`, `127.0.0.0/8`, `::1`), `cli_not_found` (no `t3` CLI: `T3_BIN`, then `PATH`, `~/.local/bin`, `~/.bun/bin`, `~/.local/share/pnpm`, `~/.npm-global/bin`, `~/.volta/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), `fake` (`T3_FAKE=1`).
+- `sync`: the running full sync (`projects` and `threads` mirrored so far); all zero when none runs.
+
+Binding: a Stage server serves one T3 backend. The first successful pairing binds it to that T3 environment (a server paired before binding existed is bound the first time it reads a valid token and the T3 identity). The T3 URL may then change only to an address serving the same environment.
 
 ### `POST /api/t3/pair`
 Paste fallback: exchange a pairing code from `t3 pair` for a token.
-Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 502 pairing failed.
+Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 409 the T3 now at `t3Url` is not the bound environment. 502 pairing failed. A success binds the server on the first pairing and starts a full sync and a catalog refresh in the background (watch `sync`).
+
+### `POST /api/t3/pair/auto`
+Pair with no code: runs `t3 auth pairing create --json --label "<client name> mcp" --ttl 5m --scope ...` (the full-access scopes) with the `t3` CLI on the server's machine (15s limit) and redeems the code like `POST /api/t3/pair`. No body. 200 `T3Status`. 409 auto-pair unavailable (`autoPair.reason`, named in `error`) or the T3 is not the bound environment. 502 T3 is not answering at `t3Url` (checked first, so nothing is minted), or the CLI or the pairing failed (its error in `error`; a T3 with a custom `T3CODE_HOME` can make the CLI mint for another instance: pair with a code instead).
+
+### `PUT /api/t3/url`
+Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is bound and the new URL does not serve that environment (`This stage server is bound to T3 '<label>'. Run another stage server for a different T3.`), or cannot be checked because nothing answers there. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
 
 ### `POST /api/sync`
 Run a full sync now (all T3 projects + threads into the mirror; creates app projects for new T3 projects; project title, root and archive state follow T3). Also reads top-level session details to populate normalized state and run metadata independently of legacy task state. Synchronous.

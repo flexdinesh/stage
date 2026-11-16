@@ -1,7 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
-import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
+import { firstSyncLanded } from "../lib/onboarding.ts";
+import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, StatsQuery, T3Status, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -26,10 +27,34 @@ export const keys = {
   journalEntry: ["journalEntry"],
 } as const;
 
+/** Default poll; 1s while a full sync runs so its counts tick. */
+const T3_STATUS_POLL_MS = 5000;
+const T3_SYNC_POLL_MS = 1000;
+
 export const useT3Status = () => {
   const api = useApi();
-  return useQuery({ queryKey: keys.t3Status, queryFn: api.t3Status });
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: keys.t3Status,
+    // Compared here (once per fetch, however many observers) so the first sync refreshes the views it fills.
+    queryFn: async () => {
+      const prev = qc.getQueryData<T3Status>(keys.t3Status);
+      const next = await api.t3Status();
+      if (firstSyncLanded(prev, next)) void refreshAfterFirstSync(qc);
+      return next;
+    },
+    refetchInterval: (q) => (q.state.data?.sync.running === true ? T3_SYNC_POLL_MS : T3_STATUS_POLL_MS),
+  });
 };
+
+/** The first full sync filled projects, threads and the catalog: refetch everything that read them empty. */
+function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
+  return Promise.all([
+    invalidateWork(qc),
+    qc.invalidateQueries({ queryKey: keys.projects }),
+    qc.invalidateQueries({ queryKey: keys.catalog }),
+  ]).then(() => undefined);
+}
 
 // Catalog is cached server-side for 10 min; no need to poll it.
 export const useCatalog = () => {

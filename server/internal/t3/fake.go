@@ -50,6 +50,12 @@ type Fake struct {
 	// after launch (SeedDemo); askAt holds when each one asks.
 	askOnLaunch bool
 	askAt       map[string]time.Time
+	// probe overrides the default probe (SetProbe).
+	probe *Probe
+	// BaseURL, PublicURL: the last Reconfigure.
+	BaseURL, PublicURL string
+	// Pairs: every accepted Pair code.
+	Pairs []string
 }
 
 type fakeMessage struct {
@@ -120,15 +126,53 @@ func (f *Fake) nextID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, f.seq)
 }
 
+// FakeEnvironmentID is the fake T3's environment id.
+const FakeEnvironmentID = "fake-env"
+
 func (f *Fake) Status(context.Context) ConnectionStatus {
 	exp := f.now().Add(30 * 24 * time.Hour)
-	return ConnectionStatus{Connected: true, ClientID: "fake", ExpiresAt: &exp, EnvironmentID: "fake-env"}
+	f.mu.Lock()
+	p := f.probeLocked()
+	f.mu.Unlock()
+	return ConnectionStatus{Connected: true, ClientID: "fake", ExpiresAt: &exp, EnvironmentID: FakeEnvironmentID, HasToken: true, Probe: p}
+}
+
+// Probe is a reachable fake T3 unless SetProbe says otherwise.
+func (f *Fake) Probe(context.Context) Probe {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.probeLocked()
+}
+
+func (f *Fake) probeLocked() Probe {
+	if f.probe != nil {
+		return *f.probe
+	}
+	return Probe{Reachable: true, CheckedAt: f.now().UTC(), Identity: &Identity{EnvironmentID: FakeEnvironmentID, Label: "fake", ServerVersion: "fake"}}
+}
+
+// SetProbe sets what Probe and Status report (tests).
+func (f *Fake) SetProbe(p Probe) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.probe = &p
+}
+
+// Reconfigure records the URLs; the fake answers the same everywhere.
+func (f *Fake) Reconfigure(base, public string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.BaseURL, f.PublicURL = base, public
 }
 
 func (f *Fake) Pair(_ context.Context, code string) error {
-	if strings.TrimSpace(code) == "" {
+	code = strings.TrimSpace(code)
+	if code == "" {
 		return errors.New("empty pairing code")
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Pairs = append(f.Pairs, code)
 	return nil
 }
 

@@ -62,6 +62,11 @@ type Service struct {
 	LaunchAttemptTimeout time.Duration
 
 	syncing       atomic.Bool
+	syncStarted   atomic.Int64 // unix nanos of the running full sync's start
+	syncProjects  atomic.Int64 // projects mirrored so far by the running full sync
+	syncThreads   atomic.Int64 // threads mirrored so far by the running full sync
+	kickSync      chan struct{}
+	kickCatalog   chan struct{}
 	catalog       atomic.Pointer[CatalogSnapshot]
 	lastStalePoll atomic.Int64 // unix nanos
 
@@ -81,7 +86,42 @@ func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
 		StalePollEvery:       time.Minute,
 		LaunchAttemptTimeout: 40 * time.Second,
 		started:              time.Now(),
+		kickSync:             make(chan struct{}, 1),
+		kickCatalog:          make(chan struct{}, 1),
 	}
+}
+
+// Kick asks Run for a full sync and a catalog refresh now (after pairing),
+// instead of at their next tick. Never blocks; kicks while one is pending
+// coalesce.
+func (s *Service) Kick() {
+	for _, ch := range []chan struct{}{s.kickSync, s.kickCatalog} {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// Progress is the running full sync, read lock-free (GET /api/t3/status).
+type Progress struct {
+	Running   bool
+	StartedAt *time.Time
+	Projects  int // projects mirrored so far
+	Threads   int // threads mirrored so far
+}
+
+// Progress reports the running full sync (zero when none runs).
+func (s *Service) Progress() Progress {
+	if !s.syncing.Load() {
+		return Progress{}
+	}
+	p := Progress{Running: true, Projects: int(s.syncProjects.Load()), Threads: int(s.syncThreads.Load())}
+	if n := s.syncStarted.Load(); n != 0 {
+		at := time.Unix(0, n).UTC()
+		p.StartedAt = &at
+	}
+	return p
 }
 
 // Run starts the full sync, active poller, thread watcher and catalog loops
@@ -89,7 +129,8 @@ func New(store *db.Store, client t3.Client, log *slog.Logger) *Service {
 // RecoverLaunching first.
 func (s *Service) Run(ctx context.Context) {
 	var wg gosync.WaitGroup
-	loop := func(name string, every time.Duration, fn func(context.Context) error) {
+	// kick (nil: none) runs fn before the next tick.
+	loop := func(name string, every time.Duration, kick <-chan struct{}, fn func(context.Context) error) {
 		defer wg.Done()
 		t := time.NewTicker(every)
 		defer t.Stop()
@@ -101,20 +142,22 @@ func (s *Service) Run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+			case <-kick:
+				t.Reset(every)
 			}
 		}
 	}
 	wg.Add(4)
-	go loop("full sync", s.FullSyncEvery, func(ctx context.Context) error {
+	go loop("full sync", s.FullSyncEvery, s.kickSync, func(ctx context.Context) error {
 		_, err := s.FullSync(ctx)
 		if errors.Is(err, ErrSyncRunning) {
 			return nil
 		}
 		return err
 	})
-	go loop("poll", s.PollEvery, s.PollActive)
-	go loop("watch threads", s.PollEvery, s.WatchThreads)
-	go loop("catalog refresh", s.CatalogEvery, func(ctx context.Context) error {
+	go loop("poll", s.PollEvery, nil, s.PollActive)
+	go loop("watch threads", s.PollEvery, nil, s.WatchThreads)
+	go loop("catalog refresh", s.CatalogEvery, s.kickCatalog, func(ctx context.Context) error {
 		_, err := s.RefreshCatalog(ctx)
 		return err
 	})
@@ -168,6 +211,9 @@ func (s *Service) FullSync(ctx context.Context) (Result, error) {
 		return Result{}, ErrSyncRunning
 	}
 	defer s.syncing.Store(false)
+	s.syncProjects.Store(0)
+	s.syncThreads.Store(0)
+	s.syncStarted.Store(time.Now().UnixNano())
 
 	projects, err := s.t3.ListProjects(ctx)
 	if err != nil {
@@ -177,6 +223,7 @@ func (s *Service) FullSync(ctx context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("upsert projects: %w", err)
 	}
+	s.syncProjects.Store(int64(nProjects))
 	nThreads := 0
 	var cursor *int
 	for page := 0; page < 10000; page++ {
@@ -189,6 +236,7 @@ func (s *Service) FullSync(ctx context.Context) (Result, error) {
 		if err := s.store.UpsertThreads(ctx, res.Threads); err != nil {
 			return Result{}, fmt.Errorf("upsert threads: %w", err)
 		}
+		s.syncThreads.Add(int64(len(res.Threads)))
 		// List rows omit pending requests and active run metadata. Read root
 		// detail as well, including old, settled and task-owned sessions.
 		for _, thread := range res.Threads {

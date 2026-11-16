@@ -75,14 +75,14 @@ func (e *OAuthError) Error() string {
 
 type oauthFlow struct {
 	http        *http.Client
-	baseURL     string // no trailing slash
+	base        func() string // current T3 URL, no trailing slash
 	redirectURI string
 	clientName  string // OAuth client_name; pairing label "<clientName> mcp"
 	now         func() time.Time
 }
 
 // resource is the MCP resource T3 issues tokens for: <origin>/mcp.
-func (f *oauthFlow) resource() string { return f.baseURL + "/mcp" }
+func (f *oauthFlow) resource() string { return f.base() + "/mcp" }
 
 // pkce returns a random S256 verifier and its challenge.
 func pkce() (verifier, challenge string, err error) {
@@ -157,7 +157,7 @@ func (f *oauthFlow) register(ctx context.Context) (string, error) {
 }
 
 func (f *oauthFlow) mintPairingCode(ctx context.Context, adminToken string) (string, error) {
-	body := map[string]any{"label": f.clientName + " mcp", "scopes": fullAccessScopes}
+	body := map[string]any{"label": PairingLabel(f.clientName), "scopes": fullAccessScopes}
 	var out struct {
 		Credential string `json:"credential"`
 	}
@@ -217,7 +217,7 @@ func (f *oauthFlow) exchange(ctx context.Context, clientID, code, verifier strin
 		"code_verifier": {verifier},
 		"resource":      {f.resource()},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.baseURL+"/oauth/mcp/token", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.base()+"/oauth/mcp/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return StoredToken{}, err
 	}
@@ -246,7 +246,7 @@ func (f *oauthFlow) postJSON(ctx context.Context, step, path, bearer string, bod
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.baseURL+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.base()+path, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

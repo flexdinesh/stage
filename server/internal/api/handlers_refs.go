@@ -19,7 +19,7 @@ type refJSON struct {
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
-	ref, err := refs.Parse(r.URL.Query().Get("ref"), s.Config.T3PublicURL)
+	ref, err := refs.Parse(r.URL.Query().Get("ref"), s.Setup.Endpoint().PublicURL)
 	if err != nil {
 		return db.Invalid("%s", err.Error())
 	}

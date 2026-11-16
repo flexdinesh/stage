@@ -6,6 +6,7 @@ import {
   useRunningThreads,
   useSchedules,
   useSettledThreads,
+  useT3Status,
   useTasks,
   useTrees,
 } from "../api/queries.ts";
@@ -15,7 +16,9 @@ import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ScheduleRow } from "../components/ScheduleList.tsx";
 import { ExternalThreadRows, SettledRows, TaskRow, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
 import { TreeRow } from "../components/trees/TreeRow.tsx";
+import { T3Alert, T3SetupPanel } from "../components/T3Setup.tsx";
 import { splitTreeMembers } from "../lib/dashboard.ts";
+import { takeover } from "../lib/onboarding.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
@@ -277,7 +280,26 @@ function StatStrip({
   );
 }
 
+/** Setup is the Dashboard until the first full sync lands; after it, T3 trouble is an Alert above it. */
 export function DashboardPage() {
+  const t3 = useT3Status();
+  if (t3.data !== undefined && takeover(t3.data)) {
+    return (
+      <>
+        <PageHeader title="Connect stage to T3" meta="stage queues and watches T3 Code threads. Pair once to start." />
+        <T3SetupPanel status={t3.data} />
+      </>
+    );
+  }
+  return (
+    <>
+      <T3Alert status={t3.data} />
+      <Dashboard />
+    </>
+  );
+}
+
+function Dashboard() {
   const [params, setParams] = useSearchParams();
   const project = params.get("project") ?? "";
   const selected = parseGroup(params.get("state"));
