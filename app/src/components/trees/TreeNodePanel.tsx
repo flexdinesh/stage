@@ -5,7 +5,7 @@ import { useInvalidateWork } from "../../api/queries.ts";
 import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { handoffHint } from "../../lib/handoff.ts";
-import { baseCandidates, needCandidates } from "../../lib/trees.ts";
+import { baseCandidates, needCandidates, treeClosed } from "../../lib/trees.ts";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconClose } from "../icons.tsx";
 import { Button, ErrorText, Panel, Segmented, Select, buttonClass } from "../ui.tsx";
@@ -115,7 +115,8 @@ export function TreeNodePanel({
 /**
  * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
  * dependents, start mode, worktree base, handoff, then `lead` and Remove from tree. Edits apply at once; needs, mode,
- * base and handoff change only in backlog. Member lines select (`onSelect`) or open the task.
+ * base and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
+ * (`onSelect`) or open the task.
  */
 export function TreeNodeEditor({
   tree,
@@ -134,7 +135,8 @@ export function TreeNodeEditor({
   const invalidate = useInvalidateWork();
   const baseId = useId();
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const editable = task.state === "backlog";
+  const closed = treeClosed(tree);
+  const editable = task.state === "backlog" && !closed;
   const byId = new Map(tree.tasks.map((t) => [t.id, t]));
   const needs = task.needs.flatMap((id) => byId.get(id) ?? []);
   const dependents = task.dependents.flatMap((id) => byId.get(id) ?? []);
@@ -202,7 +204,9 @@ export function TreeNodeEditor({
         {editable ? (
           <NeedsPicker candidates={candidates} disabled={setNeeds.isPending} onAdd={(id) => setNeeds.mutate([...task.needs, id])} />
         ) : (
-          <p className="font-mono text-meta text-muted">Needs change only while it is in backlog.</p>
+          <p className="font-mono text-meta text-muted">
+            {closed ? "Reopen the tree to change needs." : "Needs change only while it is in backlog."}
+          </p>
         )}
       </Section>
 
@@ -286,7 +290,7 @@ export function TreeNodeEditor({
         <ErrorText error={error} />
         <div className="flex flex-wrap items-center gap-2">
           {lead}
-          {confirmRemove ? (
+          {closed ? null : confirmRemove ? (
             <>
               <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()} className="ml-auto">
                 Confirm remove

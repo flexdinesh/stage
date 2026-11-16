@@ -1,15 +1,24 @@
 import { useState } from "react";
 import { useProject, useSchedules, useTasks } from "../api/queries.ts";
-import { TASK_STATES } from "../api/types.ts";
+import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { ScheduleRows } from "../components/ScheduleList.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
-import { Button, PageHeader, Panel, QueryState, Select } from "../components/ui.tsx";
+import { Button, PageHeader, Panel, QueryState, Segmented, Select } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
+
+/** Open: not archived and not in a done or archived tree; Closed: done or archived. */
+type Scope = "open" | "closed" | "all";
+
+const SCOPES: { value: Scope; label: string }[] = [
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+  { value: "all", label: "All" },
+];
 
 export function ProjectDetailPage() {
   const id = useIdParam();
@@ -19,8 +28,14 @@ export function ProjectDetailPage() {
 function ProjectDetail({ id }: { id: number }) {
   const project = useProject(id);
   const [stateFilter, setStateFilter] = useState("");
+  const [scope, setScope] = useState<Scope>("open");
   const state = pick(TASK_STATES, stateFilter);
-  const tasks = useTasks({ project: id, ...(state === undefined ? {} : { state: [state] }) });
+  const closed: TaskListQuery["closed"] = scope === "closed" ? "true" : scope === "all" ? "all" : undefined;
+  const tasks = useTasks({
+    project: id,
+    ...(state === undefined ? {} : { state: [state] }),
+    ...(closed === undefined ? {} : { closed }),
+  });
   const newTask = useNewTask();
   const taskCount = tasks.data?.tasks.length;
   const schedules = useSchedules({ project: id });
@@ -71,25 +86,34 @@ function ProjectDetail({ id }: { id: number }) {
               title="Tasks"
               {...(taskCount === undefined ? {} : { meta: taskCount })}
               actions={
-                <Select
-                  value={stateFilter}
-                  onChange={(e) => setStateFilter(e.target.value)}
-                  aria-label="Filter by state"
-                  small
-                >
-                  <option value="">All states</option>
-                  {TASK_STATES.map((s) => (
-                    <option key={s} value={s}>
-                      {taskStateLabel(s)}
-                    </option>
-                  ))}
-                </Select>
+                <div className="flex items-center gap-2">
+                  <Segmented label="Task scope" small options={SCOPES} value={scope} onChange={setScope} />
+                  <Select
+                    value={stateFilter}
+                    onChange={(e) => setStateFilter(e.target.value)}
+                    aria-label="Filter by state"
+                    small
+                  >
+                    <option value="">All states</option>
+                    {TASK_STATES.map((s) => (
+                      <option key={s} value={s}>
+                        {taskStateLabel(s)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
               }
             >
               <QueryState isPending={tasks.isPending} error={tasks.error}>
                 <TaskRows
                   tasks={tasks.data?.tasks ?? []}
-                  emptyText={state === undefined ? "No tasks in this project. Create one with New task." : "No tasks in this state."}
+                  emptyText={
+                    state !== undefined
+                      ? "No tasks in this state."
+                      : scope === "closed"
+                        ? "No done or archived tasks in this project."
+                        : "No tasks in this project. Create one with New task."
+                  }
                 />
               </QueryState>
             </Panel>

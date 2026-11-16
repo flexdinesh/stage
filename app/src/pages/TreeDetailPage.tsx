@@ -3,7 +3,7 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { useInvalidateWork, useTree } from "../api/queries.ts";
-import type { StartMode, TreeDetail } from "../api/types.ts";
+import type { StartMode, TreeDetail, TreeStatus } from "../api/types.ts";
 import { useApi } from "../platform/context.tsx";
 import { IconBack, IconChevronDown, IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
@@ -15,7 +15,7 @@ import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { treeMeta, treeSettled } from "../lib/trees.ts";
+import { closeBlocker, closedLabel, countMembers, treeClosed, treeMeta, treeSettled } from "../lib/trees.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
@@ -55,7 +55,8 @@ function TreeNotFound({ id }: { id: number }) {
     <>
       <PageHeader title="Tree not found" meta={`tree ${id}`} />
       <p className="mb-3 text-ui text-muted">
-        It was dissolved, or its last task left it (an empty tree is deleted). Its tasks, if any, are still in stage.
+        It was deleted, dissolved, or its last task left it (an empty tree is deleted). A dissolved tree&apos;s tasks are still in
+        stage.
       </p>
       <Link to="/trees" className={buttonClass("secondary")}>
         <IconBack /> Back to trees
@@ -66,20 +67,35 @@ function TreeNotFound({ id }: { id: number }) {
 
 type Drawer = "existing" | "session" | null;
 
-/** Overflow menu (popover): Rename, Add existing task, Add session, Dissolve. */
-function TreeMenu({ onPick }: { onPick: (item: "rename" | "existing" | "session" | "dissolve") => void }) {
+type MenuItem = "rename" | "existing" | "session" | "done" | "archive" | "dissolve" | "delete";
+
+/**
+ * Overflow menu (popover): Rename, Add existing task, Add session, then Mark done, Archive tree, Dissolve tree and
+ * Delete tree (only when no member started). Done and archive are disabled with the reason while a member is in
+ * progress; a closed tree drops the structural items and the status it already has.
+ */
+function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: MenuItem) => void }) {
   const menuId = useId();
   const menu = useRef<HTMLDivElement>(null);
-  const item = (key: "rename" | "existing" | "session" | "dissolve", label: string, danger = false) => (
+  const closed = treeClosed(tree);
+  const blocker = closeBlocker(tree.tasks);
+  const item = (key: MenuItem, label: string, opts: { danger?: boolean; reason?: string | null } = {}) => (
     <button
       type="button"
+      disabled={opts.reason !== undefined && opts.reason !== null}
       onClick={() => {
         menu.current?.hidePopover();
         onPick(key);
       }}
-      className={cx("border-b border-line px-3 py-2.5 text-left text-ui last:border-b-0 hover:bg-panel md:py-2", danger && "text-bad")}
+      className={cx(
+        "flex flex-col border-b border-line px-3 py-2.5 text-left text-ui last:border-b-0 hover:bg-panel disabled:hover:bg-transparent md:py-2",
+        opts.danger === true && "text-bad",
+      )}
     >
-      {label}
+      <span className={cx(opts.reason !== undefined && opts.reason !== null && "opacity-45")}>{label}</span>
+      {opts.reason === undefined || opts.reason === null ? null : (
+        <span className="font-mono text-meta-sm text-muted">{opts.reason}</span>
+      )}
     </button>
   );
   return (
@@ -96,9 +112,13 @@ function TreeMenu({ onPick }: { onPick: (item: "rename" | "existing" | "session"
       >
         <div className="flex flex-col">
           {item("rename", "Rename")}
-          {item("existing", "Add existing task")}
-          {item("session", "Add session")}
-          {item("dissolve", "Dissolve tree", true)}
+          {closed ? null : item("existing", "Add existing task")}
+          {closed ? null : item("session", "Add session")}
+          <div aria-hidden className="-mt-px h-px bg-line-strong" />
+          {tree.status === "done" ? null : item("done", "Mark done", { reason: blocker })}
+          {tree.status === "archived" ? null : item("archive", "Archive tree", { reason: blocker })}
+          {item("dissolve", "Dissolve tree", { danger: true })}
+          {tree.deletable ? item("delete", "Delete tree", { danger: true }) : null}
         </div>
       </div>
     </>
@@ -144,20 +164,22 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const [picked, setPicked] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
-  const [dissolving, setDissolving] = useState(false);
+  const [confirming, setConfirming] = useState<"dissolve" | "delete" | null>(null);
   const selected = tree.tasks.find((t) => t.id === picked) ?? null;
   const readyCount = tree.tasks.filter((t) => t.readiness === "ready" && !t.adopted).length;
   const settled = treeSettled(tree.tasks);
+  const closed = treeClosed(tree);
+  const closedChip = closedLabel(tree, countMembers(tree.tasks));
 
   const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
   const mode = useMutation({ mutationFn: (startMode: StartMode) => api.updateTree(tree.id, { startMode }), onSettled: invalidate });
-  const dissolve = useMutation({
-    mutationFn: () => api.deleteTree(tree.id),
-    onSuccess: async () => {
-      await navigate("/trees");
-      await invalidate();
-    },
-  });
+  const status = useMutation({ mutationFn: (next: TreeStatus) => api.updateTree(tree.id, { status: next }), onSettled: invalidate });
+  const leave = async () => {
+    await navigate("/trees");
+    await invalidate();
+  };
+  const dissolve = useMutation({ mutationFn: () => api.dissolveTree(tree.id), onSuccess: leave });
+  const remove = useMutation({ mutationFn: () => api.deleteTree(tree.id), onSuccess: leave });
   const startFailures = start.data?.errors ?? [];
 
   const addTask = () => {
@@ -170,9 +192,11 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
     });
   };
 
-  const onMenu = (item: "rename" | "existing" | "session" | "dissolve") => {
+  const onMenu = (item: MenuItem) => {
     if (item === "rename") setRenaming(true);
-    else if (item === "dissolve") setDissolving(true);
+    else if (item === "done") status.mutate("done");
+    else if (item === "archive") status.mutate("archived");
+    else if (item === "dissolve" || item === "delete") setConfirming(item);
     else setDrawer(item);
   };
 
@@ -196,31 +220,46 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
                 settled
               </Chip>
             ) : null}
+            {closedChip === null ? null : <Chip className="ml-2">{closedChip}</Chip>}
           </>
         }
         actions={
-          <>
-            <Segmented label="Tree start mode" options={MODE_OPTIONS} value={tree.startMode} onChange={(m) => m !== tree.startMode && mode.mutate(m)} />
-            <TreeMenu onPick={onMenu} />
-            <Button onClick={addTask} title={selected === null ? "New root task in this tree" : `New task that needs #${selected.id}`}>
-              <IconPlus size={14} />
-              {selected === null ? "Add task" : `Add task after #${selected.id}`}
-            </Button>
-            <Button
-              variant="primary"
-              busy={start.isPending}
-              disabled={readyCount === 0}
-              title={readyCount === 0 ? "No task is ready" : `Starts ${readyCount} ready task${readyCount === 1 ? "" : "s"}`}
-              onClick={() => start.mutate()}
-            >
-              Start ready <span className="font-mono tabular">{readyCount}</span>
-            </Button>
-          </>
+          closed ? (
+            <>
+              <TreeMenu tree={tree} onPick={onMenu} />
+              <Button busy={status.isPending} onClick={() => status.mutate("open")}>
+                {tree.status === "archived" ? "Unarchive" : "Reopen"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Segmented label="Tree start mode" options={MODE_OPTIONS} value={tree.startMode} onChange={(m) => m !== tree.startMode && mode.mutate(m)} />
+              <TreeMenu tree={tree} onPick={onMenu} />
+              <Button onClick={addTask} title={selected === null ? "New root task in this tree" : `New task that needs #${selected.id}`}>
+                <IconPlus size={14} />
+                {selected === null ? "Add task" : `Add task after #${selected.id}`}
+              </Button>
+              <Button
+                variant="primary"
+                busy={start.isPending}
+                disabled={readyCount === 0}
+                title={readyCount === 0 ? "No task is ready" : `Starts ${readyCount} ready task${readyCount === 1 ? "" : "s"}`}
+                onClick={() => start.mutate()}
+              >
+                Start ready <span className="font-mono tabular">{readyCount}</span>
+              </Button>
+            </>
+          )
         }
       />
+      {tree.closedAt === null || !closed ? null : (
+        <p className="-mt-2 mb-4 font-mono text-meta text-muted" title={dateTime(tree.closedAt)}>
+          {tree.status === "archived" ? "Archived" : "Marked done"} {shortDate(tree.closedAt)}. Remaining tasks won&apos;t start.
+        </p>
+      )}
 
       <div className="flex flex-col gap-3.5">
-        {dissolving ? (
+        {confirming === "dissolve" ? (
           <Alert
             tone="bad"
             actions={
@@ -228,7 +267,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
                 <Button variant="danger" small busy={dissolve.isPending} onClick={() => dissolve.mutate()}>
                   Dissolve
                 </Button>
-                <Button variant="ghost" small onClick={() => setDissolving(false)}>
+                <Button variant="ghost" small onClick={() => setConfirming(null)}>
                   Cancel
                 </Button>
               </>
@@ -236,8 +275,25 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
           >
             Dissolve this tree? Its {tree.tasks.length} tasks stay in stage; their needs and tree membership go.
           </Alert>
+        ) : confirming === "delete" ? (
+          <Alert
+            tone="bad"
+            actions={
+              <>
+                <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()}>
+                  Delete
+                </Button>
+                <Button variant="ghost" small onClick={() => setConfirming(null)}>
+                  Cancel
+                </Button>
+              </>
+            }
+          >
+            Delete this tree and its {tree.tasks.length} task{tree.tasks.length === 1 ? "" : "s"}? None has started. This can&apos;t
+            be undone.
+          </Alert>
         ) : null}
-        <ErrorText error={mode.error ?? start.error ?? dissolve.error} />
+        <ErrorText error={mode.error ?? start.error ?? status.error ?? dissolve.error ?? remove.error} />
         {startFailures.length === 0 ? null : (
           <Alert tone="bad">
             {startFailures.map((f) => (

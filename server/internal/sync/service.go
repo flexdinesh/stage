@@ -126,7 +126,7 @@ func (s *Service) Run(ctx context.Context) {
 // clientRequestId and T3 returns that thread instead of creating a second.
 // Run it once at startup before the poller, release runner and HTTP server.
 func (s *Service) RecoverLaunching(ctx context.Context) {
-	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}})
+	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}, Closed: "all"})
 	if err != nil {
 		s.log.Warn("recover launching tasks", "err", err)
 		return

@@ -160,10 +160,10 @@ func TestToolList(t *testing.T) {
 	}
 	want := []string{
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
-		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task",
+		"delete_task", "archive_task", "start_task", "stop_task", "followup_task", "duplicate_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
 		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
-		"list_trees", "get_tree", "create_tree", "update_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
+		"list_trees", "get_tree", "create_tree", "update_tree", "delete_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
 		"adopt_session",
 	}
 	slices.Sort(names)
@@ -713,7 +713,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 34 {
+	if err != nil || len(res.Tools) != 36 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

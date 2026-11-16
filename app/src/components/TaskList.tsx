@@ -8,6 +8,7 @@ import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
+import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
@@ -115,11 +116,17 @@ interface RowChip {
 }
 
 /**
- * The row's one chip: the one-shot start time while timed, its tree when `showTree` (Dashboard breakouts), "needs #3
- * #5" while blocked on its needs, else the schedule that spawned it, else the agent session that created it. Viewed
- * from a session (`contextThreadId`), its own provenance chip is dropped.
+ * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then the one-shot start time
+ * while timed, its tree when `showTree` (Dashboard breakouts), "needs #3 #5" while blocked on its needs, else the
+ * schedule that spawned it, else the agent session that created it. Viewed from a session (`contextThreadId`), its own
+ * provenance chip is dropped.
  */
 function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChip | null {
+  const closed = taskClosedLabel(task);
+  if (closed !== null)
+    return task.archivedAt !== null || task.treeId === null
+      ? { to: `/tasks/${task.id}`, label: closed, title: `Archived ${dateTime(task.archivedAt ?? "")}`, icon: null }
+      : { to: `/trees/${task.treeId}`, label: closed, title: `In ${closed}: ${task.treeTitle ?? task.treeId}`, icon: <IconTree /> };
   if (task.state === "backlog" && task.startAt !== null) {
     const tz = browserTimeZone();
     const when = wallTime(task.startAt, tz, { short: true });

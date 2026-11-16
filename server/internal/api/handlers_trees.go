@@ -9,9 +9,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// listTrees: GET /api/trees?all=1&settledFrom=&project= (docs/api.md
-// "Trees"): active trees plus trees completed since settledFrom; all=1
-// lists every tree.
+// listTrees: GET /api/trees?status=&all=1&settledFrom=&project= (docs/api.md
+// "Trees"): status active (default; plus open trees completed since
+// settledFrom) | done | archived | all; all=1 is status=all.
 func (s *server) listTrees(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	var f db.TreeFilter
@@ -19,9 +19,15 @@ func (s *server) listTrees(w http.ResponseWriter, r *http.Request) error {
 	switch v := strings.TrimSpace(q.Get("all")); v {
 	case "", "0", "false":
 	case "1", "true":
-		f.All = true
+		f.View = db.TreeViewAll
 	default:
 		return db.Invalid("invalid all %q (want 1|0)", v)
+	}
+	if v := strings.TrimSpace(q.Get("status")); v != "" {
+		if err := validEnum("status", v, db.TreeViews); err != nil {
+			return err
+		}
+		f.View = db.TreeView(v)
 	}
 	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
 		return err
@@ -84,7 +90,8 @@ func (s *server) writeTree(w http.ResponseWriter, r *http.Request, status int, i
 	return nil
 }
 
-// updateTree: PATCH /api/trees/{id} {title?, startMode?}.
+// updateTree: PATCH /api/trees/{id} {title?, startMode?, status?} (status
+// first: open reopens, done marks done, archived archives).
 func (s *server) updateTree(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {
@@ -100,6 +107,14 @@ func (s *server) updateTree(w http.ResponseWriter, r *http.Request) error {
 	if p.StartMode.Set && (p.StartMode.Null || !p.StartMode.V.Valid()) {
 		return db.Invalid("startMode must be auto or manual")
 	}
+	if p.Status.Set {
+		if p.Status.Null || !p.Status.V.Valid() {
+			return db.Invalid("status must be open, done or archived")
+		}
+		if _, err := s.Store.SetTreeStatus(r.Context(), id, p.Status.V); err != nil {
+			return err
+		}
+	}
 	if _, err := s.Store.UpdateTree(r.Context(), id, p); err != nil {
 		return err
 	}
@@ -107,13 +122,29 @@ func (s *server) updateTree(w http.ResponseWriter, r *http.Request) error {
 	return s.writeTree(w, r, http.StatusOK, id)
 }
 
-// deleteTree: DELETE /api/trees/{id} dissolves the tree (tasks stay).
+// deleteTree: DELETE /api/trees/{id} deletes an unstarted tree and its
+// tasks (409 once a member started: archive it).
 func (s *server) deleteTree(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {
 		return err
 	}
 	if err := s.Store.DeleteTree(r.Context(), id); err != nil {
+		return err
+	}
+	s.treeChanged()
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// dissolveTree: POST /api/trees/{id}/dissolve removes the tree; its tasks
+// stay (standalone), their needs go.
+func (s *server) dissolveTree(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.DissolveTree(r.Context(), id); err != nil {
 		return err
 	}
 	s.treeChanged()

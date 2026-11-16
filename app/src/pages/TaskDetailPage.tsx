@@ -116,7 +116,12 @@ function TaskBody({ task }: { task: TaskDetail }) {
       await invalidate();
     },
   });
-  const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error;
+  const archive = useMutation({
+    mutationFn: (archived: boolean) => (archived ? api.archiveTask(task.id) : api.unarchiveTask(task.id)),
+    onSettled: invalidate,
+  });
+  const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
+  const archived = task.archivedAt !== null;
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
@@ -178,6 +183,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <NodeChip task={task} />
+        {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
         {task.adopted ? <Chip title="An existing T3 session stage tracks; it never starts it">tracked session</Chip> : null}
         <Chip>{modelText(task.model, task.modelOptions)}</Chip>
         <Chip>{task.runtimeMode}</Chip>
@@ -233,18 +239,36 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </Button>
           )}
           <Button onClick={() => setEditing(true)}>Edit</Button>
-          <Button
-            variant="danger"
-            className="ml-auto"
-            disabled={isActive(task)}
-            title={isActive(task) ? "Stop the task first" : undefined}
-            busy={remove.isPending}
-            onClick={() => {
-              if (window.confirm(`Delete task "${task.title}"?`)) remove.mutate();
-            }}
-          >
-            Delete
-          </Button>
+          {/* Archive (standalone tasks; a member closes with its tree), then Delete far right, only before it ever started. */}
+          {archived ? (
+            <Button className="ml-auto" busy={archive.isPending} onClick={() => archive.mutate(false)}>
+              Unarchive
+            </Button>
+          ) : task.treeId === null ? (
+            <Button
+              className="ml-auto"
+              disabled={isActive(task)}
+              title={isActive(task) ? "Stop the task first" : "Hide it from the Dashboard and lists; activity on it unarchives it"}
+              busy={archive.isPending}
+              onClick={() => archive.mutate(true)}
+            >
+              Archive
+            </Button>
+          ) : null}
+          {task.deletable ? (
+            <Button
+              variant="danger"
+              className={cx(!archived && task.treeId !== null && "ml-auto")}
+              disabled={isActive(task)}
+              title={isActive(task) ? "Stop the task first" : undefined}
+              busy={remove.isPending}
+              onClick={() => {
+                if (window.confirm(`Delete task "${task.title}"?`)) remove.mutate();
+              }}
+            >
+              Delete
+            </Button>
+          ) : null}
         </div>
 
         <ErrorText error={actionError} />

@@ -37,7 +37,8 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
 
 /**
  * The node's one action: Answer (questions waiting; else Open in app while it needs input) > Start (ready; a blocked
- * task arms "Start before #N settles" first) > Retry (failed) > Open in app.
+ * task arms "Start before #N settles" first) > Retry (failed) > Open in app. A done or archived tree offers no Start or
+ * Retry.
  */
 export function NodeAction({ task, pending, className }: { task: Task; pending: readonly number[]; className?: string }) {
   const api = useApi();
@@ -46,6 +47,7 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
   const [armed, setArmed] = useState(false);
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
+  const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
   let action: ReactNode = null;
   if (task.state === "needs_input") {
     action =
@@ -56,7 +58,7 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
           Open in app
         </AppButton>
       );
-  } else if (canStart(task) && task.readiness === "blocked") {
+  } else if (startable && task.readiness === "blocked") {
     const verb = `settle${pending.length === 1 ? "s" : ""}`;
     action = (
       <Button
@@ -71,7 +73,7 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
         {armed ? `Start before ${ids(pending)} ${verb}` : "Start"}
       </Button>
     );
-  } else if (canStart(task)) {
+  } else if (startable) {
     action = (
       <Button small variant={task.state === "backlog" ? "primary" : "secondary"} busy={start.isPending} onClick={() => start.mutate()} className={cls}>
         {task.state === "backlog" ? (task.startAt === null ? "Start" : "Start now") : "Retry"}

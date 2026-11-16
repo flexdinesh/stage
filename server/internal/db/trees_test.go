@@ -315,7 +315,7 @@ func TestDissolveAndEmptyTrees(t *testing.T) {
 	if _, err := s.UpdateTask(ctx, b.ID, db.TaskPatch{Workspace: db.Optional[db.Workspace]{Set: true, V: ws}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteTree(ctx, *b.TreeID); err != nil {
+	if err := s.DissolveTree(ctx, *b.TreeID); err != nil {
 		t.Fatal(err)
 	}
 	if !treeGone(t, s, ctx, *b.TreeID) {
@@ -326,7 +326,7 @@ func TestDissolveAndEmptyTrees(t *testing.T) {
 			t.Fatalf("dissolved member %+v", got)
 		}
 	}
-	if err := s.DeleteTree(ctx, *b.TreeID); !errors.Is(err, db.ErrNotFound) {
+	if err := s.DissolveTree(ctx, *b.TreeID); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("dissolve twice: %v", err)
 	}
 
@@ -546,7 +546,7 @@ func TestListTreesRollup(t *testing.T) {
 		t.Fatalf("rollup %+v", sum)
 	}
 	_ = c
-	if got := list(db.TreeFilter{All: true}); len(got) != 2 {
+	if got := list(db.TreeFilter{View: db.TreeViewAll}); len(got) != 2 {
 		t.Fatalf("all trees %v", ids(got))
 	}
 	past := time.Now().Add(-time.Hour)
@@ -563,10 +563,10 @@ func TestListTreesRollup(t *testing.T) {
 	if got := list(db.TreeFilter{SettledFrom: &future}); !slices.Equal(ids(got), []int64{active}) {
 		t.Fatalf("settled from future %v", ids(got))
 	}
-	if got := list(db.TreeFilter{All: true, ProjectID: &q.ID}); len(got) != 2 {
+	if got := list(db.TreeFilter{View: db.TreeViewAll, ProjectID: &q.ID}); len(got) != 2 {
 		t.Fatalf("project beta %v", ids(got))
 	}
-	if got := list(db.TreeFilter{All: true, ProjectID: &p.ID}); !slices.Equal(ids(got), []int64{active}) {
+	if got := list(db.TreeFilter{View: db.TreeViewAll, ProjectID: &p.ID}); !slices.Equal(ids(got), []int64{active}) {
 		t.Fatalf("project alpha %v", ids(got))
 	}
 }
@@ -584,7 +584,7 @@ func TestTreeTimesAndEvents(t *testing.T) {
 	first, second := *b.TreeID, *y.TreeID
 	list := func() []db.TreeSummary {
 		t.Helper()
-		out, err := s.ListTrees(ctx, db.TreeFilter{All: true})
+		out, err := s.ListTrees(ctx, db.TreeFilter{View: db.TreeViewAll})
 		if err != nil {
 			t.Fatal(err)
 		}

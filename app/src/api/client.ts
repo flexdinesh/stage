@@ -5,6 +5,7 @@ import type {
   StartTreeResponse,
   TreeDetail,
   TreeList,
+  TreeListQuery,
   UpdateTreeRequest,
   PendingQuestions,
   QuestionAnswer,
@@ -153,12 +154,15 @@ export function createApi(transport: Transport) {
 
     tasks: (q: TaskListQuery = {}) =>
       apiFetch<TaskList>(
-        `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom })}`,
+        `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom, closed: q.closed })}`,
       ),
     task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
     createTask: (body: CreateTaskRequest) => apiFetch<Task>("/tasks", post(body)),
     updateTask: (id: number, body: UpdateTaskRequest) => apiFetch<Task>(`/tasks/${id}`, patch(body)),
+    /** Deletes a task that never started (409 once started: archive it). */
     deleteTask: (id: number) => apiSend(`/tasks/${id}`, del),
+    archiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/archive`, post()),
+    unarchiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/unarchive`, post()),
     startTask: (id: number) => apiFetch<Task>(`/tasks/${id}/start`, post()),
     followupTask: (id: number, body: FollowupRequest) => apiFetch<Task>(`/tasks/${id}/followup`, post(body)),
     stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
@@ -166,13 +170,15 @@ export function createApi(transport: Transport) {
     /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),
 
-    trees: (q: { all?: boolean; settledFrom?: string; project?: number } = {}) =>
-      apiFetch<TreeList>(`/trees${toQuery({ all: q.all === true ? 1 : undefined, settledFrom: q.settledFrom, project: q.project })}`),
+    trees: (q: TreeListQuery = {}) =>
+      apiFetch<TreeList>(`/trees${toQuery({ status: q.status, settledFrom: q.settledFrom, project: q.project })}`),
     tree: (id: number) => apiFetch<TreeDetail>(`/trees/${id}`),
     createTree: (body: CreateTreeRequest) => apiFetch<TreeDetail>("/trees", post(body)),
     updateTree: (id: number, body: UpdateTreeRequest) => apiFetch<TreeDetail>(`/trees/${id}`, patch(body)),
-    /** Dissolves the tree: its tasks stay, edges go. */
+    /** Deletes a tree whose members never started, with its tasks (409 otherwise: archive it). */
     deleteTree: (id: number) => apiSend(`/trees/${id}`, del),
+    /** Dissolves the tree: its tasks stay, edges go. */
+    dissolveTree: (id: number) => apiSend(`/trees/${id}/dissolve`, post()),
     /** Adds a task (a member of another tree moves); needs omitted keeps its needs. */
     addToTree: (id: number, taskId: number, needs?: number[]) =>
       apiFetch<TreeDetail>(`/trees/${id}/tasks`, post(needs === undefined ? { taskId } : { taskId, needs })),

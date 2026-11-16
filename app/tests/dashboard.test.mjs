@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { breaksOut, splitTreeMembers } from "../src/lib/dashboard.ts";
 
 const task = (id, state, extra = {}) => ({ id, state, treeId: null, readiness: null, ...extra });
-const tree = (id, settledAt = null) => ({ id, settledAt });
+const tree = (id, settledAt = null, status = "open") => ({ id, settledAt, status });
 const ids = (list) => list.map((t) => t.id);
 
 test("members of an active tree roll up; loose tasks keep their rows", () => {
@@ -54,6 +54,15 @@ test("settled members roll up only into a completed tree", () => {
 test("members of trees not listed keep their rows (trees not loaded, or filtered out)", () => {
   const tasks = [task(1, "running", { treeId: 10 }), task(2, "settled", { treeId: 10 })];
   const split = splitTreeMembers(tasks, []);
+  assert.deepEqual(ids(split.rows), [1, 2]);
+  assert.deepEqual(split.rolledUp, []);
+});
+
+test("done and archived trees are left out of the Dashboard split", () => {
+  const tasks = [task(1, "running", { treeId: 10 }), task(2, "settled", { treeId: 20 })];
+  const split = splitTreeMembers(tasks, [tree(10, null, "done"), tree(20, "2026-11-15T10:00:00Z", "archived"), tree(30)]);
+  assert.deepEqual(ids(split.active), [30]);
+  assert.deepEqual(split.settled, []);
   assert.deepEqual(ids(split.rows), [1, 2]);
   assert.deepEqual(split.rolledUp, []);
 });

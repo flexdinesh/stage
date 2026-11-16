@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
-import type { ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery } from "./types.ts";
+import type { ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -54,8 +54,6 @@ export const useTask = (id: number) => {
   const api = useApi();
   return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id) });
 };
-
-export type TreeListQuery = { all?: boolean; settledFrom?: string; project?: number };
 
 export const useTrees = (q: TreeListQuery = {}) => {
   const api = useApi();

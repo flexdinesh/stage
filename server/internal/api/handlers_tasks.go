@@ -35,6 +35,13 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
 		return err
 	}
+	switch v := strings.TrimSpace(q.Get("closed")); v {
+	case "", "false":
+	case "true", "all":
+		f.Closed = v
+	default:
+		return db.Invalid("invalid closed %q (want false|true|all)", v)
+	}
 	ts, err := s.Store.ListTasks(r.Context(), f)
 	if err != nil {
 		return err
@@ -394,6 +401,29 @@ func (s *server) deleteTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.treeChanged()
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// archiveTask: POST /api/tasks/{id}/archive; unarchiveTask: .../unarchive.
+func (s *server) archiveTask(w http.ResponseWriter, r *http.Request) error {
+	return s.setArchived(w, r, true)
+}
+
+func (s *server) unarchiveTask(w http.ResponseWriter, r *http.Request) error {
+	return s.setArchived(w, r, false)
+}
+
+func (s *server) setArchived(w http.ResponseWriter, r *http.Request, archived bool) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	task, err := s.Store.ArchiveTask(r.Context(), id, archived)
+	if err != nil {
+		return err
+	}
+	s.treeChanged()
+	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
 	return nil
 }
 

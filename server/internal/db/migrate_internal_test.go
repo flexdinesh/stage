@@ -113,7 +113,7 @@ func TestMigrationTrees(t *testing.T) {
 		VALUES (2, 1, 1, 'th-1', 'Build', 'sent', 'block'), (6, 1, NULL, 'sess-1', 'Planner', 'skipped', '')`)
 	mustExec(t, pool, `INSERT INTO notifications (event, task_id, title, url) VALUES ('done', 1, 'Build', '/tasks/1')`)
 
-	migrateTo(t, pool, 3)
+	migrateTo(t, pool, 4) // the store reads the latest schema; 0004 only adds columns
 	s := NewStore(pool)
 	ctx := context.Background()
 

@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router";
 import type { Task, TreeDetail } from "../../api/types.ts";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
-import { layoutLevels, nodeState, treeMeta } from "../../lib/trees.ts";
+import { closedLabel, countMembers, layoutLevels, nodeState, treeMeta } from "../../lib/trees.ts";
 import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
-import { Button, Muted, Panel, buttonClass, cx, toneClass } from "../ui.tsx";
+import { Button, Chip, Muted, Panel, buttonClass, cx, toneClass } from "../ui.tsx";
 import { AddToTreeDrawer } from "./AddToTreeDrawer.tsx";
 import { TreeNodeEditor } from "./TreeNodePanel.tsx";
 
@@ -55,6 +55,7 @@ export function MiniLevels({ tree, current }: { tree: Pick<TreeDetail, "tasks">;
  * view with this task outlined, then the member's tree controls (needs, dependents, start mode, base, handoff, remove).
  */
 export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
+  const chip = closedLabel(tree, countMembers(tree.tasks));
   return (
     <Panel
       title="Tree"
@@ -67,9 +68,12 @@ export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
     >
       <div className="flex min-w-0 flex-col gap-2.5 border-b border-line px-3 py-3">
         <div className="min-w-0">
-          <Link to={`/trees/${tree.id}`} className="text-body font-medium break-words hover:underline">
-            {tree.title}
-          </Link>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <Link to={`/trees/${tree.id}`} className="text-body font-medium break-words hover:underline">
+              {tree.title}
+            </Link>
+            {chip === null ? null : <Chip>{chip}</Chip>}
+          </div>
           <p className="mt-0.5 font-mono text-meta text-muted tabular">{treeMeta(tree)}</p>
           <p className="font-mono text-meta text-muted tabular">
             <span title={dateTime(tree.createdAt)}>created {shortDate(tree.createdAt)}</span> ·{" "}
@@ -85,19 +89,24 @@ export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
   );
 }
 
-/** Task detail side panel for a task outside any tree: says so, with Add to tree. */
+/** Task detail side panel for a task outside any tree: says so, with Add to tree (not while archived). */
 export function NoTreePanel({ task }: { task: Task }) {
   const [adding, setAdding] = useState(false);
+  const archived = task.archivedAt !== null;
   return (
     <Panel
       title="Tree"
       actions={
-        <Button small onClick={() => setAdding(true)}>
-          Add to tree
-        </Button>
+        archived ? undefined : (
+          <Button small onClick={() => setAdding(true)}>
+            Add to tree
+          </Button>
+        )
       }
     >
-      <Muted>Not in a tree. Add it to one so it can need other tasks, or be needed.</Muted>
+      <Muted>
+        {archived ? "Not in a tree. Unarchive it to add it to one." : "Not in a tree. Add it to one so it can need other tasks, or be needed."}
+      </Muted>
       {adding ? <AddToTreeDrawer task={task} onClose={() => setAdding(false)} /> : null}
     </Panel>
   );
