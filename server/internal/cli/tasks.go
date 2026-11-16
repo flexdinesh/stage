@@ -36,7 +36,7 @@ func csv(s string) []string {
 // add/edit).
 type configFlags struct {
 	project, title, prompt, promptFile, provider, model, effort string
-	runtime, mode, baseRef, branch, base, notes                 string
+	runtime, mode, baseRef, branch, base                        string
 	options, tags, images                                       list
 }
 
@@ -53,7 +53,6 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
 	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; --base-ref is the fallback)")
-	c.fs.StringVar(&f.notes, "notes", "", "notes")
 	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
 	c.fs.Var(&f.tags, "tag", "tag (repeatable)")
 	c.fs.Var(&f.images, "image", "image file (repeatable)")
@@ -104,7 +103,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	return agenttools.ConfigArgs{
 		Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
 		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
-		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, Notes: f.notes, ImagePaths: f.images,
+		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, ImagePaths: f.images,
 	}, nil
 }
 
@@ -140,7 +139,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		Provider: strFlag(c, "provider", f.provider), Model: strFlag(c, "model", f.model),
 		Effort: strFlag(c, "effort", f.effort), Options: opts, RuntimeMode: strFlag(c, "runtime", f.runtime),
 		InteractionMode: strFlag(c, "mode", f.mode), BaseRef: strFlag(c, "base-ref", f.baseRef),
-		Branch: strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base), Notes: strFlag(c, "notes", f.notes),
+		Branch: strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base),
 	}
 	if promptSet {
 		a.Prompt = &prompt
@@ -218,6 +217,8 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	o := func() *agenttools.Ops { return c.ops() }
 	printTask := func(t any) error { return c.out(t, func(w io.Writer) { printAnyTask(w, t) }) }
 	switch v {
+	case "notes":
+		return runNotes(ctx, env, "task", rest)
 	case "ls", "list":
 		var a agenttools.ListTasksArgs
 		var states string
@@ -252,9 +253,11 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	case "add", "create", "new":
 		var f configFlags
 		var wf waitFlags
+		var initialNote string
 		var start bool
 		f.register(c)
 		wf.register(c)
+		c.fs.StringVar(&initialNote, "initial-note", "", "initial journal note")
 		c.fs.BoolVar(&start, "start", false, "start now")
 		if err := c.parse(rest); err != nil {
 			return err
@@ -268,7 +271,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		res, err := o().CreateTask(ctx, agenttools.CreateTaskArgs{
-			ConfigArgs: cfg, Start: start,
+			ConfigArgs: cfg, Start: start, InitialNote: initialNote,
 			WaitArgs: agenttools.WaitArgs{
 				TreeID: int64Flag(c, "tree", wf.tree), Needs: needs, AfterMe: wf.afterMe,
 				StartMode: wf.startMode, BaseTaskID: int64Flag(c, "base-task", wf.baseTask),
@@ -480,6 +483,7 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 		var f configFlags
 		var a agenttools.CreateScheduleArgs
 		f.register(c)
+		c.fs.StringVar(&a.Notes, "notes", "", "note template for spawned tasks")
 		c.fs.StringVar(&a.Cron, "cron", "", "cron")
 		c.fs.StringVar(&a.Tz, "tz", "", "zone")
 		c.fs.BoolVar(&a.Paused, "paused", false, "create paused")
@@ -498,8 +502,9 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 		return printSchedule(res)
 	case "edit", "update":
 		var f configFlags
-		var cron, tz string
+		var cron, tz, notes string
 		f.register(c)
+		c.fs.StringVar(&notes, "notes", "", "note template for spawned tasks")
 		c.fs.StringVar(&cron, "cron", "", "cron")
 		c.fs.StringVar(&tz, "tz", "", "zone")
 		if err := c.parse(rest); err != nil {
@@ -513,7 +518,7 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		res, err := c.ops().UpdateSchedule(ctx, agenttools.UpdateScheduleArgs{UpdateArgs: u, Cron: strFlag(c, "cron", cron), Tz: strFlag(c, "tz", tz)})
+		res, err := c.ops().UpdateSchedule(ctx, agenttools.UpdateScheduleArgs{UpdateArgs: u, Notes: strFlag(c, "notes", notes), Cron: strFlag(c, "cron", cron), Tz: strFlag(c, "tz", tz)})
 		if err != nil {
 			return err
 		}
@@ -629,7 +634,7 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 		var tags list
 		var tree int64
 		c.fs.StringVar(&a.Title, "title", "", "task title (default: the session title)")
-		c.fs.StringVar(&a.Notes, "notes", "", "notes")
+		c.fs.StringVar(&a.InitialNote, "initial-note", "", "initial journal note")
 		c.fs.Var(&tags, "tag", "tag (repeatable)")
 		c.fs.Int64Var(&tree, "tree", 0, "also put the task in this tree")
 		if err := c.parse(rest); err != nil {

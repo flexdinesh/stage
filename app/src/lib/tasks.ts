@@ -13,7 +13,7 @@ export const waitTarget = (t: Pick<Task, "needs">) => t.needs.map((id) => `#${id
 /** Thread is live: stop allowed, delete refused. */
 export const isActive = (t: Task) => ACTIVE.includes(t.state);
 export const canStop = (t: Task) => t.t3ThreadId !== null && isActive(t);
-/** Outside backlog only title, tags, notes may change. */
+/** Outside backlog only title and tags may change. */
 export const isFullyEditable = (t: Task) => t.state === "backlog";
 /** Settled: no longer gates anything. */
 export const isFinal = (t: Task) => t.state === "settled";

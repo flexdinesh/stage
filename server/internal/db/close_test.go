@@ -292,13 +292,13 @@ func TestDeleteOnlyUnstarted(t *testing.T) {
 	if got := getTask(t, s, ctx, failed.ID); got.Deletable {
 		t.Fatal("launched task is not deletable")
 	}
-	wantConflict(t, s.DeleteTask(ctx, failed.ID), "has started: archive it instead")
+	wantConflict(t, s.DeleteTask(ctx, failed.ID), "has recorded work: archive it instead")
 	// Restart after a failed launch keeps it started (launch_attempt > 0, no thread).
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: failed.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
 	setState(t, s, ctx, failed.ID, db.StateFailed)
-	wantConflict(t, s.DeleteTask(ctx, failed.ID), "has started")
+	wantConflict(t, s.DeleteTask(ctx, failed.ID), "has recorded work")
 	if err := s.DeleteTask(ctx, fresh.ID); err != nil {
 		t.Fatalf("delete fresh: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestDeleteOnlyUnstarted(t *testing.T) {
 	x := mustTask(t, s, ctx, p.ID, "x", nil)
 	y := mustTask(t, s, ctx, p.ID, "y", []int64{x.ID})
 	launch(t, s, ctx, x.ID, "th-x", db.StateSettled)
-	wantConflict(t, s.DeleteTree(ctx, *y.TreeID), "has started: archive the tree instead")
+	wantConflict(t, s.DeleteTree(ctx, *y.TreeID), "has recorded work: archive it instead")
 	if got, err := s.GetTree(ctx, *y.TreeID); err != nil || got.Deletable {
 		t.Fatalf("started tree deletable %+v %v", got.Tree, err)
 	}

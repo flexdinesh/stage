@@ -18,6 +18,29 @@ import (
 
 const maxBody = 1 << 20
 
+// decodeStrict rejects removed and misspelled fields on versioned write contracts.
+func decodeStrict(r *http.Request, v any) error {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return db.Invalid("read body: %v", err)
+	}
+	if len(body) > maxBody {
+		return db.Invalid("body exceeds %d bytes", maxBody)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		body = []byte("{}")
+	}
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.DisallowUnknownFields()
+	if err := d.Decode(v); err != nil {
+		return db.Invalid("invalid JSON body: %v", err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return db.Invalid("body must contain one JSON object")
+	}
+	return nil
+}
+
 // decode reads a JSON body into v (400 on bad JSON).
 func decode(r *http.Request, v any) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))

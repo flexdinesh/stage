@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,55 @@ func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int6
 		t.Fatal("new schedule has no nextRunAt")
 	}
 	return sc
+}
+
+func TestScheduleNotesValidatedBeforeSaving(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "notes")
+	for _, notes := range []string{strings.Repeat("界", 5462), string([]byte{0xff})} {
+		_, err := s.CreateSchedule(ctx, db.NewSchedule{ProjectID: p.ID, Title: "invalid", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC", Notes: notes})
+		var invalid *db.InvalidError
+		if !errors.As(err, &invalid) {
+			t.Fatalf("create invalid template: %v", err)
+		}
+	}
+	sc := mustSchedule(t, s, ctx, p.ID, "*/5 * * * *")
+	_, err := s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{Notes: db.Optional[string]{Set: true, V: strings.Repeat("x", 16385)}})
+	var invalid *db.InvalidError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("update invalid template: %v", err)
+	}
+	got, err := s.GetSchedule(ctx, sc.ID)
+	if err != nil || got.Notes != "" {
+		t.Fatalf("failed update changed template: %+v %v", got, err)
+	}
+}
+
+func TestWhitespaceScheduleNotesDoNotBlockRuns(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "notes")
+	sc := mustSchedule(t, s, ctx, p.ID, "*/5 * * * *")
+	if _, err := s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{Notes: db.Optional[string]{Set: true, V: " \n\t "}}); err != nil {
+		t.Fatal(err)
+	}
+	manual, err := s.RunScheduleNow(ctx, sc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auto := mustFire(t, s, ctx, sc.ID, *sc.NextRunAt)
+	if auto.TaskID == nil || auto.Outcome != db.RunStarted {
+		t.Fatalf("automatic run: %+v", auto)
+	}
+	for _, id := range []int64{manual.ID, *auto.TaskID} {
+		page, err := s.ReadJournal(ctx, db.JournalOwner{TaskID: &id}, db.JournalQuery{})
+		if err != nil || len(page.Entries) != 0 {
+			t.Fatalf("whitespace template produced notes: %+v %v", page, err)
+		}
+	}
+	got, err := s.GetSchedule(ctx, sc.ID)
+	if err != nil || got.NextRunAt == nil || !got.NextRunAt.After(*sc.NextRunAt) {
+		t.Fatalf("automatic run did not advance: %+v %v", got, err)
+	}
 }
 
 func mustFire(t *testing.T, s *db.Store, ctx context.Context, id int64, now time.Time) db.FireResult {

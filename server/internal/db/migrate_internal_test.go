@@ -3,9 +3,13 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 // openUnmigrated opens a fresh temp database with no migrations applied.
@@ -113,7 +117,7 @@ func TestMigrationTrees(t *testing.T) {
 		VALUES (2, 1, 1, 'th-1', 'Build', 'sent', 'block'), (6, 1, NULL, 'sess-1', 'Planner', 'skipped', '')`)
 	mustExec(t, pool, `INSERT INTO notifications (event, task_id, title, url) VALUES ('done', 1, 'Build', '/tasks/1')`)
 
-	migrateTo(t, pool, 4) // the store reads the latest schema; 0004 only adds columns
+	migrateTo(t, pool, 5) // the store reads the latest schema
 	s := NewStore(pool)
 	ctx := context.Background()
 
@@ -234,3 +238,125 @@ func TestMigrationTrees(t *testing.T) {
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+func TestJournalMigrationPreservesHistoryAndDiscardsLegacyNotes(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 4)
+	mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(1,'existing tree')`)
+	mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,notes,cron,tz) VALUES(1,1,'schedule','prompt','template survives','* * * * *','UTC')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,notes,tree_id,schedule_id,launch_attempt,state) VALUES(1,1,'a','p','discard me',1,1,1,'done'),(2,1,'b','p','also discard',1,NULL,0,'backlog')`)
+	mustExec(t, pool, `INSERT INTO task_events(id,task_id,to_state,detail) VALUES(9,1,'done','historical result')`)
+	mustExec(t, pool, `INSERT INTO task_needs(task_id,need_id) VALUES(2,1)`)
+	mustExec(t, pool, `INSERT INTO task_attachments(task_id,name,mime_type,size_bytes,data) VALUES(1,'a.png','image/png',1,x'01')`)
+	mustExec(t, pool, `INSERT INTO task_handoffs(task_id,attempt,source_task_id,source_thread_id,status,text) VALUES(2,1,1,'thread','sent','handoff survives')`)
+	mustExec(t, pool, `INSERT INTO task_launch_bases(task_id,attempt,base_ref,start_from_origin,source) VALUES(2,1,'feature',0,'predecessor')`)
+	mustExec(t, pool, `INSERT INTO schedule_runs(schedule_id,fire_at,outcome,task_id) VALUES(1,'2026-11-01T00:00:00.000000Z','started',1)`)
+	migrateTo(t, pool, 5)
+	var n int
+	for _, table := range []string{"task_events", "task_needs", "task_attachments", "task_handoffs", "task_launch_bases", "schedule_runs"} {
+		if err := pool.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s lost rows: %d %v", table, n, err)
+		}
+	}
+	if err := pool.QueryRow(`SELECT count(*) FROM pragma_table_info('tasks') WHERE name = 'notes'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("legacy notes column: %d %v", n, err)
+	}
+	if err := pool.QueryRow(`SELECT count(*) FROM journal_entries WHERE kind = 'note' OR event_type <> 'journal_history_started'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("backfilled historical notes/events: %d %v", n, err)
+	}
+	if err := pool.QueryRow(`SELECT count(*) FROM journal_entries`).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("history markers: %d %v", n, err)
+	}
+	var text string
+	if err := pool.QueryRow(`SELECT notes FROM schedules WHERE id = 1`).Scan(&text); err != nil || text != "template survives" {
+		t.Fatalf("schedule template: %q %v", text, err)
+	}
+	s := NewStore(pool)
+	ctx := context.Background()
+	if got, err := s.TaskEvents(ctx, 1); err != nil || len(got) != 1 || got[0].ID != 9 || got[0].Detail != "historical result" {
+		t.Fatalf("task history: %+v %v", got, err)
+	}
+	if tr, err := s.GetTree(ctx, 1); err != nil || tr.Deletable {
+		t.Fatalf("migration protection: %+v %v", tr, err)
+	}
+	if _, err := s.TransitionTask(ctx, Transition{TaskID: 1, To: StateSettled, Detail: "after rollout"}); err != nil {
+		t.Fatal(err)
+	}
+	id := int64(1)
+	page, err := s.ReadJournal(ctx, JournalOwner{TreeID: &id}, JournalQuery{Kind: "events"})
+	if err != nil || len(page.Entries) != 2 || page.Entries[0].TaskID == nil || *page.Entries[0].TaskID != 1 || page.Entries[0].Attempt == nil || *page.Entries[0].Attempt != 1 {
+		t.Fatalf("post-rollout event: %+v %v", page, err)
+	}
+	// Direct inserts also invalidate existing tree cursors.
+	first, err := s.ReadJournal(ctx, JournalOwner{TreeID: &id}, JournalQuery{Kind: "events", Limit: 1})
+	if err != nil || first.NextCursor == nil {
+		t.Fatalf("first cursor %+v %v", first, err)
+	}
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,tree_id) VALUES(1,'direct insert','p',1)`)
+	if _, err := s.ReadJournal(ctx, JournalOwner{TreeID: &id}, JournalQuery{Kind: "events", Limit: 1, Cursor: *first.NextCursor}); err == nil {
+		t.Fatal("direct insert retained stale cursor")
+	}
+}
+
+func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
+	for name, template := range map[string]string{
+		"unicode":           strings.Repeat("界", 12000) + " end\n",
+		"whitespace chunks": "begin" + strings.Repeat(" \n", 20000) + "end",
+		"only whitespace":   strings.Repeat(" \n", 10000),
+		"at limit":          strings.Repeat("x", 16*1024),
+	} {
+		t.Run(name, func(t *testing.T) {
+			pool := openUnmigrated(t)
+			migrateTo(t, pool, 4)
+			mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
+			mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,notes,cron,tz,next_run_at,origin_thread_id) VALUES(1,1,'schedule','prompt',?,'* * * * *','UTC','2026-11-01T00:00:00.000000Z','source-session')`, template)
+			migrateTo(t, pool, 5)
+			s := NewStore(pool)
+			ctx := context.Background()
+			manual, err := s.RunScheduleNow(ctx, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fire := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+			auto, err := s.FireSchedule(ctx, 1, fire, time.Minute)
+			if err != nil || auto.TaskID == nil || auto.Outcome != RunStarted {
+				t.Fatalf("automatic spawn: %+v %v", auto, err)
+			}
+			for _, id := range []int64{manual.ID, *auto.TaskID} {
+				page, err := s.ReadJournal(ctx, JournalOwner{TaskID: &id}, JournalQuery{Limit: 100})
+				if err != nil || page.NextCursor != nil {
+					t.Fatalf("read notes: %+v %v", page, err)
+				}
+				slices.Reverse(page.Entries)
+				var reconstructed strings.Builder
+				for i, preview := range page.Entries {
+					entry, err := s.GetJournalEntry(ctx, preview.ID)
+					if err != nil || len(entry.Text) > 16*1024 || !utf8.ValidString(entry.Text) || entry.SourceThreadID == nil || *entry.SourceThreadID != "source-session" {
+						t.Fatalf("invalid full note: %+v %v", entry, err)
+					}
+					text := entry.Text
+					if len(page.Entries) > 1 {
+						prefix := fmt.Sprintf("Schedule template (part %d of %d)\n\n", i+1, len(page.Entries))
+						if !strings.HasPrefix(text, prefix) {
+							t.Fatalf("missing part order: %q", text[:min(80, len(text))])
+						}
+						text = strings.TrimPrefix(text, prefix)
+					}
+					reconstructed.WriteString(text)
+				}
+				want := template
+				if strings.TrimSpace(want) == "" {
+					want = ""
+				}
+				if reconstructed.String() != want {
+					t.Fatalf("template text changed across %d notes", len(page.Entries))
+				}
+			}
+			sc, err := s.GetSchedule(ctx, 1)
+			if err != nil || sc.Notes != template || sc.NextRunAt == nil || !sc.NextRunAt.After(fire) {
+				t.Fatalf("template or schedule changed: %+v %v", sc, err)
+			}
+		})
+	}
+}

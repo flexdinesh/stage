@@ -396,6 +396,12 @@ func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task,
 	if block := s.prepareHandoff(ctx, task, deps); block != "" {
 		in.Message = task.Prompt + "\n\n" + block
 	}
+	journal, err := s.store.JournalLaunchContext(ctx, task, journalInstructions(task))
+	if err != nil {
+		s.failLaunching(ctx, id, "launch aborted", "persist journal context: "+err.Error(), nil, true)
+		return db.Task{}, err
+	}
+	in.Message += "\n\n" + journal
 	var fallback *t3.WorkspaceStrategy
 	if task.Workspace.FromPredecessor() {
 		in.Workspace, fallback = s.prepareBase(ctx, task, deps)

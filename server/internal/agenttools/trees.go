@@ -215,11 +215,11 @@ func (o *Ops) SetNeeds(ctx context.Context, a SetNeedsArgs) (client.Task, error)
 
 // AdoptSessionArgs is adopt_session.
 type AdoptSessionArgs struct {
-	ThreadID string   `json:"threadId,omitempty" jsonschema:"T3 thread id of a top-level session; default: your own session"`
-	Title    string   `json:"title,omitempty" jsonschema:"task title; default: the session title"`
-	Notes    string   `json:"notes,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	TreeID   *int64   `json:"treeId,omitempty" jsonschema:"also put the task in this tree (no needs)"`
+	ThreadID    string   `json:"threadId,omitempty" jsonschema:"T3 thread id of a top-level session; default: your own session"`
+	Title       string   `json:"title,omitempty" jsonschema:"task title; default: the session title"`
+	InitialNote string   `json:"initialNote,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	TreeID      *int64   `json:"treeId,omitempty" jsonschema:"also put the task in this tree (no needs)"`
 	CallerArgs
 }
 
@@ -241,7 +241,7 @@ func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, e
 		return AdoptOut{}, errors.New("threadId is required outside a T3 session (T3CODE_THREAD_ID) or pass callerThreadId")
 	}
 	t, created, err := o.Client.AdoptThread(ctx, id, client.AdoptSession{
-		Title: strPtr(a.Title), Notes: strPtr(a.Notes), Tags: a.Tags, TreeID: a.TreeID,
+		Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), Tags: a.Tags, TreeID: a.TreeID,
 	})
 	return AdoptOut{Task: t, Created: created}, err
 }

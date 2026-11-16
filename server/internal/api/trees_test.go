@@ -167,8 +167,11 @@ func TestTreesLifecycle(t *testing.T) {
 		t.Fatalf("after deleting a %+v", got)
 	}
 	e.must("POST", treePath(tr.ID, "/dissolve"), nil, 204, nil)
-	e.must("GET", treePath(tr.ID), nil, 404, nil)
-	e.must("POST", treePath(tr.ID, "/dissolve"), nil, 404, nil)
+	var dissolved closeTree
+	e.must("GET", treePath(tr.ID), nil, 200, &dissolved)
+	if dissolved.Status != "archived" || dissolved.ClosedAt == nil {
+		t.Fatalf("dissolved tree %+v", dissolved)
+	}
 	if got = e.getTask(b.ID); got.TreeID != nil || got.Readiness != nil {
 		t.Fatalf("dissolved %+v", got)
 	}

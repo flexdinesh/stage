@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
-import type { ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
+import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -22,6 +22,8 @@ export const keys = {
   schedulePreview: ["schedulePreview"],
   trees: ["trees"],
   tree: ["tree"],
+  journal: ["journal"],
+  journalEntry: ["journalEntry"],
 } as const;
 
 export const useT3Status = () => {
@@ -62,7 +64,7 @@ export const useTrees = (q: TreeListQuery = {}) => {
 
 export const useTree = (id: number) => {
   const api = useApi();
-  // A dissolved (or emptied, so deleted) tree is a 404: show it at once instead of retrying.
+  // A deleted tree is a 404; dissolved and empty trees retain their archived identity.
   return useQuery({
     queryKey: [...keys.tree, id],
     queryFn: () => api.tree(id),
@@ -73,6 +75,32 @@ export const useTree = (id: number) => {
 export const useSchedules = (q: ScheduleListQuery = {}) => {
   const api = useApi();
   return useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q) });
+};
+
+export const useJournal = (owner: JournalOwner, q: Omit<JournalQuery, "cursor"> = {}) => {
+  const api = useApi();
+  return useInfiniteQuery({
+    queryKey: [...keys.journal, owner, q],
+    queryFn: ({ pageParam }) => api.journal(owner, { ...q, ...(pageParam === "" ? {} : { cursor: pageParam }) }),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    retry: false,
+  });
+};
+
+export const useJournalEntry = (id: number | null, enabled = true) => {
+  const api = useApi();
+  return useQuery({
+    queryKey: [...keys.journalEntry, id],
+    queryFn: () => {
+      if (id === null) throw new Error("Missing journal entry id");
+      return api.journalEntry(id);
+    },
+    enabled: id !== null && enabled,
+    staleTime: Infinity,
+    refetchInterval: false,
+    retry: false,
+  });
 };
 
 export const useSchedule = (id: number) => {
@@ -195,6 +223,7 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
       keys.schedule,
       keys.trees,
       keys.tree,
+      keys.journal,
     ].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),

@@ -164,7 +164,7 @@ func TestToolList(t *testing.T) {
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
 		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
 		"list_trees", "get_tree", "create_tree", "update_tree", "delete_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
-		"adopt_session",
+		"adopt_session", "read_journal", "get_journal_entry", "append_note",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -187,7 +187,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 
 	var cx agenttools.ContextOut
 	mustCall(t, cs, "get_context", nil, &cx)
-	if cx.ThreadID != s || cx.Project == nil || cx.Project.ID != p.ID || cx.ProjectSource != "session" {
+	if cx.ThreadID != s || cx.Project == nil || cx.Project.ID != p.ID || cx.ProjectSource != "session" || cx.TreeID != nil || cx.TreeTitle != nil {
 		t.Fatalf("context %+v (session beats cwd)", cx)
 	}
 
@@ -202,6 +202,11 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	mustCall(t, cs, "get_task", map[string]any{"id": tk.Needs[0]}, &me)
 	if !me.Adopted || me.T3ThreadID == nil || *me.T3ThreadID != s || me.TreeID == nil || *me.TreeID != *tk.TreeID {
 		t.Fatalf("caller task %+v", me.Task)
+	}
+
+	mustCall(t, cs, "get_context", nil, &cx)
+	if cx.CallerTaskID == nil || *cx.CallerTaskID != me.ID || cx.TreeID == nil || *cx.TreeID != *tk.TreeID || cx.TreeTitle == nil {
+		t.Fatalf("current tree context %+v", cx)
 	}
 
 	// Explicit project wins; arguments override the environment.
@@ -506,9 +511,14 @@ func TestAdoptSessionTool(t *testing.T) {
 	if tk.TreeID == nil {
 		t.Fatalf("needs on an adopted task builds a tree %+v", tk)
 	}
-	mustCall(t, cs, "adopt_session", map[string]any{"threadId": other, "title": "Side quest", "notes": "n", "treeId": *tk.TreeID}, &out)
-	if !out.Created || out.Task.Title != "Side quest" || out.Task.Notes != "n" || out.Task.TreeID == nil || *out.Task.TreeID != *tk.TreeID {
+	mustCall(t, cs, "adopt_session", map[string]any{"threadId": other, "title": "Side quest", "initialNote": "n", "treeId": *tk.TreeID}, &out)
+	if !out.Created || out.Task.Title != "Side quest" || out.Task.TreeID == nil || *out.Task.TreeID != *tk.TreeID {
 		t.Fatalf("adopt other into tree %+v", out)
+	}
+	var notes db.JournalPage
+	mustCall(t, cs, "read_journal", map[string]any{"taskId": out.Task.ID}, &notes)
+	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" {
+		t.Fatalf("adoption initial note %+v", notes)
 	}
 	var rows agenttools.TasksOut
 	mustCall(t, cs, "list_tasks", nil, &rows)
@@ -713,7 +723,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 36 {
+	if err != nil || len(res.Tools) != 39 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

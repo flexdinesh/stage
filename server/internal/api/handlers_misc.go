@@ -113,25 +113,25 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// adoptThread: POST /api/threads/{id}/adopt {title?, notes?, tags?,
+// adoptThread: POST /api/threads/{id}/adopt {title?, initialNote?, tags?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
 // task already owns it.
 func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	var req struct {
-		Title  *string  `json:"title"`
-		Notes  *string  `json:"notes"`
-		Tags   []string `json:"tags"`
-		TreeID *int64   `json:"treeId"`
+		Title       *string  `json:"title"`
+		InitialNote *string  `json:"initialNote"`
+		Tags        []string `json:"tags"`
+		TreeID      *int64   `json:"treeId"`
 	}
-	if err := decode(r, &req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
 	if err := s.refreshSession(r, id); err != nil {
 		return err
 	}
 	task, created, err := s.Store.AdoptThread(r.Context(), db.AdoptInput{
-		ThreadID: id, Title: req.Title, Notes: req.Notes, Tags: cleanTags(req.Tags), TreeID: req.TreeID,
+		ThreadID: id, Title: req.Title, InitialNote: req.InitialNote, Tags: cleanTags(req.Tags), TreeID: req.TreeID,
 	})
 	if err != nil {
 		return err

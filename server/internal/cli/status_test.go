@@ -12,7 +12,7 @@ import (
 func TestStatusReady(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "status")
-	if code != 0 || !strings.Contains(out, "ready at "+h.url+" (STAGE_URL)") || !strings.Contains(out, "t3        connected") || !strings.Contains(out, "api       v1") {
+	if code != 0 || !strings.Contains(out, "ready at "+h.url+" (STAGE_URL)") || !strings.Contains(out, "t3        connected") || !strings.Contains(out, "api       v2") {
 		t.Fatalf("status: %d %q %q", code, out, errOut)
 	}
 	code, out, _ = h.run("", "status", "--json")
@@ -26,7 +26,7 @@ func TestStatusReady(t *testing.T) {
 		} `json:"health"`
 		ClientAPIVersion int `json:"clientApiVersion"`
 	}
-	if code != 0 || json.Unmarshal([]byte(out), &s) != nil || !s.Ready || s.Source != "STAGE_URL" || s.Health.Service != "stage" || s.Health.APIVersion != 1 || s.ClientAPIVersion != 1 {
+	if code != 0 || json.Unmarshal([]byte(out), &s) != nil || !s.Ready || s.Source != "STAGE_URL" || s.Health.Service != "stage" || s.Health.APIVersion != 2 || s.ClientAPIVersion != 2 {
 		t.Fatalf("status --json: %d %s", code, out)
 	}
 }
@@ -71,8 +71,8 @@ func TestStatusUnreachableAndWait(t *testing.T) {
 func TestStatusAPIMismatch(t *testing.T) {
 	h := newHarness(t)
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Stage-Api-Version", "2")
-		_, _ = w.Write([]byte(`{"status":"ok","db":"ok","service":"stage","version":"9.9.9","apiVersion":2,"t3":{"connected":true}}`))
+		w.Header().Set("Stage-Api-Version", "1")
+		_, _ = w.Write([]byte(`{"status":"ok","db":"ok","service":"stage","version":"9.9.9","apiVersion":1,"t3":{"connected":true}}`))
 	})}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -82,11 +82,11 @@ func TestStatusAPIMismatch(t *testing.T) {
 	defer srv.Close()
 	h.url = "http://" + l.Addr().String()
 	code, out, errOut := h.run("", "status", "--wait", "5s")
-	if code != 1 || !strings.Contains(errOut, "API v2, this client v1") || !strings.Contains(out, "server version 9.9.9 differs") {
+	if code != 1 || !strings.Contains(errOut, "API v1, this client v2") || !strings.Contains(out, "server version 9.9.9 differs") {
 		t.Fatalf("mismatch: %d %q %q", code, out, errOut)
 	}
 	// Other commands refuse too.
-	if code, _, errOut := h.run("", "projects", "ls"); code != 1 || !strings.Contains(errOut, "API v2") {
+	if code, _, errOut := h.run("", "projects", "ls"); code != 1 || !strings.Contains(errOut, "API v1") {
 		t.Fatalf("projects ls on mismatch: %d %q", code, errOut)
 	}
 }

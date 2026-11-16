@@ -132,7 +132,6 @@ type Task struct {
 	InteractionMode    string           `json:"interactionMode"`
 	Workspace          Workspace        `json:"workspace"`
 	Tags               []string         `json:"tags"`
-	Notes              string           `json:"notes"`
 	State              TaskState        `json:"state"`
 	T3ThreadID         *string          `json:"t3ThreadId"`
 	TreeID             *int64           `json:"treeId"` // the task's tree (docs/api.md "Trees")
@@ -179,7 +178,7 @@ type Task struct {
 	ArchivedAt *time.Time `json:"archivedAt"`
 	// TreeStatus: its tree's status (nil outside a tree).
 	TreeStatus *TreeStatus `json:"treeStatus"`
-	// Deletable: never launched and no session (unstarted); else archive only.
+	// Deletable: no notes or execution history; otherwise archive only.
 	Deletable       bool       `json:"deletable"`
 	ThreadUpdatedAt *time.Time `json:"-"` // mirrored thread's updatedAt (tree activity)
 	T3ProjectID     string     `json:"-"` // project's T3 id (for launch)

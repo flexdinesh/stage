@@ -6,7 +6,8 @@ import { useApi } from "../../platform/context.tsx";
 import { relativeTime } from "../../lib/format.ts";
 import { canLinkSession } from "../../lib/sessions.ts";
 import { TaskStateBadge } from "../StateBadge.tsx";
-import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Textarea, cx } from "../ui.tsx";
+import { SnippetTextarea } from "../SnippetPicker.tsx";
+import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, cx } from "../ui.tsx";
 
 /**
  * Track a T3 session as a task. With `tree` (tree view Add session): search top-level sessions by title, pick one,
@@ -40,7 +41,7 @@ export function AdoptSessionDrawer({
     mutationFn: (thread: Thread) => {
       const body: AdoptSessionRequest = tree === undefined ? {} : { treeId: tree.id };
       if (title.trim() !== "") body.title = title.trim();
-      if (notes.trim() !== "") body.notes = notes;
+      if (notes.trim() !== "") body.initialNote = notes;
       return api.adoptThread(thread.t3ThreadId, body);
     },
     onSuccess: async (task) => {
@@ -127,7 +128,7 @@ export function AdoptSessionDrawer({
             <Field label="Title" hint="Defaults to the session title.">
               {(id) => <Input id={id} data-autofocus={searching ? undefined : true} value={title} onChange={(e) => setTitle(e.target.value)} />}
             </Field>
-            <Field label="Notes">{(id) => <Textarea id={id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
+            <Field label="Initial note">{(id) => <SnippetTextarea id={id} rows={3} value={notes} onValueChange={setNotes} projectId={picked?.projectId ?? null} />}</Field>
           </>
         )}
         <ErrorText error={adopt.error} />

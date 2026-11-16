@@ -55,8 +55,10 @@ type ContextOut struct {
 	ProjectSource string      `json:"projectSource"` // session | cwd | "" (unresolved)
 	ProjectError  string      `json:"projectError,omitempty"`
 	// CallerTaskID: the stage task that owns the caller's session.
-	CallerTaskID *int64 `json:"callerTaskId"`
-	APIURL       string `json:"apiUrl"`
+	CallerTaskID *int64  `json:"callerTaskId"`
+	TreeID       *int64  `json:"treeId"`
+	TreeTitle    *string `json:"treeTitle"`
+	APIURL       string  `json:"apiUrl"`
 }
 
 // Context resolves the caller's session, directory and project.
@@ -77,6 +79,7 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 		if err == nil && d.Task != nil {
 			id := d.Task.ID
 			out.CallerTaskID = &id
+			out.TreeID, out.TreeTitle = d.Task.TreeID, d.Task.TreeTitle
 		}
 	}
 	return out, nil
@@ -113,7 +116,6 @@ type ConfigArgs struct {
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name (with baseRef); omitted = T3 picks"`
 	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); baseRef is the fallback (tasks only)"`
 	Tags            []string          `json:"tags,omitempty"`
-	Notes           string            `json:"notes,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
 
@@ -442,6 +444,7 @@ func needsSession(w WaitArgs, c agentctx.Caller) (*string, error) {
 
 // CreateTaskArgs is create_task.
 type CreateTaskArgs struct {
+	InitialNote string `json:"initialNote,omitempty"`
 	ConfigArgs
 	WaitArgs
 	CallerArgs
@@ -472,14 +475,14 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs,
+		Tags: a.Tags, InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSessionID: session, StartMode: mode.mode, OriginThreadID: c.ThreadPtr(),
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
 }
 
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
-// only title, tags and notes change.
+// only title and tags change.
 type UpdateArgs struct {
 	ID              int64             `json:"id"`
 	Project         *string           `json:"project,omitempty" jsonschema:"move to project (id or title)"`
@@ -495,7 +498,6 @@ type UpdateArgs struct {
 	Branch          *string           `json:"branch,omitempty"`
 	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; baseRef is the fallback); without baseRef keeps the current worktree"`
 	Tags            []string          `json:"tags,omitempty" jsonschema:"replaces tags"`
-	Notes           *string           `json:"notes,omitempty"`
 }
 
 // workspacePatch is the workspace baseRef/branch/base set (ok false without
@@ -565,9 +567,6 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, erro
 	}
 	if a.Tags != nil {
 		p["tags"] = a.Tags
-	}
-	if a.Notes != nil {
-		p["notes"] = *a.Notes
 	}
 	return p, nil
 }
@@ -752,6 +751,7 @@ func (o *Ops) GetSchedule(ctx context.Context, a IDArgs) (client.ScheduleDetail,
 
 // CreateScheduleArgs is create_schedule.
 type CreateScheduleArgs struct {
+	Notes string `json:"notes,omitempty"`
 	ConfigArgs
 	CallerArgs
 	Cron   string `json:"cron" jsonschema:"5-field cron (minute hour day-of-month month day-of-week) or @hourly|@daily|@weekly|@monthly"`
@@ -776,6 +776,7 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 
 // UpdateScheduleArgs is update_schedule.
 type UpdateScheduleArgs struct {
+	Notes *string `json:"notes,omitempty"`
 	UpdateArgs
 	Cron   *string `json:"cron,omitempty"`
 	Tz     *string `json:"tz,omitempty"`
@@ -786,6 +787,9 @@ func (o *Ops) UpdateSchedule(ctx context.Context, a UpdateScheduleArgs) (db.Sche
 	p, err := o.configPatch(ctx, a.UpdateArgs)
 	if err != nil {
 		return db.Schedule{}, err
+	}
+	if a.Notes != nil {
+		p["notes"] = *a.Notes
 	}
 	if a.Cron != nil {
 		p["cron"] = *a.Cron

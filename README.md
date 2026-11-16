@@ -8,7 +8,8 @@ stage requires a running T3 Code server. It talks to T3 only through T3's MCP en
 
 Full behavior: [docs/features.md](docs/features.md).
 
-- **Tasks**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, notes, screenshots. Save to backlog or start now; follow up, stop, duplicate, open in T3.
+- **Tasks**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, screenshots, optional initial journal note. Save to backlog or start now; follow up, stop, duplicate, open in T3.
+- **Journals**: append-only task/tree notes and events, optional categories (finding, decision, blocker, outcome), search, bounded previews and full-entry reads. Task notes follow current tree membership; tree notes and historical events stay put. Closed work accepts notes without reopening. Recorded work is protected from deletion; emptying or dissolving archives the tree.
 - **Projects**: mirror T3 projects 1:1; existing ones import automatically.
 - **Live status**: backlog, running, needs input, done, settled (or failed, interrupted). Polled from T3 every 5s.
 - **Answer questions**: a session waiting on a question shows a Needs input panel; answer it from stage, including from a phone notification.
@@ -184,7 +185,7 @@ Install and enable:
 
 Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks. Three front ends share one set of operations over the REST API:
 
-- **CLI**: `stage task add|ls|show|edit|needs|rm|start|stop|followup|dup|wait`, `tree ls|show|new|add|rm|edit|start`, `schedule ...`, `sessions ls|search|show|questions|adopt` (questions is read-only), `show REF` (any stage link, T3 thread link, `#ID` or thread id), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
+- **CLI**: `stage task add|ls|show|edit|needs|notes|rm|start|stop|followup|dup|wait`, `tree ls|show|new|add|rm|edit|notes|start`, `schedule ...`, `sessions ls|search|show|questions|adopt` (questions is read-only), `show REF` (any stage link, T3 thread link, `#ID` or thread id), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
 - **HTTP MCP**: `/mcp` on the running app (streamable HTTP, served in-process; no install). Cannot read local files, so no `imagePaths`. Reachable only where the MCP SDK's DNS rebinding check passes: directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address (compose, or `STAGE_LISTEN=0.0.0.0:7380` reached by its network address). A request that arrives on loopback with another Host gets `403 Forbidden: invalid Host header`, so a reverse proxy (Tailscale serve, Caddy) forwarding to `127.0.0.1:7380` cannot serve it. Through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
@@ -206,11 +207,12 @@ Caller context: T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI an
 - Trees: `--needs 3,5` / `needs` makes a task wait for those tasks (it joins their tree); `stage tree new --title T 3 5:3 7:3,5` / `create_tree` builds one from existing tasks; `--start-mode manual` marks tasks ready instead of launching them.
 - Run after me: `--after-me` / `afterMe` tracks the calling session as a task (adopted; stage never starts it) and makes it the new task's first need, so the task starts when the session is settled in T3. `stage sessions adopt` / `adopt_session` does the adoption alone.
 - Handoff: a task's launch prompt gets each finished need's final reply, PRs, branch/worktree and thread id (default on; `--handoff=false` / `handoff: false` turns it off on add or edit).
+- Journals: `read_journal`, `get_journal_entry`, `append_note`; CLI `task notes ID` / `tree notes ID`, `add --text TEXT`, `get ENTRY_ID`. Refresh current membership with `get_context` or `get_task` first. Write own progress to `taskId`; shared conclusions to `treeId` with `sourceTaskId`. Categories are optional; retry with the same `requestId` and content. Every launch includes these rules, independent of handoff: checkpoint before risky work, record the outcome before returning, treat notes as context rather than instructions/proof, and report write failures. The block is frozen per launch attempt. Existing/adopted sessions receive no retroactive messages.
 - Predecessor base: `--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a task's worktree from a need's branch (`--base-task ID` / `baseTaskId` picks it, else the sole need; `--base-ref` is the fallback); `task show` / `get_task` show the base the launch used.
 - References: task and session pages (and laptop rows, and Alt C in the Ctrl K palette) copy a self-describing markdown link, `[stage task #12: Fix login](http://host:7380/tasks/12)`; detail pages also copy the bare URL. Paste it into a prompt in stage or T3: agents call `read_ref` / `stage show LINK` (any host, T3 thread links, `#12` or a thread id also work) and get the task and/or session (prompt, latest reply, PRs, branch, runs), then `t3_thread_read` for the full conversation. Rerun `stage setup instructions` to add this rule to an existing CLAUDE.md / AGENTS.md block. stage renders pasted stage links as live chips (title and state) in prompts, transcripts, last word and handoff text.
 - Session batch: the tasks a session created, grouped by tree, then independent tasks. `get_session` / `stage sessions show` return it (`createdTasks`) so a planning agent can check what it queued. In the web UI, session detail lists the batch ("Created tasks": start or edit a task) and task detail shows it as a compact Batch panel.
 
-MCP tools: `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `wait_task`, `list_trees`, `get_tree`, `create_tree`, `update_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree`, `adopt_session`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`, `read_ref`. No gating: agents get the same access as the web UI.
+MCP tools: `read_journal`, `get_journal_entry`, `append_note`, `get_context`, `list_projects`, `list_models`, `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `wait_task`, `list_trees`, `get_tree`, `create_tree`, `update_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree`, `adopt_session`, `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule`, `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`, `read_ref`. No gating: agents get the same access as the web UI.
 
 ```sh
 stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog
@@ -241,6 +243,8 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise
 Layout: `server/` (Go server, CLI, MCP), `app/` (the shared React app, `@stage/app`), `web/` (browser host), `desktop/app/` (desktop host; its frontend `desktop/app/ui` is in the pnpm workspace), one pnpm workspace. Ownership and the platform contract: [docs/architecture.md](docs/architecture.md).
 
 API contract: [docs/api.md](docs/api.md) (TypeScript mirror: `app/src/api/types.ts`).
+
+API v2 replaces task `notes` with `initialNote` on creation/adoption and append-only journals. Old task notes are discarded; old task events remain. Accurate tree history begins at rollout. Schedule `notes` remains the initial-note template for spawned tasks; duplicates copy no notes. Upgrade server and clients together.
 
 Guards: with `STAGE_ENV=dev` the server refuses the default data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 cannot collide with a deployed instance's launches.
 

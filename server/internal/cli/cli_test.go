@@ -388,10 +388,18 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		t.Fatalf("tree new: %s", stderr)
 	}
 	tree := decode[client.TreeDetail](t, stdout)
-	code, stdout, stderr = h.run("", "sessions", "adopt", other, "--title", "Side", "--notes", "n", "--tree", fmt.Sprint(tree.ID), "--json")
+	code, stdout, stderr = h.run("", "sessions", "adopt", other, "--title", "Side", "--initial-note", "n", "--tree", fmt.Sprint(tree.ID), "--json")
 	got := decode[agenttools.AdoptOut](t, stdout)
-	if code != 0 || !got.Created || got.Task.Title != "Side" || got.Task.Notes != "n" || got.Task.TreeID == nil || *got.Task.TreeID != tree.ID {
+	if code != 0 || !got.Created || got.Task.Title != "Side" || got.Task.TreeID == nil || *got.Task.TreeID != tree.ID {
 		t.Fatalf("adopt other: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, stderr = h.run("", "task", "notes", fmt.Sprint(got.Task.ID), "--json")
+	if code != 0 {
+		t.Fatalf("adopt initial note: %s", stderr)
+	}
+	notes := decode[db.JournalPage](t, stdout)
+	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" {
+		t.Fatalf("adopt initial note %+v", notes)
 	}
 	if code, _, _ := h.run("", "sessions", "adopt", "a", "b"); code != 2 {
 		t.Fatalf("two thread ids exit %d", code)
