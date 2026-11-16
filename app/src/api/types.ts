@@ -66,9 +66,19 @@ export type Workspace =
 
 // ---- Health ----
 
+/** GET /api/health: a live Stage server (status/db) and, separately, its T3 connection. */
 export interface Health {
   status: "ok" | "error";
   db: "ok" | "error";
+  service: "stage";
+  identity: string;
+  version: string;
+  commit: string;
+  /** /api contract version; clients refuse a server on another one. */
+  apiVersion: number;
+  instanceId: string;
+  startedAt: string | null;
+  t3: { connected: boolean; lastError: string | null };
 }
 
 // ---- T3 connection / sync / catalog ----

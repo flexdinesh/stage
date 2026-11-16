@@ -6,10 +6,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -28,6 +31,9 @@ type Deps struct {
 	SearchTimeout time.Duration
 	// Transcript serves session transcripts; nil disables those routes.
 	Transcript *transcript.Hub
+	// Instance identifies the running server in GET /api/health (zero in
+	// tests).
+	Instance instance.Meta
 }
 
 type server struct {
@@ -50,13 +56,7 @@ func NewRouter(deps Deps) http.Handler {
 		})
 	}
 
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.Store.Ping(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "db": "error"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "db": "ok"})
-	})
+	mux.HandleFunc("GET /api/health", s.health)
 
 	h("GET /api/t3/status", s.t3Status)
 	h("POST /api/t3/pair", s.t3Pair)
@@ -131,7 +131,59 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
-	return mux
+	// Every response names the API contract version; clients refuse a
+	// server whose version differs from theirs.
+	apiVersion := strconv.Itoa(buildinfo.APIVersion)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(buildinfo.APIVersionHeader, apiVersion)
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// Health is GET /api/health: whether this is a live Stage server with a
+// working database, which build it is, and (separately) whether T3 is
+// connected. T3 being offline does not make the server unhealthy.
+type Health struct {
+	Status     string     `json:"status"` // ok | error (database unreachable)
+	DB         string     `json:"db"`     // ok | error
+	Service    string     `json:"service"`
+	Identity   string     `json:"identity"`
+	Version    string     `json:"version"`
+	Commit     string     `json:"commit"`
+	APIVersion int        `json:"apiVersion"`
+	InstanceID string     `json:"instanceId"`
+	StartedAt  *time.Time `json:"startedAt"`
+	T3         HealthT3   `json:"t3"`
+}
+
+// HealthT3 is the T3 connection state in Health.
+type HealthT3 struct {
+	Connected bool    `json:"connected"`
+	LastError *string `json:"lastError"`
+}
+
+func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	h := Health{
+		Status: "ok", DB: "ok", Service: buildinfo.Service, Identity: buildinfo.Identity,
+		Version: buildinfo.Version, Commit: buildinfo.Revision(), APIVersion: buildinfo.APIVersion,
+		InstanceID: s.Instance.InstanceID,
+	}
+	if !s.Instance.StartedAt.IsZero() {
+		t := s.Instance.StartedAt
+		h.StartedAt = &t
+	}
+	if s.T3 != nil {
+		st := s.T3.Status(r.Context())
+		h.T3.Connected = st.Connected
+		if st.LastError != "" {
+			h.T3.LastError = &st.LastError
+		}
+	}
+	status := http.StatusOK
+	if err := s.Store.Ping(r.Context()); err != nil {
+		h.Status, h.DB, status = "error", "error", http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, h)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -12,12 +12,16 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
 - Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
 - Errors: non-2xx responses have body `{ "error": string }`. Some 409s add a machine-readable `"code"` (see "Pending questions").
+- Every response carries `Stage-Api-Version: <n>` (currently `1`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
+- Request origin policy (`/api` and `/mcp`; [runtime.md](runtime.md#request-origin-policy)): requests with a Host that is not allowed, cross-site requests and untrusted cross-origin writes get 403; a non-empty write body that is not `application/json` (or `multipart/form-data` for uploads) gets 415.
 
 | Status | Meaning |
 |---|---|
 | 400 | invalid body or query (bad enum, missing required field, bad JSON) |
+| 403 | rejected by the request origin policy (Host, cross-site, cross-origin) |
 | 404 | resource not found |
 | 409 | conflict: action not allowed in current state, duplicate unique value |
+| 415 | write body not `application/json` / `multipart/form-data` |
 | 502 | T3 call failed (T3 error message in `error`) |
 | 503 | T3 not connected (no valid token) or DB unavailable |
 | 500 | unexpected |
@@ -52,11 +56,25 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ## Health
 
 ### `GET /api/health`
-200 / 503:
+200 / 503 `Health`:
 ```json
-{ "status": "ok", "db": "ok" }
+{
+  "status": "ok",
+  "db": "ok",
+  "service": "stage",
+  "identity": "stage",
+  "version": "v1.4.0",
+  "commit": "4202029f...",
+  "apiVersion": 1,
+  "instanceId": "9f2c4e1a7b3d5c60",
+  "startedAt": "2026-11-16T09:00:00Z",
+  "t3": { "connected": false, "lastError": "dial tcp 127.0.0.1:3773: connection refused" }
+}
 ```
-503 (DB ping failed): `{ "status": "error", "db": "error" }`.
+- A live Stage server answers 200 whenever its database works; T3 being offline is still 200 with `t3.connected: false`.
+- 503: the DB ping failed (`status` and `db` are `"error"`; the other fields are still present).
+- `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `t3.lastError` is nullable.
+- `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
 
 ## T3 connection, sync, catalog
 

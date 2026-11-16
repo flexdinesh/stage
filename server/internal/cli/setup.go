@@ -50,10 +50,16 @@ func setupMCP(env Env, args []string) error {
 	if base == "" {
 		base = env.Getenv(URLEnv)
 	}
-	// Pass a non-default server URL to the stdio server.
+	// Pass an explicit non-default server URL to the stdio server; without
+	// one it resolves the server itself (default socket, else DefaultURL).
 	var urlEnv []string
 	if base != "" && strings.TrimRight(base, "/") != client.DefaultURL {
 		urlEnv = []string{URLEnv + "=" + base}
+	}
+	if base == "" && http {
+		if r := client.Resolve("", env.Getenv); r.Source == "default socket" {
+			return usagef("setup mcp --http: the server is on a unix socket (%s); agents need an http(s) URL: pass --url, or use stdio", r.URL)
+		}
 	}
 	if base == "" {
 		base = client.DefaultURL

@@ -35,7 +35,8 @@ run = [
   "pnpm install --frozen-lockfile && pnpm --filter stage-web build",
   "find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete",
   "cp -r web/dist/. server/internal/webui/dist/",
-  "cd server && CGO_ENABLED=0 go build -o ../bin/stage ./cmd/stage",
+  # Version/commit for /api/health and `stage status` (docs/runtime.md).
+  '''cd server && CGO_ENABLED=0 go build -ldflags "-X github.com/flexdinesh/stage/server/internal/buildinfo.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -X github.com/flexdinesh/stage/server/internal/buildinfo.Commit=$(git rev-parse HEAD 2>/dev/null)" -o ../bin/stage ./cmd/stage''',
 ]
 
 [tasks.install-cli]
