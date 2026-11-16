@@ -54,7 +54,7 @@ func smokeTest(dir string, m *Manifest) ([]string, error) {
 	}
 	for _, a := range m.Artifacts {
 		switch {
-		case ran[a.Name] || (a.Kind != KindCLI && a.Kind != KindDesktop):
+		case ran[a.Name] || (a.Kind != KindCLI && a.Kind != KindDesktop) || a.Format == FormatPNG:
 		case a.Format == FormatTarGz:
 			lines = append(lines, "not run    "+a.Name+" (cross-built: not native to this machine)")
 		default:

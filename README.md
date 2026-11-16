@@ -22,6 +22,17 @@ Full behavior: [docs/features.md](docs/features.md).
 - **References**: copy a link to any task or session and paste it into a prompt in stage or T3; agents read it with `read_ref`, and stage shows pasted links as live chips.
 - **Agents**: agents create and manage tasks via the `stage` CLI or MCP (stdio or HTTP). See [Agents](#agents).
 
+## Install (desktop or headless)
+
+Linux and macOS, per user, no root. The desktop app includes the CLI/server; `--headless` installs the CLI/server only, for remote machines.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh                  # desktop
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless  # CLI/server only
+```
+
+While the repository is private, use an authenticated `gh`: `gh api repos/flexdinesh/stage/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh`. Then `stage update` installs the latest release (same mode), `stage update --check` compares versions, and `stage uninstall` removes it and keeps your data. Headless: `stage service start` runs the server as a per-user service. Layout, verification, what restarts, recovery and exit codes: [docs/install.md](docs/install.md).
+
 ## Quick start: Docker
 
 Runs on the same machine as T3. Requires Docker with compose.
@@ -80,7 +91,7 @@ The OS supervises `stage serve --managed`: restarts with backoff, logs (journald
 
 ### Desktop app (Linux, macOS)
 
-The desktop app shows the same UI in a native window and talks to the local Stage server over its Unix socket. It starts the per-user service itself (`stage service start`) and leaves it running when you quit. Build it from source: `mise run dist` (a `stage-dev` build: packages and a manifest in `.scratch/dist/<version>`, [docs/release.md](docs/release.md)), or run it from the repository with `mise run desktop:dev`. Behavior, identities and links: [docs/desktop.md](docs/desktop.md).
+The desktop app shows the same UI in a native window and talks to the local Stage server over its Unix socket. It starts the per-user service itself (`stage service start`) and leaves it running when you quit. Install it with the installer ([Install](#install-desktop-or-headless)); developer builds: [docs/development.md](docs/development.md) and `mise run desktop:dev`. Behavior, identities and links: [docs/desktop.md](docs/desktop.md).
 
 ## Configuration
 
@@ -222,7 +233,8 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise
 - `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, desktop app and fixture Go tests). Run before a PR.
 - `mise run build`: the browser bundle (`web/dist`) embedded into `bin/stage`.
 - `mise run desktop:dev`: the desktop app against a foreground dev server on a scratch socket (no OS service). `mise run dist [TARGETS=host|all]`: a developer build of the desktop app and the headless CLI/server (`stage-dev`), verified, in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z`: the release build of a clean HEAD ([docs/release.md](docs/release.md)). `mise run desktop:e2e`: webview e2e (display and WebKitGTK 4.1, or macOS). See [docs/desktop.md](docs/desktop.md).
-- `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`.
+- `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`. It is not an installer install: `stage update` refuses it and the installer will not overwrite it.
+- Installing a development build as Stage Dev: [docs/development.md](docs/development.md). `mise run install:smoke`: the installer against real binaries and systemd with the isolated `stage-svctest` identity ([docs/install.md](docs/install.md#verification)).
 - `mise run up` / `mise run down`: build and run, or stop, the compose stack (data volume kept).
 - Single test files: `node --test app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
 

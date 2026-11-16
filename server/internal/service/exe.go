@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // BuildInfo is `stage version --json`.
@@ -21,6 +22,8 @@ type BuildInfo struct {
 	APIVersion   int    `json:"apiVersion"`
 	ServiceLabel string `json:"serviceLabel"`
 	ServiceUnit  string `json:"serviceUnit"`
+	// Schema is the highest database schema this binary knows.
+	Schema int64 `json:"schema"`
 	// Build is the release build stamp (buildinfo.Stamp), absent when
 	// unstamped.
 	Build string `json:"build,omitempty"`
@@ -31,7 +34,7 @@ func ThisBuild() BuildInfo {
 	return BuildInfo{
 		Identity: buildinfo.Identity, Version: buildinfo.Version, Commit: buildinfo.Revision(),
 		APIVersion: buildinfo.APIVersion, ServiceLabel: buildinfo.Label(), ServiceUnit: UnitName(),
-		Build: buildinfo.Stamp,
+		Schema: db.MaxVersion(), Build: buildinfo.Stamp,
 	}
 }
 

@@ -312,7 +312,7 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 1 || h.Version == "" || !h.T3.Connected {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 1 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -200,19 +201,32 @@ func assembleInto(o assembleOpts) (*Manifest, error) {
 	}
 
 	var installer []byte
+	icons := map[string][]byte{}
 	for _, t := range o.desktop {
 		src := filepath.Join(o.desktopDir, t)
-		arts, inst, err := assembleDesktop(o, t, src, cliBins)
+		arts, shared, err := assembleDesktop(o, t, src, cliBins)
 		if err != nil {
 			return nil, fmt.Errorf("desktop %s: %w", t, err)
 		}
 		m.Artifacts = append(m.Artifacts, arts...)
-		if inst != nil {
+		if inst := shared.installer; inst != nil {
 			if installer != nil && !bytes.Equal(installer, inst) {
 				return nil, errors.New("MyGo wrote different install.sh files per Linux target")
 			}
 			installer = inst
 		}
+		for name, data := range shared.icons {
+			if prev, ok := icons[name]; ok && !bytes.Equal(prev, data) {
+				return nil, fmt.Errorf("MyGo wrote different %s files per Linux target", name)
+			}
+			icons[name] = data
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(icons)) {
+		if err := os.WriteFile(filepath.Join(o.out, name), icons[name], 0o644); err != nil {
+			return nil, err
+		}
+		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: KindDesktop, Format: FormatPNG, OS: "linux"})
 	}
 	if installer != nil {
 		name := o.b.slug() + "-install.sh"
@@ -320,26 +334,34 @@ func copyFile(dst, src string, mode os.FileMode) error {
 	return os.WriteFile(dst, data, mode)
 }
 
-func assembleDesktop(o assembleOpts, target, src string, cliBins map[string][]byte) ([]Artifact, []byte, error) {
+// linuxShared is what every Linux desktop target writes alike: MyGo's
+// install.sh and the icons its PKGBUILD names as sources, by file name.
+type linuxShared struct {
+	installer []byte
+	icons     map[string][]byte
+}
+
+func assembleDesktop(o assembleOpts, target, src string, cliBins map[string][]byte) ([]Artifact, linuxShared, error) {
 	b := o.b
 	slug := b.slug()
 	osName, arch, _ := strings.Cut(target, "-")
 	if osName == "darwin" {
-		return assembleMac(o, src, cliBins)
+		arts, err := assembleMac(o, src, cliBins)
+		return arts, linuxShared{}, err
 	}
 	cli, err := os.ReadFile(filepath.Join(src, "bin", "stage"))
 	if err != nil {
-		return nil, nil, err
+		return nil, linuxShared{}, err
 	}
 	if want, ok := cliBins[target]; !ok || !bytes.Equal(cli, want) {
-		return nil, nil, errors.New("the bundled bin/stage is not this build's CLI for " + target)
+		return nil, linuxShared{}, errors.New("the bundled bin/stage is not this build's CLI for " + target)
 	}
 	exe, err := os.ReadFile(filepath.Join(src, slug))
 	if err != nil {
-		return nil, nil, err
+		return nil, linuxShared{}, err
 	}
 	if err := checkAppStamp(exe, b); err != nil {
-		return nil, nil, err
+		return nil, linuxShared{}, err
 	}
 	cliSum := bytesSHA256(cli)
 	tarName := slug + "-" + b.Version + "-" + target + ".tar.gz"
@@ -359,7 +381,7 @@ func assembleDesktop(o assembleOpts, target, src string, cliBins map[string][]by
 	var arts []Artifact
 	for _, c := range copies {
 		if err := copyFile(filepath.Join(o.out, c.to), filepath.Join(src, c.from), 0o644); err != nil {
-			return nil, nil, err
+			return nil, linuxShared{}, err
 		}
 		a := c.art
 		a.Name, a.OS, a.Arch = c.to, osName, arch
@@ -367,44 +389,73 @@ func assembleDesktop(o assembleOpts, target, src string, cliBins map[string][]by
 	}
 	inst, err := os.ReadFile(filepath.Join(src, "install.sh"))
 	if err != nil {
-		return nil, nil, err
+		return nil, linuxShared{}, err
 	}
-	return arts, inst, nil
+	icons, err := pkgbuildIcons(filepath.Join(src, "PKGBUILD"), slug, tarName)
+	if err != nil {
+		return nil, linuxShared{}, err
+	}
+	return arts, linuxShared{installer: inst, icons: icons}, nil
 }
 
-func assembleMac(o assembleOpts, src string, cliBins map[string][]byte) ([]Artifact, []byte, error) {
+// pkgbuildIcons reads the sources the PKGBUILD names beside the tarball:
+// MyGo's hicolor icons, which makepkg needs next to it, so they ship too.
+func pkgbuildIcons(p, slug, tarName string) (map[string][]byte, error) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	sources := pkgbuildArray(string(data), "source")
+	if len(sources) == 0 || sources[0] != tarName {
+		return nil, fmt.Errorf("PKGBUILD sources %q do not start with %s", sources, tarName)
+	}
+	icons := map[string][]byte{}
+	for _, name := range sources[1:] {
+		if _, ok := iconSize(name, slug); !ok {
+			return nil, fmt.Errorf("PKGBUILD names an unknown source %q", name)
+		}
+		icon, err := os.ReadFile(filepath.Join(filepath.Dir(p), name))
+		if err != nil {
+			return nil, err
+		}
+		icons[name] = icon
+	}
+	return icons, nil
+}
+
+func assembleMac(o assembleOpts, src string, cliBins map[string][]byte) ([]Artifact, error) {
 	b := o.b
 	app := b.appName() + ".app"
 	appDir := filepath.Join(src, app)
 	cliPath := app + "/Contents/Resources/bin/stage"
 	cli, err := os.ReadFile(filepath.Join(src, filepath.FromSlash(cliPath)))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := checkUniversalCLI(cli, cliBins); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	exe, err := os.ReadFile(filepath.Join(appDir, "Contents", "MacOS", b.appName()))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := checkAppStamp(exe, b); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	cliSum := bytesSHA256(cli)
 	tarName := b.slug() + "-" + b.Version + "-darwin-universal.tar.gz"
 	if err := packTree(filepath.Join(o.out, tarName), appDir, app, o.mtime); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	arts := []Artifact{{Name: tarName, Kind: KindDesktop, Format: FormatTarGz, OS: "darwin", Arch: "universal", CLI: &Binary{Path: cliPath, SHA256: cliSum}}}
 	dmg := b.slug() + "-" + b.Version + ".dmg"
 	if _, err := os.Stat(filepath.Join(src, dmg)); err == nil {
 		if err := copyFile(filepath.Join(o.out, dmg), filepath.Join(src, dmg), 0o644); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		arts = append(arts, Artifact{Name: dmg, Kind: KindDesktop, Format: FormatDMG, OS: "darwin", Arch: "universal", CLI: &Binary{Path: "/Applications/" + cliPath, SHA256: cliSum}})
 	}
-	return arts, nil, nil
+	return arts, nil
 }
 
 // checkUniversalCLI requires the bundled universal CLI's slices to be this

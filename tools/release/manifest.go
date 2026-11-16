@@ -73,6 +73,9 @@ const (
 	FormatPKGBUILD = "pkgbuild"
 	FormatDMG      = "dmg"
 	FormatSh       = "sh"
+	// FormatPNG is a Linux desktop icon the PKGBUILD names as a source
+	// beside the tarball (MyGo's <slug>-<n>x<n>.png, one per release).
+	FormatPNG = "png"
 )
 
 // Artifact is one release asset.

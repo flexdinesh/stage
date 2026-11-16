@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/instance"
 )
 
@@ -118,6 +121,31 @@ func TestServeExitCodes(t *testing.T) {
 	code, stderr = runMain(t, environ, "serve", "--managed")
 	if code != want || !strings.Contains(stderr, "must include unix") {
 		t.Fatalf("invalid service.env: %d %s", code, stderr)
+	}
+}
+
+// A database migrated by a newer Stage: exit 78 with the recovery hint.
+func TestServeNewerSchema(t *testing.T) {
+	short, environ := env(t)
+	data := filepath.Join(short, "data")
+	if err := os.MkdirAll(data, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.Open(context.Background(), filepath.Join(data, db.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(context.Background(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)`, db.MaxVersion()+1); err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	code, stderr := runMain(t, append(environ, "STAGE_DATA_DIR="+data), "serve", "--listen", "unix:"+filepath.Join(short, "s.sock"))
+	want := fmt.Sprintf("database schema %d is newer than this Stage (knows %d): install a newer Stage or restore a backup (docs/install.md#recovery)", db.MaxVersion()+1, db.MaxVersion())
+	if code != 78 || !strings.Contains(stderr, want) {
+		t.Fatalf("newer schema: %d %s", code, stderr)
 	}
 }
 

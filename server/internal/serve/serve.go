@@ -5,7 +5,9 @@ package serve
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -71,8 +73,9 @@ type Ready struct {
 //  1. lock the data dir (a second server on it, on any address, exits here)
 //  2. open every listener (a failed bind closes the others; the database
 //     is not touched yet)
-//  3. open and migrate the database, start T3, recover launching tasks and
-//     start the background loops
+//  3. open the database, refuse a schema newer than this binary (78), back
+//     it up when migrations are pending, migrate, start T3, recover
+//     launching tasks and start the background loops
 //  4. serve all listeners, then notify READY=1 (systemd)
 //
 // Shutdown: STOPPING=1, background loops and transcript streams end, the
@@ -140,7 +143,7 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	defer pool.Close()
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := migrate(ctx, pool, cfg.DataDir, logger); err != nil {
 		return err
 	}
 	logger.Info("database", "path", dbPath)
@@ -259,6 +262,32 @@ func Run(ctx context.Context, o Options) error {
 	}
 	logger.Info("stopped")
 	return nil
+}
+
+// migrate guards and migrates the schema: a database newer than this binary
+// is refused (exit 78); a non-empty one with pending migrations is first
+// backed up to <dataDir>/backups (a failed backup refuses to migrate).
+func migrate(ctx context.Context, pool *sql.DB, dataDir string, logger *slog.Logger) error {
+	cur, err := db.CurrentVersion(ctx, pool)
+	if err != nil {
+		return err
+	}
+	known := db.MaxVersion()
+	if cur > known {
+		return config.Invalid(&db.SchemaTooNewError{Current: cur, Known: known})
+	}
+	if cur > 0 && cur < known {
+		dir := filepath.Join(dataDir, db.BackupsDir)
+		path, err := db.Backup(ctx, pool, dir, cur, time.Now())
+		if err != nil {
+			return fmt.Errorf("refusing to migrate schema %d to %d: %w", cur, known, err)
+		}
+		logger.Info("database backup", "path", path, "schema", cur, "migrating_to", known)
+		if err := db.PruneBackups(dir, db.KeepBackups); err != nil {
+			logger.Warn("prune database backups", "err", err)
+		}
+	}
+	return db.Migrate(ctx, pool)
 }
 
 // sweepStagedAttachments hourly deletes uploads never attached or sent

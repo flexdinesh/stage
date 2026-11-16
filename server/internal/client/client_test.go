@@ -112,9 +112,9 @@ func TestHealthRecognizesStage(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL)
-	body = `{"status":"ok","db":"ok","service":"stage","apiVersion":1,"t3":{"connected":false,"lastError":"down"}}`
+	body = `{"status":"ok","db":"ok","service":"stage","apiVersion":1,"schema":4,"t3":{"connected":false,"lastError":"down"}}`
 	h, err := c.Health(context.Background())
-	if err != nil || h.T3.Connected || h.T3.LastError == nil || *h.T3.LastError != "down" {
+	if err != nil || h.Schema != 4 || h.T3.Connected || h.T3.LastError == nil || *h.T3.LastError != "down" {
 		t.Fatalf("health %+v, %v", h, err)
 	}
 	body = `{"status":"ok","db":"ok"}` // server predating the metadata

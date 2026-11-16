@@ -50,8 +50,6 @@ type Store struct {
 
 func NewStore(pool *sql.DB) *Store { return &Store{pool: conn{pool}} }
 
-func (s *Store) Ping(ctx context.Context) error { return s.pool.db.PingContext(ctx) }
-
 // App errors shared by db, sync, links and api (api maps them to statuses).
 var ErrNotFound = errors.New("not found")
 

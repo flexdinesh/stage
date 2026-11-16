@@ -450,6 +450,7 @@ type Health struct {
 	APIVersion int        `json:"apiVersion"`
 	InstanceID string     `json:"instanceId"`
 	StartedAt  *time.Time `json:"startedAt"`
+	Schema     int64      `json:"schema"`
 	T3         struct {
 		Connected bool    `json:"connected"`
 		LastError *string `json:"lastError"`

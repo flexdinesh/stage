@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -152,7 +154,10 @@ func newFixture(t *testing.T, mutate func(desktop string, f *fixture)) *fixture 
 	data := tarGz(t, entry{"./opt/" + slug + "/bin/stage", cli}, entry{"./opt/" + slug + "/LICENSE", []byte("MIT")}, entry{"./opt/" + slug + "/" + slug, exe})
 	write(t, filepath.Join(desktop, slug+"_1.2.3~rc.1_amd64.deb"), ar(entry{"debian-binary", []byte("2.0\n")}, entry{"control.tar.gz", control}, entry{"data.tar.gz", data}))
 	write(t, filepath.Join(desktop, slug+"-1.2.3~rc.1-1.x86_64.rpm"), []byte("rpm"))
-	write(t, filepath.Join(desktop, "PKGBUILD"), []byte("pkgver='1.2.3rc.1'\nsource=('"+tarName+"')\nsha256sums=('"+bytesSHA256(tgz)+"')\n"))
+	icon256, icon512 := pngOf(t, 256), pngOf(t, 512)
+	write(t, filepath.Join(desktop, slug+"-256x256.png"), icon256)
+	write(t, filepath.Join(desktop, slug+"-512x512.png"), icon512)
+	write(t, filepath.Join(desktop, "PKGBUILD"), pkgbuild(tarName, slug, bytesSHA256(tgz), bytesSHA256(icon256), bytesSHA256(icon512)))
 	write(t, filepath.Join(desktop, "install.sh"), []byte("#!/bin/sh\n"))
 	if mutate != nil {
 		mutate(desktop, f)
@@ -164,6 +169,21 @@ func newFixture(t *testing.T, mutate func(desktop string, f *fixture)) *fixture 
 		omit: []Omission{{Kind: KindDesktop, OS: "darwin", Arch: "universal", Reason: "test"}},
 	}
 	return f
+}
+
+// pngOf is an n x n PNG.
+func pngOf(t *testing.T, n int) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	if err := png.Encode(&b, image.NewGray(image.Rect(0, 0, n, n))); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// pkgbuild is MyGo's PKGBUILD shape: the tarball, then its two icons.
+func pkgbuild(tarName, slug, tarSum, sum256, sum512 string) []byte {
+	return []byte("pkgver='1.2.3rc.1'\nsource=('" + tarName + "' '" + slug + "-256x256.png' '" + slug + "-512x512.png')\nsha256sums=('" + tarSum + "' '" + sum256 + "' '" + sum512 + "')\n")
 }
 
 func TestAssembleThenVerify(t *testing.T) {
@@ -186,6 +206,8 @@ func TestAssembleThenVerify(t *testing.T) {
 		"stage-desktop-1.2.3~rc.1-1.x86_64.rpm",
 		"stage-desktop-1.2.3-rc.1-linux-amd64.PKGBUILD",
 		"stage-desktop-install.sh",
+		"stage-desktop-256x256.png",
+		"stage-desktop-512x512.png",
 	} {
 		if !names[want] {
 			t.Errorf("missing artifact %s in %v", want, names)
@@ -276,6 +298,31 @@ func TestAssembleRefuses(t *testing.T) {
 		},
 		"PKGBUILD names another archive": func(desktop string, f *fixture) {
 			write(t, filepath.Join(desktop, "PKGBUILD"), []byte("pkgver='1.2.3rc.1'\nsource=('x.tar.gz')\n"))
+		},
+		"PKGBUILD names an unknown source": func(desktop string, f *fixture) {
+			tarName := f.b.slug() + "-1.2.3-rc.1-linux-amd64.tar.gz"
+			write(t, filepath.Join(desktop, "evil.sh"), []byte("#!/bin/sh\n"))
+			write(t, filepath.Join(desktop, "PKGBUILD"), []byte("pkgver='1.2.3rc.1'\nsource=('"+tarName+"' 'evil.sh')\nsha256sums=('x' 'y')\n"))
+		},
+		"PKGBUILD icon checksum wrong": func(desktop string, f *fixture) {
+			slug := f.b.slug()
+			tarName := slug + "-1.2.3-rc.1-linux-amd64.tar.gz"
+			tgz, err := os.ReadFile(filepath.Join(desktop, tarName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(desktop, "PKGBUILD"), pkgbuild(tarName, slug, bytesSHA256(tgz), strings.Repeat("0", 64), bytesSHA256(pngOf(t, 512))))
+		},
+		"icon not its named size": func(desktop string, f *fixture) {
+			slug := f.b.slug()
+			tarName := slug + "-1.2.3-rc.1-linux-amd64.tar.gz"
+			tgz, err := os.ReadFile(filepath.Join(desktop, tarName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			small := pngOf(t, 128)
+			write(t, filepath.Join(desktop, slug+"-256x256.png"), small)
+			write(t, filepath.Join(desktop, "PKGBUILD"), pkgbuild(tarName, slug, bytesSHA256(tgz), bytesSHA256(small), bytesSHA256(pngOf(t, 512))))
 		},
 		"deb with another version": func(desktop string, f *fixture) {
 			cli := fakeCLI(f.b, 1)

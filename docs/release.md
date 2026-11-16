@@ -6,9 +6,9 @@ headless CLI/server for remote machines, with the web UI embedded in every
 CLI/server binary. There are no separate desktop and server release
 schedules. A release is built from an exact revision with the pinned
 toolchain (`mise.toml`: Go, Node, pnpm, shellcheck; MyGo is a Go tool in
-`desktop/app/go.mod`), then verified. Nothing in the repository uploads,
-tags, installs or self-updates; installing (`install.sh`, `install-dev.sh`)
-is the next task, and it reads the contract below.
+`desktop/app/go.mod`), then verified. Nothing in the repository uploads or
+tags; installing and updating (`scripts/install.sh`, `stage update`,
+`scripts/install-dev.sh`: [install.md](install.md)) read the contract below.
 
 ## Modes
 
@@ -18,7 +18,7 @@ is the next task, and it reads the contract below.
 | `mise run release VERSION=X.Y.Z` | release build | `stage`, `X.Y.Z` or `X.Y.Z-pre` | `git archive HEAD` in a temp dir (tracked files only), HEAD must have no uncommitted changes and tag `vX.Y.Z`, if it exists, must be HEAD | `STAGE_RELEASE_OUT`, default `.scratch/release/v<version>` |
 | `mise run release:verify DIR=<dir>` | verify an asset directory | as built | | |
 
-- `dist` builds this machine's targets (`TARGETS=host`, the default: `linux-<arch>`, or both darwin CLIs and `darwin-universal` on a Mac) or every target (`TARGETS=all`, which replaced `desktop:package`). It skips the DMG. An earlier `dist` in the same directory is replaced; any other non-empty directory is refused. It prints `version <v>` and `out <dir>` last, the contract `install-dev.sh` will use.
+- `dist` builds this machine's targets (`TARGETS=host`, the default: `linux-<arch>`, or both darwin CLIs and `darwin-universal` on a Mac) or every target (`TARGETS=all`, which replaced `desktop:package`). It skips the DMG. An earlier `dist` in the same directory is replaced; any other non-empty directory is refused. It prints `version <v>` and `out <dir>` last. Pass the variables before the command (`TARGETS=all mise run dist`): `mise run dist TARGETS=all` builds only the host.
 - `release` builds every CLI target and the Linux desktop targets. The macOS desktop needs a Mac with `MACOS_SIGNING_IDENTITY` (a Developer ID Application identity) and `MACOS_NOTARY_PROFILE` (an `xcrun notarytool store-credentials` profile); otherwise it is left out and the manifest records why (`omitted`).
 - Pre-release versions use lowercase letters, digits and dots (`1.2.0-rc.1`); there is no build metadata, so package formats need no escaping.
 - Both run `scripts/release.sh`, which builds, then `tools/release assemble` and `tools/release verify -smoke`. `scripts/release.sh` and `tools/release` (Go standard library only) are the whole implementation.
@@ -47,8 +47,9 @@ Linux desktop: glibc, GTK 3 and WebKitGTK 4.1 (the packages depend on them). mac
 | `<id>-<v>-<os>-<arch>.tar.gz` | headless CLI/server: `<id>-<v>-<os>-<arch>/{stage,LICENSE,README.md}` | `<id>-<v>-<os>-<arch>/stage` |
 | `<slug>-<v>-linux-<arch>.tar.gz` | desktop (MyGo's archive: the app executable, `bin/stage`, `LICENSE`, `.desktop` file) | `bin/stage` (next to the executable) |
 | `<slug>_<debv>_<arch>.deb`, `<slug>-<rpmv>-1.<x86_64\|aarch64>.rpm` | desktop, installs to `/opt/<slug>` | `/opt/<slug>/bin/stage` |
-| `<slug>-<v>-linux-<arch>.PKGBUILD` | desktop for Arch (`makepkg -si` next to the tarball, renamed to `PKGBUILD`) | |
-| `<slug>-install.sh` | MyGo's per-user installer for the Linux tarball (`~/.local/<slug>.app`) | |
+| `<slug>-<v>-linux-<arch>.PKGBUILD` | desktop for Arch (`makepkg -si` next to the tarball and the two icons, renamed to `PKGBUILD`) | |
+| `<slug>-256x256.png`, `<slug>-512x512.png` | the app icon at the sizes the PKGBUILD installs (`format: png`, linux, any arch, one copy per release) | |
+| `<slug>-install.sh` | MyGo's per-user installer for the Linux tarball (`~/.local/<slug>.app`); not used by Stage's installer, which refuses to overwrite its desktop entry ([install.md](install.md#layout)) | |
 | `<slug>-<v>-darwin-universal.tar.gz` | desktop: `<Name>.app` | `<Name>.app/Contents/Resources/bin/stage` |
 | `<slug>-<v>.dmg` | desktop (signed, notarized releases only) | |
 | `stage-release.json` | the manifest | |
@@ -83,7 +84,7 @@ These names are the installer contract: change them only together with the insta
 }
 ```
 
-- `kind`: `cli`, `desktop` or `installer`; `format`: `tar.gz`, `deb`, `rpm`, `pkgbuild`, `dmg` or `sh`; `arch`: `amd64`, `arm64`, `universal`, or absent for any.
+- `kind`: `cli`, `desktop` or `installer`; `format`: `tar.gz`, `deb`, `rpm`, `pkgbuild`, `png`, `dmg` or `sh`; `arch`: `amd64`, `arm64`, `universal`, or absent for any.
 - `channel` is `stable` (identity `stage`, never dirty) or `dev` (identity `stage-dev`).
 - `apiVersion` comes from running this machine's CLI (`stage version --json`); every binary of a build shares it.
 - `cli.sha256` pins the bundled CLI, so an installer can check what it puts on `PATH` matches the headless binary.
@@ -124,7 +125,7 @@ Release builds also exclude local state by construction: they build from `git ar
 
 ## Integrity and updates
 
-Releases are not signed. `checksums.txt` and the manifest's hashes catch a corrupted download, not a tampered release: trust rests on the GitHub account and HTTPS (as Zero does). Updates mean running the install script again. MyGo's signed self-update (`updates` in `mygo.config.ts`, an Ed25519 key) is deliberately not configured; turning it on later needs a key the maintainer owns, and apps installed before then reinstall once.
+Releases are not signed. `checksums.txt` and the manifest's hashes catch a corrupted download, not a tampered release: trust rests on the GitHub account and HTTPS (as Zero does). Updates are explicit: `stage update` (or the install script again) verifies the release and runs its own `stage install` ([install.md](install.md)). MyGo's signed self-update (`updates` in `mygo.config.ts`, an Ed25519 key) is deliberately not configured; turning it on later needs a key the maintainer owns, and apps installed before then reinstall once.
 
 The repository is private for now: downloading release assets needs an authenticated `gh`.
 
@@ -143,6 +144,6 @@ Never rebuild a published version: publish a new patch instead.
 
 ## For successors
 
-- The installer task reads `stage-release.json` and `checksums.txt`, and installs the CLI from the headless archive or the desktop's `cli.path`. `dist`'s `STAGE_DIST_OUT`, `TARGETS` and its last two lines are the `install-dev.sh` contract.
-- Self-update needs: a key (`go tool mygo keygen`), `updates` in `mygo.config.ts`, an updater in the app, and coordinated service restarts (the service runs the bundled CLI by path; [service.md](service.md)).
+- The installer ([install.md](install.md)) reads `stage-release.json` and `checksums.txt` (exactly the manifest's artifacts), picks the headless archive or this platform's desktop tar.gz, and checks the unpacked CLI against `cli.path`/`cli.sha256`. `scripts/install.sh` derives the asset names above and the CLI member (`<id>-<v>-<os>-<arch>/stage`, `bin/stage`, `Stage.app/Contents/Resources/bin/stage`). `scripts/install-dev.sh` uses `STAGE_DIST_OUT`.
+- In-app updates, if wanted later, call the same authority (`stage update`); MyGo's own updater stays off (it would swap the bundle without restarting the service). Signing needs a key and a signature check in `stage install`.
 - The macOS release path is implemented but unverified until a Mac with a Developer ID runs it.

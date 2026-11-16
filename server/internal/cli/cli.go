@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/service"
 )
 
@@ -41,6 +42,10 @@ type Env struct {
 	LookPath func(name string) error
 	// Service is the `stage service` environment; nil is the real one.
 	Service func() service.Deps
+	// Install is the installer's environment; nil is the real one.
+	Install func() install.Deps
+	// Releases is where `stage update` finds releases; nil is GitHub.
+	Releases install.Source
 }
 
 // OSEnv is the real process environment.
@@ -105,7 +110,18 @@ Usage:
                                       config from service.env only, default data dir, unix required
   stage status [--wait DUR]           the server this CLI reaches: version, readiness, T3 state
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
-  stage version [--json]              this binary: version, identity, commit, API version
+  stage version [--json]              this binary: version, identity, commit, API version, schema,
+                                      and its installation (mode, location) when installed
+  stage update [--check] [--version X] [--from DIR]
+                                      install the latest stable release (or X) in this installation's
+                                      mode; restarts the service and desktop as needed (docs/install.md)
+  stage uninstall                     remove this installation; keeps data, config, logs and backups
+  stage install --from DIR [--headless|--desktop] [--cli-name NAME]
+                                      install a downloaded, verified release (run by scripts/install.sh
+                                      and stage update with the release's own CLI)
+                                      install commands take --json; exit 0 ok, 1 failed, 3 another
+                                      install running, 7 unsupported/collision, 10 network, 11 failed
+                                      verification, 12 rolled back, 13 failed and kept (see docs)
   stage service start [--exe PATH] [--wait 30s]
                                       register/update the per-user service (systemd --user, launchd)
                                       and start it; waits for readiness; never restarts a running one
@@ -253,6 +269,12 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runVersion(env, sub)
 	case "service":
 		return runService(ctx, env, sub)
+	case "install":
+		return runInstall(ctx, env, sub)
+	case "update":
+		return runUpdate(ctx, env, sub)
+	case "uninstall":
+		return runUninstall(ctx, env, sub)
 	case "show":
 		return runShow(ctx, env, sub)
 	case "projects":
