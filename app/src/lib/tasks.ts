@@ -3,46 +3,22 @@ import type { Task, TaskState } from "../api/types.ts";
 const STARTABLE: readonly TaskState[] = ["backlog", "failed", "interrupted", "cancelled"];
 const ACTIVE: readonly TaskState[] = ["launching", "running", "needs_input"];
 
-/** POST /tasks/:id/start allowed. On a waiting task it is "Start now" (unlinks it). */
-export const canStart = (t: Task) => STARTABLE.includes(t.state);
-/** Backlog task linked to run after another: it starts when that one settles. */
-export const isWaiting = (t: Task) => t.state === "backlog" && (t.afterTaskId !== null || t.afterThreadId !== null);
+/** POST /tasks/:id/start allowed (never for an adopted session). On a blocked task it starts early and keeps its needs. */
+export const canStart = (t: Task) => !t.adopted && STARTABLE.includes(t.state);
+/** Backlog tree member with a need not settled yet: it starts when every need settles. */
+export const isWaiting = (t: Task) => t.readiness === "blocked";
 
-/** What a waiting task waits on, for button copy: "#12" or "session <title>". */
-export const waitTarget = (t: Task) =>
-  t.afterTaskId !== null ? `#${t.afterTaskId}` : t.afterThreadId !== null ? `session ${t.afterThreadTitle ?? t.afterThreadId}` : "";
+/** "#12", or "#3, #5": the tasks a task needs, for copy. */
+export const waitTarget = (t: Pick<Task, "needs">) => t.needs.map((id) => `#${id}`).join(", ");
 /** Thread is live: stop allowed, delete refused. */
 export const isActive = (t: Task) => ACTIVE.includes(t.state);
 export const canStop = (t: Task) => t.t3ThreadId !== null && isActive(t);
 /** Outside backlog only title, tags, notes may change. */
 export const isFullyEditable = (t: Task) => t.state === "backlog";
-/** Settled: no longer gates anything and can't be linked. */
+/** Settled: no longer gates anything. */
 export const isFinal = (t: Task) => t.state === "settled";
 
 // ---- Session batch (tasks one session created) ----
-
-/** Can be picked for "link in order": an independent backlog task (not in a batch chain). */
-export const canSelectForOrder = (t: Task) => t.state === "backlog";
-
-/** Reorder is offered while no chain step has started. */
-export const canReorder = (chain: readonly Task[]) => chain.length > 1 && chain.every((t) => t.state === "backlog");
-
-/**
- * What a chain's Start does, from its head: "start" (followers already wait), "start_now" (head is timed),
- * "confirm" (head waits on a task or session: Start now unlinks it), or "none" (head already ran).
- */
-export type ChainAction = "start" | "start_now" | "confirm" | "none";
-export function chainAction(head: Task): ChainAction {
-  if (head.state !== "backlog") return "none";
-  if (isWaiting(head)) return "confirm";
-  return head.startAt !== null ? "start_now" : "start";
-}
-
-/** "2 of 3 settled" once a step has settled, else null. */
-export function chainProgress(chain: readonly Task[]): string | null {
-  const settled = chain.filter((t) => t.state === "settled").length;
-  return settled === 0 ? null : `${settled} of ${chain.length} settled`;
-}
 
 /** Copy of items with the one at `from` moved by `by` (clamped to the ends). */
 export function moveItem<T>(items: readonly T[], from: number, by: number): T[] {
@@ -55,5 +31,5 @@ export function moveItem<T>(items: readonly T[], from: number, by: number): T[] 
 }
 
 /** Number of tasks in a batch. */
-export const batchSize = (b: { chains: readonly (readonly Task[])[]; independent: readonly Task[] }) =>
-  b.chains.reduce((n, c) => n + c.length, 0) + b.independent.length;
+export const batchSize = (b: { trees: readonly { tasks: readonly Task[] }[]; independent: readonly Task[] }) =>
+  b.trees.reduce((n, t) => n + t.tasks.length, 0) + b.independent.length;

@@ -4,60 +4,94 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-// predecessor is a launching task's settled predecessor, looked up and read
-// from T3 at most once per launch (shared by the handoff and the
-// predecessor base).
-type predecessor struct {
+// depSources are a launching task's finished needs (handoff sources), looked
+// up once and each read from T3 at most once per launch (shared by the
+// handoff and the predecessor base).
+type depSources struct {
 	s    *Service
 	task db.Task
 
 	srcDone bool
-	src     *db.HandoffSource
+	srcs    []db.HandoffSource
 	srcErr  error
 
-	readDone bool
-	detail   t3.ThreadDetail
-	readErr  error
+	reads map[string]threadRead // by thread id
 }
 
-func (s *Service) predecessorOf(task db.Task) *predecessor {
-	return &predecessor{s: s, task: task}
+type threadRead struct {
+	detail t3.ThreadDetail
+	err    error
 }
 
-// source is the settled predecessor; nil when the task is not linked, the
-// predecessor has not passed, or the predecessor task has no thread.
-func (p *predecessor) source(ctx context.Context) (*db.HandoffSource, error) {
-	if !p.srcDone {
-		p.srcDone = true
-		if p.task.AfterTaskID != nil || p.task.AfterThreadID != nil {
-			p.src, p.srcErr = p.s.store.HandoffSourceFor(ctx, p.task)
+func (s *Service) depSourcesOf(task db.Task) *depSources {
+	return &depSources{s: s, task: task, reads: map[string]threadRead{}}
+}
+
+// sources are the task's needs in settled or done with a thread, by id
+// (db.HandoffSources); nil without needs.
+func (d *depSources) sources(ctx context.Context) ([]db.HandoffSource, error) {
+	if !d.srcDone {
+		d.srcDone = true
+		if len(d.task.Needs) > 0 {
+			d.srcs, d.srcErr = d.s.store.HandoffSources(ctx, d.task.ID)
 		}
 	}
-	return p.src, p.srcErr
+	return d.srcs, d.srcErr
 }
 
 // read is the live t3_thread_read of src (bounded by handoffReadTimeout).
-func (p *predecessor) read(ctx context.Context, src db.HandoffSource) (t3.ThreadDetail, error) {
-	if !p.readDone {
-		p.readDone = true
-		ctx, cancel := context.WithTimeout(ctx, handoffReadTimeout)
-		defer cancel()
-		p.detail, p.readErr = p.s.t3.ReadThread(ctx, src.ThreadID)
-		if p.readErr != nil {
-			p.readErr = fmt.Errorf("read %s: %w", src.Label(), p.readErr)
-		}
+func (d *depSources) read(ctx context.Context, src db.HandoffSource) (t3.ThreadDetail, error) {
+	if r, ok := d.reads[src.ThreadID]; ok {
+		return r.detail, r.err
 	}
-	return p.detail, p.readErr
+	ctx, cancel := context.WithTimeout(ctx, handoffReadTimeout)
+	defer cancel()
+	detail, err := d.s.t3.ReadThread(ctx, src.ThreadID)
+	if err != nil {
+		err = fmt.Errorf("read %s: %w", src.Label(), err)
+	}
+	d.reads[src.ThreadID] = threadRead{detail, err}
+	return detail, err
 }
 
-// ResolveBase decides a predecessor-base launch from the settled predecessor
-// src (read as d): its branch when usable, else the fallback reason
+// baseSource picks the need whose branch a predecessor-base worktree starts
+// from (docs/api.md "Predecessor base"): workspace.baseTaskId when it is a
+// need, else the sole need. nil and the fallback reason otherwise, or when
+// that need has not finished or has no thread.
+func (d *depSources) baseSource(ctx context.Context) (*db.HandoffSource, string) {
+	needs := d.task.Needs
+	var pick int64
+	switch base := d.task.Workspace.BaseTaskID; {
+	case len(needs) == 0:
+		return nil, "the task has no needs"
+	case base != nil && slices.Contains(needs, *base):
+		pick = *base
+	case len(needs) == 1:
+		pick = needs[0]
+	default:
+		return nil, fmt.Sprintf("the task has %d needs and no workspace.baseTaskId to pick one", len(needs))
+	}
+	srcs, err := d.sources(ctx)
+	if err != nil {
+		return nil, "find needs: " + err.Error()
+	}
+	for i := range srcs {
+		if srcs[i].TaskID != nil && *srcs[i].TaskID == pick {
+			return &srcs[i], ""
+		}
+	}
+	return nil, fmt.Sprintf("#%d has not finished or has no thread", pick)
+}
+
+// ResolveBase decides a predecessor-base launch from the chosen need src
+// (read as d): its branch when usable, else the fallback reason
 // (docs/api.md "Predecessor base"). t3ProjectID is the task's T3 project.
 func ResolveBase(t3ProjectID string, src db.HandoffSource, d t3.ThreadDetail) (branch, reason string) {
 	label := src.Label()
@@ -89,12 +123,12 @@ func allMerged(prs []t3.PullRequest) bool {
 }
 
 // prepareBase resolves the worktree base of a task with workspace.base
-// "predecessor" and records it: the predecessor's local branch
+// "predecessor" and records it: the chosen need's local branch
 // (startFromOrigin false), or the task's own baseRef with a reason. An
 // attempt that already recorded one (a reused clientRequestId) reuses it.
 // fallback is the strategy to retry with when T3 rejects the predecessor
 // branch (nil when the base already is the fallback).
-func (s *Service) prepareBase(ctx context.Context, task db.Task, p *predecessor) (ws, fallback *t3.WorkspaceStrategy) {
+func (s *Service) prepareBase(ctx context.Context, task db.Task, p *depSources) (ws, fallback *t3.WorkspaceStrategy) {
 	own := WorkspaceStrategy(task.Workspace)
 	prev, err := s.store.GetLaunchBase(ctx, task.ID, task.LaunchAttempt)
 	if err != nil {
@@ -117,18 +151,12 @@ func (s *Service) prepareBase(ctx context.Context, task db.Task, p *predecessor)
 	return baseStrategy(task.Workspace, branch), own
 }
 
-// resolveBase fills b's source fields and returns the predecessor's branch,
+// resolveBase fills b's source fields and returns the chosen need's branch,
 // or "" and the fallback reason.
-func (s *Service) resolveBase(ctx context.Context, task db.Task, p *predecessor, b *db.LaunchBase) (string, string) {
-	if task.AfterTaskID == nil && task.AfterThreadID == nil {
-		return "", "not linked"
-	}
-	src, err := p.source(ctx)
-	if err != nil {
-		return "", "find predecessor: " + err.Error()
-	}
+func (s *Service) resolveBase(ctx context.Context, task db.Task, p *depSources, b *db.LaunchBase) (string, string) {
+	src, reason := p.baseSource(ctx)
 	if src == nil {
-		return "", "predecessor has not settled or has no thread"
+		return "", reason
 	}
 	b.SourceTaskID, b.SourceThreadID, b.SourceTitle = src.TaskID, &src.ThreadID, src.Title
 	d, err := p.read(ctx, *src)

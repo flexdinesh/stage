@@ -44,8 +44,8 @@ type Service struct {
 	t3    t3.Client
 	log   *slog.Logger
 
-	// OnTransition is called after every applied task transition (link
-	// runner hook). Must not block for long.
+	// OnTransition is called after every applied task transition (release
+	// runner and notifier hook). Must not block for long.
 	OnTransition func(ctx context.Context, c Change)
 	// OnThreadChange is called when an external thread changes into
 	// needs_input, done or failed (thread watcher). Must not block.
@@ -124,7 +124,7 @@ func (s *Service) Run(ctx context.Context) {
 // RecoverLaunching fails tasks stuck in launching (process died mid-launch).
 // The launch may have reached T3, so the next start reuses the attempt's
 // clientRequestId and T3 returns that thread instead of creating a second.
-// Run it once at startup before the poller, link runner and HTTP server.
+// Run it once at startup before the poller, release runner and HTTP server.
 func (s *Service) RecoverLaunching(ctx context.Context) {
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{States: []string{string(db.StateLaunching)}})
 	if err != nil {
@@ -278,16 +278,16 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 }
 
 // frozen: the thread no longer drives the task state. backlog tasks, and
-// settled tasks with a follower (it has been released). Other settled tasks
-// and all cancelled tasks may reopen: T3 reports a cancelled turn (e.g. a
-// denied permission) as thread status cancelled, then the thread runs on; a
-// cancelled task's follower waits for it to settle.
+// settled tasks with dependents (they have been released). Other settled
+// tasks and all cancelled tasks may reopen: T3 reports a cancelled turn (e.g.
+// a denied permission) as thread status cancelled, then the thread runs on;
+// a cancelled need keeps its dependents blocked until it settles.
 func frozen(t db.Task) bool {
 	switch t.State {
 	case db.StateBacklog:
 		return true
 	case db.StateSettled:
-		return t.NextTaskID != nil
+		return len(t.Dependents) > 0
 	}
 	return false
 }
@@ -326,22 +326,34 @@ func (s *Service) Catalog(ctx context.Context) (*CatalogSnapshot, error) {
 
 var launchable = []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}
 
-// StartTask is a manual start (POST /api/tasks/:id/start), "Start now": a
-// backlog task still waiting on an unfinished predecessor is unlinked from
-// it, then launched. Its own follower stays linked.
+// StartTask is a manual start (POST /api/tasks/:id/start). A tree member
+// may start before its needs settle ("start early"): its needs stay, and the
+// launching event names the unsettled ones.
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
-	return s.launch(ctx, id, true, "launch requested")
+	detail := "launch requested"
+	unsettled, err := s.store.UnsettledNeeds(ctx, id)
+	if err != nil {
+		return db.Task{}, err
+	}
+	if len(unsettled) > 0 {
+		labels := make([]string, len(unsettled))
+		for i, n := range unsettled {
+			labels[i] = fmt.Sprintf("#%d", n)
+		}
+		detail = "launch requested before " + strings.Join(labels, ", ") + " settled"
+	}
+	return s.launch(ctx, id, detail)
 }
 
-// LaunchTask starts a task in T3 (link runner path; keeps links).
+// LaunchTask starts a task in T3 (release runner path).
 func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
-	return s.launch(ctx, id, false, "launch requested")
+	return s.launch(ctx, id, "launch requested")
 }
 
-// LaunchScheduled starts a task whose start time has come (scheduler path;
-// keeps links). detail is the launching event's detail.
+// LaunchScheduled starts a task whose start time has come (scheduler path).
+// detail is the launching event's detail.
 func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error) {
-	return s.launch(ctx, id, false, detail)
+	return s.launch(ctx, id, detail)
 }
 
 // launch: launching (attempt+1, or the same attempt when the previous launch
@@ -352,15 +364,21 @@ func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) 
 // adopting it. A transport failure is
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
-// task.
-func (s *Service) launch(ctx context.Context, id int64, manual bool, detail string) (db.Task, error) {
+// task. An adopted session is never launched (Conflict).
+func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task, error) {
 	// The launch must finish (or fail) even if the HTTP client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 
+	cur, err := s.store.GetTask(ctx, id)
+	if err != nil {
+		return db.Task{}, err
+	}
+	if cur.Adopted {
+		return db.Task{}, db.Conflict("task %d tracks an adopted session: follow up on it instead of starting it", id)
+	}
 	res, err := s.transition(ctx, db.Transition{
 		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true,
-		UnlinkWaiting: manual,
 	})
 	if err != nil {
 		return db.Task{}, err
@@ -374,13 +392,13 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool, detail stri
 		return db.Task{}, err
 	}
 	in := launchInput(task, res.RequestID)
-	pred := s.predecessorOf(task)
-	if block := s.prepareHandoff(ctx, task, pred); block != "" {
+	deps := s.depSourcesOf(task)
+	if block := s.prepareHandoff(ctx, task, deps); block != "" {
 		in.Message = task.Prompt + "\n\n" + block
 	}
 	var fallback *t3.WorkspaceStrategy
 	if task.Workspace.FromPredecessor() {
-		in.Workspace, fallback = s.prepareBase(ctx, task, pred)
+		in.Workspace, fallback = s.prepareBase(ctx, task, deps)
 	}
 	in.Attachments, err = s.uploadImages(ctx, id)
 	var out t3.LaunchResult
@@ -389,7 +407,7 @@ func (s *Service) launch(ctx context.Context, id int64, manual bool, detail stri
 		out, err = s.launchWithRetry(ctx, in)
 		if fallback != nil && BaseRefRejected(err, in.Workspace.BaseRef) && ctx.Err() == nil {
 			// T3 created no thread: relaunch from the task's own baseRef.
-			s.log.Warn("predecessor branch rejected; launching from fallback base", "task", id, "branch", in.Workspace.BaseRef, "err", err)
+			s.log.Warn("need's branch rejected; launching from fallback base", "task", id, "branch", in.Workspace.BaseRef, "err", err)
 			s.rejectBase(ctx, task, fallback)
 			in.Workspace = fallback
 			out, err = s.launchWithRetry(ctx, in)

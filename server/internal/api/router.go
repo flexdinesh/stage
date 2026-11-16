@@ -35,6 +35,10 @@ type Deps struct {
 	// Instance identifies the running server in GET /api/health (zero in
 	// tests).
 	Instance instance.Meta
+	// OnTreeChange is called after a tree mutation (needs, start mode,
+	// membership) so the release runner reconciles now; nil = no-op. Must
+	// not block.
+	OnTreeChange func()
 }
 
 type server struct {
@@ -70,7 +74,6 @@ func NewRouter(deps Deps) http.Handler {
 
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)
-	h("POST /api/tasks/order", s.orderTasks)
 	h("GET /api/tasks/{id}", s.getTask)
 	h("PATCH /api/tasks/{id}", s.updateTask)
 	h("DELETE /api/tasks/{id}", s.deleteTask)
@@ -78,6 +81,16 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/followup", s.followupTask)
 	h("POST /api/tasks/{id}/stop", s.stopTask)
 	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
+	h("PUT /api/tasks/{id}/needs", s.setNeeds)
+
+	h("GET /api/trees", s.listTrees)
+	h("POST /api/trees", s.createTree)
+	h("GET /api/trees/{id}", s.getTree)
+	h("PATCH /api/trees/{id}", s.updateTree)
+	h("DELETE /api/trees/{id}", s.deleteTree)
+	h("POST /api/trees/{id}/tasks", s.addToTree)
+	h("DELETE /api/trees/{id}/tasks/{taskId}", s.removeFromTree)
+	h("POST /api/trees/{id}/start", s.startTree)
 
 	h("GET /api/schedules", s.listSchedules)
 	h("POST /api/schedules", s.createSchedule)
@@ -94,6 +107,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/threads", s.listThreads)
 	h("GET /api/threads/search", s.searchThreads)
 	h("GET /api/threads/{id}", s.getThread)
+	h("POST /api/threads/{id}/adopt", s.adoptThread)
 	h("GET /api/threads/{id}/transcript", s.getTranscript)
 	h("GET /api/threads/{id}/transcript/items/{itemId}", s.getTranscriptItem)
 	h("GET /api/threads/{id}/transcript/opening", s.getTranscriptOpening)
@@ -135,6 +149,13 @@ func NewRouter(deps Deps) http.Handler {
 		w.Header().Set(buildinfo.APIVersionHeader, apiVersion)
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// treeChanged notifies OnTreeChange.
+func (s *server) treeChanged() {
+	if s.OnTreeChange != nil {
+		s.OnTreeChange()
+	}
 }
 
 // Health is GET /api/health: whether this is a live Stage server with a

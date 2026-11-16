@@ -9,7 +9,7 @@ import (
 // Notification is an inbox entry (docs/api.md "Notifications inbox").
 type Notification struct {
 	ID           int64      `json:"id"`
-	Event        TaskState  `json:"event"` // needs_input | done | failed
+	Event        TaskState  `json:"event"` // needs_input | ready | done | failed | settled
 	TaskID       *int64     `json:"taskId"`
 	T3ThreadID   *string    `json:"t3ThreadId"` // external thread, or the task's thread
 	Title        string     `json:"title"`

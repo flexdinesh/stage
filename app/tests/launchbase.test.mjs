@@ -11,8 +11,8 @@ import {
   workspaceOptions,
 } from "../src/lib/launchbase.ts";
 
-const stacked = { type: "worktree", baseRef: "origin/main", branch: null, base: "predecessor" };
-const task = (extra = {}) => ({ state: "backlog", afterTaskId: 12, afterThreadId: null, workspace: stacked, ...extra });
+const stacked = { type: "worktree", baseRef: "origin/main", branch: null, base: "predecessor", baseTaskId: null };
+const task = (extra = {}) => ({ state: "backlog", needs: [12], workspace: stacked, ...extra });
 const base = (extra = {}) => ({
   attempt: 1,
   baseRef: "feat/api",
@@ -26,19 +26,26 @@ const base = (extra = {}) => ({
   ...extra,
 });
 
-test("predecessor cell shows only when there is a predecessor to name", () => {
+test("need's-branch cell shows only when the task has needs", () => {
   assert.deepEqual(
     workspaceOptions(null).map((o) => o.value),
     ["root", "worktree"],
   );
   assert.deepEqual(workspaceOptions("#12").at(-1), { value: "predecessor", label: "#12's branch" });
-  assert.equal(workspaceOptions("session").at(-1).label, "session's branch");
-  assert.equal(predecessorName({ afterTaskId: 12, afterThreadId: null }), "#12");
-  assert.equal(predecessorName({ afterTaskId: null, afterThreadId: "th-1" }), "session");
-  assert.equal(predecessorName({ afterTaskId: null, afterThreadId: null }), null);
+  assert.equal(workspaceOptions("a need").at(-1).label, "a need's branch");
 });
 
-test("a predecessor choice reverts to worktree once Runs after is cleared", () => {
+test("predecessor name: the picked need, else the sole need, else a need, else none", () => {
+  assert.equal(predecessorName(task()), "#12");
+  assert.equal(predecessorName(task({ needs: [3, 5], workspace: { ...stacked, baseTaskId: 5 } })), "#5");
+  assert.equal(predecessorName(task({ needs: [3, 5] })), "a need");
+  // A stale baseTaskId (no longer a need) does not name the base.
+  assert.equal(predecessorName(task({ needs: [3], workspace: { ...stacked, baseTaskId: 9 } })), "#3");
+  assert.equal(predecessorName(task({ needs: [] })), null);
+  assert.equal(predecessorName(task({ needs: [3, 5], workspace: { type: "root" } })), "a need");
+});
+
+test("a predecessor choice reverts to worktree once the task has no needs", () => {
   assert.equal(effectiveChoice("predecessor", "#12"), "predecessor");
   assert.equal(effectiveChoice("predecessor", null), "worktree");
   assert.equal(effectiveChoice("root", null), "root");
@@ -46,6 +53,9 @@ test("a predecessor choice reverts to worktree once Runs after is cleared", () =
 
 test("form choice maps to and from the workspace", () => {
   assert.deepEqual(choiceToWorkspace("predecessor", " origin/main ", " "), stacked);
+  assert.deepEqual(choiceToWorkspace("predecessor", "origin/main", "", 5), { ...stacked, baseTaskId: 5 });
+  // baseTaskId applies only to a predecessor choice.
+  assert.equal("baseTaskId" in choiceToWorkspace("worktree", "origin/main", "", 5), false);
   assert.deepEqual(choiceToWorkspace("worktree", "origin/main", "feat/x"), {
     type: "worktree",
     baseRef: "origin/main",
@@ -61,10 +71,10 @@ test("form choice maps to and from the workspace", () => {
 
 test("config line names the planned base, then the resolved one", () => {
   assert.equal(predecessorWorkspaceText(task(), null), "worktree from #12's branch · fallback origin/main");
-  assert.equal(predecessorWorkspaceText(task({ afterTaskId: null }), null), "worktree from predecessor's branch · fallback origin/main");
+  assert.equal(predecessorWorkspaceText(task({ needs: [3, 5] }), null), "worktree from a need's branch · fallback origin/main");
   assert.equal(predecessorWorkspaceText(task(), base()), "worktree from feat/api (#12)");
   assert.equal(
-    predecessorWorkspaceText(task({ afterTaskId: null, afterThreadId: "th-1" }), base({ sourceTaskId: null, baseRef: "plan/x" })),
+    predecessorWorkspaceText(task(), base({ sourceTaskId: null, baseRef: "plan/x" })),
     "worktree from plan/x (Build API)",
   );
   assert.equal(
@@ -85,6 +95,7 @@ test("chip and pending note", () => {
   assert.equal(predecessorChip(task({ workspace: { type: "root" } }), null), null);
   assert.equal(pendingBaseNote(task()), "+ on launch: worktree from #12's branch (fallback origin/main)");
   assert.equal(pendingBaseNote(task({ state: "running" })), null);
-  assert.equal(pendingBaseNote(task({ afterTaskId: null })), null);
+  assert.equal(pendingBaseNote(task({ needs: [] })), null);
+  assert.equal(pendingBaseNote(task({ needs: [3, 5], workspace: { ...stacked, baseTaskId: 5 } })), "+ on launch: worktree from #5's branch (fallback origin/main)");
   assert.equal(pendingBaseNote(task({ workspace: { ...stacked, base: "ref" } })), null);
 });

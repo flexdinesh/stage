@@ -12,7 +12,7 @@ import {
 } from "../api/types.ts";
 import { DesktopAppCard } from "../components/Host.tsx";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
-import { taskStateTone } from "../components/StateBadge.tsx";
+import { notificationEventTone } from "../components/StateBadge.tsx";
 import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
@@ -214,6 +214,7 @@ const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
 const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }[] = [
   { event: "needs_input", label: "Needs input", hint: "waits on you" },
   { event: "failed", label: "Failed", hint: "run failed" },
+  { event: "ready", label: "Ready", hint: "needs settled, start it" },
   { event: "done", label: "Done", hint: "run finished" },
   { event: "settled", label: "Settled", hint: "settled in T3" },
 ];
@@ -263,7 +264,7 @@ function EventFilter() {
             <li key={event} className="border-b border-line last:border-b-0">
               <label className="flex min-h-11 cursor-pointer items-center gap-3 transition-colors duration-150 hover:bg-panel md:min-h-8">
                 <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
-                <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c)", toneClass(taskStateTone(event)))} />
+                <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c)", toneClass(notificationEventTone(event)))} />
                 <span className="text-small text-fg">{label}</span>
                 <span className="ml-auto font-mono text-meta text-muted">{hint}</span>
               </label>

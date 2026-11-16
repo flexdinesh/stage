@@ -14,41 +14,53 @@ import (
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
-  t.state, t.t3_thread_id, t.after_task_id, nx.id, t.launch_attempt, t.last_error,
+  t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
+  COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
+  COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
+  t.adopted, t.ready_at, t.launch_attempt, t.last_error,
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at,
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
-  t.origin_thread_id, oth.title, t.after_thread_id, ath.title, t.handoff,
+  t.origin_thread_id, oth.title, t.handoff,
   COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
-LEFT JOIN tasks nx ON nx.after_task_id = t.id
+LEFT JOIN task_trees tr ON tr.id = t.tree_id
 LEFT JOIN threads th ON th.t3_thread_id = t.t3_thread_id
 LEFT JOIN schedules sc ON sc.id = t.schedule_id
-LEFT JOIN threads oth ON oth.t3_thread_id = t.origin_thread_id
-LEFT JOIN threads ath ON ath.t3_thread_id = t.after_thread_id`
+LEFT JOIN threads oth ON oth.t3_thread_id = t.origin_thread_id`
 
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.AfterTaskID, &t.NextTaskID,
+		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadID, &t.OriginThreadTitle, &t.AfterThreadID, &t.AfterThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments)
+		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
 	t.ModelOptions = nonNilOptions(t.ModelOptions)
 	t.Tags = nonNilStrings(t.Tags)
 	t.PullRequests = nonNilPRs(t.PullRequests)
+	t.Needs = nonNilIDs(t.Needs)
+	t.Dependents = nonNilIDs(t.Dependents)
 	if t.Workspace.Type == "" {
 		t.Workspace.Type = "root"
 	}
 	return t, nil
+}
+
+func nonNilIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }
 
 func collectTasks(rows *rowSet, err error) ([]Task, error) {
@@ -162,35 +174,28 @@ type NewTask struct {
 	Workspace          Workspace
 	Tags               []string
 	Notes              string
-	AfterTaskID        *int64  // runs after this task (link rules: setAfter)
 	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 	StartAt            *time.Time
 	StartTz            *string // set with StartAt (IANA zone)
 	ScheduleID         *int64  // spawning schedule
 	OriginThreadID     *string // T3 thread that created the task (agent interface)
-	AfterThreadID      *string // runs after this T3 thread (setAfterThread)
-	Handoff            *bool   // append the predecessor handoff at launch; nil = default (on)
+	Handoff            *bool   // append the needs' handoff at launch; nil = default (on)
+	// TreeID: join this tree (docs/api.md "Tree rules"); nil with Needs joins
+	// the needs' tree (or a new one).
+	TreeID *int64
+	// Needs: tasks this one needs (setNeeds rules).
+	Needs []int64
+	// NeedsThreadID ("afterMe"): adopt this T3 session (or take its owning
+	// task) and need it, before Needs.
+	NeedsThreadID *string
+	StartMode     *StartMode // nil = inherit the tree's
 }
 
-// errStartAndAfter: a task waits on a start time or a predecessor, not both.
-var errStartAndAfter = Invalid("a task can have a start time or run after another task, not both")
+// errStartAndNeeds: a task waits on a start time or on needs, not both.
+var errStartAndNeeds = Invalid("a task can have a start time or needs, not both")
 
-// errOneWait: a task waits on at most one of a start time, a task or a thread.
-var errOneWait = Invalid("a task can wait on one of: a start time, another task, a thread")
-
-// countSet counts the non-nil waits.
-func countSet(waits ...bool) int {
-	n := 0
-	for _, w := range waits {
-		if w {
-			n++
-		}
-	}
-	return n
-}
-
-// CreateTask inserts a backlog task (+ creation event), linked to run after
-// AfterTaskID when set (setAfter rules; the whole insert fails otherwise).
+// CreateTask inserts a backlog task (+ creation event) and places it in its
+// tree with its needs (the whole insert fails on a rule violation).
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
 	return s.createTask(ctx, in, nil)
 }
@@ -209,13 +214,11 @@ func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx *Tx, i
 	return s.GetTask(ctx, id)
 }
 
-// insertTask is createTask's insert, inside tx.
+// insertTask is createTask's insert, inside tx: insert, adopt
+// NeedsThreadID, resolve and join the tree, set needs.
 func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id int64) error) (int64, error) {
-	if in.StartAt != nil && in.AfterTaskID != nil {
-		return 0, errStartAndAfter
-	}
-	if countSet(in.StartAt != nil, in.AfterTaskID != nil, in.AfterThreadID != nil) > 1 {
-		return 0, errOneWait
+	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsThreadID != nil) {
+		return 0, errStartAndNeeds
 	}
 	if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 		return 0, err
@@ -223,24 +226,41 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id, handoff)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true)) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true),$17) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	if in.AfterTaskID != nil {
-		if err := setAfter(ctx, tx, id, in.AfterTaskID); err != nil {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id); err != nil {
+		return 0, err
+	}
+	needs := slices.Clone(in.Needs)
+	if in.NeedsThreadID != nil {
+		owner, _, err := adoptThread(ctx, tx, AdoptInput{ThreadID: *in.NeedsThreadID})
+		if err != nil {
+			return 0, err
+		}
+		needs = append([]int64{owner}, needs...)
+	}
+	if in.TreeID != nil || len(needs) > 0 {
+		tree, err := resolveTree(ctx, tx, in.TreeID, needs)
+		if err != nil {
+			return 0, err
+		}
+		if err := joinTree(ctx, tx, id, tree); err != nil {
+			return 0, err
+		}
+		if err := setNeeds(ctx, tx, id, needs); err != nil {
 			return 0, err
 		}
 	}
-	if in.AfterThreadID != nil {
-		if err := setAfterThread(ctx, tx, id, in.AfterThreadID); err != nil {
-			return 0, err
-		}
+	if err := checkBaseTask(ctx, tx, id); err != nil {
+		return 0, err
 	}
 	if len(in.AttachmentIDs) > 0 {
 		if err := setAttachments(ctx, tx, id, in.AttachmentIDs); err != nil {
@@ -252,9 +272,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true)) 
 			return 0, err
 		}
 	}
-	_, err = tx.Exec(ctx,
-		`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id)
-	return id, err
+	return id, nil
 }
 
 func projectExists(ctx context.Context, tx *Tx, id int64) error {
@@ -267,7 +285,7 @@ func projectExists(ctx context.Context, tx *Tx, id int64) error {
 }
 
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
-// Nullable fields: providerInstanceId, model (Null clears).
+// Nullable fields: providerInstanceId, model, startMode (Null clears).
 type TaskPatch struct {
 	ProjectID          Optional[int64]            `json:"projectId"`
 	Title              Optional[string]           `json:"title"`
@@ -280,10 +298,9 @@ type TaskPatch struct {
 	Workspace          Optional[Workspace]        `json:"workspace"`
 	Tags               Optional[[]string]         `json:"tags"`
 	Notes              Optional[string]           `json:"notes"`
-	AfterTaskID        Optional[int64]            `json:"afterTaskId"`   // null unlinks
-	AfterThreadID      Optional[string]           `json:"afterThreadId"` // null unlinks (setAfterThread)
 	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
-	Handoff            Optional[bool]             `json:"handoff"`       // append the predecessor handoff at launch
+	Handoff            Optional[bool]             `json:"handoff"`       // append the needs' handoff at launch
+	StartMode          Optional[StartMode]        `json:"startMode"`     // null = inherit the tree's
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
 	StartLocal Optional[string]    `json:"startLocal"`
@@ -295,7 +312,7 @@ type TaskPatch struct {
 func (p TaskPatch) restrictedSet() bool {
 	return p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
 		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
-		p.StartAt.Set || p.Handoff.Set
+		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
 // UpdateTask applies a validated patch. Outside backlog only title, tags and
@@ -304,16 +321,19 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
 		var provider, model *string
-		var startAt *time.Time
-		var after *int64
-		var afterThread *string
-		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, start_at, after_task_id, after_thread_id FROM tasks WHERE id = $1`, id).
-			Scan(&state, &provider, &model, &startAt, &after, &afterThread)
+		var adopted bool
+		var nNeeds int
+		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,
+  (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
+			Scan(&state, &provider, &model, &adopted, &nNeeds)
 		if err != nil {
 			return notFound(err)
 		}
 		if state != StateBacklog && p.restrictedSet() {
 			return Conflict("task is %s: only title, tags and notes are editable outside backlog", state)
+		}
+		if adopted && p.Prompt.Set {
+			return Conflict("an adopted session's prompt is its T3 conversation")
 		}
 		if p.ProviderInstanceID.Set {
 			provider = p.ProviderInstanceID.Ptr()
@@ -324,54 +344,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if (provider == nil) != (model == nil) {
 			return Invalid("providerInstanceId and model must be set together")
 		}
+		if p.StartAt.Set && !p.StartAt.Null && nNeeds > 0 {
+			return errStartAndNeeds
+		}
 		if p.StartAt.Set {
-			startAt = p.StartAt.Ptr()
-		}
-		if p.AfterTaskID.Set {
-			after = p.AfterTaskID.Ptr()
-		}
-		if p.AfterThreadID.Set {
-			afterThread = p.AfterThreadID.Ptr()
-		}
-		if startAt != nil && after != nil {
-			return errStartAndAfter
-		}
-		if countSet(startAt != nil, after != nil, afterThread != nil) > 1 {
-			return errOneWait
-		}
-		// Clear waits before setting new ones, so the one-wait check holds
-		// at every step.
-		if p.AfterThreadID.Set && p.AfterThreadID.Null {
-			if err := setAfterThread(ctx, tx, id, nil); err != nil {
-				return err
-			}
-		}
-		if p.AfterTaskID.Set && p.AfterTaskID.Null {
-			if err := setAfter(ctx, tx, id, nil); err != nil {
-				return err
-			}
-		}
-		setStart := func() error {
-			_, err := tx.Exec(ctx, `UPDATE tasks SET start_at = $2, start_tz = $3 WHERE id = $1`, id, p.StartAt.Ptr(), p.StartTz.Ptr())
-			return err
-		}
-		if p.StartAt.Set && p.StartAt.Null {
-			if err := setStart(); err != nil {
-				return err
-			}
-		}
-		if p.AfterTaskID.Set && !p.AfterTaskID.Null {
-			if err := setAfter(ctx, tx, id, p.AfterTaskID.Ptr()); err != nil {
-				return err
-			}
-		}
-		if p.AfterThreadID.Set && !p.AfterThreadID.Null {
-			if err := setAfterThread(ctx, tx, id, p.AfterThreadID.Ptr()); err != nil {
-				return err
-			}
-		}
-		if p.StartAt.Set && !p.StartAt.Null {
-			if err := setStart(); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE tasks SET start_at = $2, start_tz = $3 WHERE id = $1`, id, p.StartAt.Ptr(), p.StartTz.Ptr()); err != nil {
 				return err
 			}
 		}
@@ -423,12 +400,20 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.Handoff.Set {
 			set("handoff", p.Handoff.V)
 		}
-		if len(sets) == 0 && !p.AfterTaskID.Set && !p.AfterThreadID.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
+		if p.StartMode.Set {
+			set("start_mode", p.StartMode.Ptr())
+		}
+		if len(sets) == 0 && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
 		sets = append(sets, "updated_at = "+nowSQL)
-		_, err = tx.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
-		return err
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...); err != nil {
+			return err
+		}
+		if p.Workspace.Set {
+			return checkBaseTask(ctx, tx, id)
+		}
+		return nil
 	})
 	if err != nil {
 		return Task{}, err
@@ -436,23 +421,36 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 	return s.GetTask(ctx, id)
 }
 
-// DeleteTask removes a task unless a thread is active (Conflict). Its follower
-// is spliced onto its predecessor (A→X→B becomes A→B).
+// checkBaseTask: workspace.baseTaskId, when set, names one of the task's
+// needs (Invalid otherwise).
+func checkBaseTask(ctx context.Context, tx *Tx, id int64) error {
+	var base *int64
+	var isNeed bool
+	err := tx.QueryRow(ctx, `
+SELECT json_extract(workspace, '$.baseTaskId'),
+  EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = tasks.id AND n.need_id = json_extract(tasks.workspace, '$.baseTaskId'))
+FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
+	if err != nil {
+		return notFound(err)
+	}
+	if base != nil && !isNeed {
+		return Invalid("workspace.baseTaskId: task %d is not a need of this task", *base)
+	}
+	return nil
+}
+
+// DeleteTask removes a task unless a thread is active (Conflict). It is
+// spliced out of its tree first (its dependents take over its needs).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
-		var after *int64
-		if err := tx.QueryRow(ctx, `SELECT state, after_task_id FROM tasks WHERE id = $1`, id).Scan(&state, &after); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT state FROM tasks WHERE id = $1`, id).Scan(&state); err != nil {
 			return notFound(err)
 		}
 		if state.Active() {
 			return Conflict("task is %s: stop it first", state)
 		}
-		// Free the predecessor's follower slot before the follower takes it.
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = NULL WHERE id = $1`, id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET after_task_id = $2, updated_at = `+nowSQL+` WHERE after_task_id = $1`, id, after); err != nil {
+		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
@@ -461,17 +459,22 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 }
 
 // DuplicateTask copies a task's config and images into a new backlog task
-// (not linked).
+// (no tree, no needs). An adopted session cannot be duplicated (Conflict).
 func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	src, err := s.GetTask(ctx, id)
 	if err != nil {
 		return Task{}, err
 	}
+	if src.Adopted {
+		return Task{}, Conflict("task %d tracks an adopted session: it has no prompt to duplicate", id)
+	}
+	ws := src.Workspace
+	ws.BaseTaskID = nil
 	copyImages := func(tx *Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
-		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: src.Workspace,
+		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: ws,
 		Tags: src.Tags, Notes: src.Notes,
 	}, copyImages)
 }
@@ -492,17 +495,13 @@ type Transition struct {
 	To     TaskState
 	Detail string
 
-	BeginAttempt bool    // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start
+	BeginAttempt bool    // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
 	ThreadID     *string // set t3_thread_id (+ launched_at)
 	LastError    *string // set last_error
 	// ReuseAttempt marks the attempt's launch outcome unknown (transport
 	// failure or restart mid-launch, no thread): the next BeginAttempt keeps
 	// the attempt number and the clientRequestId.
 	ReuseAttempt bool
-	// UnlinkWaiting ("Start now"): a backlog task still waiting on an
-	// unfinished predecessor task or thread (not settled) is
-	// unlinked from it.
-	UnlinkWaiting bool
 }
 
 // TransitionResult reports what happened. Changed=false: current state not
@@ -534,7 +533,7 @@ UPDATE tasks SET
   state = $2,
   launch_attempt = launch_attempt + CASE WHEN $3 AND NOT launch_reuse THEN 1 ELSE 0 END,
   launch_request_id = CASE WHEN $3 AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
-                           THEN 'task-' || id || '-' || $9 ELSE launch_request_id END,
+                           THEN 'task-' || id || '-' || $8 ELSE launch_request_id END,
   launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
                       WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
   t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
@@ -545,15 +544,10 @@ UPDATE tasks SET
   settled_at = CASE WHEN $3 THEN NULL WHEN $2 = 'settled' THEN `+nowSQL+` ELSE settled_at END,
   start_at = CASE WHEN $3 THEN NULL ELSE start_at END,
   start_tz = CASE WHEN $3 THEN NULL ELSE start_tz END,
-  after_task_id = CASE WHEN $8 AND state = 'backlog' AND NOT EXISTS (
-      SELECT 1 FROM tasks p WHERE p.id = tasks.after_task_id AND p.state = 'settled')
-    THEN NULL ELSE after_task_id END,
-  after_thread_id = CASE WHEN $8 AND state = 'backlog' AND NOT EXISTS (
-      SELECT 1 FROM threads th WHERE th.t3_thread_id = tasks.after_thread_id AND `+threadPassedSQL+`)
-    THEN NULL ELSE after_thread_id END,
+  ready_at = CASE WHEN $3 THEN NULL ELSE ready_at END,
   updated_at = `+nowSQL+`
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, t.UnlinkWaiting, newUUID(),
+			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(),
 		).Scan(&res.Attempt, &res.RequestID)
 		if err != nil {
 			return err

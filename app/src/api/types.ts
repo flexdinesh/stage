@@ -40,6 +40,13 @@ export type InteractionMode = (typeof INTERACTION_MODES)[number];
 export const SEND_MODES = ["auto", "queue", "steer", "restart"] as const;
 export type SendMode = (typeof SEND_MODES)[number];
 
+/** When a tree member launches once its needs settle: auto (the server launches it) or manual (it reads ready). */
+export const START_MODES = ["auto", "manual"] as const;
+export type StartMode = (typeof START_MODES)[number];
+
+/** A backlog tree member: blocked (a need is not settled) or ready (every need settled and manual, or no needs). */
+export type Readiness = "blocked" | "ready";
+
 export type ProjectSource = "app" | "t3";
 export type ThreadSource = "app" | "t3";
 
@@ -57,12 +64,19 @@ export interface ModelOption {
   value: string | boolean;
 }
 
-/** Worktree base: ref (from baseRef) or predecessor (from the linked predecessor's branch; baseRef is the fallback). */
+/** Worktree base: ref (from baseRef) or predecessor (from a need's branch; baseRef is the fallback). */
 export type WorkspaceBase = "ref" | "predecessor";
 
 export type Workspace =
   | { type: "root" }
-  | { type: "worktree"; baseRef: string; branch: string | null; base?: WorkspaceBase };
+  | {
+      type: "worktree";
+      baseRef: string;
+      branch: string | null;
+      base?: WorkspaceBase;
+      /** With base predecessor: the need whose branch the worktree starts from (null = the sole need). */
+      baseTaskId?: number | null;
+    };
 
 // ---- Health ----
 
@@ -185,10 +199,23 @@ export interface Task {
   notes: string;
   state: TaskState;
   t3ThreadId: string | null;
-  /** Runs after this task (launches when it settles). */
-  afterTaskId: number | null;
-  /** The task that runs after this one. */
-  nextTaskId: number | null;
+  /** The task's tree; null outside one. */
+  treeId: number | null;
+  treeTitle: string | null;
+  /** The task's own start mode; null inherits the tree's. */
+  startMode: StartMode | null;
+  /** startMode, else the tree's; null outside a tree. */
+  effectiveStartMode: StartMode | null;
+  /** Backlog tree members only; null otherwise. */
+  readiness: Readiness | null;
+  /** Tasks (same tree) this one needs, by id. */
+  needs: number[];
+  /** Tasks that need this one, by id. */
+  dependents: number[];
+  /** Tracks an existing T3 session (prompt ""); stage never starts, restarts or duplicates it. */
+  adopted: boolean;
+  /** A manual task's needs all settled (the ready notification episode); null otherwise. */
+  readyAt: string | null;
   /** One-shot start (UTC instant) of a backlog task; null once launched or when unset. */
   startAt: string | null;
   /** IANA zone the start time was entered in (set with startAt). */
@@ -199,10 +226,7 @@ export interface Task {
   /** T3 session that created the task (agent CLI/MCP); null otherwise. */
   originThreadId: string | null;
   originThreadTitle: string | null;
-  /** Runs after this T3 session (launches when it settles); not set together with afterTaskId. */
-  afterThreadId: string | null;
-  afterThreadTitle: string | null;
-  /** Append the predecessor's handoff block (final reply, PRs, branch, thread link) to the launch prompt. */
+  /** Append one handoff block per finished need (final reply, PRs, branch, thread link) to the launch prompt. */
   handoff: boolean;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
@@ -268,17 +292,17 @@ export interface TaskEvent {
 export interface TaskDetail extends Task {
   events: TaskEvent[];
   thread: Thread | null;
-  /** Linked run order containing this task, head first (just this task when unlinked). */
-  sequence: Task[];
+  /** The task's tree; null outside one. */
+  tree: TreeDetail | null;
   /** Tasks the task's origin session created; null without an origin session. */
   batch: CreatedTasks | null;
-  /** Handoff record of the current launch attempt; null when none was built. */
-  currentHandoff: Handoff | null;
+  /** Handoff records of the current launch attempt, one per need; empty when none. */
+  currentHandoffs: Handoff[];
   /** Worktree base the current launch attempt used (base predecessor); null when none was recorded. */
   currentLaunchBase: LaunchBase | null;
 }
 
-/** The worktree base a launch attempt with base "predecessor" used: the predecessor's branch, or the fallback and why. */
+/** The worktree base a launch attempt with base "predecessor" used: a need's branch, or the fallback and why. */
 export interface LaunchBase {
   attempt: number;
   baseRef: string;
@@ -287,12 +311,12 @@ export interface LaunchBase {
   sourceTaskId: number | null;
   sourceThreadId: string | null;
   sourceTitle: string;
-  /** Why it fell back; null when it used the predecessor's branch. */
+  /** Why it fell back; null when it used the need's branch. */
   reason: string | null;
   at: string;
 }
 
-/** What a launch attempt appended (or why it appended nothing) from its predecessor. */
+/** What a launch attempt appended (or why it appended nothing) from one need. */
 export interface Handoff {
   attempt: number;
   status: "sent" | "skipped";
@@ -306,17 +330,101 @@ export interface Handoff {
   at: string;
 }
 
-/** A session batch: tasks one session created, grouped by run order. */
+/** A tree's name and start mode. */
+export interface TreeRef {
+  id: number;
+  title: string;
+  startMode: StartMode;
+}
+
+/** A session batch: tasks one session created, grouped by tree. */
 export interface CreatedTasks {
-  /** Runs of batch tasks linked by run order, head first; ordered by head id. */
-  chains: Task[][];
-  /** Batch tasks with no batch predecessor or follower. */
+  /** Batch tasks per tree, ordered by each group's lowest task id; tasks by id. */
+  trees: { tree: TreeRef; tasks: Task[] }[];
+  /** Batch tasks outside any tree. */
   independent: Task[];
 }
 
-export interface OrderTasksResponse {
-  /** Resulting run order, head first. */
+// ---- Trees ----
+
+/** A DAG of tasks: each member's needs are members that must settle before it starts. */
+export interface Tree {
+  id: number;
+  title: string;
+  startMode: StartMode;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** taskId needs needId. */
+export interface TreeEdge {
+  taskId: number;
+  needId: number;
+}
+
+export interface TreeDetail extends Tree {
   tasks: Task[];
+  edges: TreeEdge[];
+  /** Task ids per level (longest need path from a root), roots first; each level by id. */
+  levels: number[][];
+}
+
+/** Member counts by state; blocked and ready split backlog. */
+export interface TreeCounts {
+  total: number;
+  backlog: number;
+  blocked: number;
+  ready: number;
+  launching: number;
+  running: number;
+  needsInput: number;
+  done: number;
+  settled: number;
+  failed: number;
+  interrupted: number;
+  cancelled: number;
+}
+
+export interface TreeSummary extends Tree {
+  counts: TreeCounts;
+  levels: number;
+  /** Member project titles, sorted. */
+  projects: string[];
+  /** Every member settled: the latest settle; null otherwise. */
+  settledAt: string | null;
+}
+
+export interface TreeList {
+  trees: TreeSummary[];
+}
+
+export interface TreeMemberRequest {
+  taskId: number;
+  /** Members of the tree this task needs; omitted keeps the task's needs. */
+  needs?: number[];
+}
+
+export interface CreateTreeRequest {
+  title: string;
+  startMode?: StartMode;
+  tasks: TreeMemberRequest[];
+}
+
+export interface UpdateTreeRequest {
+  title?: string;
+  startMode?: StartMode;
+}
+
+export interface StartTreeResponse {
+  started: Task[];
+  errors: { taskId: number; error: string }[];
+}
+
+export interface AdoptSessionRequest {
+  title?: string;
+  notes?: string;
+  tags?: string[];
+  treeId?: number;
 }
 
 export interface TaskList {
@@ -335,13 +443,19 @@ export interface CreateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
-  /** Run after this task (start is then ignored). */
-  afterTaskId?: number | null;
-  /** Append the predecessor's handoff at launch (server default true). */
+  /** Join this tree (default: the needs' tree, else a new tree when there are needs). */
+  treeId?: number;
+  /** Tasks this one needs (not with start or startLocal). */
+  needs?: number[];
+  /** Also need this T3 session (adopted as a task first). */
+  needsSessionId?: string;
+  /** Omitted inherits the tree's. */
+  startMode?: StartMode;
+  /** Append each need's handoff at launch (server default true). */
   handoff?: boolean;
   /** Staged uploads to attach (max 8). */
   attachmentIds?: number[];
-  /** One-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz (not with afterTaskId or start). */
+  /** One-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz (not with needs or start). */
   startLocal?: string | null;
   startTz?: string | null;
   start?: boolean;
@@ -359,11 +473,9 @@ export interface UpdateTaskRequest {
   workspace?: Workspace;
   tags?: string[];
   notes?: string;
-  /** null unlinks. */
-  afterTaskId?: number | null;
-  /** null unlinks the session wait. */
-  afterThreadId?: string | null;
-  /** Backlog only: append the predecessor's handoff at launch. */
+  /** Backlog only: null inherits the tree's. */
+  startMode?: StartMode | null;
+  /** Backlog only: append each need's handoff at launch. */
   handoff?: boolean;
   /** Backlog only: the exact image set (task's own ids + staged uploads). */
   attachmentIds?: number[];
@@ -813,7 +925,7 @@ export interface Badge {
 // ---- Notifications inbox ----
 
 /** States a notification is sent for. */
-export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled">;
+export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled"> | "ready";
 
 export interface Notification {
   id: number;

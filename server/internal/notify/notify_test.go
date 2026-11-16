@@ -351,6 +351,43 @@ func TestNotifyEventsFilter(t *testing.T) {
 	}
 }
 
+// The ready event (release runner OnReady): queued, filtered by the ready
+// preference, recorded on the task with a "Ready" push.
+func TestReadyNotification(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	srv := newPushServer(t)
+	subscribe(t, store, srv.URL+"/push/1")
+	task := seedTask(t, store, db.StateBacklog)
+
+	n.OnReady(ctx, task.ID)
+	if len(n.events) != 1 || (<-n.events).to() != db.EventReady {
+		t.Fatal("OnReady must queue one ready event")
+	}
+	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateDone}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{ready: &task.ID})
+	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || len(srv.requests()) != 0 {
+		t.Fatalf("ready disabled: %+v %v", got, err)
+	}
+	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.EventReady}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{ready: &task.ID})
+	got, err := store.ListNotifications(ctx, 10, nil)
+	if err != nil || len(got) != 1 || len(srv.requests()) != 1 {
+		t.Fatalf("ready enabled: %+v %v", got, err)
+	}
+	if r := got[0]; r.Event != db.EventReady || r.TaskID == nil || *r.TaskID != task.ID || r.URL != fmt.Sprintf("/tasks/%d", task.ID) {
+		t.Fatalf("ready notification %+v", r)
+	}
+	p, _, err := n.payload(ctx, event{ready: &task.ID})
+	if err != nil || p.Title != "Ready" || p.URL != fmt.Sprintf("/tasks/%d", task.ID) || p.Tag != fmt.Sprintf("task-%d", task.ID) || p.Body != "Say OK · stage" {
+		t.Fatalf("ready payload %+v %v", p, err)
+	}
+}
+
 func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()

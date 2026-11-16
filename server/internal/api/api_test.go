@@ -24,8 +24,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/stage/server/internal/links"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/transcript"
@@ -49,6 +49,8 @@ type flakyT3 struct {
 	// (T3 deduped the clientRequestId to another client's launch).
 	foreignProject atomic.Pointer[string]
 	failReply      atomic.Bool // LatestReply transport failure
+	// failReplyFor fails LatestReply for this thread only.
+	failReplyFor atomic.Pointer[string]
 
 	mu         gosync.Mutex
 	requestIDs []string // clientRequestId of every launch call
@@ -72,7 +74,7 @@ func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.Launc
 }
 
 func (f *flakyT3) LatestReply(ctx context.Context, in t3.LatestReplyInput) (t3.Reply, error) {
-	if f.failReply.Load() {
+	if p := f.failReplyFor.Load(); f.failReply.Load() || (p != nil && *p == in.ThreadID) {
 		return t3.Reply{}, errors.New("t3 read timed out")
 	}
 	return f.Fake.LatestReply(ctx, in)
@@ -126,7 +128,7 @@ type env struct {
 	fake   *t3.Fake
 	t3     *flakyT3
 	sync   *t3sync.Service
-	runner *links.Runner
+	runner *release.Runner
 	store  *db.Store
 	hub    *transcript.Hub
 }
@@ -140,13 +142,15 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, client, log)
-	runner := links.NewRunner(store, svc, log)
+	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
+	push := notify.New(store, "https://stage.test", log)
+	runner.OnReady = push.OnReady
 	hub := transcript.NewHub(t.Context(), client, api.MirrorActive(store), log)
 	hub.PollEvery, hub.IdleEvery, hub.Grace = 10*time.Millisecond, 10*time.Millisecond, 50*time.Millisecond
 	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, T3: client, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, T3: client, Sync: svc, Push: push, Logger: log,
 		Transcript: hub,
 	}
 	for _, opt := range opts {
@@ -228,8 +232,13 @@ type task struct {
 	Tags          []string          `json:"tags"`
 	State         string            `json:"state"`
 	T3ThreadID    *string           `json:"t3ThreadId"`
-	AfterTaskID   *int64            `json:"afterTaskId"`
-	NextTaskID    *int64            `json:"nextTaskId"`
+	TreeID        *int64            `json:"treeId"`
+	Needs         []int64           `json:"needs"`
+	Dependents    []int64           `json:"dependents"`
+	Readiness     *string           `json:"readiness"`
+	StartMode     *string           `json:"startMode"`
+	EffStartMode  *string           `json:"effectiveStartMode"`
+	Adopted       bool              `json:"adopted"`
 	LaunchAttempt int               `json:"launchAttempt"`
 	LastError     *string           `json:"lastError"`
 	T3WebURL      *string           `json:"t3WebUrl"`
@@ -247,7 +256,7 @@ type task struct {
 		Detail    string  `json:"detail"`
 	} `json:"events"`
 	Thread      *thread      `json:"thread"`
-	Sequence    []task       `json:"sequence"`
+	Tree        *treeDetail  `json:"tree"`
 	Attachments []attachment `json:"attachments"`
 }
 
@@ -504,7 +513,7 @@ func TestTaskActions(t *testing.T) {
 
 	var dup task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", tk.ID), nil, 201, &dup)
-	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.T3ThreadID != nil || dup.AfterTaskID != nil {
+	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.T3ThreadID != nil || len(dup.Needs) != 0 {
 		t.Fatalf("duplicate %+v", dup)
 	}
 	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", dup.ID), nil, 204, nil)
@@ -753,46 +762,11 @@ func TestProjects(t *testing.T) {
 	}
 }
 
-func TestLinkedTaskStartsOnlyAfterSettle(t *testing.T) {
-	e := newEnv(t)
-	p1 := e.project("/w/one")
-	p2 := e.project("/w/two")
-	a := e.task(p1.ID, "step 1", map[string]any{"start": true})
-	b := e.task(p2.ID, "step 2", map[string]any{"afterTaskId": a.ID, "start": true}) // start ignored when linked
-	if b.State != "backlog" || b.AfterTaskID == nil || *b.AfterTaskID != a.ID {
-		t.Fatalf("linked %+v", b)
-	}
-	if got := e.getTask(a.ID); got.NextTaskID == nil || *got.NextTaskID != b.ID || len(got.Sequence) != 2 ||
-		got.Sequence[0].ID != a.ID || got.Sequence[1].ID != b.ID {
-		t.Fatalf("a %+v", got)
-	}
-	thread1 := *a.T3ThreadID
-
-	_ = e.fake.SetStatus(thread1, t3.StatusCompleted)
-	e.poll()
-	e.reconcile()
-	if got := e.getTask(b.ID); got.State != "backlog" {
-		t.Fatalf("done but unsettled must wait: %+v", got)
-	}
-
-	_ = e.fake.Settle(thread1)
-	e.poll()
-	e.reconcile()
-	got := e.getTask(b.ID)
-	if got.State != "running" || got.T3ThreadID == nil || *got.T3ThreadID == thread1 || got.AfterTaskID == nil {
-		t.Fatalf("after settle step 2 must run in a new thread, keeping its link: %+v", got)
-	}
-	d, _ := e.fake.ReadThread(context.Background(), *got.T3ThreadID)
-	if d.ProjectID != p2.T3ProjectID {
-		t.Fatalf("step 2 launched in %s, want %s", d.ProjectID, p2.T3ProjectID)
-	}
-}
-
-func TestLinkRunLoopProcessesKicks(t *testing.T) {
+func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
 	a := e.task(p.ID, "s1", map[string]any{"start": true})
-	b := e.task(p.ID, "s2", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "s2", map[string]any{"needs": []int64{a.ID}})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { e.runner.Run(ctx); close(done) }()
@@ -810,72 +784,24 @@ func TestLinkRunLoopProcessesKicks(t *testing.T) {
 		case <-timeAfter():
 		}
 	}
-	t.Fatalf("runner loop did not launch step 2: %+v", e.getTask(b.ID))
-}
-
-func TestLinkRulesAndStartNow(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/one")
-	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", nil)
-	c := e.task(p.ID, "c", nil)
-
-	// "Then run" from a = link b after a.
-	var got task
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", b.ID), map[string]any{"afterTaskId": a.ID}, 200, &got)
-	if got.AfterTaskID == nil || *got.AfterTaskID != a.ID {
-		t.Fatalf("linked %+v", got)
-	}
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", c.ID), map[string]any{"afterTaskId": a.ID}, 409, nil) // a taken
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", a.ID), map[string]any{"afterTaskId": c.ID}, 409, nil) // a not backlog
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", c.ID), map[string]any{"afterTaskId": 999}, 404, nil)  // missing
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "afterTaskId": a.ID}, 409, nil)
-
-	// A failed predecessor leaves its follower waiting.
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusFailed)
-	e.poll()
-	e.reconcile()
-	if got = e.getTask(b.ID); got.State != "backlog" {
-		t.Fatalf("follower of failed task %+v", got)
-	}
-
-	// Start now: b is unlinked from the unfinished a and launched.
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &got)
-	if got.State != "running" || got.AfterTaskID != nil {
-		t.Fatalf("start now %+v", got)
-	}
-	if got = e.getTask(a.ID); got.NextTaskID != nil {
-		t.Fatalf("a still has a follower %+v", got)
-	}
-
-	// Unlink with null; delete splices.
-	d := e.task(p.ID, "d", map[string]any{"afterTaskId": c.ID})
-	f := e.task(p.ID, "f", map[string]any{"afterTaskId": d.ID})
-	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", d.ID), nil, 204, nil)
-	if got = e.getTask(f.ID); got.AfterTaskID == nil || *got.AfterTaskID != c.ID {
-		t.Fatalf("splice %+v", got)
-	}
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", f.ID), map[string]any{"afterTaskId": nil}, 200, &got)
-	if got.AfterTaskID != nil {
-		t.Fatalf("unlink %+v", got)
-	}
+	t.Fatalf("runner loop did not launch s2: %+v", e.getTask(b.ID))
 }
 
 func TestFollowupDoesNotReviveReleasedSettledTask(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
 	a := e.task(p.ID, "s1", map[string]any{"start": true})
-	b := e.task(p.ID, "s2", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "s2", map[string]any{"needs": []int64{a.ID}})
 	threadA := *a.T3ThreadID
 	_ = e.fake.SetStatus(threadA, t3.StatusCompleted)
 	_ = e.fake.Settle(threadA)
 	e.poll()
 	e.reconcile()
 	if got := e.getTask(b.ID); got.State != "running" {
-		t.Fatalf("follower %+v", got)
+		t.Fatalf("dependent %+v", got)
 	}
 
-	// Follow-up on the settled task whose follower already ran: stays settled.
+	// Follow-up on the settled task whose dependent already ran: stays settled (frozen).
 	_ = e.fake.SetThread(threadA, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
 	var got task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", a.ID), map[string]any{"message": "more"}, 200, &got)
@@ -886,7 +812,7 @@ func TestFollowupDoesNotReviveReleasedSettledTask(t *testing.T) {
 		t.Fatalf("thread mirror not refreshed: %+v", th)
 	}
 
-	// A settled unlinked task still reopens on follow-up.
+	// A settled task without dependents still reopens on follow-up.
 	solo := e.task(p.ID, "solo", map[string]any{"start": true})
 	_ = e.fake.SetStatus(*solo.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*solo.T3ThreadID)
@@ -937,15 +863,15 @@ func TestCancelledTaskReopens(t *testing.T) {
 		t.Fatalf("resumed thread did not reopen stale cancelled task: %s", got.State)
 	}
 
-	// Cancelled with a follower: the follower waits; the task keeps following
-	// T3 and the follower starts once it settles.
+	// Cancelled with a dependent: the dependent stays blocked; the task keeps
+	// following T3 and the dependent starts once it settles.
 	b := e.task(p.ID, "b", map[string]any{"start": true})
-	c := e.task(p.ID, "c", map[string]any{"afterTaskId": b.ID})
+	c := e.task(p.ID, "c", map[string]any{"needs": []int64{b.ID}})
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCancelled)
 	e.poll()
 	e.reconcile()
 	if got := e.getTask(c.ID); got.State != "backlog" {
-		t.Fatalf("follower of cancelled task %s", got.State)
+		t.Fatalf("dependent of cancelled task %s", got.State)
 	}
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusRunning)
 	if _, err := e.sync.FullSync(ctx); err != nil {
@@ -953,17 +879,17 @@ func TestCancelledTaskReopens(t *testing.T) {
 	}
 	e.poll()
 	if got := e.getTask(b.ID); got.State != "running" {
-		t.Fatalf("cancelled task with follower did not reopen: %s", got.State)
+		t.Fatalf("cancelled task with a dependent did not reopen: %s", got.State)
 	}
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*b.T3ThreadID)
 	e.poll()
 	e.reconcile()
 	if got := e.getTask(b.ID); got.State != "settled" {
-		t.Fatalf("predecessor %s", got.State)
+		t.Fatalf("need %s", got.State)
 	}
 	if got := e.getTask(c.ID); got.State != "running" {
-		t.Fatalf("follower after settle %s", got.State)
+		t.Fatalf("dependent after settle %s", got.State)
 	}
 }
 
@@ -1328,11 +1254,11 @@ func TestPreferences(t *testing.T) {
 	}
 
 	// Notification filter: default all; set; validate.
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,done,settled" {
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,ready,done,settled" {
 		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
 	}
-	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"settled", "done", "needs_input"}}, 200, &p)
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,done,settled" || p.LastUsed == nil {
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"settled", "ready", "done", "needs_input"}}, 200, &p)
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done,settled" || p.LastUsed == nil {
 		t.Fatalf("notifyEvents %+v", p)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)

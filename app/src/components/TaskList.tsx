@@ -7,7 +7,7 @@ import type { Task, Thread } from "../api/types.ts";
 import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
 import { sessionPath } from "../lib/sessions.ts";
-import { canStart, isWaiting } from "../lib/tasks.ts";
+import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
@@ -110,10 +110,9 @@ interface RowChip {
 }
 
 /**
- * The row's one chip: the one-shot start time while timed, "after #X" while waiting on a predecessor, "then #Y" when
- * something runs after it, else the schedule that spawned it, else the
- * agent session that created it. Viewed from a session (`contextThreadId`), a wait on it reads "after this session"
- * and its own provenance chip is dropped.
+ * The row's one chip: the one-shot start time while timed, "needs #3 #5" while blocked on its needs, else the
+ * schedule that spawned it, else the agent session that created it. Viewed from a session (`contextThreadId`), its
+ * own provenance chip is dropped.
  */
 function rowChip(task: Task, contextThreadId?: string): RowChip | null {
   if (task.state === "backlog" && task.startAt !== null) {
@@ -126,17 +125,14 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
       icon: <IconClock />,
     };
   }
-  if (isWaiting(task) && task.afterTaskId !== null)
-    return { to: `/tasks/${task.afterTaskId}`, label: `after #${task.afterTaskId}`, title: "Starts when this task settles", icon: <IconChainLink /> };
-  if (isWaiting(task) && task.afterThreadId !== null)
+  const [firstNeed] = task.needs;
+  if (isWaiting(task) && firstNeed !== undefined)
     return {
-      to: sessionPath(task.afterThreadId),
-      label: task.afterThreadId === contextThreadId ? "after this session" : "after session",
-      title: `Starts when session ${task.afterThreadTitle ?? task.afterThreadId} settles`,
+      to: `/tasks/${firstNeed}`,
+      label: `needs ${task.needs.map((id) => `#${id}`).join(" ")}`,
+      title: `Starts when ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}`,
       icon: <IconChainLink />,
     };
-  if (task.nextTaskId !== null)
-    return { to: `/tasks/${task.nextTaskId}`, label: `then #${task.nextTaskId}`, title: "Runs next when this task settles", icon: <IconChainLink /> };
   if (task.scheduleId !== null)
     return {
       to: `/schedules/${task.scheduleId}`,

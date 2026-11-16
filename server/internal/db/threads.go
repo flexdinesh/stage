@@ -314,9 +314,3 @@ const threadStateSQL = `CASE
  WHEN th.settled THEN 'settled'
  WHEN th.status IN ('idle','completed') THEN 'done'
  ELSE 'running' END`
-
-// threadPassedSQL: a session no longer blocks tasks waiting on it (link
-// rules): settled in T3 with no pending input or active run. Uses the raw
-// settled flag, so a settled session whose last run was cancelled passes.
-const threadPassedSQL = `(th.settled AND th.pending_request_count = 0 AND th.active_run_id IS NULL
- AND COALESCE(NULLIF(th.status,'idle'),th.latest_run_status,'') NOT IN ('preparing','queued','starting','running','waiting'))`

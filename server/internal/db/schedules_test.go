@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -184,24 +185,32 @@ func TestTaskStartAt(t *testing.T) {
 	if err != nil || b.StartAt == nil || !b.StartAt.Equal(at) || *b.StartTz != tz {
 		t.Fatalf("create = %+v %v", b, err)
 	}
+	// A start time excludes needs, both ways; clearing one allows the other.
 	var invalid *db.InvalidError
-	if _, err := s.UpdateTask(ctx, b.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: a.ID}}); !errors.As(err, &invalid) {
-		t.Fatalf("link with start = %v", err)
+	if _, err := s.SetNeeds(ctx, b.ID, []int64{a.ID}); !errors.As(err, &invalid) {
+		t.Fatalf("needs with start = %v", err)
 	}
-	// Switch from start time to run-after in one patch, then back.
+	if got, _ := s.GetTask(ctx, a.ID); got.TreeID != nil {
+		t.Fatalf("refused needs must roll back the tree: %+v", got)
+	}
 	b, err = s.UpdateTask(ctx, b.ID, db.TaskPatch{
 		StartAt: db.Optional[time.Time]{Set: true, Null: true}, StartTz: db.Optional[string]{Set: true, Null: true},
-		AfterTaskID: db.Optional[int64]{Set: true, V: a.ID},
 	})
-	if err != nil || b.StartAt != nil || b.AfterTaskID == nil {
-		t.Fatalf("switch to after = %+v %v", b, err)
+	if err != nil || b.StartAt != nil {
+		t.Fatalf("clear start = %+v %v", b, err)
 	}
-	b, err = s.UpdateTask(ctx, b.ID, db.TaskPatch{
-		StartAt: db.Optional[time.Time]{Set: true, V: at}, StartTz: db.Optional[string]{Set: true, V: tz},
-		AfterTaskID: db.Optional[int64]{Set: true, Null: true},
-	})
-	if err != nil || b.StartAt == nil || b.AfterTaskID != nil {
-		t.Fatalf("switch to start = %+v %v", b, err)
+	if b, err = s.SetNeeds(ctx, b.ID, []int64{a.ID}); err != nil || !slices.Equal(b.Needs, []int64{a.ID}) {
+		t.Fatalf("needs after clearing start = %+v %v", b, err)
+	}
+	if _, err := s.UpdateTask(ctx, b.ID, db.TaskPatch{StartAt: db.Optional[time.Time]{Set: true, V: at}, StartTz: db.Optional[string]{Set: true, V: tz}}); !errors.As(err, &invalid) {
+		t.Fatalf("start with needs = %v", err)
+	}
+	if _, err := s.SetNeeds(ctx, b.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, err = s.UpdateTask(ctx, b.ID, db.TaskPatch{StartAt: db.Optional[time.Time]{Set: true, V: at}, StartTz: db.Optional[string]{Set: true, V: tz}})
+	if err != nil || b.StartAt == nil || len(b.Needs) != 0 {
+		t.Fatalf("switch back to start = %+v %v", b, err)
 	}
 	due, _ := s.DueOneShots(ctx, at.Add(-time.Second))
 	if len(due) != 0 {

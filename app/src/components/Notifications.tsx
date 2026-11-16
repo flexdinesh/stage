@@ -8,7 +8,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
-import { TaskStateBadge, taskStateLabel, taskStateTone } from "./StateBadge.tsx";
+import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, toneClass } from "./ui.tsx";
 
@@ -212,7 +212,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <TaskStateBadge state={n.event} />
+        <NotificationEventBadge event={n.event} />
         <Button variant="ghost" small onClick={onDismiss} aria-label="Dismiss notification" className="-mr-1.5 w-6 px-0">
           <IconClose />
         </Button>
@@ -486,8 +486,8 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
 
 function NotificationEventLabel({ event }: { event: NotificationEvent }) {
   return (
-    <span className={cx(toneClass(taskStateTone(event)), "font-mono text-meta text-[var(--cf)]")}>
-      {taskStateLabel(event)}
+    <span className={cx(toneClass(notificationEventTone(event)), "font-mono text-meta text-[var(--cf)]")}>
+      {notificationEventLabel(event)}
     </span>
   );
 }
@@ -504,7 +504,7 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
             {unique.map((event) => (
               <li
                 key={event.id}
-                className={cx(toneClass(taskStateTone(event.event)), "relative flex items-baseline justify-between gap-3 py-1")}
+                className={cx(toneClass(notificationEventTone(event.event)), "relative flex items-baseline justify-between gap-3 py-1")}
               >
                 <span aria-hidden="true" className="absolute top-2.5 -left-[19.5px] size-1.5 bg-[var(--c)] outline-3 outline-surface" />
                 <NotificationEventLabel event={event.event} />

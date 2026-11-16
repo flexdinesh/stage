@@ -61,15 +61,16 @@ func validCron(cron, tz string) error {
 }
 
 // errSchedulePredecessor: a schedule's runs have no predecessor.
-var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a schedule option (schedule runs are not linked)")
+var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a schedule option (schedule runs have no needs)")
 
 func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	var req createScheduleReq
 	if err := decode(r, &req); err != nil {
 		return err
 	}
-	if req.AfterTaskID != nil || req.AfterThreadID != nil || req.Start || req.StartLocal != nil || req.StartTz != nil {
-		return db.Invalid("afterTaskId, afterThreadId, start, startLocal and startTz are not schedule fields")
+	if req.TreeID != nil || req.Needs != nil || req.NeedsSessionID != nil || req.StartMode != nil ||
+		req.Start || req.StartLocal != nil || req.StartTz != nil {
+		return db.Invalid("treeId, needs, needsSessionId, startMode, start, startLocal and startTz are not schedule fields")
 	}
 	in, err := req.validate()
 	if err != nil {

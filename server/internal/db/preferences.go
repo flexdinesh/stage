@@ -25,17 +25,24 @@ type Preferences struct {
 	NotifyEvents []TaskState    `json:"notifyEvents"`
 }
 
-// NotificationEvents: the states that can notify, in display order.
-var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, StateDone, StateSettled}
+// EventReady is the ready notification event: a manual tree member whose
+// needs all settled. A pseudo-state: never a task's state, not in TaskStates.
+const EventReady TaskState = "ready"
+
+// NotificationEvents: the events that can notify, in display order.
+var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, EventReady, StateDone, StateSettled}
 
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 	var p Preferences
 	var events []string
 	err := s.pool.QueryRow(ctx, `SELECT pinned, last_used, notify_events FROM preferences WHERE id = 1`).
 		Scan(&p.Pinned, &p.LastUsed, &events)
+	// Display order (migrations append new events at the end).
 	p.NotifyEvents = make([]TaskState, 0, len(events))
-	for _, e := range events {
-		p.NotifyEvents = append(p.NotifyEvents, TaskState(e))
+	for _, e := range NotificationEvents {
+		if slices.Contains(events, string(e)) {
+			p.NotifyEvents = append(p.NotifyEvents, e)
+		}
 	}
 	return normalize(p), err
 }
@@ -45,7 +52,7 @@ func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Preferences, error) {
 	for _, e := range events {
 		if !slices.Contains(NotificationEvents, e) {
-			return Preferences{}, Invalid("invalid event %q (want needs_input, failed, done or settled)", e)
+			return Preferences{}, Invalid("invalid event %q (want needs_input, failed, ready, done or settled)", e)
 		}
 	}
 	stored := make([]string, 0, len(events))

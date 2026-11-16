@@ -1,5 +1,11 @@
 import type {
+  AdoptSessionRequest,
   AnswerResult,
+  CreateTreeRequest,
+  StartTreeResponse,
+  TreeDetail,
+  TreeList,
+  UpdateTreeRequest,
   PendingQuestions,
   QuestionAnswer,
   Attachment,
@@ -23,7 +29,6 @@ import type {
   NotificationEvent,
   NotificationGroupPage,
   NotificationPage,
-  OrderTasksResponse,
   PairRequest,
   Preferences,
   Project,
@@ -158,8 +163,23 @@ export function createApi(transport: Transport) {
     followupTask: (id: number, body: FollowupRequest) => apiFetch<Task>(`/tasks/${id}/followup`, post(body)),
     stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
     duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
-    /** Links backlog tasks to run in this order (each after the previous one). */
-    orderTasks: (taskIds: number[]) => apiFetch<OrderTasksResponse>("/tasks/order", post({ taskIds })),
+    /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
+    setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),
+
+    trees: (q: { all?: boolean; settledFrom?: string; project?: number } = {}) =>
+      apiFetch<TreeList>(`/trees${toQuery({ all: q.all === true ? 1 : undefined, settledFrom: q.settledFrom, project: q.project })}`),
+    tree: (id: number) => apiFetch<TreeDetail>(`/trees/${id}`),
+    createTree: (body: CreateTreeRequest) => apiFetch<TreeDetail>("/trees", post(body)),
+    updateTree: (id: number, body: UpdateTreeRequest) => apiFetch<TreeDetail>(`/trees/${id}`, patch(body)),
+    /** Dissolves the tree: its tasks stay, edges go. */
+    deleteTree: (id: number) => apiSend(`/trees/${id}`, del),
+    /** Adds a task (a member of another tree moves); needs omitted keeps its needs. */
+    addToTree: (id: number, taskId: number, needs?: number[]) =>
+      apiFetch<TreeDetail>(`/trees/${id}/tasks`, post(needs === undefined ? { taskId } : { taskId, needs })),
+    /** Splices the task out: its dependents take over its needs. */
+    removeFromTree: (id: number, taskId: number) => apiSend(`/trees/${id}/tasks/${taskId}`, del),
+    /** Starts every ready member. */
+    startTree: (id: number) => apiFetch<StartTreeResponse>(`/trees/${id}/start`, post()),
 
     schedules: (q: ScheduleListQuery = {}) =>
       apiFetch<ScheduleList>(`/schedules${toQuery({ project: q.project, dueWithin: q.dueWithin })}`),
@@ -204,6 +224,9 @@ export function createApi(transport: Transport) {
     searchThreads: (q: string, opts: { project?: number; limit?: number } = {}) =>
       apiFetch<ThreadSearch>(`/threads/search${toQuery({ q, project: opts.project, limit: opts.limit })}`),
     thread: (id: string) => apiFetch<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+    /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
+    adoptThread: (id: string, body: AdoptSessionRequest = {}) =>
+      apiFetch<Task>(`/threads/${encodeURIComponent(id)}/adopt`, post(body)),
     transcript: (id: string, q: TranscriptQuery = {}) =>
       apiFetch<TranscriptPage>(`/threads/${encodeURIComponent(id)}/transcript${toQuery({ before: q.before, limit: q.limit })}`),
     transcriptItem: (id: string, itemId: string) =>

@@ -111,7 +111,7 @@ type ConfigArgs struct {
 	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name (with baseRef); omitted = T3 picks"`
-	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: a linked task's worktree starts from its predecessor's branch; baseRef is the fallback (tasks only)"`
+	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); baseRef is the fallback (tasks only)"`
 	Tags            []string          `json:"tags,omitempty"`
 	Notes           string            `json:"notes,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
@@ -232,9 +232,9 @@ func workspace(baseRef, branch, base string) *db.Workspace {
 // errBaseNeedsWorktree: base without a worktree to apply it to.
 var errBaseNeedsWorktree = errors.New("base needs a worktree: pass baseRef (with base predecessor it is the fallback)")
 
-// baseOnly patches task id's current workspace with base (base given
-// without baseRef).
-func (o *Ops) baseOnly(ctx context.Context, id int64, base string, p client.Patch) error {
+// baseOnly patches task id's current workspace with base and/or baseTask
+// (given without baseRef; nil = unchanged).
+func (o *Ops) baseOnly(ctx context.Context, id int64, base *string, baseTaskID *int64, p client.Patch) error {
 	cur, err := o.Client.Task(ctx, id)
 	if err != nil {
 		return err
@@ -243,9 +243,47 @@ func (o *Ops) baseOnly(ctx context.Context, id int64, base string, p client.Patc
 	if w.Type != "worktree" {
 		return errBaseNeedsWorktree
 	}
-	w.Base = strings.TrimSpace(base)
+	if base != nil {
+		w.Base = strings.TrimSpace(*base)
+	}
+	if baseTaskID != nil {
+		w.BaseTaskID = baseTask(*baseTaskID)
+	}
+	if w.Base != db.BasePredecessor {
+		w.BaseTaskID = nil
+	}
 	p["workspace"] = w
 	return nil
+}
+
+// baseTask is a baseTaskId argument: 0 = none (the sole need).
+func baseTask(id int64) *int64 {
+	if id <= 0 {
+		return nil
+	}
+	return &id
+}
+
+// parsedStartMode is a startMode argument: mode nil = omitted (or inherit).
+type parsedStartMode struct {
+	mode    *db.StartMode
+	inherit bool
+}
+
+// startMode parses auto | manual | inherit ("" = omitted).
+func startMode(s string) (parsedStartMode, error) {
+	switch v := strings.TrimSpace(s); v {
+	case "":
+		return parsedStartMode{}, nil
+	case "inherit":
+		return parsedStartMode{inherit: true}, nil
+	default:
+		m := db.StartMode(v)
+		if !m.Valid() {
+			return parsedStartMode{}, fmt.Errorf("invalid startMode %q (want auto|manual|inherit)", v)
+		}
+		return parsedStartMode{mode: &m}, nil
+	}
 }
 
 // uploadImages stages local images and returns their attachment ids.
@@ -292,17 +330,20 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 
 // TaskRow is a compact task for lists.
 type TaskRow struct {
-	ID            int64        `json:"id"`
-	Title         string       `json:"title"`
-	State         db.TaskState `json:"state"`
-	ProjectID     int64        `json:"projectId"`
-	Project       string       `json:"project"`
-	T3ThreadID    *string      `json:"t3ThreadId,omitempty"`
-	AfterTaskID   *int64       `json:"afterTaskId,omitempty"`
-	AfterThreadID *string      `json:"afterThreadId,omitempty"`
-	StartAt       *time.Time   `json:"startAt,omitempty"`
-	ScheduleID    *int64       `json:"scheduleId,omitempty"`
-	Tags          []string     `json:"tags,omitempty"`
+	ID         int64        `json:"id"`
+	Title      string       `json:"title"`
+	State      db.TaskState `json:"state"`
+	ProjectID  int64        `json:"projectId"`
+	Project    string       `json:"project"`
+	T3ThreadID *string      `json:"t3ThreadId,omitempty"`
+	TreeID     *int64       `json:"treeId,omitempty"`
+	Needs      []int64      `json:"needs,omitempty"`
+	// Readiness: blocked | ready for a backlog tree member.
+	Readiness  *db.Readiness `json:"readiness,omitempty"`
+	Adopted    bool          `json:"adopted,omitempty"` // tracks an existing session
+	StartAt    *time.Time    `json:"startAt,omitempty"`
+	ScheduleID *int64        `json:"scheduleId,omitempty"`
+	Tags       []string      `json:"tags,omitempty"`
 	// LastWordPreview is the thread's latest assistant reply, one plain line
 	// (get_task has the excerpt in thread.lastWord).
 	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
@@ -312,7 +353,7 @@ type TaskRow struct {
 func taskRow(t client.Task) TaskRow {
 	return TaskRow{
 		ID: t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
-		T3ThreadID: t.T3ThreadID, AfterTaskID: t.AfterTaskID, AfterThreadID: t.AfterThreadID,
+		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, Adopted: t.Adopted,
 		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, LastWordPreview: t.LastWordPreview,
 		UpdatedAt: t.UpdatedAt,
 	}
@@ -365,35 +406,27 @@ func (o *Ops) GetTask(ctx context.Context, a IDArgs) (client.TaskDetail, error) 
 	return o.Client.Task(ctx, a.ID)
 }
 
-// WaitArgs are the run-order and start options of create_task.
+// WaitArgs are the tree and start options of create_task.
 type WaitArgs struct {
-	AfterTaskID   int64  `json:"afterTaskId,omitempty" jsonschema:"run after this task settles"`
-	AfterThreadID string `json:"afterThreadId,omitempty" jsonschema:"run after this T3 session settles"`
-	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles (needs your session id)"`
-	StartLocal    string `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
-	StartTz       string `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`
-	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
+	TreeID     *int64  `json:"treeId,omitempty" jsonschema:"join this tree (default: the needs' tree, else a new tree when there are needs)"`
+	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task needs (same tree): it starts once all of them settle"`
+	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task starts once it settles (needs your session id)"`
+	StartMode  string  `json:"startMode,omitempty" jsonschema:"auto (launch when needs settle) | manual (reads ready; start it yourself) | inherit (default: the tree's)"`
+	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from (default: the sole need)"`
+	StartLocal string  `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
+	StartTz    string  `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`
+	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
 }
 
-// afterThread resolves afterThreadId / afterMe.
-func afterThread(w WaitArgs, c agentctx.Caller) (*string, error) {
-	if w.AfterMe {
-		if w.AfterThreadID != "" || w.AfterTaskID != 0 {
-			return nil, errors.New("afterMe excludes afterTaskId and afterThreadId")
-		}
-		if c.ThreadID == "" {
-			return nil, errors.New("afterMe needs your session id: run inside a T3 session (T3CODE_THREAD_ID) or pass callerThreadId")
-		}
-		return c.ThreadPtr(), nil
+// needsSession resolves afterMe to the caller's session id.
+func needsSession(w WaitArgs, c agentctx.Caller) (*string, error) {
+	if !w.AfterMe {
+		return nil, nil
 	}
-	return strPtr(w.AfterThreadID), nil
-}
-
-func idPtr(id int64) *int64 {
-	if id == 0 {
-		return nil
+	if c.ThreadID == "" {
+		return nil, errors.New("afterMe needs your session id: run inside a T3 session (T3CODE_THREAD_ID) or pass callerThreadId")
 	}
-	return &id
+	return c.ThreadPtr(), nil
 }
 
 // CreateTaskArgs is create_task.
@@ -401,12 +434,16 @@ type CreateTaskArgs struct {
 	ConfigArgs
 	WaitArgs
 	CallerArgs
-	Start bool `json:"start,omitempty" jsonschema:"start now (ignored when linked to run after something); default: save to backlog"`
+	Start bool `json:"start,omitempty" jsonschema:"start now (not with needs or afterMe); default: save to backlog"`
 }
 
 func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, error) {
 	c := o.caller(a.CallerArgs)
-	after, err := afterThread(a.WaitArgs, c)
+	session, err := needsSession(a.WaitArgs, c)
+	if err != nil {
+		return client.Task{}, err
+	}
+	mode, err := startMode(a.StartMode)
 	if err != nil {
 		return client.Task{}, err
 	}
@@ -414,12 +451,18 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 	if err != nil {
 		return client.Task{}, err
 	}
+	if a.BaseTaskID != nil {
+		if rc.workspace == nil {
+			return client.Task{}, errBaseNeedsWorktree
+		}
+		rc.workspace.BaseTaskID = a.BaseTaskID
+	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
 		ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
 		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs,
-		AfterTaskID: idPtr(a.AfterTaskID), AfterThreadID: after, OriginThreadID: c.ThreadPtr(),
+		TreeID: a.TreeID, Needs: a.Needs, NeedsSessionID: session, StartMode: mode.mode, OriginThreadID: c.ThreadPtr(),
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
 }
@@ -439,9 +482,28 @@ type UpdateArgs struct {
 	InteractionMode *string           `json:"interactionMode,omitempty"`
 	BaseRef         *string           `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
 	Branch          *string           `json:"branch,omitempty"`
-	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from the predecessor's branch; baseRef is the fallback); without baseRef keeps the current worktree"`
+	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; baseRef is the fallback); without baseRef keeps the current worktree"`
 	Tags            []string          `json:"tags,omitempty" jsonschema:"replaces tags"`
 	Notes           *string           `json:"notes,omitempty"`
+}
+
+// workspacePatch is the workspace baseRef/branch/base set (ok false without
+// baseRef).
+func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
+	if a.BaseRef == nil {
+		return db.Workspace{}, false
+	}
+	branch, base := "", ""
+	if a.Branch != nil {
+		branch = *a.Branch
+	}
+	if a.Base != nil {
+		base = *a.Base
+	}
+	if w := workspace(*a.BaseRef, branch, base); w != nil {
+		return *w, true
+	}
+	return db.Workspace{Type: "root", Base: base}, true
 }
 
 func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, error) {
@@ -487,20 +549,8 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, erro
 	if a.InteractionMode != nil {
 		p["interactionMode"] = *a.InteractionMode
 	}
-	if a.BaseRef != nil {
-		branch := ""
-		if a.Branch != nil {
-			branch = *a.Branch
-		}
-		base := ""
-		if a.Base != nil {
-			base = *a.Base
-		}
-		if w := workspace(*a.BaseRef, branch, base); w != nil {
-			p["workspace"] = w
-		} else {
-			p["workspace"] = db.Workspace{Type: "root", Base: base}
-		}
+	if w, ok := a.workspacePatch(); ok {
+		p["workspace"] = w
 	}
 	if a.Tags != nil {
 		p["tags"] = a.Tags
@@ -516,7 +566,9 @@ type UpdateTaskArgs struct {
 	UpdateArgs
 	StartLocal *string `json:"startLocal,omitempty" jsonschema:"set a one-shot start (with startTz); empty string clears it"`
 	StartTz    *string `json:"startTz,omitempty"`
-	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch; backlog only"`
+	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch; backlog only"`
+	StartMode  *string `json:"startMode,omitempty" jsonschema:"auto | manual | inherit (the tree's); backlog only"`
+	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from; 0 = the sole need"`
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
@@ -534,10 +586,27 @@ func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, er
 	if a.Handoff != nil {
 		p["handoff"] = *a.Handoff
 	}
-	if a.Base != nil && a.BaseRef == nil {
-		if err := o.baseOnly(ctx, a.ID, *a.Base, p); err != nil {
+	if a.StartMode != nil {
+		mode, err := startMode(*a.StartMode)
+		if err != nil {
 			return client.Task{}, err
 		}
+		if mode.inherit || mode.mode == nil {
+			p["startMode"] = nil
+		} else {
+			p["startMode"] = *mode.mode
+		}
+	}
+	if (a.Base != nil || a.BaseTaskID != nil) && a.BaseRef == nil {
+		if err := o.baseOnly(ctx, a.ID, a.Base, a.BaseTaskID, p); err != nil {
+			return client.Task{}, err
+		}
+	} else if w, ok := a.workspacePatch(); ok && a.BaseTaskID != nil {
+		if w.Type != "worktree" {
+			return client.Task{}, errBaseNeedsWorktree
+		}
+		w.BaseTaskID = baseTask(*a.BaseTaskID)
+		p["workspace"] = w
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
@@ -579,75 +648,6 @@ func (o *Ops) FollowupTask(ctx context.Context, a FollowupArgs) (client.Task, er
 		return client.Task{}, err
 	}
 	return o.Client.FollowupTask(ctx, a.ID, client.Followup{Message: a.Message, Mode: strPtr(a.Mode), AttachmentIDs: ids})
-}
-
-// LinkTaskArgs is link_task: exactly one of afterTaskId, afterThreadId,
-// afterMe.
-type LinkTaskArgs struct {
-	ID            int64  `json:"id" jsonschema:"backlog task to link"`
-	AfterTaskID   int64  `json:"afterTaskId,omitempty" jsonschema:"run after this task settles"`
-	AfterThreadID string `json:"afterThreadId,omitempty" jsonschema:"run after this T3 session settles"`
-	AfterMe       bool   `json:"afterMe,omitempty" jsonschema:"run after your own session settles"`
-	Handoff       *bool  `json:"handoff,omitempty" jsonschema:"append the predecessor's final reply, PRs, branch and thread link to the prompt at launch; omitted keeps the task's setting (default true)"`
-	Base          string `json:"base,omitempty" jsonschema:"predecessor: the task's worktree starts from the predecessor's branch (its baseRef is the fallback; needs a worktree); ref: from its baseRef; omitted keeps it"`
-	CallerArgs
-}
-
-func (o *Ops) LinkTask(ctx context.Context, a LinkTaskArgs) (client.Task, error) {
-	c := o.caller(a.CallerArgs)
-	after, err := afterThread(WaitArgs{AfterTaskID: a.AfterTaskID, AfterThreadID: a.AfterThreadID, AfterMe: a.AfterMe}, c)
-	if err != nil {
-		return client.Task{}, err
-	}
-	p := client.Patch{}
-	switch {
-	case a.AfterTaskID != 0 && after != nil:
-		return client.Task{}, errors.New("pass one of afterTaskId, afterThreadId, afterMe")
-	case a.AfterTaskID != 0:
-		p["afterTaskId"], p["afterThreadId"] = a.AfterTaskID, nil
-	case after != nil:
-		p["afterThreadId"], p["afterTaskId"] = *after, nil
-	default:
-		return client.Task{}, errors.New("pass one of afterTaskId, afterThreadId, afterMe")
-	}
-	cur, err := o.Client.Task(ctx, a.ID)
-	if err != nil {
-		return client.Task{}, err
-	}
-	if cur.StartAt != nil {
-		p["startLocal"], p["startTz"] = nil, nil // a link replaces a start time
-	}
-	if a.Handoff != nil {
-		p["handoff"] = *a.Handoff
-	}
-	if a.Base != "" {
-		w := cur.Workspace
-		if w.Type != "worktree" {
-			return client.Task{}, errBaseNeedsWorktree
-		}
-		w.Base = a.Base
-		p["workspace"] = w
-	}
-	return o.Client.UpdateTask(ctx, a.ID, p)
-}
-
-// OrderTasksArgs is order_tasks.
-type OrderTasksArgs struct {
-	TaskIDs []int64 `json:"taskIds" jsonschema:"backlog tasks in run order (at least two); each runs after the previous one settles"`
-}
-
-// OrderTasksOut is order_tasks.
-type OrderTasksOut struct {
-	Tasks []client.Task `json:"tasks" jsonschema:"resulting run order, head first"`
-}
-
-func (o *Ops) OrderTasks(ctx context.Context, a OrderTasksArgs) (OrderTasksOut, error) {
-	ts, err := o.Client.OrderTasks(ctx, a.TaskIDs)
-	return OrderTasksOut{Tasks: ts}, err
-}
-
-func (o *Ops) UnlinkTask(ctx context.Context, a IDArgs) (client.Task, error) {
-	return o.Client.UpdateTask(ctx, a.ID, client.Patch{"afterTaskId": nil, "afterThreadId": nil})
 }
 
 // WaitTaskArgs is wait_task.

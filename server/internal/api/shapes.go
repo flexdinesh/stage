@@ -26,28 +26,47 @@ type threadJSON struct {
 
 type taskDetailJSON struct {
 	taskJSON
-	Events   []db.TaskEvent `json:"events"`
-	Thread   *threadJSON    `json:"thread"`
-	Sequence []taskJSON     `json:"sequence"` // linked run order containing the task (head first)
+	Events []db.TaskEvent `json:"events"`
+	Thread *threadJSON    `json:"thread"`
+	// Tree: the task's tree (null outside one).
+	Tree *treeDetailJSON `json:"tree"`
 	// Batch: the tasks the task's origin session created (null without one).
 	Batch *createdTasksJSON `json:"batch"`
-	// CurrentHandoff: what the current launch attempt appended (null when none).
-	CurrentHandoff *db.Handoff `json:"currentHandoff"`
+	// CurrentHandoffs: what the current launch attempt appended, one per
+	// need (empty when none).
+	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
 	// CurrentLaunchBase: the worktree base the current launch attempt used
 	// (workspace.base predecessor; null when none).
 	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
+// treeDetailJSON is db.TreeDetail with API task shapes.
+type treeDetailJSON struct {
+	db.Tree
+	Tasks  []taskJSON    `json:"tasks"`
+	Edges  []db.TreeEdge `json:"edges"`
+	Levels [][]int64     `json:"levels"`
+}
+
+func (s *server) treeDetail(env string, t db.TreeDetail) treeDetailJSON {
+	return treeDetailJSON{Tree: t.Tree, Tasks: s.tasks(env, t.Tasks), Edges: t.Edges, Levels: t.Levels}
+}
+
 // createdTasksJSON is db.CreatedTasks with API task shapes.
 type createdTasksJSON struct {
-	Chains      [][]taskJSON `json:"chains"`
-	Independent []taskJSON   `json:"independent"`
+	Trees       []batchTreeJSON `json:"trees"`
+	Independent []taskJSON      `json:"independent"`
+}
+
+type batchTreeJSON struct {
+	Tree  db.TreeRef `json:"tree"`
+	Tasks []taskJSON `json:"tasks"`
 }
 
 func (s *server) createdTasks(env string, c db.CreatedTasks) createdTasksJSON {
-	out := createdTasksJSON{Chains: make([][]taskJSON, len(c.Chains)), Independent: s.tasks(env, c.Independent)}
-	for i, chain := range c.Chains {
-		out.Chains[i] = s.tasks(env, chain)
+	out := createdTasksJSON{Trees: make([]batchTreeJSON, len(c.Trees)), Independent: s.tasks(env, c.Independent)}
+	for i, t := range c.Trees {
+		out.Trees[i] = batchTreeJSON{Tree: t.Tree, Tasks: s.tasks(env, t.Tasks)}
 	}
 	return out
 }

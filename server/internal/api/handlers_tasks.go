@@ -55,8 +55,10 @@ type createTaskReq struct {
 	Workspace          *db.Workspace    `json:"workspace"`
 	Tags               []string         `json:"tags"`
 	Notes              *string          `json:"notes"`
-	AfterTaskID        *int64           `json:"afterTaskId"`
-	AfterThreadID      *string          `json:"afterThreadId"`
+	TreeID             *int64           `json:"treeId"`
+	Needs              []int64          `json:"needs"`
+	NeedsSessionID     *string          `json:"needsSessionId"`
+	StartMode          *db.StartMode    `json:"startMode"`
 	OriginThreadID     *string          `json:"originThreadId"`
 	AttachmentIDs      []int64          `json:"attachmentIds"`
 	StartLocal         *string          `json:"startLocal"`
@@ -75,14 +77,20 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 		InteractionMode:    "default",
 		Workspace:          db.Workspace{Type: "root"},
 		Tags:               cleanTags(req.Tags),
-		AfterTaskID:        req.AfterTaskID,
-		AfterThreadID:      trimmedPtr(req.AfterThreadID),
+		TreeID:             req.TreeID,
+		Needs:              req.Needs,
+		NeedsThreadID:      trimmedPtr(req.NeedsSessionID),
+		StartMode:          req.StartMode,
 		OriginThreadID:     trimmedPtr(req.OriginThreadID),
 		AttachmentIDs:      req.AttachmentIDs,
 		Handoff:            req.Handoff,
 	}
-	if in.AfterTaskID != nil && in.AfterThreadID != nil {
-		return in, db.Invalid("a task can run after another task or a session, not both")
+	if in.StartMode != nil && !in.StartMode.Valid() {
+		return in, db.Invalid("invalid startMode %q (want auto|manual)", *in.StartMode)
+	}
+	hasNeeds := len(in.Needs) > 0 || in.NeedsThreadID != nil
+	if req.Start && hasNeeds {
+		return in, db.Invalid("a task with needs cannot also start now (it starts when its needs settle)")
 	}
 	if err := attachmentIDs(req.AttachmentIDs); err != nil {
 		return in, err
@@ -129,11 +137,8 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 	}
 	if in.StartAt != nil {
 		in.StartTz = req.StartTz
-		if req.AfterTaskID != nil {
-			return in, db.Invalid("a task can have a start time or run after another task, not both")
-		}
-		if in.AfterThreadID != nil {
-			return in, db.Invalid("a task can have a start time or run after a session, not both")
+		if hasNeeds {
+			return in, db.Invalid("a task can have a start time or needs, not both")
 		}
 		if req.Start {
 			return in, db.Invalid("a task with a start time cannot also start now")
@@ -178,17 +183,23 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if in.NeedsThreadID != nil {
+		if err := s.refreshSession(r, *in.NeedsThreadID); err != nil {
+			return err
+		}
+	}
 	task, err := s.Store.CreateTask(r.Context(), in)
 	if err != nil {
 		return err
 	}
+	s.treeChanged()
 	if err := s.Store.SetLastUsed(r.Context(), db.ModelDefaults{
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
 	}); err != nil {
 		s.log.Warn("record last-used model", "task", task.ID, "err", err)
 	}
-	if req.Start && req.AfterTaskID == nil && in.AfterThreadID == nil {
+	if req.Start {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
@@ -216,13 +227,17 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	env := s.envID(ctx)
-	seq, err := s.Store.Sequence(ctx, id)
-	if err != nil {
-		return err
+	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, CurrentHandoffs: []db.Handoff{}}
+	if task.TreeID != nil {
+		tree, err := s.Store.GetTree(ctx, *task.TreeID)
+		if err != nil {
+			return err
+		}
+		shaped := s.treeDetail(env, tree)
+		out.Tree = &shaped
 	}
-	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, Sequence: s.tasks(env, seq)}
 	if task.LaunchAttempt > 0 {
-		if out.CurrentHandoff, err = s.Store.GetHandoff(ctx, id, task.LaunchAttempt); err != nil {
+		if out.CurrentHandoffs, err = s.Store.GetHandoffs(ctx, id, task.LaunchAttempt); err != nil {
 			return err
 		}
 		if out.CurrentLaunchBase, err = s.Store.GetLaunchBase(ctx, id, task.LaunchAttempt); err != nil {
@@ -273,7 +288,9 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		return err
 	}
-	nullableText(&p.AfterThreadID)
+	if p.StartMode.Set && !p.StartMode.Null && !p.StartMode.V.Valid() {
+		return db.Invalid("invalid startMode %q (want auto|manual or null)", p.StartMode.V)
+	}
 	if p.Handoff.Set && p.Handoff.Null {
 		return db.Invalid("handoff must be true or false")
 	}
@@ -293,6 +310,9 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	task, err := s.Store.UpdateTask(r.Context(), id, p)
 	if err != nil {
 		return err
+	}
+	if p.StartMode.Set {
+		s.treeChanged()
 	}
 	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
 	return nil
@@ -372,6 +392,7 @@ func (s *server) deleteTask(w http.ResponseWriter, r *http.Request) error {
 	if err := s.Store.DeleteTask(r.Context(), id); err != nil {
 		return err
 	}
+	s.treeChanged()
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -515,20 +536,40 @@ func (s *server) duplicateTask(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// orderTasks: POST /api/tasks/order {taskIds} links the tasks to run in that
-// order (db.OrderTasks) and returns the resulting run order.
-func (s *server) orderTasks(w http.ResponseWriter, r *http.Request) error {
+// setNeeds: PUT /api/tasks/{id}/needs {needs} replaces the task's needs
+// (docs/api.md "Tree rules"); a task outside a tree joins its needs' tree.
+func (s *server) setNeeds(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
 	var in struct {
-		TaskIDs []int64 `json:"taskIds"`
+		Needs *[]int64 `json:"needs"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	ctx := r.Context()
-	seq, err := s.Store.OrderTasks(ctx, in.TaskIDs)
+	if in.Needs == nil {
+		return db.Invalid("needs is required (an empty list clears them)")
+	}
+	needs := *in.Needs
+	if needs == nil {
+		needs = []int64{}
+	}
+	task, err := s.Store.SetNeeds(r.Context(), id, needs)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.tasks(s.envID(ctx), seq)})
+	s.treeChanged()
+	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
 	return nil
+}
+
+// refreshSession reads session id from T3 into the mirror when T3 is
+// connected (so a session not mirrored yet can be adopted).
+func (s *server) refreshSession(r *http.Request, id string) error {
+	if !s.T3.Status(r.Context()).Connected {
+		return nil
+	}
+	return s.Sync.RefreshSession(r.Context(), id)
 }

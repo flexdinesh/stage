@@ -19,9 +19,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/guard"
 	"github.com/flexdinesh/stage/server/internal/instance"
-	"github.com/flexdinesh/stage/server/internal/links"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -181,7 +181,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	syncSvc := t3sync.New(store, t3Client, logger)
-	runner := links.NewRunner(store, syncSvc, logger)
+	runner := release.NewRunner(store, syncSvc, logger)
 	scheduler := schedule.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
@@ -189,11 +189,9 @@ func Run(ctx context.Context, o Options) error {
 		runner.OnTransition(ctx, c)
 		notifier.OnTransition(ctx, c)
 	}
-	syncSvc.OnThreadChange = func(ctx context.Context, c t3sync.ThreadChange) {
-		runner.OnThreadChange(ctx, c)
-		notifier.OnThreadChange(ctx, c)
-	}
-	// Before the poller, link runner, scheduler and HTTP server can touch launching tasks.
+	syncSvc.OnThreadChange = notifier.OnThreadChange
+	runner.OnReady = notifier.OnReady
+	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
 	wg.Add(6)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
@@ -209,7 +207,7 @@ func Run(ctx context.Context, o Options) error {
 	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
-		Instance: meta,
+		Instance: meta, OnTreeChange: runner.Kick,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

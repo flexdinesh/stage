@@ -27,11 +27,11 @@ func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db
 	return p
 }
 
-func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, after *int64) db.Task {
+func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, needs []int64) db.Task {
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{
 		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, AfterTaskID: after,
+		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Needs: needs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -569,134 +569,6 @@ func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
 	}
 }
 
-func TestLinks(t *testing.T) {
-	s, ctx := setup(t)
-	p := mustProject(t, s, ctx, "proj-1")
-	q := mustProject(t, s, ctx, "proj-2")
-	a := mustTask(t, s, ctx, p.ID, "a", nil)
-	b := mustTask(t, s, ctx, q.ID, "b", &a.ID) // links may span projects
-	if b.AfterTaskID == nil || *b.AfterTaskID != a.ID {
-		t.Fatalf("created link %+v", b)
-	}
-	if got, _ := s.GetTask(ctx, a.ID); got.NextTaskID == nil || *got.NextTaskID != b.ID {
-		t.Fatalf("next of a %+v", got)
-	}
-	var conflict *db.ConflictError
-	// a already has a follower: refuse.
-	c := mustTask(t, s, ctx, p.ID, "c", nil)
-	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: a.ID}}); !errors.As(err, &conflict) {
-		t.Fatalf("second follower: %v", err)
-	}
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, AfterTaskID: &a.ID}); !errors.As(err, &conflict) {
-		t.Fatalf("create with taken predecessor: %v", err)
-	}
-	// Cycle: a after b (b already runs after a).
-	if _, err := s.UpdateTask(ctx, a.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: b.ID}}); !errors.As(err, &conflict) {
-		t.Fatalf("cycle: %v", err)
-	}
-	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: c.ID}}); !errors.As(err, &conflict) {
-		t.Fatalf("self: %v", err)
-	}
-	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: 9999}}); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("missing predecessor: %v", err)
-	}
-	// c after b: a → b → c. Sequence is head first from any member.
-	if _, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: b.ID}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []int64{a.ID, b.ID, c.ID} {
-		seq, err := s.Sequence(ctx, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := fmt.Sprint(titlesOf(seq)); got != "[a b c]" {
-			t.Fatalf("sequence from %d: %s", id, got)
-		}
-	}
-	// Only a backlog task can be linked; a settled predecessor is refused.
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning})
-	d := mustTask(t, s, ctx, p.ID, "d", nil)
-	if _, err := s.UpdateTask(ctx, a.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
-		t.Fatalf("link a running task: %v", err)
-	}
-	e := mustTask(t, s, ctx, p.ID, "e", nil)
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: d.ID, To: db.StateSettled})
-	if _, err := s.UpdateTask(ctx, e.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: d.ID}}); !errors.As(err, &conflict) {
-		t.Fatalf("settled predecessor: %v", err)
-	}
-	// A cancelled predecessor can be linked; its follower waits (only settled passes).
-	h := mustTask(t, s, ctx, p.ID, "h", nil)
-	g := mustTask(t, s, ctx, p.ID, "g", nil)
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: h.ID, To: db.StateCancelled})
-	if _, err := s.UpdateTask(ctx, g.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: h.ID}}); err != nil {
-		t.Fatalf("cancelled predecessor: %v", err)
-	}
-	// Ready followers: b once a settles; never g.
-	if ids, _ := s.ReadyFollowers(ctx); len(ids) != 0 {
-		t.Fatalf("ready before settle %v", ids)
-	}
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateSettled})
-	if ids, _ := s.ReadyFollowers(ctx); fmt.Sprint(ids) != fmt.Sprint([]int64{b.ID}) {
-		t.Fatalf("ready after settle %v", ids)
-	}
-	// Delete splices: a → b → c, delete b ⇒ a → c.
-	if err := s.DeleteTask(ctx, b.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil || *got.AfterTaskID != a.ID {
-		t.Fatalf("splice %+v", got)
-	}
-	// Unlink.
-	if got, err := s.UpdateTask(ctx, c.ID, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, Null: true}}); err != nil || got.AfterTaskID != nil {
-		t.Fatalf("unlink %+v %v", got, err)
-	}
-}
-
-func TestStartNowUnlinksWaitingTask(t *testing.T) {
-	s, ctx := setup(t)
-	p := mustProject(t, s, ctx, "proj-1")
-	a := mustTask(t, s, ctx, p.ID, "a", nil)
-	b := mustTask(t, s, ctx, p.ID, "b", &a.ID)
-	c := mustTask(t, s, ctx, p.ID, "c", &b.ID)
-	begin := func(id int64, unlink bool) {
-		t.Helper()
-		if res, err := s.TransitionTask(ctx, db.Transition{TaskID: id, From: []db.TaskState{db.StateBacklog}, To: db.StateLaunching,
-			BeginAttempt: true, UnlinkWaiting: unlink}); err != nil || !res.Changed {
-			t.Fatalf("begin %d: %+v %v", id, res, err)
-		}
-	}
-	begin(b.ID, true) // a is unfinished: b is unlinked; c stays after b
-	if got, _ := s.GetTask(ctx, b.ID); got.AfterTaskID != nil {
-		t.Fatalf("b still linked %+v", got)
-	}
-	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil || *got.AfterTaskID != b.ID {
-		t.Fatalf("c lost its link %+v", got)
-	}
-	// A passed predecessor keeps the link (history), even on a manual start.
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: b.ID, To: db.StateSettled})
-	begin(c.ID, true)
-	if got, _ := s.GetTask(ctx, c.ID); got.AfterTaskID == nil {
-		t.Fatalf("c unlinked from settled predecessor %+v", got)
-	}
-	// A cancelled predecessor is unfinished: Start now unlinks.
-	x := mustTask(t, s, ctx, p.ID, "x", nil)
-	y := mustTask(t, s, ctx, p.ID, "y", &x.ID)
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: x.ID, To: db.StateCancelled})
-	begin(y.ID, true)
-	if got, _ := s.GetTask(ctx, y.ID); got.AfterTaskID != nil {
-		t.Fatalf("y still linked to cancelled predecessor %+v", got)
-	}
-}
-
-func titlesOf(ts []db.Task) []string {
-	out := make([]string, len(ts))
-	for i, t := range ts {
-		out[i] = t.Title
-	}
-	return out
-}
-
 func TestSweepStagedAttachments(t *testing.T) {
 	s, ctx := setup(t)
 	old, err := s.CreateAttachment(ctx, "old.png", "image/png", []byte{1})
@@ -728,44 +600,6 @@ func TestSweepStagedAttachments(t *testing.T) {
 		_, err := s.GetAttachment(ctx, id)
 		if (err == nil) != want {
 			t.Fatalf("attachment %d exists=%v, want %v", id, err == nil, want)
-		}
-	}
-}
-
-// Link writes serialize (BEGIN IMMEDIATE): racing followers of one
-// predecessor get exactly one link and Conflicts, never a raw constraint
-// error or SQLITE_BUSY.
-func TestConcurrentLinksSerialize(t *testing.T) {
-	s, ctx := setup(t)
-	p := mustProject(t, s, ctx, "p-race").ID
-	for round := range 5 {
-		head := mustTask(t, s, ctx, p, fmt.Sprintf("head-%d", round), nil)
-		const n = 8
-		followers := make([]int64, n)
-		for i := range followers {
-			followers[i] = mustTask(t, s, ctx, p, fmt.Sprintf("f-%d-%d", round, i), nil).ID
-		}
-		errs := make(chan error, n)
-		for _, id := range followers {
-			go func() {
-				_, err := s.UpdateTask(ctx, id, db.TaskPatch{AfterTaskID: db.Optional[int64]{Set: true, V: head.ID}})
-				errs <- err
-			}()
-		}
-		linked := 0
-		for range n {
-			err := <-errs
-			var conflict *db.ConflictError
-			switch {
-			case err == nil:
-				linked++
-			case errors.As(err, &conflict):
-			default:
-				t.Fatalf("round %d: unexpected error %v", round, err)
-			}
-		}
-		if linked != 1 {
-			t.Fatalf("round %d: %d followers linked, want 1", round, linked)
 		}
 	}
 }

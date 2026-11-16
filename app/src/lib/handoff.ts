@@ -1,22 +1,21 @@
 import type { Handoff, Task } from "../api/types.ts";
 
-type Predecessor = Pick<Task, "afterTaskId" | "afterThreadId" | "afterThreadTitle">;
+type Needs = Pick<Task, "needs">;
 
-/** Who a task's handoff would come from: "#12", the session title (id fallback), or null without a predecessor. */
-export function handoffSource(t: Predecessor): string | null {
-  if (t.afterTaskId !== null) return `#${t.afterTaskId}`;
-  if (t.afterThreadId !== null) return t.afterThreadTitle ?? t.afterThreadId;
-  return null;
+/** Who a task's handoff would come from: "#12", "#3, #5", or null without needs. */
+export function handoffSource(t: Needs): string | null {
+  return t.needs.length === 0 ? null : t.needs.map((id) => `#${id}`).join(", ");
 }
 
-/** Checkbox hint: what the toggle appends, naming the predecessor when known. */
-export function handoffHint(t: Pick<Task, "afterTaskId" | "afterThreadId">): string {
-  const whose = t.afterTaskId !== null ? `#${t.afterTaskId}'s` : t.afterThreadId !== null ? "the session's" : "the predecessor's";
+/** Checkbox hint: what the toggle appends, naming the need when there is one. */
+export function handoffHint(t: Needs): string {
+  const [only] = t.needs;
+  const whose = t.needs.length === 1 && only !== undefined ? `#${only}'s` : "each need's";
   return `Appends ${whose} final reply, PRs, branch and thread link at launch.`;
 }
 
 /** Prompt panel note for a backlog task that will append a handoff at launch; null otherwise. */
-export function pendingHandoffNote(t: Predecessor & Pick<Task, "state" | "handoff">): string | null {
+export function pendingHandoffNote(t: Needs & Pick<Task, "state" | "handoff">): string | null {
   const source = handoffSource(t);
   if (t.state !== "backlog" || !t.handoff || source === null) return null;
   return `+ on launch: handoff from ${source} (final reply, PRs, branch, thread link)`;
