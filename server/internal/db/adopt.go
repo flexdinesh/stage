@@ -21,11 +21,11 @@ const adoptStateSQL = `CASE WHEN th.settled THEN 'settled'
 
 // AdoptInput adopts a T3 session as a task ("Track as task").
 type AdoptInput struct {
-	ThreadID string
-	Title    *string  // nil or blank = the session title (else "Session <id8>")
-	Notes    *string  // nil = ""
-	Tags     []string // cleaned by the API
-	TreeID   *int64   // join this tree (no needs)
+	ThreadID    string
+	Title       *string  // nil or blank = the session title (else "Session <id8>")
+	InitialNote *string  // nil = ""
+	Tags        []string // cleaned by the API
+	TreeID      *int64   // join this tree (no needs)
 }
 
 // AdoptThread makes mirrored session in.ThreadID a task (docs/api.md "Adopt
@@ -89,29 +89,41 @@ LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id WHERE th.t3_thread_id
 		v := strings.TrimSpace(*in.Title)
 		title = &v
 	}
-	notes := ""
-	if in.Notes != nil {
-		notes = *in.Notes
-	}
 	var id int64
 	var state TaskState
 	err = tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, runtime_mode, interaction_mode,
-  tags, notes, state, t3_thread_id, launch_attempt, launched_at, finished_at, settled_at, adopted)
+  tags, state, t3_thread_id, launch_attempt, launched_at, finished_at, settled_at, adopted)
 SELECT $2, COALESCE($3, NULLIF(trim(th.title), ''), 'Session ' || substr(th.t3_thread_id, 1, 8)), '',
   CASE WHEN th.provider_instance_id IS NOT NULL AND th.model IS NOT NULL THEN th.provider_instance_id END,
   CASE WHEN th.provider_instance_id IS NOT NULL AND th.model IS NOT NULL THEN th.model END,
   CASE WHEN th.runtime_mode IN ('approval-required', 'auto-accept-edits', 'auto', 'full-access')
        THEN th.runtime_mode ELSE 'full-access' END,
   CASE WHEN th.interaction_mode IN ('default', 'plan') THEN th.interaction_mode ELSE 'default' END,
-  $4, $5, st, th.t3_thread_id, 1, th.created_at,
+  $4, st, th.t3_thread_id, 1, th.created_at,
   CASE WHEN st IN ('done', 'failed', 'interrupted', 'cancelled', 'settled') THEN COALESCE(th.run_ended_at, th.updated_at) END,
   CASE WHEN st = 'settled' THEN COALESCE(th.settled_at, th.updated_at) END, 1
 FROM (SELECT th.*, `+adoptStateSQL+` AS st FROM threads th WHERE th.t3_thread_id = $1) th
-RETURNING id, state`, in.ThreadID, *project, title, nonNilStrings(in.Tags), notes).Scan(&id, &state)
+RETURNING id, state`, in.ThreadID, *project, title, nonNilStrings(in.Tags)).Scan(&id, &state)
 	if err != nil {
 		return 0, false, err
 	}
+	if in.TreeID != nil {
+		if err := treeExists(ctx, tx, *in.TreeID); err != nil {
+			return 0, false, err
+		}
+		if err := joinTree(ctx, tx, id, *in.TreeID); err != nil {
+			return 0, false, err
+		}
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, $2, 'adopted session')`, id, string(state))
-	return id, true, err
+	if err != nil {
+		return 0, false, err
+	}
+	if in.InitialNote != nil && *in.InitialNote != "" {
+		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: *in.InitialNote, RequestID: "initial-note", SourceThreadID: &in.ThreadID}); err != nil {
+			return 0, false, err
+		}
+	}
+	return id, true, nil
 }

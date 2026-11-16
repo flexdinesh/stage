@@ -137,7 +137,7 @@ func (s *server) deleteTree(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// dissolveTree: POST /api/trees/{id}/dissolve removes the tree; its tasks
+// dissolveTree: POST /api/trees/{id}/dissolve archives the tree; its tasks
 // stay (standalone), their needs go.
 func (s *server) dissolveTree(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)

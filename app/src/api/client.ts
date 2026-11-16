@@ -1,4 +1,9 @@
 import type {
+  AppendNoteInput,
+  JournalEntry,
+  JournalOwner,
+  JournalPage,
+  JournalQuery,
   AdoptSessionRequest,
   AnswerResult,
   CreateTreeRequest,
@@ -157,9 +162,14 @@ export function createApi(transport: Transport) {
         `/tasks${toQuery({ project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom, closed: q.closed })}`,
       ),
     task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
+    journal: (owner: JournalOwner, q: JournalQuery = {}) =>
+      apiFetch<JournalPage>(`${journalPath(owner)}${toQuery({ ...q })}`),
+    journalEntry: (id: number) => apiFetch<JournalEntry>(`/journal/${id}`),
+    appendNote: (owner: JournalOwner, body: AppendNoteInput) =>
+      apiFetch<JournalEntry>(journalPath(owner), post(body)),
     createTask: (body: CreateTaskRequest) => apiFetch<Task>("/tasks", post(body)),
     updateTask: (id: number, body: UpdateTaskRequest) => apiFetch<Task>(`/tasks/${id}`, patch(body)),
-    /** Deletes a task that never started (409 once started: archive it). */
+    /** Deletes only when the server permits it (409 when work is recorded: archive it). */
     deleteTask: (id: number) => apiSend(`/tasks/${id}`, del),
     archiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/archive`, post()),
     unarchiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/unarchive`, post()),
@@ -175,9 +185,9 @@ export function createApi(transport: Transport) {
     tree: (id: number) => apiFetch<TreeDetail>(`/trees/${id}`),
     createTree: (body: CreateTreeRequest) => apiFetch<TreeDetail>("/trees", post(body)),
     updateTree: (id: number, body: UpdateTreeRequest) => apiFetch<TreeDetail>(`/trees/${id}`, patch(body)),
-    /** Deletes a tree whose members never started, with its tasks (409 otherwise: archive it). */
+    /** Deletes a tree and its tasks only when no recorded work prevents it. */
     deleteTree: (id: number) => apiSend(`/trees/${id}`, del),
-    /** Dissolves the tree: its tasks stay, edges go. */
+    /** Detaches tasks and archives the tree, retaining its notes and event history. */
     dissolveTree: (id: number) => apiSend(`/trees/${id}/dissolve`, post()),
     /** Adds a task (a member of another tree moves); needs omitted keeps its needs. */
     addToTree: (id: number, taskId: number, needs?: number[]) =>
@@ -279,3 +289,7 @@ export function createApi(transport: Transport) {
 }
 
 export type ArchivedFilter = "true" | "false" | "all";
+
+function journalPath(owner: JournalOwner): string {
+  return owner.taskId === undefined ? `/trees/${owner.treeId}/journal` : `/tasks/${owner.taskId}/journal`;
+}

@@ -170,7 +170,7 @@ Usage:
   stage sessions search QUERY [--project P] [--limit N]   title, branch, PR, project, message text
   stage sessions show THREAD_ID
   stage sessions questions THREAD_ID  pending questions (read-only)
-  stage sessions adopt [THREAD_ID] [--title T] [--notes TEXT] [--tag T]... [--tree ID]
+  stage sessions adopt [THREAD_ID] [--title T] [--initial-note TEXT] [--tag T]... [--tree ID]
                                       track a session as a task (default: your session)
   stage mcp                           stdio MCP server
   stage setup mcp [--claude] [--codex] [--http]
@@ -178,8 +178,13 @@ Usage:
   stage guide                         agent workflow guide
 
 Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
-        --mode default|plan --base-ref REF --branch NAME --tag T... --notes TEXT
+        --mode default|plan --base-ref REF --branch NAME --tag T...
         --prompt-file PATH --image PATH...
+Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
+  stage task|tree notes ID [list] [--kind notes|events|all] [--category C] [--q TEXT]
+                          [--task ID (tree only)] [--cursor CURSOR] [--limit N]
+  stage task|tree notes ID add --text TEXT [--category C] [--request-id KEY] [--source-task ID]
+  stage task|tree notes ID get ENTRY_ID
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
 Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance

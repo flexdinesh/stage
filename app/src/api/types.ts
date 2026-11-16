@@ -196,7 +196,6 @@ export interface Task {
   interactionMode: InteractionMode;
   workspace: Workspace;
   tags: string[];
-  notes: string;
   state: TaskState;
   t3ThreadId: string | null;
   /** The task's tree; null outside one. */
@@ -257,7 +256,7 @@ export interface Task {
   archivedAt: string | null;
   /** Its tree's status; null outside a tree. */
   treeStatus: TreeStatus | null;
-  /** Never launched and no session: it can be deleted. A started task can only be archived. */
+  /** Server eligibility: deletable only when no recorded work, launch or session exists. */
   deletable: boolean;
 }
 
@@ -368,7 +367,7 @@ export interface Tree {
   closedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  /** Every member is unstarted: deleting removes the tree and its tasks. */
+  /** Server eligibility: deletion must not discard recorded work, including departed members. */
   deletable: boolean;
 }
 
@@ -459,7 +458,7 @@ export interface StartTreeResponse {
 
 export interface AdoptSessionRequest {
   title?: string;
-  notes?: string;
+  initialNote?: string;
   tags?: string[];
   treeId?: number;
 }
@@ -479,7 +478,7 @@ export interface CreateTaskRequest {
   interactionMode?: InteractionMode;
   workspace?: Workspace;
   tags?: string[];
-  notes?: string;
+  initialNote?: string;
   /** Join this tree (default: the needs' tree, else a new tree when there are needs). */
   treeId?: number;
   /** Tasks this one needs (not with start or startLocal). */
@@ -509,7 +508,6 @@ export interface UpdateTaskRequest {
   interactionMode?: InteractionMode;
   workspace?: Workspace;
   tags?: string[];
-  notes?: string;
   /** Backlog only: null inherits the tree's. */
   startMode?: StartMode | null;
   /** Backlog only: append each need's handoff at launch. */
@@ -519,6 +517,52 @@ export interface UpdateTaskRequest {
   /** Backlog only: one-shot start; both null clears. */
   startLocal?: string | null;
   startTz?: string | null;
+}
+
+// ---- Append-only journals ----
+
+export type JournalOwner = { taskId: number; treeId?: never } | { treeId: number; taskId?: never };
+export type JournalKind = "notes" | "events" | "all";
+export type NoteCategory = "" | "finding" | "decision" | "blocker" | "outcome";
+
+export interface JournalEntry {
+  id: number;
+  kind: "note" | "event";
+  taskId: number | null;
+  treeId: number | null;
+  sourceTaskId: number | null;
+  sourceThreadId: string | null;
+  attempt: number | null;
+  category: string;
+  text: string;
+  eventType: string;
+  fromTreeId: number | null;
+  toTreeId: number | null;
+  createdAt: string;
+  truncated: boolean;
+}
+
+export interface JournalQuery {
+  kind?: JournalKind;
+  category?: NoteCategory;
+  q?: string;
+  /** Tree reads only. */
+  taskId?: number;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface JournalPage {
+  entries: JournalEntry[];
+  nextCursor: string | null;
+}
+
+export interface AppendNoteInput {
+  text: string;
+  category: NoteCategory;
+  requestId: string;
+  sourceTaskId?: number | null;
+  sourceThreadId?: string | null;
 }
 
 // ---- Schedules ----

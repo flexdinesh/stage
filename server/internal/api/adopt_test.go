@@ -62,7 +62,7 @@ func TestAdoptSession(t *testing.T) {
 	s := launchSession(t, e, p.T3ProjectID, "Planner")
 
 	var a agentTask
-	e.must("POST", "/api/threads/"+s+"/adopt", map[string]any{"notes": "n", "tags": []string{" plan ", ""}}, 201, &a)
+	e.must("POST", "/api/threads/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
 		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || !slices.Equal(a.Tags, []string{"plan"}) || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)

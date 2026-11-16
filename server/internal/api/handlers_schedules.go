@@ -46,7 +46,8 @@ func (s *server) listSchedules(w http.ResponseWriter, r *http.Request) error {
 }
 
 type createScheduleReq struct {
-	createTaskReq
+	taskConfigReq
+	Notes  string `json:"notes"`
 	Cron   string `json:"cron"`
 	Tz     string `json:"tz"`
 	Paused bool   `json:"paused"`
@@ -65,7 +66,7 @@ var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a sch
 
 func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	var req createScheduleReq
-	if err := decode(r, &req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
 	if req.TreeID != nil || req.Needs != nil || req.NeedsSessionID != nil || req.StartMode != nil ||
@@ -86,7 +87,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
-		Tags: in.Tags, Notes: in.Notes, AttachmentIDs: in.AttachmentIDs,
+		Tags: in.Tags, Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginThreadID: in.OriginThreadID,
 	})
 	if err != nil {
@@ -135,12 +136,15 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := validateConfigPatch(configPatch{
 		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
-		Workspace: &p.Workspace, Tags: &p.Tags, Notes: &p.Notes, AttachmentIDs: &p.AttachmentIDs,
+		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
 		return err
 	}
 	if p.Workspace.Set && p.Workspace.V.FromPredecessor() {
 		return errSchedulePredecessor
+	}
+	if p.Notes.Set && p.Notes.Null {
+		p.Notes.V, p.Notes.Null = "", false
 	}
 	for name, o := range map[string]db.Optional[string]{"cron": p.Cron, "tz": p.Tz} {
 		if o.Set && o.Null {

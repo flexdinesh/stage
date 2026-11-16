@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { useInvalidateWork, useTree } from "../api/queries.ts";
 import type { StartMode, TreeDetail, TreeStatus } from "../api/types.ts";
@@ -10,6 +10,7 @@ import { useNewTask } from "../components/NewTask.tsx";
 import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer.tsx";
 import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
 import { TreeActivity } from "../components/trees/TreeActivity.tsx";
+import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
@@ -23,6 +24,11 @@ const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "manual", label: "Manual" },
 ];
 
+const VIEW_OPTIONS: { value: "tasks" | "notes"; label: string }[] = [
+  { value: "tasks", label: "Tasks" },
+  { value: "notes", label: "Notes" },
+];
+
 export function TreeDetailPage() {
   const id = useIdParam();
   return id === null ? <NotFoundPage /> : <TreeDetailView id={id} />;
@@ -33,7 +39,7 @@ function TreeDetailView({ id }: { id: number }) {
   if (tree.isPending) return <TreeLoading />;
   if (tree.error instanceof ApiError && tree.error.status === 404) return <TreeNotFound id={id} />;
   if (tree.data === undefined) return <ErrorText error={tree.error} />;
-  return <TreeBody tree={tree.data} />;
+  return <><ErrorText error={tree.error} /><TreeBody key={id} tree={tree.data} /></>;
 }
 
 function TreeLoading() {
@@ -55,8 +61,7 @@ function TreeNotFound({ id }: { id: number }) {
     <>
       <PageHeader title="Tree not found" meta={`tree ${id}`} />
       <p className="mb-3 text-ui text-muted">
-        It was deleted, dissolved, or its last task left it (an empty tree is deleted). A dissolved tree&apos;s tasks are still in
-        stage.
+        This tree was deleted or does not exist. Empty and dissolved trees remain in the Archived list.
       </p>
       <Link to="/trees" className={buttonClass("secondary")}>
         <IconBack /> Back to trees
@@ -117,7 +122,7 @@ function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: MenuItem)
           <div aria-hidden className="-mt-px h-px bg-line-strong" />
           {tree.status === "done" ? null : item("done", "Mark done", { reason: blocker })}
           {tree.status === "archived" ? null : item("archive", "Archive tree", { reason: blocker })}
-          {item("dissolve", "Dissolve tree", { danger: true })}
+          {tree.tasks.length === 0 ? null : item("dissolve", "Dissolve tree", { danger: true })}
           {tree.deletable ? item("delete", "Delete tree", { danger: true }) : null}
         </div>
       </div>
@@ -161,6 +166,14 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const newTask = useNewTask();
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "notes" ? "notes" : "tasks";
+  const setView = (next: "tasks" | "notes") => {
+    const updated = new URLSearchParams(params);
+    if (next === "notes") updated.set("view", "notes");
+    else updated.delete("view");
+    setParams(updated);
+  };
   const [picked, setPicked] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
@@ -178,7 +191,14 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
     await navigate("/trees");
     await invalidate();
   };
-  const dissolve = useMutation({ mutationFn: () => api.dissolveTree(tree.id), onSuccess: leave });
+  const dissolve = useMutation({
+    mutationFn: () => api.dissolveTree(tree.id),
+    onSuccess: async () => {
+      setConfirming(null);
+      setPicked(null);
+      await invalidate();
+    },
+  });
   const remove = useMutation({ mutationFn: () => api.deleteTree(tree.id), onSuccess: leave });
   const startFailures = start.data?.errors ?? [];
 
@@ -273,7 +293,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               </>
             }
           >
-            Dissolve this tree? Its {tree.tasks.length} tasks stay in stage; their needs and tree membership go.
+            Dissolve this tree? Its {tree.tasks.length} tasks stay in stage; their needs and tree membership go. The tree is archived and its history stays here.
           </Alert>
         ) : confirming === "delete" ? (
           <Alert
@@ -304,6 +324,11 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
           </Alert>
         )}
 
+        <div className="self-start"><Segmented label="Tree view" options={VIEW_OPTIONS} value={view} onChange={setView} /></div>
+        <div hidden={view !== "notes"}>
+          <JournalPanel owner={{ treeId: tree.id }} tasks={tree.tasks} active={view === "notes"} />
+        </div>
+        <div hidden={view !== "tasks"}>
         <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <Panel
             title="Tree"
@@ -315,16 +340,17 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               </>
             }
           >
-            <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
+            {tree.tasks.length === 0 ? <p className="p-3 text-small text-muted">No tasks remain in this tree. Its notes and history are retained.</p> : <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />}
           </Panel>
           <TreeActivity tree={tree} className="lg:hidden" />
           <div className="flex min-w-0 flex-col gap-3.5 max-lg:hidden">
             {selected === null ? (
-              <TreeActivity tree={tree} onSelect={setPicked} />
+              <TreeActivity tree={tree} />
             ) : (
               <TreeNodePanel key={selected.id} tree={tree} task={selected} onSelect={setPicked} onClose={() => setPicked(null)} />
             )}
           </div>
+        </div>
         </div>
       </div>
 

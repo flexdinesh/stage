@@ -307,7 +307,7 @@ type CreateTask struct {
 	InteractionMode    *string          `json:"interactionMode,omitempty"`
 	Workspace          *db.Workspace    `json:"workspace,omitempty"`
 	Tags               []string         `json:"tags,omitempty"`
-	Notes              *string          `json:"notes,omitempty"`
+	InitialNote        *string          `json:"initialNote,omitempty"`
 	TreeID             *int64           `json:"treeId,omitempty"`
 	Needs              []int64          `json:"needs,omitempty"`
 	NeedsSessionID     *string          `json:"needsSessionId,omitempty"`
@@ -653,10 +653,10 @@ type TreeStart struct {
 
 // AdoptSession is the POST /api/threads/:id/adopt body.
 type AdoptSession struct {
-	Title  *string  `json:"title,omitempty"`
-	Notes  *string  `json:"notes,omitempty"`
-	Tags   []string `json:"tags,omitempty"`
-	TreeID *int64   `json:"treeId,omitempty"`
+	Title       *string  `json:"title,omitempty"`
+	InitialNote *string  `json:"initialNote,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	TreeID      *int64   `json:"treeId,omitempty"`
 }
 
 func treePath(id int64, action string) string {

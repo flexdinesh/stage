@@ -64,9 +64,8 @@ const (
 	// releasedSQL: a backlog task with needs, all settled, and no start time
 	// (auto launches it; manual reads ready and notifies).
 	releasedSQL = `t.state = 'backlog' AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unsettledNeedSQL
-	// unstartedSQL: task t never launched and has no session (deletable;
-	// otherwise it can only be archived).
-	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0)`
+	// unstartedSQL: task t has no notes or execution history (deletable).
+	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0 AND t.recorded_work = 0)`
 )
 
 // Tree is a DAG of tasks (docs/api.md "Trees").
@@ -79,8 +78,9 @@ type Tree struct {
 	ClosedAt  *time.Time `json:"closedAt"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
-	// Deletable: every member is unstarted (Store.DeleteTree).
-	Deletable bool `json:"deletable"`
+	// Deletable: no recorded work, including from members that left.
+	Deletable         bool      `json:"deletable"`
+	JournalActivityAt time.Time `json:"-"`
 }
 
 // TreeEdge: TaskID needs NeedID.
@@ -102,8 +102,8 @@ type TreeDetail struct {
 }
 
 // TreeTimes: StartedAt is the first member launch (nil before any);
-// LastActivityAt the latest of the tree's creation, a member's updatedAt and
-// its thread's updatedAt (ListTrees orders by it).
+// LastActivityAt includes tree, member, thread and journal activity.
+// ListTrees orders by it.
 type TreeTimes struct {
 	StartedAt      *time.Time `json:"startedAt"`
 	LastActivityAt time.Time  `json:"lastActivityAt"`
@@ -113,11 +113,14 @@ type TreeTimes struct {
 const treeEventLimit = 50
 
 // treeActivitySQL is TreeTimes.LastActivityAt for tree tr in SQL.
-const treeActivitySQL = `max(tr.created_at, COALESCE((SELECT max(max(m.updated_at, COALESCE(th.updated_at, '')))
+const treeActivitySQL = `max(tr.created_at, tr.updated_at, COALESCE((SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), ''), COALESCE((SELECT max(max(m.updated_at, COALESCE(th.updated_at, '')))
  FROM tasks m LEFT JOIN threads th ON th.t3_thread_id = m.t3_thread_id WHERE m.tree_id = tr.id), ''))`
 
 func treeTimes(t Tree, members []Task) TreeTimes {
 	tt := TreeTimes{LastActivityAt: t.CreatedAt}
+	if t.JournalActivityAt.After(tt.LastActivityAt) {
+		tt.LastActivityAt = t.JournalActivityAt
+	}
 	later := func(v *time.Time) {
 		if v != nil && v.After(tt.LastActivityAt) {
 			tt.LastActivityAt = *v
@@ -206,11 +209,11 @@ type TreePatch struct {
 }
 
 const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.updated_at,
-  NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)`
+  (tr.recorded_work = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL
 
 func scanTree(row rowScanner) (Tree, error) {
 	var t Tree
-	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.UpdatedAt, &t.Deletable)
+	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.UpdatedAt, &t.Deletable, &t.JournalActivityAt)
 	return t, notFound(err)
 }
 
@@ -463,21 +466,28 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 // UpdateTree applies a validated patch. Start mode changes only while the
 // tree is open (Conflict).
 func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, error) {
-	if p.StartMode.Set {
-		if err := treeOpen(ctx, s.pool, id); err != nil {
-			return Tree{}, err
+	err := s.inTx(ctx, func(tx *Tx) error {
+		if err := treeExists(ctx, tx, id); err != nil {
+			return err
 		}
-	}
-	var w where
-	w.arg(id)
-	sets := []string{"updated_at = " + nowSQL}
-	if p.Title.Set {
-		sets = append(sets, "title = "+w.arg(p.Title.V))
-	}
-	if p.StartMode.Set {
-		sets = append(sets, "start_mode = "+w.arg(p.StartMode.V))
-	}
-	if _, err := s.pool.Exec(ctx, `UPDATE task_trees SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...); err != nil {
+		if p.StartMode.Set {
+			if err := treeOpen(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		var w where
+		w.arg(id)
+		sets := []string{"updated_at = " + nowSQL}
+		if p.Title.Set {
+			sets = append(sets, "title = "+w.arg(p.Title.V))
+		}
+		if p.StartMode.Set {
+			sets = append(sets, "start_mode = "+w.arg(p.StartMode.V))
+		}
+		_, err := tx.Exec(ctx, `UPDATE task_trees SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
+		return err
+	})
+	if err != nil {
 		return Tree{}, err
 	}
 	t, err := scanTree(s.pool.QueryRow(ctx, `SELECT `+treeColumns+` FROM task_trees tr WHERE tr.id = $1`, id))
@@ -546,13 +556,20 @@ func treeOpen(ctx context.Context, q queryRower, id int64) error {
 	return nil
 }
 
-// DeleteTree deletes a tree and every member task. Only a tree whose members
-// are all unstarted (never launched, no session) can be deleted (Conflict:
-// archive it instead).
+// DeleteTree deletes a tree and its members only if neither the tree nor
+// any member has notes or execution history, including former members
+// recorded since journal rollout. Otherwise archive it.
 func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
+		}
+		var protected bool
+		if err := tx.QueryRow(ctx, `SELECT recorded_work FROM task_trees WHERE id = $1`, id).Scan(&protected); err != nil {
+			return err
+		}
+		if protected {
+			return Conflict("tree %d has recorded work: archive it instead", id)
 		}
 		var started *int64
 		if err := tx.QueryRow(ctx, `SELECT min(t.id) FROM tasks t WHERE t.tree_id = $1 AND NOT `+unstartedSQL, id).Scan(&started); err != nil {
@@ -572,7 +589,7 @@ func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 	})
 }
 
-// DissolveTree removes a tree: its tasks stay (standalone), their needs go.
+// DissolveTree detaches members and archives the tree, preserving its journal.
 func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		if err := treeExists(ctx, tx, id); err != nil {
@@ -587,7 +604,7 @@ func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 		if err := clearStaleBases(ctx, tx); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM task_trees WHERE id = $1`, id)
+		_, err := tx.Exec(ctx, `UPDATE task_trees SET status = 'archived', closed_at = COALESCE(closed_at, `+nowSQL+`), updated_at = `+nowSQL+` WHERE id = $1`, id)
 		return err
 	})
 }
@@ -614,7 +631,7 @@ func (s *Store) AddToTree(ctx context.Context, treeID, taskID int64, needs []int
 }
 
 // RemoveFromTree splices task taskID out of tree treeID: its dependents take
-// over its needs; it stays as a standalone task. The emptied tree is deleted.
+// over its needs; it stays as a standalone task. The emptied tree is archived.
 func (s *Store) RemoveFromTree(ctx context.Context, treeID, taskID int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		var tree *int64
@@ -798,7 +815,7 @@ func resolveTree(ctx context.Context, tx *Tx, tree *int64, needs []int64) (int64
 	}
 	for _, id := range needs {
 		if found[id].tree == nil {
-			if _, err := tx.Exec(ctx, `UPDATE tasks SET tree_id = $2, updated_at = `+nowSQL+` WHERE id = $1 AND tree_id IS NULL`, id, target); err != nil {
+			if err := joinTree(ctx, tx, id, target); err != nil {
 				return 0, err
 			}
 			n := found[id]
@@ -830,9 +847,7 @@ func joinTree(ctx context.Context, tx *Tx, id, tree int64) error {
 		return Conflict("task %d is archived: unarchive it first", id)
 	}
 	if cur != nil {
-		if err := spliceOut(ctx, tx, id); err != nil {
-			return err
-		}
+		return spliceOutTo(ctx, tx, id, &tree)
 	}
 	_, err := tx.Exec(ctx, `UPDATE tasks SET tree_id = $2, updated_at = `+nowSQL+` WHERE id = $1`, id, tree)
 	return err
@@ -841,8 +856,13 @@ func joinTree(ctx context.Context, tx *Tx, id, tree int64) error {
 // spliceOut takes task id out of its tree: each dependent drops id and takes
 // over id's needs (A <- X <- B becomes A <- B, deduplicated), id loses its
 // needs and leaves the tree, stale workspace.baseTaskId values are cleared
-// and an emptied tree is deleted.
+// and an emptied tree is archived.
 func spliceOut(ctx context.Context, tx *Tx, id int64) error {
+	return spliceOutTo(ctx, tx, id, nil)
+}
+
+// spliceOutTo changes membership once, so a move records both tree IDs.
+func spliceOutTo(ctx context.Context, tx *Tx, id int64, destination *int64) error {
 	var tree *int64
 	if err := tx.QueryRow(ctx, `SELECT tree_id FROM tasks WHERE id = $1`, id).Scan(&tree); err != nil {
 		return fmt.Errorf("task %d: %w", id, notFound(err))
@@ -870,10 +890,7 @@ WHERE d.need_id = $1 AND n.need_id <> d.task_id`, id); err != nil {
 	if tree == nil {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE tasks SET tree_id = NULL, updated_at = `+nowSQL+` WHERE id = $1`, id); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `DELETE FROM task_trees WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM tasks WHERE tree_id = $1)`, *tree)
+	_, err := tx.Exec(ctx, `UPDATE tasks SET tree_id = $2, updated_at = `+nowSQL+` WHERE id = $1`, id, destination)
 	return err
 }
 
@@ -933,10 +950,13 @@ func setNeeds(ctx context.Context, tx *Tx, id int64, needs []int64) error {
 			return Conflict("task %d already needs this task (needs cannot loop)", need)
 		}
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM task_needs WHERE task_id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM task_needs WHERE task_id = $1 AND need_id NOT IN (SELECT value FROM json_each($2))`, id, jsonArray(want)); err != nil {
 		return err
 	}
 	for _, need := range want {
+		if slices.Contains(cur, need) {
+			continue
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO task_needs (task_id, need_id) VALUES ($1, $2)`, id, need); err != nil {
 			return err
 		}

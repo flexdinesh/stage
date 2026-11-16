@@ -9,6 +9,7 @@ import { CopyButton } from "../components/CopyButton.tsx";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
+import { JournalPanel } from "../components/Journal.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
@@ -63,8 +64,9 @@ function TaskDetailView({ id }: { id: number }) {
     markViewed([`task:${id}`]);
   }, [notifications, id, markViewed]);
   return (
-    <QueryState isPending={task.isPending} error={task.error}>
-      {task.data === undefined ? null : <TaskBody task={task.data} />}
+    <QueryState isPending={task.isPending} error={task.data === undefined ? task.error : null}>
+      {task.data === undefined ? null : <ErrorText error={task.error} />}
+      {task.data === undefined ? null : <TaskBody key={id} task={task.data} />}
     </QueryState>
   );
 }
@@ -305,6 +307,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
             {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
+            <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
           </div>
           )}
@@ -314,7 +317,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
-            <NotesPanel task={task} />
           </div>
         </div>
       </div>
@@ -484,54 +486,6 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
             </li>
           ))}
         </ol>
-      )}
-    </Panel>
-  );
-}
-
-function NotesPanel({ task }: { task: TaskDetail }) {
-  const api = useApi();
-  const invalidate = useInvalidateWork();
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = useMutation({
-    mutationFn: (notes: string) => api.updateTask(task.id, { notes }),
-    onSuccess: async () => {
-      await invalidate();
-      setDraft(null);
-    },
-  });
-
-  return (
-    <Panel
-      title="Notes"
-      actions={
-        draft === null ? (
-          <Button small onClick={() => setDraft(task.notes)}>
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button small onClick={() => setDraft(null)}>
-              Cancel
-            </Button>
-            <Button small variant="primary" busy={save.isPending} onClick={() => save.mutate(draft)}>
-              Save
-            </Button>
-          </>
-        )
-      }
-    >
-      {draft === null ? (
-        task.notes === "" ? (
-          <Muted>No notes. Use Edit to jot context for later.</Muted>
-        ) : (
-          <p className="text-small whitespace-pre-wrap">{task.notes}</p>
-        )
-      ) : (
-        <div className="flex flex-col gap-2">
-          <SnippetTextarea rows={4} value={draft} onValueChange={setDraft} projectId={task.projectId} autoFocus aria-label="Notes" />
-          <ErrorText error={save.error} />
-        </div>
       )}
     </Panel>
   );

@@ -114,7 +114,6 @@ type Template = Pick<
   | "interactionMode"
   | "workspace"
   | "tags"
-  | "notes"
 >;
 
 function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeStart" | "startLocal" | "repeat" | "tz"> {
@@ -133,7 +132,7 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeSt
     baseRef: t.workspace.type === "worktree" ? t.workspace.baseRef : "origin/main",
     branch: t.workspace.type === "worktree" ? (t.workspace.branch ?? "") : "",
     tags: t.tags.join(", "),
-    notes: t.notes,
+    notes: "",
   };
 }
 
@@ -175,7 +174,7 @@ function initialState(
   const treeStart: TreeStartChoice = task?.startMode ?? "inherit";
   const timing = { handoff: true, treeStart, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
   if (schedule !== undefined) {
-    return { ...fromTemplate(schedule), ...timing, mode: "repeat", repeat: parseCron(schedule.cron), tz: schedule.tz };
+    return { ...fromTemplate(schedule), notes: schedule.notes, ...timing, mode: "repeat", repeat: parseCron(schedule.cron), tz: schedule.tz };
   }
   if (task !== undefined) {
     const startTz = task.startTz ?? tz;
@@ -314,21 +313,20 @@ function TaskFormDrawer({
       interactionMode: s.interactionMode,
       workspace: choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId),
       tags: parseTags(s.tags),
-      notes: s.notes,
     };
   }
 
   const save = useMutation({
     mutationFn: async (): Promise<Saved> => {
       if (mode === "repeat") {
-        const body: CreateScheduleRequest = { ...template(), attachmentIds: images.ids, cron, tz: s.tz };
+        const body: CreateScheduleRequest = { ...template(), notes: s.notes, attachmentIds: images.ids, cron, tz: s.tz };
         const saved = schedule === undefined ? await api.createSchedule(body) : await api.updateSchedule(schedule.id, body);
         return { kind: "schedule", schedule: saved };
       }
       const timed = mode === "at" ? { startLocal: s.startLocal, startTz: s.tz } : null;
       if (task !== undefined) {
         const tags = parseTags(s.tags);
-        const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags, notes: s.notes };
+        const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags };
         if (full) {
           if (needs.length > 0 && s.handoff !== task.handoff) body.handoff = s.handoff;
           if (inTree && s.treeStart !== (task.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
@@ -344,6 +342,7 @@ function TaskFormDrawer({
       }
       const body: CreateTaskRequest = {
         ...template(),
+        initialNote: s.notes,
         ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
         ...(timed !== null ? timed : { start: mode === "now" }),
         ...(defaultTree === undefined ? {} : { treeId: defaultTree.treeId }),
@@ -415,7 +414,7 @@ function TaskFormDrawer({
       <form onSubmit={submit} onKeyDown={onKeyDown} className="flex flex-col gap-3.5">
         {task === undefined || full ? null : (
           <Alert tone="plain">
-            Task is <TaskStateBadge state={task.state} />; only title, tags and notes can change.
+            Task is <TaskStateBadge state={task.state} />; only title and tags can change. Add notes in its journal.
           </Alert>
         )}
         {!isNew || defaultTree === undefined ? null : (
@@ -572,11 +571,16 @@ function TaskFormDrawer({
         >
           {(id) => <Input id={id} value={s.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="smoke, refactor" />}
         </Field>
-        <Field label="Notes">
-          {(id) => (
-            <SnippetTextarea id={id} rows={3} value={s.notes} onValueChange={(notes) => set({ notes })} projectId={snippetProject} />
-          )}
-        </Field>
+        {task === undefined ? (
+          <Field
+            label={mode === "repeat" ? "Notes template" : "Initial note"}
+            hint={mode === "repeat" ? "Starts each spawned task's journal." : "Optional. Appended once to the new task's journal."}
+          >
+            {(id) => (
+              <SnippetTextarea id={id} rows={3} value={s.notes} onValueChange={(notes) => set({ notes })} projectId={snippetProject} />
+            )}
+          </Field>
+        ) : null}
         <ErrorText error={save.error} />
       </form>
     </Drawer>

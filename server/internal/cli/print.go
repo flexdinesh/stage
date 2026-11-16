@@ -41,6 +41,9 @@ func printContext(w io.Writer, c agenttools.ContextOut) {
 	} else {
 		fmt.Fprintf(w, "project  - (%s)\n", c.ProjectError)
 	}
+	if c.TreeID != nil {
+		fmt.Fprintf(w, "tree     %d %s\n", *c.TreeID, orDash(c.TreeTitle))
+	}
 	if c.CallerTaskID != nil {
 		fmt.Fprintf(w, "task     %d\n", *c.CallerTaskID)
 	}

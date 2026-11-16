@@ -97,7 +97,7 @@ func TestHandoffAppendedForNeed(t *testing.T) {
 	if h.Status != "sent" || h.Attempt != 1 || h.SourceTaskID == nil || *h.SourceTaskID != a.ID || h.SourceThreadID != thread {
 		t.Fatalf("handoff record %+v", h)
 	}
-	if msg := e.lastMessage(); msg != "reply OK\n\n"+h.Text {
+	if msg := e.lastMessage(); !strings.HasPrefix(msg, "reply OK\n\n"+h.Text+"\n\n<stage-journal>") {
 		t.Fatalf("launch prompt must be prompt + stored block:\n%q\nblock:\n%q", msg, h.Text)
 	}
 	for _, want := range []string{
@@ -138,7 +138,7 @@ func TestHandoffCapsReplyAndMarksTruncation(t *testing.T) {
 	}
 }
 
-func TestHandoffOffSendsBarePrompt(t *testing.T) {
+func TestHandoffOffStillSendsJournalInstructions(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/off")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
@@ -149,7 +149,7 @@ func TestHandoffOffSendsBarePrompt(t *testing.T) {
 	if got.State != "running" || got.Handoff || len(got.CurrentHandoffs) != 0 {
 		t.Fatalf("handoff off: %+v", got)
 	}
-	if msg := e.lastMessage(); msg != "reply OK" {
+	if msg := e.lastMessage(); !strings.HasPrefix(msg, "reply OK\n\n<stage-journal>") {
 		t.Fatalf("prompt %q", msg)
 	}
 }
@@ -165,7 +165,7 @@ func TestHandoffReadFailureLaunchesWithout(t *testing.T) {
 	if got.State != "running" {
 		t.Fatalf("a failed handoff read must not block the launch: %+v", got)
 	}
-	if msg := e.lastMessage(); msg != "reply OK" {
+	if msg := e.lastMessage(); !strings.HasPrefix(msg, "reply OK\n\n<stage-journal>") {
 		t.Fatalf("prompt %q", msg)
 	}
 	h := got.one(t)
@@ -229,7 +229,7 @@ func TestHandoffFanInPerNeed(t *testing.T) {
 		!strings.Contains(hs[0].Text, "[truncated at 2666 chars; full reply via t3_thread_read "+*a.T3ThreadID+"]") {
 		t.Fatal("fan-in reply must be capped at 2666 chars")
 	}
-	if want := "reply OK\n\n" + hs[0].Text + "\n\n" + hs[1].Text + "\n\n" + hs[2].Text; e.lastMessage() != want {
+	if want := "reply OK\n\n" + hs[0].Text + "\n\n" + hs[1].Text + "\n\n" + hs[2].Text; !strings.HasPrefix(e.lastMessage(), want+"\n\n<stage-journal>") {
 		t.Fatalf("prompt must append the blocks by need id:\n%q", e.lastMessage())
 	}
 }
@@ -261,7 +261,7 @@ func TestHandoffPerNeedSkip(t *testing.T) {
 		!strings.Contains(hs[1].Text, ", finished, not settled yet.") {
 		t.Fatalf("b sent %+v", hs[1])
 	}
-	if e.lastMessage() != "reply OK\n\n"+hs[1].Text {
+	if !strings.HasPrefix(e.lastMessage(), "reply OK\n\n"+hs[1].Text+"\n\n<stage-journal>") {
 		t.Fatalf("prompt %q", e.lastMessage())
 	}
 	if !e.hasEvent(d.ID, fmt.Sprintf("handoff from #%d skipped: ", a.ID)) || !e.hasEvent(d.ID, fmt.Sprintf("handoff from #%d appended", b.ID)) {

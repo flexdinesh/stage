@@ -30,6 +30,8 @@ func runTree(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "tree "+v)
 	printTreeOut := func(res any) error { return c.out(res, func(w io.Writer) { printAnyTree(w, res) }) }
 	switch v {
+	case "notes":
+		return runNotes(ctx, env, "tree", rest)
 	case "ls", "list":
 		var a agenttools.ListTreesArgs
 		c.fs.BoolVar(&a.All, "all", false, "every tree (default: active)")

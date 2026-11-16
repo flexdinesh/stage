@@ -51,6 +51,11 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 }
 
 type createTaskReq struct {
+	taskConfigReq
+	InitialNote string `json:"initialNote"`
+}
+
+type taskConfigReq struct {
 	ProjectID          *int64           `json:"projectId"`
 	Title              string           `json:"title"`
 	Prompt             string           `json:"prompt"`
@@ -61,7 +66,6 @@ type createTaskReq struct {
 	InteractionMode    *string          `json:"interactionMode"`
 	Workspace          *db.Workspace    `json:"workspace"`
 	Tags               []string         `json:"tags"`
-	Notes              *string          `json:"notes"`
 	TreeID             *int64           `json:"treeId"`
 	Needs              []int64          `json:"needs"`
 	NeedsSessionID     *string          `json:"needsSessionId"`
@@ -75,6 +79,12 @@ type createTaskReq struct {
 }
 
 func (req createTaskReq) validate() (db.NewTask, error) {
+	in, err := req.taskConfigReq.validate()
+	in.InitialNote = req.InitialNote
+	return in, err
+}
+
+func (req taskConfigReq) validate() (db.NewTask, error) {
 	in := db.NewTask{
 		Title:              strings.TrimSpace(req.Title),
 		Prompt:             req.Prompt,
@@ -136,9 +146,6 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 			return in, err
 		}
 	}
-	if req.Notes != nil {
-		in.Notes = *req.Notes
-	}
 	if in.StartAt, err = startAt(req.StartLocal, req.StartTz, time.Now()); err != nil {
 		return in, err
 	}
@@ -183,7 +190,7 @@ func startAt(local, tz *string, now time.Time) (*time.Time, error) {
 
 func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	var req createTaskReq
-	if err := decode(r, &req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
 	in, err := req.validate()
@@ -285,13 +292,13 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var p db.TaskPatch
-	if err := decode(r, &p); err != nil {
+	if err := decodeStrict(r, &p); err != nil {
 		return err
 	}
 	if err := validateConfigPatch(configPatch{
 		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
-		Workspace: &p.Workspace, Tags: &p.Tags, Notes: &p.Notes, AttachmentIDs: &p.AttachmentIDs,
+		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
 		return err
 	}
@@ -338,7 +345,6 @@ type configPatch struct {
 	InteractionMode    *db.Optional[string]
 	Workspace          *db.Optional[db.Workspace]
 	Tags               *db.Optional[[]string]
-	Notes              *db.Optional[string]
 	AttachmentIDs      *db.Optional[[]int64]
 }
 
@@ -378,9 +384,6 @@ func validateConfigPatch(c configPatch) error {
 	}
 	if c.Tags.Set {
 		c.Tags.V, c.Tags.Null = cleanTags(c.Tags.V), false
-	}
-	if c.Notes.Set && c.Notes.Null {
-		c.Notes.V, c.Notes.Null = "", false
 	}
 	if c.AttachmentIDs.Set {
 		if err := attachmentIDs(c.AttachmentIDs.V); err != nil {

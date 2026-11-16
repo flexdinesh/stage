@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/cronexpr"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -161,6 +162,9 @@ func nextRun(cron, tz string, paused bool, now time.Time) (*time.Time, error) {
 }
 
 func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, error) {
+	if err := validateScheduleNotes(in.Notes); err != nil {
+		return Schedule{}, err
+	}
 	next, err := nextRun(in.Cron, in.Tz, in.Paused, time.Now())
 	if err != nil {
 		return Schedule{}, err
@@ -215,6 +219,11 @@ type SchedulePatch struct {
 // UpdateSchedule applies a validated patch. Changing cron, tz or paused
 // recomputes next_run_at from now (a resume never fires a missed time).
 func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (Schedule, error) {
+	if p.Notes.Set {
+		if err := validateScheduleNotes(p.Notes.V); err != nil {
+			return Schedule{}, err
+		}
+	}
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var provider, model *string
 		var cron, tz string
@@ -364,15 +373,49 @@ WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 	return runs, nil
 }
 
+func validateScheduleNotes(notes string) error {
+	if !utf8.ValidString(notes) || len(notes) > 16*1024 {
+		return Invalid("notes: UTF-8, at most 16 KiB")
+	}
+	return nil
+}
+
+// Legacy templates had no size limit. Number their parts without dropping text,
+// including whitespace-only chunks, while keeping each note within 16 KiB.
+func scheduleNoteParts(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	if len(text) <= 16*1024 {
+		return []string{text}
+	}
+	const heading = "Schedule template (part %d of %d)\n\n"
+	// Byte length bounds both the part count and its widest possible number.
+	limit := 16*1024 - len(fmt.Sprintf(heading, len(text), len(text)))
+	var parts []string
+	for len(text) > 0 {
+		end := min(limit, len(text))
+		for end < len(text) && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		parts = append(parts, text[:end])
+		text = text[end:]
+	}
+	for i := range parts {
+		parts[i] = fmt.Sprintf(heading, i+1, len(parts)) + parts[i]
+	}
+	return parts
+}
+
 // spawnTask inserts a backlog task from schedule id's config and images.
 func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64, error) {
 	var in NewTask
-	var tz string
+	var tz, notes string
 	err := tx.QueryRow(ctx, `
 SELECT project_id, title, prompt, provider_instance_id, model, model_options, runtime_mode,
   interaction_mode, workspace, tags, notes, tz, origin_thread_id FROM schedules WHERE id = $1`, id).
 		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.ProviderInstanceID, &in.Model, &in.ModelOptions,
-			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &in.Notes, &tz, &in.OriginThreadID)
+			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.OriginThreadID)
 	if err != nil {
 		return 0, notFound(err)
 	}
@@ -381,7 +424,20 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 		in.StartAt, in.StartTz = startAt, &tz
 	}
 	return insertTask(ctx, tx, in, func(tx *Tx, task int64) error {
-		return copyScheduleAttachments(ctx, tx, id, task)
+		if err := copyScheduleAttachments(ctx, tx, id, task); err != nil {
+			return err
+		}
+		parts := scheduleNoteParts(notes)
+		for i, text := range parts {
+			key := "initial-note"
+			if len(parts) > 1 {
+				key = fmt.Sprintf("initial-note-%d", i+1)
+			}
+			if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceThreadID: in.OriginThreadID}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

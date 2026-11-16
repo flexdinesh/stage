@@ -13,7 +13,7 @@ import (
 
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
-  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags, t.notes,
+  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags,
   t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
   COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
@@ -38,7 +38,7 @@ func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.Tags, &t.Notes, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.Workspace, &t.Tags, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
@@ -186,7 +186,7 @@ type NewTask struct {
 	InteractionMode    string
 	Workspace          Workspace
 	Tags               []string
-	Notes              string
+	InitialNote        string
 	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 	StartAt            *time.Time
 	StartTz            *string // set with StartAt (IANA zone)
@@ -239,19 +239,16 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true),$17) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
+		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags),
 		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id); err != nil {
-		return 0, err
-	}
+
 	needs := slices.Clone(in.Needs)
 	if in.NeedsThreadID != nil {
 		owner, _, err := adoptThread(ctx, tx, AdoptInput{ThreadID: *in.NeedsThreadID})
@@ -272,11 +269,20 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16, true),$
 			return 0, err
 		}
 	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id); err != nil {
+		return 0, err
+	}
 	if err := checkBaseTask(ctx, tx, id); err != nil {
 		return 0, err
 	}
 	if len(in.AttachmentIDs) > 0 {
 		if err := setAttachments(ctx, tx, id, in.AttachmentIDs); err != nil {
+			return 0, err
+		}
+	}
+	if in.InitialNote != "" {
+		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID}); err != nil {
 			return 0, err
 		}
 	}
@@ -310,7 +316,6 @@ type TaskPatch struct {
 	InteractionMode    Optional[string]           `json:"interactionMode"`
 	Workspace          Optional[Workspace]        `json:"workspace"`
 	Tags               Optional[[]string]         `json:"tags"`
-	Notes              Optional[string]           `json:"notes"`
 	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 	Handoff            Optional[bool]             `json:"handoff"`       // append the needs' handoff at launch
 	StartMode          Optional[StartMode]        `json:"startMode"`     // null = inherit the tree's
@@ -328,8 +333,8 @@ func (p TaskPatch) restrictedSet() bool {
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
-// UpdateTask applies a validated patch. Outside backlog only title, tags and
-// notes may change (Conflict otherwise).
+// UpdateTask applies a validated patch. Outside backlog only title and tags
+// may change (Conflict otherwise).
 func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, error) {
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
@@ -343,7 +348,7 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			return notFound(err)
 		}
 		if state != StateBacklog && p.restrictedSet() {
-			return Conflict("task is %s: only title, tags and notes are editable outside backlog", state)
+			return Conflict("task is %s: only title and tags are editable outside backlog", state)
 		}
 		if adopted && p.Prompt.Set {
 			return Conflict("an adopted session's prompt is its T3 conversation")
@@ -407,9 +412,6 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if p.Tags.Set {
 			set("tags", nonNilStrings(p.Tags.V))
 		}
-		if p.Notes.Set {
-			set("notes", p.Notes.V)
-		}
 		if p.Handoff.Set {
 			set("handoff", p.Handoff.V)
 		}
@@ -452,8 +454,8 @@ FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
 	return nil
 }
 
-// DeleteTask removes an unstarted task (never launched, no session);
-// a started one can only be archived (Conflict). It is spliced out of its
+// DeleteTask removes a task without notes or execution history;
+// recorded work can only be archived (Conflict). It is spliced out of its
 // tree first (its dependents take over its needs).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
@@ -466,7 +468,7 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 			return Conflict("task is %s: stop it first", state)
 		}
 		if !unstarted {
-			return Conflict("task %d has started: archive it instead", id)
+			return Conflict("task %d has recorded work: archive it instead", id)
 		}
 		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
@@ -516,12 +518,18 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	}
 	ws := src.Workspace
 	ws.BaseTaskID = nil
-	copyImages := func(tx *Tx, dst int64) error { return copyAttachments(ctx, tx, src.ID, dst) }
+	copyImages := func(tx *Tx, dst int64) error {
+		if err := copyAttachments(ctx, tx, src.ID, dst); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2)`, dst, src.ID)
+		return err
+	}
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
 		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: ws,
-		Tags: src.Tags, Notes: src.Notes,
+		Tags: src.Tags,
 	}, copyImages)
 }
 

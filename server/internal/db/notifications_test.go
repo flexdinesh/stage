@@ -92,16 +92,16 @@ func TestNotificationsInbox(t *testing.T) {
 		t.Fatalf("unread after read %d %v", n, err)
 	}
 
-	// Deleting the task keeps the entry, without a state.
-	if err := s.DeleteTask(ctx, task.ID); err != nil {
+	// Archiving recorded work keeps its notification and current state.
+	if _, err := s.ArchiveTask(ctx, task.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	all, err = s.ListNotifications(ctx, 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 3 || all[2].TaskID != nil || all[2].CurrentState != nil {
-		t.Fatalf("after task delete %+v", all[2])
+	if len(all) != 3 || all[2].TaskID == nil || all[2].CurrentState == nil || *all[2].CurrentState != db.StateDone {
+		t.Fatalf("after task archive %+v", all[2])
 	}
 
 	// Prune drops entries older than the age.
@@ -186,17 +186,17 @@ func TestNotificationGroups(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: active.ID, To: db.StateFailed}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteTask(ctx, active.ID); err != nil {
+	if _, err := s.ArchiveTask(ctx, active.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	groups, err = s.ListNotificationGroups(ctx, 10, nil, futureID)
 	if err != nil || len(groups) != 4 || groups[1].Key != key || groups[1].EventCount != 56 ||
-		groups[1].UnreadCount != 1 || groups[1].CurrentState != nil {
-		t.Fatalf("deleted/restarted task must retain its group: %+v %v", groups, err)
+		groups[1].UnreadCount != 1 || groups[1].CurrentState == nil || *groups[1].CurrentState != db.StateFailed {
+		t.Fatalf("archived/restarted task must retain its group: %+v %v", groups, err)
 	}
 	history, err = s.ListNotificationHistory(ctx, key, 100, nil)
 	if err != nil || len(history) != 56 {
-		t.Fatalf("deleted task history: %d %v", len(history), err)
+		t.Fatalf("archived task history: %d %v", len(history), err)
 	}
 	// Attention follows current state, even without another notification.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: waiting.ID, To: db.StateDone}); err != nil {

@@ -13,6 +13,9 @@ const projectCols = `id, t3_project_id, title, workspace_root, source, archived_
 	   SELECT max(max(th.updated_at, COALESCE(th.settled_at, th.updated_at))) AS a FROM threads th WHERE th.t3_project_id = projects.t3_project_id
 	   UNION ALL
 	   SELECT max(tk.updated_at) AS a FROM tasks tk WHERE tk.project_id = projects.id
+       UNION ALL
+       SELECT max(j.created_at) FROM journal_entries j WHERE j.task_id IN (SELECT id FROM tasks WHERE project_id = projects.id)
+         OR j.tree_id IN (SELECT tree_id FROM tasks WHERE project_id = projects.id)
 	 )) AS last_activity_at`
 
 func scanProject(row rowScanner) (Project, error) {

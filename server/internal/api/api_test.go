@@ -52,13 +52,15 @@ type flakyT3 struct {
 	// failReplyFor fails LatestReply for this thread only.
 	failReplyFor atomic.Pointer[string]
 
-	mu         gosync.Mutex
-	requestIDs []string // clientRequestId of every launch call
+	mu             gosync.Mutex
+	requestIDs     []string // clientRequestId of every launch call
+	launchMessages []string
 }
 
 func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.LaunchResult, error) {
 	f.mu.Lock()
 	f.requestIDs = append(f.requestIDs, in.ClientRequestID)
+	f.launchMessages = append(f.launchMessages, in.Message)
 	f.mu.Unlock()
 	if f.failLaunch.Load() {
 		return t3.LaunchResult{}, &t3.ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: "t3 exploded"}
@@ -312,12 +314,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 1 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 2 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "1" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "2" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -481,7 +483,7 @@ func TestTaskActions(t *testing.T) {
 		t.Fatalf("branch %q", d.Branch)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"prompt": "x"}, 409, nil)
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": "B", "notes": "n", "tags": []string{"t"}}, 200, &patched)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": "B", "tags": []string{"t"}}, 200, &patched)
 	if patched.Title != "B" {
 		t.Fatalf("title %q", patched.Title)
 	}

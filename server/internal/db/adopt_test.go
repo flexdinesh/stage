@@ -52,10 +52,14 @@ func TestAdoptThread(t *testing.T) {
 
 	// Title and notes override; a settled session reads settled with timestamps.
 	thread("done-1", func(d *t3.ThreadDetail) { d.Settled, d.Status = true, t3.StatusIdle })
-	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "done-1", Title: ptr(" Review "), Notes: ptr("n")})
-	if err != nil || settled.Title != "Review" || settled.Notes != "n" || settled.State != db.StateSettled ||
+	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "done-1", Title: ptr(" Review "), InitialNote: ptr("n")})
+	if err != nil || settled.Title != "Review" || settled.State != db.StateSettled ||
 		settled.SettledAt == nil || settled.FinishedAt == nil {
 		t.Fatalf("settled adopt %+v %v", settled, err)
+	}
+	notes := journal(t, s, ctx, db.JournalOwner{TaskID: &settled.ID}, db.JournalQuery{})
+	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" || notes.Entries[0].SourceThreadID == nil || *notes.Entries[0].SourceThreadID != "done-1" {
+		t.Fatalf("adoption initial note: %+v", notes)
 	}
 	// A blank title falls back to "Session <id8>"; a joined tree is kept.
 	thread("abcdefghij", func(d *t3.ThreadDetail) { d.Title = "  " })

@@ -89,8 +89,8 @@ func TestCreateTreeAndLevels(t *testing.T) {
 		!slices.Equal(got.Needs, []int64{a.ID, b.ID}) || !slices.Equal(got.Dependents, []int64{e.ID}) {
 		t.Fatalf("member c %+v", got)
 	}
-	if !treeGone(t, s, ctx, old.ID) {
-		t.Fatal("emptied tree must be deleted")
+	if got, err := s.GetTree(ctx, old.ID); err != nil || got.Status != db.TreeArchived || len(got.Tasks) != 0 {
+		t.Fatalf("empty tree must remain archived: %+v %v", got, err)
 	}
 	var invalid *db.InvalidError
 	if _, err := s.CreateTree(ctx, db.NewTree{Title: "none"}); !errors.As(err, &invalid) {
@@ -318,19 +318,19 @@ func TestDissolveAndEmptyTrees(t *testing.T) {
 	if err := s.DissolveTree(ctx, *b.TreeID); err != nil {
 		t.Fatal(err)
 	}
-	if !treeGone(t, s, ctx, *b.TreeID) {
-		t.Fatal("dissolved tree still exists")
+	if got, err := s.GetTree(ctx, *b.TreeID); err != nil || got.Status != db.TreeArchived || len(got.Tasks) != 0 {
+		t.Fatalf("dissolved tree must remain archived: %+v %v", got, err)
 	}
 	for _, id := range []int64{a.ID, b.ID} {
 		if got := getTask(t, s, ctx, id); got.TreeID != nil || len(got.Needs)+len(got.Dependents) != 0 || got.Workspace.BaseTaskID != nil {
 			t.Fatalf("dissolved member %+v", got)
 		}
 	}
-	if err := s.DissolveTree(ctx, *b.TreeID); !errors.Is(err, db.ErrNotFound) {
+	if err := s.DissolveTree(ctx, *b.TreeID); err != nil {
 		t.Fatalf("dissolve twice: %v", err)
 	}
 
-	// The last member leaving (removed or deleted) deletes the tree.
+	// The last member leaving (removed or deleted) archives the tree.
 	x := mustTask(t, s, ctx, p.ID, "x", nil)
 	y := mustTask(t, s, ctx, p.ID, "y", []int64{x.ID})
 	tree := *y.TreeID
@@ -343,8 +343,8 @@ func TestDissolveAndEmptyTrees(t *testing.T) {
 	if err := s.DeleteTask(ctx, x.ID); err != nil {
 		t.Fatal(err)
 	}
-	if !treeGone(t, s, ctx, tree) {
-		t.Fatal("empty tree must be deleted")
+	if got, err := s.GetTree(ctx, tree); err != nil || got.Status != db.TreeArchived || len(got.Tasks) != 0 {
+		t.Fatalf("empty tree must remain archived: %+v %v", got, err)
 	}
 }
 

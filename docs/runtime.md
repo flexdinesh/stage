@@ -172,7 +172,12 @@ binary knows; `/api/health` `schema` is the database's.
 - It does not expose paths or the pid.
 
 Every `/api` response carries `Stage-Api-Version: <n>` (`buildinfo.APIVersion`,
-currently 1). The number changes only on breaking API changes.
+currently 2). The number changes only on breaking API changes.
+
+API v2 replaces mutable task notes with append-only task/tree journals and
+`initialNote` on task creation/adoption. Old task notes are discarded; existing
+task events stay. Historical tree recording begins at rollout. Schedule notes
+remain templates for each spawned task. Upgrade clients and server together.
 
 - The Go client (CLI, stdio MCP) refuses any response whose version differs:
   `stage server at … speaks API vN, this client vM`. A response without the

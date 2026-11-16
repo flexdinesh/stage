@@ -513,9 +513,15 @@ func TestProjectLastActivity(t *testing.T) {
 		t.Fatalf("thread activity: want settle %v, got %v %v", settled, p.LastActivityAt, err)
 	}
 	task := mustTask(t, s, ctx, p.ID, "a", nil)
+	latest := task.UpdatedAt
+	for _, e := range journal(t, s, ctx, db.JournalOwner{TaskID: &task.ID}, db.JournalQuery{Kind: "all"}).Entries {
+		if e.CreatedAt.After(latest) {
+			latest = e.CreatedAt
+		}
+	}
 	ps, err := s.ListProjects(ctx, "false")
-	if err != nil || len(ps) != 1 || ps[0].LastActivityAt == nil || !ps[0].LastActivityAt.Equal(task.UpdatedAt) {
-		t.Fatalf("task activity: want %v, got %+v %v", task.UpdatedAt, ps, err)
+	if err != nil || len(ps) != 1 || ps[0].LastActivityAt == nil || !ps[0].LastActivityAt.Equal(latest) {
+		t.Fatalf("task and journal activity: want %v, got %+v %v", latest, ps, err)
 	}
 }
 

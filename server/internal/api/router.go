@@ -90,6 +90,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/archive", s.archiveTask)
 	h("POST /api/tasks/{id}/unarchive", s.unarchiveTask)
 	h("PUT /api/tasks/{id}/needs", s.setNeeds)
+	h("GET /api/tasks/{id}/journal", s.taskJournal)
+	h("POST /api/tasks/{id}/journal", s.taskJournal)
 
 	h("GET /api/trees", s.listTrees)
 	h("POST /api/trees", s.createTree)
@@ -100,6 +102,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/trees/{id}/tasks", s.addToTree)
 	h("DELETE /api/trees/{id}/tasks/{taskId}", s.removeFromTree)
 	h("POST /api/trees/{id}/start", s.startTree)
+	h("GET /api/trees/{id}/journal", s.treeJournal)
+	h("POST /api/trees/{id}/journal", s.treeJournal)
+	h("GET /api/journal/{id}", s.getJournalEntry)
 
 	h("GET /api/schedules", s.listSchedules)
 	h("POST /api/schedules", s.createSchedule)
