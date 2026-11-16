@@ -81,13 +81,84 @@ export function needCandidates<T extends Node>(nodes: readonly T[], taskId: numb
     .toSorted((a, b) => a.id - b.id);
 }
 
-/** Direct needs and direct dependents of `id` within the tree (not `id` itself). */
-export function related<T extends Node>(nodes: readonly T[], id: number): Set<number> {
-  const out = new Set<number>();
+// ---- Graph ----
+
+/** A level's execution step: live work (or a ready task) in it, every member settled, or still waiting. */
+export type BandState = "now" | "done" | "waits";
+
+export function bandState(members: readonly Member[]): BandState {
+  const live = members.some(
+    (m) => m.state === "launching" || m.state === "running" || m.state === "needs_input" || (m.state === "backlog" && m.readiness === "ready"),
+  );
+  if (live) return "now";
+  if (members.length > 0 && members.every((m) => m.state === "settled")) return "done";
+  return "waits";
+}
+
+/** A need edge: met once the need settles, failed while it failed (dependents stay blocked), else waiting. */
+export type EdgeState = "met" | "waiting" | "failed";
+
+export function edgeState(need: Pick<Task, "state">): EdgeState {
+  if (need.state === "settled") return "met";
+  if (need.state === "failed" || need.state === "interrupted" || need.state === "cancelled") return "failed";
+  return "waiting";
+}
+
+export type GraphSize = { nodeW: number; nodeH: number; gapX: number; gapY: number };
+
+export type GraphLayout = {
+  width: number;
+  height: number;
+  /** Ids per level, as `layoutLevels`. */
+  levels: number[][];
+  /** Top-left corner of each node, in level order. */
+  nodes: { id: number; level: number; x: number; y: number }[];
+  /** Need -> dependent: a cubic from the need's bottom centre to just above the dependent, and its arrowhead. */
+  edges: { from: number; to: number; path: string; arrow: string }[];
+};
+
+/**
+ * Top-down layered layout: one row per level (`layoutLevels` order, so crossings stay low), each row centred on the
+ * widest. Edges run from the bottom centre of a need to the top centre of its dependent.
+ */
+export function graphLayout<T extends Node>(nodes: readonly T[], size: GraphSize): GraphLayout {
+  const { nodeW, nodeH, gapX, gapY } = size;
+  const levels = layoutLevels(nodes);
+  const widest = Math.max(0, ...levels.map((band) => band.length));
+  const width = widest === 0 ? 0 : widest * nodeW + (widest - 1) * gapX;
+  const height = levels.length === 0 ? 0 : levels.length * nodeH + (levels.length - 1) * gapY;
+  const placed: GraphLayout["nodes"] = [];
+  const at = new Map<number, { x: number; y: number }>();
+  levels.forEach((band, level) => {
+    const row = band.length * nodeW + (band.length - 1) * gapX;
+    band.forEach((id, i) => {
+      const p = { x: (width - row) / 2 + i * (nodeW + gapX), y: level * (nodeH + gapY) };
+      at.set(id, p);
+      placed.push({ id, level, ...p });
+    });
+  });
   const needs = needsWithin(nodes);
-  for (const need of needs.get(id) ?? []) out.add(need);
-  for (const [other, list] of needs) if (list.includes(id)) out.add(other);
-  return out;
+  const edges: GraphLayout["edges"] = [];
+  for (const { id } of placed) {
+    const b = at.get(id);
+    if (b === undefined) continue;
+    for (const need of needs.get(id) ?? []) {
+      const a = at.get(need);
+      if (a === undefined) continue;
+      const x1 = a.x + nodeW / 2;
+      const y1 = a.y + nodeH;
+      const x2 = b.x + nodeW / 2;
+      const y2 = b.y - 2;
+      const bend = Math.max(gapY / 2, (y2 - y1) / 2);
+      edges.push({
+        from: need,
+        to: id,
+        path: `M${x1} ${y1}C${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`,
+        arrow: `M${x2 - 4} ${y2 - 5}L${x2} ${y2}L${x2 + 4} ${y2 - 5}`,
+      });
+    }
+  }
+  return { width, height, levels, nodes: placed, edges };
 }
 
 // ---- Roll-up ----
