@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/service"
 )
 
 // URLEnv overrides the server address.
@@ -38,6 +39,8 @@ type Env struct {
 	Exec func(name string, args ...string) error
 	// LookPath reports whether a command is installed.
 	LookPath func(name string) error
+	// Service is the `stage service` environment; nil is the real one.
+	Service func() service.Deps
 }
 
 // OSEnv is the real process environment.
@@ -73,9 +76,12 @@ var errTimeout = errors.New("timed out")
 func Run(ctx context.Context, args []string, env Env) int {
 	err := run(ctx, args, env)
 	var u errUsage
+	var x exitError
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &x):
+		return x.code
 	case errors.Is(err, flag.ErrHelp):
 		return 0
 	case errors.As(err, &u):
@@ -95,8 +101,22 @@ Usage:
   stage serve [--listen ADDR]...      run the server (also: stage with no args); ADDR host:port,
                                       unix:/abs/path.sock or unix (private default socket); repeat or
                                       comma-separate for several (env STAGE_LISTEN, default 127.0.0.1:7380)
+  stage serve --managed               run as the per-user service (what "stage service" registers):
+                                      config from service.env only, default data dir, unix required
   stage status [--wait DUR]           the server this CLI reaches: version, readiness, T3 state
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
+  stage version [--json]              this binary: version, identity, commit, API version
+  stage service start [--exe PATH] [--wait 30s]
+                                      register/update the per-user service (systemd --user, launchd)
+                                      and start it; waits for readiness; never restarts a running one
+  stage service restart [--exe PATH] [--wait 150s]
+  stage service stop|uninstall [--wait 2m]   uninstall keeps data and service.env
+  stage service status                service, definition, data dir holder, Stage health, T3, problems
+  stage service logs [-f] [-n 100]
+  stage service enable|disable        login startup on/off (does not start or stop it)
+                                      service commands take --json; exit 0 ok, 1 failed, 3 wait
+                                      expired, 4 not running, 5 data dir in use, 6 no service
+                                      manager, 7 invalid config; --url/STAGE_URL do not apply
   stage context                       your session, cwd and resolved project
   stage show REF                      the task or session a stage link, T3 thread link,
                                       #TASK_ID or thread id names (with its session/task)
@@ -215,6 +235,10 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runContext(ctx, env, sub)
 	case "status":
 		return runStatus(ctx, env, sub)
+	case "version":
+		return runVersion(env, sub)
+	case "service":
+		return runService(ctx, env, sub)
 	case "show":
 		return runShow(ctx, env, sub)
 	case "projects":

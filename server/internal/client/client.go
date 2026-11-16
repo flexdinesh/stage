@@ -384,7 +384,7 @@ func (c *Client) send(req *http.Request, out any) error {
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("stage unreachable at %s (set STAGE_URL): %w", c.BaseURL, err)
+		return fmt.Errorf("stage unreachable at %s (set STAGE_URL, or start the local service: `stage service start`): %w", c.BaseURL, err)
 	}
 	defer res.Body.Close()
 	if err := c.checkVersion(res); err != nil {

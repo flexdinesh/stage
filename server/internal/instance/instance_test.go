@@ -122,3 +122,34 @@ func TestNotify(t *testing.T) {
 		}
 	}
 }
+
+// A managed holder's conflict error says how to stop it; ReadHolder sees
+// a live holder's record and nothing once it is released.
+func TestManagedHolder(t *testing.T) {
+	dir := t.TempDir()
+	if held, m, err := ReadHolder(dir); held || m != nil || err != nil {
+		t.Fatalf("empty dir: %v %v %v", held, m, err)
+	}
+	o, err := Lock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := NewMeta()
+	meta.Managed, meta.Manager, meta.Service = true, "systemd", "stage.service"
+	if err := o.Record(meta); err != nil {
+		t.Fatal(err)
+	}
+	held, m, err := ReadHolder(dir)
+	if !held || m == nil || m.InstanceID != meta.InstanceID || !m.Managed || err != nil {
+		t.Fatalf("ReadHolder: %v %+v %v", held, m, err)
+	}
+	_, err = Lock(dir)
+	var le *LockedError
+	if !errors.As(err, &le) || !strings.Contains(err.Error(), "`stage service stop`") || !strings.Contains(err.Error(), "systemd stage.service") {
+		t.Fatalf("managed conflict: %v", err)
+	}
+	o.Release()
+	if held, _, _ := ReadHolder(dir); held {
+		t.Fatal("held after release")
+	}
+}

@@ -5,6 +5,7 @@
 package filelock
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -50,6 +51,32 @@ func Acquire(path string, perm fs.FileMode) (*Lock, error) {
 			return nil, ErrLocked
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// AcquireContext is Acquire that keeps retrying until ctx ends (then
+// ErrLocked): for short-lived critical sections that queue up, such as
+// concurrent `stage service` commands.
+func AcquireContext(ctx context.Context, path string, perm fs.FileMode) (*Lock, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, perm)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &Lock{f: f}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			_ = f.Close()
+			return nil, fmt.Errorf("lock %s: %w", path, err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, ErrLocked
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
 }
 

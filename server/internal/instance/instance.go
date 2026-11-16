@@ -33,6 +33,12 @@ type Meta struct {
 	Commit     string    `json:"commit"`
 	StartedAt  time.Time `json:"startedAt"`
 	Listeners  []string  `json:"listeners"`
+	// Managed: started by the per-user service (`stage serve --managed`),
+	// supervised by Manager ("systemd" | "launchd") as Service (unit name or
+	// launchd label).
+	Managed bool   `json:"managed,omitempty"`
+	Manager string `json:"manager,omitempty"`
+	Service string `json:"service,omitempty"`
 }
 
 // NewMeta describes this process (listeners filled in after binding).
@@ -59,8 +65,35 @@ func (e *LockedError) Error() string {
 			msg += ", listening on " + strings.Join(h.Listeners, ", ")
 		}
 		msg += ")"
+		if h.Managed {
+			msg += fmt.Sprintf("; it is the %s service (%s %s): stop it with `stage service stop`", h.Identity, h.Manager, h.Service)
+		}
 	}
 	return msg
+}
+
+// ReadHolder reports whether a live process holds dataDir's lock and, when
+// it does, its record (nil while the holder is still writing it or when it
+// is unreadable). It never creates or locks anything for long.
+func ReadHolder(dataDir string) (bool, *Meta, error) {
+	path := filepath.Join(dataDir, LockFile)
+	held, err := filelock.Held(path)
+	if err != nil || !held {
+		return false, nil, err
+	}
+	// Record truncates before writing: retry briefly on an empty record.
+	for i := 0; ; i++ {
+		if b, err := os.ReadFile(path); err == nil {
+			var m Meta
+			if json.Unmarshal(b, &m) == nil && m.PID != 0 {
+				return true, &m, nil
+			}
+		}
+		if i == 10 {
+			return true, nil, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // Owner is a held data dir.

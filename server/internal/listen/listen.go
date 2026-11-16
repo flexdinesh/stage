@@ -51,9 +51,13 @@ func maxSocketPath(goos string) int {
 }
 
 // CheckSocketPath rejects a socket path the OS cannot bind.
-func CheckSocketPath(p string) error {
-	if n := len(p); n > MaxSocketPath() {
-		return fmt.Errorf("unix socket path %s is %d bytes, over the %d-byte limit; use a shorter unix:/abs/path.sock", p, n, MaxSocketPath())
+func CheckSocketPath(p string) error { return CheckSocketPathFor(runtime.GOOS, p) }
+
+// CheckSocketPathFor is CheckSocketPath for goos (paths of another OS are
+// derived and tested on any host).
+func CheckSocketPathFor(goos, p string) error {
+	if n, max := len(p), maxSocketPath(goos); n > max {
+		return fmt.Errorf("unix socket path %s is %d bytes, over the %d-byte limit; use a shorter unix:/abs/path.sock", p, n, max)
 	}
 	return nil
 }

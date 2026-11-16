@@ -54,7 +54,9 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 - Server side: one `stage serve` process serves every listener (TCP and/or
   Unix sockets) with one store and runtime, owns its data dir through a lock,
   and applies the request origin policy to `/api` and `/mcp`
-  ([runtime.md](runtime.md)).
+  ([runtime.md](runtime.md)). On a desktop machine an OS per-user service
+  (systemd `--user`, launchd) supervises it (`stage service`,
+  [service.md](service.md)).
 
 ## Builds and legacy paths
 

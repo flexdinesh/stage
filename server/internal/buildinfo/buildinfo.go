@@ -2,7 +2,10 @@
 // (docs/runtime.md). Release builds set the variables with -ldflags -X.
 package buildinfo
 
-import "runtime/debug"
+import (
+	"regexp"
+	"runtime/debug"
+)
 
 // Identity names an installation: it derives the default data dir, the
 // runtime (socket) dir and the T3 client name. "stage" is the stable
@@ -10,6 +13,26 @@ import "runtime/debug"
 // (-X github.com/flexdinesh/stage/server/internal/buildinfo.Identity=...),
 // so its binary can never use the stable paths.
 var Identity = "stage"
+
+// ServiceLabel overrides the macOS launchd label of the per-user service
+// (docs/service.md). Empty: Label() derives it from Identity. Packaging may
+// set it with -X .../buildinfo.ServiceLabel=...
+var ServiceLabel = ""
+
+// Label is the launchd label of the per-user service: ServiceLabel, or
+// "io.github.flexdinesh.<Identity>".
+func Label() string {
+	if ServiceLabel != "" {
+		return ServiceLabel
+	}
+	return "io.github.flexdinesh." + Identity
+}
+
+var identityRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// ValidIdentity reports whether Identity is usable in a unit name, a
+// launchd label and paths: lowercase letters, digits, '.', '_' and '-'.
+func ValidIdentity() bool { return identityRe.MatchString(Identity) }
 
 // Version is the release version ("dev" when not stamped).
 var Version = "dev"

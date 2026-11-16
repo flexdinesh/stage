@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -38,14 +37,27 @@ const ShutdownTimeout = 100 * time.Second
 // Options configure Run.
 type Options struct {
 	Config config.Config
-	// T3 is the T3 client; nil uses the in-memory fake with T3_FAKE=1, else
-	// the real MCP client from Config.
+	// T3 is the T3 client; nil uses the in-memory fake with Config.T3Fake
+	// (T3_FAKE=1), else the real MCP client from Config.
 	T3     t3.Client
 	Logger *slog.Logger
 	// Ready, when set, is called once every listener serves.
 	Ready func(Ready)
 	// ShutdownTimeout overrides ShutdownTimeout (tests).
 	ShutdownTimeout time.Duration
+	// Service, when set, marks this process as the per-user service
+	// (`stage serve --managed`) in the data dir's holder record.
+	Service *Service
+	// OnLocked, when set, runs once the data dir lock is held and before
+	// anything else; a non-nil logger it returns replaces Logger (the macOS
+	// managed log file, which a losing process must never rotate).
+	OnLocked func() (*slog.Logger, error)
+}
+
+// Service names the manager supervising a managed server.
+type Service struct {
+	Manager string // "systemd" | "launchd"
+	Name    string // unit name or launchd label
 }
 
 // Ready describes a serving instance.
@@ -81,9 +93,18 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	defer owner.Release()
+	if o.OnLocked != nil {
+		l, err := o.OnLocked()
+		if err != nil {
+			return err
+		}
+		if l != nil {
+			logger = l
+		}
+	}
 	cfg.DataDir = owner.DataDir
 	if err := cfg.ResolveSockets(); err != nil {
-		return err
+		return config.Invalid(err)
 	}
 	lns, err := listen.OpenAll(cfg.Listen)
 	if err != nil {
@@ -95,6 +116,9 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}()
 	meta := instance.NewMeta()
+	if o.Service != nil {
+		meta.Managed, meta.Manager, meta.Service = true, o.Service.Manager, o.Service.Name
+	}
 	addrs := make([]listen.Addr, len(lns))
 	for i, l := range lns {
 		addrs[i] = l.Spec
@@ -105,7 +129,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	policy, err := guard.New(cfg.AllowedOrigins, logger)
 	if err != nil {
-		return err
+		return config.Invalid(err)
 	}
 
 	ctx, stop := context.WithCancel(ctx)
@@ -135,11 +159,11 @@ func Run(ctx context.Context, o Options) error {
 	t3Client := o.T3
 	switch {
 	case t3Client != nil:
-	case os.Getenv("T3_FAKE") == "1":
+	case cfg.T3Fake:
 		// T3_FAKE=1 forces the in-memory fake (dev/demo without a T3 server).
 		fake := t3.NewFake()
 		// T3_FAKE_SEED=1 seeds demo threads waiting on questions (UI work).
-		if os.Getenv("T3_FAKE_SEED") == "1" {
+		if cfg.T3FakeSeed {
 			fake.SeedDemo()
 		}
 		t3Client = fake
