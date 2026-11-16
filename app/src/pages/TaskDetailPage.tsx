@@ -10,13 +10,15 @@ import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
-import { PromptPanel } from "../components/PromptPanel.tsx";
+import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { NeedsInputSlot, focusAnswerPanel } from "../components/NeedsInputPanel.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
+import { NodeChip } from "../components/trees/TreeNode.tsx";
+import { NoTreePanel, TreePanel } from "../components/trees/TreePanel.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
@@ -175,7 +177,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         }
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
-        <TaskStateBadge state={task.state} />
+        <NodeChip task={task} />
+        {task.adopted ? <Chip title="An existing T3 session stage tracks; it never starts it">tracked session</Chip> : null}
         <Chip>{modelText(task.model, task.modelOptions)}</Chip>
         <Chip>{task.runtimeMode}</Chip>
         {task.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
@@ -261,16 +264,20 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </div>
           ) : (
           <div className="flex min-w-0 flex-col gap-3.5">
-            <PromptPanel text={task.prompt}>
-              {pendingHandoffNote(task) === null ? null : (
-                <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
-              )}
-              {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
-              <ImageStrip attachments={task.attachments} label="Prompt images" />
-              {task.currentHandoffs.map((h) => (
-                <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.sourceThreadId}`} handoff={h} />
-              ))}
-            </PromptPanel>
+            {task.adopted && task.t3ThreadId !== null ? (
+              <OpeningPrompt threadId={task.t3ThreadId} live={isLiveState(task.state)} />
+            ) : (
+              <PromptPanel text={task.prompt}>
+                {pendingHandoffNote(task) === null ? null : (
+                  <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
+                )}
+                {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
+                <ImageStrip attachments={task.attachments} label="Prompt images" />
+                {task.currentHandoffs.map((h) => (
+                  <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.sourceThreadId}`} handoff={h} />
+                ))}
+              </PromptPanel>
+            )}
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
             {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
@@ -278,6 +285,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </div>
           )}
           <div className="flex min-w-0 flex-col gap-3.5">
+            {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
             <PullRequestsPanel prs={task.pullRequests} />
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />

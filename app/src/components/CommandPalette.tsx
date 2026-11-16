@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { keys, useInvalidateWork, useProjects, useTasks } from "../api/queries.ts";
+import { keys, useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
 import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from "../lib/paletteSearch.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
+import { treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
 import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
@@ -31,6 +32,7 @@ interface Item {
 
 const PAGES: [string, string][] = [
   ["Dashboard", "/"],
+  ["Trees", "/trees"],
   ["Projects", "/projects"],
   ["Sessions", "/sessions"],
   ["History", "/history"],
@@ -79,6 +81,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const debounced = useDebounced(q, 200);
   const tasks = useTasks();
   const projects = useProjects();
+  const trees = useTrees({ all: true });
   const threads = useQuery({
     queryKey: [...keys.threads, "palette", debounced],
     queryFn: () => api.threads({ q: debounced, limit: 8, subagents: "exclude" }),
@@ -117,6 +120,8 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           t3Url: t.t3DeepLink,
           link: { kind: "task", id: t.id, title: t.title },
         });
+      for (const tr of (trees.data?.trees ?? []).filter((t) => has(t.title, q)).slice(0, 4))
+        out.push({ key: `tree-${tr.id}`, group: "Trees", label: tr.title, hint: treeMeta(tr), run: go(`/trees/${tr.id}`) });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
       const { sessions, messages } = mergePaletteSessions(
@@ -158,7 +163,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, debounced, searchCurrent, tasks.data, projects.data, threads.data, search.data, navigate, onClose, onNewTask, setTheme, sync]);
+  }, [q, debounced, searchCurrent, tasks.data, trees.data, projects.data, threads.data, search.data, navigate, onClose, onNewTask, setTheme, sync]);
 
   const found = items.findIndex((item) => item.key === activeKey);
   const active = found < 0 ? 0 : found;

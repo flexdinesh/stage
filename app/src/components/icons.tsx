@@ -166,3 +166,10 @@ export const IconRepeat = (p: IconProps) => (
     <path d="M2.5 7.5V4.5h10M10.5 2.5l2 2-2 2M13.5 8.5v3h-10M5.5 13.5l-2-2 2-2" />
   </Svg>
 );
+
+/** Task tree: a need over two dependents, joined by an orthogonal connector (as the tree view draws them). */
+export const IconTree = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5.5 2h5v3.5h-5zM1.5 10.5h5V14h-5zM9.5 10.5h5V14h-5zM8 5.5V8M4 10.5V8h8v2.5" />
+  </Svg>
+);

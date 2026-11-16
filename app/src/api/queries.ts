@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
-import type { ArchivedFilter } from "./client.ts";
+import { ApiError, type ArchivedFilter } from "./client.ts";
 import type { ScheduleListQuery, SchedulePreviewRequest, StatsQuery, TaskListQuery, ThreadListQuery } from "./types.ts";
 
 export const keys = {
@@ -20,6 +20,8 @@ export const keys = {
   schedules: ["schedules"],
   schedule: ["schedule"],
   schedulePreview: ["schedulePreview"],
+  trees: ["trees"],
+  tree: ["tree"],
 } as const;
 
 export const useT3Status = () => {
@@ -51,6 +53,23 @@ export const useTasks = (q: TaskListQuery = {}) => {
 export const useTask = (id: number) => {
   const api = useApi();
   return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id) });
+};
+
+export type TreeListQuery = { all?: boolean; settledFrom?: string; project?: number };
+
+export const useTrees = (q: TreeListQuery = {}) => {
+  const api = useApi();
+  return useQuery({ queryKey: [...keys.trees, q], queryFn: () => api.trees(q), placeholderData: keepPreviousData });
+};
+
+export const useTree = (id: number) => {
+  const api = useApi();
+  // A dissolved (or emptied, so deleted) tree is a 404: show it at once instead of retrying.
+  return useQuery({
+    queryKey: [...keys.tree, id],
+    queryFn: () => api.tree(id),
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,
+  });
 };
 
 export const useSchedules = (q: ScheduleListQuery = {}) => {
@@ -176,6 +195,8 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
       keys.badge,
       keys.schedules,
       keys.schedule,
+      keys.trees,
+      keys.tree,
     ].map((queryKey) =>
       qc.invalidateQueries({ queryKey }),
     ),

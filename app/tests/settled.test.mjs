@@ -34,3 +34,15 @@ test("settled tasks and threads interleave newest settle first", () => {
     ["task 2", "thread a", "task 1", "thread b", "task 3"],
   );
 });
+
+test("completed trees interleave with settled tasks and threads", () => {
+  const merged = mergeSettled(
+    [task(1, "2026-11-10T01:00:00Z")],
+    [thread("a", "2026-11-10T03:00:00Z")],
+    [{ id: 7, settledAt: "2026-11-10T02:00:00Z" }],
+  );
+  assert.deepEqual(
+    merged.map((i) => (i.kind === "task" ? i.task.id : i.kind === "thread" ? i.thread.t3ThreadId : `tree ${i.tree.id}`)),
+    ["a", "tree 7", 1],
+  );
+});

@@ -18,8 +18,8 @@ import {
   IconSearch,
   IconStage,
   IconSun,
-  IconSnippets,
   IconThemeSystem,
+  IconTree,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
@@ -28,6 +28,7 @@ import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx"
 
 const NAV = [
   { to: "/", label: "Dashboard" },
+  { to: "/trees", label: "Trees" },
   { to: "/projects", label: "Projects" },
   { to: "/sessions", label: "Sessions" },
   { to: "/schedules", label: "Schedules" },
@@ -37,15 +38,20 @@ const NAV = [
 ] as const;
 
 /** Phone More drawer: the laptop nav items the bottom tabs leave out. */
-const MORE = NAV.filter((item) => item.to === "/schedules" || item.to === "/history" || item.to === "/settings");
+const MORE = NAV.filter(
+  (item) => item.to === "/schedules" || item.to === "/history" || item.to === "/snippets" || item.to === "/settings",
+);
 
 /** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
 const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
 
-/** Laptop top bar tab styling, shared by nav links and the More menu trigger. */
+/**
+ * Laptop top bar tab styling, shared by nav links and the More menu trigger. Padding tightens between lg and xl so
+ * all eight tabs fit at 1024px (with a classic scrollbar) without clipping Settings.
+ */
 function navTabClass(active: boolean): string {
   return cx(
-    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 xl:px-3",
+    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 lg:px-1.5 xl:px-3",
     active ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
   );
 }
@@ -90,9 +96,9 @@ const TAB_ICON = 22;
 
 const TABS = [
   { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
+  { to: "/trees", label: "Trees", icon: <IconTree size={TAB_ICON} /> },
   { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
   { to: "/sessions", label: "Sessions", icon: <IconHistory size={TAB_ICON} /> },
-  { to: "/snippets", label: "Snippets", icon: <IconSnippets size={TAB_ICON} /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {
@@ -248,7 +254,7 @@ function Shell() {
   return (
     <div className="min-h-screen bg-bg text-fg">
       {/* Laptop top bar */}
-      <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex">
+      <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex lg:max-xl:gap-3">
         <div className="flex items-center">
           <Mark needsInput={needsInput} />
         </div>
@@ -274,7 +280,7 @@ function Shell() {
             className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
-            <span className="hidden xl:inline">Search tasks, threads</span>
+            <span className="hidden 2xl:inline">Search tasks, threads</span>
             <Kbd className="max-xl:hidden">Ctrl K</Kbd>
           </button>
           <NotificationsBell onOpen={openInbox} />

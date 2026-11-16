@@ -1,15 +1,25 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useNeedsInputThreads, useProjects, useRunningThreads, useSchedules, useSettledThreads, useTasks } from "../api/queries.ts";
-import type { Schedule, Task, TaskState, Thread } from "../api/types.ts";
+import {
+  useNeedsInputThreads,
+  useProjects,
+  useRunningThreads,
+  useSchedules,
+  useSettledThreads,
+  useTasks,
+  useTrees,
+} from "../api/queries.ts";
+import type { Schedule, Task, TaskState, Thread, TreeSummary } from "../api/types.ts";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ScheduleRow } from "../components/ScheduleList.tsx";
 import { ExternalThreadRows, SettledRows, TaskRow, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
+import { TreeRow } from "../components/trees/TreeRow.tsx";
+import { splitTreeMembers } from "../lib/dashboard.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 
-type GroupKey = "needs" | "running" | "done" | "failed" | "backlog" | "scheduled" | "settled";
+type GroupKey = "needs" | "trees" | "running" | "done" | "failed" | "ready" | "backlog" | "scheduled" | "settled";
 
 interface Group {
   key: GroupKey;
@@ -18,7 +28,7 @@ interface Group {
   short: string;
   tone: ChipTone;
   states: TaskState[];
-  /** Narrows `states` (backlog splits into untimed and timed). */
+  /** Narrows `states` (backlog splits into ready, untimed and timed). */
   filter?: (t: Task) => boolean;
   empty: string;
   /** Not a stat strip cell (no `?state=` filter). */
@@ -37,6 +47,17 @@ const GROUPS: Group[] = [
     tone: "need",
     states: ["needs_input"],
     empty: "Nothing waiting on you. Tasks and threads that ask a question land here.",
+  },
+  {
+    key: "trees",
+    title: "Trees",
+    stat: "Trees",
+    short: "trees",
+    tone: "plain",
+    states: [],
+    empty: "No active trees.",
+    noStat: true,
+    hideEmpty: true,
   },
   {
     key: "running",
@@ -67,13 +88,25 @@ const GROUPS: Group[] = [
     hideEmpty: true,
   },
   {
+    key: "ready",
+    title: "Ready · start when you choose",
+    stat: "Ready",
+    short: "ready",
+    tone: "idle",
+    states: ["backlog"],
+    filter: (t) => t.readiness === "ready",
+    empty: "Nothing ready. Tree tasks whose needs settled in manual mode, and tree roots, wait here for Start.",
+    hideEmpty: true,
+  },
+  {
     key: "backlog",
     title: "Backlog",
     stat: "Backlog",
     short: "backlog",
     tone: "idle",
     states: ["backlog"],
-    filter: (t) => t.startAt === null,
+    // Ready tasks count (and list) under Ready only, so the strip partitions backlog.
+    filter: (t) => t.startAt === null && t.readiness !== "ready",
     empty: "Backlog is empty. Add one with New task.",
   },
   {
@@ -159,10 +192,17 @@ function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function EmptyGroups({ groups }: { groups: Group[] }) {
+/** A group with nothing to list: its count, and why it is empty (its members may be rolled up into tree rows). */
+interface EmptyGroup {
+  group: Group;
+  count: number;
+  text: string;
+}
+
+function EmptyGroups({ groups }: { groups: EmptyGroup[] }) {
   return (
     <ul className="border border-line bg-surface md:grid md:grid-cols-[max-content_minmax(0,1fr)]">
-      {groups.map((g) => (
+      {groups.map(({ group: g, count, text }) => (
         <li
           key={g.key}
           className="flex min-w-0 flex-col gap-0.5 border-b border-line px-3 py-2 last:border-b-0 md:col-span-2 md:grid md:grid-cols-subgrid md:items-baseline md:gap-x-6"
@@ -170,9 +210,9 @@ function EmptyGroups({ groups }: { groups: Group[] }) {
           <span className="label-caps inline-flex items-center gap-2 text-fg">
             <span aria-hidden className="size-1.5 bg-line-strong" />
             {g.title}
-            <span className="tabular text-muted">0</span>
+            <span className="tabular text-muted">{count}</span>
           </span>
-          <span className="min-w-0 text-small text-muted">{g.empty}</span>
+          <span className="min-w-0 text-small text-muted">{text}</span>
         </li>
       ))}
     </ul>
@@ -203,6 +243,9 @@ function StatStrip({
             className={cx(
               toneClass(g.tone),
               "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-lg:last-of-type:border-r-0 transition-colors duration-150 lg:flex-none lg:flex-row lg:justify-start lg:gap-2 lg:px-3",
+              // Phone fits six cells; Settled stays reachable from its collapsible group.
+              g.key === "settled" && "max-md:hidden",
+              g.key === "backlog" && "max-md:border-r-0",
               on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "hover:bg-panel",
             )}
           >
@@ -217,7 +260,7 @@ function StatStrip({
           </button>
         );
       })}
-      <div className="hidden flex-1 items-center justify-end px-3 whitespace-nowrap lg:flex">
+      <div className="hidden flex-1 items-center justify-end px-3 whitespace-nowrap xl:flex">
         {selected === null ? (
           <span className="font-mono text-meta-sm text-muted">click a count to filter</span>
         ) : (
@@ -271,13 +314,35 @@ export function DashboardPage() {
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
+  // Active trees, plus trees completed inside the settled window; members roll up into their tree's row.
+  const trees = useTrees({ settledFrom: since, ...projectQuery });
+  const split = splitTreeMembers(all, trees.data?.trees ?? []);
   const dueSchedules = useSchedules({ dueWithin: "24h", ...projectQuery });
   const due = dueSchedules.data?.schedules ?? [];
-  const byGroup = (g: Group) => all.filter((t) => g.states.includes(t.state) && (g.filter?.(t) ?? true));
+  const inGroup = (g: Group) => (t: Task) => g.states.includes(t.state) && (g.filter?.(t) ?? true);
+  // Stat counts include tree members; rows leave out members rolled up into a tree row.
+  const byGroup = (g: Group) => all.filter(inGroup(g));
+  const rowsOf = (g: Group) => split.rows.filter(inGroup(g));
+  const treeRows = (g: Group): TreeSummary[] => (g.key === "trees" ? split.active : g.key === "settled" ? split.settled : []);
   const groupCount = (g: Group) =>
-    byGroup(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0);
+    g.key === "trees" ? split.active.length : byGroup(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0);
+  /** Rows the group lists (tasks, external threads, schedules, tree rows). */
+  const listed = (g: Group) =>
+    rowsOf(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0) + treeRows(g).length;
+  /** Members counted here but shown in a tree row. */
+  const inTrees = (g: Group) => (g.key === "trees" || g.key === "ready" ? 0 : split.rolledUp.filter(inGroup(g)).length);
 
-  const counts: Record<GroupKey, number> = { needs: 0, running: 0, done: 0, failed: 0, backlog: 0, scheduled: 0, settled: 0 };
+  const counts: Record<GroupKey, number> = {
+    needs: 0,
+    trees: 0,
+    running: 0,
+    done: 0,
+    failed: 0,
+    ready: 0,
+    backlog: 0,
+    scheduled: 0,
+    settled: 0,
+  };
   for (const g of GROUPS) counts[g.key] = groupCount(g);
   const active = all.filter((t) => ACTIVE_STATES.includes(t.state)).length;
   const projectCount = projects.data?.projects.length;
@@ -291,16 +356,22 @@ export function DashboardPage() {
     });
   }
 
-  // Groups in order; consecutive empty groups (unfiltered view) collapse into one ruled list.
-  const blocks: (Group | Group[])[] = [];
+  // Groups in order; consecutive groups with nothing to list (unfiltered view) collapse into one ruled list.
+  const blocks: (Group | EmptyGroup[])[] = [];
   for (const g of GROUPS) {
     if (selected !== null && selected !== g.key) continue;
-    const empty = groupCount(g) === 0;
-    if (selected === null && empty && g.hideEmpty === true) continue;
+    const empty = listed(g) === 0;
+    if (selected === null && empty && groupCount(g) === 0 && g.hideEmpty === true) continue;
     const prev = blocks.at(-1);
     if (selected === null && empty) {
-      if (Array.isArray(prev)) prev.push(g);
-      else blocks.push([g]);
+      const hidden = inTrees(g);
+      const entry: EmptyGroup = {
+        group: g,
+        count: groupCount(g),
+        text: hidden === 0 ? g.empty : `${hidden} in tree${hidden === 1 ? "" : "s"}, shown in the Trees group.`,
+      };
+      if (Array.isArray(prev)) prev.push(entry);
+      else blocks.push([entry]);
     } else blocks.push(g);
   }
 
@@ -319,6 +390,11 @@ export function DashboardPage() {
         actions={<ProjectSelect value={project} onChange={(v) => setParam("project", v)} />}
       />
       <QueryState isPending={tasks.isPending || settled.isPending} error={tasks.error ?? settled.error}>
+        {trees.error === null ? null : (
+          <div className="mb-3">
+            <ErrorText error={trees.error} />
+          </div>
+        )}
         <StatStrip
           counts={counts}
           selected={selected}
@@ -326,9 +402,10 @@ export function DashboardPage() {
         />
         <div className="flex flex-col gap-3.5">
           {blocks.map((block) => {
-            if (Array.isArray(block)) return <EmptyGroups key={block.map((g) => g.key).join("-")} groups={block} />;
+            if (Array.isArray(block)) return <EmptyGroups key={block.map((e) => e.group.key).join("-")} groups={block} />;
             const g = block;
-            const list = byGroup(g);
+            const list = rowsOf(g);
+            const hidden = inTrees(g);
             const ext = external[g.key];
             const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
             // self-baseline: flex baseline comes from the text, not the square/chevron (no baseline → bottom edge),
@@ -361,11 +438,24 @@ export function DashboardPage() {
                     label
                   )
                 }
-                meta={<span className="tabular">{groupCount(g)}</span>}
+                meta={
+                  <span className="tabular">
+                    {groupCount(g)}
+                    {hidden === 0 ? null : ` · ${hidden} in trees`}
+                  </span>
+                }
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
                 {g.key === "settled" ? (
-                  <SettledRows items={mergeSettled(list, ext?.threads ?? [])} emptyText={g.empty} />
+                  <SettledRows items={mergeSettled(list, ext?.threads ?? [], split.settled)} emptyText={g.empty} />
+                ) : g.key === "trees" ? (
+                  <ul>
+                    {split.active.map((t) => (
+                      <li key={t.id} className="border-b border-line last:border-b-0">
+                        <TreeRow tree={t} />
+                      </li>
+                    ))}
+                  </ul>
                 ) : g.key === "scheduled" ? (
                   <>
                     <ScheduledRows items={mergeScheduled(list, due)} emptyText={g.empty} />
@@ -379,13 +469,18 @@ export function DashboardPage() {
                   <>
                     {list.length > 0 ? (
                       <div className="border-b border-line">
-                        <TaskRows tasks={list} showProject />
+                        <TaskRows tasks={list} showProject showTree />
                       </div>
                     ) : null}
                     <ExternalThreadRows threads={ext.threads} state={ext.state} />
                   </>
                 ) : (
-                  <TaskRows tasks={list} emptyText={g.empty} showProject />
+                  <TaskRows
+                    tasks={list}
+                    emptyText={hidden === 0 ? g.empty : `All ${hidden} are in trees, shown in the Trees group.`}
+                    showProject
+                    showTree
+                  />
                 )}
                 {ext !== undefined && ext.error !== null ? (
                   <div className="border-t border-line p-3">

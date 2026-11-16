@@ -9,13 +9,15 @@ import type { SettledItem } from "../lib/settled.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
-import { IconChainLink, IconClock, IconRepeat } from "./icons.tsx";
+import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
 import { PrChips } from "./PullRequests.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
+import { NodeChip } from "./trees/TreeNode.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 import { RowCopyLink } from "./StageLinks.tsx";
+import { TreeRow } from "./trees/TreeRow.tsx";
 
 /** Standalone bordered task list. Inside a `Panel flush`, use `TaskRows` instead. */
 export function TaskList({ tasks, emptyText = "No tasks." }: { tasks: Task[]; emptyText?: string }) {
@@ -35,17 +37,20 @@ export function TaskRows({
   tasks,
   emptyText = "No tasks.",
   showProject = false,
+  showTree = false,
 }: {
   tasks: Task[];
   emptyText?: string;
   showProject?: boolean;
+  /** Tree members carry a chip naming their tree (Dashboard breakouts). */
+  showTree?: boolean;
 }) {
   if (tasks.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
   return (
     <ul>
       {tasks.map((t) => (
         <li key={t.id} className="border-b border-line last:border-b-0">
-          <TaskRow task={t} showProject={showProject} />
+          <TaskRow task={t} showProject={showProject} showTree={showTree} />
         </li>
       ))}
     </ul>
@@ -110,11 +115,11 @@ interface RowChip {
 }
 
 /**
- * The row's one chip: the one-shot start time while timed, "needs #3 #5" while blocked on its needs, else the
- * schedule that spawned it, else the agent session that created it. Viewed from a session (`contextThreadId`), its
- * own provenance chip is dropped.
+ * The row's one chip: the one-shot start time while timed, its tree when `showTree` (Dashboard breakouts), "needs #3
+ * #5" while blocked on its needs, else the schedule that spawned it, else the agent session that created it. Viewed
+ * from a session (`contextThreadId`), its own provenance chip is dropped.
  */
-function rowChip(task: Task, contextThreadId?: string): RowChip | null {
+function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChip | null {
   if (task.state === "backlog" && task.startAt !== null) {
     const tz = browserTimeZone();
     const when = wallTime(task.startAt, tz, { short: true });
@@ -125,6 +130,13 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
       icon: <IconClock />,
     };
   }
+  if (showTree && task.treeId !== null)
+    return {
+      to: `/trees/${task.treeId}`,
+      label: task.treeTitle ?? `tree ${task.treeId}`,
+      title: `In tree: ${task.treeTitle ?? task.treeId}`,
+      icon: <IconTree />,
+    };
   const [firstNeed] = task.needs;
   if (isWaiting(task) && firstNeed !== undefined)
     return {
@@ -158,12 +170,14 @@ export function TaskRow({
   task,
   extra,
   showProject = false,
+  showTree = false,
   contextThreadId,
   hideStart = false,
 }: {
   task: Task;
   extra?: ReactNode;
   showProject?: boolean;
+  showTree?: boolean;
   contextThreadId?: string;
   /** The Start lives elsewhere (a chain head's Start chain). */
   hideStart?: boolean;
@@ -173,7 +187,7 @@ export function TaskRow({
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
-  const chip = rowChip(task, contextThreadId);
+  const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
   const answerable = needsInput && task.pendingQuestionCount > 0;
   const hasActions = showStart || answerable || task.t3DeepLink !== null || extra !== undefined;
@@ -191,7 +205,7 @@ export function TaskRow({
       )}
     >
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
-        <TaskStateBadge state={task.state} />
+        <NodeChip task={task} />
       </div>
 
       {showProject ? <ProjectCell projectId={task.projectId} title={task.projectTitle} /> : null}
@@ -227,7 +241,7 @@ export function TaskRow({
               className="inline-flex items-center gap-1 tabular hover:text-fg hover:underline md:hidden"
             >
               {chip.icon}
-              {chip.label}
+              <span className="max-w-[24ch] truncate">{chip.label}</span>
             </Link>
           )}
           {task.tags.map((tag) => (
@@ -243,9 +257,9 @@ export function TaskRow({
       <div className="hidden md:order-3 md:block">
         {chip === null ? null : (
           <Link to={chip.to} title={chip.title} className="hover:opacity-80">
-            <Chip tone="plain" className="tabular">
+            <Chip tone="plain" className="max-w-[22ch] tabular">
               {chip.icon}
-              {chip.label}
+              <span className="min-w-0 truncate">{chip.label}</span>
             </Chip>
           </Link>
         )}
@@ -307,11 +321,13 @@ export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyT
     <ul>
       {items.map((item) => (
         <li
-          key={item.kind === "task" ? `task-${item.task.id}` : `thread-${item.thread.t3ThreadId}`}
+          key={item.kind === "task" ? `task-${item.task.id}` : item.kind === "tree" ? `tree-${item.tree.id}` : `thread-${item.thread.t3ThreadId}`}
           className="border-b border-line last:border-b-0"
         >
           {item.kind === "task" ? (
             <TaskRow task={item.task} showProject />
+          ) : item.kind === "tree" ? (
+            <TreeRow tree={item.tree} />
           ) : (
             <ExternalThreadRow thread={item.thread} state="settled" />
           )}

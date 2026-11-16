@@ -2,7 +2,14 @@ import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { keys, latestNotificationsKey, useNotificationHistory, useNotificationInbox, useNotifications } from "../api/queries.ts";
+import {
+  keys,
+  latestNotificationsKey,
+  useInvalidateWork,
+  useNotificationHistory,
+  useNotificationInbox,
+  useNotifications,
+} from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
@@ -10,7 +17,7 @@ import { pushFooterNote } from "../lib/push.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
-import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, toneClass } from "./ui.tsx";
+import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, errorText, toneClass } from "./ui.tsx";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -19,6 +26,34 @@ const MAX_TOASTS = 3;
 const stillWaiting = (n: Notification) => n.event === "needs_input" && n.currentState === "needs_input";
 /** Still waiting on questions stage can answer. */
 const answerable = (n: Notification) => n.currentState === "needs_input" && n.pendingQuestionCount > 0;
+
+/** A ready notification whose task still waits in backlog: it can be started from here. */
+const startable = (n: Notification): n is Notification & { taskId: number } =>
+  n.event === "ready" && n.currentState === "backlog" && n.taskId !== null;
+
+/** Start for a ready notification (POST start); the error shows in the title and as a red line. */
+function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => void }) {
+  const api = useApi();
+  const invalidate = useInvalidateWork();
+  const start = useMutation({
+    mutationFn: () => api.startTask(taskId),
+    onSuccess: () => onStarted?.(),
+    onSettled: invalidate,
+  });
+  const error = errorText(start.error);
+  return (
+    <>
+      {error === null ? null : (
+        <span className="min-w-0 basis-full truncate text-right font-mono text-meta-sm text-bad" title={error}>
+          {error}
+        </span>
+      )}
+      <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()} title={`Start task #${taskId}`}>
+        Start
+      </Button>
+    </>
+  );
+}
 
 const notificationPath = (n: Notification) => n.t3ThreadId === null ? n.url : sessionPath(n.t3ThreadId);
 
@@ -33,7 +68,7 @@ export function usePushRefresh() {
   useEffect(
     () =>
       notifications?.onDelivered(() => {
-        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.stats]) {
+        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.stats, keys.trees, keys.tree]) {
           void qc.invalidateQueries({ queryKey });
         }
       }),
@@ -225,7 +260,8 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
           {project === "" ? "" : `${project} · `}
           <span className="tabular">{relativeTime(n.createdAt)}</span>
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onDismiss} /> : <ToastView n={n} onDismiss={onDismiss} />}
           {n.t3DeepLink === null ? null : (
             <AppButton small variant={stillWaiting(n) && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
@@ -369,7 +405,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
       <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
         {items.length === 0 ? (
-          <Muted>No notifications in the last 30 days. Needs input, failed, done and settled events land here.</Muted>
+          <Muted>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</Muted>
         ) : (
           <div className="flex flex-col gap-3.5">
             {groupByDay(items).map((g) => (
@@ -424,7 +460,9 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   const historyId = useId();
   const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
-  const changed = n.currentState !== null && n.currentState !== n.event;
+  // A ready task still in backlog reads "ready": that is its current state, not a change.
+  const ready = startable(n);
+  const changed = n.currentState !== null && n.currentState !== n.event && !ready;
   return (
     <div className={cx("border-l-2 px-3 py-2.5", waiting ? "border-l-need" : "border-l-transparent")}>
       <div className="flex items-start justify-between gap-2.5">
@@ -439,7 +477,13 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           </Link>
         </div>
         <div className="shrink-0">
-          {n.currentState === null ? <Chip className="text-muted">unavailable</Chip> : <TaskStateBadge state={n.currentState} />}
+          {ready ? (
+            <NotificationEventBadge event="ready" />
+          ) : n.currentState === null ? (
+            <Chip className="text-muted">unavailable</Chip>
+          ) : (
+            <TaskStateBadge state={n.currentState} />
+          )}
         </div>
       </div>
       <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
@@ -469,6 +513,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           <span className="font-mono">{n.eventCount} {n.eventCount === 1 ? "update" : "updates"}</span>
         </Button>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {startable(n) ? <StartButton taskId={n.taskId} /> : null}
           {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onNavigate} /> : null}
           {n.t3DeepLink === null ? null : (
             <AppButton small variant={waiting && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
