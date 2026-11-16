@@ -113,9 +113,7 @@ export function TreeNode({
   endsLevel,
   showProject,
   selected,
-  dimmed,
   onSelect,
-  onHot,
 }: {
   task: Task;
   byId: ReadonlyMap<number, Task>;
@@ -126,10 +124,7 @@ export function TreeNode({
   endsLevel: boolean;
   showProject: boolean;
   selected: boolean;
-  dimmed: boolean;
   onSelect: (id: number) => void;
-  /** Hover / focus enters (id) or leaves (null). */
-  onHot: (kind: "hover" | "focus", id: number | null) => void;
 }) {
   const { pending, failed } = pendingNeeds(task, byId);
   const when = inState(task);
@@ -138,19 +133,11 @@ export function TreeNode({
   return (
     <li
       data-node={task.id}
-      onMouseEnter={() => onHot("hover", task.id)}
-      onMouseLeave={() => onHot("hover", null)}
-      onFocus={() => onHot("focus", task.id)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) onHot("focus", null);
-      }}
       className={cx(
         "relative flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 last:border-b-0 md:col-span-6 md:grid md:min-h-[34px] md:grid-cols-subgrid md:gap-0 md:px-0 md:py-0",
-        "transition-opacity duration-150 motion-reduce:transition-none",
         endsLevel ? "border-line-strong" : "border-line",
         task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",
         selected && "outline outline-1 -outline-offset-2 outline-fg",
-        dimmed && "opacity-45",
       )}
     >
       <span className="font-mono text-meta-sm text-muted tabular max-md:hidden md:pl-3">{firstOfLevel ? `L${level + 1}` : null}</span>

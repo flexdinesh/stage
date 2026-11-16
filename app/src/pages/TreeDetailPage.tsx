@@ -12,6 +12,7 @@ import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
 import { TreeActivity } from "../components/trees/TreeActivity.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
+import { TreeGraph } from "../components/trees/TreeGraph.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
@@ -27,6 +28,11 @@ const MODE_OPTIONS: { value: StartMode; label: string }[] = [
 const VIEW_OPTIONS: { value: "tasks" | "notes"; label: string }[] = [
   { value: "tasks", label: "Tasks" },
   { value: "notes", label: "Notes" },
+];
+
+const LAYOUT_OPTIONS: { value: "list" | "graph"; label: string }[] = [
+  { value: "list", label: "List" },
+  { value: "graph", label: "Graph" },
 ];
 
 export function TreeDetailPage() {
@@ -172,6 +178,13 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
     const updated = new URLSearchParams(params);
     if (next === "notes") updated.set("view", "notes");
     else updated.delete("view");
+    setParams(updated);
+  };
+  const layout = params.get("layout") === "graph" ? "graph" : "list";
+  const setLayout = (next: "list" | "graph") => {
+    const updated = new URLSearchParams(params);
+    if (next === "graph") updated.set("layout", "graph");
+    else updated.delete("layout");
     setParams(updated);
   };
   const [picked, setPicked] = useState<number | null>(null);
@@ -335,12 +348,19 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             flush
             meta={
               <>
-                <span className="max-lg:hidden">hover to trace needs · click a task to edit</span>
+                <span className="max-lg:hidden">{layout === "graph" ? "steps run top to bottom · click a task to edit" : "click a task to edit"}</span>
                 <span className="lg:hidden">tap a task to open it</span>
               </>
             }
+            actions={<Segmented label="Tree layout" small options={LAYOUT_OPTIONS} value={layout} onChange={setLayout} />}
           >
-            {tree.tasks.length === 0 ? <p className="p-3 text-small text-muted">No tasks remain in this tree. Its notes and history are retained.</p> : <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />}
+            {tree.tasks.length === 0 ? (
+              <p className="p-3 text-small text-muted">No tasks remain in this tree. Its notes and history are retained.</p>
+            ) : layout === "graph" ? (
+              <TreeGraph tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
+            ) : (
+              <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
+            )}
           </Panel>
           <TreeActivity tree={tree} className="lg:hidden" />
           <div className="flex min-w-0 flex-col gap-3.5 max-lg:hidden">

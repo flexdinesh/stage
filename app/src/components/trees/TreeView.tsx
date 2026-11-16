@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { TreeDetail } from "../../api/types.ts";
-import { layoutLevels, related } from "../../lib/trees.ts";
+import { layoutLevels } from "../../lib/trees.ts";
 import { TreeNode } from "./TreeNode.tsx";
 
 /** Laptop columns: level, state, task, needs, in state, action (rows join the list's subgrid). */
@@ -10,7 +10,7 @@ const HEAD = ["L", "State", "Task", "Needs", "In state", ""];
 
 /**
  * The tree as a graph list: one ruled row per member in level order (roots first, each level ordered by its needs),
- * a stronger rule between levels. Hovering or focusing a row dims every row that is not a direct need or dependent.
+ * a stronger rule between levels.
  */
 export function TreeView({
   tree,
@@ -24,11 +24,6 @@ export function TreeView({
   const levels = useMemo(() => layoutLevels(tree.tasks), [tree.tasks]);
   const byId = useMemo(() => new Map(tree.tasks.map((t) => [t.id, t])), [tree.tasks]);
   const showProject = useMemo(() => new Set(tree.tasks.map((t) => t.projectId)).size > 1, [tree.tasks]);
-  const [hover, setHover] = useState<number | null>(null);
-  const [focus, setFocus] = useState<number | null>(null);
-  const hot = hover ?? focus;
-  const near = useMemo(() => (hot === null ? null : related(tree.tasks, hot)), [tree.tasks, hot]);
-  const onHot = useCallback((kind: "hover" | "focus", id: number | null) => (kind === "hover" ? setHover(id) : setFocus(id)), []);
 
   return (
     <ul className={COLUMNS} aria-label="Tree tasks in level order">
@@ -53,9 +48,7 @@ export function TreeView({
               endsLevel={i === band.length - 1 && l < levels.length - 1}
               showProject={showProject}
               selected={selected === id}
-              dimmed={near !== null && id !== hot && !near.has(id)}
               onSelect={onSelect}
-              onHot={onHot}
             />
           );
         }),

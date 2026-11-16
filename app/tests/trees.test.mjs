@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  bandState,
   baseCandidates,
   closeBlocker,
   closedLabel,
   countMembers,
+  edgeState,
+  graphLayout,
   inState,
   layoutLevels,
   needCandidates,
   nextActionText,
   nodeState,
-  related,
   rollupLabel,
   taskClosedLabel,
   treeClosed,
@@ -65,10 +67,68 @@ test("need candidates exclude self, existing needs and loops", () => {
   assert.deepEqual(needCandidates(diamond, 42), []);
 });
 
-test("related is direct needs plus direct dependents", () => {
-  assert.deepEqual([...related(diamond, 3)].toSorted(), [1, 2, 5]);
-  assert.deepEqual([...related(diamond, 1)].toSorted(), [3, 4]);
-  assert.deepEqual([...related(diamond, 5)].toSorted(), [3, 4]);
+const size = { nodeW: 100, nodeH: 40, gapX: 10, gapY: 30 };
+
+test("graph layout stacks a chain in one column with vertical edges", () => {
+  const chain = [node(1), node(2, [1]), node(3, [2])];
+  const g = graphLayout(chain, size);
+  assert.deepEqual(g.levels, [[1], [2], [3]]);
+  assert.equal(g.width, 100);
+  assert.equal(g.height, 3 * 40 + 2 * 30);
+  assert.deepEqual(g.nodes, [
+    { id: 1, level: 0, x: 0, y: 0 },
+    { id: 2, level: 1, x: 0, y: 70 },
+    { id: 3, level: 2, x: 0, y: 140 },
+  ]);
+  assert.deepEqual(g.edges.map((e) => [e.from, e.to]), [[1, 2], [2, 3]]);
+  // Bottom centre of the need to just above the dependent's top centre.
+  assert.match(g.edges[0].path, /^M50 40C50 \S+ 50 \S+ 50 68$/);
+  assert.equal(g.edges[0].arrow, "M46 63L50 68L54 63");
+});
+
+test("graph layout centres rows and draws every edge of a fan-in", () => {
+  const g = graphLayout(diamond, size);
+  assert.deepEqual(g.levels, [[1, 2], [4, 3], [5]]);
+  assert.equal(g.width, 210);
+  const x = Object.fromEntries(g.nodes.map((n) => [n.id, n.x]));
+  assert.deepEqual(x, { 1: 0, 2: 110, 4: 0, 3: 110, 5: 55 });
+  assert.deepEqual(
+    g.edges.map((e) => `${e.from}>${e.to}`).toSorted(),
+    ["1>3", "1>4", "2>3", "3>5", "4>5"],
+  );
+});
+
+test("graph layout spans skipped levels and ignores needs outside the tree", () => {
+  const g = graphLayout([node(1), node(2, [1]), node(3, [1, 2, 99])], size);
+  const skip = g.edges.find((e) => e.from === 1 && e.to === 3);
+  assert.ok(skip);
+  assert.match(skip.path, /^M50 40C/);
+  assert.match(skip.path, / 50 138$/);
+  assert.equal(g.edges.length, 3);
+});
+
+test("graph layout of an empty tree is empty", () => {
+  assert.deepEqual(graphLayout([], size), { width: 0, height: 0, levels: [], nodes: [], edges: [] });
+});
+
+const bandMember = (state, readiness = null) => ({ state, readiness });
+
+test("band state: live or ready work is now, all settled is done, else waits", () => {
+  assert.equal(bandState([bandMember("settled"), bandMember("running")]), "now");
+  assert.equal(bandState([bandMember("needs_input")]), "now");
+  assert.equal(bandState([bandMember("launching")]), "now");
+  assert.equal(bandState([bandMember("backlog", "ready")]), "now");
+  assert.equal(bandState([bandMember("settled"), bandMember("settled")]), "done");
+  assert.equal(bandState([bandMember("settled"), bandMember("done")]), "waits");
+  assert.equal(bandState([bandMember("backlog", "blocked")]), "waits");
+  assert.equal(bandState([bandMember("failed")]), "waits");
+  assert.equal(bandState([]), "waits");
+});
+
+test("edge state follows the need: settled met, failed kinds failed, else waiting", () => {
+  assert.equal(edgeState({ state: "settled" }), "met");
+  for (const s of ["failed", "interrupted", "cancelled"]) assert.equal(edgeState({ state: s }), "failed");
+  for (const s of ["backlog", "launching", "running", "needs_input", "done"]) assert.equal(edgeState({ state: s }), "waiting");
 });
 
 const member = (state, readiness = null) => ({ state, readiness });
