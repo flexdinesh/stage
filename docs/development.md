@@ -18,14 +18,26 @@ needs no install at all ([below](#stage-dev-vs-stable-vs-dev-runs)).
 
 ## Install or update from a commit
 
-Run from any Stage checkout (the script is in `scripts/`):
+```sh
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install-dev.sh | sh                       # latest origin/main
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install-dev.sh | sh -s -- <sha>            # that commit (full 40-hex SHA)
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install-dev.sh | sh -s -- --headless       # stage-dev CLI/server only
+```
 
-Install script: https://github.com/flexdinesh/stage/blob/main/scripts/install-dev.sh
+Piped, the script needs no checkout: it builds from a cached bare clone
+(`${XDG_CACHE_HOME:-~/.cache}/stage-install-dev/repo.git`) of
+`https://github.com/flexdinesh/stage.git` (`STAGE_DEV_REPO` overrides it,
+for forks and tests), using gh's credentials when `gh` is logged in.
+
+### From a checkout
+
+The same script in `scripts/` builds from that checkout's `origin`
+instead, and only there can it build the working tree:
 
 ```sh
-scripts/install-dev.sh            # latest origin/main
-scripts/install-dev.sh <sha>      # that commit (full 40-hex SHA)
-scripts/install-dev.sh --headless # stage-dev CLI/server only
+scripts/install-dev.sh                 # latest origin/main
+scripts/install-dev.sh <sha>           # that commit
+scripts/install-dev.sh --working-tree  # this checkout's working tree
 ```
 
 | Flag | Meaning |
@@ -35,15 +47,15 @@ scripts/install-dev.sh --headless # stage-dev CLI/server only
 | `--cli-name NAME` | the CLI's name in `~/.local/bin` (default `stage-dev`) |
 | `--check` | run `mise run check` on the commit before building (slow) |
 | `--force` | rebuild and reinstall even if that commit is already installed |
-| `--working-tree` | build this checkout's working tree instead of a commit (no fetch; uncommitted changes marked `-dirty`); takes no SHA |
+| `--working-tree` | build this checkout's working tree instead of a commit (no fetch; uncommitted changes marked `-dirty`); takes no SHA; checkout runs only (piped: exit 2) |
 
 What it does:
 
-1. `git fetch origin`. A failed fetch stops it (exit 10): it never falls back to local branches.
+1. `git fetch origin`, in the checkout or, piped, in the cache clone (created on the first run, its `origin` set to `STAGE_DEV_REPO`). A failed fetch stops it (exit 10): it never falls back to local branches.
 2. Resolves the commit: `origin/main` when no SHA is given, else the SHA, which origin must have (contained in an origin branch, or served by origin when fetched by hash). A commit only in your local clone is refused (exit 10). It prints `commit <full sha>`.
 3. If Stage Dev is already that commit (same mode and CLI name) it stops: "already installed" (exit 0). `--force` rebuilds.
 4. Checks the commit has the build interface the script drives (`mise run dist` with `STAGE_DIST_OUT`, and `stage install --from`: commit `45792be` and later); older commits are refused (exit 7) before anything runs.
-5. Checks the commit out into a temporary detached `git worktree` under `${XDG_CACHE_HOME:-~/.cache}/stage-install-dev/` (checkout hooks off). Your checkout, its branches, index and uncommitted work are never touched; only `origin/*` refs are updated.
+5. Checks the commit out into a temporary detached `git worktree` under `${XDG_CACHE_HOME:-~/.cache}/stage-install-dev/` (checkout hooks off). Your checkout, its branches, index and uncommitted work are never touched; only `origin/*` refs are updated. Piped runs touch only the cache clone, never the repository of the current directory.
 6. In that worktree: `mise install`, optionally `mise run check`, then `mise run dist` (a `stage-dev` build: version `0.0.0-dev.g<sha12>`, the full commit in every binary, verified and smoke-run: [release.md](release.md#modes)). The built commit must be exactly the SHA.
 7. The built `stage-dev` runs `stage-dev install --from <dist>`: the same checks, layout, locking, service restart and rollback as a release install ([install.md](install.md)), with Stage Dev's paths.
 8. Removes the temporary worktree and build, also after a failure or Ctrl-C.
@@ -67,13 +79,14 @@ release; Gatekeeper is not bypassed.
 
 ## Uninstall
 
-Uninstall script: https://github.com/flexdinesh/stage/blob/main/scripts/uninstall-dev.sh
-
 ```sh
-scripts/uninstall-dev.sh           # app, CLI link, desktop entry, service; data kept
-scripts/uninstall-dev.sh --purge   # also Stage Dev's data, config, logs, preferences (asks first)
-scripts/uninstall-dev.sh --purge --yes
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/uninstall-dev.sh | sh                        # app, CLI link, desktop entry, service; data kept
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/uninstall-dev.sh | sh -s -- --purge --yes    # also Stage Dev's data, config, logs, preferences
 ```
+
+From a checkout: `scripts/uninstall-dev.sh [--purge] [--yes]`. Piped,
+stdin is the script, so `--purge` cannot ask: pass `--yes` (without it,
+it refuses, exit 2).
 
 It runs the installed Stage Dev's own `uninstall` (`stage-dev uninstall`
 does the same, [install.md](install.md#uninstall)). `--purge` then deletes
@@ -121,13 +134,13 @@ installs then run agents on that T3 as separate clients.
 
 ## Troubleshooting
 
-- **`git fetch origin failed`** (exit 10): network, or git credentials for origin (the repository is private). Nothing was built; fix and rerun.
+- **`git fetch origin failed`** (exit 10): network, or git credentials for origin (the repository is private; piped runs use gh's credentials, so `gh auth login`). Nothing was built; fix and rerun.
 - **`origin has no commit`** (exit 10): the SHA is mistyped, abbreviated, or not pushed. Push it, or pass the full hash.
 - **`predates the dev-install build interface`** (exit 7): the commit is older than `45792be`; pick a newer one.
 - **`build failed`** (exit 1): the commit's `mise install`, `check` or `dist` failed (its output is above). Stage Dev was not changed. Try `--working-tree` on a checkout of that commit to debug.
-- **`installed in desktop mode`** (exit 7): switching between desktop and `--headless` needs `scripts/uninstall-dev.sh` first.
+- **`installed in desktop mode`** (exit 7): switching between desktop and `--headless` needs an uninstall first (the [curl command above](#uninstall) or `scripts/uninstall-dev.sh`).
 - **A file it does not own** (exit 7), **another install running** (exit 3), **rolled back** (12) or **kept after migration** (13): see [install.md](install.md#exit-codes).
-- **Leftover temporary worktree** (the script was killed with SIGKILL): `git worktree prune` in your checkout and delete `~/.cache/stage-install-dev/`.
+- **Leftover temporary worktree** (the script was killed with SIGKILL): `git worktree prune` in your checkout (piped runs: `git -C ~/.cache/stage-install-dev/repo.git worktree prune`) and delete `~/.cache/stage-install-dev/build.*`.
 
 Exit codes: 0 done or already installed, 1 build or other failure, 2
 usage (including a SHA that is not 40 hex characters), 3/11/12/13 from the
@@ -144,7 +157,10 @@ stub `mise` and `stage` (`tools/release/install_dev_script_test.go`:
 default `origin/main`, explicit and pull request SHAs, repeat and
 `--force`, update, fetch failure, unknown, local-only, malformed and
 unsupported revisions, build failure keeping the prior install, `--check`,
-`--working-tree`, cleanup, purge paths on Linux and macOS) and the
+`--working-tree`, cleanup, purge paths on Linux and macOS, and piped
+runs via `sh -s` with `STAGE_DEV_REPO` at the fixture: cache clone reuse,
+SHAs, refusals, `--help`, a current directory inside a checkout, and
+uninstall) and the
 stable/dev coexistence tests (`server/internal/install/coexist_test.go`).
 To try a real build by hand, point `HOME`, `XDG_DATA_HOME`,
 `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` at a scratch directory and put a
@@ -153,4 +169,5 @@ failing `systemctl` stub first on `PATH`, so no real service is registered.
 ## For successors
 
 - The build interface between the script and a commit: the commit's `mise run dist` honors `STAGE_DIST_OUT`, writes `stage-release.json` with `version` and `commit`, and `stage-dev-<v>-<os>-<arch>.tar.gz` with `<base>/stage`, whose `install --from DIR --desktop|--headless [--cli-name NAME]` installs it. The gate in `scripts/install-dev.sh` probes for it; a change to that interface needs a new probe and must keep older supported commits building.
+- Piped mode is chosen when `$0` is not an `install-dev.sh` file inside a git checkout (under `curl | sh`, `$0` is the shell). `STAGE_DEV_REPO` is the seam the tests use to point the cache clone at a fixture origin.
 - Not verified: macOS (paths are covered by fixtures only) and a real run of the script into a home.
