@@ -23,7 +23,7 @@ unchanged. Code: `server/internal/service`, `server/internal/cli/service.go`,
 | `stage service logs [-f] [-n 100]` | Recent log lines (journald on Linux, the log file on macOS). |
 | `stage service enable` / `disable` | Login startup on/off. Neither starts nor stops it. |
 | `stage service uninstall [--wait 2m]` | Stops it, turns login startup off and removes the definition. Keeps the data dir, `service.env` and logs. |
-| `stage version [--json]` | This binary's identity, version, commit, API version, unit and label. |
+| `stage version [--json]` | This binary's identity, version, commit, API version, unit and label; `build`, the release build stamp, when stamped ([release.md](release.md#build-stamp)). |
 
 Every command but `logs` takes `--json`. Service commands always target this
 installation's local service: `--url` is refused and `STAGE_URL` is ignored.

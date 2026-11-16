@@ -36,8 +36,9 @@ build time:
 go build -ldflags "-X github.com/flexdinesh/stage/server/internal/buildinfo.Identity=stage-dev" ./cmd/stage
 ```
 
-A developer installation built this way can never use the stable paths. The
-packaging task picks the names. The identity derives:
+A developer installation built this way can never use the stable paths.
+Release builds use `stage`, developer builds (`mise run dist`) `stage-dev`
+([release.md](release.md)). The identity derives:
 
 | What | Path |
 | --- | --- |

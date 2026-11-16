@@ -80,7 +80,7 @@ The OS supervises `stage serve --managed`: restarts with backoff, logs (journald
 
 ### Desktop app (Linux, macOS)
 
-The desktop app shows the same UI in a native window and talks to the local Stage server over its Unix socket. It starts the per-user service itself (`stage service start`) and leaves it running when you quit. Build it from source: `mise run desktop:package` (local packages in `desktop/app/build/`), or run it from the repository with `mise run desktop:dev`. Behavior, identities and links: [docs/desktop.md](docs/desktop.md).
+The desktop app shows the same UI in a native window and talks to the local Stage server over its Unix socket. It starts the per-user service itself (`stage service start`) and leaves it running when you quit. Build it from source: `mise run dist` (a `stage-dev` build: packages and a manifest in `.scratch/dist/<version>`, [docs/release.md](docs/release.md)), or run it from the repository with `mise run desktop:dev`. Behavior, identities and links: [docs/desktop.md](docs/desktop.md).
 
 ## Configuration
 
@@ -221,7 +221,7 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise
 - `mise run test`: Go vet and tests; app and web host tests, typecheck and lint.
 - `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, desktop app and fixture Go tests). Run before a PR.
 - `mise run build`: the browser bundle (`web/dist`) embedded into `bin/stage`.
-- `mise run desktop:dev`: the desktop app against a foreground dev server on a scratch socket (no OS service). `mise run desktop:package [IDENTITY=stage|stage-dev]`: local Linux packages and a macOS `.app` in `desktop/app/build/`. `mise run desktop:e2e`: webview e2e (display and WebKitGTK 4.1, or macOS). See [docs/desktop.md](docs/desktop.md).
+- `mise run desktop:dev`: the desktop app against a foreground dev server on a scratch socket (no OS service). `mise run dist [TARGETS=host|all]`: a developer build of the desktop app and the headless CLI/server (`stage-dev`), verified, in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z`: the release build of a clean HEAD ([docs/release.md](docs/release.md)). `mise run desktop:e2e`: webview e2e (display and WebKitGTK 4.1, or macOS). See [docs/desktop.md](docs/desktop.md).
 - `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`.
 - `mise run up` / `mise run down`: build and run, or stop, the compose stack (data volume kept).
 - Single test files: `node --test app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
