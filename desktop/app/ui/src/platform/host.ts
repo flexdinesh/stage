@@ -1,0 +1,47 @@
+import type { HostServices, HostState } from "@stage/app/platform";
+import { INITIAL_STATE, type DesktopNative } from "./native.ts";
+
+/** The connection state store over the shell's state events, plus login startup and navigation. */
+export function desktopHost(native: DesktopNative): HostServices & { current(): HostState } {
+  let state = INITIAL_STATE;
+  const listeners = new Set<(s: HostState) => void>();
+  const set = (next: HostState) => {
+    state = next;
+    for (const l of listeners) l(next);
+  };
+  // Events first, then the snapshot, so no change is missed in between; a stale snapshot never wins.
+  let seen = false;
+  native.onState((s) => {
+    seen = true;
+    set(s);
+  });
+  void native.state().then((s) => {
+    if (!seen) set(s);
+  });
+
+  return {
+    current: () => state,
+    connection: {
+      current: () => state,
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      retry: () => native.retry(),
+      startServer: () => native.startServer(),
+      restartServer: () => native.restartServer(),
+      diagnostics: () => native.diagnostics(),
+    },
+    loginStartup: {
+      get: () => native.loginStartup(),
+      set: (enabled) => native.setLoginStartup(enabled),
+    },
+    onNavigate(listener) {
+      const off = native.onNavigate(listener);
+      void native.takeNavigation().then((path) => {
+        if (path !== "") listener(path);
+      });
+      return off;
+    },
+  };
+}

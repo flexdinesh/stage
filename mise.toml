@@ -54,8 +54,8 @@ run = [
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture Go tests"
-depends = ["check:go", "check:web", "check:fixture"]
+description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture and desktop app Go tests"
+depends = ["check:go", "check:web", "check:fixture", "check:desktop"]
 
 [tasks."check:go"]
 description = "go vet (with and without the smoke tag) + go test"
@@ -72,6 +72,86 @@ run = "pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pn
 [tasks."check:fixture"]
 description = "Desktop fixture (desktop/fixture): go vet (with and without e2e tag) + go test; no webview needed"
 run = "cd desktop/fixture && go vet ./... && go vet -tags e2e ./... && go test ./..."
+
+[tasks."check:desktop"]
+description = "Desktop app (desktop/app): go vet (with and without e2e tag) + go test, incl. the headless integration test against a real stage serve; no webview needed"
+run = "cd desktop/app && mkdir -p dist && touch dist/.gitkeep && go vet ./... && go vet -tags e2e ./... && go test ./..."
+
+[tasks."desktop:dev"]
+description = "Desktop app in development: foreground stage-dev server on a scratch socket (branch data dir) + go tool mygo dev with the UI's Vite server (:5174); no OS service touched"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -e
+DEV_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+DEV_DIR="$PWD/.scratch/dev/$(printf '%s' "$DEV_BRANCH" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-80)"
+BRANCH8=$(printf '%s' "$DEV_BRANCH" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-8)
+SOCK_DIR="${XDG_RUNTIME_DIR:-/tmp}/stage-desktopdev"
+mkdir -p "$SOCK_DIR" "$DEV_DIR/bin" && chmod 700 "$SOCK_DIR"
+# The desktop app (dev builds only) and the UI's Vite proxy use this socket.
+export STAGE_DESKTOP_SOCKET="$SOCK_DIR/$BRANCH8.sock"
+export STAGE_DESKTOP_DEV_SOCKET="$STAGE_DESKTOP_SOCKET"
+# Load .env.dev (if present, never .env); T3_FAKE and friends pass through.
+set -a; [ -f .env.dev ] && . ./.env.dev; set +a
+export STAGE_ENV=dev STAGE_DATA_DIR="$DEV_DIR/desktop"
+unset STAGE_LISTEN STAGE_URL
+(cd server && go build -ldflags "-X github.com/flexdinesh/stage/server/internal/buildinfo.Identity=stage-dev" -o "$DEV_DIR/bin/stage" ./cmd/stage)
+echo "desktop dev: data $STAGE_DATA_DIR, socket $STAGE_DESKTOP_SOCKET"
+# On exit, kill only this script's jobs and their descendants, never the
+# process group (mise, the calling shell).
+kill_tree() { local c; for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null || true; }
+trap 'for p in $(jobs -p); do kill_tree "$p"; done' EXIT
+"$DEV_DIR/bin/stage" serve --listen "unix:$STAGE_DESKTOP_SOCKET" &
+pnpm install
+# mygo.config.ts: devUrl http://localhost:5174, devCommand runs the UI's Vite server.
+(cd desktop/app && go tool mygo dev) &
+wait
+'''
+
+[tasks."desktop:package"]
+description = "Package the desktop app locally (IDENTITY=stage|stage-dev, default stage-dev): bundled stage CLI per platform + mygo build for linux/amd64, linux/arm64, darwin/universal into desktop/app/build"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+IDENTITY="${IDENTITY:-stage-dev}"
+case "$IDENTITY" in
+  stage) NAME="Stage"; APPID=io.github.flexdinesh.stage.desktop ;;
+  stage-dev) NAME="Stage Dev"; APPID=io.github.flexdinesh.stage-dev.desktop ;;
+  *) echo "IDENTITY must be stage or stage-dev, not $IDENTITY" >&2; exit 2 ;;
+esac
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
+BI=github.com/flexdinesh/stage/server/internal/buildinfo
+RES="$PWD/desktop/app/resources"
+rm -rf "$RES"
+for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
+  os=${target%/*}; arch=${target#*/}
+  mkdir -p "$RES/$os-$arch/bin"
+  (cd server && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+    -ldflags "-s -w -X $BI.Identity=$IDENTITY -X $BI.Version=$VERSION -X $BI.Commit=$COMMIT" \
+    -o "$RES/$os-$arch/bin/stage" ./cmd/stage)
+done
+pnpm install --frozen-lockfile
+cd desktop/app
+rm -rf build
+export IDENTITY STAGE_VERSION="${STAGE_VERSION:-0.0.0}"
+export MYGO_LDFLAGS="-X 'main.appName=$NAME' -X main.appIdentifier=$APPID -X main.appIdentity=$IDENTITY"
+go tool mygo build -platform linux/amd64,linux/arm64,darwin/universal
+echo "desktop:package: $NAME ($IDENTITY) in desktop/app/build"
+'''
+
+[tasks."desktop:e2e"]
+description = "Desktop app webview e2e: needs a display + WebKitGTK 4.1, or macOS; builds the UI first, uses a temp foreground server (no OS service)"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -e
+pnpm install --frozen-lockfile
+pnpm --filter stage-desktop build
+cd desktop/app
+go test -tags e2e -count=1 -v -timeout 10m ./e2e
+'''
 
 [tasks."fixture:e2e"]
 description = "Desktop fixture webview e2e: needs a display + WebKitGTK 4.1, or macOS. STAGE_FIXTURE_REAL_UI=1 adds the real Stage UI"

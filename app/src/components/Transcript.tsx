@@ -16,6 +16,7 @@ import {
   type TranscriptModel,
 } from "../lib/transcript.ts";
 // This chunk is already lazy, so the shared renderer (marked + DOMPurify) loads with it.
+import { useHostEpoch } from "./Host.tsx";
 import ReplyMarkdown from "./ReplyMarkdown.tsx";
 import { Alert, Button, Chip, Panel, cx, errorText } from "./ui.tsx";
 
@@ -40,8 +41,10 @@ function useDocumentVisible(): boolean {
 export function TranscriptPanel({ threadId, jumpOffset = "session" }: { threadId: string; jumpOffset?: JumpOffset }) {
   const api = useApi();
   const [epoch, setEpoch] = useState(0);
+  // A desktop host's server came back: refetch and reopen the stream, as after a reset.
+  const hostEpoch = useHostEpoch();
   const tail = useQuery({
-    queryKey: ["transcript", threadId, epoch],
+    queryKey: ["transcript", threadId, epoch, hostEpoch],
     queryFn: () => api.transcript(threadId, { limit: PAGE }),
     staleTime: Infinity,
     gcTime: 0,

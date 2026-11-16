@@ -321,6 +321,18 @@ func TestHealthAndNotFound(t *testing.T) {
 	e.must("GET", "/api/nope", nil, 404, nil)
 	e.must("GET", "/api/tasks/abc", nil, 400, nil)
 	e.must("GET", "/api/tasks/999", nil, 404, nil)
+	if h.PublicURL != nil {
+		t.Fatalf("publicUrl without STAGE_PUBLIC_URL = %q, want null", *h.PublicURL)
+	}
+}
+
+func TestHealthPublicURL(t *testing.T) {
+	e := newEnv(t, func(d *api.Deps) { d.Config.PublicURL = "https://stage.example.ts.net/" })
+	var h api.Health
+	e.must("GET", "/api/health", nil, 200, &h)
+	if h.PublicURL == nil || *h.PublicURL != "https://stage.example.ts.net" {
+		t.Fatalf("publicUrl %v, want https://stage.example.ts.net", h.PublicURL)
+	}
 }
 
 func TestTaskLifecycle(t *testing.T) {

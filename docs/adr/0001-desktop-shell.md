@@ -134,7 +134,7 @@ the developer installation.
 - **WebKit `EventSource` on a custom scheme:** undocumented for Linux and macOS. The e2e run decides B vs A.
 - **Linux notification clicks after the app exits:** undocumented by MyGo. While the app runs, clicks work through `OnClick`.
 - **Tray:** needs AppIndicator. GNOME needs the AppIndicator extension. The app runs without a tray, and the deb does not depend on it.
-- **Copied links:** `window.location.origin` is `mygo://localhost`, so copied Stage links (`StageLinks.tsx`) need a configured public URL on desktop.
+- **Copied links:** `window.location.origin` is `mygo://localhost`. Resolved in `desktop/app`: copied links use `STAGE_PUBLIC_URL` (from `/api/health`) or a `stage://` deep link ([desktop.md](../desktop.md#links)).
 - **Service worker and Web Push:** not used on desktop; native notifications replace them.
 - **External links:** `t3code://` links and `window.location.assign` to external URLs need the shell to route them to the OS (`mygo.Shell`), not navigate the webview.
 - **Media:** WebKitGTK cannot play `<video>`/`<audio>` from custom schemes. Stage serves only images.
@@ -142,6 +142,8 @@ the developer installation.
 - **MyGo maturity:** pre-1.0 with frequent releases. Bump the pin deliberately and rerun the fixture.
 
 ## For successors
+
+The shipping shell is `desktop/app` ([desktop.md](../desktop.md)); it rewrote bridge B, close/Quit, single instance and the tray from the fixture, and adds the launcher, URL policy and deep links. The items below are kept as history.
 
 - The shipping shell reuses the bridge-B handler and policy, the CSP, the close/Quit/notification wiring and the single-instance handover from `desktop/fixture/`. Rewrite them in the real desktop module; do not import the fixture.
 - Keep the fixture until the shell has its own e2e coverage. Its checks are the regression suite for MyGo bumps.

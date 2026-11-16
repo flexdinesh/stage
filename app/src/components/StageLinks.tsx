@@ -5,7 +5,17 @@ import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { keys } from "../api/queries.ts";
 import type { TaskState } from "../api/types.ts";
-import { parseStageRef, refPath, sessionMarkdown, sessionUrl, splitStageRefs, taskMarkdown, taskUrl, type StageRef } from "../lib/refs.ts";
+import {
+  parseStageRef,
+  refPath,
+  sessionMarkdown,
+  sessionUrl,
+  splitStageRefs,
+  taskMarkdown,
+  taskUrl,
+  type StageLink,
+  type StageRef,
+} from "../lib/refs.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { IconChainLink, IconCheck } from "./icons.tsx";
 import { taskStateLabel, taskStateTone } from "./StateBadge.tsx";
@@ -36,10 +46,10 @@ export function useCopy(): [CopyStatus, (text: string) => void] {
 /** What a copied link points at: a task, or a session (T3 thread). */
 export type LinkSubject = { kind: "task"; id: number; title: string } | { kind: "session"; id: string; title: string };
 
-export function subjectLinks(s: LinkSubject, origin: string): { markdown: string; url: string; name: string } {
+export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: string; url: string; name: string } {
   return s.kind === "task"
-    ? { markdown: taskMarkdown(origin, s.id, s.title), url: taskUrl(origin, s.id), name: `task #${s.id}` }
-    : { markdown: sessionMarkdown(origin, s.id, s.title), url: sessionUrl(origin, s.id), name: "session" };
+    ? { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` }
+    : { markdown: sessionMarkdown(link, s.id, s.title), url: sessionUrl(link, s.id), name: "session" };
 }
 
 const statusText = (s: CopyStatus, idle: string) => (s === "copied" ? "Copied" : s === "failed" ? "Copy failed" : idle);
@@ -47,7 +57,7 @@ const statusText = (s: CopyStatus, idle: string) => (s === "copied" ? "Copied" :
 /** Detail-page header: "Copy link" (self-describing markdown, for prompts) joined to "URL" (bare). */
 export function CopyLinkPair({ subject }: { subject: LinkSubject }) {
   const { links } = usePlatform();
-  const { markdown, url, name } = subjectLinks(subject, links.appOrigin());
+  const { markdown, url, name } = subjectLinks(subject, (path) => links.stageLink(path));
   const [mdStatus, copyMd] = useCopy();
   const [urlStatus, copyUrl] = useCopy();
   return (
@@ -69,7 +79,7 @@ export function CopyLinkPair({ subject }: { subject: LinkSubject }) {
 /** Laptop row action: a ghost link icon shown on row hover or keyboard focus (the row carries `group/row`). */
 export function RowCopyLink({ subject, className }: { subject: LinkSubject; className?: string }) {
   const { links } = usePlatform();
-  const { markdown, name } = subjectLinks(subject, links.appOrigin());
+  const { markdown, name } = subjectLinks(subject, (path) => links.stageLink(path));
   const [status, copy] = useCopy();
   const label = status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : `Copy link to ${name}`;
   return (

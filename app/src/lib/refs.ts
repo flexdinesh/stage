@@ -1,27 +1,37 @@
 /**
  * Stage links: copyable references to tasks and sessions, and recognizing them in text. Agents resolve the same
  * links with `read_ref` (server/internal/refs); the host is ignored there and here, because one stage is reached
- * at several addresses (loopback, tailnet, phone).
+ * at several addresses (loopback, tailnet, phone). The desktop's deep links (`stage://tasks/12`, one scheme per
+ * installation identity) read the same.
  */
 
 export type StageRef = { kind: "task"; id: number } | { kind: "session"; id: string };
 
-export const taskUrl = (origin: string, id: number) => `${origin}/tasks/${id}`;
-export const sessionUrl = (origin: string, threadId: string) => `${origin}/sessions/${encodeURIComponent(threadId)}`;
+/** Turns an app path into the copyable link (the platform's `links.stageLink`). */
+export type StageLink = (path: string) => string;
+
+export const taskUrl = (link: StageLink, id: number) => link(`/tasks/${id}`);
+export const sessionUrl = (link: StageLink, threadId: string) => link(`/sessions/${encodeURIComponent(threadId)}`);
 
 /** Escape text for a markdown link label. */
 const label = (text: string) => text.replace(/[\\[\]]/g, (c) => `\\${c}`).replace(/\s+/g, " ").trim();
 
 /** `[stage task #12: Title](url)`: names itself, so an agent knows what it is even without stage's instructions. */
-export const taskMarkdown = (origin: string, id: number, title: string) =>
-  `[stage task #${id}: ${label(title)}](${taskUrl(origin, id)})`;
+export const taskMarkdown = (link: StageLink, id: number, title: string) =>
+  `[stage task #${id}: ${label(title)}](${taskUrl(link, id)})`;
 
-export const sessionMarkdown = (origin: string, threadId: string, title: string) =>
-  `[stage session: ${label(title)}](${sessionUrl(origin, threadId)})`;
+export const sessionMarkdown = (link: StageLink, threadId: string, title: string) =>
+  `[stage session: ${label(title)}](${sessionUrl(link, threadId)})`;
 
 export const refPath = (ref: StageRef) => (ref.kind === "task" ? `/tasks/${ref.id}` : `/sessions/${encodeURIComponent(ref.id)}`);
 
-/** An http(s) URL whose path ends in tasks/<n> or sessions/<id>, on any host; else null. */
+/** Desktop deep-link schemes: `stage:` and developer identities' `stage-<suffix>:`. */
+const DEEP_LINK = /^stage(-[a-z0-9-]+)?:$/;
+
+/**
+ * An http(s) URL whose path ends in tasks/<n> or sessions/<id>, on any host, or a desktop deep link
+ * (`stage://tasks/<n>`, where the host is the kind, or `stage://localhost/tasks/<n>`); else null.
+ */
 export function parseStageRef(href: string): StageRef | null {
   let u: URL;
   try {
@@ -29,8 +39,12 @@ export function parseStageRef(href: string): StageRef | null {
   } catch {
     return null;
   }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-  const segs = u.pathname.split("/").filter((s) => s !== "");
+  let segs = u.pathname.split("/").filter((s) => s !== "");
+  if (DEEP_LINK.test(u.protocol)) {
+    const host = u.hostname.toLowerCase();
+    if (host !== "" && host !== "localhost") segs = [host, ...segs];
+    if (segs.length !== 2) return null;
+  } else if (u.protocol !== "http:" && u.protocol !== "https:") return null;
   if (segs.length < 2) return null;
   const kind = segs[segs.length - 2];
   const raw = segs[segs.length - 1] ?? "";
@@ -51,8 +65,9 @@ export function parseStageRef(href: string): StageRef | null {
 
 export type TextPart = { kind: "text"; text: string } | { kind: "ref"; ref: StageRef; text: string; href: string };
 
-// A markdown link (label may hold escaped brackets) or a bare http(s) URL.
-const LINK = /\[((?:\\.|[^\]\\\n])*)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>()[\]"'`]+/g;
+// A markdown link (label may hold escaped brackets) or a bare http(s) or stage deep-link URL.
+const LINK =
+  /\[((?:\\.|[^\]\\\n])*)\]\(((?:https?|stage(?:-[a-z0-9-]+)?):\/\/[^\s)]+)\)|(?:https?|stage(?:-[a-z0-9-]+)?):\/\/[^\s<>()[\]"'`]+/gi;
 const TRAILING = /[.,;:!?]+$/;
 
 /** Split plain text (a prompt, a handoff block) into text and stage-link parts; other links stay text. */

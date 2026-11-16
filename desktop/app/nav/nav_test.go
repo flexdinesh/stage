@@ -1,0 +1,169 @@
+package nav
+
+import "testing"
+
+func TestNavigate(t *testing.T) {
+	p := Policy{Identity: "stage"}
+	dev := Policy{Identity: "stage-dev", DevOrigin: DevOriginOf("http://localhost:5174/")}
+	cases := []struct {
+		p    Policy
+		raw  string
+		want Action
+		path string
+	}{
+		{p, "mygo://localhost/", Allow, ""},
+		{p, "mygo://localhost/tasks/12?x=1", Allow, ""},
+		{p, "MYGO://LOCALHOST/tasks/12", Allow, ""},
+		{p, "mygo://other/", Deny, ""},
+		{p, "http://localhost:5174/", External, ""},
+		{dev, "http://localhost:5174/tasks/3", Allow, ""},
+		{dev, "http://localhost:5175/", External, ""},
+		{dev, "mygo://localhost/", Allow, ""},
+		{p, "https://github.com/flexdinesh/stage/pull/1", External, ""},
+		{p, "http://example.com", External, ""},
+		{p, "https://user:pw@example.com/", Deny, ""},
+		{p, "https:///nohost", Deny, ""},
+		{p, "t3code://threads/env_1/thread_2", OpenApp, ""},
+		{p, "t3code://threads/env_1", Deny, ""},
+		{p, "t3code://settings", Deny, ""},
+		{p, "stage://tasks/12", InApp, "/tasks/12"},
+		{p, "stage://nope/1", Deny, ""},
+		{p, "stage-dev://tasks/12", Deny, ""},
+		{dev, "stage-dev://tasks/12", InApp, "/tasks/12"},
+		{p, "file:///etc/passwd", Deny, ""},
+		{p, "javascript:alert(1)", Deny, ""},
+		{p, "data:text/html,<h1>x</h1>", Deny, ""},
+		{p, "about:blank", Deny, ""},
+		{p, "mailto:a@b.c", Deny, ""},
+		{p, "ftp://example.com/", Deny, ""},
+	}
+	for _, c := range cases {
+		d := c.p.Navigate(c.raw)
+		if d.Action != c.want || d.Path != c.path {
+			t.Errorf("Navigate(%q) = %v %q (%s), want %v %q", c.raw, d.Action, d.Path, d.Reason, c.want, c.path)
+		}
+	}
+}
+
+func TestOpen(t *testing.T) {
+	p := Policy{Identity: "stage"}
+	dev := Policy{Identity: "stage", DevOrigin: "http://localhost:5174"}
+	cases := []struct {
+		p    Policy
+		raw  string
+		want Action
+		path string
+	}{
+		{p, "mygo://localhost/api/attachments/12", Child, ""},
+		{dev, "http://localhost:5174/api/attachments/12", Child, ""},
+		{p, "mygo://localhost/api/attachments/12?download=1", InApp, "/api/attachments/12?download=1"},
+		{p, "mygo://localhost/api/attachments/x", InApp, "/api/attachments/x"},
+		{p, "mygo://localhost/tasks/3", InApp, "/tasks/3"},
+		{p, "https://example.com/", External, ""},
+		{p, "t3code://threads/e/t", OpenApp, ""},
+		{p, "stage://sessions/th-1", InApp, "/sessions/th-1"},
+		{p, "file:///tmp/x", Deny, ""},
+		{p, "javascript:void(0)", Deny, ""},
+	}
+	for _, c := range cases {
+		d := c.p.Open(c.raw)
+		if d.Action != c.want || d.Path != c.path {
+			t.Errorf("Open(%q) = %v %q (%s), want %v %q", c.raw, d.Action, d.Path, d.Reason, c.want, c.path)
+		}
+	}
+}
+
+func TestChildNavigate(t *testing.T) {
+	p := Policy{Identity: "stage"}
+	cur := "mygo://localhost/api/attachments/1"
+	for raw, want := range map[string]Action{
+		cur:                                  Allow,
+		"mygo://localhost/api/attachments/2": Deny,
+		"mygo://localhost/":                  Deny,
+		"https://example.com/":               External,
+		"stage://tasks/1":                    Deny,
+		"t3code://threads/e/t":               Deny,
+	} {
+		if d := p.ChildNavigate(cur, raw); d.Action != want {
+			t.Errorf("ChildNavigate(%q) = %v, want %v", raw, d.Action, want)
+		}
+	}
+}
+
+func TestExternalAndApp(t *testing.T) {
+	p := Policy{Identity: "stage"}
+	for raw, want := range map[string]Action{
+		"https://example.com/a?b": External,
+		"http://127.0.0.1:7380/":  External,
+		"t3code://threads/e/t":    Deny,
+		"mygo://localhost/":       Deny,
+		"file:///etc/passwd":      Deny,
+		"https://u:p@example.com": Deny,
+	} {
+		if d := p.External(raw); d.Action != want {
+			t.Errorf("External(%q) = %v, want %v", raw, d.Action, want)
+		}
+	}
+	for raw, want := range map[string]Action{
+		"t3code://threads/e/t": OpenApp,
+		"stage://tasks/4":      InApp,
+		"https://example.com/": Deny,
+		"t3code://evil":        Deny,
+		"ms-settings:":         Deny,
+	} {
+		if d := p.App(raw); d.Action != want {
+			t.Errorf("App(%q) = %v, want %v", raw, d.Action, want)
+		}
+	}
+}
+
+func TestDeepLink(t *testing.T) {
+	p := Policy{Identity: "stage-dev"}
+	cases := map[string]string{
+		"stage-dev://":                           "/",
+		"stage-dev:":                             "/",
+		"stage-dev:///":                          "/",
+		"stage-dev://localhost":                  "/",
+		"stage-dev://localhost/":                 "/",
+		"stage-dev://tasks/12":                   "/tasks/12",
+		"stage-dev://tasks/12/":                  "/tasks/12",
+		"STAGE-DEV://Tasks/12":                   "/tasks/12",
+		"stage-dev://localhost/tasks/12":         "/tasks/12",
+		"stage-dev://tasks/12?x=1#y":             "/tasks/12",
+		"stage-dev://sessions/thread_abc":        "/sessions/thread_abc",
+		"stage-dev://localhost/sessions/a%20b":   "/sessions/a%20b",
+		"stage-dev://sessions/a%2Fb":             "/sessions/a%2Fb",
+		"stage-dev://tasks/0":                    "",
+		"stage-dev://tasks/-1":                   "",
+		"stage-dev://tasks/12a":                  "",
+		"stage-dev://tasks/1/2":                  "",
+		"stage-dev://tasks":                      "",
+		"stage-dev://sessions/..":                "",
+		"stage-dev://projects/1":                 "",
+		"stage-dev://evil.com/tasks/1":           "",
+		"stage-dev://localhost:80/tasks/1":       "",
+		"stage-dev://u@localhost/tasks/1":        "",
+		"stage://tasks/12":                       "",
+		"https://stage.example/tasks/12":         "",
+		"stage-dev://tasks/99999999999999999999": "",
+	}
+	for raw, want := range cases {
+		got, ok := p.DeepLink(raw)
+		if got != want || ok != (want != "") {
+			t.Errorf("DeepLink(%q) = %q %v, want %q", raw, got, ok, want)
+		}
+	}
+}
+
+func TestT3WebURL(t *testing.T) {
+	got, err := T3WebURL("http://t3.example.com:3773/", "t3code://threads/env_1/thread_2")
+	if err != nil || got != "http://t3.example.com:3773/env_1/thread_2" {
+		t.Fatalf("T3WebURL = %q, %v", got, err)
+	}
+	if _, err := T3WebURL("http://t3", "t3code://settings"); err == nil {
+		t.Error("non-thread link: want error")
+	}
+	if _, err := T3WebURL("file:///x", "t3code://threads/e/t"); err == nil {
+		t.Error("non-http public URL: want error")
+	}
+}

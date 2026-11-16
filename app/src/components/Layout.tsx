@@ -5,6 +5,7 @@ import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
+import { HostBanner } from "./Host.tsx";
 import {
   IconCheck,
   IconChevronDown,
@@ -306,6 +307,7 @@ function Shell() {
 
       {/* Relative positioning keeps fixed task actions anchored to the viewport during a pull. */}
       <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 md:pb-10">
+        <HostBanner />
         <Outlet />
       </main>
 

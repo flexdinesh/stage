@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
@@ -153,7 +154,10 @@ type Health struct {
 	APIVersion int        `json:"apiVersion"`
 	InstanceID string     `json:"instanceId"`
 	StartedAt  *time.Time `json:"startedAt"`
-	T3         HealthT3   `json:"t3"`
+	// PublicURL is STAGE_PUBLIC_URL, null when unset: the address copied
+	// Stage links use on hosts whose own origin is not shareable (desktop).
+	PublicURL *string  `json:"publicUrl"`
+	T3        HealthT3 `json:"t3"`
 }
 
 // HealthT3 is the T3 connection state in Health.
@@ -171,6 +175,9 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	if !s.Instance.StartedAt.IsZero() {
 		t := s.Instance.StartedAt
 		h.StartedAt = &t
+	}
+	if u := strings.TrimRight(s.Config.PublicURL, "/"); u != "" {
+		h.PublicURL = &u
 	}
 	if s.T3 != nil {
 		st := s.T3.Status(r.Context())
