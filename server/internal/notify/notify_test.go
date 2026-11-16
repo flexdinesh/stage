@@ -471,7 +471,7 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	}
 }
 
-func TestTaskNotificationGroupSurvivesSessionChangeAndDelete(t *testing.T) {
+func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()
 	task := seedTask(t, store, db.StateBacklog)
@@ -489,16 +489,19 @@ func TestTaskNotificationGroupSurvivesSessionChangeAndDelete(t *testing.T) {
 		}
 		n.handle(ctx, e)
 	}
-	if err := store.DeleteTask(ctx, task.ID); err != nil {
-		t.Fatal(err)
+	// A started task cannot be deleted (archive only), so its group keeps the task.
+	var conflict *db.ConflictError
+	if err := store.DeleteTask(ctx, task.ID); !errors.As(err, &conflict) {
+		t.Fatalf("delete started task: %v", err)
 	}
 	latest, _, err := store.NotificationReadState(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	groups, err := store.ListNotificationGroups(ctx, 10, nil, latest)
-	if err != nil || len(groups) != 1 || groups[0].Key != fmt.Sprintf("task:%d", task.ID) || groups[0].EventCount != 2 || groups[0].TaskID != nil {
-		t.Fatalf("deleted task lost stable notification group: %+v %v", groups, err)
+	if err != nil || len(groups) != 1 || groups[0].Key != fmt.Sprintf("task:%d", task.ID) || groups[0].EventCount != 2 ||
+		groups[0].TaskID == nil || *groups[0].TaskID != task.ID {
+		t.Fatalf("task lost stable notification group: %+v %v", groups, err)
 	}
 }
 

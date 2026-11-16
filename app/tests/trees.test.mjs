@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   baseCandidates,
+  closeBlocker,
+  closedLabel,
   countMembers,
   inState,
   layoutLevels,
@@ -10,6 +12,8 @@ import {
   nodeState,
   related,
   rollupLabel,
+  taskClosedLabel,
+  treeClosed,
   treeMeta,
   treeRollup,
   treeMembers,
@@ -187,4 +191,29 @@ test("time in state reads per state from when it was entered", () => {
   assert.equal(t({ state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }).text, "ready 3h");
   // Blocked or plain backlog counts from creation when there is no later backlog event.
   assert.deepEqual(t({ state: "backlog", readiness: "blocked" }), { text: "queued 2d", at: nov(14, 9, 12) });
+});
+
+test("closed trees: chip text, blocker and task label", () => {
+  const left = countMembers([
+    { state: "settled", readiness: null },
+    { state: "cancelled", readiness: null },
+    { state: "backlog", readiness: "blocked" },
+    { state: "backlog", readiness: "blocked" },
+  ]);
+  assert.equal(closedLabel({ status: "open" }, left), null);
+  assert.equal(closedLabel({ status: "done" }, left), "done · 2 not run · 1 cancelled");
+  assert.equal(closedLabel({ status: "done" }, countMembers([{ state: "settled", readiness: null }])), "done");
+  assert.equal(closedLabel({ status: "archived" }, left), "archived");
+  assert.equal(treeClosed({ status: "open" }), false);
+  assert.equal(treeClosed({ status: "done" }), true);
+
+  assert.equal(closeBlocker([{ id: 2, state: "cancelled" }, { id: 1, state: "backlog" }]), null);
+  assert.equal(closeBlocker([{ id: 5, state: "needs_input" }, { id: 4, state: "running" }]), "#4 is running");
+  assert.equal(closeBlocker([{ id: 5, state: "needs_input" }]), "#5 needs input");
+
+  assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: null }), null);
+  assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: "open" }), null);
+  assert.equal(taskClosedLabel({ archivedAt: "2026-11-16T10:00:00Z", treeStatus: null }), "archived");
+  assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: "done" }), "tree done");
+  assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: "archived" }), "tree archived");
 });

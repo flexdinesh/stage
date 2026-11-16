@@ -161,14 +161,14 @@ func TestTreesLifecycle(t *testing.T) {
 	}
 	e.must("DELETE", treePath(tr.ID, fmt.Sprintf("/tasks/%d", c.ID)), nil, 404, nil)
 
-	// Deleting a member splices too; deleting the tree dissolves it.
+	// Deleting a member splices too; dissolving the tree keeps its tasks.
 	e.must("DELETE", taskPath(a.ID), nil, 204, nil)
 	if got = e.getTask(d.ID); len(got.Needs) != 0 || got.TreeID == nil {
 		t.Fatalf("after deleting a %+v", got)
 	}
-	e.must("DELETE", treePath(tr.ID), nil, 204, nil)
+	e.must("POST", treePath(tr.ID, "/dissolve"), nil, 204, nil)
 	e.must("GET", treePath(tr.ID), nil, 404, nil)
-	e.must("DELETE", treePath(tr.ID), nil, 404, nil)
+	e.must("POST", treePath(tr.ID, "/dissolve"), nil, 404, nil)
 	if got = e.getTask(b.ID); got.TreeID != nil || got.Readiness != nil {
 		t.Fatalf("dissolved %+v", got)
 	}

@@ -7,11 +7,22 @@ import { keys, useInvalidateWork, useProjects, useTasks, useTrees } from "../api
 import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from "../lib/paletteSearch.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
-import { treeMeta } from "../lib/trees.ts";
+import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
 import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
-import { Kbd, cx } from "./ui.tsx";
+import { Chip, Kbd, cx } from "./ui.tsx";
+
+/** A closed item's plain chip (archived, done, tree done) beside its other badge. */
+function ClosedBadge({ label, children }: { label: string | null; children?: ReactNode }) {
+  if (label === null) return children ?? null;
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Chip>{label}</Chip>
+      {children}
+    </span>
+  );
+}
 
 interface Item {
   key: string;
@@ -79,9 +90,9 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
 
   const q = query.trim().toLowerCase();
   const debounced = useDebounced(q, 200);
-  const tasks = useTasks();
+  const tasks = useTasks({ closed: "all" });
   const projects = useProjects();
-  const trees = useTrees({ all: true });
+  const trees = useTrees({ status: "all" });
   const threads = useQuery({
     queryKey: [...keys.threads, "palette", debounced],
     queryFn: () => api.threads({ q: debounced, limit: 8, subagents: "exclude" }),
@@ -115,13 +126,20 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           group: "Tasks",
           label: t.title,
           hint: t.projectTitle,
-          badge: <TaskStateBadge state={t.state} />,
+          badge: <ClosedBadge label={taskClosedLabel(t)}><TaskStateBadge state={t.state} /></ClosedBadge>,
           run: go(t.t3ThreadId === null ? `/tasks/${t.id}` : sessionPath(t.t3ThreadId)),
           t3Url: t.t3DeepLink,
           link: { kind: "task", id: t.id, title: t.title },
         });
       for (const tr of (trees.data?.trees ?? []).filter((t) => has(t.title, q)).slice(0, 4))
-        out.push({ key: `tree-${tr.id}`, group: "Trees", label: tr.title, hint: treeMeta(tr), run: go(`/trees/${tr.id}`) });
+        out.push({
+          key: `tree-${tr.id}`,
+          group: "Trees",
+          label: tr.title,
+          hint: treeMeta(tr),
+          badge: <ClosedBadge label={tr.status === "open" ? null : tr.status} />,
+          run: go(`/trees/${tr.id}`),
+        });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
       const { sessions, messages } = mergePaletteSessions(

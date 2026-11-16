@@ -226,10 +226,14 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "pendingQuestionCount": 0,
   "createdAt": "2026-11-08T09:59:00Z",
   "updatedAt": "2026-11-08T10:00:00Z",
-  "stateSince": "2026-11-08T10:00:00Z"
+  "stateSince": "2026-11-08T10:00:00Z",
+  "archivedAt": null,
+  "treeStatus": null,
+  "deletable": false
 }
 ```
 - `stateSince`: when the task entered its current `state` (its latest task event into that state); null without one.
+- `archivedAt`: when the task was archived (null = not archived); `treeStatus`: its tree's `status` (null outside a tree); `deletable`: the task never launched and has no session (`launchAttempt` 0, no thread, not adopted), so it can be deleted; a started task can only be archived. See "Done, archive and delete".
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `treeId` / `treeTitle`: the task's tree (see "Trees"); null outside one. `needs`: tasks in the same tree this one needs (by id); `dependents`: tasks that need this one. Both `[]` outside a tree.
 - `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all settled (the `ready` notification); cleared when it stops being ready or launches.
@@ -255,7 +259,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 `TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null }`. `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt; `thread.recentRuns` the runs.
 
 ### `GET /api/tasks`
-Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`).
+Query (all optional): `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -300,7 +304,10 @@ In `backlog` all fields are editable; otherwise only `title`, `tags`, `notes` (4
 Body `{ "needs": number[] }` (required; `[]` clears them): replaces the task's needs per "Tree rules". A task outside a tree joins its needs' tree (or a new one). 200 `Task`. 400 missing `needs`, or needs on a task with a start time. 404 task / need. 409 tree rule broken.
 
 ### `DELETE /api/tasks/:id`
-204. 409 when state is `launching|running|needs_input` (stop first). In a tree it is spliced out first: its dependents take over its needs (A→X→B becomes A→B).
+Only a task that never started (`deletable`). 204. 409 when state is `launching|running|needs_input` (stop first), when it has started (`task N has started: archive it instead`), or when it is in a done or archived tree. In a tree it is spliced out first: its dependents take over its needs (A→X→B becomes A→B).
+
+### `POST /api/tasks/:id/archive`, `POST /api/tasks/:id/unarchive`
+Archive (sets `archivedAt`) or unarchive a standalone task. Archive 409 when the task is in a tree (`archive the tree, or remove it from the tree first`) or is `launching|running|needs_input` (`#N is running: stop it first`). Unarchive of a task that is not archived is a no-op. 200 `Task`. 404.
 
 ### `POST /api/tasks/:id/start`
 Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Start early: a `blocked` task starts before its needs settle and keeps them (the `launching` event reads `launch requested before #3, #5 settled`); it gets a handoff only from needs that have finished. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
@@ -328,8 +335,9 @@ A tree is a DAG of tasks: each member's `needs` are members that must settle bef
 
 `Tree`:
 ```json
-{ "id": 3, "title": "Ship auth", "startMode": "auto", "createdAt": "2026-11-08T09:59:00Z", "updatedAt": "2026-11-08T10:00:00Z" }
+{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
 ```
+`status`: `open | done | archived` (see "Done, archive and delete"); `closedAt`: when it was marked done or archived (null while open); `deletable`: every member never started (`DELETE` removes the tree and its tasks).
 `TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`).
 
 `TreeTimes` = `{ "startedAt": string | null, "lastActivityAt": string }`. `startedAt`: the earliest member `launchedAt` (null before any launch). `lastActivityAt`: the latest of the tree's `createdAt`, a member's `updatedAt` and its thread's `updatedAt` (so a member's agent working counts as activity).
@@ -337,7 +345,7 @@ A tree is a DAG of tasks: each member's `needs` are members that must settle bef
 `TreeSummary` = `Tree` + `TreeTimes` + `{ "counts": TreeCounts, "levels": number, "projects": string[] (member project titles, sorted), "settledAt": string | null }`. `counts`: `{ total, backlog, blocked, ready, launching, running, needsInput, done, settled, failed, interrupted, cancelled }` (`blocked` and `ready` split `backlog`). `settledAt`: the latest member settle once every member is settled, else null.
 
 ### `GET /api/trees`
-Query (all optional): `all=1` (every tree), `settledFrom` (also completed trees whose latest settle is at or after it), `project` (a member is in that project). Default: active trees (a member not settled). 200 `{ "trees": TreeSummary[] }`, `lastActivityAt` desc.
+Query (all optional): `status` (`active` default: open trees with a member not settled; `done`: marked done, or open with every member settled; `archived`; `all`; else 400), `all=1` (= `status=all`), `settledFrom` (with `active`: also open trees whose latest settle is at or after it), `project` (a member is in that project). 200 `{ "trees": TreeSummary[] }`, `lastActivityAt` desc.
 
 ### `POST /api/trees`
 Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, "needs"?: number[] }] }`: creates the tree, moves each listed task into it (a member of another tree is spliced out there), then sets each listed `needs` (omitted keeps the task's needs). One transaction. 201 `TreeDetail`. 400 blank title, no tasks, a task listed twice, bad `startMode`. 404 task / need. 409 tree rule broken.
@@ -346,9 +354,12 @@ Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, 
 200 `TreeDetail`. 404.
 
 ### `PATCH /api/trees/:id`
-Body: any of `title`, `startMode` (`auto|manual`). 200 `TreeDetail`. 400. 404. Switching to `manual` makes released members ready (each notifies once); switching to `auto` launches them on the next reconcile.
+Body: any of `title`, `startMode` (`auto|manual`), `status` (`open|done|archived`; applied first). 200 `TreeDetail`. 400. 404. Switching to `manual` makes released members ready (each notifies once); switching to `auto` launches them on the next reconcile. `status` `done` or `archived` 409 while a member is `launching|running|needs_input` (`#N is running: stop it first`); `startMode` 409 on a done or archived tree; `open` reopens or unarchives.
 
 ### `DELETE /api/trees/:id`
+Deletes the tree and every member task, only when no member ever started (`deletable`). 204. 404. 409 once a member started (`#N has started: archive the tree instead`).
+
+### `POST /api/trees/:id/dissolve`
 Dissolves the tree: its tasks stay, their needs and tree membership go. 204. 404.
 
 ### `POST /api/trees/:id/tasks`
@@ -358,7 +369,7 @@ Body `{ "taskId": number, "needs"?: number[] }`: adds the task (a member of anot
 Splices the task out: its dependents take over its needs; the task stays, standalone. An emptied tree is deleted. 204. 404 (also when the task is not in that tree).
 
 ### `POST /api/trees/:id/start`
-"Start ready": starts every `ready` member (same as `POST /api/tasks/:id/start` each). 200 `{ "started": Task[], "errors": [{ "taskId": number, "error": string }] }`. 404.
+"Start ready": starts every `ready` member (same as `POST /api/tasks/:id/start` each). 200 `{ "started": Task[], "errors": [{ "taskId": number, "error": string }] }`. 404. 409 on a done or archived tree.
 
 ## Schedules
 
@@ -844,8 +855,17 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 - `readiness` (backlog members only, else null): `blocked` while a need is not settled; `ready` when every need settled, there is no start time, and the task is manual or has no needs. Roots read `ready` (auto never launches them; the user starts them, or Start ready).
 - Release runner (on every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all settled (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs settled` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
 - Splice (remove from tree, delete, move to another tree): each dependent drops the task and takes over its needs (A→X→B becomes A→B, deduplicated); the task loses its needs and leaves the tree; stale `workspace.baseTaskId` values are cleared; an emptied tree is deleted. Splicing an unfinished middle task can make dependents ready at once.
-- Moving between trees = remove + add (no merge). `DELETE /api/trees/:id` dissolves a tree.
+- Moving between trees = remove + add (no merge). `POST /api/trees/:id/dissolve` dissolves a tree.
 - A settled task with dependents is frozen: its thread no longer changes its state.
+
+## Done, archive and delete
+
+- A tree is `open`, `done` (marked done by hand: the remaining tasks will not be worked on) or `archived`. A task is archived when `archivedAt` is set. "Closed" = an archived task, or a member of a done or archived tree.
+- Marking done or archiving needs no member (or the task itself) in `launching|running|needs_input` (409 naming it). Members keep their states. Only standalone tasks are archived one by one; a tree member is closed with its tree.
+- A closed tree releases nothing (no auto launch, no `readiness`, no `ready` notification, no due one-shot start), and rejects structural changes with 409 (`tree N is done: reopen it first`): add or move a task into or out of it, set needs, remove from tree, delete a member, create a task with its `treeId`, adopt into it, change `startMode`, start ready. Rename, status, delete and dissolve stay allowed. An archived task waits too (no due one-shot start) and cannot join a tree (409 `unarchive it first`).
+- Closed tasks and trees leave the default lists (`GET /api/tasks`, `GET /api/trees`), so they leave the Dashboard; `closed=true|all` and `status=done|archived|all` list them.
+- Activity reopens: a transition into `launching|running|needs_input` (a T3 restart, a manual Start, a follow-up) clears `archivedAt` (task event `unarchived: became running`) and sets a done or archived tree back to `open` (task event `tree reopened: became running`). Settling is not activity.
+- Delete only work that never started (no launch attempt, no thread, not adopted): `DELETE /api/tasks/:id`, and `DELETE /api/trees/:id` for a tree whose members all never started (it deletes them). Anything started is archived instead.
 
 ## Adopt session
 
@@ -924,14 +944,15 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 
 ## Agent interface
 
-`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST /mcp` (streamable HTTP MCP, stateless, served by the app; other methods 405) expose the same operations, all through this REST API (HTTP MCP serves `/api` in-process, no network dial). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task start_task stop_task followup_task duplicate_task wait_task list_trees get_tree create_tree update_tree add_to_tree remove_from_tree set_needs start_tree adopt_session list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions read_ref` (`read_ref` / `stage show REF` resolve a pasted reference via `GET /api/refs/resolve` and return `{ kind, task: TaskDetail|null, session: ThreadDetail|null, next }`: a task reference carries its session, a session reference its owning task, `next` points at `t3_thread_read` for the full conversation; `get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`, `list_sessions` rows `lastWordPreview`; `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
+`stage` subcommands (CLI, `--json`), `stage mcp` (stdio MCP) and `POST /mcp` (streamable HTTP MCP, stateless, served by the app; other methods 405) expose the same operations, all through this REST API (HTTP MCP serves `/api` in-process, no network dial). Tools: `get_context list_projects list_models list_tasks get_task create_task update_task delete_task archive_task start_task stop_task followup_task duplicate_task wait_task list_trees get_tree create_tree update_tree delete_tree add_to_tree remove_from_tree set_needs start_tree adopt_session list_schedules get_schedule create_schedule update_schedule delete_schedule run_schedule preview_schedule list_sessions search_sessions get_session get_session_questions read_ref` (`read_ref` / `stage show REF` resolve a pasted reference via `GET /api/refs/resolve` and return `{ kind, task: TaskDetail|null, session: ThreadDetail|null, next }`: a task reference carries its session, a session reference its owning task, `next` points at `t3_thread_read` for the full conversation; `get_session_questions` / `stage sessions questions ID` read pending questions; agents cannot answer them). `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps `GET /api/threads/search` and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`. Results are the REST shapes (lists as compact rows; `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`, `list_sessions` rows `lastWordPreview`; `get_task` and `get_session` carry the excerpt in `thread.lastWord`, and the CLI prints it as "last word"; `get_task` and `get_session` also carry `pullRequests` and `thread.recentRuns`, which the CLI prints as a `prs` block and a `runs` block: newest 10, `(10 of N runs)`, `--json` has every stored run); errors are tool errors carrying the API `error`.
 
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.
 - Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
 - `get_session` returns `createdTasks` (see "Session batch"); `get_task` returns `batch` and `tree`.
 - `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `needsSessionId` of the caller session (adopted into the tree as a task; error without a session).
-- Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--all] [--project P]`), `update_tree {id, title?, startMode?}` (CLI `tree edit`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
+- Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when no member started; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
+- Close work: `archive_task {id, archived?}` (default archives; CLI `task archive ID [--undo]`), `list_tasks {closed?}` (`true|all`; CLI `task ls --closed true|all`; rows carry `treeStatus` and `archived`), `delete_task` only for a task that never started. See "Done, archive and delete".
 - `adopt_session {threadId?, title?, notes?, tags?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [THREAD_ID] [--title --notes --tag --tree]`).
 - `start_task` on a blocked task starts it early (needs kept).
 - `create_task` and `update_task` take optional `handoff` (CLI `task add --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoffs`; `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records, plus `tree` and `readiness` lines.

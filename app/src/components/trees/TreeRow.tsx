@@ -4,7 +4,7 @@ import { useInvalidateWork } from "../../api/queries.ts";
 import type { TreeSummary } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
-import { nextActionText, rollupLabel, treeMeta, treeRollup, type Rollup } from "../../lib/trees.ts";
+import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { Button, Chip, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
@@ -59,13 +59,18 @@ function TreeWhen({ tree, inline = false }: { tree: TreeSummary; inline?: boolea
   );
 }
 
-/** A tree in a ruled list: title and mono meta, its times, the state bar with its next step, and one action. */
+/**
+ * A tree in a ruled list: title and mono meta, its times, the state bar with its next step, and one action. A done or
+ * archived tree carries its chip and only offers Open.
+ */
 export function TreeRow({ tree }: { tree: TreeSummary }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
   const rollup = treeRollup(tree.counts);
   const next = rollup.next;
+  const closed = treeClosed(tree);
+  const chip = closedLabel(tree, tree.counts);
   const to = `/trees/${tree.id}`;
   const failures = start.data?.errors ?? [];
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
@@ -82,6 +87,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
               settled {relativeTime(tree.settledAt)}
             </Chip>
           )}
+          {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
         </div>
         <p className="mt-0.5 font-mono text-meta text-muted tabular" title={tree.projects.join(", ")}>
           {treeMeta(tree)}
@@ -104,7 +110,11 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
       </div>
 
       <div className="flex justify-end">
-        {next.kind === "answer" ? (
+        {closed ? (
+          <Link to={to} className={buttonClass("secondary", true)}>
+            Open
+          </Link>
+        ) : next.kind === "answer" ? (
           <Link to={to} className={buttonClass("primary", true)}>
             Answer
           </Link>

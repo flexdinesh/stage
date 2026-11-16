@@ -408,10 +408,12 @@ type DueTask struct {
 	StartAt time.Time
 }
 
-// DueOneShots: backlog tasks with start_at at or before now, oldest first.
+// DueOneShots: backlog tasks with start_at at or before now, oldest first
+// (archived tasks and members of a done or archived tree wait).
 func (s *Store) DueOneShots(ctx context.Context, now time.Time) ([]DueTask, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT id, start_at FROM tasks WHERE state = 'backlog' AND start_at <= $1 ORDER BY start_at, id`, now)
+SELECT t.id, t.start_at FROM tasks t LEFT JOIN task_trees tr ON tr.id = t.tree_id
+WHERE t.state = 'backlog' AND t.start_at <= $1 AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now)
 	if err != nil {
 		return nil, err
 	}

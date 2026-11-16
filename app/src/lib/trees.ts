@@ -1,4 +1,4 @@
-import type { StartMode, Task, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
+import type { StartMode, Task, Tree, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
 import { age, relativeTime, shortDate } from "./format.ts";
 
 /** What layout and graph helpers need of a member. */
@@ -279,6 +279,40 @@ export function inState(t: Timed, now: number = Date.now()): { text: string; at:
 
 /** Every member settled. */
 export const treeSettled = (tasks: readonly Pick<Task, "state">[]) => tasks.length > 0 && tasks.every((t) => t.state === "settled");
+
+/** Marked done or archived: nothing starts, structure is read-only, members leave the Dashboard. */
+export const treeClosed = (tree: Pick<Tree, "status">) => tree.status !== "open";
+
+/**
+ * Chip text for a closed tree: "archived", or "done" with what was left ("done · 2 not run · 1 cancelled"); null
+ * while open.
+ */
+export function closedLabel(tree: Pick<Tree, "status">, counts: TreeCounts): string | null {
+  if (tree.status === "archived") return "archived";
+  if (tree.status !== "done") return null;
+  const left: [number, string][] = [
+    [counts.backlog, "not run"],
+    [counts.failed, "failed"],
+    [counts.interrupted, "interrupted"],
+    [counts.cancelled, "cancelled"],
+  ];
+  return ["done", ...left.filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`)].join(" · ");
+}
+
+/** Why the tree cannot be marked done or archived ("#4 is running"); null when no member is in progress. */
+export function closeBlocker(tasks: readonly Pick<Task, "id" | "state">[]): string | null {
+  const busy = tasks.toSorted((a, b) => a.id - b.id).find((t) => t.state === "launching" || t.state === "running" || t.state === "needs_input");
+  if (busy === undefined) return null;
+  return busy.state === "needs_input" ? `#${busy.id} needs input` : `#${busy.id} is ${busy.state}`;
+}
+
+/** Row chip for a closed task: archived, or its tree done or archived; null when open. */
+export function taskClosedLabel(t: Pick<Task, "archivedAt" | "treeStatus">): string | null {
+  if (t.archivedAt !== null) return "archived";
+  if (t.treeStatus === "done") return "tree done";
+  if (t.treeStatus === "archived") return "tree archived";
+  return null;
+}
 
 /** New tree from a selection: parallel (every task a root) or a chain (each needs the one before it). */
 export type TreeShape = "parallel" | "chain";

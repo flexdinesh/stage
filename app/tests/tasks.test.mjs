@@ -52,21 +52,33 @@ test("HTTP contract: needs, trees and adopt calls; batch links anchor the sessio
     return Response.json({});
   });
   await api.setNeeds(7, [3, 5]);
-  await api.trees({ all: true, project: 2 });
+  await api.trees({ status: "all", project: 2 });
   await api.createTree({ title: "T", tasks: [{ taskId: 3 }, { taskId: 7, needs: [3] }] });
   await api.updateTree(4, { startMode: "manual" });
   await api.addToTree(4, 9);
   await api.addToTree(4, 9, [7]);
   await api.startTree(4);
+  await api.updateTree(4, { status: "done" });
+  await api.deleteTree(4);
+  await api.dissolveTree(5);
+  await api.archiveTask(7);
+  await api.unarchiveTask(7);
+  await api.tasks({ project: 2, closed: "true" });
   await api.adoptThread("a/b", { title: "Plan" });
   assert.deepEqual(calls, [
     { path: "/tasks/7/needs", method: "PUT", body: { needs: [3, 5] } },
-    { path: "/trees?all=1&project=2", method: "GET", body: undefined },
+    { path: "/trees?status=all&project=2", method: "GET", body: undefined },
     { path: "/trees", method: "POST", body: { title: "T", tasks: [{ taskId: 3 }, { taskId: 7, needs: [3] }] } },
     { path: "/trees/4", method: "PATCH", body: { startMode: "manual" } },
     { path: "/trees/4/tasks", method: "POST", body: { taskId: 9 } },
     { path: "/trees/4/tasks", method: "POST", body: { taskId: 9, needs: [7] } },
     { path: "/trees/4/start", method: "POST", body: undefined },
+    { path: "/trees/4", method: "PATCH", body: { status: "done" } },
+    { path: "/trees/4", method: "DELETE", body: undefined },
+    { path: "/trees/5/dissolve", method: "POST", body: undefined },
+    { path: "/tasks/7/archive", method: "POST", body: undefined },
+    { path: "/tasks/7/unarchive", method: "POST", body: undefined },
+    { path: "/tasks?project=2&closed=true", method: "GET", body: undefined },
     { path: "/threads/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
   ]);
   assert.equal(batchPath("a/b"), "/sessions/a%2Fb#created-tasks");

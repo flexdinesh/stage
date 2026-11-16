@@ -33,6 +33,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 	case "ls", "list":
 		var a agenttools.ListTreesArgs
 		c.fs.BoolVar(&a.All, "all", false, "every tree (default: active)")
+		c.fs.StringVar(&a.Status, "status", "", "active|done|archived|all (default active)")
 		c.fs.StringVar(&a.Project, "project", "", "project")
 		if err := c.parse(rest); err != nil {
 			return err
@@ -149,6 +150,41 @@ func runTree(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { printTreeStart(w, res) })
+	case "done", "archive":
+		var undo bool
+		c.fs.BoolVar(&undo, "undo", false, "reopen (done) or unarchive (archive)")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		status := "done"
+		if v == "archive" {
+			status = "archived"
+		}
+		if undo {
+			status = "open"
+		}
+		res, err := c.ops().UpdateTree(ctx, agenttools.UpdateTreeArgs{ID: id, Status: &status})
+		if err != nil {
+			return err
+		}
+		return printTreeOut(res)
+	case "rm-tree":
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		res, err := c.ops().DeleteTree(ctx, agenttools.TreeIDArgs{ID: id})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted tree %d and its tasks\n", id) })
 	}
 	return usagef("tree %s: unknown", v)
 }

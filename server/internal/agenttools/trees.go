@@ -26,6 +26,7 @@ type TreeRow struct {
 	// zero counts are left out.
 	States    map[string]int `json:"states"`
 	SettledAt *time.Time     `json:"settledAt,omitempty"`
+	Status    db.TreeStatus  `json:"status"` // open | done | archived
 }
 
 func treeRow(t db.TreeSummary) TreeRow {
@@ -42,13 +43,14 @@ func treeRow(t db.TreeSummary) TreeRow {
 	}
 	return TreeRow{
 		ID: t.ID, Title: t.Title, StartMode: t.StartMode, Tasks: c.Total, Levels: t.Levels,
-		Projects: t.Projects, States: states, SettledAt: t.SettledAt,
+		Projects: t.Projects, States: states, SettledAt: t.SettledAt, Status: t.Status,
 	}
 }
 
 // ListTreesArgs is list_trees.
 type ListTreesArgs struct {
-	All     bool   `json:"all,omitempty" jsonschema:"every tree; default: active trees (a member not settled)"`
+	All     bool   `json:"all,omitempty" jsonschema:"every tree (status all)"`
+	Status  string `json:"status,omitempty" jsonschema:"active (default: open with a member not settled) | done (marked done, or every member settled) | archived | all"`
 	Project string `json:"project,omitempty" jsonschema:"project id or title: trees with a member there; omitted = all projects"`
 }
 
@@ -58,7 +60,7 @@ type TreesOut struct {
 }
 
 func (o *Ops) ListTrees(ctx context.Context, a ListTreesArgs) (TreesOut, error) {
-	q := client.TreeQuery{All: a.All}
+	q := client.TreeQuery{All: a.All, Status: a.Status}
 	if a.Project != "" {
 		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
 		if err != nil {
@@ -125,6 +127,7 @@ type UpdateTreeArgs struct {
 	ID        int64   `json:"id" jsonschema:"tree id"`
 	Title     *string `json:"title,omitempty"`
 	StartMode *string `json:"startMode,omitempty" jsonschema:"auto | manual"`
+	Status    *string `json:"status,omitempty" jsonschema:"done (mark done: remaining tasks never start) | archived | open (reopen or unarchive); not while a member is launching, running or needs input"`
 }
 
 func (o *Ops) UpdateTree(ctx context.Context, a UpdateTreeArgs) (client.TreeDetail, error) {
@@ -142,7 +145,20 @@ func (o *Ops) UpdateTree(ctx context.Context, a UpdateTreeArgs) (client.TreeDeta
 		}
 		p["startMode"] = *mode
 	}
+	if a.Status != nil {
+		st := db.TreeStatus(*a.Status)
+		if !st.Valid() {
+			return client.TreeDetail{}, fmt.Errorf("invalid status %q (want open|done|archived)", *a.Status)
+		}
+		p["status"] = st
+	}
 	return o.Client.UpdateTree(ctx, a.ID, p)
+}
+
+// DeleteTree deletes an unstarted tree and every member task.
+func (o *Ops) DeleteTree(ctx context.Context, a TreeIDArgs) (DeletedOut, error) {
+	err := o.Client.DeleteTree(ctx, a.ID)
+	return DeletedOut{Deleted: err == nil, ID: a.ID}, err
 }
 
 // AddToTreeArgs is add_to_tree.

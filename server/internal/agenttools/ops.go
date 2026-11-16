@@ -339,11 +339,13 @@ type TaskRow struct {
 	TreeID     *int64       `json:"treeId,omitempty"`
 	Needs      []int64      `json:"needs,omitempty"`
 	// Readiness: blocked | ready for a backlog tree member.
-	Readiness  *db.Readiness `json:"readiness,omitempty"`
-	Adopted    bool          `json:"adopted,omitempty"` // tracks an existing session
-	StartAt    *time.Time    `json:"startAt,omitempty"`
-	ScheduleID *int64        `json:"scheduleId,omitempty"`
-	Tags       []string      `json:"tags,omitempty"`
+	Readiness  *db.Readiness  `json:"readiness,omitempty"`
+	TreeStatus *db.TreeStatus `json:"treeStatus,omitempty"` // its tree's status (open | done | archived)
+	Archived   bool           `json:"archived,omitempty"`
+	Adopted    bool           `json:"adopted,omitempty"` // tracks an existing session
+	StartAt    *time.Time     `json:"startAt,omitempty"`
+	ScheduleID *int64         `json:"scheduleId,omitempty"`
+	Tags       []string       `json:"tags,omitempty"`
 	// LastWordPreview is the thread's latest assistant reply, one plain line
 	// (get_task has the excerpt in thread.lastWord).
 	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
@@ -353,7 +355,8 @@ type TaskRow struct {
 func taskRow(t client.Task) TaskRow {
 	return TaskRow{
 		ID: t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
-		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, Adopted: t.Adopted,
+		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
+		Archived: t.ArchivedAt != nil, Adopted: t.Adopted,
 		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, LastWordPreview: t.LastWordPreview,
 		UpdatedAt: t.UpdatedAt,
 	}
@@ -365,6 +368,7 @@ type ListTasksArgs struct {
 	States  []string `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
 	Tag     string   `json:"tag,omitempty"`
 	Query   string   `json:"query,omitempty" jsonschema:"substring of title or prompt"`
+	Closed  string   `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
 	Limit   int      `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
 }
 
@@ -384,6 +388,13 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 		q.ProjectID = &p.ID
 	}
 	q.States, q.Tag, q.Q = a.States, a.Tag, a.Query
+	switch a.Closed {
+	case "", "false":
+	case "true", "all":
+		q.Closed = a.Closed
+	default:
+		return TasksOut{}, fmt.Errorf("invalid closed %q (want false|true|all)", a.Closed)
+	}
 	ts, err := o.Client.Tasks(ctx, q)
 	if err != nil {
 		return TasksOut{}, err
@@ -620,6 +631,16 @@ type DeletedOut struct {
 func (o *Ops) DeleteTask(ctx context.Context, a IDArgs) (DeletedOut, error) {
 	err := o.Client.DeleteTask(ctx, a.ID)
 	return DeletedOut{Deleted: err == nil, ID: a.ID}, err
+}
+
+// ArchiveTaskArgs is archive_task.
+type ArchiveTaskArgs struct {
+	ID       int64 `json:"id" jsonschema:"task id (standalone; a tree member is closed with its tree)"`
+	Archived *bool `json:"archived,omitempty" jsonschema:"true (default) archives; false unarchives"`
+}
+
+func (o *Ops) ArchiveTask(ctx context.Context, a ArchiveTaskArgs) (client.Task, error) {
+	return o.Client.ArchiveTask(ctx, a.ID, a.Archived == nil || *a.Archived)
 }
 
 func (o *Ops) StartTask(ctx context.Context, a IDArgs) (client.Task, error) {

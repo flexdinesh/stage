@@ -25,7 +25,8 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
-  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at
+  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
+  t.archived_at, tr.status, ` + unstartedSQL + `
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
@@ -43,7 +44,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
-		&t.StateSince, &t.ThreadUpdatedAt)
+		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -92,7 +93,13 @@ type TaskFilter struct {
 	Q           string
 	From, To    *time.Time
 	SettledFrom *time.Time // settled_at >= SettledFrom
+	// Closed: "" or "false" (open only: not archived, tree open or none),
+	// "true" (archived, or in a done or archived tree) or "all".
+	Closed string
 }
+
+// closedSQL: task t is archived or its tree tr is not open.
+const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	var w where
@@ -117,6 +124,13 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	}
 	if f.SettledFrom != nil {
 		w.add("t.settled_at >= " + w.arg(*f.SettledFrom))
+	}
+	switch f.Closed {
+	case "all":
+	case "true":
+		w.add(closedSQL)
+	default:
+		w.add("NOT " + closedSQL)
 	}
 	rows, err := s.pool.Query(ctx, taskSelect+w.sql()+` ORDER BY t.updated_at DESC, t.id DESC`, w.args...)
 	return collectTasks(rows, err)
@@ -438,16 +452,21 @@ FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
 	return nil
 }
 
-// DeleteTask removes a task unless a thread is active (Conflict). It is
-// spliced out of its tree first (its dependents take over its needs).
+// DeleteTask removes an unstarted task (never launched, no session);
+// a started one can only be archived (Conflict). It is spliced out of its
+// tree first (its dependents take over its needs).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		var state TaskState
-		if err := tx.QueryRow(ctx, `SELECT state FROM tasks WHERE id = $1`, id).Scan(&state); err != nil {
+		var unstarted bool
+		if err := tx.QueryRow(ctx, `SELECT t.state, `+unstartedSQL+` FROM tasks t WHERE t.id = $1`, id).Scan(&state, &unstarted); err != nil {
 			return notFound(err)
 		}
 		if state.Active() {
 			return Conflict("task is %s: stop it first", state)
+		}
+		if !unstarted {
+			return Conflict("task %d has started: archive it instead", id)
 		}
 		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
@@ -455,6 +474,34 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 		_, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
 		return err
 	})
+}
+
+// ArchiveTask archives (archived) or unarchives task id. Archiving needs a
+// standalone task (a tree member is closed with its tree) that is not
+// launching, running or needing input (Conflict).
+func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task, error) {
+	err := s.inTx(ctx, func(tx *Tx) error {
+		var tree *int64
+		if err := tx.QueryRow(ctx, `SELECT tree_id FROM tasks WHERE id = $1`, id).Scan(&tree); err != nil {
+			return notFound(err)
+		}
+		if !archived {
+			_, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = NULL, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NOT NULL`, id)
+			return err
+		}
+		if tree != nil {
+			return Conflict("task %d is in tree %d: archive the tree, or remove it from the tree first", id, *tree)
+		}
+		if err := noActiveTask(ctx, tx, `t.id = $1`, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = `+nowSQL+`, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NULL`, id)
+		return err
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	return s.GetTask(ctx, id)
 }
 
 // DuplicateTask copies a task's config and images into a new backlog task
@@ -556,6 +603,11 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 			t.TaskID, string(res.From), string(t.To), t.Detail); err != nil {
 			return err
 		}
+		if t.To.Active() {
+			if err := reopenOnActivity(ctx, tx, t.TaskID, t.To); err != nil {
+				return err
+			}
+		}
 		res.Changed = true
 		return nil
 	})
@@ -563,4 +615,33 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 		return TransitionResult{}, fmt.Errorf("transition task %d: %w", t.TaskID, err)
 	}
 	return res, err
+}
+
+// reopenOnActivity: task id became active (to), so an archived task is
+// unarchived and a done or archived tree reopened, each with a task event
+// (docs/api.md "Done, archive and delete").
+func reopenOnActivity(ctx context.Context, tx *Tx, id int64, to TaskState) error {
+	label := strings.ReplaceAll(string(to), "_", " ")
+	tag, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $2, $3)`,
+			id, string(to), "unarchived: became "+label); err != nil {
+			return err
+		}
+	}
+	tag, err = tx.Exec(ctx, `UPDATE task_trees SET status = 'open', closed_at = NULL, updated_at = `+nowSQL+`
+WHERE status <> 'open' AND id = (SELECT tree_id FROM tasks WHERE id = $1)`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $2, $3)`,
+			id, string(to), "tree reopened: became "+label); err != nil {
+			return err
+		}
+	}
+	return nil
 }

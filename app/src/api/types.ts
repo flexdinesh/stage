@@ -253,6 +253,12 @@ export interface Task {
   updatedAt: string;
   /** When the task entered its current state (latest event into it); null without one. */
   stateSince: string | null;
+  /** When the task was archived; null when not archived. Activity on it unarchives it. */
+  archivedAt: string | null;
+  /** Its tree's status; null outside a tree. */
+  treeStatus: TreeStatus | null;
+  /** Never launched and no session: it can be deleted. A started task can only be archived. */
+  deletable: boolean;
 }
 
 /** A pull request T3 associates with a thread. `state` is T3's string (open, merged, closed, draft, ...). */
@@ -350,12 +356,20 @@ export interface CreatedTasks {
 // ---- Trees ----
 
 /** A DAG of tasks: each member's needs are members that must settle before it starts. */
+/** open; done (marked done by hand: nothing more starts); archived. Activity on a member reopens it. */
+export type TreeStatus = "open" | "done" | "archived";
+
 export interface Tree {
   id: number;
   title: string;
   startMode: StartMode;
+  status: TreeStatus;
+  /** When it was marked done or archived; null while open. */
+  closedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Every member is unstarted: deleting removes the tree and its tasks. */
+  deletable: boolean;
 }
 
 /** taskId needs needId. */
@@ -425,6 +439,17 @@ export interface CreateTreeRequest {
 export interface UpdateTreeRequest {
   title?: string;
   startMode?: StartMode;
+  status?: TreeStatus;
+}
+
+/** Trees page and API view: active (open, a member not settled), done (marked done or all settled), archived, all. */
+export type TreeView = "active" | "done" | "archived" | "all";
+
+export interface TreeListQuery {
+  status?: TreeView;
+  /** With active: also open trees completed at or after this. */
+  settledFrom?: string;
+  project?: number;
 }
 
 export interface StartTreeResponse {
@@ -606,6 +631,8 @@ export interface TaskListQuery {
   to?: string;
   /** settledAt >= this (ISO date or datetime). */
   settledFrom?: string;
+  /** Omitted: open tasks only; true: archived or in a done/archived tree; all: both. */
+  closed?: "true" | "all";
 }
 
 // ---- Threads (history) ----

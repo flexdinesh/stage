@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -25,6 +26,23 @@ var StartModes = []string{string(StartAuto), string(StartManual)}
 
 func (m StartMode) Valid() bool { return slices.Contains(StartModes, string(m)) }
 
+// TreeStatus is a tree's lifecycle (docs/api.md "Done, archive and delete"):
+// open, done (marked done by hand) or archived. A tree that is not open
+// releases nothing, rejects structural changes and its members leave the
+// Dashboard; activity on a member reopens it.
+type TreeStatus string
+
+const (
+	TreeOpen     TreeStatus = "open"
+	TreeDone     TreeStatus = "done"
+	TreeArchived TreeStatus = "archived"
+)
+
+// TreeStatuses are the valid tree statuses.
+var TreeStatuses = []string{string(TreeOpen), string(TreeDone), string(TreeArchived)}
+
+func (s TreeStatus) Valid() bool { return slices.Contains(TreeStatuses, string(s)) }
+
 // Readiness of a backlog tree member: blocked (a need is not settled) or
 // ready (every need settled, no start time, and manual or no needs).
 type Readiness string
@@ -39,22 +57,30 @@ const (
 	effectiveModeSQL = `COALESCE(t.start_mode, tr.start_mode)`
 	hasNeedsSQL      = `EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = t.id)`
 	unsettledNeedSQL = `EXISTS (SELECT 1 FROM task_needs n JOIN tasks d ON d.id = n.need_id WHERE n.task_id = t.id AND d.state <> 'settled')`
-	readinessSQL     = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' THEN NULL
+	readinessSQL     = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR tr.status <> 'open' THEN NULL
  WHEN ` + unsettledNeedSQL + ` THEN 'blocked'
  WHEN t.start_at IS NULL AND (` + effectiveModeSQL + ` = 'manual' OR NOT ` + hasNeedsSQL + `) THEN 'ready'
  END`
 	// releasedSQL: a backlog task with needs, all settled, and no start time
 	// (auto launches it; manual reads ready and notifies).
-	releasedSQL = `t.state = 'backlog' AND t.start_at IS NULL AND t.adopted = 0 AND ` + hasNeedsSQL + ` AND NOT ` + unsettledNeedSQL
+	releasedSQL = `t.state = 'backlog' AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unsettledNeedSQL
+	// unstartedSQL: task t never launched and has no session (deletable;
+	// otherwise it can only be archived).
+	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0)`
 )
 
 // Tree is a DAG of tasks (docs/api.md "Trees").
 type Tree struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	StartMode StartMode `json:"startMode"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        int64      `json:"id"`
+	Title     string     `json:"title"`
+	StartMode StartMode  `json:"startMode"`
+	Status    TreeStatus `json:"status"`
+	// ClosedAt: when it was marked done or archived (nil while open).
+	ClosedAt  *time.Time `json:"closedAt"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	// Deletable: every member is unstarted (Store.DeleteTree).
+	Deletable bool `json:"deletable"`
 }
 
 // TreeEdge: TaskID needs NeedID.
@@ -135,10 +161,25 @@ type TreeSummary struct {
 	SettledAt *time.Time `json:"settledAt"`
 }
 
-// TreeFilter selects trees: active ones (a member not settled), plus
-// completed ones settled at or after SettledFrom; All lists every tree.
+// TreeView picks trees by lifecycle: active (open with a member not
+// settled), done (marked done, or open with every member settled),
+// archived, or all.
+type TreeView string
+
+const (
+	TreeViewActive   TreeView = "active"
+	TreeViewDone     TreeView = "done"
+	TreeViewArchived TreeView = "archived"
+	TreeViewAll      TreeView = "all"
+)
+
+// TreeViews are the valid tree views.
+var TreeViews = []string{string(TreeViewActive), string(TreeViewDone), string(TreeViewArchived), string(TreeViewAll)}
+
+// TreeFilter selects trees: View ("" = active); with active, open trees
+// completed at or after SettledFrom are listed too.
 type TreeFilter struct {
-	All         bool
+	View        TreeView
 	SettledFrom *time.Time
 	ProjectID   *int64 // a member is in this project
 }
@@ -160,13 +201,16 @@ type NewTree struct {
 type TreePatch struct {
 	Title     Optional[string]    `json:"title"`
 	StartMode Optional[StartMode] `json:"startMode"`
+	// Status is applied by SetTreeStatus (UpdateTree ignores it).
+	Status Optional[TreeStatus] `json:"status"`
 }
 
-const treeColumns = `tr.id, tr.title, tr.start_mode, tr.created_at, tr.updated_at`
+const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.updated_at,
+  NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)`
 
 func scanTree(row rowScanner) (Tree, error) {
 	var t Tree
-	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.UpdatedAt, &t.Deletable)
 	return t, notFound(err)
 }
 
@@ -318,12 +362,19 @@ func (s *Store) ListTrees(ctx context.Context, f TreeFilter) ([]TreeSummary, err
 	if f.ProjectID != nil {
 		w.add("EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.project_id = " + w.arg(*f.ProjectID) + ")")
 	}
-	if !f.All {
-		active := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.state <> 'settled')"
+	unsettled := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.state <> 'settled')"
+	switch f.View {
+	case TreeViewAll:
+	case TreeViewDone:
+		w.add("(tr.status = 'done' OR (tr.status = 'open' AND NOT " + unsettled + "))")
+	case TreeViewArchived:
+		w.add("tr.status = 'archived'")
+	default:
+		active := unsettled
 		if f.SettledFrom != nil {
 			active = "(" + active + " OR (SELECT max(m.settled_at) FROM tasks m WHERE m.tree_id = tr.id) >= " + w.arg(*f.SettledFrom) + ")"
 		}
-		w.add(active)
+		w.add("tr.status = 'open' AND " + active)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+treeColumns+` FROM task_trees tr`+w.sql()+`
 ORDER BY `+treeActivitySQL+` DESC, tr.id DESC`, w.args...)
@@ -409,8 +460,14 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 	return sum
 }
 
-// UpdateTree applies a validated patch.
+// UpdateTree applies a validated patch. Start mode changes only while the
+// tree is open (Conflict).
 func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, error) {
+	if p.StartMode.Set {
+		if err := treeOpen(ctx, s.pool, id); err != nil {
+			return Tree{}, err
+		}
+	}
 	var w where
 	w.arg(id)
 	sets := []string{"updated_at = " + nowSQL}
@@ -430,8 +487,93 @@ func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, er
 	return t, nil
 }
 
-// DeleteTree dissolves a tree: its tasks stay (standalone), their needs go.
+// SetTreeStatus marks tree id done, archives it, or reopens it (open). Done
+// and archived need no member launching, running or needing input
+// (Conflict naming it); members keep their states.
+func (s *Store) SetTreeStatus(ctx context.Context, id int64, status TreeStatus) (TreeDetail, error) {
+	err := s.inTx(ctx, func(tx *Tx) error {
+		if err := treeExists(ctx, tx, id); err != nil {
+			return err
+		}
+		if status != TreeOpen {
+			if err := noActiveTask(ctx, tx, `t.tree_id = $1`, id); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(ctx, `UPDATE task_trees SET status = $2,
+  closed_at = CASE WHEN $2 = 'open' THEN NULL WHEN status = $2 THEN closed_at ELSE `+nowSQL+` END,
+  updated_at = `+nowSQL+` WHERE id = $1`, id, status)
+		return err
+	})
+	if err != nil {
+		return TreeDetail{}, err
+	}
+	return s.GetTree(ctx, id)
+}
+
+// noActiveTask: Conflict naming the first task matching cond (over tasks t,
+// arg $1) that is launching, running or needing input.
+func noActiveTask(ctx context.Context, tx *Tx, cond string, arg any) error {
+	var id int64
+	var state TaskState
+	err := tx.QueryRow(ctx, `SELECT t.id, t.state FROM tasks t WHERE `+cond+`
+  AND t.state IN ('launching', 'running', 'needs_input') ORDER BY t.id LIMIT 1`, arg).Scan(&id, &state)
+	if errors.Is(notFound(err), ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return Conflict("#%d is %s: stop it first", id, strings.ReplaceAll(string(state), "_", " "))
+}
+
+// treeOpen: Conflict unless tree id is open (structural changes need an open
+// tree). A missing tree is not checked here.
+func treeOpen(ctx context.Context, q queryRower, id int64) error {
+	var status TreeStatus
+	if err := q.QueryRow(ctx, `SELECT status FROM task_trees WHERE id = $1`, id).Scan(&status); err != nil {
+		if errors.Is(notFound(err), ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	switch status {
+	case TreeDone:
+		return Conflict("tree %d is done: reopen it first", id)
+	case TreeArchived:
+		return Conflict("tree %d is archived: unarchive it first", id)
+	}
+	return nil
+}
+
+// DeleteTree deletes a tree and every member task. Only a tree whose members
+// are all unstarted (never launched, no session) can be deleted (Conflict:
+// archive it instead).
 func (s *Store) DeleteTree(ctx context.Context, id int64) error {
+	return s.inTx(ctx, func(tx *Tx) error {
+		if err := treeExists(ctx, tx, id); err != nil {
+			return err
+		}
+		var started *int64
+		if err := tx.QueryRow(ctx, `SELECT min(t.id) FROM tasks t WHERE t.tree_id = $1 AND NOT `+unstartedSQL, id).Scan(&started); err != nil {
+			return err
+		}
+		if started != nil {
+			return Conflict("#%d has started: archive the tree instead", *started)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM tasks WHERE tree_id = $1`, id); err != nil {
+			return err
+		}
+		if err := clearStaleBases(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM task_trees WHERE id = $1`, id)
+		return err
+	})
+}
+
+// DissolveTree removes a tree: its tasks stay (standalone), their needs go.
+func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 	return s.inTx(ctx, func(tx *Tx) error {
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
@@ -505,6 +647,9 @@ func (s *Store) SetNeeds(ctx context.Context, id int64, needs []int64) (Task, er
 // StartableInTree: the tree's ready members (Start ready), by id.
 func (s *Store) StartableInTree(ctx context.Context, treeID int64) ([]int64, error) {
 	if err := treeExists(ctx, s.pool, treeID); err != nil {
+		return nil, err
+	}
+	if err := treeOpen(ctx, s.pool, treeID); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT t.id FROM tasks t JOIN task_trees tr ON tr.id = t.tree_id
@@ -674,6 +819,16 @@ func joinTree(ctx context.Context, tx *Tx, id, tree int64) error {
 	if cur != nil && *cur == tree {
 		return nil
 	}
+	if err := treeOpen(ctx, tx, tree); err != nil {
+		return err
+	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM tasks WHERE id = $1`, id).Scan(&archived); err != nil {
+		return err
+	}
+	if archived {
+		return Conflict("task %d is archived: unarchive it first", id)
+	}
 	if cur != nil {
 		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
@@ -691,6 +846,11 @@ func spliceOut(ctx context.Context, tx *Tx, id int64) error {
 	var tree *int64
 	if err := tx.QueryRow(ctx, `SELECT tree_id FROM tasks WHERE id = $1`, id).Scan(&tree); err != nil {
 		return fmt.Errorf("task %d: %w", id, notFound(err))
+	}
+	if tree != nil {
+		if err := treeOpen(ctx, tx, *tree); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT OR IGNORE INTO task_needs (task_id, need_id)
@@ -742,6 +902,11 @@ func setNeeds(ctx context.Context, tx *Tx, id int64, needs []int64) error {
 	}
 	if slices.Equal(cur, want) {
 		return nil
+	}
+	if tree != nil {
+		if err := treeOpen(ctx, tx, *tree); err != nil {
+			return err
+		}
 	}
 	if state != StateBacklog {
 		return Conflict("task %d is %s: needs change only in backlog", id, state)

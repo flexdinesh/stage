@@ -225,6 +225,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		c.fs.StringVar(&states, "state", "", "states")
 		c.fs.StringVar(&a.Tag, "tag", "", "tag")
 		c.fs.StringVar(&a.Query, "q", "", "search")
+		c.fs.StringVar(&a.Closed, "closed", "", "false|true|all (default false: open tasks only)")
 		c.fs.IntVar(&a.Limit, "limit", 50, "max rows")
 		if err := c.parse(rest); err != nil {
 			return err
@@ -346,6 +347,22 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted task %d\n", id) })
+	case "archive":
+		var undo bool
+		c.fs.BoolVar(&undo, "undo", false, "unarchive")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		archived := !undo
+		res, err := o().ArchiveTask(ctx, agenttools.ArchiveTaskArgs{ID: id, Archived: &archived})
+		if err != nil {
+			return err
+		}
+		return printTask(res)
 	case "start", "stop", "dup", "duplicate":
 		if err := c.parse(rest); err != nil {
 			return err

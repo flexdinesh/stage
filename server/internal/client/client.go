@@ -357,6 +357,9 @@ type TaskQuery struct {
 	States    []string
 	Tag       string
 	Q         string
+	// Closed: "" (open only), "true" (archived or in a done/archived tree)
+	// or "all".
+	Closed string
 }
 
 // ThreadQuery filters GET /api/threads.
@@ -526,6 +529,9 @@ func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	if f.Q != "" {
 		q.Set("q", f.Q)
 	}
+	if f.Closed != "" {
+		q.Set("closed", f.Closed)
+	}
 	var out struct {
 		Tasks []Task `json:"tasks"`
 	}
@@ -562,9 +568,20 @@ func (c *Client) UpdateTask(ctx context.Context, id int64, p Patch) (Task, error
 	return out, err
 }
 
-// DeleteTask deletes a task.
+// DeleteTask deletes an unstarted task (409 once started: archive it).
 func (c *Client) DeleteTask(ctx context.Context, id int64) error {
 	return c.do(ctx, http.MethodDelete, taskPath(id, ""), nil, nil)
+}
+
+// ArchiveTask archives (archived) or unarchives a task.
+func (c *Client) ArchiveTask(ctx context.Context, id int64, archived bool) (Task, error) {
+	action := "unarchive"
+	if archived {
+		action = "archive"
+	}
+	var out Task
+	err := c.do(ctx, http.MethodPost, taskPath(id, action), nil, &out)
+	return out, err
 }
 
 // StartTask launches a task in T3.
@@ -606,10 +623,12 @@ func (c *Client) SetNeeds(ctx context.Context, id int64, needs []int64) (Task, e
 	return out, err
 }
 
-// TreeQuery filters GET /api/trees: active trees (plus ones settled since
-// SettledFrom); All lists every tree.
+// TreeQuery filters GET /api/trees: Status active (default; plus open
+// trees settled since SettledFrom) | done | archived | all; All is
+// Status all.
 type TreeQuery struct {
 	All         bool
+	Status      string
 	ProjectID   *int64
 	SettledFrom *time.Time
 }
@@ -653,6 +672,9 @@ func (c *Client) Trees(ctx context.Context, f TreeQuery) ([]db.TreeSummary, erro
 	if f.All {
 		q.Set("all", "1")
 	}
+	if f.Status != "" {
+		q.Set("status", f.Status)
+	}
 	setID(q, "project", f.ProjectID)
 	if f.SettledFrom != nil {
 		q.Set("settledFrom", f.SettledFrom.UTC().Format(time.RFC3339))
@@ -681,16 +703,22 @@ func (c *Client) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error)
 	return out, err
 }
 
-// UpdateTree patches a tree (title, startMode).
+// UpdateTree patches a tree (title, startMode, status).
 func (c *Client) UpdateTree(ctx context.Context, id int64, p Patch) (TreeDetail, error) {
 	var out TreeDetail
 	err := c.do(ctx, http.MethodPatch, treePath(id, ""), p, &out)
 	return out, err
 }
 
-// DeleteTree dissolves a tree (its tasks stay, edges go).
+// DeleteTree deletes an unstarted tree and its tasks (409 once a member
+// started: archive it).
 func (c *Client) DeleteTree(ctx context.Context, id int64) error {
 	return c.do(ctx, http.MethodDelete, treePath(id, ""), nil, nil)
+}
+
+// DissolveTree removes a tree; its tasks stay, their needs go.
+func (c *Client) DissolveTree(ctx context.Context, id int64) error {
+	return c.do(ctx, http.MethodPost, treePath(id, "dissolve"), nil, nil)
 }
 
 // AddToTree adds task taskID to tree id; needs nil keeps the task's needs.

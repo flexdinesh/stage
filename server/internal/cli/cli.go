@@ -122,7 +122,7 @@ Usage:
                                       #TASK_ID or thread id names (with its session/task)
   stage projects ls
   stage models ls
-  stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
+  stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
                    [--start-mode auto|manual|inherit] [--base-task ID]
@@ -130,16 +130,20 @@ Usage:
   stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
                    [--start-mode auto|manual|inherit] [--base-task ID]
   stage task needs ID [NEED...]       replace a backlog task's needs (none clears them)
-  stage task rm|start|stop|dup ID     start on a blocked task starts it early (needs kept)
+  stage task rm|start|stop|dup ID     start on a blocked task starts it early (needs kept);
+                                      rm only for a task that never started
+  stage task archive ID [--undo]      archive a standalone task (--undo unarchives)
   stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
-  stage tree ls [--all] [--project P]
+  stage tree ls [--status active|done|archived|all] [--all] [--project P]
   stage tree show ID                  levels, states, needs, readiness
   stage tree new --title T [--start-mode auto|manual] ID[:NEED,..]...
   stage tree add TREE_ID TASK_ID [--needs ID,..]   a task in another tree moves
   stage tree rm TASK_ID               take a task out of its tree (dependents take its needs)
   stage tree edit ID [--title T] [--start-mode auto|manual]
   stage tree start ID                 start every ready member
+  stage tree done|archive ID [--undo] mark done / archive (--undo reopens)
+  stage tree rm-tree ID               delete a tree and its tasks (none started)
   stage schedule ls [--project P]
   stage schedule show ID
   stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]

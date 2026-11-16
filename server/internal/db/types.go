@@ -172,12 +172,19 @@ type Task struct {
 	UpdatedAt            time.Time `json:"updatedAt"`
 	// StateSince: when the task entered its current state (latest task event
 	// into it; nil without one).
-	StateSince      *time.Time   `json:"stateSince"`
-	Attachments     []Attachment `json:"attachments"` // images, upload order
-	ThreadUpdatedAt *time.Time   `json:"-"`           // mirrored thread's updatedAt (tree activity)
-	T3ProjectID     string       `json:"-"`           // project's T3 id (for launch)
-	ThreadLink      *string      `json:"-"`           // mirrored thread link
-	TreeStartMode   *StartMode   `json:"-"`           // the tree's start mode (batch grouping)
+	StateSince  *time.Time   `json:"stateSince"`
+	Attachments []Attachment `json:"attachments"` // images, upload order
+	// ArchivedAt: when the task was archived (nil = not archived; docs/api.md
+	// "Done, archive and delete").
+	ArchivedAt *time.Time `json:"archivedAt"`
+	// TreeStatus: its tree's status (nil outside a tree).
+	TreeStatus *TreeStatus `json:"treeStatus"`
+	// Deletable: never launched and no session (unstarted); else archive only.
+	Deletable       bool       `json:"deletable"`
+	ThreadUpdatedAt *time.Time `json:"-"` // mirrored thread's updatedAt (tree activity)
+	T3ProjectID     string     `json:"-"` // project's T3 id (for launch)
+	ThreadLink      *string    `json:"-"` // mirrored thread link
+	TreeStartMode   *StartMode `json:"-"` // the tree's start mode (batch grouping)
 }
 
 type TaskEvent struct {
