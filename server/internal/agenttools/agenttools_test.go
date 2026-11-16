@@ -24,8 +24,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/stage/server/internal/links"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -37,7 +37,7 @@ type env struct {
 	handler http.Handler // the /api router
 	fake    *t3.Fake
 	sync    *t3sync.Service
-	runner  *links.Runner
+	runner  *release.Runner
 	client  *client.Client
 	url     string
 }
@@ -48,7 +48,7 @@ func newEnv(t *testing.T) *env {
 	fake := t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, fake, log)
-	runner := links.NewRunner(store, svc, log)
+	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
@@ -160,7 +160,7 @@ func TestToolList(t *testing.T) {
 	}
 	want := []string{
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
-		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task", "link_task", "order_tasks", "unlink_task",
+		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
 		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
 	}
@@ -190,9 +190,15 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 
 	var tk client.Task
 	mustCall(t, cs, "create_task", map[string]any{"title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high", "tags": []string{"agent"}}, &tk)
-	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || tk.AfterThreadID == nil || *tk.AfterThreadID != s ||
+	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || len(tk.Needs) != 1 || tk.Readiness == nil || *tk.Readiness != db.ReadinessBlocked ||
 		tk.OriginThreadID == nil || *tk.OriginThreadID != s || len(tk.ModelOptions) != 1 || tk.ModelOptions[0].ID != "effort" {
 		t.Fatalf("task %+v", tk)
+	}
+	// afterMe tracks the caller's session as a task and needs it.
+	var me client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": tk.Needs[0]}, &me)
+	if !me.Adopted || me.T3ThreadID == nil || *me.T3ThreadID != s || me.TreeID == nil || *me.TreeID != *tk.TreeID {
+		t.Fatalf("caller task %+v", me.Task)
 	}
 
 	// Explicit project wins; arguments override the environment.
@@ -219,7 +225,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	// The session settling starts the task.
 	_ = e.fake.SetStatus(s, t3.StatusCompleted)
 	_ = e.fake.Settle(s)
-	if err := e.sync.WatchThreads(context.Background()); err != nil {
+	if err := e.sync.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.runner.Reconcile(context.Background()); err != nil {
@@ -237,7 +243,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 }
 
-func TestLifecycleLinkWaitTools(t *testing.T) {
+func TestLifecycleWaitTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/life")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/life"}, PollEvery: 10 * time.Millisecond})
@@ -247,17 +253,12 @@ func TestLifecycleLinkWaitTools(t *testing.T) {
 	if a.State == db.StateBacklog || a.T3ThreadID == nil {
 		t.Fatalf("start=true %+v", a)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y"}, &b)
-	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID}, &b)
-	if b.AfterTaskID == nil || *b.AfterTaskID != a.ID {
-		t.Fatalf("link %+v", b)
+	if msg := call(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "start": true}, nil); !strings.Contains(msg, "cannot also start now") {
+		t.Fatalf("needs with start=true: %q", msg)
 	}
-	mustCall(t, cs, "unlink_task", map[string]any{"id": b.ID}, &b)
-	if b.AfterTaskID != nil {
-		t.Fatalf("unlink %+v", b)
-	}
-	if msg := call(t, cs, "link_task", map[string]any{"id": b.ID}, nil); msg == "" {
-		t.Fatal("link without target must fail")
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}}, &b)
+	if !slices.Equal(b.Needs, []int64{a.ID}) || b.TreeID == nil {
+		t.Fatalf("needs %+v", b)
 	}
 	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "title": "b2", "baseRef": "origin/main"}, &b)
 	if b.Title != "b2" || b.Workspace.Type != "worktree" || b.Workspace.BaseRef != "origin/main" {
@@ -382,7 +383,7 @@ func TestSearchSessionsTool(t *testing.T) {
 	}
 }
 
-// A planning session queues tasks, orders them, then verifies the batch.
+// A planning session queues dependent tasks, then verifies the batch.
 func TestPlanningSessionBatch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/plan")
@@ -390,31 +391,26 @@ func TestPlanningSessionBatch(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
 	var a, b, c client.Task
 	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "do a", "afterMe": true}, &a)
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "do b"}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "do b", "needs": []int64{a.ID}}, &b)
 	mustCall(t, cs, "create_task", map[string]any{"title": "c", "prompt": "do c"}, &c)
-
-	var ord agenttools.OrderTasksOut
-	mustCall(t, cs, "order_tasks", map[string]any{"taskIds": []int64{a.ID, b.ID}}, &ord)
-	if len(ord.Tasks) != 2 || ord.Tasks[0].ID != a.ID || ord.Tasks[1].ID != b.ID {
-		t.Fatalf("order %+v", ord)
-	}
-	if msg := call(t, cs, "order_tasks", map[string]any{"taskIds": []int64{c.ID}}, nil); !strings.Contains(msg, "at least two") {
-		t.Fatalf("one id: %q", msg)
+	if b.TreeID == nil || a.TreeID == nil || *b.TreeID != *a.TreeID {
+		t.Fatalf("b joins a's tree: %+v %+v", a, b)
 	}
 
 	var sd client.ThreadDetail
 	mustCall(t, cs, "get_session", map[string]any{"id": s}, &sd)
 	ct := sd.CreatedTasks
-	if len(ct.Chains) != 1 || len(ct.Chains[0]) != 2 || ct.Chains[0][0].ID != a.ID || ct.Chains[0][1].ID != b.ID ||
+	if len(ct.Trees) != 1 || ct.Trees[0].Tree.ID != *a.TreeID || ct.Trees[0].Tree.Title != "Planner" ||
+		len(ct.Trees[0].Tasks) != 2 || ct.Trees[0].Tasks[0].ID != a.ID || ct.Trees[0].Tasks[1].ID != b.ID ||
 		len(ct.Independent) != 1 || ct.Independent[0].ID != c.ID {
 		t.Fatalf("createdTasks %+v", ct)
 	}
-	if h := ct.Chains[0][0]; h.AfterThreadID == nil || *h.AfterThreadID != s {
-		t.Fatalf("head keeps after-me wait: %+v", h)
+	if h := ct.Trees[0].Tasks[0]; len(h.Needs) != 1 || h.Needs[0] == b.ID {
+		t.Fatalf("a needs the planner's session task: %+v", h)
 	}
 	var td client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &td)
-	if td.Batch == nil || len(td.Batch.Chains) != 1 || len(td.Batch.Independent) != 1 {
+	if td.Batch == nil || len(td.Batch.Trees) != 1 || len(td.Batch.Independent) != 1 || td.Tree != nil {
 		t.Fatalf("task batch %+v", td.Batch)
 	}
 }
@@ -494,7 +490,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 28 {
+	if err != nil || len(res.Tools) != 25 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut
@@ -559,7 +555,7 @@ func TestHandoffFlagTools(t *testing.T) {
 	if !a.Handoff {
 		t.Fatalf("create_task: handoff defaults on: %+v", a)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "afterTaskId": a.ID, "handoff": false}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "handoff": false}, &b)
 	if b.Handoff {
 		t.Fatalf("create_task handoff=false: %+v", b)
 	}
@@ -567,17 +563,17 @@ func TestHandoffFlagTools(t *testing.T) {
 	if !b.Handoff {
 		t.Fatalf("update_task handoff=true: %+v", b)
 	}
-	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID}, &b)
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "title": "b2"}, &b)
 	if !b.Handoff {
-		t.Fatalf("link_task without handoff keeps it: %+v", b)
+		t.Fatalf("update_task without handoff keeps it: %+v", b)
 	}
-	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID, "handoff": false}, &b)
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "handoff": false}, &b)
 	if b.Handoff {
-		t.Fatalf("link_task handoff=false: %+v", b)
+		t.Fatalf("update_task handoff=false: %+v", b)
 	}
 	var d client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": b.ID}, &d)
-	if d.Handoff || d.CurrentHandoff != nil {
+	if d.Handoff || len(d.CurrentHandoffs) != 0 {
 		t.Fatalf("get_task %+v", d)
 	}
 }
@@ -589,7 +585,7 @@ func TestBaseTools(t *testing.T) {
 
 	var a, b, r client.Task
 	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x"}, &a)
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "afterTaskId": a.ID, "baseRef": "origin/main", "base": "predecessor"}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "baseRef": "origin/main", "base": "predecessor"}, &b)
 	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
 		t.Fatalf("create_task base=predecessor: %+v", b.Workspace)
 	}
@@ -597,9 +593,9 @@ func TestBaseTools(t *testing.T) {
 	if b.Workspace.Type != "worktree" || b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
 		t.Fatalf("update_task base=ref keeps the worktree: %+v", b.Workspace)
 	}
-	mustCall(t, cs, "link_task", map[string]any{"id": b.ID, "afterTaskId": a.ID, "base": "predecessor"}, &b)
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "base": "predecessor"}, &b)
 	if !b.Workspace.FromPredecessor() {
-		t.Fatalf("link_task base=predecessor: %+v", b.Workspace)
+		t.Fatalf("update_task base=predecessor: %+v", b.Workspace)
 	}
 	var d client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": b.ID}, &d)
@@ -607,8 +603,8 @@ func TestBaseTools(t *testing.T) {
 		t.Fatalf("get_task %+v", d)
 	}
 	mustCall(t, cs, "create_task", map[string]any{"title": "r", "prompt": "z"}, &r)
-	if msg := call(t, cs, "link_task", map[string]any{"id": r.ID, "afterTaskId": a.ID, "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
-		t.Fatal("link_task base=predecessor on a root task must fail")
+	if msg := call(t, cs, "update_task", map[string]any{"id": r.ID, "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
+		t.Fatal("update_task base=predecessor on a root task must fail")
 	}
 	if msg := call(t, cs, "create_task", map[string]any{"title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatal("create_task base without baseRef must fail")

@@ -72,8 +72,8 @@ type Project struct {
 }
 
 // Workspace bases: ref (the worktree starts from BaseRef) or predecessor
-// (from the linked predecessor's branch; BaseRef is the fallback,
-// docs/api.md "Predecessor base").
+// (from a need's branch; BaseRef is the fallback, docs/api.md "Predecessor
+// base").
 const (
 	BaseRef         = "ref"
 	BasePredecessor = "predecessor"
@@ -85,26 +85,34 @@ type Workspace struct {
 	BaseRef string  `json:"baseRef,omitempty"`
 	Branch  *string `json:"branch,omitempty"`
 	Base    string  `json:"base,omitempty"` // worktree: ref ("" = ref) | predecessor
+	// BaseTaskID: with base predecessor, the need whose branch the worktree
+	// starts from (nil = the sole need).
+	BaseTaskID *int64 `json:"baseTaskId,omitempty"`
 }
 
-// FromPredecessor: a worktree that starts from the predecessor's branch.
+// FromPredecessor: a worktree that starts from a need's branch.
 func (w Workspace) FromPredecessor() bool {
 	return w.Type == "worktree" && w.Base == BasePredecessor
 }
 
-// MarshalJSON emits {type:"root"} or {type:"worktree", baseRef, branch|null, base}.
+// MarshalJSON emits {type:"root"} or {type:"worktree", baseRef,
+// branch|null, base, baseTaskId|null}.
 func (w Workspace) MarshalJSON() ([]byte, error) {
 	if w.Type == "worktree" {
 		base := BaseRef
+		baseTask := w.BaseTaskID
 		if w.Base == BasePredecessor {
 			base = BasePredecessor
+		} else {
+			baseTask = nil
 		}
 		return json.Marshal(struct {
-			Type    string  `json:"type"`
-			BaseRef string  `json:"baseRef"`
-			Branch  *string `json:"branch"`
-			Base    string  `json:"base"`
-		}{w.Type, w.BaseRef, w.Branch, base})
+			Type       string  `json:"type"`
+			BaseRef    string  `json:"baseRef"`
+			Branch     *string `json:"branch"`
+			Base       string  `json:"base"`
+			BaseTaskID *int64  `json:"baseTaskId"`
+		}{w.Type, w.BaseRef, w.Branch, base, baseTask})
 	}
 	return json.Marshal(struct {
 		Type string `json:"type"`
@@ -127,27 +135,37 @@ type Task struct {
 	Notes              string           `json:"notes"`
 	State              TaskState        `json:"state"`
 	T3ThreadID         *string          `json:"t3ThreadId"`
-	AfterTaskID        *int64           `json:"afterTaskId"` // runs after this task (launches when it settles)
-	NextTaskID         *int64           `json:"nextTaskId"`  // the task that runs after this one
-	StartAt            *time.Time       `json:"startAt"`     // one-shot start of a backlog task (scheduler launches it)
-	StartTz            *string          `json:"startTz"`     // IANA zone startAt was entered in
-	ScheduleID         *int64           `json:"scheduleId"`  // recurring schedule that spawned the task
-	ScheduleTitle      *string          `json:"scheduleTitle"`
-	OriginThreadID     *string          `json:"originThreadId"`    // T3 session that created the task (agent interface)
-	OriginThreadTitle  *string          `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
-	AfterThreadID      *string          `json:"afterThreadId"`     // runs after this T3 session (launches when it settles)
-	AfterThreadTitle   *string          `json:"afterThreadTitle"`
-	Handoff            bool             `json:"handoff"` // append the predecessor handoff at launch (docs/api.md "Handoff")
-	LaunchAttempt      int              `json:"launchAttempt"`
-	LastError          *string          `json:"lastError"`
-	LaunchedAt         *time.Time       `json:"launchedAt"`
-	FinishedAt         *time.Time       `json:"finishedAt"`
-	SettledAt          *time.Time       `json:"settledAt"`
-	RunStartedAt       *time.Time       `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
-	RunEndedAt         *time.Time       `json:"runEndedAt"`
-	LastWordPreview    *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
-	LastWordAt         *time.Time       `json:"lastWordAt"`
-	PullRequests       []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
+	TreeID             *int64           `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle          *string          `json:"treeTitle"`
+	// StartMode is the task's own start mode (nil = inherit the tree's);
+	// EffectiveStartMode applies the tree's (nil outside a tree without one).
+	StartMode          *StartMode `json:"startMode"`
+	EffectiveStartMode *StartMode `json:"effectiveStartMode"`
+	// Readiness: blocked | ready for a backlog tree member, else nil.
+	Readiness  *Readiness `json:"readiness"`
+	Needs      []int64    `json:"needs"`      // tasks this one needs (same tree), by id
+	Dependents []int64    `json:"dependents"` // tasks that need this one, by id
+	// Adopted: the task tracks an existing T3 session (prompt ""); it is never
+	// started, restarted or duplicated by stage.
+	Adopted           bool             `json:"adopted"`
+	ReadyAt           *time.Time       `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
+	StartAt           *time.Time       `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
+	StartTz           *string          `json:"startTz"`    // IANA zone startAt was entered in
+	ScheduleID        *int64           `json:"scheduleId"` // recurring schedule that spawned the task
+	ScheduleTitle     *string          `json:"scheduleTitle"`
+	OriginThreadID    *string          `json:"originThreadId"`    // T3 session that created the task (agent interface)
+	OriginThreadTitle *string          `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
+	Handoff           bool             `json:"handoff"`           // append the needs' handoff at launch (docs/api.md "Handoff")
+	LaunchAttempt     int              `json:"launchAttempt"`
+	LastError         *string          `json:"lastError"`
+	LaunchedAt        *time.Time       `json:"launchedAt"`
+	FinishedAt        *time.Time       `json:"finishedAt"`
+	SettledAt         *time.Time       `json:"settledAt"`
+	RunStartedAt      *time.Time       `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
+	RunEndedAt        *time.Time       `json:"runEndedAt"`
+	LastWordPreview   *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
+	LastWordAt        *time.Time       `json:"lastWordAt"`
+	PullRequests      []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
 	// PendingQuestionCount: the thread's answerable pending questions.
 	PendingQuestionCount int          `json:"pendingQuestionCount"`
 	CreatedAt            time.Time    `json:"createdAt"`
@@ -155,6 +173,7 @@ type Task struct {
 	Attachments          []Attachment `json:"attachments"` // images, upload order
 	T3ProjectID          string       `json:"-"`           // project's T3 id (for launch)
 	ThreadLink           *string      `json:"-"`           // mirrored thread link
+	TreeStartMode        *StartMode   `json:"-"`           // the tree's start mode (batch grouping)
 }
 
 type TaskEvent struct {

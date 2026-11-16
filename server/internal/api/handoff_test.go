@@ -21,9 +21,21 @@ type handoffRec struct {
 
 type handoffTask struct {
 	task
-	Handoff        bool        `json:"handoff"`
-	AfterThreadID  *string     `json:"afterThreadId"`
-	CurrentHandoff *handoffRec `json:"currentHandoff"`
+	Handoff         bool         `json:"handoff"`
+	CurrentHandoffs []handoffRec `json:"currentHandoffs"`
+}
+
+// one is the current attempt's only handoff record (nil when none).
+func (h handoffTask) one(t *testing.T) *handoffRec {
+	t.Helper()
+	switch len(h.CurrentHandoffs) {
+	case 0:
+		return nil
+	case 1:
+		return &h.CurrentHandoffs[0]
+	}
+	t.Fatalf("want at most one handoff, got %+v", h.CurrentHandoffs)
+	return nil
 }
 
 func (e *env) handoffTask(id int64) handoffTask {
@@ -33,16 +45,13 @@ func (e *env) handoffTask(id int64) handoffTask {
 	return out
 }
 
-// settle completes and settles thread, then lets sync and the link runner act
+// settle completes and settles thread, then lets sync and the release runner act
 // (launch failures are asserted through task state).
 func (e *env) settle(thread string) {
 	e.t.Helper()
 	_ = e.fake.SetStatus(thread, t3.StatusCompleted)
 	_ = e.fake.Settle(thread)
 	e.poll()
-	if err := e.sync.WatchThreads(context.Background()); err != nil {
-		e.t.Fatal(err)
-	}
 	_ = e.runner.Reconcile(context.Background())
 }
 
@@ -64,13 +73,13 @@ func (e *env) hasEvent(id int64, prefix string) bool {
 	return false
 }
 
-func TestHandoffAppendedForTaskLink(t *testing.T) {
+func TestHandoffAppendedForNeed(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/handoff")
 	a := e.task(p.ID, "Build API", map[string]any{"start": true})
-	b := e.task(p.ID, "Write docs", map[string]any{"afterTaskId": a.ID})
-	if got := e.handoffTask(b.ID); !got.Handoff || got.CurrentHandoff != nil {
-		t.Fatalf("linked task: handoff must default on with no record yet: %+v", got)
+	b := e.task(p.ID, "Write docs", map[string]any{"needs": []int64{a.ID}})
+	if got := e.handoffTask(b.ID); !got.Handoff || got.CurrentHandoffs == nil || len(got.CurrentHandoffs) != 0 {
+		t.Fatalf("task with needs: handoff must default on with no record yet: %+v", got)
 	}
 	thread := *a.T3ThreadID
 	_ = e.fake.SetThread(thread, func(d *t3.ThreadDetail) {
@@ -81,10 +90,10 @@ func TestHandoffAppendedForTaskLink(t *testing.T) {
 	e.settle(thread)
 
 	got := e.handoffTask(b.ID)
-	if got.State != "running" || got.CurrentHandoff == nil {
-		t.Fatalf("follower must run with a handoff: %+v", got)
+	h := got.one(t)
+	if got.State != "running" || h == nil {
+		t.Fatalf("dependent must run with a handoff: %+v", got)
 	}
-	h := got.CurrentHandoff
 	if h.Status != "sent" || h.Attempt != 1 || h.SourceTaskID == nil || *h.SourceTaskID != a.ID || h.SourceThreadID != thread {
 		t.Fatalf("handoff record %+v", h)
 	}
@@ -92,7 +101,7 @@ func TestHandoffAppendedForTaskLink(t *testing.T) {
 		t.Fatalf("launch prompt must be prompt + stored block:\n%q\nblock:\n%q", msg, h.Text)
 	}
 	for _, want := range []string{
-		`<handoff from="stage">`, fmt.Sprintf(`"Build API" (task #%d)`, a.ID), "T3 thread: " + thread,
+		`<handoff from="stage">`, fmt.Sprintf(`This task needs "Build API" (task #%d), settled `, a.ID), "T3 thread: " + thread,
 		"Branch: feat/api · Worktree: /w/wt-api", "me/app#41 (open) https://github.com/me/app/pull/41",
 		"Final reply:\nShipped the API; see PR 41.", "</handoff>",
 	} {
@@ -112,11 +121,11 @@ func TestHandoffCapsReplyAndMarksTruncation(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/cap")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
 	thread := *a.T3ThreadID
 	_ = e.fake.SetReply(thread, t3.Reply{Text: strings.Repeat("x", 5000) + "TAIL"})
 	e.settle(thread)
-	h := e.handoffTask(b.ID).CurrentHandoff
+	h := e.handoffTask(b.ID).one(t)
 	if h == nil || h.Status != "sent" {
 		t.Fatalf("handoff %+v", h)
 	}
@@ -133,11 +142,11 @@ func TestHandoffOffSendsBarePrompt(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/off")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "handoff": false})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "handoff": false})
 	_ = e.fake.SetReply(*a.T3ThreadID, t3.Reply{Text: "done"})
 	e.settle(*a.T3ThreadID)
 	got := e.handoffTask(b.ID)
-	if got.State != "running" || got.Handoff || got.CurrentHandoff != nil {
+	if got.State != "running" || got.Handoff || len(got.CurrentHandoffs) != 0 {
 		t.Fatalf("handoff off: %+v", got)
 	}
 	if msg := e.lastMessage(); msg != "reply OK" {
@@ -149,7 +158,7 @@ func TestHandoffReadFailureLaunchesWithout(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/fail")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
 	e.t3.failReply.Store(true)
 	e.settle(*a.T3ThreadID)
 	got := e.handoffTask(b.ID)
@@ -159,32 +168,104 @@ func TestHandoffReadFailureLaunchesWithout(t *testing.T) {
 	if msg := e.lastMessage(); msg != "reply OK" {
 		t.Fatalf("prompt %q", msg)
 	}
-	h := got.CurrentHandoff
+	h := got.one(t)
 	if h == nil || h.Status != "skipped" || h.Text != "" || h.Reason == nil || !strings.Contains(*h.Reason, "t3 read timed out") {
 		t.Fatalf("skipped record %+v", h)
 	}
-	if !e.hasEvent(b.ID, "handoff skipped: ") {
+	if !e.hasEvent(b.ID, fmt.Sprintf("handoff from #%d skipped: ", a.ID)) {
 		t.Fatal("missing skip event")
 	}
 }
 
-func TestHandoffForSessionLink(t *testing.T) {
+func TestHandoffFromAdoptedSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/session")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	b := e.task(p.ID, "b", map[string]any{"afterThreadId": s})
+	b := e.task(p.ID, "b", map[string]any{"needsSessionId": s})
+	planner := b.Needs[0]
 	_ = e.fake.SetReply(s, t3.Reply{Text: "Plan ready."})
 	e.settle(s)
 	got := e.handoffTask(b.ID)
-	h := got.CurrentHandoff
-	if got.State != "running" || h == nil || h.Status != "sent" || h.SourceTaskID != nil || h.SourceThreadID != s || h.SourceTitle != "Planner" {
+	h := got.one(t)
+	if got.State != "running" || h == nil || h.Status != "sent" || h.SourceTaskID == nil || *h.SourceTaskID != planner ||
+		h.SourceThreadID != s || h.SourceTitle != "Planner" {
 		t.Fatalf("session handoff %+v / %+v", got, h)
 	}
-	if !strings.Contains(h.Text, `"Planner" (session)`) || !strings.Contains(h.Text, "Plan ready.") {
+	if !strings.Contains(h.Text, fmt.Sprintf(`"Planner" (task #%d)`, planner)) || !strings.Contains(h.Text, "Plan ready.") {
 		t.Fatalf("block:\n%s", h.Text)
 	}
-	if !e.hasEvent(b.ID, `handoff from session "Planner" appended`) {
+	if !e.hasEvent(b.ID, fmt.Sprintf("handoff from #%d appended", planner)) {
 		t.Fatal("missing event")
+	}
+}
+
+// Fan-in: one block per finished need, by id, each capped at replyCap(n).
+func TestHandoffFanInPerNeed(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/fanin")
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	b := e.task(p.ID, "b", map[string]any{"start": true})
+	c := e.task(p.ID, "c", map[string]any{"start": true})
+	d := e.task(p.ID, "d", map[string]any{"needs": []int64{c.ID, a.ID, b.ID}})
+	_ = e.fake.SetReply(*a.T3ThreadID, t3.Reply{Text: strings.Repeat("a", 3000) + "TAIL"})
+	_ = e.fake.SetReply(*b.T3ThreadID, t3.Reply{Text: "b done"})
+	_ = e.fake.SetReply(*c.T3ThreadID, t3.Reply{Text: "c done"})
+	e.settle(*a.T3ThreadID)
+	e.settle(*b.T3ThreadID)
+	e.settle(*c.T3ThreadID)
+	got := e.handoffTask(d.ID)
+	hs := got.CurrentHandoffs
+	if got.State != "running" || len(hs) != 3 {
+		t.Fatalf("fan-in %+v", got)
+	}
+	for i, src := range []int64{a.ID, b.ID, c.ID} {
+		if hs[i].Status != "sent" || hs[i].SourceTaskID == nil || *hs[i].SourceTaskID != src {
+			t.Fatalf("record %d %+v", i, hs[i])
+		}
+	}
+	// 3 needs: each reply capped at min(4000, max(1000, 8000/3)) = 2666.
+	if strings.Contains(hs[0].Text, "TAIL") || !strings.Contains(hs[0].Text, strings.Repeat("a", 2666)) ||
+		strings.Contains(hs[0].Text, strings.Repeat("a", 2667)) ||
+		!strings.Contains(hs[0].Text, "[truncated at 2666 chars; full reply via t3_thread_read "+*a.T3ThreadID+"]") {
+		t.Fatal("fan-in reply must be capped at 2666 chars")
+	}
+	if want := "reply OK\n\n" + hs[0].Text + "\n\n" + hs[1].Text + "\n\n" + hs[2].Text; e.lastMessage() != want {
+		t.Fatalf("prompt must append the blocks by need id:\n%q", e.lastMessage())
+	}
+}
+
+// A failed read skips that need only; a done but unsettled need (start
+// early) still hands off; a need still running does not.
+func TestHandoffPerNeedSkip(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/skip")
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	b := e.task(p.ID, "b", map[string]any{"start": true})
+	c := e.task(p.ID, "c", map[string]any{"start": true})
+	d := e.task(p.ID, "d", map[string]any{"needs": []int64{a.ID, b.ID, c.ID}})
+	_ = e.fake.SetReply(*b.T3ThreadID, t3.Reply{Text: "b done"})
+	e.settle(*a.T3ThreadID)
+	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted) // done, not settled
+	e.poll()
+	e.t3.failReplyFor.Store(a.T3ThreadID)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", d.ID), nil, 200, nil)
+	got := e.handoffTask(d.ID)
+	hs := got.CurrentHandoffs
+	if got.State != "running" || len(hs) != 2 {
+		t.Fatalf("per-need records %+v", hs)
+	}
+	if hs[0].Status != "skipped" || *hs[0].SourceTaskID != a.ID || hs[0].Reason == nil || !strings.Contains(*hs[0].Reason, "t3 read timed out") {
+		t.Fatalf("a skipped %+v", hs[0])
+	}
+	if hs[1].Status != "sent" || *hs[1].SourceTaskID != b.ID || !strings.Contains(hs[1].Text, `"b" (task #`) ||
+		!strings.Contains(hs[1].Text, ", finished, not settled yet.") {
+		t.Fatalf("b sent %+v", hs[1])
+	}
+	if e.lastMessage() != "reply OK\n\n"+hs[1].Text {
+		t.Fatalf("prompt %q", e.lastMessage())
+	}
+	if !e.hasEvent(d.ID, fmt.Sprintf("handoff from #%d skipped: ", a.ID)) || !e.hasEvent(d.ID, fmt.Sprintf("handoff from #%d appended", b.ID)) {
+		t.Fatal("missing per-need events")
 	}
 }
 
@@ -192,9 +273,9 @@ func TestHandoffNoReplyStillSendsContext(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/noreply")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
 	e.settle(*a.T3ThreadID)
-	h := e.handoffTask(b.ID).CurrentHandoff
+	h := e.handoffTask(b.ID).one(t)
 	if h == nil || h.Status != "sent" || !strings.Contains(h.Text, "Final reply: none found.") ||
 		strings.Contains(h.Text, "Branch:") || strings.Contains(h.Text, "Pull requests:") {
 		t.Fatalf("no-reply handoff %+v", h)
@@ -205,19 +286,19 @@ func TestHandoffRecomposedOnRestart(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/restart")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
 	thread := *a.T3ThreadID
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "first"})
 	e.t3.failLaunch.Store(true)
 	e.settle(thread)
-	if got := e.handoffTask(b.ID); got.State != "failed" || got.CurrentHandoff == nil || got.CurrentHandoff.Attempt != 1 {
+	if got := e.handoffTask(b.ID); got.State != "failed" || got.one(t) == nil || got.one(t).Attempt != 1 {
 		t.Fatalf("first attempt %+v", got)
 	}
 	e.t3.failLaunch.Store(false)
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "second"})
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, nil)
 	got := e.handoffTask(b.ID)
-	h := got.CurrentHandoff
+	h := got.one(t)
 	if got.State != "running" || h == nil || h.Attempt != 2 || !strings.Contains(h.Text, "Final reply:\nsecond") {
 		t.Fatalf("restart must recompose: %+v / %+v", got, h)
 	}
@@ -230,20 +311,20 @@ func TestHandoffReusedForSameAttempt(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/reuse")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
 	thread := *a.T3ThreadID
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "original"})
 	e.t3.lostLaunches.Store(2) // launch + same-id retry both lose the response
 	e.settle(thread)
 	first := e.handoffTask(b.ID)
-	if first.State != "failed" || first.CurrentHandoff == nil {
+	if first.State != "failed" || first.one(t) == nil {
 		t.Fatalf("lost launch %+v", first)
 	}
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "changed"})
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, nil)
 	got := e.handoffTask(b.ID)
-	if got.LaunchAttempt != first.LaunchAttempt || got.CurrentHandoff == nil || got.CurrentHandoff.Text != first.CurrentHandoff.Text {
-		t.Fatalf("same attempt must resend the stored block: %+v", got.CurrentHandoff)
+	if got.LaunchAttempt != first.LaunchAttempt || got.one(t) == nil || got.one(t).Text != first.one(t).Text {
+		t.Fatalf("same attempt must resend the stored block: %+v", got.CurrentHandoffs)
 	}
 	if msg := e.lastMessage(); !strings.Contains(msg, "original") || strings.Contains(msg, "changed") {
 		t.Fatalf("prompt %q", msg)

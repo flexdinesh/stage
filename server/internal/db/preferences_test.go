@@ -14,17 +14,17 @@ func TestNotifyEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.StateDone, db.StateSettled}
+	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady, db.StateDone, db.StateSettled}
 	if !slices.Equal(p.NotifyEvents, all) {
 		t.Fatalf("default %v, want all", p.NotifyEvents)
 	}
 
 	// Deduplicated, stored in display order.
-	p, err = s.SetNotifyEvents(ctx, []db.TaskState{db.StateFailed, db.StateNeedsInput, db.StateFailed})
+	p, err = s.SetNotifyEvents(ctx, []db.TaskState{db.EventReady, db.StateFailed, db.StateNeedsInput, db.StateFailed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []db.TaskState{db.StateNeedsInput, db.StateFailed}; !slices.Equal(p.NotifyEvents, want) {
+	if want := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady}; !slices.Equal(p.NotifyEvents, want) {
 		t.Fatalf("set %v, want %v", p.NotifyEvents, want)
 	}
 

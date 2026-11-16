@@ -124,13 +124,11 @@ Usage:
   stage models ls
   stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
   stage task show ID
-  stage task add --title T --prompt TEXT|- [config] [--after-me|--after-task ID|--after-thread ID]
+  stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me]
                    [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start] [--handoff=false]
   stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
-  stage task rm|start|stop|dup|unlink ID
+  stage task rm|start|stop|dup ID
   stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
-  stage task link ID --after-me|--after-task ID|--after-thread ID [--handoff=false]
-  stage task order ID ID...           link backlog tasks to run in this order
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
   stage schedule ls [--project P]
   stage schedule show ID

@@ -43,15 +43,19 @@ type PushError struct {
 
 func (e *PushError) Error() string { return e.Msg }
 
-// event is a queued notification: exactly one of task / thread set.
+// event is a queued notification: exactly one of task / thread / ready set.
 type event struct {
 	task   *t3sync.Change
 	thread *t3sync.ThreadChange
+	ready  *int64 // a manual tree member whose needs settled
 }
 
 func (e event) to() db.TaskState {
-	if e.task != nil {
+	switch {
+	case e.task != nil:
 		return e.task.To
+	case e.ready != nil:
+		return db.EventReady
 	}
 	return e.thread.To
 }
@@ -119,6 +123,12 @@ func (n *Notifier) OnThreadChange(_ context.Context, c t3sync.ThreadChange) {
 	}
 }
 
+// OnReady is the release runner hook: a manual tree member whose needs all
+// settled (the ready event).
+func (n *Notifier) OnReady(_ context.Context, taskID int64) {
+	n.enqueue(event{ready: &taskID})
+}
+
 func (n *Notifier) enqueue(e event) {
 	select {
 	case n.events <- e:
@@ -179,6 +189,7 @@ func (n *Notifier) enabled(ctx context.Context, to db.TaskState) bool {
 
 var titles = map[db.TaskState]string{
 	db.StateNeedsInput: "Needs input",
+	db.EventReady:      "Ready",
 	db.StateDone:       "Done",
 	db.StateFailed:     "Failed",
 	db.StateSettled:    "Settled",
@@ -214,6 +225,16 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		// navigation can open the current session without changing this key.
 		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, T3ThreadID: t.T3ThreadID,
 			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
+	case e.ready != nil:
+		t, err := n.store.GetTask(ctx, *e.ready)
+		if err != nil {
+			return p, rec, fmt.Errorf("task %d: %w", *e.ready, err)
+		}
+		id := strconv.FormatInt(t.ID, 10)
+		path := "/tasks/" + id
+		p = Payload{Title: titles[db.EventReady], Body: t.Title + " · " + t.ProjectTitle, URL: path, Tag: "task-" + id}
+		project := t.ProjectTitle
+		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project, URL: path}
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID

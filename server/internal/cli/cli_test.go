@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +137,7 @@ func TestTaskCommands(t *testing.T) {
 		t.Fatalf("add: %d %s", code, stderr)
 	}
 	tk := decode[client.Task](t, stdout)
-	if tk.ProjectID != p.ID || tk.Prompt != "multi\nline prompt\n" || tk.AfterThreadID == nil || *tk.AfterThreadID != out.ThreadID ||
+	if tk.ProjectID != p.ID || tk.Prompt != "multi\nline prompt\n" || len(tk.Needs) != 1 ||
 		tk.OriginThreadID == nil || len(tk.Tags) != 2 {
 		t.Fatalf("task %+v", tk)
 	}
@@ -151,16 +152,15 @@ func TestTaskCommands(t *testing.T) {
 		t.Fatalf("ls: %d %s", code, stdout)
 	}
 	code, stdout, _ = h.run("", "task", "ls")
-	if code != 0 || !strings.Contains(stdout, "Renamed") || !strings.Contains(stdout, "session "+out.ThreadID) {
+	if code != 0 || !strings.Contains(stdout, "Renamed") || !strings.Contains(stdout, fmt.Sprintf("needs #%d", tk.Needs[0])) {
 		t.Fatalf("ls human: %s", stdout)
 	}
 	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(tk.ID))
 	if code != 0 || !strings.Contains(stdout, "created by session") || !strings.Contains(stdout, "line prompt") {
 		t.Fatalf("show: %s", stdout)
 	}
-	code, stdout, _ = h.run("", "task", "unlink", fmt.Sprint(tk.ID), "--json")
-	if code != 0 || decode[client.Task](t, stdout).AfterThreadID != nil {
-		t.Fatalf("unlink: %s", stdout)
+	if code, _, _ = h.run("", "task", "unlink", fmt.Sprint(tk.ID)); code != 2 {
+		t.Fatalf("task unlink is gone: exit %d", code)
 	}
 
 	// wait times out with exit 3.
@@ -244,7 +244,7 @@ func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
 	}
 }
 
-func TestTaskOrderAndSessionBatch(t *testing.T) {
+func TestTaskNeedsAndSessionBatch(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("/w/cli-o")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Planner"})
@@ -255,28 +255,31 @@ func TestTaskOrderAndSessionBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{ThreadID: out.ThreadID}
-	ids := make([]string, 3)
-	for i, title := range []string{"first", "second", "loose"} {
-		code, stdout, stderr := h.run("", "task", "add", "--title", title, "--prompt", "p", "--json")
+	add := func(args ...string) client.Task {
+		t.Helper()
+		code, stdout, stderr := h.run("", append([]string{"task", "add", "--prompt", "p", "--json"}, args...)...)
 		if code != 0 {
 			t.Fatalf("add: %s", stderr)
 		}
-		ids[i] = fmt.Sprint(decode[client.Task](t, stdout).ID)
+		return decode[client.Task](t, stdout)
 	}
-	code, stdout, stderr := h.run("", "task", "order", ids[1], ids[0])
-	if code != 0 || !strings.Contains(stdout, "1. #"+ids[1]+" [backlog] second") || !strings.Contains(stdout, "2. #"+ids[0]) {
-		t.Fatalf("order: %d %s %s", code, stdout, stderr)
+	first := add("--title", "first")
+	second := add("--title", "second", "--needs", fmt.Sprint(first.ID))
+	loose := add("--title", "loose")
+	if !slices.Equal(second.Needs, []int64{first.ID}) || second.TreeID == nil {
+		t.Fatalf("--needs: %+v", second)
 	}
-	if code, _, _ := h.run("", "task", "order", ids[0]); code != 2 {
-		t.Fatalf("order one id exit %d", code)
+	if code, _, _ := h.run("", "task", "add", "--title", "x", "--prompt", "p", "--needs", "nope"); code != 2 {
+		t.Fatalf("bad --needs exit %d", code)
 	}
-	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID)
-	want := "\ncreated tasks (3)\n  chain #" + ids[1] + " [backlog] second\n        #" + ids[0] + " [backlog] first\n  task  #" + ids[2] + " [backlog] loose\n"
+	code, stdout, _ := h.run("", "sessions", "show", out.ThreadID)
+	want := fmt.Sprintf("\ncreated tasks (3)\n  tree %d first (auto)\n    #%d [backlog] first\n    #%d [backlog] second  (waits on needs #%d)\n  task #%d [backlog] loose\n",
+		*second.TreeID, first.ID, second.ID, first.ID, loose.ID)
 	if code != 0 || !strings.Contains(stdout, want) {
 		t.Fatalf("sessions show:\n%s\nwant:\n%s", stdout, want)
 	}
 	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID, "--json")
-	if d := decode[client.ThreadDetail](t, stdout); code != 0 || len(d.CreatedTasks.Chains) != 1 || len(d.CreatedTasks.Independent) != 1 {
+	if d := decode[client.ThreadDetail](t, stdout); code != 0 || len(d.CreatedTasks.Trees) != 1 || len(d.CreatedTasks.Independent) != 1 {
 		t.Fatalf("sessions show json: %s", stdout)
 	}
 }
@@ -453,7 +456,7 @@ func TestHandoffFlags(t *testing.T) {
 	if !a.Handoff {
 		t.Fatalf("handoff defaults on: %+v", a)
 	}
-	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--after-task", fmt.Sprint(a.ID), "--handoff=false", "--json")
+	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--needs", fmt.Sprint(a.ID), "--handoff=false", "--json")
 	if code != 0 {
 		t.Fatalf("add b: %d %s", code, stderr)
 	}
@@ -472,10 +475,6 @@ func TestHandoffFlags(t *testing.T) {
 	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--handoff=true", "--json")
 	if code != 0 || !decode[client.Task](t, stdout).Handoff {
 		t.Fatalf("edit --handoff=true: %s", stdout)
-	}
-	code, stdout, _ = h.run("", "task", "link", fmt.Sprint(b.ID), "--after-task", fmt.Sprint(a.ID), "--handoff=false", "--json")
-	if code != 0 || decode[client.Task](t, stdout).Handoff {
-		t.Fatalf("link --handoff=false: %s", stdout)
 	}
 }
 
@@ -518,7 +517,7 @@ func TestBaseFlag(t *testing.T) {
 		t.Fatalf("add: %d %s", code, stderr)
 	}
 	a := decode[client.Task](t, stdout)
-	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--after-task", fmt.Sprint(a.ID),
+	code, stdout, stderr = h.run("", "task", "add", "--title", "b", "--prompt", "y", "--needs", fmt.Sprint(a.ID),
 		"--base-ref", "origin/main", "--base", "predecessor", "--json")
 	if code != 0 {
 		t.Fatalf("add b: %d %s", code, stderr)

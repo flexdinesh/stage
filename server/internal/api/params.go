@@ -139,6 +139,9 @@ func validateWorkspace(w db.Workspace) (db.Workspace, error) {
 	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
 		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
 	}
+	if w.BaseTaskID != nil && w.Base != db.BasePredecessor {
+		return w, db.Invalid("workspace.baseTaskId needs base predecessor")
+	}
 	switch w.Type {
 	case "root":
 		if w.Base == db.BasePredecessor {

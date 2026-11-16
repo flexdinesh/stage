@@ -22,10 +22,11 @@ type launchBaseRec struct {
 type baseTask struct {
 	task
 	Workspace struct {
-		Type    string  `json:"type"`
-		BaseRef string  `json:"baseRef"`
-		Branch  *string `json:"branch"`
-		Base    string  `json:"base"`
+		Type     string  `json:"type"`
+		BaseRef  string  `json:"baseRef"`
+		Branch   *string `json:"branch"`
+		Base     string  `json:"base"`
+		BaseTask *int64  `json:"baseTaskId"`
 	} `json:"workspace"`
 	CurrentLaunchBase *launchBaseRec `json:"currentLaunchBase"`
 }
@@ -37,7 +38,7 @@ func (e *env) baseTask(id int64) baseTask {
 	return out
 }
 
-// predecessorWS is a worktree from the predecessor's branch, origin/main the fallback.
+// predecessorWS is a worktree from a need's branch, origin/main the fallback.
 func predecessorWS() map[string]any {
 	return map[string]any{"type": "worktree", "baseRef": "origin/main", "base": "predecessor"}
 }
@@ -74,7 +75,7 @@ func TestPredecessorBaseStacksOnBranch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/stack")
 	a := e.task(p.ID, "Build API", map[string]any{"start": true})
-	b := e.task(p.ID, "Use API", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS(), "handoff": false})
+	b := e.task(p.ID, "Use API", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
 	if got := e.baseTask(b.ID); got.Workspace.Base != "predecessor" || got.Workspace.BaseRef != "origin/main" || got.CurrentLaunchBase != nil {
 		t.Fatalf("saved workspace %+v", got)
 	}
@@ -96,37 +97,78 @@ func TestPredecessorBaseStacksOnBranch(t *testing.T) {
 	}
 }
 
-func TestPredecessorBaseKeepsFollowerBranch(t *testing.T) {
+func TestPredecessorBaseKeepsDependentBranch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/named")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	ws := predecessorWS()
 	ws["branch"] = "feat/next"
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": ws})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": ws})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	e.settle(*a.T3ThreadID)
 	if got := e.lastWorkspace(); got.BaseRef != "feat/a" || got.Branch != "feat/next" {
-		t.Fatalf("follower branch must stay its own: %+v", got)
+		t.Fatalf("dependent branch must stay its own: %+v", got)
 	}
 	if e.getTask(b.ID).State != "running" {
 		t.Fatal("not running")
 	}
 }
 
-func TestPredecessorBaseForSessionLink(t *testing.T) {
+func TestPredecessorBaseFromAdoptedSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/base-session")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	b := e.task(p.ID, "b", map[string]any{"afterThreadId": s, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"needsSessionId": s, "workspace": predecessorWS()})
+	planner := b.Needs[0]
 	e.inWorktree(s, "plan/x")
 	e.settle(s)
 	got := e.baseTask(b.ID)
-	if lb := got.CurrentLaunchBase; lb == nil || lb.Source != "predecessor" || lb.BaseRef != "plan/x" || lb.SourceTaskID != nil || lb.SourceTitle != "Planner" {
+	if lb := got.CurrentLaunchBase; lb == nil || lb.Source != "predecessor" || lb.BaseRef != "plan/x" ||
+		lb.SourceTaskID == nil || *lb.SourceTaskID != planner || lb.SourceTitle != "Planner" {
 		t.Fatalf("session base %+v", lb)
 	}
-	if !e.hasEvent(b.ID, `base from session "Planner"'s branch plan/x`) {
+	if !e.hasEvent(b.ID, fmt.Sprintf("base from #%d's branch plan/x", planner)) {
 		t.Fatal("missing event")
 	}
+}
+
+// With several needs, workspace.baseTaskId picks the need to stack on.
+func TestPredecessorBasePicksBaseTaskID(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/pick")
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	b := e.task(p.ID, "b", map[string]any{"start": true})
+	ws := predecessorWS()
+	ws["baseTaskId"] = b.ID
+	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}, "workspace": ws, "handoff": false})
+	if got := e.baseTask(c.ID); got.Workspace.BaseTask == nil || *got.Workspace.BaseTask != b.ID {
+		t.Fatalf("saved baseTaskId %+v", got.Workspace)
+	}
+	e.inWorktree(*a.T3ThreadID, "feat/a")
+	e.inWorktree(*b.T3ThreadID, "feat/b")
+	e.settle(*a.T3ThreadID)
+	e.settle(*b.T3ThreadID)
+	got := e.baseTask(c.ID)
+	if lb := got.CurrentLaunchBase; got.State != "running" || lb == nil || lb.Source != "predecessor" || lb.BaseRef != "feat/b" ||
+		lb.SourceTaskID == nil || *lb.SourceTaskID != b.ID {
+		t.Fatalf("base from baseTaskId %+v / %+v", got, lb)
+	}
+	if e.lastWorkspace().BaseRef != "feat/b" {
+		t.Fatalf("launch workspace %+v", e.lastWorkspace())
+	}
+}
+
+func TestPredecessorBaseAmbiguousNeedsFallBack(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/ambiguous")
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	b := e.task(p.ID, "b", map[string]any{"start": true})
+	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}, "workspace": predecessorWS(), "handoff": false})
+	e.inWorktree(*a.T3ThreadID, "feat/a")
+	e.inWorktree(*b.T3ThreadID, "feat/b")
+	e.settle(*a.T3ThreadID)
+	e.settle(*b.T3ThreadID)
+	assertFallback(t, e.baseTask(c.ID), e.lastWorkspace(), "the task has 2 needs and no workspace.baseTaskId")
 }
 
 func TestPredecessorBaseFallbacks(t *testing.T) {
@@ -156,7 +198,7 @@ func TestPredecessorBaseFallbacks(t *testing.T) {
 			e := newEnv(t)
 			p := e.project("/w/fb")
 			a := e.task(p.ID, "a", map[string]any{"start": true})
-			b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS(), "handoff": false})
+			b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
 			_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
 			_ = e.fake.Settle(*a.T3ThreadID)
 			e.poll()
@@ -174,7 +216,7 @@ func TestPredecessorBaseMixedPRsStillStacks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/mixed")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	_ = e.fake.SetThread(*a.T3ThreadID, func(d *t3.ThreadDetail) {
 		d.PullRequests = []t3.PullRequest{{Number: 1, State: "merged"}, {Number: 2, State: "open"}}
@@ -190,7 +232,7 @@ func TestPredecessorBaseOtherProjectFallsBack(t *testing.T) {
 	p := e.project("/w/here")
 	other := e.project("/w/there")
 	a := e.task(other.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/there")
 	e.settle(*a.T3ThreadID)
 	assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), "ran in another project")
@@ -200,7 +242,7 @@ func TestPredecessorBaseRejectedBranchRetriesFallback(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/deleted")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/gone")
 	e.fake.MissRef("feat/gone")
 	before := len(e.t3.launchRequestIDs())
@@ -223,7 +265,7 @@ func TestPredecessorBaseReusedForSameAttempt(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/base-reuse")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/one")
 	e.t3.lostLaunches.Store(2)
 	e.settle(*a.T3ThreadID)
@@ -239,18 +281,18 @@ func TestPredecessorBaseReusedForSameAttempt(t *testing.T) {
 	}
 }
 
-func TestPredecessorBaseUnlinkedFallsBack(t *testing.T) {
+func TestPredecessorBaseWithoutNeedsFallsBack(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/unlinked")
 	b := e.task(p.ID, "b", map[string]any{"workspace": predecessorWS(), "start": true})
-	assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), "not linked")
+	assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), "the task has no needs")
 }
 
 func TestRefBaseRecordsNothing(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/ref")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"afterTaskId": a.ID, "workspace": map[string]any{"type": "worktree", "baseRef": "origin/main"}})
+	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": map[string]any{"type": "worktree", "baseRef": "origin/main"}})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	e.settle(*a.T3ThreadID)
 	got := e.baseTask(b.ID)

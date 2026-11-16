@@ -82,7 +82,7 @@ func printCatalog(w io.Writer, c client.Catalog) {
 func printTaskRows(w io.Writer, res agenttools.TasksOut) {
 	table(w, "ID\tSTATE\tPROJECT\tTITLE\tWAITS ON", func(tw io.Writer) {
 		for _, t := range res.Tasks {
-			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", t.ID, t.State, t.Project, t.Title, waitsOn(t.AfterTaskID, t.AfterThreadID, t.StartAt))
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", t.ID, t.State, t.Project, t.Title, waitsOn(t.Needs, t.StartAt))
 		}
 	})
 	if res.Total > len(res.Tasks) {
@@ -90,12 +90,10 @@ func printTaskRows(w io.Writer, res agenttools.TasksOut) {
 	}
 }
 
-func waitsOn(task *int64, thread *string, start *time.Time) string {
+func waitsOn(needs []int64, start *time.Time) string {
 	switch {
-	case task != nil:
-		return fmt.Sprintf("task %d", *task)
-	case thread != nil:
-		return "session " + *thread
+	case len(needs) > 0:
+		return "needs " + needLabels(needs)
 	case start != nil:
 		return "start " + ts(start)
 	}
@@ -115,7 +113,7 @@ func printTask(w io.Writer, t client.Task) {
 	case t.Workspace.Type == "worktree":
 		fmt.Fprintf(w, "  worktree %s (branch %s)\n", t.Workspace.BaseRef, orDash(t.Workspace.Branch))
 	}
-	if s := waitsOn(t.AfterTaskID, t.AfterThreadID, t.StartAt); s != "-" {
+	if s := waitsOn(t.Needs, t.StartAt); s != "-" {
 		fmt.Fprintf(w, "  waits on %s\n", s)
 	}
 	if t.OriginThreadID != nil {
@@ -166,45 +164,53 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	}
 }
 
-// printHandoff: the toggle for a linked task, then the current attempt's record.
+// printHandoff: the toggle for a task with needs, then the current
+// attempt's record per need.
 func printHandoff(w io.Writer, d client.TaskDetail) {
-	if d.AfterTaskID != nil || d.AfterThreadID != nil {
+	if len(d.Needs) > 0 {
 		state := "on"
 		if !d.Handoff {
 			state = "off"
 		}
 		fmt.Fprintf(w, "  handoff  %s\n", state)
 	}
-	h := d.CurrentHandoff
-	if h == nil {
-		return
-	}
-	from := h.SourceTitle
-	if h.SourceTaskID != nil {
-		from = fmt.Sprintf("#%d", *h.SourceTaskID)
-	}
-	switch h.Status {
-	case db.HandoffSent:
-		fmt.Fprintf(w, "  handoff  sent from %s (attempt %d, %d chars)\n", from, h.Attempt, len([]rune(h.Text)))
-	default:
-		reason := ""
-		if h.Reason != nil {
-			reason = *h.Reason
+	for _, h := range d.CurrentHandoffs {
+		from := h.SourceTitle
+		if h.SourceTaskID != nil {
+			from = fmt.Sprintf("#%d", *h.SourceTaskID)
 		}
-		fmt.Fprintf(w, "  handoff  skipped (attempt %d): %s\n", h.Attempt, reason)
+		switch h.Status {
+		case db.HandoffSent:
+			fmt.Fprintf(w, "  handoff  sent from %s (attempt %d, %d chars)\n", from, h.Attempt, len([]rune(h.Text)))
+		default:
+			reason := ""
+			if h.Reason != nil {
+				reason = *h.Reason
+			}
+			fmt.Fprintf(w, "  handoff  skipped from %s (attempt %d): %s\n", from, h.Attempt, reason)
+		}
 	}
 }
 
-// predecessorLabel names a task's predecessor: `#12`, `session <id>` or
-// `predecessor` when unlinked.
+// needLabels is "#3 #5".
+func needLabels(ids []int64) string {
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = fmt.Sprintf("#%d", id)
+	}
+	return strings.Join(labels, " ")
+}
+
+// predecessorLabel names the need a worktree starts from: workspace
+// baseTaskId, else the sole need, else `a need`.
 func predecessorLabel(t client.Task) string {
 	switch {
-	case t.AfterTaskID != nil:
-		return fmt.Sprintf("#%d", *t.AfterTaskID)
-	case t.AfterThreadID != nil:
-		return "session " + *t.AfterThreadID
+	case t.Workspace.BaseTaskID != nil:
+		return fmt.Sprintf("#%d", *t.Workspace.BaseTaskID)
+	case len(t.Needs) == 1:
+		return fmt.Sprintf("#%d", t.Needs[0])
 	}
-	return "predecessor"
+	return "a need"
 }
 
 // printLaunchBase prints the base the current launch attempt used:
@@ -391,48 +397,34 @@ func printLastWord(w io.Writer, lw *db.LastWord) {
 	}
 }
 
-// printCreated prints a session batch: each chain head first (followers
-// indented), then independent tasks.
+// printCreated prints a session batch: each tree's tasks (by id), then
+// independent tasks.
 func printCreated(w io.Writer, c client.CreatedTasks) {
 	n := len(c.Independent)
-	for _, chain := range c.Chains {
-		n += len(chain)
+	for _, tr := range c.Trees {
+		n += len(tr.Tasks)
 	}
 	if n == 0 {
 		return
 	}
 	fmt.Fprintf(w, "\ncreated tasks (%d)\n", n)
-	for _, chain := range c.Chains {
-		for i, t := range chain {
-			lead := "chain "
-			if i > 0 {
-				lead = "      "
-			}
-			fmt.Fprintf(w, "  %s#%d [%s] %s%s\n", lead, t.ID, t.State, t.Title, createdWait(t, i == 0))
+	for _, tr := range c.Trees {
+		fmt.Fprintf(w, "  tree %d %s (%s)\n", tr.Tree.ID, tr.Tree.Title, tr.Tree.StartMode)
+		for _, t := range tr.Tasks {
+			fmt.Fprintf(w, "    #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t))
 		}
 	}
 	for _, t := range c.Independent {
-		fmt.Fprintf(w, "  task  #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t, true))
+		fmt.Fprintf(w, "  task #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t))
 	}
 }
 
-// createdWait is a batch row's outside wait ("  (waits on session x)"); a
-// chain follower's wait on its predecessor is implied by its position.
-func createdWait(t client.Task, show bool) string {
-	if !show {
-		return ""
-	}
-	if s := waitsOn(t.AfterTaskID, t.AfterThreadID, t.StartAt); s != "-" {
+// createdWait is a batch row's wait ("  (waits on needs #3 #5)").
+func createdWait(t client.Task) string {
+	if s := waitsOn(t.Needs, t.StartAt); s != "-" {
 		return "  (waits on " + s + ")"
 	}
 	return ""
-}
-
-// printOrder prints a run order, head first.
-func printOrder(w io.Writer, ts []client.Task) {
-	for i, t := range ts {
-		fmt.Fprintf(w, "%d. #%d [%s] %s\n", i+1, t.ID, t.State, t.Title)
-	}
 }
 
 func printQuestions(w io.Writer, threadID string, p client.PendingQuestions) {

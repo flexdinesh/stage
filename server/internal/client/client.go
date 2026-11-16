@@ -181,22 +181,33 @@ type Task struct {
 // TaskDetail is GET /api/tasks/:id.
 type TaskDetail struct {
 	Task
-	Events   []db.TaskEvent `json:"events"`
-	Thread   *Thread        `json:"thread"`
-	Sequence []Task         `json:"sequence"`
-	Batch    *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
-	// CurrentHandoff: what the current launch attempt appended (null when none).
-	CurrentHandoff *db.Handoff `json:"currentHandoff"`
+	Events []db.TaskEvent `json:"events"`
+	Thread *Thread        `json:"thread"`
+	Tree   *TreeDetail    `json:"tree"`  // the task's tree (null outside one)
+	Batch  *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
+	// CurrentHandoffs: what the current launch attempt appended, one per need.
+	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
 	// CurrentLaunchBase: the worktree base the current launch attempt used
 	// (workspace.base predecessor; null when none).
 	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
-// CreatedTasks is a session batch: tasks one session created, grouped by run
-// order (chains head first, then independent tasks).
+// TreeDetail is a tree with its members, edges and levels.
+type TreeDetail struct {
+	db.Tree
+	Tasks  []Task        `json:"tasks"`
+	Edges  []db.TreeEdge `json:"edges"`
+	Levels [][]int64     `json:"levels"`
+}
+
+// CreatedTasks is a session batch: tasks one session created, grouped by
+// tree, then tasks outside any tree.
 type CreatedTasks struct {
-	Chains      [][]Task `json:"chains"`
-	Independent []Task   `json:"independent"`
+	Trees []struct {
+		Tree  db.TreeRef `json:"tree"`
+		Tasks []Task     `json:"tasks"`
+	} `json:"trees"`
+	Independent []Task `json:"independent"`
 }
 
 // Thread is the API Thread (session) shape.
@@ -297,8 +308,8 @@ type CreateTask struct {
 	Workspace          *db.Workspace    `json:"workspace,omitempty"`
 	Tags               []string         `json:"tags,omitempty"`
 	Notes              *string          `json:"notes,omitempty"`
-	AfterTaskID        *int64           `json:"afterTaskId,omitempty"`
-	AfterThreadID      *string          `json:"afterThreadId,omitempty"`
+	Needs              []int64          `json:"needs,omitempty"`
+	NeedsSessionID     *string          `json:"needsSessionId,omitempty"`
 	Handoff            *bool            `json:"handoff,omitempty"`
 	OriginThreadID     *string          `json:"originThreadId,omitempty"`
 	AttachmentIDs      []int64          `json:"attachmentIds,omitempty"`
@@ -574,16 +585,6 @@ func (c *Client) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "duplicate"), nil, &out)
 	return out, err
-}
-
-// OrderTasks links tasks to run in the given order (POST /api/tasks/order)
-// and returns the resulting run order, head first.
-func (c *Client) OrderTasks(ctx context.Context, ids []int64) ([]Task, error) {
-	var out struct {
-		Tasks []Task `json:"tasks"`
-	}
-	err := c.do(ctx, http.MethodPost, "/api/tasks/order", map[string]any{"taskIds": ids}, &out)
-	return out.Tasks, err
 }
 
 func schedulePath(id int64, action string) string {

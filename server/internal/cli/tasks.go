@@ -52,7 +52,7 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.mode, "mode", "", "interaction mode: default|plan")
 	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
-	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from the linked predecessor's branch; --base-ref is the fallback)")
+	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from the sole need's branch; --base-ref is the fallback)")
 	c.fs.StringVar(&f.notes, "notes", "", "notes")
 	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
 	c.fs.Var(&f.tags, "tag", "tag (repeatable)")
@@ -167,24 +167,33 @@ func (c *cmd) oneID() (int64, error) {
 	return parseID(c.pos[0])
 }
 
-// waitFlags are the run-order flags of task add / link.
+// waitFlags are the needs and start flags of task add.
 type waitFlags struct {
-	afterTask        int64
-	afterThread      string
+	needs            string
 	afterMe          bool
 	handoff          bool
 	startAt, startTz string
 }
 
-func (w *waitFlags) register(c *cmd, start bool) {
-	c.fs.Int64Var(&w.afterTask, "after-task", 0, "run after this task")
-	c.fs.StringVar(&w.afterThread, "after-thread", "", "run after this T3 session")
-	c.fs.BoolVar(&w.afterMe, "after-me", false, "run after your own session")
-	c.fs.BoolVar(&w.handoff, "handoff", true, "append the predecessor's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
-	if start {
-		c.fs.StringVar(&w.startAt, "start-at", "", "one-shot start YYYY-MM-DDTHH:mm")
-		c.fs.StringVar(&w.startTz, "tz", "", "IANA zone for --start-at")
+func (w *waitFlags) register(c *cmd) {
+	c.fs.StringVar(&w.needs, "needs", "", "task ids this task needs (comma-separated): it starts once all settle")
+	c.fs.BoolVar(&w.afterMe, "after-me", false, "also need your own session (tracked as a task)")
+	c.fs.BoolVar(&w.handoff, "handoff", true, "append each need's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
+	c.fs.StringVar(&w.startAt, "start-at", "", "one-shot start YYYY-MM-DDTHH:mm")
+	c.fs.StringVar(&w.startTz, "tz", "", "IANA zone for --start-at")
+}
+
+// needIDs parses --needs.
+func (w *waitFlags) needIDs() ([]int64, error) {
+	var ids []int64
+	for _, p := range csv(w.needs) {
+		id, err := parseID(p)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
 	}
+	return ids, nil
 }
 
 func runTask(ctx context.Context, env Env, args []string) error {
@@ -228,7 +237,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		var wf waitFlags
 		var start bool
 		f.register(c)
-		wf.register(c, true)
+		wf.register(c)
 		c.fs.BoolVar(&start, "start", false, "start now")
 		if err := c.parse(rest); err != nil {
 			return err
@@ -237,10 +246,14 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
+		needs, err := wf.needIDs()
+		if err != nil {
+			return err
+		}
 		res, err := o().CreateTask(ctx, agenttools.CreateTaskArgs{
 			ConfigArgs: cfg, Start: start,
 			WaitArgs: agenttools.WaitArgs{
-				AfterTaskID: wf.afterTask, AfterThreadID: wf.afterThread, AfterMe: wf.afterMe,
+				Needs: needs, AfterMe: wf.afterMe,
 				StartLocal: wf.startAt, StartTz: wf.startTz, Handoff: boolFlag(c, "handoff", wf.handoff),
 			},
 		})
@@ -255,7 +268,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		f.register(c)
 		c.fs.StringVar(&startAt, "start-at", "", "one-shot start (empty clears)")
 		c.fs.StringVar(&tz, "tz", "", "zone for --start-at")
-		c.fs.BoolVar(&handoff, "handoff", true, "append the predecessor handoff at launch (true|false)")
+		c.fs.BoolVar(&handoff, "handoff", true, "append the needs' handoff at launch (true|false)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -286,7 +299,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted task %d\n", id) })
-	case "start", "stop", "dup", "duplicate", "unlink":
+	case "start", "stop", "dup", "duplicate":
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -300,7 +313,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			"stop":      wrap(ops.StopTask),
 			"dup":       wrap(ops.DuplicateTask),
 			"duplicate": wrap(ops.DuplicateTask),
-			"unlink":    wrap(ops.UnlinkTask),
 		}[v]
 		res, err := fn(ctx, agenttools.IDArgs{ID: id})
 		if err != nil {
@@ -334,41 +346,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return printTask(res)
-	case "link":
-		var wf waitFlags
-		wf.register(c, false)
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		id, err := c.oneID()
-		if err != nil {
-			return err
-		}
-		res, err := o().LinkTask(ctx, agenttools.LinkTaskArgs{ID: id, AfterTaskID: wf.afterTask, AfterThreadID: wf.afterThread, AfterMe: wf.afterMe, Handoff: boolFlag(c, "handoff", wf.handoff)})
-		if err != nil {
-			return err
-		}
-		return printTask(res)
-	case "order":
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		ids := make([]int64, len(c.pos))
-		for i, p := range c.pos {
-			id, err := parseID(p)
-			if err != nil {
-				return err
-			}
-			ids[i] = id
-		}
-		if len(ids) < 2 {
-			return usagef("task order: want at least two ids, in run order")
-		}
-		res, err := o().OrderTasks(ctx, agenttools.OrderTasksArgs{TaskIDs: ids})
-		if err != nil {
-			return err
-		}
-		return c.out(res, func(w io.Writer) { printOrder(w, res.Tasks) })
 	case "wait":
 		var until string
 		var timeout time.Duration

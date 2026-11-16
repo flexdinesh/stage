@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -61,12 +62,12 @@ func TestTaskStartTime(t *testing.T) {
 	other := e.task(p.ID, "other", nil)
 	past := time.Now().In(loc).Add(-time.Hour).Format("2006-01-02T15:04")
 	for name, extra := range map[string]map[string]any{
-		"with afterTaskId": {"startLocal": local, "startTz": "Asia/Kolkata", "afterTaskId": other.ID},
-		"with start":       {"startLocal": local, "startTz": "Asia/Kolkata", "start": true},
-		"past":             {"startLocal": past, "startTz": "Asia/Kolkata"},
-		"bad tz":           {"startLocal": local, "startTz": "Nope/Zone"},
-		"no tz":            {"startLocal": local},
-		"bad format":       {"startLocal": "tomorrow", "startTz": "UTC"},
+		"with needs": {"startLocal": local, "startTz": "Asia/Kolkata", "needs": []int64{other.ID}},
+		"with start": {"startLocal": local, "startTz": "Asia/Kolkata", "start": true},
+		"past":       {"startLocal": past, "startTz": "Asia/Kolkata"},
+		"bad tz":     {"startLocal": local, "startTz": "Nope/Zone"},
+		"no tz":      {"startLocal": local},
+		"bad format": {"startLocal": "tomorrow", "startTz": "UTC"},
 	} {
 		if code := e.do("POST", "/api/tasks", body(extra), nil); code != 400 {
 			t.Errorf("%s: status %d, want 400", name, code)
@@ -74,15 +75,18 @@ func TestTaskStartTime(t *testing.T) {
 	}
 
 	path := fmt.Sprintf("/api/tasks/%d", tk.ID)
-	e.must("PATCH", path, map[string]any{"afterTaskId": other.ID}, 400, nil)
+	e.must("PUT", path+"/needs", map[string]any{"needs": []int64{other.ID}}, 400, nil)
 	e.must("PATCH", path, map[string]any{"startLocal": local}, 400, nil)
 	var got startTask
-	e.must("PATCH", path, map[string]any{"startLocal": nil, "startTz": nil, "afterTaskId": other.ID}, 200, &got)
-	if got.StartAt != nil || got.AfterTaskID == nil {
-		t.Fatalf("switch to after = %+v", got)
+	e.must("PATCH", path, map[string]any{"startLocal": nil, "startTz": nil}, 200, &got)
+	e.must("PUT", path+"/needs", map[string]any{"needs": []int64{other.ID}}, 200, &got)
+	if got.StartAt != nil || !slices.Equal(got.Needs, []int64{other.ID}) {
+		t.Fatalf("switch to needs = %+v", got)
 	}
-	e.must("PATCH", path, map[string]any{"startLocal": local, "startTz": "UTC", "afterTaskId": nil}, 200, &got)
-	if got.StartAt == nil || got.AfterTaskID != nil || *got.StartTz != "UTC" {
+	e.must("PATCH", path, map[string]any{"startLocal": local, "startTz": "UTC"}, 400, nil)
+	e.must("PUT", path+"/needs", map[string]any{"needs": []int64{}}, 200, nil)
+	e.must("PATCH", path, map[string]any{"startLocal": local, "startTz": "UTC"}, 200, &got)
+	if got.StartAt == nil || len(got.Needs) != 0 || *got.StartTz != "UTC" {
 		t.Fatalf("switch to start = %+v", got)
 	}
 
@@ -115,14 +119,14 @@ func TestSchedulesAPI(t *testing.T) {
 		return b
 	}
 	for name, extra := range map[string]map[string]any{
-		"bad cron":    {"cron": "61 * * * *"},
-		"every":       {"cron": "@every 5m"},
-		"cron tz":     {"cron": "CRON_TZ=UTC 0 2 * * *"},
-		"bad tz":      {"cron": "0 2 * * *", "tz": "Nope/Zone"},
-		"no cron":     {},
-		"no title":    {"cron": "0 2 * * *", "title": ""},
-		"startLocal":  {"cron": "0 2 * * *", "startLocal": "2030-01-01T00:00", "startTz": "UTC"},
-		"afterTaskId": {"cron": "0 2 * * *", "afterTaskId": 1},
+		"bad cron":   {"cron": "61 * * * *"},
+		"every":      {"cron": "@every 5m"},
+		"cron tz":    {"cron": "CRON_TZ=UTC 0 2 * * *"},
+		"bad tz":     {"cron": "0 2 * * *", "tz": "Nope/Zone"},
+		"no cron":    {},
+		"no title":   {"cron": "0 2 * * *", "title": ""},
+		"startLocal": {"cron": "0 2 * * *", "startLocal": "2030-01-01T00:00", "startTz": "UTC"},
+		"needs":      {"cron": "0 2 * * *", "needs": []int64{1}},
 	} {
 		if code := e.do("POST", "/api/schedules", with(extra), nil); code != 400 {
 			t.Errorf("%s: status %d, want 400", name, code)
