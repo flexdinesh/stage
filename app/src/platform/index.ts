@@ -46,20 +46,32 @@ export interface Links {
 
 /**
  * - `insecure`: not a secure context (plain HTTP on a non-localhost origin); push needs HTTPS or localhost
- * - `unsupported`: no service worker / Push API / Notification API
+ * - `unsupported`: no service worker / Push API / Notification API (native: no OS notification service)
  * - `ios-install`: iOS/iPadOS browser tab; Web Push needs the Home Screen app
  * - `blocked`: permission denied (only the OS/browser settings can undo it)
  * - `off` / `on`: whether this device receives notifications
+ *
+ * The native channel never reports `insecure` or `ios-install`.
  */
 export type PushState = "insecure" | "unsupported" | "ios-install" | "blocked" | "off" | "on";
 
 /** System notification delivery on this device. */
 export interface NotificationDelivery {
+  /**
+   * How notifications reach this device. Absent means `web-push`.
+   * - `web-push`: the server pushes to this browser's subscription
+   * - `native`: the desktop host shows OS notifications from the server inbox
+   */
+  channel?: "web-push" | "native";
   state(): Promise<PushState>;
-  /** Call from a user gesture: asks permission and registers this device. */
+  /**
+   * Call from a user gesture. Web Push: asks permission and registers this
+   * device. Native: turns delivery on (also "try again" after `blocked`) and
+   * shows a confirmation notification, which may trigger the OS permission prompt.
+   */
   enable(): Promise<void>;
   disable(): Promise<void>;
-  /** Asks the server to send a test notification to this device. */
+  /** Web Push: asks the server to send a test notification to this device. Native: shows one locally, no server push. */
   test(): Promise<void>;
   /** Closes shown system notifications with `tag` (all when omitted). Best effort, never rejects. */
   closeShown(tag?: string): Promise<void>;
@@ -67,6 +79,8 @@ export interface NotificationDelivery {
   syncShown(): Promise<void>;
   /** Runs `listener` whenever a notification is delivered to this device. Returns an unsubscribe. */
   onDelivered(listener: () => void): () => void;
+  /** Opens the OS notification settings for this app. Resolves false when the host cannot; absent when it never can. */
+  openSystemSettings?(): Promise<boolean>;
 }
 
 /** Ambient needs-input signal outside the page (tab icon, app badge). */

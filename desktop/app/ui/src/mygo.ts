@@ -92,6 +92,13 @@ export type Step = "service" | "server" | "api";
  * navigation lock keeps other content out of that frame.
  */
 export const Desktop = {
+  /**
+   * CloseNotifications closes the shown notification with tag (task-12,
+   * thread-x), or all of them for "".
+   */
+  closeNotifications(tag: string): Promise<void> {
+    return call("Desktop.CloseNotifications", tag);
+  },
   /** CopyText puts text on the clipboard. */
   copyText(text: string): Promise<void> {
     return call("Desktop.CopyText", text);
@@ -103,9 +110,30 @@ export const Desktop = {
   diagnostics(): Promise<string> {
     return call("Desktop.Diagnostics");
   },
+  /**
+   * DisableNotifications turns native notifications off and closes shown
+   * ones; the badge keeps updating.
+   */
+  disableNotifications(): Promise<void> {
+    return call("Desktop.DisableNotifications");
+  },
+  /**
+   * EnableNotifications turns native notifications on and shows a
+   * confirmation (on macOS the first one asks for permission).
+   */
+  enableNotifications(): Promise<void> {
+    return call("Desktop.EnableNotifications");
+  },
   /** LoginStartup reports whether Stage opens at login. */
   loginStartup(): Promise<boolean> {
     return call("Desktop.LoginStartup");
+  },
+  /**
+   * NotificationState is this device's native notification state:
+   * "unsupported", "off", "blocked" or "on".
+   */
+  notificationState(): Promise<string> {
+    return call("Desktop.NotificationState");
   },
   /**
    * OpenApp opens an app link: a t3code:// thread in T3 (its web page when
@@ -117,6 +145,13 @@ export const Desktop = {
   /** OpenExternal opens an http(s) page in the default browser. */
   openExternal(url: string): Promise<void> {
     return call("Desktop.OpenExternal", url);
+  },
+  /**
+   * OpenNotificationSettings opens the OS notification settings for this
+   * app; false when this system has no known place to open.
+   */
+  openNotificationSettings(): Promise<boolean> {
+    return call("Desktop.OpenNotificationSettings");
   },
   /**
    * RestartServer restarts the Stage service onto the server bundled with
@@ -145,11 +180,22 @@ export const Desktop = {
     return call("Desktop.State");
   },
   /**
+   * SyncNotifications closes shown notifications whose groups were read on
+   * any device.
+   */
+  syncNotifications(): Promise<void> {
+    return call("Desktop.SyncNotifications");
+  },
+  /**
    * TakeNavigation returns the app path of a deep link the UI has not shown
    * yet, and forgets it; "" when there is none.
    */
   takeNavigation(): Promise<string> {
     return call("Desktop.TakeNavigation");
+  },
+  /** TestNotification shows a test notification on this device. */
+  testNotification(): Promise<void> {
+    return call("Desktop.TestNotification");
   },
 } as const;
 
@@ -167,4 +213,10 @@ export const events = {
    * not listening yet reads it with Desktop.TakeNavigation().
    */
   hostNavigate: event<string>("host:navigate"),
+  /**
+   * NotificationDelivered is broadcast with the newest notification id each
+   * time the stream delivers notifications (shown or not), so the page
+   * refetches its inbox at once.
+   */
+  notificationsDelivered: event<number>("notifications:delivered"),
 } as const;

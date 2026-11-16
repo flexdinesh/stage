@@ -17,7 +17,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, listening on 127.0.0.1:7380 by default (compose publishes it on host loopback; expose it only on a trusted private network or behind a proxy), no auth.
-- Or as a per-user OS service with the Linux/macOS desktop app: the same UI in a native window over the local Unix socket; the app starts the service, stays resident when its window closes, and Quit leaves the server running. Phones and other machines keep using the browser.
+- Or as a per-user OS service with the Linux/macOS desktop app: the same UI in a native window over the local Unix socket; the app starts the service, stays resident when its window closes and shows native notifications and a needs-input badge while resident; Quit stops them and leaves the server running. Phones and other machines keep using the browser.
 - Talks to T3 only through T3's MCP endpoint; polls active tasks every 5s, full sync every 5 min, watched transcripts every 2s while their run is active.
 - Settling a thread happens in T3, not here; dependent tasks wait for it.
 
@@ -39,7 +39,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - History: all mirrored threads (often hundreds, many of them subagent threads), time-window and attribute filters.
 - Agent interface: agents (and scripts) manage tasks through the `stage` CLI (`--json`), a stdio MCP server (`stage mcp`) or HTTP MCP at `/mcp`, all over the REST API. Create backlog tasks, start/stop/follow up, build trees and set needs (incl. "after me": the calling session is tracked as a task and needed), track a session as a task, schedules, session reads (incl. the tasks the session created, so a planning agent can verify its batch). The calling session and cwd pick the project; tasks and schedules record the session that created them (shown as "Created by" / "by agent").
 - References: task and session detail copy a self-describing markdown link (Copy link) or the bare URL; laptop rows copy on a hover icon; the palette copies with Alt C. Agents resolve a pasted link (stage link on any host, T3 thread link, #id, thread id) with `read_ref` / `stage show`, getting the task and/or session plus a pointer to `t3_thread_read`. Pasted stage links render as live chips in prompts, transcript user messages, last word and handoff. A reference is context only, never a tree dependency.
-- Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now, global notification event filter (needs input / failed / ready / done / settled; unchecked events are dropped from inbox and push).
+- Snippets: reusable prompt text, global or scoped to one project, inserted by typing `/` in a prompt, follow-up or notes. Settings: connection, pairing, sync now, global notification event filter (needs input / failed / ready / done / settled; unchecked events are dropped from inbox, push and desktop notifications), per-device notifications (Web Push in the browser, a native on/off on desktop, on by default).
 
 ## Brand Commitments
 - Name: stage (lowercase).

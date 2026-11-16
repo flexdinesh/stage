@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,6 +59,43 @@ const notificationKeySQL = `CASE
   WHEN n.t3_thread_id IS NOT NULL THEN 'thread:' || n.t3_thread_id
   ELSE 'notification:' || n.id END`
 
+// NotificationKey is notificationKeySQL for a loaded row. n.T3ThreadID is the
+// task's current thread only when TaskID is set, where the task key wins.
+func NotificationKey(n Notification) string {
+	switch {
+	case n.TaskID != nil:
+		return "task:" + strconv.FormatInt(*n.TaskID, 10)
+	case isTaskURL(n.URL):
+		return "task:" + strings.TrimPrefix(n.URL, "/tasks/")
+	case n.T3ThreadID != nil:
+		return "thread:" + *n.T3ThreadID
+	}
+	return "notification:" + strconv.FormatInt(n.ID, 10)
+}
+
+// isTaskURL: `/tasks/` followed by one or more ASCII digits only.
+func isTaskURL(u string) bool {
+	id, ok := strings.CutPrefix(u, "/tasks/")
+	if !ok || id == "" {
+		return false
+	}
+	for _, c := range []byte(id) {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// TagForKey is a group key's push tag (`task:<id>` → `task-<id>`,
+// `thread:<id>` → `thread-<id>`); identity-less keys have none ("").
+func TagForKey(key string) string {
+	if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "thread") {
+		return kind + "-" + id
+	}
+	return ""
+}
+
 const notificationColumns = `n.id, n.event, n.task_id, COALESCE(tk.t3_thread_id, n.t3_thread_id), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
@@ -101,6 +140,10 @@ LIMIT $1`, limit, beforeID, key)
 	if err != nil {
 		return nil, err
 	}
+	return scanNotifications(rows)
+}
+
+func scanNotifications(rows *rowSet) ([]Notification, error) {
 	defer rows.Close()
 	out := []Notification{}
 	for rows.Next() {
@@ -112,6 +155,28 @@ LIMIT $1`, limit, beforeID, key)
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// NotificationsAfter returns up to limit entries with id > after in ascending
+// order: the oldest ones, or with newest the newest ones.
+func (s *Store) NotificationsAfter(ctx context.Context, after int64, limit int, newest bool) ([]Notification, error) {
+	order := "ASC"
+	if newest {
+		order = "DESC"
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+notificationColumns+`
+FROM notifications n`+notificationJoins+`
+WHERE n.id > $1
+ORDER BY n.id `+order+`
+LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	out, err := scanNotifications(rows)
+	if newest {
+		slices.Reverse(out)
+	}
+	return out, err
 }
 
 // NotificationReadState captures the read boundary before listing groups.
@@ -195,8 +260,8 @@ WHERE n.read_at IS NULL ORDER BY 1`)
 		if err := rows.Scan(&key); err != nil {
 			return nil, err
 		}
-		if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "thread") {
-			tags = append(tags, kind+"-"+id)
+		if tag := TagForKey(key); tag != "" {
+			tags = append(tags, tag)
 		}
 	}
 	return tags, rows.Err()

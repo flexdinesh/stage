@@ -82,6 +82,8 @@ type Notifier struct {
 	HTTPClient webpush.HTTPClient
 	// SendTimeout bounds one push request.
 	SendTimeout time.Duration
+	// Inbox is signalled after each recorded notification (nil = none).
+	Inbox *Hub
 }
 
 // FallbackSubject is the VAPID subject when STAGE_PUBLIC_URL is not https.
@@ -159,8 +161,12 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 		return
 	}
 	// Inbox first (also with no subscriptions); a failed insert still pushes.
-	if _, err := n.store.InsertNotification(ctx, rec); err != nil && ctx.Err() == nil {
-		n.log.Warn("record notification", "err", err)
+	if _, err := n.store.InsertNotification(ctx, rec); err != nil {
+		if ctx.Err() == nil {
+			n.log.Warn("record notification", "err", err)
+		}
+	} else {
+		n.Inbox.Signal()
 	}
 	subs, err := n.store.ListPushSubscriptions(ctx)
 	if err != nil {
@@ -203,23 +209,37 @@ func answerAnchor(to db.TaskState) string {
 	return ""
 }
 
+// PayloadFor is the notification shown for a stored inbox row (Web Push and
+// GET /api/notifications/stream): task rows with a thread open the session.
+func PayloadFor(n db.Notification, badge int) Payload {
+	key := db.NotificationKey(n)
+	p := Payload{Title: titles[n.Event], Body: n.Title, URL: n.URL, Tag: db.TagForKey(key), Badge: badge}
+	if n.ProjectTitle != nil {
+		p.Body += " · " + *n.ProjectTitle
+	}
+	if strings.HasPrefix(key, "task:") && n.T3ThreadID != nil {
+		p.URL = "/sessions/" + url.PathEscape(*n.T3ThreadID)
+	}
+	p.URL += answerAnchor(n.Event)
+	return p
+}
+
+// notificationFrom is the row rec will be stored as (no id or timestamps).
+func notificationFrom(rec db.NewNotification) db.Notification {
+	return db.Notification{Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
+		Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
+}
+
 // payload builds the push payload and its inbox record (lookups at send time).
 func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
-	var p Payload
 	var rec db.NewNotification
 	switch {
 	case e.task != nil:
 		t, err := n.store.GetTask(ctx, e.task.TaskID)
 		if err != nil {
-			return p, rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
+			return Payload{}, rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
 		}
 		id := strconv.FormatInt(t.ID, 10)
-		p = Payload{Title: titles[e.task.To], Body: t.Title + " · " + t.ProjectTitle,
-			URL: "/tasks/" + id, Tag: "task-" + id}
-		if t.T3ThreadID != nil {
-			p.URL = "/sessions/" + url.PathEscape(*t.T3ThreadID)
-		}
-		p.URL += answerAnchor(e.task.To)
 		project := t.ProjectTitle
 		// Retain task identity across restarts and ON DELETE SET NULL. Push
 		// navigation can open the current session without changing this key.
@@ -228,13 +248,12 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	case e.ready != nil:
 		t, err := n.store.GetTask(ctx, *e.ready)
 		if err != nil {
-			return p, rec, fmt.Errorf("task %d: %w", *e.ready, err)
+			return Payload{}, rec, fmt.Errorf("task %d: %w", *e.ready, err)
 		}
-		id := strconv.FormatInt(t.ID, 10)
-		path := "/tasks/" + id
-		p = Payload{Title: titles[db.EventReady], Body: t.Title + " · " + t.ProjectTitle, URL: path, Tag: "task-" + id}
+		// A backlog task (no thread yet): the payload opens the task.
 		project := t.ProjectTitle
-		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project, URL: path}
+		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project,
+			URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID
@@ -244,21 +263,19 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 				project = *th.ProjectTitle
 			}
 		} else if !errors.Is(err, db.ErrNotFound) {
-			return p, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
+			return Payload{}, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 		}
-		path := "/sessions/" + url.PathEscape(c.ThreadID)
-		p = Payload{Title: titles[c.To], Body: title + " · " + project, URL: path + answerAnchor(c.To), Tag: "thread-" + c.ThreadID}
 		threadID := c.ThreadID
-		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project, URL: path}
+		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project,
+			URL: "/sessions/" + url.PathEscape(c.ThreadID)}
 	default:
-		return p, rec, errors.New("empty event")
+		return Payload{}, rec, errors.New("empty event")
 	}
 	badge, err := n.store.NeedsInputCount(ctx)
 	if err != nil {
-		return p, rec, err
+		return Payload{}, rec, err
 	}
-	p.Badge = badge
-	return p, rec, nil
+	return PayloadFor(notificationFrom(rec), badge), rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

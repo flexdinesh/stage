@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -32,6 +33,8 @@ type Deps struct {
 	SearchTimeout time.Duration
 	// Transcript serves session transcripts; nil disables those routes.
 	Transcript *transcript.Hub
+	// Inbox wakes GET /api/notifications/stream (nil = a private hub).
+	Inbox *notify.Hub
 	// Instance identifies the running server in GET /api/health (zero in
 	// tests).
 	Instance instance.Meta
@@ -51,6 +54,9 @@ func NewRouter(deps Deps) http.Handler {
 	s := &server{Deps: deps, log: deps.Logger}
 	if s.log == nil {
 		s.log = slog.Default()
+	}
+	if s.Inbox == nil {
+		s.Inbox = notify.NewHub(context.Background())
 	}
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
@@ -138,6 +144,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/notifications/groups", s.listNotificationGroups)
 	h("POST /api/notifications/read", s.readNotifications)
 	h("GET /api/notifications/unread-tags", s.unreadNotificationTags)
+	h("GET /api/notifications/stream", s.streamNotifications)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

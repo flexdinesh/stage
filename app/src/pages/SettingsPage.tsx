@@ -290,15 +290,34 @@ function NotificationsCard() {
   return <DeviceNotificationsCard notifications={notifications} />;
 }
 
+/** "This device" copy per delivery channel (absent channel = web-push). */
+const DEVICE_COPY: Record<NonNullable<NotificationDelivery["channel"]>, { intro: string; unsupported: string; tested: string }> = {
+  "web-push": {
+    intro: "Web Push to this browser for the checked events.",
+    unsupported: "This browser does not support Web Push notifications.",
+    tested: "Test notification sent.",
+  },
+  native: {
+    intro: "System notifications from the Stage app for the checked events, when Stage is not in front.",
+    unsupported: "This system has no notification service Stage can use.",
+    tested: "Test notification shown.",
+  },
+};
+
 function DeviceNotificationsCard({ notifications }: { notifications: NotificationDelivery }) {
   const qc = useQueryClient();
+  const channel = notifications.channel ?? "web-push";
+  const copy = DEVICE_COPY[channel];
+  const canOpenSettings = notifications.openSystemSettings !== undefined;
   // Device state, not server state: no polling; rechecked on focus (permission may change in system settings).
   const state = useQuery({ queryKey: PUSH_KEY, queryFn: () => notifications.state(), refetchInterval: false });
   const refresh = () => qc.invalidateQueries({ queryKey: PUSH_KEY });
   const enable = useMutation({ mutationFn: () => notifications.enable(), onSettled: refresh });
   const disable = useMutation({ mutationFn: () => notifications.disable(), onSettled: refresh });
   const test = useMutation({ mutationFn: () => notifications.test(), onSettled: refresh });
-  const busy = enable.isPending || disable.isPending || test.isPending;
+  // Resolves false when the host cannot open them; the hint then says where to go. Returning re-checks state on focus.
+  const settings = useMutation({ mutationFn: async () => (await notifications.openSystemSettings?.()) ?? false });
+  const busy = enable.isPending || disable.isPending || test.isPending || settings.isPending;
   const chip = state.data === undefined ? null : PUSH_CHIP[state.data];
   const deviceId = useId();
   return (
@@ -312,7 +331,7 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
           <h3 id={deviceId} className="label-caps">
             This device
           </h3>
-          <Muted>Web Push to this browser for the checked events.</Muted>
+          <Muted>{copy.intro}</Muted>
           <QueryState isPending={state.isPending} error={state.error}>
             {state.data === "insecure" ? (
               <Alert
@@ -326,14 +345,33 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
                 Push needs HTTPS, or http://localhost on this machine. This page is served over plain HTTP.
               </Alert>
             ) : null}
-            {state.data === "unsupported" ? <Muted>This browser does not support Web Push notifications.</Muted> : null}
+            {state.data === "unsupported" ? <Muted>{copy.unsupported}</Muted> : null}
             {state.data === "ios-install" ? (
               <Alert tone="plain">
                 Add to Home Screen first: Share → Add to Home Screen, then open stage from the Home Screen.
               </Alert>
             ) : null}
-            {state.data === "blocked" ? (
+            {state.data === "blocked" && channel === "web-push" ? (
               <Alert tone="plain">Notifications are blocked for this site. Allow them in the browser or system settings, then reload.</Alert>
+            ) : null}
+            {state.data === "blocked" && channel === "native" ? (
+              <Alert
+                tone="plain"
+                actions={
+                  <>
+                    {canOpenSettings ? (
+                      <Button small busy={settings.isPending} disabled={busy} onClick={() => settings.mutate()}>
+                        Open System Settings
+                      </Button>
+                    ) : null}
+                    <Button small busy={enable.isPending} disabled={busy} onClick={() => enable.mutate()}>
+                      Try again
+                    </Button>
+                  </>
+                }
+              >
+                Notifications from Stage are turned off in system settings. Allow them there, then try again.
+              </Alert>
             ) : null}
             {state.data === "off" ? (
               <div>
@@ -350,11 +388,17 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
                 <Button busy={disable.isPending} disabled={busy} onClick={() => disable.mutate()}>
                   Disable
                 </Button>
+                {channel === "native" && canOpenSettings ? (
+                  <Button variant="ghost" busy={settings.isPending} disabled={busy} onClick={() => settings.mutate()}>
+                    System settings
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </QueryState>
-          {test.isSuccess ? <Alert tone="plain">Test notification sent.</Alert> : null}
-          <ErrorText error={enable.error ?? disable.error ?? test.error} />
+          {settings.data === false ? <Muted>Allow notifications for Stage in your desktop&apos;s settings.</Muted> : null}
+          {test.isSuccess ? <Alert tone="plain">{copy.tested}</Alert> : null}
+          <ErrorText error={enable.error ?? disable.error ?? test.error ?? settings.error} />
         </section>
       </div>
     </Panel>

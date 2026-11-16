@@ -184,10 +184,15 @@ func Run(ctx context.Context, o Options) error {
 	runner := release.NewRunner(store, syncSvc, logger)
 	scheduler := schedule.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)
+	// One inbox hub wakes notification streams on inserts (notifier), reads
+	// (API), prunes and task transitions (badge). Streams end with ctx.
+	inbox := notify.NewHub(ctx)
+	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	syncSvc.OnTransition = func(ctx context.Context, c t3sync.Change) {
 		runner.OnTransition(ctx, c)
 		notifier.OnTransition(ctx, c)
+		inbox.Signal()
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
 	runner.OnReady = notifier.OnReady
@@ -199,7 +204,7 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer wg.Done(); runner.Run(ctx) }()
 	go func() { defer wg.Done(); scheduler.Run(ctx) }()
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
-	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger) }()
+	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 
 	mux := http.NewServeMux()
 	// Transcript pollers and their event streams end with ctx, so Shutdown
@@ -207,7 +212,7 @@ func Run(ctx context.Context, o Options) error {
 	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
-		Instance: meta, OnTreeChange: runner.Kick,
+		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.
@@ -278,8 +283,9 @@ func sweepStagedAttachments(ctx context.Context, store *db.Store, log *slog.Logg
 // notificationRetention: inbox entries older than this are pruned hourly.
 const notificationRetention = 30 * 24 * time.Hour
 
-// pruneNotifications hourly deletes inbox entries past notificationRetention.
-func pruneNotifications(ctx context.Context, store *db.Store, log *slog.Logger) {
+// pruneNotifications hourly deletes inbox entries past notificationRetention,
+// calling signal when it deleted any.
+func pruneNotifications(ctx context.Context, store *db.Store, log *slog.Logger, signal func()) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
@@ -287,6 +293,7 @@ func pruneNotifications(ctx context.Context, store *db.Store, log *slog.Logger) 
 			log.Warn("prune notifications", "err", err)
 		} else if n > 0 {
 			log.Info("pruned notifications", "count", n)
+			signal()
 		}
 		select {
 		case <-ctx.Done():
