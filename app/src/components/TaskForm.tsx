@@ -10,6 +10,7 @@ import {
   type ModelDefaults,
   type Preferences,
   type Schedule,
+  type StartMode as TreeStartMode,
   type Task,
   type UpdateTaskRequest,
 } from "../api/types.ts";
@@ -79,6 +80,8 @@ interface FormState {
   mode: StartMode;
   /** Append each need's handoff at launch (a task with needs). */
   handoff: boolean;
+  /** Tree member's own start mode; inherit follows the tree. */
+  treeStart: TreeStartChoice;
   /** One-shot wall time "YYYY-MM-DDTHH:mm" in tz. */
   startLocal: string;
   repeat: RepeatSpec;
@@ -114,7 +117,7 @@ type Template = Pick<
   | "notes"
 >;
 
-function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "startLocal" | "repeat" | "tz"> {
+function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeStart" | "startLocal" | "repeat" | "tz"> {
   return {
     projectId: String(t.projectId),
     title: t.title,
@@ -139,6 +142,19 @@ export interface TreePrefill {
   treeId: number;
   treeTitle: string;
   needs: number[];
+  /** The tree's start mode (names what Inherit means). */
+  startMode?: TreeStartMode;
+}
+
+type TreeStartChoice = "inherit" | TreeStartMode;
+
+/** Start mode select options; Inherit names the tree's mode when known. */
+function treeStartOptions(inherited: TreeStartMode | null): { value: TreeStartChoice; label: string }[] {
+  return [
+    { value: "inherit", label: inherited === null ? "Inherit from tree" : `Inherit (tree: ${inherited})` },
+    { value: "auto", label: "Auto: starts when its needs settle" },
+    { value: "manual", label: "Manual: reads ready, you start it" },
+  ];
 }
 
 /** Start options for a new task: a task with needs waits in backlog; tree tasks never repeat (schedules take no tree). */
@@ -156,7 +172,8 @@ function initialState(
   tree: TreePrefill | undefined,
 ): FormState {
   const tz = browserTimeZone();
-  const timing = { handoff: true, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
+  const treeStart: TreeStartChoice = task?.startMode ?? "inherit";
+  const timing = { handoff: true, treeStart, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
   if (schedule !== undefined) {
     return { ...fromTemplate(schedule), ...timing, mode: "repeat", repeat: parseCron(schedule.cron), tz: schedule.tz };
   }
@@ -265,6 +282,9 @@ function TaskFormDrawer({
   const predName = task === undefined ? null : predecessorName(task);
   const wsChoice = effectiveChoice(s.workspaceType, predName);
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
+  // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
+  const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
+  const inheritedMode = isNew ? (defaultTree?.startMode ?? null) : task !== undefined && task.startMode === null ? task.effectiveStartMode : null;
 
   const tzValid = validTimeZone(s.tz);
   const startMs = mode === "at" && tzValid ? localToInstant(s.startLocal, s.tz) : null;
@@ -311,6 +331,7 @@ function TaskFormDrawer({
         const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags, notes: s.notes };
         if (full) {
           if (needs.length > 0 && s.handoff !== task.handoff) body.handoff = s.handoff;
+          if (inTree && s.treeStart !== (task.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
           if (timed !== null) {
             body.startLocal = timed.startLocal;
             body.startTz = timed.startTz;
@@ -327,6 +348,7 @@ function TaskFormDrawer({
         ...(timed !== null ? timed : { start: mode === "now" }),
         ...(defaultTree === undefined ? {} : { treeId: defaultTree.treeId }),
         ...(defaultTree === undefined || defaultTree.needs.length === 0 ? {} : { needs: defaultTree.needs }),
+        ...(defaultTree === undefined || s.treeStart === "inherit" ? {} : { startMode: s.treeStart }),
       };
       return { kind: "task", task: await api.createTask(body) };
     },
@@ -499,6 +521,27 @@ function TaskFormDrawer({
         ) : null}
         {mode === "at" && modes.length > 0 ? (
           <StartAtFields s={s} set={set} startMs={startMs} past={startPast} now={now} />
+        ) : null}
+        {inTree ? (
+          <Field label="Tree start" className="md:max-w-sm">
+            {(id) => (
+              <Select
+                id={id}
+                value={s.treeStart}
+                onChange={(e) => {
+                  const picked = treeStartOptions(inheritedMode).find((o) => o.value === e.target.value);
+                  if (picked !== undefined) set({ treeStart: picked.value });
+                }}
+                className="w-full"
+              >
+                {treeStartOptions(inheritedMode).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
         ) : null}
         {task !== undefined && full && needs.length > 0 ? (
           <HandoffToggle checked={s.handoff} onChange={(handoff) => set({ handoff })} hint={handoffHint(task)} />

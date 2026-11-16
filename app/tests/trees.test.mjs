@@ -12,6 +12,7 @@ import {
   rollupLabel,
   treeMeta,
   treeRollup,
+  treeMembers,
   treeSettled,
   wouldCycle,
 } from "../src/lib/trees.ts";
@@ -189,4 +190,11 @@ test("a tree is settled only when every member is", () => {
   assert.equal(treeSettled([member("settled"), member("settled")]), true);
   assert.equal(treeSettled([member("settled"), member("done")]), false);
   assert.equal(treeSettled([]), false);
+});
+
+test("new tree members: parallel roots, or a chain in the given order", () => {
+  const order = [{ id: 5 }, { id: 2 }, { id: 9 }];
+  assert.deepEqual(treeMembers(order, "parallel"), [{ taskId: 5 }, { taskId: 2 }, { taskId: 9 }]);
+  assert.deepEqual(treeMembers(order, "chain"), [{ taskId: 5 }, { taskId: 2, needs: [5] }, { taskId: 9, needs: [2] }]);
+  assert.deepEqual(treeMembers([], "chain"), []);
 });

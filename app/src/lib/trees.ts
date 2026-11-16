@@ -1,4 +1,4 @@
-import type { StartMode, Task, TreeCounts, TreeDetail, TreeSummary } from "../api/types.ts";
+import type { StartMode, Task, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
 
 /** What layout and graph helpers need of a member. */
 type Node = Pick<Task, "id" | "needs">;
@@ -289,3 +289,14 @@ export function nodeState(t: Pick<Task, "state" | "readiness">): NodeState {
 
 /** Every member settled. */
 export const treeSettled = (tasks: readonly Pick<Task, "state">[]) => tasks.length > 0 && tasks.every((t) => t.state === "settled");
+
+/** New tree from a selection: parallel (every task a root) or a chain (each needs the one before it). */
+export type TreeShape = "parallel" | "chain";
+
+/** Members for POST /trees: chain needs follow `order`. */
+export function treeMembers(order: readonly Pick<Task, "id">[], shape: TreeShape): TreeMemberRequest[] {
+  return order.map((t, i) => {
+    const prev = order[i - 1];
+    return shape === "chain" && prev !== undefined ? { taskId: t.id, needs: [prev.id] } : { taskId: t.id };
+  });
+}

@@ -32,18 +32,26 @@ function Section({ label, meta, children }: { label: string; meta?: ReactNode; c
   );
 }
 
-/** A member line: `#id` and title (selects that node), with an optional trailing control. */
-function MemberLine({ task, onSelect, trailing }: { task: Task; onSelect: (id: number) => void; trailing?: ReactNode }) {
+/** A member line: `#id` and title (selects that node, else opens the task), with an optional trailing control. */
+function MemberLine({ task, onSelect, trailing }: { task: Task; onSelect?: ((id: number) => void) | undefined; trailing?: ReactNode }) {
+  const cls = "flex min-w-0 flex-1 items-baseline gap-1.5 text-left text-small hover:underline";
+  const label = (
+    <>
+      <span className="font-mono text-meta text-muted tabular">#{task.id}</span>
+      <span className="min-w-0 truncate">{task.title}</span>
+    </>
+  );
   return (
     <li className="flex min-h-8 items-center gap-2">
-      <button
-        type="button"
-        onClick={() => onSelect(task.id)}
-        className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left text-small hover:underline"
-      >
-        <span className="font-mono text-meta text-muted tabular">#{task.id}</span>
-        <span className="min-w-0 truncate">{task.title}</span>
-      </button>
+      {onSelect === undefined ? (
+        <Link to={`/tasks/${task.id}`} className={cls}>
+          {label}
+        </Link>
+      ) : (
+        <button type="button" onClick={() => onSelect(task.id)} className={cls}>
+          {label}
+        </button>
+      )}
       {trailing}
     </li>
   );
@@ -57,8 +65,7 @@ function baseValue(w: Workspace, candidates: readonly Task[]): string {
 }
 
 /**
- * lg+ side column for the selected node: needs (remove, cycle-safe add), dependents, start mode, worktree base,
- * handoff, Open task and Remove from tree. Edits apply at once; needs, mode, base and handoff change only in backlog.
+ * lg+ side column for the selected node: the task, then its tree controls with Open task. Edits apply at once.
  */
 export function TreeNodePanel({
   tree,
@@ -71,41 +78,6 @@ export function TreeNodePanel({
   onSelect: (id: number) => void;
   onClose: () => void;
 }) {
-  const api = useApi();
-  const invalidate = useInvalidateWork();
-  const baseId = useId();
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const editable = task.state === "backlog";
-  const byId = new Map(tree.tasks.map((t) => [t.id, t]));
-  const needs = task.needs.flatMap((id) => byId.get(id) ?? []);
-  const dependents = task.dependents.flatMap((id) => byId.get(id) ?? []);
-  const candidates = needCandidates(tree.tasks, task.id);
-  const bases = baseCandidates(task, tree);
-
-  const setNeeds = useMutation({ mutationFn: (next: number[]) => api.setNeeds(task.id, next), onSettled: invalidate });
-  const update = useMutation({
-    mutationFn: (body: UpdateTaskRequest) => api.updateTask(task.id, body),
-    onSettled: invalidate,
-  });
-  const remove = useMutation({
-    mutationFn: () => api.removeFromTree(tree.id, task.id),
-    onSuccess: onClose,
-    onSettled: invalidate,
-  });
-  const error = setNeeds.error ?? update.error ?? remove.error;
-
-  const mode: ModeChoice = task.startMode ?? "inherit";
-  const w = task.workspace;
-  const setBase = (value: string) => {
-    if (w.type !== "worktree") return;
-    const picked = Number(value);
-    const next: Workspace =
-      value === ""
-        ? { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "ref" }
-        : { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "predecessor", baseTaskId: picked };
-    update.mutate({ workspace: next });
-  };
-
   return (
     <Panel
       title={`Task #${task.id}`}
@@ -125,10 +97,79 @@ export function TreeNodePanel({
         </Link>
         <p className="font-mono text-meta text-muted">{task.projectTitle}</p>
       </div>
+      <TreeNodeEditor
+        tree={tree}
+        task={task}
+        onSelect={onSelect}
+        onRemoved={onClose}
+        lead={
+          <Link to={`/tasks/${task.id}`} className={buttonClass("secondary", true)}>
+            Open task
+          </Link>
+        }
+      />
+    </Panel>
+  );
+}
 
+/**
+ * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
+ * dependents, start mode, worktree base, handoff, then `lead` and Remove from tree. Edits apply at once; needs, mode,
+ * base and handoff change only in backlog. Member lines select (`onSelect`) or open the task.
+ */
+export function TreeNodeEditor({
+  tree,
+  task,
+  onSelect,
+  onRemoved,
+  lead,
+}: {
+  tree: TreeDetail;
+  task: Task;
+  onSelect?: (id: number) => void;
+  onRemoved?: () => void;
+  lead?: ReactNode;
+}) {
+  const api = useApi();
+  const invalidate = useInvalidateWork();
+  const baseId = useId();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const editable = task.state === "backlog";
+  const byId = new Map(tree.tasks.map((t) => [t.id, t]));
+  const needs = task.needs.flatMap((id) => byId.get(id) ?? []);
+  const dependents = task.dependents.flatMap((id) => byId.get(id) ?? []);
+  const candidates = needCandidates(tree.tasks, task.id);
+  const bases = baseCandidates(task, tree);
+
+  const setNeeds = useMutation({ mutationFn: (next: number[]) => api.setNeeds(task.id, next), onSettled: invalidate });
+  const update = useMutation({
+    mutationFn: (body: UpdateTaskRequest) => api.updateTask(task.id, body),
+    onSettled: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: () => api.removeFromTree(tree.id, task.id),
+    onSuccess: () => onRemoved?.(),
+    onSettled: invalidate,
+  });
+  const error = setNeeds.error ?? update.error ?? remove.error;
+
+  const mode: ModeChoice = task.startMode ?? "inherit";
+  const w = task.workspace;
+  const setBase = (value: string) => {
+    if (w.type !== "worktree") return;
+    const picked = Number(value);
+    const next: Workspace =
+      value === ""
+        ? { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "ref" }
+        : { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "predecessor", baseTaskId: picked };
+    update.mutate({ workspace: next });
+  };
+
+  return (
+    <>
       <Section label="Needs" meta={needs.length}>
         {needs.length === 0 ? (
-          <p className="text-small text-muted">None. It is a root: it starts when you start it.</p>
+          <p className="text-small text-muted">{editable ? "None. It is a root: it starts when you start it." : "None."}</p>
         ) : (
           <ul className="flex flex-col">
             {needs.map((n) => (
@@ -140,17 +181,17 @@ export function TreeNodePanel({
                   <>
                     <NodeChip task={n} />
                     {editable ? (
-                      <Button
-                        variant="ghost"
-                        small
-                        aria-label={`Remove need #${n.id}`}
-                        title={`Remove need #${n.id}`}
-                        disabled={setNeeds.isPending}
-                        onClick={() => setNeeds.mutate(task.needs.filter((id) => id !== n.id))}
-                        className="w-8 px-0 md:w-6"
-                      >
-                        <IconClose size={12} />
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          small
+                          aria-label={`Remove need #${n.id}`}
+                          title={`Remove need #${n.id}`}
+                          disabled={setNeeds.isPending}
+                          onClick={() => setNeeds.mutate(task.needs.filter((id) => id !== n.id))}
+                          className="w-8 px-0 md:w-6"
+                        >
+                          <IconClose size={12} />
+                        </Button>
                     ) : null}
                   </>
                 }
@@ -177,6 +218,8 @@ export function TreeNodePanel({
         )}
       </Section>
 
+      {/* Start mode, base and handoff only shape a launch: once it has run they no longer apply. */}
+      {editable ? (
       <Section label="Start mode">
         <fieldset disabled={!editable || update.isPending} className="min-w-0 disabled:opacity-55">
           <Segmented
@@ -194,7 +237,9 @@ export function TreeNodePanel({
         </p>
       </Section>
 
-      {task.needs.length === 0 ? null : (
+      ) : null}
+
+      {!editable || task.needs.length === 0 ? null : (
         <Section label="Worktree base">
           {w.type !== "worktree" ? (
             <p className="text-small text-muted">Runs at the project root, so there is no base to pick.</p>
@@ -226,7 +271,7 @@ export function TreeNodePanel({
         </Section>
       )}
 
-      {task.needs.length === 0 ? null : (
+      {!editable || task.needs.length === 0 ? null : (
         <div className="border-b border-line px-3 py-2">
           <HandoffToggle
             checked={task.handoff}
@@ -240,9 +285,7 @@ export function TreeNodePanel({
       <div className="flex flex-col gap-2 px-3 py-3">
         <ErrorText error={error} />
         <div className="flex flex-wrap items-center gap-2">
-          <Link to={`/tasks/${task.id}`} className={buttonClass("secondary", true)}>
-            Open task
-          </Link>
+          {lead}
           {confirmRemove ? (
             <>
               <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()} className="ml-auto">
@@ -264,6 +307,6 @@ export function TreeNodePanel({
           </p>
         ) : null}
       </div>
-    </Panel>
+    </>
   );
 }

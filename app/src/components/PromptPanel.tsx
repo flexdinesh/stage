@@ -113,7 +113,8 @@ function TaskPrompt({ prompt, attachments }: { prompt: string; attachments: read
   );
 }
 
-function OpeningPrompt({ threadId, live }: { threadId: string; live: boolean }) {
+/** The session's first own message, read from T3 (session detail without a task; an adopted task's detail). */
+export function OpeningPrompt({ threadId, live }: { threadId: string; live: boolean }) {
   const api = useApi();
   const query = useQuery({
     queryKey: ["transcript-opening", threadId],

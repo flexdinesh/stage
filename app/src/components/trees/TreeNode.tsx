@@ -133,7 +133,7 @@ export function TreeNode({
         if (!e.currentTarget.contains(e.relatedTarget)) onHot("focus", null);
       }}
       className={cx(
-        "relative z-[1] min-w-0 border bg-surface px-3 py-2.5 transition-[border-color,outline-color] duration-150 motion-reduce:transition-none md:w-[232px]",
+        "relative z-[1] min-w-0 border bg-surface px-3 py-2.5 transition-[border-color,outline-color] duration-150 motion-reduce:transition-none md:w-[216px]",
         notStarted && "border-dashed",
         dimmed ? "border-line" : "border-line-strong",
         task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",

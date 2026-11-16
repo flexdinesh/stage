@@ -164,6 +164,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
       treeId: tree.id,
       treeTitle: tree.title,
       needs: selected === null ? [] : [selected.id],
+      startMode: tree.startMode,
     });
   };
 

@@ -45,10 +45,13 @@ const MORE = NAV.filter(
 /** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
 const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
 
-/** Laptop top bar tab styling, shared by nav links and the More menu trigger. */
+/**
+ * Laptop top bar tab styling, shared by nav links and the More menu trigger. Padding tightens between lg and xl so
+ * all eight tabs fit at 1024px (with a classic scrollbar) without clipping Settings.
+ */
 function navTabClass(active: boolean): string {
   return cx(
-    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 xl:px-3",
+    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 lg:px-1.5 xl:px-3",
     active ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
   );
 }
@@ -251,7 +254,7 @@ function Shell() {
   return (
     <div className="min-h-screen bg-bg text-fg">
       {/* Laptop top bar */}
-      <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex">
+      <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex lg:max-xl:gap-3">
         <div className="flex items-center">
           <Mark needsInput={needsInput} />
         </div>

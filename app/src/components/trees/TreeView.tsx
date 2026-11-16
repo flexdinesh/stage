@@ -154,7 +154,7 @@ export function TreeViewSkeleton() {
           <div className="h-3 w-14 animate-pulse bg-panel" />
           <div className="flex flex-col gap-2 md:flex-row md:gap-6">
             {Array.from({ length: n }, (_, j) => (
-              <div key={j} className="h-[116px] animate-pulse border border-line bg-panel md:w-[232px]" />
+              <div key={j} className="h-[116px] animate-pulse border border-line bg-panel md:w-[216px]" />
             ))}
           </div>
         </div>

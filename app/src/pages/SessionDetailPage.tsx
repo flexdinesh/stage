@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
@@ -14,9 +14,12 @@ import { SessionOpenButton, SessionRows } from "../components/SessionList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
 import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
 import { NeedsInputSlot } from "../components/NeedsInputPanel.tsx";
-import { Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
+import { IconTree } from "../components/icons.tsx";
+import { AddToTreeDrawer } from "../components/trees/AddToTreeDrawer.tsx";
+import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
+import { Button, Chip, Detail, Details, PageHeader, Panel, QueryState, buttonClass } from "../components/ui.tsx";
 import { dateTime } from "../lib/format.ts";
-import { sessionPath } from "../lib/sessions.ts";
+import { canLinkSession, sessionPath } from "../lib/sessions.ts";
 import { usePlatform } from "../platform/context.tsx";
 
 export function SessionDetailPage() {
@@ -33,14 +36,15 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
   const { notifications } = usePlatform();
   const markViewed = useMarkNotificationGroupsRead();
   const [view, setView] = useDetailView();
+  const [drawer, setDrawer] = useState<"adopt" | "tree" | null>(null);
   useEffect(() => {
     void notifications?.closeShown(`thread-${thread.t3ThreadId}`);
     if (taskId !== undefined) void notifications?.closeShown(`task-${taskId}`);
     markViewed(taskId === undefined ? [`thread:${thread.t3ThreadId}`] : [`thread:${thread.t3ThreadId}`, `task:${taskId}`]);
   }, [notifications, thread.t3ThreadId, taskId, markViewed]);
   return <>
-    <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><CopyLinkPair subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} /><SessionOpenButton thread={thread} />{task === null ? null : <Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link>}</>} />
-    <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
+    <PageHeader title={thread.title} meta={<><Link to="/sessions" className="hover:underline">Sessions</Link>{` / ${thread.projectTitle ?? thread.t3ProjectId}`}{thread.archived ? " · archived" : ""}</>} actions={<><CopyLinkPair subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} /><SessionOpenButton thread={thread} />{task === null ? (canLinkSession(thread) ? <Button small onClick={() => setDrawer("adopt")} title="Track this session as a stage task so it can join a tree">Track as task</Button> : null) : <>{task.treeId === null ? <Button small onClick={() => setDrawer("tree")}>Add to tree</Button> : null}<Link to={`/tasks/${task.id}`} className={buttonClass()}>Task #{task.id}</Link></>}</>} />
+    <div className="mb-3.5 flex flex-wrap items-center gap-2"><span className="text-small text-muted">Session</span><TaskStateBadge state={thread.state} />{task === null || task.treeId === null ? null : <Link to={`/trees/${task.treeId}`} title={`In tree: ${task.treeTitle ?? task.treeId}`} className="hover:opacity-80"><Chip className="max-w-[32ch]"><IconTree /><span className="min-w-0 truncate">{task.treeTitle ?? `tree ${task.treeId}`}</span></Chip></Link>}{thread.parentThreadId === null ? null : <Link to={sessionPath(thread.parentThreadId)} className="text-small underline">Inspect parent session</Link>}</div>
     <div className="mb-3.5"><DetailViewTabs view={view} onChange={setView} live={isLiveState(thread.state)} /></div>
     <div className="flex flex-col gap-3.5">
       <NeedsInputSlot pending={thread.pendingRequestCount} threadId={thread.t3ThreadId} links={thread} />
@@ -80,5 +84,7 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
         </div>
       </div>
     </div>
+    {drawer === "adopt" ? <AdoptSessionDrawer session={thread} onClose={() => setDrawer(null)} /> : null}
+    {drawer === "tree" && task !== null ? <AddToTreeDrawer task={task} onClose={() => setDrawer(null)} /> : null}
   </>;
 }

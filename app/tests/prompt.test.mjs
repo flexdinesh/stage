@@ -13,3 +13,8 @@ test("a session with a stage task shows the task prompt and images", () => {
 test("an external session reads its first message from T3", () => {
   assert.deepEqual(sessionPromptSource({ thread, task: null }), { kind: "t3", threadId: "thread-1" });
 });
+
+test("an adopted task's session reads its first message from T3 (the task has no prompt)", () => {
+  const task = { id: 92, prompt: "", attachments: [], adopted: true };
+  assert.deepEqual(sessionPromptSource({ thread, task }), { kind: "t3", threadId: "thread-1" });
+});
