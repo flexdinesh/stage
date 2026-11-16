@@ -78,6 +78,60 @@ test("host: actions and login startup go to the shell", async () => {
   assert.deepEqual(f.calls, ["retry", "start", "restart", ["login", false]]);
 });
 
+function fakeServers() {
+  const calls = [];
+  const listeners = new Set();
+  const local = { id: "local", name: "This machine", kind: "local", url: "", active: true, needsInput: 1 };
+  const native = {
+    servers: async () => [local],
+    addServer: async (input) => (calls.push(["add", input]), { id: "s-1", ...input, kind: "remote", active: false, needsInput: null }),
+    updateServer: async (id, input) => (calls.push(["update", id, input]), { id, ...input, kind: "remote", active: false, needsInput: null }),
+    removeServer: async (id) => void calls.push(["remove", id]),
+    switchServer: async (id) => void calls.push(["switch", id]),
+    testServer: async (url) => (calls.push(["test", url]), { reachable: false, apiVersion: 0, identity: "", version: "", error: "refused", hint: "h", command: "" }),
+    onServers: (l) => (listeners.add(l), () => listeners.delete(l)),
+  };
+  return { native, calls, emit: (list) => listeners.forEach((l) => l(list)), listeners };
+}
+
+test("host: no servers service without the shell's server calls", () => {
+  assert.equal(desktopHost(fakeNative().native).servers, undefined);
+});
+
+test("host: servers go to the shell; subscribe follows servers:changed until unsubscribed", async () => {
+  const s = fakeServers();
+  const { servers } = desktopHost(fakeNative().native, s.native);
+  assert.ok(servers);
+  assert.deepEqual((await servers.list()).map((e) => e.id), ["local"]);
+  const input = { name: "Box", url: "http://10.0.0.2:7380" };
+  assert.equal((await servers.add(input)).id, "s-1");
+  assert.equal((await servers.update("s-1", { ...input, name: "Big box" })).name, "Big box");
+  await servers.switch("s-1");
+  await servers.remove("s-1");
+  assert.equal((await servers.test("http://x")).error, "refused");
+  assert.deepEqual(s.calls, [
+    ["add", input],
+    ["update", "s-1", { ...input, name: "Big box" }],
+    ["switch", "s-1"],
+    ["remove", "s-1"],
+    ["test", "http://x"],
+  ]);
+  const seen = [];
+  const off = servers.subscribe((list) => seen.push(list.length));
+  s.emit([1, 2]);
+  off();
+  s.emit([1]);
+  assert.deepEqual(seen, [2]);
+  assert.equal(s.listeners.size, 0);
+});
+
+test("host: the initial state targets this machine, before any ready", () => {
+  const host = desktopHost(fakeNative({ state: () => new Promise(() => {}) }).native);
+  const s = host.connection.current();
+  assert.deepEqual(s.target, { id: "local", name: "This machine", kind: "local", url: "" });
+  assert.equal(s.serverEpoch, 0);
+});
+
 test("links: public URL when the server has one, else the app's deep link, never mygo://", () => {
   const f = fakeNative();
   const server = { version: "1", apiVersion: 1, identity: "stage", publicUrl: null, socket: "/s", managed: true, pid: 1 };

@@ -22,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
 	"github.com/flexdinesh/stage/desktop/app/nav"
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // e2ePreload is injected into the main page by e2e builds (e2e.go), ""
@@ -34,6 +35,7 @@ type host struct {
 	api       *bridge.APIProxy
 	l         *launch.Launcher
 	alerts    *alerts.Service
+	servers   *target.Store
 	dev       bool
 	devOrigin string // MYGO_DEV_URL in a development build
 
@@ -78,8 +80,9 @@ func (h *host) wire() {
 	// OnOpenURL: both show, and navigating twice to one path is harmless.
 	mygo.App.OnOpenURL(h.openURL)
 	// A notification click, also the one that launched the app (macOS
-	// relaunches it from Notification Center): show its target.
-	mygo.App.OnNotificationClick(func(id string) { h.navigate(h.alerts.Target(id)) })
+	// relaunches it from Notification Center): switch to its server, then
+	// show its target.
+	mygo.App.OnNotificationClick(h.clickNotification)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		h.quitting.Store(true)
 		// Quit ends native notifications; keep the cursor for the next run.

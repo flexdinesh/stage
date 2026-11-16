@@ -28,6 +28,7 @@ import {
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
+import { ServerMenu } from "./Servers.tsx";
 import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx, type ChipTone } from "./ui.tsx";
 
 const NAV = [
@@ -309,7 +310,8 @@ function Shell() {
           ))}
           <MoreMenu active={moreActive} />
         </nav>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          <ServerMenu />
           <button
             type="button"
             onClick={() => setPalette(true)}
@@ -333,10 +335,11 @@ function Shell() {
       {/* Phone top bar */}
       <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] md:hidden">
         <Mark needsInput={needsInput} />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 items-center gap-2">
           <ConnectionStatus />
           <NotificationsBell onOpen={openInbox} />
-          <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 px-0">
+          <ServerMenu />
+          <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 shrink-0 px-0">
             <IconSearch size={16} />
           </Button>
           <Button variant="primary" onClick={() => newTask()}>

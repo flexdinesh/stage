@@ -1,10 +1,12 @@
 // Package launch ensures and supervises the desktop app's connection to
-// the Stage server: it runs the bundled stage CLI (`stage service start
-// --json`, docs/service.md) to start the per-user service, checks
-// readiness over the Unix socket (GET /api/health), and monitors it,
-// producing the State the UI shows (docs/desktop.md). It does not import
-// MyGo: the CLI, the socket client, the clock and the login-item calls
-// are injected, so it is unit-tested with fake CLIs.
+// the active Stage server (docs/desktop.md): for this machine's server it
+// runs the bundled stage CLI (`stage service start --json`,
+// docs/service.md) to start the per-user service and checks readiness over
+// the Unix socket (GET /api/health); a remote server is only checked and
+// watched, never managed. It produces the State the UI shows and switches
+// servers. It does not import MyGo: the CLI, the HTTP client, the clock
+// and the login-item calls are injected, so it is unit-tested with fake
+// CLIs.
 package launch
 
 import (
@@ -16,10 +18,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // ErrBusy is returned by an action while another one runs.
 var ErrBusy = errors.New("another start, restart or retry is running")
+
+// ErrRemote is returned by actions on this machine's service (start,
+// restart, login startup) while a remote server is active.
+var ErrRemote = errors.New("not available while connected to a remote Stage server; switch to this machine first")
 
 // Timing bounds the launcher's waits.
 type Timing struct {
@@ -70,14 +78,22 @@ type Config struct {
 	// TempDirs are refused as the app's location (nil: DefaultTempDirs).
 	TempDirs []string
 	Run      Runner // default ExecRunner
-	Get      Getter // default SocketGetter
+	Get      Getter // default TargetGetter
 	Now      func() time.Time
 	Timing   Timing // zero: DefaultTiming
 	// OnChange receives every new state (coalesced, latest wins), off the
 	// caller's goroutine.
 	OnChange func(State)
-	// OnSocket receives the socket to proxy to whenever it changes.
-	OnSocket func(socket string)
+	// Servers is the saved server list; its active one is the first
+	// target (nil: this machine only).
+	Servers *target.Store
+	// OnTarget receives the target to proxy to: the active server each
+	// time it becomes ready, a zero Target when a switch leaves none.
+	OnTarget func(target.Target)
+	// OnServer receives a server whose address is known or which became
+	// ready again (the active one, or this machine's while a remote is
+	// active), to reconnect its notification stream.
+	OnServer func(target.Target)
 	// OpenAtLogin and SetOpenAtLogin are MyGo's login item.
 	OpenAtLogin    func() bool
 	SetOpenAtLogin func(bool) error
@@ -90,15 +106,22 @@ type Launcher struct {
 	cfg Config
 	t   Timing
 
-	mu      sync.Mutex
-	st      State
-	info    *buildInfo // the bundled CLI, once read
-	socket  string
-	monStop context.CancelFunc
-	life    context.Context
-	stop    context.CancelFunc
+	mu        sync.Mutex
+	st        State
+	info      *buildInfo    // the bundled CLI, once read
+	target    target.Target // the active server
+	connected target.Target // the last ready target, zero before one
+	local     string        // this machine's socket, once known
+	monStop   context.CancelFunc
+	life      context.Context
+	stop      context.CancelFunc
+	// gen counts switches; opGen is the gen of the ensure holding op, and
+	// state changes of an older gen are dropped.
+	gen, opGen uint64
+	opCancel   context.CancelFunc
 
 	op     sync.Mutex // one ensure at a time
+	cbMu   sync.Mutex // orders OnTarget calls with switches
 	notify chan struct{}
 }
 
@@ -108,7 +131,7 @@ func New(cfg Config) *Launcher {
 		cfg.Run = ExecRunner
 	}
 	if cfg.Get == nil {
-		cfg.Get = SocketGetter
+		cfg.Get = TargetGetter
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -125,11 +148,19 @@ func New(cfg Config) *Launcher {
 	}
 	life, stop := context.WithCancel(context.Background())
 	l := &Launcher{cfg: cfg, t: t, life: life, stop: stop, notify: make(chan struct{}, 1)}
+	l.target = target.Local("")
+	if cfg.Servers != nil {
+		l.target = cfg.Servers.Active()
+	}
+	if l.devMode() {
+		l.local = cfg.DevSocket
+	}
 	l.st = State{
-		Phase: PhaseStarting, Step: stepPtr(StepService), Title: "Starting Stage server",
+		Phase: PhaseStarting, Step: stepPtr(firstStep(l.target)), Title: startTitle(l.target),
 		Problems: []Problem{}, LogTail: []string{},
-		App: AppInfo{Name: cfg.AppName, Version: cfg.AppVersion},
-		Dev: l.devMode(),
+		App:    AppInfo{Name: cfg.AppName, Version: cfg.AppVersion},
+		Target: l.target,
+		Dev:    l.devMode(),
 	}
 	go l.deliver()
 	return l
@@ -137,16 +168,155 @@ func New(cfg Config) *Launcher {
 
 func (l *Launcher) devMode() bool { return l.cfg.Dev && l.cfg.DevSocket != "" }
 
+// firstStep is where starting begins: the service for this machine, the
+// server itself for a remote.
+func firstStep(t target.Target) Step {
+	if t.Remote() {
+		return StepServer
+	}
+	return StepService
+}
+
+func startTitle(t target.Target) string {
+	if t.Remote() {
+		return "Connecting to " + t.Name
+	}
+	return "Starting Stage server"
+}
+
+// remote reports whether the active server is a remote one.
+func (l *Launcher) remote() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.target.Remote()
+}
+
+// Active is the active server.
+func (l *Launcher) Active() target.Target {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.target
+}
+
+// LocalTarget is this machine's server, with its socket once known (a
+// ready, a status probe or the dev socket), else "".
+func (l *Launcher) LocalTarget() target.Target {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return target.Local(l.local)
+}
+
 // Close stops the monitor and state delivery (tests; the app just quits).
 func (l *Launcher) Close() { l.stop() }
 
-// Start ensures the server in the background.
+// Start ensures the active server in the background. With a remote
+// active, it also looks up this machine's socket (`service status`, read
+// only) so its notifications keep coming.
 func (l *Launcher) Start() {
 	go func() {
 		l.op.Lock()
 		defer l.op.Unlock()
 		l.ensure(false)
 	}()
+	if l.remote() {
+		go l.probeLocal()
+	}
+}
+
+// probeLocal learns this machine's socket without starting anything and
+// hands it to OnServer.
+func (l *Launcher) probeLocal() {
+	sock := l.cfg.DevSocket
+	if !l.devMode() {
+		st, _, _ := l.status(l.life)
+		if st == nil || st.Socket.Path == "" {
+			return
+		}
+		sock = st.Socket.Path
+	}
+	l.mu.Lock()
+	if l.local == "" {
+		l.local = sock
+	}
+	sock = l.local
+	l.mu.Unlock()
+	if l.cfg.OnServer != nil {
+		l.cfg.OnServer(target.Local(sock))
+	}
+}
+
+// Switch makes the saved server id active: the open connection (bridge,
+// streams) ends at once, the state starts over for the new server
+// (ServerEpoch 0) and the start sequence runs in the background (the
+// service for this machine; a remote is only checked). Switching to the
+// active server only refreshes its name.
+func (l *Launcher) Switch(id string) error {
+	if l.cfg.Servers == nil {
+		if id == target.LocalID {
+			return nil
+		}
+		return target.ErrNotFound
+	}
+	t, ok := l.cfg.Servers.Get(id)
+	if !ok {
+		return target.ErrNotFound
+	}
+	if err := l.cfg.Servers.SetActive(id); err != nil {
+		return err
+	}
+	l.cbMu.Lock()
+	l.mu.Lock()
+	cur := l.target
+	if t.Kind == target.KindLocal {
+		t.Socket = ""
+	}
+	if cur.ID == t.ID && cur.URL == t.URL {
+		l.target.Name = t.Name
+		l.st.Target.Name = t.Name
+		if !l.connected.IsZero() {
+			l.connected.Name = t.Name
+		}
+		l.mu.Unlock()
+		l.cbMu.Unlock()
+		l.poke()
+		return nil
+	}
+	l.gen++
+	gen := l.gen
+	l.target, l.connected = t, target.Target{}
+	if l.opCancel != nil {
+		l.opCancel()
+	}
+	if l.monStop != nil {
+		l.monStop()
+		l.monStop = nil
+	}
+	l.st.Phase, l.st.Step, l.st.Title = PhaseStarting, stepPtr(firstStep(t)), startTitle(t)
+	l.st.Message, l.st.Fix, l.st.Command = "", "", ""
+	l.st.Problems, l.st.LogTail = []Problem{}, []string{}
+	l.st.Server, l.st.Foreground, l.st.VersionSkew = nil, false, false
+	l.st.Target, l.st.ServerEpoch = t, 0
+	l.mu.Unlock()
+	if l.cfg.OnTarget != nil {
+		l.cfg.OnTarget(target.Target{})
+	}
+	l.cbMu.Unlock()
+	l.poke()
+	l.cfg.Logf("launch: switched to %s (%s)", t.ID, orNone(t.URL))
+	go func() {
+		l.op.Lock()
+		defer l.op.Unlock()
+		l.mu.Lock()
+		stale := l.gen != gen
+		l.mu.Unlock()
+		if !stale {
+			l.ensure(false)
+		}
+	}()
+	if t.Remote() {
+		go l.probeLocal()
+	}
+	return nil
 }
 
 // State is the current state.
@@ -156,21 +326,34 @@ func (l *Launcher) State() State {
 	return l.st.clone()
 }
 
-// Socket is the socket of the last ready server, "" before one.
+// Socket is the socket of the last ready server, "" before one (and for
+// a remote).
 func (l *Launcher) Socket() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.socket
+	return l.connected.Socket
 }
 
-// Retry runs the start sequence again; StartServer does the same (it
-// starts the service when it is stopped). Both return once it settled.
-func (l *Launcher) Retry() error       { return l.action(false) }
-func (l *Launcher) StartServer() error { return l.action(false) }
+// Retry runs the start sequence again (for a remote: checks it again);
+// it returns once it settled.
+func (l *Launcher) Retry() error { return l.action(false) }
+
+// StartServer does what Retry does, which starts this machine's service
+// when it is stopped; ErrRemote while a remote is active.
+func (l *Launcher) StartServer() error {
+	if l.remote() {
+		return ErrRemote
+	}
+	return l.action(false)
+}
 
 // RestartServer restarts the service onto the bundled CLI (`service
-// restart --exe <cli>`), e.g. after a version skew or API mismatch.
+// restart --exe <cli>`), e.g. after a version skew or API mismatch;
+// ErrRemote while a remote is active.
 func (l *Launcher) RestartServer() error {
+	if l.remote() {
+		return ErrRemote
+	}
 	if l.devMode() {
 		return errors.New("restart is not available in a development run: restart the dev server")
 	}
@@ -192,6 +375,31 @@ func (l *Launcher) update(fn func(*State)) {
 	l.mu.Lock()
 	fn(&l.st)
 	l.mu.Unlock()
+	l.poke()
+}
+
+// apply runs fn on the state only while gen is the current switch
+// generation; false when a switch made it stale.
+func (l *Launcher) apply(gen uint64, fn func(*State)) bool {
+	l.mu.Lock()
+	if gen != l.gen {
+		l.mu.Unlock()
+		return false
+	}
+	fn(&l.st)
+	l.mu.Unlock()
+	l.poke()
+	return true
+}
+
+// opGeneration is the switch generation of the running ensure.
+func (l *Launcher) opGeneration() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.opGen
+}
+
+func (l *Launcher) poke() {
 	select {
 	case l.notify <- struct{}{}:
 	default:
@@ -219,25 +427,29 @@ type outcome struct {
 	logTail                      []string
 }
 
-func (l *Launcher) settle(o outcome) {
+// settle settles the running ensure's outcome (dropped after a switch).
+func (l *Launcher) settle(o outcome) { l.settleGen(l.opGeneration(), o) }
+
+func (l *Launcher) settleGen(gen uint64, o outcome) {
 	if o.problems == nil {
 		o.problems = []Problem{}
 	}
 	if o.logTail == nil {
 		o.logTail = []string{}
 	}
-	l.cfg.Logf("launch: %s: %s %s", o.phase, o.title, o.message)
-	l.update(func(s *State) {
+	if l.apply(gen, func(s *State) {
 		s.Phase, s.Step = o.phase, nil
 		s.Title, s.Message, s.Fix, s.Command = o.title, o.message, o.fix, o.command
 		s.Problems, s.LogTail = o.problems, o.logTail
-	})
+	}) {
+		l.cfg.Logf("launch: %s: %s %s", o.phase, o.title, o.message)
+	}
 }
 
 func (l *Launcher) progress(step Step) {
-	l.update(func(s *State) {
+	l.apply(l.opGeneration(), func(s *State) {
 		if s.Phase != PhaseStarting {
-			s.Phase, s.Title = PhaseStarting, "Starting Stage server"
+			s.Phase, s.Title = PhaseStarting, startTitle(s.Target)
 			s.Message, s.Fix, s.Command = "", "", ""
 			s.Problems, s.LogTail = []Problem{}, []string{}
 		}
@@ -259,7 +471,16 @@ func (l *Launcher) stopMonitor() {
 // monitors the server if it became ready. The caller holds l.op.
 func (l *Launcher) ensure(restart bool) {
 	l.stopMonitor()
-	ctx := l.life
+	ctx, cancel := context.WithCancel(l.life)
+	defer cancel()
+	l.mu.Lock()
+	l.opGen, l.opCancel = l.gen, cancel
+	t := l.target
+	l.mu.Unlock()
+	if t.Remote() {
+		l.ensureRemote(ctx, t)
+		return
+	}
 	l.progress(StepService)
 	if l.devMode() {
 		l.ensureDev(ctx)
@@ -471,7 +692,7 @@ func (l *Launcher) foreground(ctx context.Context, info buildInfo, st *status) {
 	reason := " but does not answer on the desktop socket."
 	if sock != "" {
 		l.progress(StepAPI)
-		h, err := l.waitHealth(ctx, sock, l.t.Ready)
+		h, err := l.waitHealth(ctx, target.Local(sock), l.t.Ready)
 		switch {
 		case err != nil || h.Service != "stage":
 		case h.Identity != info.Identity:
@@ -479,7 +700,7 @@ func (l *Launcher) foreground(ctx context.Context, info buildInfo, st *status) {
 		case h.APIVersion != info.APIVersion:
 			reason = fmt.Sprintf(" but speaks API v%d; this app needs v%d.", h.APIVersion, info.APIVersion)
 		default:
-			l.ready(info, sock, h, false, pid, true)
+			l.ready(info, target.Local(sock), h, false, pid, true)
 			return
 		}
 	}
@@ -496,7 +717,7 @@ func (l *Launcher) foreground(ctx context.Context, info buildInfo, st *status) {
 // connect checks readiness on sock and settles ready (or incompatible).
 func (l *Launcher) connect(ctx context.Context, info buildInfo, sock string, pid *int, foreground bool) {
 	l.progress(StepAPI)
-	h, err := l.waitHealth(ctx, sock, l.t.Ready)
+	h, err := l.waitHealth(ctx, target.Local(sock), l.t.Ready)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -506,17 +727,22 @@ func (l *Launcher) connect(ctx context.Context, info buildInfo, sock string, pid
 			fix:     "Retry. If it keeps failing, restart the server.", logTail: l.logTail(ctx)})
 		return
 	}
-	l.ready(info, sock, h, !foreground, pid, foreground)
+	l.ready(info, target.Local(sock), h, !foreground, pid, foreground)
 }
 
-// waitHealth polls GET /api/health on sock for up to bound.
-func (l *Launcher) waitHealth(ctx context.Context, sock string, bound time.Duration) (Health, error) {
+// waitHealth polls GET /api/health on t for up to bound; a refusal by
+// the server's origin policy (403) ends it at once.
+func (l *Launcher) waitHealth(ctx context.Context, t target.Target, bound time.Duration) (Health, error) {
 	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	for {
-		h, err := l.health(ctx, sock, bound)
+		h, err := l.health(ctx, t, bound)
 		if err == nil {
 			return h, nil
+		}
+		var he *HTTPError
+		if errors.As(err, &he) && he.Status == 403 {
+			return h, err
 		}
 		if !sleep(ctx, 250*time.Millisecond) {
 			return h, err
@@ -524,71 +750,108 @@ func (l *Launcher) waitHealth(ctx context.Context, sock string, bound time.Durat
 	}
 }
 
-func (l *Launcher) health(ctx context.Context, sock string, bound time.Duration) (Health, error) {
+func (l *Launcher) health(ctx context.Context, t target.Target, bound time.Duration) (Health, error) {
 	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	var h Health
-	if err := l.cfg.Get(ctx, sock, "/api/health", &h); err != nil {
+	if err := l.cfg.Get(ctx, t, "/api/health", &h); err != nil {
 		return h, err
 	}
 	if h.Service != "stage" {
-		return h, fmt.Errorf("%s is not a Stage server (service %q)", sock, h.Service)
+		return h, fmt.Errorf("%s is not a Stage server (service %q)", where(t), h.Service)
 	}
 	return h, nil
 }
 
+// where names a target in messages: its socket or URL.
+func where(t target.Target) string {
+	if t.Remote() {
+		return t.URL
+	}
+	return t.Socket
+}
+
 // ready settles the ready phase (or incompatible on another API version)
-// and starts the monitor.
-func (l *Launcher) ready(info buildInfo, sock string, h Health, managed bool, pid *int, foreground bool) {
-	if info.Identity == "" { // a dev run: the dev server stands in for the bundled CLI
+// for t and starts the monitor; dropped when a switch made the running
+// ensure stale.
+func (l *Launcher) ready(info buildInfo, t target.Target, h Health, managed bool, pid *int, foreground bool) {
+	gen := l.opGeneration()
+	if info.Identity == "" && !t.Remote() { // a dev run: the dev server stands in for the bundled CLI
 		info = buildInfo{Identity: h.Identity, Version: h.Version, APIVersion: h.APIVersion}
 		l.mu.Lock()
 		l.info = &info
 		l.mu.Unlock()
 		l.update(func(s *State) { s.App.Identity, s.App.APIVersion = h.Identity, h.APIVersion })
 	}
-	srv := &Server{Version: h.Version, APIVersion: h.APIVersion, Identity: h.Identity,
-		PublicURL: h.PublicURL, Socket: sock, Managed: managed, PID: pid}
+	if t.Remote() {
+		managed, pid, foreground = false, nil, false
+	}
+	srv := &Server{ID: t.ID, Version: h.Version, APIVersion: h.APIVersion, Identity: h.Identity,
+		PublicURL: h.PublicURL, Socket: t.Socket, Managed: managed, PID: pid}
 	if info.APIVersion != 0 && h.APIVersion != info.APIVersion {
-		l.update(func(s *State) { s.Server = srv })
-		l.settle(outcome{phase: PhaseIncompatible, title: "Stage server is incompatible",
+		if !l.apply(gen, func(s *State) { s.Server = srv }) {
+			return
+		}
+		o := outcome{phase: PhaseIncompatible, title: "Stage server is incompatible",
 			message: fmt.Sprintf("The running server (%s) speaks API v%d; this app needs v%d.", h.Version, h.APIVersion, info.APIVersion),
-			fix:     "Restart the Stage server onto the version bundled with this app.", command: "stage service restart"})
-		l.startMonitor(sock, info, h, managed, pid, foreground)
+			fix:     "Restart the Stage server onto the version bundled with this app.", command: "stage service restart"}
+		if t.Remote() {
+			o.message = fmt.Sprintf("The server on %s (%s) speaks API v%d; this app needs v%d.", t.Name, h.Version, h.APIVersion, info.APIVersion)
+			o.fix, o.command = "Update Stage on that machine to match this app, or switch to another server.", ""
+		}
+		l.settleGen(gen, o)
+		l.startMonitor(gen, t, info, h, managed, pid, foreground)
 		return
 	}
-	l.mu.Lock()
-	l.socket = sock
-	l.mu.Unlock()
-	if l.cfg.OnSocket != nil {
-		l.cfg.OnSocket(sock)
-	}
-	l.cfg.Logf("launch: ready on %s (server %s, api v%d, foreground %v)", sock, h.Version, h.APIVersion, foreground)
-	l.update(func(s *State) {
+	l.cbMu.Lock()
+	ok := l.apply(gen, func(s *State) {
 		s.Phase, s.Step, s.Title = PhaseReady, nil, "Connected"
 		s.Message, s.Fix, s.Command = "", "", ""
 		s.Problems, s.LogTail = []Problem{}, []string{}
 		s.Server, s.Foreground = srv, foreground
-		s.VersionSkew = info.Version != "" && h.Version != info.Version
+		s.VersionSkew = !t.Remote() && info.Version != "" && h.Version != info.Version
+		s.Target = t
 		s.Epoch++
+		s.ServerEpoch++
+		// Under the same lock as the generation check.
+		l.connected = t
+		if !t.Remote() {
+			l.local = t.Socket
+		}
 	})
-	l.startMonitor(sock, info, h, managed, pid, foreground)
+	if ok && l.cfg.OnTarget != nil {
+		l.cfg.OnTarget(t)
+	}
+	l.cbMu.Unlock()
+	if !ok {
+		return
+	}
+	if l.cfg.OnServer != nil {
+		l.cfg.OnServer(t)
+	}
+	l.cfg.Logf("launch: ready on %s (server %s, api v%d, foreground %v)", where(t), h.Version, h.APIVersion, foreground)
+	l.startMonitor(gen, t, info, h, managed, pid, foreground)
 }
 
-func (l *Launcher) startMonitor(sock string, info buildInfo, h Health, managed bool, pid *int, foreground bool) {
+func (l *Launcher) startMonitor(gen uint64, t target.Target, info buildInfo, h Health, managed bool, pid *int, foreground bool) {
 	ctx, cancel := context.WithCancel(l.life)
 	l.mu.Lock()
+	if gen != l.gen {
+		l.mu.Unlock()
+		cancel()
+		return
+	}
 	if l.monStop != nil {
 		l.monStop()
 	}
 	l.monStop = cancel
 	l.mu.Unlock()
-	go l.monitor(ctx, monitorState{sock: sock, info: info, instance: h.InstanceID, managed: managed, pid: pid, foreground: foreground})
+	go l.monitor(ctx, monitorState{gen: gen, t: t, info: info, instance: h.InstanceID, managed: managed, pid: pid, foreground: foreground})
 }
 
 // logTail is the last 50 server log lines (`service logs -n 50`), or nil.
 func (l *Launcher) logTail(ctx context.Context) []string {
-	if l.devMode() {
+	if l.devMode() || l.remote() {
 		return nil
 	}
 	res := l.run(ctx, l.t.Command, "service", "logs", "-n", "50")
@@ -620,17 +883,19 @@ func (l *Launcher) Identity() string {
 	return l.st.App.Identity
 }
 
-// T3PublicURL is T3's public URL as the server knows it (GET
+// T3PublicURL is T3's public URL as the active server knows it (GET
 // /api/t3/status), for opening a T3 thread in the browser.
 func (l *Launcher) T3PublicURL(ctx context.Context) (string, error) {
-	sock := l.Socket()
-	if sock == "" {
+	l.mu.Lock()
+	t := l.connected
+	l.mu.Unlock()
+	if t.IsZero() {
 		return "", errors.New("the Stage server is not connected")
 	}
 	var st struct {
 		PublicURL *string `json:"publicUrl"`
 	}
-	if err := l.cfg.Get(ctx, sock, "/api/t3/status", &st); err != nil {
+	if err := l.cfg.Get(ctx, t, "/api/t3/status", &st); err != nil {
 		return "", err
 	}
 	if st.PublicURL == nil || strings.TrimSpace(*st.PublicURL) == "" {

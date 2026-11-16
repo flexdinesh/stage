@@ -1,9 +1,11 @@
 // Package alerts is the desktop app's native notification consumer
-// (docs/desktop.md, Notifications): it follows the server's notification
-// stream over the Unix socket, decides what to show (catch-up, foreground,
-// toggle, grouping), keeps the cursor and device preferences, reconciles
-// shown notifications with the unread snapshot and sets the badge. It is
-// pure Go, without MyGo: the OS side is a Sink.
+// (docs/desktop.md, Notifications): it follows the notification stream of
+// every saved server at once (this machine's over its Unix socket,
+// remotes over TCP), decides what to show (catch-up, foreground, toggle,
+// grouping), keeps each server's cursor and the device preferences,
+// reconciles shown notifications with each server's unread snapshot and
+// sets the badge to the sum of their needs-input counts. It is pure Go,
+// without MyGo: the OS side is a Sink.
 package alerts
 
 import (
@@ -15,8 +17,11 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // ErrDenied: the OS refuses notifications from the app (macOS
@@ -72,14 +77,18 @@ type Config struct {
 	PrefsPath string
 	// Sink shows notifications and sets the badge.
 	Sink Sink
-	// Foreground reports whether the main window is visible and focused
-	// (then rows show as in-app toasts only). Called from the stream
-	// goroutine; nil means never.
-	Foreground func() bool
-	// Delivered runs after new unread rows arrived (once per catch-up
-	// batch, with its newest id; once per live row), shown or not. It must
-	// not block. Nil means no-op.
-	Delivered func(id int64)
+	// Foreground reports whether the main window is visible, focused and
+	// showing server id (then its rows show as in-app toasts only; other
+	// servers' rows still show as OS notifications). Called from stream
+	// goroutines; nil means never.
+	Foreground func(serverID string) bool
+	// Delivered runs after new unread rows of a server arrived (once per
+	// catch-up batch, with its newest id; once per live row), shown or not.
+	// It must not block. Nil means no-op.
+	Delivered func(serverID string, id int64)
+	// Changed runs when a server's needs-input count (Badges) changed. It
+	// must not block. Nil means no-op.
+	Changed func()
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 	// Logf logs (default log.Printf).
@@ -89,7 +98,8 @@ type Config struct {
 	MinBackoff, MaxBackoff time.Duration
 	// Window is how old a catch-up row may be to show (default 15 min).
 	Window time.Duration
-	// Max is how many catch-up groups show before the summary (default 3).
+	// Max is how many catch-up groups show per server before its summary
+	// (default 3).
 	Max int
 }
 
@@ -101,14 +111,38 @@ type shownNote struct {
 // queued is a notification waiting for the delivery worker.
 type queued struct {
 	note Note
-	id   int64
-	url  string
-	// seq is the unread snapshot sequence when it was queued.
+	// server is the server id, "" for device notes (test).
+	server string
+	id     int64
+	url    string
+	// seq is the server's unread snapshot sequence when it was queued.
 	seq uint64
 }
 
-// Service consumes the notification stream. Create it with New, then
-// Start; Connect on every server (re)start; Close on exit.
+// stream is one server's notification stream and its notifications.
+// Fields are guarded by Service.mu.
+type stream struct {
+	id     string
+	t      target.Target
+	ctx    context.Context // ends the loop when the server is removed
+	stop   context.CancelFunc
+	wake   chan struct{}
+	gen    uint64
+	cancel context.CancelFunc // the open connection
+	looped bool
+
+	noStreamLogged bool
+	shown          map[string]shownNote // by note ID
+	summaryTags    []string
+	unread         map[string]bool
+	snapSeq        uint64
+	badge          int
+	hasBadge       bool
+}
+
+// Service consumes the notification streams of every saved server.
+// Create it with New, then Start; SetServers on every list change;
+// Connect on every (re)start of a server; Close on exit.
 type Service struct {
 	cfg    Config
 	ctx    context.Context
@@ -119,30 +153,25 @@ type Service struct {
 	supportedOnce sync.Once
 	supported     bool
 
-	connWake  chan struct{}
 	queueWake chan struct{}
 	saveWake  chan struct{}
 
-	mu             sync.Mutex
-	prefs          Prefs
-	dirty          bool
-	started        bool
-	closed         bool
-	socket         string
-	gen            uint64
-	streamCancel   context.CancelFunc
-	noStreamLogged bool
-	queue          []queued
-	busy           bool
-	shown          map[string]shownNote
-	summaryTags    []string
-	unread         map[string]bool
-	snapSeq        uint64
-	badge          int
+	mu       sync.Mutex
+	prefs    Prefs
+	dirty    bool
+	started  bool
+	closed   bool
+	streams  map[string]*stream
+	order    []string // stream ids in list order
+	queue    []queued
+	busy     bool
+	badge    int
+	badgeSet bool
 }
 
 // New loads the preferences (a corrupt file is logged and replaced by
-// defaults) and returns a stopped Service.
+// defaults; a version 1 file migrates to this machine's entry) and
+// returns a stopped Service without servers.
 func New(cfg Config) *Service {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -165,11 +194,10 @@ func New(cfg Config) *Service {
 	}
 	s := &Service{
 		cfg:       cfg,
-		connWake:  make(chan struct{}, 1),
 		queueWake: make(chan struct{}, 1),
 		saveWake:  make(chan struct{}, 1),
-		shown:     map[string]shownNote{},
 		prefs:     DefaultPrefs(),
+		streams:   map[string]*stream{},
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if cfg.PrefsPath != "" {
@@ -178,6 +206,9 @@ func New(cfg Config) *Service {
 			s.logf("preferences: %v; using defaults", err)
 		}
 		s.prefs = p
+		if p.migrated {
+			s.dirty = true
+		}
 	}
 	return s
 }
@@ -193,8 +224,8 @@ func signal(c chan struct{}) {
 	}
 }
 
-// Start runs the stream loop, the delivery worker and the debounced saver.
-// It does nothing after the first call or after Close.
+// Start runs the delivery worker, the debounced saver and a stream loop
+// per server. It does nothing after the first call or after Close.
 func (s *Service) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,24 +233,113 @@ func (s *Service) Start() {
 		return
 	}
 	s.started = true
-	s.wg.Add(3)
-	go s.loop()
+	s.wg.Add(2)
 	go s.worker()
 	go s.saver()
+	for _, id := range s.order {
+		s.startLoopLocked(s.streams[id])
+	}
+	if s.dirty {
+		signal(s.saveWake)
+	}
 }
 
-// Connect (re)connects the stream to the server at socket: the current
-// stream and any backoff wait end and a new stream opens at once.
-func (s *Service) Connect(socket string) {
-	s.mu.Lock()
-	s.socket = socket
-	s.gen++
-	s.noStreamLogged = false
-	if s.streamCancel != nil {
-		s.streamCancel()
+func (s *Service) startLoopLocked(st *stream) {
+	if !s.started || s.closed || st.looped {
+		return
 	}
+	st.looped = true
+	s.wg.Add(1)
+	go s.loop(st)
+}
+
+// SetServers makes ts the servers to follow, in list order: new ones get
+// a stream, removed ones lose theirs (their shown notifications close and
+// their cursor is forgotten), and a server at a new address reconnects. A
+// local target without a socket keeps the socket already known.
+func (s *Service) SetServers(ts []target.Target) {
+	var closes []string
+	s.mu.Lock()
+	keep := map[string]bool{}
+	s.order = s.order[:0]
+	for _, t := range ts {
+		if t.ID == "" || keep[t.ID] {
+			continue
+		}
+		keep[t.ID] = true
+		s.order = append(s.order, t.ID)
+		s.upsertLocked(t, false)
+	}
+	for id, st := range s.streams {
+		if keep[id] {
+			continue
+		}
+		st.stop()
+		for nid := range st.shown {
+			closes = append(closes, nid)
+		}
+		if sp := s.prefs.Servers[id]; sp != nil {
+			closes = append(closes, sp.Shown...)
+		}
+		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.server == id })
+		delete(s.streams, id)
+		delete(s.prefs.Servers, id)
+		s.markDirtyLocked()
+	}
+	badge, setBadge := s.badgeLocked()
 	s.mu.Unlock()
-	signal(s.connWake)
+	if setBadge {
+		s.cfg.Sink.SetBadge(badge)
+	}
+	slices.Sort(closes)
+	for _, id := range slices.Compact(closes) {
+		s.cfg.Sink.Close(id)
+	}
+	if len(closes) > 0 || setBadge {
+		s.changed()
+	}
+}
+
+// Connect (re)connects the stream of t now (adding t when it is new):
+// the current connection and any backoff wait end and a new one opens at
+// once. Call it on every ready of a server (a new instance may have
+// replayed nothing to the old connection).
+func (s *Service) Connect(t target.Target) {
+	if t.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	if _, ok := s.streams[t.ID]; !ok {
+		s.order = append(s.order, t.ID)
+	}
+	s.upsertLocked(t, true)
+	s.mu.Unlock()
+}
+
+// upsertLocked adds or updates the stream of t; it reconnects when force
+// or the address changed.
+func (s *Service) upsertLocked(t target.Target, force bool) {
+	st, ok := s.streams[t.ID]
+	if !ok {
+		ctx, stop := context.WithCancel(s.ctx)
+		st = &stream{id: t.ID, t: t, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), shown: map[string]shownNote{}}
+		s.streams[t.ID] = st
+		s.startLoopLocked(st)
+		return
+	}
+	if t.Kind == target.KindLocal && t.Socket == "" {
+		t.Socket = st.t.Socket
+	}
+	moved := !st.t.Same(t)
+	st.t = t
+	if force || moved {
+		st.gen++
+		st.noStreamLogged = false
+		if st.cancel != nil {
+			st.cancel()
+		}
+		signal(st.wake)
+	}
 }
 
 // Flush writes pending preference changes now.
@@ -233,7 +353,7 @@ func (s *Service) Flush() error {
 	return s.save()
 }
 
-// Close stops the stream and the worker and flushes the preferences.
+// Close stops the streams and the worker and flushes the preferences.
 func (s *Service) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -264,6 +384,20 @@ func (s *Service) State() State {
 	return StateOn
 }
 
+// Badges is each server's needs-input count, for the servers whose
+// stream sent an unread snapshot.
+func (s *Service) Badges() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]int{}
+	for id, st := range s.streams {
+		if st.hasBadge {
+			out[id] = st.badge
+		}
+	}
+	return out
+}
+
 // Enable turns notifications on and, at the user gesture, shows "Notifications
 // are on" (on macOS the first Show asks for authorization). A denial leaves
 // the state blocked and is not an error; other Show errors are.
@@ -279,12 +413,19 @@ func (s *Service) Enable(ctx context.Context) error {
 	return err
 }
 
-// Disable turns notifications off and closes shown ones. The stream keeps
-// running (badge, cursor).
+// Disable turns notifications off and closes shown ones. The streams keep
+// running (badge, cursors).
 func (s *Service) Disable() {
 	s.mu.Lock()
 	s.prefs.Enabled = false
-	s.clearLocked()
+	s.queue = nil
+	for _, st := range s.streams {
+		s.clearLocked(st)
+	}
+	for _, sp := range s.prefs.Servers {
+		sp.Shown = []string{}
+	}
+	s.markDirtyLocked()
 	s.mu.Unlock()
 	s.saveLogged()
 	s.cfg.Sink.CloseAll()
@@ -296,68 +437,118 @@ func (s *Service) Test(ctx context.Context) error {
 	return s.showNow(ctx, Note{ID: TestID, Title: "Stage", Body: "Test notification"})
 }
 
-// CloseShown closes the notification with id tag, or all of them for "".
-func (s *Service) CloseShown(tag string) {
+// CloseShown closes server's notification for tag (task-12, thread-x,
+// summary), or all of that server's for "".
+func (s *Service) CloseShown(server, tag string) {
+	var closes []string
 	s.mu.Lock()
-	if tag == "" {
-		s.clearLocked()
-	} else {
-		s.forgetLocked(tag)
-		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.note.ID == tag })
+	st := s.streams[server]
+	switch {
+	case st == nil:
+	case tag == "":
+		for id := range st.shown {
+			closes = append(closes, id)
+		}
+		if sp := s.prefs.Servers[server]; sp != nil {
+			closes = append(closes, sp.Shown...)
+		}
+		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.server == server })
+		s.clearLocked(st)
+		s.prefs.server(server).Shown = []string{}
+	default:
+		id := noteKey(server, tag)
+		closes = append(closes, id)
+		s.forgetLocked(st, id)
+		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.note.ID == id })
 		if tag == SummaryID {
-			s.summaryTags = nil
+			st.summaryTags = nil
 		}
 	}
 	s.markDirtyLocked()
 	s.mu.Unlock()
-	if tag == "" {
-		s.cfg.Sink.CloseAll()
-	} else {
-		s.cfg.Sink.Close(tag)
+	slices.Sort(closes)
+	for _, id := range slices.Compact(closes) {
+		s.cfg.Sink.Close(id)
 	}
 }
 
-// Sync closes shown notifications whose groups have no unread rows in the
-// latest unread snapshot.
-func (s *Service) Sync() {
+// Sync closes shown notifications of server ("" for every server) whose
+// groups have no unread rows in its latest unread snapshot.
+func (s *Service) Sync(server string) {
+	var closes []string
 	s.mu.Lock()
-	if s.snapSeq == 0 {
-		s.mu.Unlock()
-		return
+	for id, st := range s.streams {
+		if (server == "" || id == server) && st.snapSeq > 0 {
+			closes = append(closes, s.reconcileLocked(st)...)
+		}
 	}
-	closes := s.reconcileLocked()
 	s.mu.Unlock()
 	for _, id := range closes {
 		s.cfg.Sink.Close(id)
 	}
 }
 
-// Target is the app path a click on notification id opens (see Target).
-func (s *Service) Target(id string) string {
+// Target is where a click on notification id goes: the server it came
+// from ("" for the device's test note) and the app path there (see
+// Target). A version 1 ID without a server ("task-7") is this machine's.
+func (s *Service) Target(id string) (server, path string) {
+	if id == TestID {
+		return "", Target(id, nil)
+	}
+	server, tag, ok := strings.Cut(id, "/")
+	if !ok {
+		server, tag = target.LocalID, id
+	}
+	known := map[string]string{}
 	s.mu.Lock()
-	known := make(map[string]string, len(s.shown))
-	for k, v := range s.shown {
-		known[k] = v.url
+	if st := s.streams[server]; st != nil {
+		if n, ok := st.shown[id]; ok {
+			known[tag] = n.url
+		}
 	}
 	s.mu.Unlock()
-	return Target(id, known)
+	return server, Target(tag, known)
 }
 
-// clearLocked forgets every shown and queued notification.
-func (s *Service) clearLocked() {
-	s.queue = nil
-	s.shown = map[string]shownNote{}
-	s.summaryTags = nil
-	s.prefs.Shown = []string{}
+// clearLocked forgets every shown notification of st.
+func (s *Service) clearLocked(st *stream) {
+	st.shown = map[string]shownNote{}
+	st.summaryTags = nil
 	s.markDirtyLocked()
 }
 
-// forgetLocked drops id from the shown notifications.
-func (s *Service) forgetLocked(id string) {
-	delete(s.shown, id)
-	if s.prefs.removeShown(id) {
+// forgetLocked drops note id from st's shown notifications.
+func (s *Service) forgetLocked(st *stream, id string) {
+	delete(st.shown, id)
+	if sp := s.prefs.Servers[st.id]; sp != nil && sp.removeShown(id) {
 		s.markDirtyLocked()
 	}
+}
+
+func (s *Service) changed() {
+	if s.cfg.Changed != nil {
+		s.cfg.Changed()
+	}
+}
+
+// badgeLocked is the badge (the sum of the servers' needs-input counts)
+// and whether it must be set (first snapshot, or changed).
+func (s *Service) badgeLocked() (int, bool) {
+	sum, known := 0, false
+	for _, st := range s.streams {
+		if st.hasBadge {
+			sum += st.badge
+			known = true
+		}
+	}
+	if !known && !s.badgeSet {
+		return 0, false
+	}
+	if s.badgeSet && sum == s.badge {
+		return sum, false
+	}
+	s.badge, s.badgeSet = sum, true
+	return sum, true
 }
 
 // --- persistence ---
@@ -422,20 +613,33 @@ func (s *Service) saver() {
 
 // --- delivery ---
 
-func (s *Service) foreground() bool {
-	return s.cfg.Foreground != nil && s.cfg.Foreground()
+func (s *Service) foreground(server string) bool {
+	return s.cfg.Foreground != nil && s.cfg.Foreground(server)
 }
 
-func (s *Service) delivered(id int64) {
+func (s *Service) delivered(server string, id int64) {
 	if s.cfg.Delivered != nil {
-		s.cfg.Delivered(id)
+		s.cfg.Delivered(server, id)
 	}
+}
+
+// noteKey is the OS notification ID of tag on server: "<server>/<tag>".
+func noteKey(server, tag string) string { return server + "/" + tag }
+
+// titleLocked prefixes a title with the server's name once more than one
+// server is followed.
+func (s *Service) titleLocked(st *stream, title string) string {
+	if len(s.streams) > 1 && st.t.Name != "" {
+		return st.t.Name + " · " + title
+	}
+	return title
 }
 
 // enqueueLocked queues q for the worker; a queued note with the same ID is
 // replaced in place.
-func (s *Service) enqueueLocked(q queued) {
-	q.seq = s.snapSeq
+func (s *Service) enqueueLocked(st *stream, q queued) {
+	q.server = st.id
+	q.seq = st.snapSeq
 	for i := range s.queue {
 		if s.queue[i].note.ID == q.note.ID {
 			s.queue[i] = q
@@ -447,7 +651,7 @@ func (s *Service) enqueueLocked(q queued) {
 }
 
 // worker shows queued notifications one at a time, so a blocking Show
-// never stalls the stream.
+// never stalls a stream.
 func (s *Service) worker() {
 	defer s.wg.Done()
 	for {
@@ -482,16 +686,14 @@ func (s *Service) showNow(ctx context.Context, n Note) error {
 	ctx, cancel := context.WithTimeout(ctx, showTimeout)
 	defer cancel()
 	err := s.cfg.Sink.Show(ctx, n)
-	s.mu.Lock()
-	seq := s.snapSeq
-	s.mu.Unlock()
-	s.record(queued{note: n, url: "/settings", seq: seq}, err, false)
+	s.record(queued{note: n, url: "/settings"}, err, false)
 	return err
 }
 
 // record applies a Show result: a denial marks the state blocked, a
-// success clears it and remembers the notification, unless it went stale
-// while showing (its group was read, or notifications were turned off).
+// success clears it and remembers a server's notification, unless it went
+// stale while showing (its group was read, its server removed, or
+// notifications were turned off).
 func (s *Service) record(q queued, err error, fromQueue bool) {
 	id := q.note.ID
 	saveNow, closeNow := false, false
@@ -510,14 +712,19 @@ func (s *Service) record(q queued, err error, fromQueue bool) {
 			s.prefs.Denied = false
 			saveNow = true
 		}
-		stale := fromQueue && (!s.prefs.Enabled ||
-			(isGroupTag(id) && s.snapSeq > q.seq && !s.unread[id]))
+		if q.server == "" {
+			break
+		}
+		st := s.streams[q.server]
+		tag := strings.TrimPrefix(id, q.server+"/")
+		stale := fromQueue && (st == nil || !s.prefs.Enabled ||
+			(isGroupTag(tag) && st.snapSeq > q.seq && !st.unread[tag]))
 		if stale {
 			closeNow = true
 			break
 		}
-		s.shown[id] = shownNote{id: q.id, url: q.url}
-		s.prefs.addShown(id)
+		st.shown[id] = shownNote{id: q.id, url: q.url}
+		s.prefs.server(q.server).addShown(id)
 		s.markDirtyLocked()
 	}
 	s.mu.Unlock()
@@ -531,47 +738,48 @@ func (s *Service) record(q queued, err error, fromQueue bool) {
 
 // --- stream ---
 
-// loop keeps one stream open to the current socket: reconnects with
+// loop keeps one connection open to st's server: reconnects with
 // jittered backoff (reset by a hello or a Connect), and after a 404 waits
-// for the next Connect.
-func (s *Service) loop() {
+// for the next Connect. It ends when the server is removed or the
+// Service closes.
+func (s *Service) loop(st *stream) {
 	defer s.wg.Done()
 	backoff := s.cfg.MinBackoff
 	var lastGen uint64
 	for {
-		if s.ctx.Err() != nil {
+		if st.ctx.Err() != nil {
 			return
 		}
 		s.mu.Lock()
-		socket, gen := s.socket, s.gen
+		t, gen := st.t, st.gen
 		s.mu.Unlock()
 		if gen != lastGen {
 			backoff, lastGen = s.cfg.MinBackoff, gen
 		}
-		if socket == "" {
-			if !s.wait(gen, 0) {
+		if !t.Remote() && t.Socket == "" {
+			if !s.wait(st, gen, 0) {
 				return
 			}
 			continue
 		}
-		ctx, cancel := context.WithCancel(s.ctx)
+		ctx, cancel := context.WithCancel(st.ctx)
 		s.mu.Lock()
-		if s.gen != gen {
+		if st.gen != gen {
 			s.mu.Unlock()
 			cancel()
 			continue
 		}
-		s.streamCancel = cancel
+		st.cancel = cancel
 		s.mu.Unlock()
 
-		hello, err := s.run(ctx, socket)
+		hello, err := s.run(ctx, st, t)
 
 		s.mu.Lock()
-		s.streamCancel = nil
-		changed := s.gen != gen
+		st.cancel = nil
+		changed := st.gen != gen
 		s.mu.Unlock()
 		cancel()
-		if s.ctx.Err() != nil {
+		if st.ctx.Err() != nil {
 			return
 		}
 		if changed {
@@ -582,20 +790,20 @@ func (s *Service) loop() {
 		}
 		if errors.Is(err, errNoStream) {
 			s.mu.Lock()
-			first := !s.noStreamLogged
-			s.noStreamLogged = true
+			first := !st.noStreamLogged
+			st.noStreamLogged = true
 			s.mu.Unlock()
 			if first {
-				s.logf("%v (server older than this app); waiting for the next server start", err)
+				s.logf("%s: %v (server older than this app); waiting for the next server start", st.id, err)
 			}
-			if !s.wait(gen, 0) {
+			if !s.wait(st, gen, 0) {
 				return
 			}
 			continue
 		}
 		d := jitter(backoff, s.cfg.MaxBackoff)
-		s.logf("stream: %v; reconnecting in %s", err, d.Round(time.Millisecond))
-		if !s.wait(gen, d) {
+		s.logf("%s stream: %v; reconnecting in %s", st.id, err, d.Round(time.Millisecond))
+		if !s.wait(st, gen, d) {
 			return
 		}
 		backoff = min(backoff*2, s.cfg.MaxBackoff)
@@ -610,9 +818,9 @@ func jitter(d, max time.Duration) time.Duration {
 	return min(d+rand.N(d/2+1), max)
 }
 
-// wait sleeps d (forever for 0) or until a Connect changes the
-// generation; false when the Service closes.
-func (s *Service) wait(gen uint64, d time.Duration) bool {
+// wait sleeps d (forever for 0) or until a Connect changes st's
+// generation; false when the stream ends.
+func (s *Service) wait(st *stream, gen uint64, d time.Duration) bool {
 	var fire <-chan time.Time
 	if d > 0 {
 		t := time.NewTimer(d)
@@ -621,13 +829,13 @@ func (s *Service) wait(gen uint64, d time.Duration) bool {
 	}
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-st.ctx.Done():
 			return false
 		case <-fire:
 			return true
-		case <-s.connWake:
+		case <-st.wake:
 			s.mu.Lock()
-			g := s.gen
+			g := st.gen
 			s.mu.Unlock()
 			if g != gen {
 				return true
@@ -668,44 +876,44 @@ type wireUnread struct {
 	Badge int      `json:"badge"`
 }
 
-// run reads one stream until it ends; hello reports whether it got a
+// run reads one connection until it ends; hello reports whether it got a
 // hello (the server was reachable and current).
-func (s *Service) run(ctx context.Context, socket string) (hello bool, err error) {
+func (s *Service) run(ctx context.Context, st *stream, t target.Target) (hello bool, err error) {
 	s.mu.Lock()
 	var cursor *int64
-	if s.prefs.Cursor != nil {
-		c := *s.prefs.Cursor
+	if sp := s.prefs.Servers[st.id]; sp != nil && sp.Cursor != nil {
+		c := *sp.Cursor
 		cursor = &c
 	}
 	s.mu.Unlock()
-	body, err := openStream(ctx, socket, cursor)
+	body, err := openStream(ctx, t, cursor)
 	if err != nil {
 		return false, err
 	}
 	defer body.Close()
 	rd := newSSEReader(body)
-	st := &conn{}
+	c := &conn{}
 	for {
 		ev, err := rd.Next()
 		if err != nil {
-			return st.hello, err
+			return c.hello, err
 		}
 		switch ev.Event {
 		case "hello":
 			var h wireHello
 			if err := json.Unmarshal([]byte(ev.Data), &h); err != nil {
-				return st.hello, fmt.Errorf("hello: %w", err)
+				return c.hello, fmt.Errorf("hello: %w", err)
 			}
-			s.onHello(st, h)
+			s.onHello(st, c, h)
 		case "gap":
-			s.logf("stream skipped older rows (more than the replay limit)")
+			s.logf("%s stream skipped older rows (more than the replay limit)", st.id)
 		case "notification":
 			var n wireNotification
 			if err := json.Unmarshal([]byte(ev.Data), &n); err != nil {
 				s.logf("notification: %v", err)
 				continue
 			}
-			s.onNotification(st, Item{
+			s.onNotification(st, c, Item{
 				ID: n.ID, Event: n.Event, CreatedAt: parseTime(n.CreatedAt), Read: n.Read,
 				Tag: n.Tag, Title: n.Title, Body: n.Body, URL: n.URL,
 			})
@@ -715,44 +923,46 @@ func (s *Service) run(ctx context.Context, socket string) (hello bool, err error
 				s.logf("unread: %v", err)
 				continue
 			}
-			if st.hello && !st.caughtUp {
-				s.finishCatchUp(st)
+			if c.hello && !c.caughtUp {
+				s.finishCatchUp(st, c)
 			}
-			s.onUnread(u)
+			s.onUnread(st, u)
 		}
 	}
 }
 
 // onHello: without a cursor (first run), after a database reset or when
 // the server is behind the cursor, the cursor moves to latestId silently.
-func (s *Service) onHello(st *conn, h wireHello) {
+func (s *Service) onHello(st *stream, c *conn, h wireHello) {
 	s.mu.Lock()
-	moved := s.prefs.Cursor == nil || h.Reset || h.LatestID < *s.prefs.Cursor
+	sp := s.prefs.server(st.id)
+	moved := sp.Cursor == nil || h.Reset || h.LatestID < *sp.Cursor
 	if moved {
 		v := h.LatestID
-		s.prefs.Cursor = &v
+		sp.Cursor = &v
 	}
-	*st = conn{hello: true, liveFrom: h.LatestID, lastSeen: *s.prefs.Cursor}
+	*c = conn{hello: true, liveFrom: h.LatestID, lastSeen: *sp.Cursor}
 	s.mu.Unlock()
 	if moved {
 		s.saveLogged()
 	}
 }
 
-func (s *Service) onNotification(st *conn, it Item) {
-	if !st.hello || it.ID <= st.lastSeen {
+func (s *Service) onNotification(st *stream, c *conn, it Item) {
+	if !c.hello || it.ID <= c.lastSeen {
 		return
 	}
-	st.lastSeen = it.ID
-	if !st.caughtUp && it.ID <= st.liveFrom {
-		st.catchUp = append(st.catchUp, it)
+	c.lastSeen = it.ID
+	if !c.caughtUp && it.ID <= c.liveFrom {
+		c.catchUp = append(c.catchUp, it)
 		return
 	}
-	fg := s.foreground()
+	fg := s.foreground(st.id)
 	s.mu.Lock()
-	if s.prefs.Cursor == nil || it.ID > *s.prefs.Cursor {
+	sp := s.prefs.server(st.id)
+	if sp.Cursor == nil || it.ID > *sp.Cursor {
 		v := it.ID
-		s.prefs.Cursor = &v
+		sp.Cursor = &v
 		s.markDirtyLocked()
 	}
 	if it.Read {
@@ -760,38 +970,39 @@ func (s *Service) onNotification(st *conn, it Item) {
 		return
 	}
 	if s.prefs.Enabled && !fg {
-		s.enqueueLocked(queued{note: Note{ID: noteID(it), Title: it.Title, Body: it.Body}, id: it.ID, url: it.URL})
+		s.enqueueLocked(st, queued{note: Note{ID: noteKey(st.id, noteID(it)), Title: s.titleLocked(st, it.Title), Body: it.Body}, id: it.ID, url: it.URL})
 	}
 	s.mu.Unlock()
-	s.delivered(it.ID)
+	s.delivered(st.id, it.ID)
 }
 
 // finishCatchUp shows the buffered replay per PlanCatchUp (plus a summary)
 // and moves the cursor to the hello's latestId.
-func (s *Service) finishCatchUp(st *conn) {
-	st.caughtUp = true
-	items := st.catchUp
-	st.catchUp = nil
-	fg := s.foreground()
+func (s *Service) finishCatchUp(st *stream, c *conn) {
+	c.caughtUp = true
+	items := c.catchUp
+	c.catchUp = nil
+	fg := s.foreground(st.id)
 	show, summarized := PlanCatchUp(items, s.cfg.Now(), s.cfg.Window, s.cfg.Max)
 	s.mu.Lock()
+	sp := s.prefs.server(st.id)
 	moved := false
-	if s.prefs.Cursor == nil || st.liveFrom > *s.prefs.Cursor {
-		v := st.liveFrom
-		s.prefs.Cursor = &v
+	if sp.Cursor == nil || c.liveFrom > *sp.Cursor {
+		v := c.liveFrom
+		sp.Cursor = &v
 		moved = true
 	}
 	if s.prefs.Enabled && !fg {
 		for _, it := range show {
-			s.enqueueLocked(queued{note: Note{ID: noteID(it), Title: it.Title, Body: it.Body}, id: it.ID, url: it.URL})
+			s.enqueueLocked(st, queued{note: Note{ID: noteKey(st.id, noteID(it)), Title: s.titleLocked(st, it.Title), Body: it.Body}, id: it.ID, url: it.URL})
 		}
 		if len(summarized) > 0 {
-			s.summaryTags = s.summaryTags[:0]
+			st.summaryTags = st.summaryTags[:0]
 			for _, it := range summarized {
-				s.summaryTags = append(s.summaryTags, it.Tag)
+				st.summaryTags = append(st.summaryTags, it.Tag)
 			}
-			s.enqueueLocked(queued{
-				note: Note{ID: SummaryID, Title: strconv.Itoa(len(summarized)) + " more in Stage", Body: "Open notifications"},
+			s.enqueueLocked(st, queued{
+				note: Note{ID: noteKey(st.id, SummaryID), Title: s.titleLocked(st, strconv.Itoa(len(summarized))+" more in Stage"), Body: "Open notifications"},
 				url:  "/?inbox",
 			})
 		}
@@ -805,61 +1016,78 @@ func (s *Service) finishCatchUp(st *conn) {
 		for _, it := range items {
 			newest = max(newest, it.ID)
 		}
-		s.delivered(newest)
+		s.delivered(st.id, newest)
 	}
 }
 
-// onUnread applies an unread snapshot: the badge when it changed, and
-// closes notifications of groups without unread rows.
-func (s *Service) onUnread(u wireUnread) {
+// onUnread applies a server's unread snapshot: its needs-input count (the
+// badge is the sum over servers, set when it changed), and closes its
+// notifications of groups without unread rows.
+func (s *Service) onUnread(st *stream, u wireUnread) {
 	s.mu.Lock()
 	set := make(map[string]bool, len(u.Tags))
 	for _, t := range u.Tags {
 		set[t] = true
 	}
-	badgeChanged := s.snapSeq == 0 || s.badge != u.Badge
-	s.unread = set
-	s.snapSeq++
-	s.badge = u.Badge
-	closes := s.reconcileLocked()
+	countChanged := !st.hasBadge || st.badge != u.Badge
+	st.unread = set
+	st.snapSeq++
+	st.badge, st.hasBadge = u.Badge, true
+	closes := s.reconcileLocked(st)
+	badge, setBadge := s.badgeLocked()
 	s.mu.Unlock()
-	if badgeChanged {
-		s.cfg.Sink.SetBadge(u.Badge)
+	if setBadge {
+		s.cfg.Sink.SetBadge(badge)
 	}
 	for _, id := range closes {
 		s.cfg.Sink.Close(id)
 	}
+	if countChanged {
+		s.changed()
+	}
 }
 
-// reconcileLocked drops queued and shown group notifications not in the
-// unread set, including earlier runs' IDs in Prefs.Shown (so the first
-// snapshot closes those), and the summary when none of its groups is
+// reconcileLocked drops st's queued and shown group notifications not in
+// its unread set, including earlier runs' IDs in its Shown (so the first
+// snapshot closes those), and its summary when none of its groups is
 // unread. It returns the IDs to close.
-func (s *Service) reconcileLocked() []string {
-	set := s.unread
-	stale := func(id string) bool { return isGroupTag(id) && !set[id] }
+func (s *Service) reconcileLocked(st *stream) []string {
+	set := st.unread
+	prefix := st.id + "/"
+	stale := func(id string) bool {
+		tag := id
+		if strings.HasPrefix(id, prefix) {
+			tag = id[len(prefix):]
+		} else if strings.Contains(id, "/") {
+			return false // another server's
+		}
+		return isGroupTag(tag) && !set[tag]
+	}
 	var closes []string
-	s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return stale(q.note.ID) })
-	for id := range s.shown {
+	s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.server == st.id && stale(q.note.ID) })
+	for id := range st.shown {
 		if stale(id) {
 			closes = append(closes, id)
-			s.forgetLocked(id)
+			s.forgetLocked(st, id)
 		}
 	}
-	if len(s.summaryTags) > 0 && !slices.ContainsFunc(s.summaryTags, func(t string) bool { return set[t] }) {
-		s.summaryTags = nil
-		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.note.ID == SummaryID })
-		if _, ok := s.shown[SummaryID]; ok {
-			closes = append(closes, SummaryID)
-			s.forgetLocked(SummaryID)
+	summary := noteKey(st.id, SummaryID)
+	if len(st.summaryTags) > 0 && !slices.ContainsFunc(st.summaryTags, func(t string) bool { return set[t] }) {
+		st.summaryTags = nil
+		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.note.ID == summary })
+		if _, ok := st.shown[summary]; ok {
+			closes = append(closes, summary)
+			s.forgetLocked(st, summary)
 		}
 	}
-	// Prefs.Shown also holds earlier runs' IDs (macOS can still close
-	// those); this run's stale ones were dropped above.
-	for _, id := range slices.Clone(s.prefs.Shown) {
-		if stale(id) {
-			closes = append(closes, id)
-			s.forgetLocked(id)
+	// Shown also holds earlier runs' IDs (macOS can still close those);
+	// this run's stale ones were dropped above.
+	if sp := s.prefs.Servers[st.id]; sp != nil {
+		for _, id := range slices.Clone(sp.Shown) {
+			if stale(id) {
+				closes = append(closes, id)
+				s.forgetLocked(st, id)
+			}
 		}
 	}
 	slices.Sort(closes)

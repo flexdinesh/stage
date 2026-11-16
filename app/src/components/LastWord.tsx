@@ -3,6 +3,7 @@ import type { TaskState, Thread } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { Panel, cx } from "./ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 // marked + DOMPurify load only when a reply is shown.
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
@@ -15,9 +16,10 @@ const PREVIEW_STATES: readonly TaskState[] = ["needs_input", "done"];
  */
 export function LastWordPanel({ thread }: { thread: Thread }) {
   const word = thread.lastWord;
+  const showT3 = useShowT3Links();
   if (word === null) return null;
   const earlier = word.runId !== null && thread.latestRunId !== null && word.runId !== thread.latestRunId;
-  const href = thread.t3DeepLink ?? thread.t3WebUrl ?? thread.t3AppUrl;
+  const href = showT3 ? (thread.t3DeepLink ?? thread.t3WebUrl ?? thread.t3AppUrl) : null;
   return (
     <Panel
       title="Last word"

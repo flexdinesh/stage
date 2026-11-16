@@ -8,11 +8,14 @@ import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { AppButton, Button, ExternalButton, cx } from "./ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 /** Needs input with questions stage can answer: Answer leads, Open in T3 steps back. */
 const answerable = (thread: Thread) => thread.state === "needs_input" && thread.pendingQuestionCount > 0;
 
 export function SessionOpenButton({ thread }: { thread: Thread }) {
+  const showT3 = useShowT3Links();
+  if (!showT3) return null;
   const variant = thread.state === "needs_input" && !answerable(thread) ? "primary" : "secondary";
   if (thread.t3DeepLink !== null) return <AppButton small variant={variant} href={thread.t3DeepLink}>Open in T3</AppButton>;
   const href = thread.t3WebUrl ?? thread.t3AppUrl;

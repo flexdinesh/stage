@@ -23,6 +23,7 @@ import (
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
 	"github.com/flexdinesh/stage/desktop/app/procnet"
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // app is the desktop's scheme handler as main.go wires it, with a fake UI
@@ -35,7 +36,7 @@ type app struct {
 
 func newApp(t *testing.T, sock string) *app {
 	ui := fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><div id="root"></div>`)}, "assets/app.js": {Data: []byte("1")}}
-	p := bridge.NewAPIProxy(sock)
+	p := bridge.NewAPIProxy(target.Local(sock))
 	return &app{t: t, proxy: p, h: bridge.Scheme(p, mygo.FileServer(ui))}
 }
 
@@ -158,7 +159,8 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 				t.Errorf("%s %s: %d %q, want %d denied", c.method, c.path, status, body, c.status)
 			}
 		}
-		// The server's own origin policy still applies through the bridge.
+		// The bridge enforces the page origin itself (it strips Origin and
+		// Sec-Fetch-* before the server).
 		r, _ := http.NewRequest("POST", "mygo://localhost/api/tasks", strings.NewReader("{}"))
 		r.RequestURI = r.URL.RequestURI()
 		r.Header.Set("Content-Type", "application/json")
@@ -396,7 +398,7 @@ func TestLauncherDevAgainstRealServer(t *testing.T) {
 	l := launch.New(launch.Config{
 		CLI: bin, AppName: "Stage Test", AppVersion: "itest",
 		Dev: true, DevSocket: e.sock, TempDirs: []string{},
-		OnSocket: func(s string) { sockets <- s },
+		OnTarget: func(t target.Target) { sockets <- t.Socket },
 		Logf:     t.Logf,
 	})
 	t.Cleanup(l.Close)
@@ -413,7 +415,7 @@ func TestLauncherDevAgainstRealServer(t *testing.T) {
 		t.Fatalf("app %+v server %+v", s.App, s.Server)
 	}
 	if got := <-sockets; got != e.sock {
-		t.Fatalf("OnSocket %q", got)
+		t.Fatalf("OnTarget %q", got)
 	}
 	if d := l.Diagnostics(context.Background()); !strings.Contains(d, "identity "+identity) {
 		t.Fatalf("diagnostics:\n%s", d)

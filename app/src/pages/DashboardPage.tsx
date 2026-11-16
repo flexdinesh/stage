@@ -21,6 +21,7 @@ import { splitTreeMembers } from "../lib/dashboard.ts";
 import { takeover } from "../lib/onboarding.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 type GroupKey = "needs" | "trees" | "running" | "done" | "failed" | "ready" | "backlog" | "scheduled" | "settled";
 
@@ -186,8 +187,9 @@ const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.k
 
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   // App links open one thread, so only a lone task gets one.
+  const showT3 = useShowT3Links();
   const href = tasks.length === 1 ? (tasks[0]?.t3DeepLink ?? null) : null;
-  if (href === null) return null;
+  if (href === null || !showT3) return null;
   return (
     <AppButton href={href} small variant="ghost">
       Open in app

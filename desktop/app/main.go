@@ -1,8 +1,9 @@
 // Command app is the Stage desktop client (docs/desktop.md): a MyGo
-// webview hosting @stage/app (desktop/app/ui), which reaches the per-user
-// Stage service over its Unix socket only, through bridge B. The bundled
-// stage CLI (resources/<platform>/bin/stage) starts and inspects the
-// service; package launch drives it, package nav polices URLs.
+// webview hosting @stage/app (desktop/app/ui), which reaches the active
+// Stage server through bridge B: this machine's per-user service over its
+// Unix socket, or a saved remote server over TCP (package target). The
+// bundled stage CLI (resources/<platform>/bin/stage) starts and inspects
+// the local service; package launch drives it, package nav polices URLs.
 //
 //	STAGE_DESKTOP_SOCKET=/run/user/1000/stage-desktopdev/x.sock
 //	    development builds only (mise run desktop:dev): talk to this
@@ -24,6 +25,7 @@ import (
 	"github.com/flexdinesh/stage/desktop/app/alerts"
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // Set by `mise run dist` / `mise run release` through MYGO_LDFLAGS
@@ -54,9 +56,14 @@ var StateChanged = mygo.NewEvent[launch.State]("host:state")
 var Navigate = mygo.NewEvent[string]("host:navigate")
 
 // NotificationDelivered is broadcast with the newest notification id each
-// time the stream delivers notifications (shown or not), so the page
-// refetches its inbox at once.
+// time the active server's stream delivers notifications (shown or not),
+// so the page refetches its inbox at once.
 var NotificationDelivered = mygo.NewEvent[int64]("notifications:delivered")
+
+// ServersChanged is broadcast with the server list whenever it changes:
+// a server added, edited or removed, a switch, or a server's needs-input
+// count.
+var ServersChanged = mygo.NewEvent[[]ServerEntry]("servers:changed")
 
 func main() {
 	if os.Getenv(selfcheckEnv) == "1" {
@@ -66,7 +73,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	api := bridge.NewAPIProxy("")
+	api := bridge.NewAPIProxy(target.Target{})
 	// Bridge B: the page's own scheme serves the UI and /api/* (which
 	// replaces MyGo's embedded frontend, so no frontendDist).
 	if err := mygo.Protocol.Handle("mygo", bridge.Scheme(api, mygo.FileServer(ui))); err != nil {
@@ -109,31 +116,41 @@ func setup(h *host) bool {
 		devSocket = os.Getenv("STAGE_DESKTOP_SOCKET")
 		h.devOrigin = os.Getenv("MYGO_DEV_URL")
 	}
-	h.alerts = alerts.New(alerts.Config{
-		PrefsPath:  filepath.Join(h.userData, "notifications.json"),
-		Sink:       mygoSink{},
-		Foreground: h.foreground,
-		Delivered:  func(id int64) { _ = NotificationDelivered.Broadcast(id) },
-		Logf:       log.Printf,
-	})
-	// Every ready (first start, recovery, a new server) reconnects the
-	// notification stream too.
-	onSocket := func(sock string) {
-		h.api.SetSocket(sock)
-		h.alerts.Connect(sock)
+	servers, err := target.Open(filepath.Join(h.userData, "servers.json"))
+	if err != nil {
+		log.Printf("stage desktop: servers: %v", err)
 	}
+	h.servers = servers
+	h.alerts = alerts.New(alerts.Config{
+		PrefsPath: filepath.Join(h.userData, "notifications.json"),
+		Sink:      mygoSink{},
+		// The page's toasts cover the server it shows, not the others.
+		Foreground: func(id string) bool { return h.foreground() && h.activeID() == id },
+		Delivered: func(id string, n int64) {
+			if id == h.activeID() {
+				_ = NotificationDelivered.Broadcast(n)
+			}
+		},
+		Changed: h.serversChanged,
+		Logf:    log.Printf,
+	})
 	h.l = launch.New(launch.Config{
-		CLI:            filepath.Join(res, "bin", "stage"),
-		AppName:        appName,
-		AppVersion:     appVersion(),
-		Dev:            h.dev,
-		DevSocket:      devSocket,
-		OnChange:       func(s launch.State) { _ = StateChanged.Broadcast(s) },
-		OnSocket:       onSocket,
+		CLI:        filepath.Join(res, "bin", "stage"),
+		AppName:    appName,
+		AppVersion: appVersion(),
+		Dev:        h.dev,
+		DevSocket:  devSocket,
+		Servers:    servers,
+		OnChange:   func(s launch.State) { _ = StateChanged.Broadcast(s) },
+		OnTarget:   h.api.SetTarget,
+		// Every ready (first start, recovery, a new server) reconnects
+		// that server's notification stream too.
+		OnServer:       h.alerts.Connect,
 		OpenAtLogin:    mygo.App.OpenAtLogin,
 		SetOpenAtLogin: mygo.App.SetOpenAtLogin,
 		Logf:           log.Printf,
 	})
+	h.alerts.SetServers(h.serverTargets())
 	h.wire()
 	return true
 }

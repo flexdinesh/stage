@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // --- scripted SSE server on a short temp Unix socket ---
@@ -267,8 +269,8 @@ func newFixture(t *testing.T, prefs *Prefs, opts ...func(*Config)) *fixture {
 	cfg := Config{
 		PrefsPath:  f.prefsPath,
 		Sink:       f.sink,
-		Foreground: f.foreground,
-		Delivered:  f.onDelivered,
+		Foreground: func(string) bool { return f.foreground() },
+		Delivered:  func(_ string, id int64) { f.onDelivered(id) },
 		Now:        f.clock,
 		Logf:       f.logf,
 		MinBackoff: 5 * time.Millisecond,
@@ -284,7 +286,7 @@ func newFixture(t *testing.T, prefs *Prefs, opts ...func(*Config)) *fixture {
 		}
 	})
 	f.svc.Start()
-	f.svc.Connect(f.srv.socket)
+	f.svc.Connect(target.Local(f.srv.socket))
 	return f
 }
 
@@ -383,8 +385,35 @@ func eventually(t *testing.T, what string, cond func() bool) {
 
 func cursorPrefs(c int64) *Prefs {
 	p := DefaultPrefs()
-	p.Cursor = &c
+	p.server(target.LocalID).Cursor = &c
 	return &p
+}
+
+// local is the OS notification ID of a local tag.
+func local(tags ...string) []string {
+	out := []string{}
+	for _, t := range tags {
+		out = append(out, target.LocalID+"/"+t)
+	}
+	return out
+}
+
+// targetPath is the click path of a local tag's notification.
+func (f *fixture) targetPath(tag string) string {
+	f.t.Helper()
+	server, path := f.svc.Target(target.LocalID + "/" + tag)
+	if server != target.LocalID {
+		f.t.Errorf("Target(%q) server %q", tag, server)
+	}
+	return path
+}
+
+// shownOf is the saved shown list of the local server.
+func shownOf(p Prefs) []string {
+	if sp := p.Servers[target.LocalID]; sp != nil {
+		return sp.Shown
+	}
+	return nil
 }
 
 func row(id int64, tag string, age time.Duration) wireNotification {
@@ -395,10 +424,11 @@ func row(id int64, tag string, age time.Duration) wireNotification {
 }
 
 func cursorOf(p Prefs) int64 {
-	if p.Cursor == nil {
+	sp := p.Servers[target.LocalID]
+	if sp == nil || sp.Cursor == nil {
 		return -1
 	}
-	return *p.Cursor
+	return *sp.Cursor
 }
 
 // --- tests ---
@@ -447,7 +477,7 @@ func TestLiveRowsAndReconnectCursor(t *testing.T) {
 	c.note(row(9, "", 0))
 	f.barrier(c, 3, "task-6", "task-8")
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-6", "task-8", "notification-9"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-6", "local/task-8", "local/notification-9"}) {
 		t.Fatalf("shows = %v", got)
 	}
 	if got := f.sink.lastShow(); got.Title != "Needs input" || got.Body != "Task  · proj" {
@@ -456,7 +486,7 @@ func TestLiveRowsAndReconnectCursor(t *testing.T) {
 	if got := f.deliveredIDs(); !slices.Equal(got, []int64{6, 8, 9}) {
 		t.Errorf("delivered = %v", got)
 	}
-	if got := f.svc.Target("task-6"); got != "/sessions/thr%201#answer" {
+	if got := f.targetPath("task-6"); got != "/sessions/thr%201#answer" {
 		t.Errorf("Target = %q", got)
 	}
 
@@ -471,7 +501,7 @@ func TestLiveRowsAndReconnectCursor(t *testing.T) {
 	c2.note(row(10, "task-10", 0))
 	f.barrier(c2, 4, "task-6", "task-8", "task-10")
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-6", "task-8", "notification-9", "task-10"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-6", "local/task-8", "local/notification-9", "local/task-10"}) {
 		t.Fatalf("shows after reconnect = %v", got)
 	}
 	if got := cursorOf(f.saved()); got != 10 {
@@ -514,7 +544,7 @@ func TestNotFoundWaitsForConnect(t *testing.T) {
 		t.Errorf("logged %d times", got)
 	}
 	f.srv.setStatus(0)
-	f.svc.Connect(f.srv.socket)
+	f.svc.Connect(target.Local(f.srv.socket))
 	c := f.srv.next(t)
 	c.hello(1, false)
 	f.barrier(c, 1)
@@ -532,12 +562,12 @@ func TestReconnectBackoffAndConnect(t *testing.T) {
 	slow := newFixture(t, nil, func(c *Config) { c.MinBackoff, c.MaxBackoff = time.Hour, time.Hour })
 	slow.srv.next(t).close()
 	eventually(t, "retry logged", func() bool { return slow.logCount("reconnecting in") == 1 })
-	slow.svc.Connect(slow.srv.socket) // ends the backoff wait at once
+	slow.svc.Connect(target.Local(slow.srv.socket)) // ends the backoff wait at once
 	c = slow.srv.next(t)
 	c.hello(1, false)
 	// A Connect mid-stream drops the stream and reconnects with the cursor.
 	slow.barrier(c, 2)
-	slow.svc.Connect(slow.srv.socket)
+	slow.svc.Connect(target.Local(slow.srv.socket))
 	c = slow.srv.next(t)
 	if c.lastEventID != "1" {
 		t.Errorf("Last-Event-ID = %q, want 1", c.lastEventID)
@@ -579,7 +609,7 @@ func TestCatchUp(t *testing.T) {
 	all := []string{"task-1", "task-2", "thread-a", "task-6", "task-8", "task-9", "task-10"}
 	f.barrier(c, 6, all...)
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-8", "task-9", "task-10", "summary"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-8", "local/task-9", "local/task-10", "local/summary"}) {
 		t.Fatalf("catch-up shows = %v", got)
 	}
 	if got := f.sink.lastShow(); got.Title != "3 more in Stage" || got.Body != "Open notifications" {
@@ -591,17 +621,17 @@ func TestCatchUp(t *testing.T) {
 	if got := cursorOf(f.saved()); got != 20 {
 		t.Errorf("cursor = %d, want 20", got)
 	}
-	if got := f.svc.Target("summary"); got != "/?inbox" {
+	if got := f.targetPath("summary"); got != "/?inbox" {
 		t.Errorf("summary target = %q", got)
 	}
 
 	// task-9 and task-10 read; the summary stays while task-2 is unread.
 	f.barrier(c, 2, "task-2", "task-8")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"task-10", "task-9"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-10", "local/task-9"}) {
 		t.Errorf("closes = %v", got)
 	}
 	f.barrier(c, 1, "task-8")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"task-10", "task-9", "summary"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-10", "local/task-9", "local/summary"}) {
 		t.Errorf("closes = %v", got)
 	}
 
@@ -609,7 +639,7 @@ func TestCatchUp(t *testing.T) {
 	c.note(row(21, "task-21", 0))
 	f.barrier(c, 3, "task-8", "task-21")
 	f.idle()
-	if got := f.sink.showIDs(); got[len(got)-1] != "task-21" {
+	if got := f.sink.showIDs(); got[len(got)-1] != "local/task-21" {
 		t.Errorf("live after catch-up: %v", got)
 	}
 }
@@ -638,7 +668,7 @@ func TestReplaceAndCoalesce(t *testing.T) {
 	f.barrier(c, 2, "task-1", "task-2")
 	close(gate)
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-1", "task-2"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-1", "local/task-2"}) {
 		t.Fatalf("shows = %v", got)
 	}
 	if got := f.sink.lastShow(); got.Title != "Done" {
@@ -648,7 +678,7 @@ func TestReplaceAndCoalesce(t *testing.T) {
 	c.note(row(9, "task-1", 0))
 	f.barrier(c, 3, "task-1", "task-2")
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-1", "task-2", "task-1"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-1", "local/task-2", "local/task-1"}) {
 		t.Fatalf("shows = %v", got)
 	}
 }
@@ -675,7 +705,7 @@ func TestForegroundSuppression(t *testing.T) {
 	c.note(row(7, "task-7", 0))
 	f.barrier(c, 2, "task-6", "task-7")
 	f.idle()
-	if got := f.sink.showIDs(); !slices.Equal(got, []string{"task-7"}) {
+	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-7"}) {
 		t.Errorf("shows = %v", got)
 	}
 
@@ -774,8 +804,8 @@ func TestDeniedAndRecover(t *testing.T) {
 	if p := f.saved(); p.Denied || !p.Enabled {
 		t.Errorf("prefs = %+v", p)
 	}
-	if got := f.svc.Target("test"); got != "/settings" {
-		t.Errorf("test target = %q", got)
+	if server, got := f.svc.Target("test"); server != "" || got != "/settings" {
+		t.Errorf("test target = %q %q", server, got)
 	}
 
 	// Test ignores the foreground.
@@ -839,13 +869,13 @@ func TestUnsupportedEvaluatedOnce(t *testing.T) {
 
 func TestReconcile(t *testing.T) {
 	p := cursorPrefs(5)
-	p.Shown = []string{"task-90", "thread-old", "summary", "task-5"}
+	p.server(target.LocalID).Shown = local("task-90", "thread-old", "summary", "task-5")
 	f := newFixture(t, p)
 	c := f.srv.next(t)
 	c.hello(5, false)
 	// First snapshot closes earlier runs' notifications of read groups.
 	f.barrier(c, 1, "task-5")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"task-90", "thread-old"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-90", "local/thread-old"}) {
 		t.Fatalf("first snapshot closes = %v", got)
 	}
 	c.note(row(6, "task-6", 0))
@@ -854,36 +884,36 @@ func TestReconcile(t *testing.T) {
 	c.note(n7)
 	f.barrier(c, 3, "task-5", "task-6", "thread-a")
 	f.idle()
-	if got := f.saved().Shown; !slices.Equal(got, []string{"summary", "task-5", "task-6", "thread-a"}) {
+	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/task-5", "local/task-6", "local/thread-a"}) {
 		t.Errorf("shown = %v", got)
 	}
 	// Read on another device: closed here.
 	f.barrier(c, 1, "thread-a")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"task-90", "thread-old", "task-5", "task-6"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-90", "local/thread-old", "local/task-5", "local/task-6"}) {
 		t.Errorf("closes = %v", got)
 	}
-	if got := f.saved().Shown; !slices.Equal(got, []string{"summary", "thread-a"}) {
+	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/thread-a"}) {
 		t.Errorf("shown = %v", got)
 	}
-	f.svc.Sync() // nothing left to close
+	f.svc.Sync("") // nothing left to close
 	if got := len(f.sink.closed()); got != 4 {
 		t.Errorf("Sync closed more: %v", f.sink.closed())
 	}
-	if got := f.svc.Target("thread-a"); got != "/sessions/a#answer" {
+	if got := f.targetPath("thread-a"); got != "/sessions/a#answer" {
 		t.Errorf("target = %q", got)
 	}
-	f.svc.CloseShown("thread-a")
-	if got := f.sink.closed(); got[len(got)-1] != "thread-a" {
+	f.svc.CloseShown(target.LocalID, "thread-a")
+	if got := f.sink.closed(); got[len(got)-1] != "local/thread-a" {
 		t.Errorf("CloseShown: %v", got)
 	}
-	if got := f.svc.Target("thread-a"); got != "/sessions/a" {
+	if got := f.targetPath("thread-a"); got != "/sessions/a" {
 		t.Errorf("target after close = %q", got)
 	}
-	f.svc.CloseShown("")
-	if got := f.sink.closeAllCount(); got != 1 {
-		t.Errorf("CloseAll = %d", got)
+	f.svc.CloseShown(target.LocalID, "")
+	if got := f.sink.closed(); got[len(got)-1] != "local/summary" {
+		t.Errorf("CloseShown(local, \"\") closed %v, want the earlier run's summary too", got)
 	}
-	if got := f.saved().Shown; len(got) != 0 {
+	if got := shownOf(f.saved()); len(got) != 0 {
 		t.Errorf("shown after CloseShown(\"\") = %v", got)
 	}
 }
@@ -908,10 +938,10 @@ func TestReadWhileShowingCloses(t *testing.T) {
 	f.barrier(c, 1, "task-7") // task-6 read meanwhile
 	close(gate)
 	f.idle()
-	if got := f.sink.closed(); !slices.Equal(got, []string{"task-6"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-6"}) {
 		t.Errorf("closes = %v", got)
 	}
-	if got := f.svc.Target("task-6"); got != "/tasks/6" {
+	if got := f.targetPath("task-6"); got != "/tasks/6" {
 		t.Errorf("target = %q, want derived", got)
 	}
 }

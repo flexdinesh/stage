@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/procnet"
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // stub is a minimal Stage-like server for the proxy: health, an upload
@@ -189,7 +191,7 @@ func TestSchemeRouting(t *testing.T) {
 	st, sock := startStub(t)
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
 	static := http.FileServerFS(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>app")}})
-	h := bridge.Scheme(bridge.NewAPIProxy(sock), static)
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), static)
 	cases := []struct {
 		method, target string
 		status         int
@@ -222,7 +224,7 @@ func TestSchemeRouting(t *testing.T) {
 func TestStaticCSP(t *testing.T) {
 	_, sock := startStub(t)
 	static := http.FileServerFS(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>app")}, "a.js": {Data: []byte("1")}})
-	h := bridge.Scheme(bridge.NewAPIProxy(sock), static)
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), static)
 	for _, target := range []string{"mygo://localhost/", "mygo://localhost/a.js", "mygo://localhost/missing.css"} {
 		rec := newStreamRecorder()
 		h.ServeHTTP(rec, httpRequest(t, context.Background(), "GET", target, nil))
@@ -249,7 +251,7 @@ func TestStaticCSP(t *testing.T) {
 
 func TestProxyUploadAndAttachment(t *testing.T) {
 	_, sock := startStub(t)
-	h := bridge.Scheme(bridge.NewAPIProxy(sock), http.NotFoundHandler())
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), http.NotFoundHandler())
 	body, ctype := multipartPNG(t, "dot.png", pngBytes)
 	r := httpRequest(t, context.Background(), "POST", "mygo://localhost/api/uploads", body)
 	r.Header.Set("Content-Type", ctype)
@@ -273,7 +275,7 @@ func TestProxyUploadAndAttachment(t *testing.T) {
 // TestProxyNotReady: no socket yet → 503 starting; a dead socket → 503
 // unavailable; setting the socket makes requests work.
 func TestProxyNotReady(t *testing.T) {
-	p := bridge.NewAPIProxy("")
+	p := bridge.NewAPIProxy(target.Target{})
 	h := bridge.Scheme(p, http.NotFoundHandler())
 	get := func() (int, string) {
 		rec := newStreamRecorder()
@@ -283,14 +285,14 @@ func TestProxyNotReady(t *testing.T) {
 	if status, body := get(); status != 503 || !strings.Contains(body, `"code":"starting"`) {
 		t.Fatalf("unset socket: %d %s", status, body)
 	}
-	p.SetSocket(filepath.Join(shortDir(t), "none.sock"))
+	p.SetTarget(target.Local(filepath.Join(shortDir(t), "none.sock")))
 	if status, body := get(); status != 503 || !strings.Contains(body, `"code":"unavailable"`) {
 		t.Fatalf("dead socket: %d %s", status, body)
 	}
 	_, sock := startStub(t)
-	p.SetSocket(sock)
-	if p.Socket() != sock {
-		t.Fatalf("Socket() = %q", p.Socket())
+	p.SetTarget(target.Local(sock))
+	if p.Target().Socket != sock {
+		t.Fatalf("Target() = %+v", p.Target())
 	}
 	if status, body := get(); status != 200 {
 		t.Fatalf("after SetSocket: %d %s", status, body)
@@ -302,7 +304,7 @@ func TestProxyNotReady(t *testing.T) {
 // the server.
 func TestProxySSE(t *testing.T) {
 	st, sock := startStub(t)
-	h := bridge.Scheme(bridge.NewAPIProxy(sock), http.NotFoundHandler())
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), http.NotFoundHandler())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := newStreamRecorder()
@@ -351,7 +353,7 @@ func TestProxySSEWaitsForServer(t *testing.T) {
 	st := &stub{events: make(chan int, 16)}
 	sock := filepath.Join(shortDir(t), "s.sock")
 	stop := serve(t, st, sock)
-	p := bridge.NewAPIProxy(sock)
+	p := bridge.NewAPIProxy(target.Local(sock))
 	h := bridge.Scheme(p, http.NotFoundHandler())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -395,7 +397,7 @@ func TestProxySSEWaitsForServer(t *testing.T) {
 	}
 
 	// A wait that runs out: an empty stream with a retry, never an error.
-	p.SetSocket(filepath.Join(shortDir(t), "none.sock"))
+	p.SetTarget(target.Local(filepath.Join(shortDir(t), "none.sock")))
 	p.StreamWait = 200 * time.Millisecond
 	rec = newStreamRecorder()
 	h.ServeHTTP(rec, sseRequest(t, context.Background(), "mygo://localhost/api/stream", ""))
@@ -403,7 +405,7 @@ func TestProxySSEWaitsForServer(t *testing.T) {
 	if status != 200 || rec.sentHeader().Get("Content-Type") != "text/event-stream" || !strings.Contains(body, "retry:") {
 		t.Fatalf("expired wait: %d %q %q", status, rec.sentHeader().Get("Content-Type"), body)
 	}
-	p.SetSocket("")
+	p.SetTarget(target.Target{})
 	rec = newStreamRecorder()
 	h.ServeHTTP(rec, sseRequest(t, context.Background(), "mygo://localhost/api/stream", ""))
 	if status, body := rec.result(); status != 200 || !strings.Contains(body, "retry:") {
@@ -414,7 +416,7 @@ func TestProxySSEWaitsForServer(t *testing.T) {
 // TestProxyCancel: a request the page aborts ends on the server.
 func TestProxyCancel(t *testing.T) {
 	st, sock := startStub(t)
-	h := bridge.Scheme(bridge.NewAPIProxy(sock), http.NotFoundHandler())
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), http.NotFoundHandler())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -435,7 +437,7 @@ func TestNoTCPListener(t *testing.T) {
 	}
 	_, sock := startStub(t)
 	rec := newStreamRecorder()
-	bridge.Scheme(bridge.NewAPIProxy(sock), http.NotFoundHandler()).ServeHTTP(rec, httpRequest(t, context.Background(), "GET", "mygo://localhost/api/health", nil))
+	bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), http.NotFoundHandler()).ServeHTTP(rec, httpRequest(t, context.Background(), "GET", "mygo://localhost/api/health", nil))
 	if status, _ := rec.result(); status != 200 {
 		t.Fatalf("scheme health: %d", status)
 	}
@@ -594,4 +596,205 @@ func parseSSE(s string) []sseEvent {
 		}
 	}
 	return out
+}
+
+// headerRecorder wraps a handler and keeps the last request's Host and
+// headers.
+type headerRecorder struct {
+	h    http.Handler
+	mu   sync.Mutex
+	host string
+	hdr  http.Header
+	n    int
+}
+
+func (hr *headerRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hr.mu.Lock()
+	hr.host, hr.hdr = r.Host, r.Header.Clone()
+	hr.n++
+	hr.mu.Unlock()
+	hr.h.ServeHTTP(w, r)
+}
+
+func (hr *headerRecorder) last() (string, http.Header, int) {
+	hr.mu.Lock()
+	defer hr.mu.Unlock()
+	return hr.host, hr.hdr, hr.n
+}
+
+// remoteStub runs the stub over TCP (httptest) as a remote target.
+func remoteStub(t *testing.T) (*stub, *headerRecorder, target.Target) {
+	t.Helper()
+	st := &stub{events: make(chan int, 16)}
+	hr := &headerRecorder{h: st.handler()}
+	srv := httptest.NewServer(hr)
+	t.Cleanup(srv.Close)
+	u, err := target.NormalizeURL(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, hr, target.Target{ID: "s-remote", Name: "Remote", Kind: target.KindRemote, URL: u}
+}
+
+// TestProxyRemoteTCP: a remote target gets the request over TCP with its
+// own Host, and without the page's Cookie, Origin and Sec-Fetch-*
+// headers (a non-browser client to its origin policy); HTTP_PROXY never
+// applies.
+func TestProxyRemoteTCP(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
+	_, hr, rt := remoteStub(t)
+	h := bridge.Scheme(bridge.NewAPIProxy(rt), http.NotFoundHandler())
+	body, ctype := multipartPNG(t, "dot.png", pngBytes)
+	r := httpRequest(t, context.Background(), "POST", "mygo://localhost/api/uploads", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("Origin", bridge.PageOrigin)
+	r.Header.Set("Cookie", "a=b")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("Sec-Fetch-Mode", "cors")
+	r.Header.Set("Sec-Fetch-Dest", "empty")
+	rec := newStreamRecorder()
+	h.ServeHTTP(rec, r)
+	if status, out := rec.result(); status != http.StatusCreated {
+		t.Fatalf("remote upload: %d %s", status, out)
+	}
+	host, hdr, _ := hr.last()
+	if host != rt.Host() {
+		t.Errorf("Host %q, want %q", host, rt.Host())
+	}
+	for _, k := range []string{"Origin", "Cookie", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"} {
+		if v := hdr.Get(k); v != "" {
+			t.Errorf("%s forwarded: %q", k, v)
+		}
+	}
+	if hdr.Get("Content-Type") != ctype {
+		t.Errorf("Content-Type %q", hdr.Get("Content-Type"))
+	}
+}
+
+// TestProxyPageOrigin: the bridge enforces the page origin itself (it
+// strips Origin before the server): cross-site requests and unsafe
+// methods from another origin never reach the server.
+func TestProxyPageOrigin(t *testing.T) {
+	_, hr, rt := remoteStub(t)
+	h := bridge.Scheme(bridge.NewAPIProxy(rt), http.NotFoundHandler())
+	cases := []struct {
+		method, origin, site string
+		status               int
+	}{
+		{"POST", "https://evil.example", "", 403},
+		{"POST", "null", "", 403},
+		{"DELETE", "http://localhost:5174", "", 403},
+		{"GET", "https://evil.example", "cross-site", 403},
+		{"GET", "", "same-site", 403},
+		{"GET", "", "", 200},
+		{"GET", "https://evil.example", "", 200}, // a GET's Origin alone is not a cross-site signal
+		{"POST", bridge.PageOrigin, "same-origin", 404},
+		{"POST", "", "", 404}, // no Origin: WebKit may omit it
+	}
+	for _, c := range cases {
+		path := "mygo://localhost/api/health"
+		if c.method != "GET" {
+			path = "mygo://localhost/api/nope"
+		}
+		r := httpRequest(t, context.Background(), c.method, path, strings.NewReader("{}"))
+		r.Header.Set("Content-Type", "application/json")
+		if c.origin != "" {
+			r.Header.Set("Origin", c.origin)
+		}
+		if c.site != "" {
+			r.Header.Set("Sec-Fetch-Site", c.site)
+		}
+		_, _, before := hr.last()
+		rec := newStreamRecorder()
+		h.ServeHTTP(rec, r)
+		status, body := rec.result()
+		if status != c.status {
+			t.Errorf("%s origin %q site %q: %d %s, want %d", c.method, c.origin, c.site, status, body, c.status)
+		}
+		_, _, after := hr.last()
+		if c.status == 403 && (after != before || !strings.Contains(body, `"code":"denied"`)) {
+			t.Errorf("%s origin %q site %q reached the server or was not denied: %s", c.method, c.origin, c.site, body)
+		}
+	}
+}
+
+// TestProxySwitchCancels: switching servers ends the old server's open
+// streams and requests at once (a JSON request in flight gets 503
+// unavailable); the reconnecting stream lands on the new server.
+func TestProxySwitchCancels(t *testing.T) {
+	local, sock := startStub(t)
+	remote, _, rt := remoteStub(t)
+	p := bridge.NewAPIProxy(target.Local(sock))
+	h := bridge.Scheme(p, http.NotFoundHandler())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newStreamRecorder()
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		h.ServeHTTP(stream, sseRequest(t, ctx, "mygo://localhost/api/stream", ""))
+	}()
+	slow := newStreamRecorder()
+	slowDone := make(chan struct{})
+	go func() {
+		defer close(slowDone)
+		h.ServeHTTP(slow, httpRequest(t, ctx, "GET", "mygo://localhost/api/slow", nil))
+	}()
+	waitFor(t, "local stream and slow request open", func() bool { return local.streams.Load() == 1 && local.slow.Load() == 1 })
+
+	p.SetTarget(rt)
+	for name, done := range map[string]chan struct{}{"stream": streamDone, "slow request": slowDone} {
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s did not end on the switch", name)
+		}
+	}
+	waitFor(t, "old server's requests closed", func() bool { return local.streams.Load() == 0 && local.slow.Load() == 0 })
+	if status, body := slow.result(); status != 503 || !strings.Contains(body, `"code":"unavailable"`) {
+		t.Errorf("in-flight request after switch: %d %s", status, body)
+	}
+	if status, _ := stream.result(); status != 200 {
+		t.Errorf("stream status %d", status)
+	}
+
+	// EventSource reconnects: the new stream is the remote's.
+	again := newStreamRecorder()
+	go h.ServeHTTP(again, sseRequest(t, ctx, "mygo://localhost/api/stream", ""))
+	waitFor(t, "stream on the new server", func() bool { return remote.streams.Load() == 1 })
+	remote.events <- 7
+	if evs := again.events(t, 1); evs[0].id != "7" {
+		t.Fatalf("events %+v", evs)
+	}
+	// The same target again keeps open streams.
+	p.SetTarget(rt)
+	time.Sleep(50 * time.Millisecond)
+	if remote.streams.Load() != 1 {
+		t.Fatal("SetTarget with the same target ended the stream")
+	}
+}
+
+// TestProxyRemoteUnreachable: a remote that refuses connections maps to
+// 503 unavailable for JSON and to the retry stream for EventSource.
+func TestProxyRemoteUnreachable(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	p := bridge.NewAPIProxy(target.Target{ID: "s-dead", Name: "Dead", Kind: target.KindRemote, URL: "http://" + addr})
+	p.StreamWait = 300 * time.Millisecond
+	h := bridge.Scheme(p, http.NotFoundHandler())
+	rec := newStreamRecorder()
+	h.ServeHTTP(rec, httpRequest(t, context.Background(), "GET", "mygo://localhost/api/health", nil))
+	if status, body := rec.result(); status != 503 || !strings.Contains(body, `"code":"unavailable"`) {
+		t.Fatalf("dead remote JSON: %d %s", status, body)
+	}
+	rec = newStreamRecorder()
+	h.ServeHTTP(rec, sseRequest(t, context.Background(), "mygo://localhost/api/stream", ""))
+	if status, body := rec.result(); status != 200 || !strings.Contains(body, "retry:") {
+		t.Fatalf("dead remote stream: %d %q", status, body)
+	}
 }

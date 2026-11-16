@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 func TestLoadPrefsMissingIsDefault(t *testing.T) {
@@ -12,7 +14,7 @@ func TestLoadPrefsMissingIsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Enabled || p.Cursor != nil || p.Denied || len(p.Shown) != 0 || p.Version != 1 {
+	if !p.Enabled || p.Denied || len(p.Servers) != 0 || p.Version != 2 {
 		t.Fatalf("defaults = %+v", p)
 	}
 }
@@ -21,8 +23,9 @@ func TestLoadPrefsCorruptIsDefault(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
 		"garbage": "{not json",
-		"version": `{"version":2,"enabled":false}`,
-		"type":    `{"version":1,"cursor":"x"}`,
+		"version": `{"version":3,"enabled":false}`,
+		"type":    `{"version":2,"servers":{"local":{"cursor":"x"}}}`,
+		"typeV1":  `{"version":1,"cursor":"x"}`,
 	} {
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -32,22 +35,47 @@ func TestLoadPrefsCorruptIsDefault(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: no error", name)
 		}
-		if !p.Enabled || p.Cursor != nil {
+		if !p.Enabled || len(p.Servers) != 0 {
 			t.Errorf("%s: prefs = %+v, want defaults", name, p)
 		}
 	}
 }
 
-func TestLoadPrefsKeepsMissingFieldsDefault(t *testing.T) {
+// TestLoadPrefsMigratesV1: a version 1 file (one server) becomes this
+// machine's entry, IDs unchanged (the OS knows them by those).
+func TestLoadPrefsMigratesV1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "n.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"cursor":9}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":1,"enabled":false,"cursor":9,"denied":true,"shown":["task-7","summary"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	p, err := LoadPrefs(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Enabled || p.Cursor == nil || *p.Cursor != 9 {
+	sp := p.Servers[target.LocalID]
+	if p.Enabled || !p.Denied || !p.migrated || sp == nil || sp.Cursor == nil || *sp.Cursor != 9 || len(sp.Shown) != 2 || sp.Shown[0] != "task-7" {
+		t.Fatalf("migrated = %+v local %+v", p, sp)
+	}
+	// Missing fields keep their defaults.
+	if err := os.WriteFile(path, []byte(`{"version":1,"cursor":4}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = LoadPrefs(path)
+	if !p.Enabled || *p.Servers[target.LocalID].Cursor != 4 {
+		t.Fatalf("partial v1 = %+v", p)
+	}
+}
+
+func TestLoadPrefsKeepsMissingFieldsDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "n.json")
+	if err := os.WriteFile(path, []byte(`{"version":2,"servers":{"local":{"cursor":9},"s-1":{"cursor":-3},"a/b":{"cursor":1}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadPrefs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Enabled || p.Servers["local"].Cursor == nil || *p.Servers["local"].Cursor != 9 || p.Servers["s-1"].Cursor != nil || p.Servers["a/b"] != nil {
 		t.Fatalf("prefs = %+v", p)
 	}
 }
@@ -56,7 +84,7 @@ func TestSavePrefsRoundTripAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "notifications.json")
 	c := int64(123)
-	want := Prefs{Version: 1, Enabled: false, Cursor: &c, Denied: true, Shown: []string{"task-7"}}
+	want := Prefs{Version: 2, Enabled: false, Denied: true, Servers: map[string]*ServerPrefs{"local": {Cursor: &c, Shown: []string{"local/task-7"}}}}
 	if err := SavePrefs(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +96,15 @@ func TestSavePrefsRoundTripAtomic(t *testing.T) {
 		t.Errorf("mode = %v, want 0600", fi.Mode().Perm())
 	}
 	b, _ := os.ReadFile(path)
-	if string(b) != `{"version":1,"enabled":false,"cursor":123,"denied":true,"shown":["task-7"]}` {
+	if string(b) != `{"version":2,"enabled":false,"denied":true,"servers":{"local":{"cursor":123,"shown":["local/task-7"]}}}` {
 		t.Errorf("file = %s", b)
 	}
 	got, err := LoadPrefs(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Enabled || got.Cursor == nil || *got.Cursor != 123 || !got.Denied || len(got.Shown) != 1 || got.Shown[0] != "task-7" {
+	sp := got.Servers["local"]
+	if got.Enabled || !got.Denied || sp == nil || sp.Cursor == nil || *sp.Cursor != 123 || len(sp.Shown) != 1 || sp.Shown[0] != "local/task-7" {
 		t.Errorf("round trip = %+v", got)
 	}
 	ents, _ := os.ReadDir(filepath.Dir(path))
@@ -85,24 +114,24 @@ func TestSavePrefsRoundTripAtomic(t *testing.T) {
 }
 
 func TestShownCapped(t *testing.T) {
-	p := DefaultPrefs()
+	sp := &ServerPrefs{}
 	for i := range 60 {
-		p.addShown("task-" + strconv.Itoa(i))
+		sp.addShown("local/task-" + strconv.Itoa(i))
 	}
-	p.addShown("task-15")
-	if len(p.Shown) != maxShown || p.Shown[0] != "task-10" || p.Shown[maxShown-1] != "task-15" {
-		t.Fatalf("shown = %v", p.Shown)
+	sp.addShown("local/task-15")
+	if len(sp.Shown) != maxShown || sp.Shown[0] != "local/task-10" || sp.Shown[maxShown-1] != "local/task-15" {
+		t.Fatalf("shown = %v", sp.Shown)
 	}
 	path := filepath.Join(t.TempDir(), "n.json")
 	big := DefaultPrefs()
 	for i := range 70 {
-		big.Shown = append(big.Shown, "task-"+strconv.Itoa(i))
+		big.server("local").Shown = append(big.server("local").Shown, "local/task-"+strconv.Itoa(i))
 	}
 	if err := SavePrefs(path, big); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := LoadPrefs(path)
-	if len(got.Shown) != maxShown || got.Shown[0] != "task-20" {
-		t.Fatalf("saved shown = %v", got.Shown)
+	if s := got.Servers["local"].Shown; len(s) != maxShown || s[0] != "local/task-20" {
+		t.Fatalf("saved shown = %v", s)
 	}
 }

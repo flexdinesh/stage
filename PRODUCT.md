@@ -18,6 +18,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, listening on 127.0.0.1:7380 by default (compose publishes it on host loopback; expose it only on a trusted private network or behind a proxy), no auth.
 - Or as a per-user OS service with the Linux/macOS desktop app: the same UI in a native window over the local Unix socket; the app starts the service, stays resident when its window closes and shows native notifications and a needs-input badge while resident; Quit stops them and leaves the server running. Phones and other machines keep using the browser.
+- The desktop app can also switch to saved remote Stage servers on a trusted network (no auth, plain TCP to that server's listener; a hostname needs that server's `STAGE_ALLOWED_ORIGINS`). One server at a time in the window (Settings Servers: add with Test connection, edit, remove, switch; a top-bar server menu once more than one is saved); notifications and the badge cover every saved server. "Open in app" / "Open in T3" show only for this machine's server. Each Stage server is bound to its own T3 backend; the desktop never starts or configures a remote.
 - Talks to T3 only through T3's MCP endpoint; polls active tasks every 5s, full sync every 5 min, watched transcripts every 2s while their run is active.
 - Settling a thread happens in T3, not here; dependent tasks wait for it.
 

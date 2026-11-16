@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/desktop/app/alerts"
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // Native notifications (docs/desktop.md, Notifications): the real
@@ -131,13 +132,13 @@ func open(t *testing.T, prefs, sock string, now time.Duration, fg *atomic.Bool) 
 	cfg := alerts.Config{
 		PrefsPath:  prefs,
 		Sink:       h.sink,
-		Delivered:  h.delivered.add,
+		Delivered:  func(_ string, id int64) { h.delivered.add(id) },
 		Logf:       t.Logf,
 		MinBackoff: 20 * time.Millisecond,
 		MaxBackoff: 200 * time.Millisecond,
 	}
 	if fg != nil {
-		cfg.Foreground = fg.Load
+		cfg.Foreground = func(string) bool { return fg.Load() }
 	}
 	if now != 0 {
 		cfg.Now = func() time.Time { return time.Now().Add(now) }
@@ -145,7 +146,7 @@ func open(t *testing.T, prefs, sock string, now time.Duration, fg *atomic.Bool) 
 	h.svc = alerts.New(cfg)
 	t.Cleanup(func() { _ = h.svc.Close() })
 	h.svc.Start()
-	h.svc.Connect(sock)
+	h.svc.Connect(target.Local(sock))
 	return h
 }
 
@@ -310,13 +311,26 @@ func cursor(t *testing.T, prefs string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Cursor == nil {
+	sp := p.Servers[target.LocalID]
+	if sp == nil || sp.Cursor == nil {
 		return -1
 	}
-	return *p.Cursor
+	return *sp.Cursor
 }
 
 func taskTag(id int64) string { return fmt.Sprintf("task-%d", id) }
+
+// noteID is the OS notification ID of a local tag.
+func noteID(tag string) string { return target.LocalID + "/" + tag }
+
+// clickPath is the path a click on a local notification opens.
+func (h *harness) clickPath(tag string) string {
+	server, path := h.svc.Target(noteID(tag))
+	if server != target.LocalID {
+		return "server " + server
+	}
+	return path
+}
 
 func sessionAnswer(thread string) string { return "/sessions/" + url.PathEscape(thread) + "#answer" }
 
@@ -365,13 +379,13 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		tk := a.launch(projectID, "Notify live")
 		row, tk := a.needsInput(tk.ID)
 		live = tk
-		want := alerts.Note{ID: taskTag(tk.ID), Title: "Needs input", Body: "Notify live · " + projectTitle}
+		want := alerts.Note{ID: noteID(taskTag(tk.ID)), Title: "Needs input", Body: "Notify live · " + projectTitle}
 		waitUntil(t, "show "+want.ID, notifWait, func() bool { return slices.Contains(h.sink.notes(), want) })
 		if n := h.sink.notes(); len(n) != 1 {
 			t.Fatalf("shows %+v, want only %+v", n, want)
 		}
-		target := sessionAnswer(tk.T3ThreadID)
-		waitUntil(t, "Target "+target, 5*time.Second, func() bool { return h.svc.Target(want.ID) == target })
+		path := sessionAnswer(tk.T3ThreadID)
+		waitUntil(t, "Target "+path, 5*time.Second, func() bool { return h.clickPath(taskTag(tk.ID)) == path })
 		waitUntil(t, "Delivered", 5*time.Second, func() bool { return slices.Contains(h.delivered.all(), row.ID) })
 		waitUntil(t, "badge up", notifWait, func() bool {
 			b, _ := h.sink.badge()
@@ -387,9 +401,9 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		tag := taskTag(live.ID)
 		start := time.Now()
 		a.read(fmt.Sprintf("task:%d", live.ID))
-		waitUntil(t, "Close "+tag, 5*time.Second, func() bool { return slices.Contains(h.sink.closed(), tag) })
+		waitUntil(t, "Close "+tag, 5*time.Second, func() bool { return slices.Contains(h.sink.closed(), noteID(tag)) })
 		t.Logf("closed %s %s after the read", tag, time.Since(start).Round(time.Millisecond))
-		if got := h.svc.Target(tag); got != "/tasks/"+fmt.Sprint(live.ID) {
+		if got := h.clickPath(tag); got != "/tasks/"+fmt.Sprint(live.ID) {
 			t.Fatalf("Target after close %q, want the derived /tasks/%d", got, live.ID)
 		}
 	})
@@ -457,16 +471,16 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		h2 := open(t, prefs, e.sock, 0, &fg)
 		var want []alerts.Note
 		for _, r := range unread[len(unread)-3:] {
-			want = append(want, alerts.Note{ID: taskTag(*r.TaskID), Title: "Needs input", Body: r.Title + " · " + projectTitle})
+			want = append(want, alerts.Note{ID: noteID(taskTag(*r.TaskID)), Title: "Needs input", Body: r.Title + " · " + projectTitle})
 		}
-		want = append(want, alerts.Note{ID: alerts.SummaryID, Title: fmt.Sprintf("%d more in Stage", len(unread)-3), Body: "Open notifications"})
+		want = append(want, alerts.Note{ID: noteID(alerts.SummaryID), Title: fmt.Sprintf("%d more in Stage", len(unread)-3), Body: "Open notifications"})
 		h2.waitSnapshot(t)
 		waitUntil(t, "catch-up shows", notifWait, func() bool { return len(h2.sink.notes()) >= len(want) })
 		time.Sleep(500 * time.Millisecond) // nothing more may follow
 		if got := h2.sink.notes(); !slices.Equal(got, want) {
 			t.Fatalf("catch-up shows\n got %+v\nwant %+v", got, want)
 		}
-		if got := h2.svc.Target(alerts.SummaryID); got != "/?inbox" {
+		if got := h2.clickPath(alerts.SummaryID); got != "/?inbox" {
 			t.Fatalf("summary Target %q", got)
 		}
 		if d := h2.delivered.all(); len(d) != 1 {
@@ -493,7 +507,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p.Cursor = &before
+		p.Servers[target.LocalID].Cursor = &before
 		if err := alerts.SavePrefs(prefs, p); err != nil {
 			t.Fatal(err)
 		}
@@ -524,7 +538,7 @@ func TestNotificationsServerRestart(t *testing.T) {
 	h.waitSnapshot(t)
 	tk := a.launch(projectID, "Notify restart")
 	row, _ := a.needsInput(tk.ID)
-	first := alerts.Note{ID: taskTag(tk.ID), Title: "Needs input", Body: "Notify restart · " + projectTitle}
+	first := alerts.Note{ID: noteID(taskTag(tk.ID)), Title: "Needs input", Body: "Notify restart · " + projectTitle}
 	waitUntil(t, "show before restart", notifWait, func() bool { return slices.Contains(h.sink.notes(), first) })
 	if err := h.svc.Flush(); err != nil {
 		t.Fatal(err)
@@ -534,7 +548,7 @@ func TestNotificationsServerRestart(t *testing.T) {
 
 	srv.kill(syscall.SIGTERM)
 	e.serve(t, bin)
-	h.svc.Connect(e.sock) // the launcher's OnSocket on every ready server
+	h.svc.Connect(target.Local(e.sock)) // the launcher's OnServer on every ready server
 
 	// The fake T3 forgot the thread: the task fails (a new row). Start it
 	// again for a fresh needs_input.
@@ -556,7 +570,7 @@ func TestNotificationsServerRestart(t *testing.T) {
 	titles := map[string]string{"needs_input": "Needs input", "failed": "Failed"}
 	var want []alerts.Note
 	for _, r := range after {
-		want = append(want, alerts.Note{ID: taskTag(tk.ID), Title: titles[r.Event], Body: r.Title + " · " + projectTitle})
+		want = append(want, alerts.Note{ID: noteID(taskTag(tk.ID)), Title: titles[r.Event], Body: r.Title + " · " + projectTitle})
 	}
 	waitUntil(t, "shows after restart", notifWait, func() bool { return len(h.sink.notes()) >= shows+len(want) })
 	time.Sleep(500 * time.Millisecond) // nothing more may follow
@@ -576,7 +590,7 @@ func TestNotificationsDatabaseReset(t *testing.T) {
 	prefs := filepath.Join(t.TempDir(), "notifications.json")
 	old := int64(1000)
 	p := alerts.DefaultPrefs()
-	p.Cursor = &old
+	p.Servers[target.LocalID] = &alerts.ServerPrefs{Cursor: &old, Shown: []string{}}
 	if err := alerts.SavePrefs(prefs, p); err != nil {
 		t.Fatal(err)
 	}

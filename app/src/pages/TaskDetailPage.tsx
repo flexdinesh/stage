@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref }
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
+import { useShowT3Links } from "../lib/hostState.ts";
 import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
@@ -135,7 +136,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const blocked = isWaiting(task);
   const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
-  const appUrl = task.t3DeepLink;
+  const appUrl = useShowT3Links() ? task.t3DeepLink : null;
   const phoneBar = appUrl !== null || hasThread || stoppable || answerable;
 
   const focusFollowup = () => {
@@ -345,6 +346,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 }
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
+  const showT3 = useShowT3Links();
   if (task.t3ThreadId === null) {
     return (
       <Panel title="Thread">
@@ -353,7 +355,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
     );
   }
   const links: ReactNode[] = [<Link key="session" to={sessionPath(task.t3ThreadId)} className={buttonClass("secondary", true)}>View session</Link>];
-  if (task.t3DeepLink !== null) {
+  if (task.t3DeepLink !== null && showT3) {
     links.push(
       <AppButton key="app" href={task.t3DeepLink} small>
         Open in app

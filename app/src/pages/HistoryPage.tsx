@@ -12,6 +12,7 @@ import { ThreadStatusBadge, threadStatusLabel } from "../components/StateBadge.t
 import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Segmented, Select, cx } from "../components/ui.tsx";
 import { dateTime, localDateToIso, localMidnight, pick } from "../lib/format.ts";
 import { RowCopyLink } from "../components/StageLinks.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 const PAGE_SIZE = 50;
 const PRESETS = ["today", "7d", "30d", "all", "custom"] as const;
@@ -563,7 +564,8 @@ function ThreadRow({ t }: { t: Thread }) {
 }
 
 function T3Link({ t }: { t: Thread }) {
-  if (t.t3DeepLink === null) return null;
+  const showT3 = useShowT3Links();
+  if (t.t3DeepLink === null || !showT3) return null;
   return (
     <a
       href={t.t3DeepLink}

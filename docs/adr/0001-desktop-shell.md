@@ -109,6 +109,29 @@ the developer installation.
 - **Config:** JSON (`mygo.json`), so there is no Bun dependency.
 - **Bindings:** `mygo generate` writes the typed client (`web/src/mygo.ts`). The app runs headless for this (`MYGO_GENERATE`), so `main` must reach `App.Run` without a socket.
 
+### 9. Remote servers (amendment, 2026-11-17)
+
+The shipping app may also connect to a **saved remote Stage server** over
+TCP, one server at a time, switched in the app ([desktop.md](../desktop.md#servers)).
+This machine's server over the Unix socket stays the default and keeps
+every guarantee above (no TCP listener anywhere; the remote path is
+outbound TCP only).
+
+- **Trust:** a remote is on a trusted network with **no authentication**,
+  as a browser on that network would be. Stage's origin policy is hygiene,
+  not auth ([runtime.md](../runtime.md#request-origin-policy)); exposing a
+  server beyond a trusted network still belongs behind an authenticating
+  proxy, which the desktop does not support (no credentials, no cookies).
+- **Bridge:** the same `Permit` policy, CSP, no redirects, no cookies and
+  `Proxy: nil`; dialing goes to the active target only (the socket, or the
+  saved host with TLS for `https`). Requests carry the target's Host and no
+  `Origin`/`Sec-Fetch-*`, after the bridge has checked them itself, so the
+  server sees a non-browser client. A switch ends every open request and
+  stream to the old server.
+- **Ownership:** unchanged. The desktop never starts, stops or configures a
+  remote; each server keeps its own SQLite and T3 binding. Notifications
+  follow every saved server, each with its own cursor.
+
 ## Alternatives considered
 
 - **A. Fetch plugin.** `fetch.New(fetch.Options{Client: bridge.UnixClient(sock), Allow: bridge.Allow})` with pages requesting `http://stage.invalid/api/*`. It works with the same policy, and the fixture proves it with the same probe suite. Its costs:

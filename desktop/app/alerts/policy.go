@@ -26,17 +26,18 @@ type Item struct {
 	URL string
 }
 
-// Note IDs with a fixed meaning.
+// Note tags with a fixed meaning. OS notification IDs are
+// "<server id>/<tag>" (local/task-7, local/summary), except TestID.
 const (
-	// SummaryID is the "N more in Stage" catch-up summary; it opens the
-	// inbox.
+	// SummaryID is the tag of a server's "N more in Stage" catch-up
+	// summary; it opens the inbox.
 	SummaryID = "summary"
 	// TestID is the confirmation and test notification; it opens Settings.
 	TestID = "test"
 )
 
-// noteID is the notification ID of an item: its group tag (a newer row of
-// the group replaces the shown one), notification-<id> without a tag.
+// noteID is the notification tag of an item: its group tag (a newer row
+// of the group replaces the shown one), notification-<id> without a tag.
 func noteID(it Item) string {
 	if it.Tag != "" {
 		return it.Tag

@@ -1,4 +1,4 @@
-import type { HostState } from "@stage/app/platform";
+import type { HostServerEntry, HostServerInput, HostServerTest, HostState } from "@stage/app/platform";
 
 /**
  * The Go side of the desktop app as the adapters use it: the generated MyGo client (src/mygo.ts) wired in
@@ -21,6 +21,18 @@ export interface DesktopNative {
   openApp(url: string): Promise<void>;
   loginStartup(): Promise<boolean>;
   setLoginStartup(enabled: boolean): Promise<void>;
+}
+
+/** The Go side's server list and switching (desktop/app/servers.go), as the host adapter uses it. */
+export interface NativeServers {
+  servers(): Promise<HostServerEntry[]>;
+  addServer(input: HostServerInput): Promise<HostServerEntry>;
+  updateServer(id: string, input: HostServerInput): Promise<HostServerEntry>;
+  removeServer(id: string): Promise<void>;
+  switchServer(id: string): Promise<void>;
+  testServer(url: string): Promise<HostServerTest>;
+  /** Every list change (servers:changed). Returns an unsubscribe. */
+  onServers(listener: (servers: HostServerEntry[]) => void): () => void;
 }
 
 /** The Go side's native notifications (desktop/app/alerts), as the notifications adapter uses it. */
@@ -53,7 +65,9 @@ export const INITIAL_STATE: HostState = {
   server: null,
   foreground: false,
   versionSkew: false,
+  target: { id: "local", name: "This machine", kind: "local", url: "" },
   epoch: 0,
+  serverEpoch: 0,
   busy: false,
   dev: false,
 };

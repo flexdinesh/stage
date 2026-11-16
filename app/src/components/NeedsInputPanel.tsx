@@ -19,6 +19,7 @@ import {
   type Draft,
 } from "../lib/questions.ts";
 import { AppButton, Button, Checkbox, Chip, ErrorText, ExternalButton, Radio, Textarea, buttonClass, cx, toneClass } from "./ui.tsx";
+import { useShowT3Links } from "../lib/hostState.ts";
 
 /** Links that open the session in T3 (app deep link first). */
 export interface T3Links {
@@ -28,6 +29,8 @@ export interface T3Links {
 }
 
 export function OpenInT3({ links, variant = "secondary", label = "Open in T3" }: { links: T3Links; variant?: "primary" | "secondary"; label?: string }) {
+  const showT3 = useShowT3Links();
+  if (!showT3) return null;
   if (links.t3DeepLink !== null) return <AppButton small variant={variant} href={links.t3DeepLink}>{label}</AppButton>;
   const href = links.t3WebUrl ?? links.t3AppUrl;
   return href === null ? null : <ExternalButton small variant={variant} href={href}>{label}</ExternalButton>;
