@@ -406,28 +406,10 @@ func TestFakeReadItemsPagesMessagesOnly(t *testing.T) {
 	}
 	tail, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: id, ItemID: page.Items[1].ItemID, TextOffset: 4})
 	if err != nil || len(tail.Items) != 1 || tail.Items[0].Text != "ef" || tail.Items[0].TextTruncated {
-		t.Fatalf("continuation = %+v, %v", tail, err)
+		t.Fatalf("tail = %+v, %v", tail, err)
 	}
 	if _, err := f.ReadItems(ctx, ReadItemsInput{ThreadID: "nope"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown thread err = %v", err)
-	}
-}
-
-func TestContinuationSendEnvelopeAndReceipt(t *testing.T) {
-	f := newFakeT3(t)
-	f.tool("t3_thread_send", func(args map[string]any) (*mcp.CallToolResult, error) {
-		if args["threadId"] != "target" || args["message"] != " exact\n" || args["mode"] != "queue" || args["clientRequestId"] != "persisted-request" {
-			t.Errorf("send args=%v", args)
-		}
-		return structured(`{"threadId":"target","delivery":"started","runId":"new-run","messageId":"new-message"}`), nil
-	})
-	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
-	out, err := c.QueueContinuation(ctxT(t), "target", " exact\n", "persisted-request")
-	if err != nil || out.RunID != "new-run" || out.MessageID != "new-message" {
-		t.Fatalf("receipt=%+v err=%v", out, err)
-	}
-	if retrySafe("t3_thread_send", map[string]any{"clientRequestId": "persisted-request"}) {
-		t.Fatal("send retry assumes unproven deduplication")
 	}
 }
 

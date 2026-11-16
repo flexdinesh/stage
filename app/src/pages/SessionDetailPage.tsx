@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { useThread } from "../api/queries.ts";
 import type { ThreadDetail } from "../api/types.ts";
-import { RunOrderPanel } from "../components/Continuations.tsx";
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
@@ -27,7 +26,7 @@ export function SessionDetailPage() {
 }
 
 function SessionDetail({ data }: { data: ThreadDetail }) {
-  const { thread, children, continuations, task, createdTasks } = data;
+  const { thread, children, task, createdTasks } = data;
   const taskId = task?.id;
   // Viewing clears system notifications here and marks their groups read, so
   // other devices close theirs on their next sync.
@@ -51,7 +50,6 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
             <SessionPromptPanel detail={data} live={isLiveState(thread.state)} />
             <LastWordPanel thread={thread} />
             <CreatedTasksPanel threadId={thread.t3ThreadId} batch={createdTasks} />
-            <RunOrderPanel thread={thread} entries={continuations} />
             <RunsPanel runs={thread.recentRuns ?? []} runCount={thread.runCount} />
             <Panel title="Child sessions" meta={`${children.length}`} flush><SessionRows threads={children} emptyText="No child sessions. Delegated work appears here when T3 reports it." /></Panel>
           </>}

@@ -12,7 +12,6 @@ export const keys = {
   threads: ["threads"],
   thread: ["thread"],
   questions: ["questions"],
-  continuations: ["continuations"],
   snippets: ["snippets"],
   stats: ["stats"],
   preferences: ["preferences"],
@@ -94,11 +93,6 @@ export const useThreadQuestions = (id: string, enabled: boolean) => {
   return useQuery({ queryKey: [...keys.questions, id], queryFn: () => api.questions(id), enabled: enabled && id !== "", retry: false });
 };
 
-export const useContinuations = (thread?: string) => {
-  const api = useApi();
-  return useQuery({ queryKey: [...keys.continuations, thread], queryFn: () => api.continuations(thread) });
-};
-
 /** External threads needing input (not task-owned; tasks come from useTasks). */
 export const useNeedsInputThreads = (project?: number) =>
   useThreads(project === undefined ? { needsInput: true } : { needsInput: true, project });
@@ -177,7 +171,6 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
       keys.threads,
       keys.thread,
       keys.questions,
-      keys.continuations,
       keys.stats,
       keys.preferences,
       keys.badge,

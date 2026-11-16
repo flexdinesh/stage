@@ -113,6 +113,50 @@ func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
+	id := r.PathValue("id")
+	if s.T3.Status(r.Context()).Connected {
+		if err := s.Sync.RefreshSession(r.Context(), id); err != nil {
+			return err
+		}
+	}
+	thread, err := s.Store.GetThread(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if thread.LastWord, err = s.Store.GetThreadLastWord(r.Context(), id); err != nil {
+		return err
+	}
+	if thread.RecentRuns, err = s.Store.ThreadRuns(r.Context(), id); err != nil {
+		return err
+	}
+	children, _, err := s.Store.ListThreads(r.Context(), db.ThreadFilter{Parent: &id, Limit: 2147483647, SortActivity: true})
+	if err != nil {
+		return err
+	}
+	env := s.envID(r.Context())
+	childJSON := make([]threadJSON, len(children))
+	for i, c := range children {
+		childJSON[i] = s.thread(env, c)
+	}
+	var task *taskJSON
+	if thread.TaskID != nil {
+		t, err := s.Store.GetTask(r.Context(), *thread.TaskID)
+		if err != nil {
+			return err
+		}
+		shaped := s.task(env, t)
+		task = &shaped
+	}
+	created, err := s.Store.CreatedBy(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread), "children": childJSON,
+		"task": task, "createdTasks": s.createdTasks(env, created)})
+	return nil
+}
+
 // ---- snippets ----
 
 func validateSnippet(p *db.SnippetPatch, create bool) error {

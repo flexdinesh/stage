@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { useNeedsInputThreads, useProjects, useRunningThreads, useSchedules, useSettledThreads, useTasks } from "../api/queries.ts";
 import type { Schedule, Task, TaskState, Thread } from "../api/types.ts";
-import { PendingContinuationsPanel } from "../components/Continuations.tsx";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ScheduleRow } from "../components/ScheduleList.tsx";
@@ -319,7 +318,6 @@ export function DashboardPage() {
         {...(meta === "" ? {} : { meta })}
         actions={<ProjectSelect value={project} onChange={(v) => setParam("project", v)} />}
       />
-      <PendingContinuationsPanel project={projectId} />
       <QueryState isPending={tasks.isPending || settled.isPending} error={tasks.error ?? settled.error}>
         <StatStrip
           counts={counts}

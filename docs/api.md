@@ -452,7 +452,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
   "recentRuns": null
 }
 ```
-`lastWord` (detail reads only: `GET /api/threads/:id` `thread` and `GET /api/tasks/:id` `thread`; always null in lists): the thread's latest assistant reply (last word) as last synced, `{ "text": "## Done\nFixed **the race**.", "truncated": false, "runId": "run_2", "at": "2026-11-08T10:00:58Z" }`; null until one is read. `text` is the reply's markdown capped at 4000 chars (T3 UTF-16 units); `truncated` = the reply is longer (full text in T3); `runId` = the reply's run; `at` = the reply item's updatedAt. `lastWordPreview` (every Thread and Task): the same reply as one plain line (markdown markers dropped, whitespace collapsed, up to 240 chars); `lastWordAt` = `lastWord.at`. Sync reads the last word only when a thread is at rest (no active run, or pending input) and its `updatedAt` changed since the last check, from any detail read (task polls, watched threads, root threads in full sync, linked and continuation sessions); a running thread keeps its previous reply. A thread with no assistant reply keeps the stored one. `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `runStartedAt` / `runEndedAt`: elapsed run span from the last detail read (`t3_thread_read` recentRuns, up to 50): the oldest run's `startedAt` (`requestedAt` if it never started; thread `createdAt` when `runCount` exceeds the runs read) to the newest run's `completedAt`; null without runs, `runEndedAt` null while the newest run is incomplete. Full sync reads every root thread, so subagents have no span. `pendingRequestCount`: T3 pending requests (questions and approvals). `pendingQuestionCount`: how many of them are user-input questions stage can answer (`t3_pending_request` list, counted whenever sync reads a thread with pending requests; a failed count keeps the previous value; reset to 0 when nothing is pending; never above `pendingRequestCount`). `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
+`lastWord` (detail reads only: `GET /api/threads/:id` `thread` and `GET /api/tasks/:id` `thread`; always null in lists): the thread's latest assistant reply (last word) as last synced, `{ "text": "## Done\nFixed **the race**.", "truncated": false, "runId": "run_2", "at": "2026-11-08T10:00:58Z" }`; null until one is read. `text` is the reply's markdown capped at 4000 chars (T3 UTF-16 units); `truncated` = the reply is longer (full text in T3); `runId` = the reply's run; `at` = the reply item's updatedAt. `lastWordPreview` (every Thread and Task): the same reply as one plain line (markdown markers dropped, whitespace collapsed, up to 240 chars); `lastWordAt` = `lastWord.at`. Sync reads the last word only when a thread is at rest (no active run, or pending input) and its `updatedAt` changed since the last check, from any detail read (task polls, watched threads, root threads in full sync, linked sessions); a running thread keeps its previous reply. A thread with no assistant reply keeps the stored one. `projectId` / `projectTitle` null when no app project mirrors `t3ProjectId`. `runStartedAt` / `runEndedAt`: elapsed run span from the last detail read (`t3_thread_read` recentRuns, up to 50): the oldest run's `startedAt` (`requestedAt` if it never started; thread `createdAt` when `runCount` exceeds the runs read) to the newest run's `completedAt`; null without runs, `runEndedAt` null while the newest run is incomplete. Full sync reads every root thread, so subagents have no span. `pendingRequestCount`: T3 pending requests (questions and approvals). `pendingQuestionCount`: how many of them are user-input questions stage can answer (`t3_pending_request` list, counted whenever sync reads a thread with pending requests; a failed count keeps the previous value; reset to 0 when nothing is pending; never above `pendingRequestCount`). `relationship`: `fork|subagent|null`. `creationSource`: T3 `web|mobile|mcp|provider|server`.
 
 `pullRequests` (`PullRequest[]`, never null): PRs T3 associates with the thread, mirrored on every list and detail read (`t3_thread_list` / `t3_thread_read` `linkedPullRequest` first, then `pullRequests`, deduped by `url`, entries without a `url` dropped). `repository` is `owner/name`; `state` is T3's string (`open`, `merged`, `closed`, `draft`, ...); `source` is T3's (`created`, `agent`) or `linked` for an unlabelled `linkedPullRequest`. Fresh within the 5 min full sync (sooner for polled/watched threads).
 `runCount`: runs T3 reported on the last detail read (each follow-up is a new run); 0 before one.
@@ -499,7 +499,7 @@ Results: stage matches first, then T3 matches whose thread is not already listed
 
 ### `GET /api/threads/:id`
 
-200 `{ "thread": Thread, "children": Thread[], "continuations": Continuation[], "task": Task|null, "createdTasks": CreatedTasks }`. `createdTasks`: the tasks this session created (see "Session batch"; empty arrays when none). Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Includes the session's continuation orders and history. Never sends a message. 404 missing session; 502/503 T3 read errors.
+200 `{ "thread": Thread, "children": Thread[], "task": Task|null, "createdTasks": CreatedTasks }`. `createdTasks`: the tasks this session created (see "Session batch"; empty arrays when none). Encode the complete T3 thread ID as one URL path segment. Refreshes the requested session when connected; reads cached metadata offline. Children are direct children, newest activity first. Never sends a message. 404 missing session; 502/503 T3 read errors.
 
 ## Transcript
 
@@ -596,64 +596,6 @@ What a pasted reference names. `ref` accepts: a stage task or session link (`…
 { "kind": "task", "taskId": 12, "threadId": "th-1" }
 ```
 A task's `threadId` is its T3 thread (null before launch); a session's `taskId` is the task that owns it (null for sessions started outside stage). A session stage has not mirrored yet is read from T3 once when connected. 400 not a reference; 404 unknown task or session.
-
-## Queued continuations
-
-A continuation sends a saved prompt into an existing top-level, unarchived session. It never launches a replacement thread, steers or interrupts current work. Saving and resuming only check readiness; the background runner owns delivery.
-
-`Continuation`:
-```jsonc
-{
-  "id": 1,
-  "afterThreadId": "thread-a",
-  "targetThreadId": "thread-b",
-  "previousContinuationId": null,
-  "prompt": "Update the client against the finalized API.",
-  "state": "waiting",
-  "waitReasons": ["predecessor_unsettled", "target_running"],
-  "lastError": null,
-  "runId": null,
-  "messageId": null,
-  "createdAt": "2026-11-10T00:00:00Z",
-  "updatedAt": "2026-11-10T00:00:00Z",
-  "sentAt": null,
-  "settledAt": null,
-  "afterThread": {}, // Thread
-  "targetThread": {} // Thread
-}
-```
-
-States: `waiting|paused|blocked|sending|running|awaiting_settle|settled|cancelled|uncertain`.
-
-Wait reasons: `predecessor_unsettled|target_running|target_needs_input|predecessor_failed|target_failed|upstream_pending|upstream_cancelled|thread_missing|t3_offline|delivery_uncertain|legacy_conflict`.
-
-- `GET /api/continuations` -> `{ "continuations": Continuation[] }`. Optional `thread=<id>` includes related orders, predecessor first, retaining history.
-- `POST /api/continuations` body `{ "afterThreadId": string, "targetThreadId": string, "prompt": string }` -> 201 `Continuation`. Required nonblank IDs/prompt. Prompt whitespace preserved. No send on save.
-- `PATCH /api/continuations/:id` body `{ "prompt": string }` -> 200 `Continuation`.
-- `POST /api/continuations/:id/pause|resume|cancel` -> 200 `Continuation`. Resume rechecks conditions. Cancel retains the link and blocks downstream steps, including after restart; it does not splice the order.
-- Invalid input: 400. Missing resource: 404. Child/archived session, self-link, cycle, occupied live order, conflicting legacy task order or mutation after delivery claim: 409.
-
-### Release and delivery
-
-The predecessor must be explicitly settled in T3. The target must have finished with no active run or pending input. Failure, interruption or cancellation blocks either endpoint even if its settled flag remains set. New work in the target keeps the continuation waiting. Recover in T3 before resuming. Existing backlog task links retain their documented behavior; unlink conflicting task order before creating a continuation.
-
-For A -> B -> C, the second continuation references the first continuation. B's original run or old settlement cannot release C. The delivered run must finish successfully, followed by a settlement recorded after that delivery. Pausing and cancellation never stop the T3 session itself.
-
-The send preserves the saved prompt verbatim and appends:
-```text
-
-
----
-Prerequisite session
-Title: <A title>
-Thread ID: <A T3 thread ID>
-T3: <canonical link, omitted when unavailable>
-```
-Canonical link order: configured T3 web URL, T3's returned link, app deep link. No transcript or final response is copied.
-
-The runner refreshes all chain participants, including finished/settled sessions, then checks both endpoints before claiming delivery. A database claim persists the exact delivery prompt and unique request ID before `t3_thread_send` with `mode: queue`. Resulting message/run IDs track the continuation. Concurrent reconciles cannot claim the same continuation. There is no blind retry: a transport failure, missing receipt or expired claim becomes `uncertain`; review the target in T3. Resume cannot resend an uncertain/claimed continuation. If a delivered run falls outside T3's bounded recent-run history before completion was observed, block for review rather than infer success.
-
-Session and continuation states are independent. Current runs may still edit concurrently; this orders future prompts. MCP does not expose every background wait, and readiness reads across sessions are not atomic. Queue mode prevents steering when the target starts again between read and send.
 
 ## Snippets
 
@@ -910,7 +852,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - Links between listed tasks are replaced; `taskIds[i]` runs after `taskIds[i-1]`. Followers lose their start time and session wait.
 - The first task keeps its own wait (start time, session, or a task outside the list).
 - Reorder: when the listed tasks already form exactly one chain, a new head without a wait takes the old head's wait, and the old tail's follower outside the list moves to the new tail.
-- Each link follows "Link rules" (e.g. 409 when an outside follower of a middle task would give it two followers, or a task belongs to a queued continuation order).
+- Each link follows "Link rules" (e.g. 409 when an outside follower of a middle task would give it two followers).
 
 ## Agent interface
 

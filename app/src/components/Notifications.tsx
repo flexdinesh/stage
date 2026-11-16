@@ -33,7 +33,7 @@ export function usePushRefresh() {
   useEffect(
     () =>
       notifications?.onDelivered(() => {
-        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.continuations, keys.stats]) {
+        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.stats]) {
           void qc.invalidateQueries({ queryKey });
         }
       }),

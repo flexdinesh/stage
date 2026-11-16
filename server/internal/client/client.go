@@ -208,11 +208,10 @@ type Thread struct {
 
 // ThreadDetail is GET /api/threads/:id.
 type ThreadDetail struct {
-	Thread        Thread            `json:"thread"`
-	Children      []Thread          `json:"children"`
-	Continuations []json.RawMessage `json:"continuations"`
-	Task          *Task             `json:"task"`
-	CreatedTasks  CreatedTasks      `json:"createdTasks"` // tasks this session created
+	Thread       Thread       `json:"thread"`
+	Children     []Thread     `json:"children"`
+	Task         *Task        `json:"task"`
+	CreatedTasks CreatedTasks `json:"createdTasks"` // tasks this session created
 }
 
 // ThreadPage is GET /api/threads.

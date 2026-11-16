@@ -35,11 +35,6 @@ func nowPlusSQL(modifier string) string {
 	return `strftime('%Y-%m-%dT%H:%M:%f000Z','now','` + modifier + `')`
 }
 
-// bumpSQL is a write's new updated_at: now, but always after the stored
-// value, so compare-and-set on updated_at (ObserveContinuation,
-// ClaimContinuation) sees every write, even two within one clock tick.
-const bumpSQL = `max(` + nowSQL + `, strftime('%Y-%m-%dT%H:%M:%f000Z', updated_at, '+0.001 seconds'))`
-
 func formatTime(t time.Time) string { return t.UTC().Format(timeLayout) }
 
 func parseTime(v any) (time.Time, error) {

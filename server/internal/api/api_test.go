@@ -140,7 +140,6 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, client, log)
-	svc.SetPublicURL(publicURL)
 	runner := links.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	hub := transcript.NewHub(t.Context(), client, api.MirrorActive(store), log)

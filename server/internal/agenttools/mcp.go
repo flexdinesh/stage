@@ -72,7 +72,7 @@ func NewServer(o *Ops) *mcp.Server {
 
 	add(s, "list_sessions", "List T3 sessions (root threads) across projects, newest first.", ro, o.ListSessions)
 	add(s, "search_sessions", "Find T3 sessions by title, branch, PR or project, then by message text (via T3; falls back to stage titles when T3 is offline, see t3).", ro, o.SearchSessions)
-	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, continuations, task, and the tasks it created (createdTasks: run-order chains head first, then independent tasks).", ro, o.GetSession)
+	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, task, and the tasks it created (createdTasks: run-order chains head first, then independent tasks).", ro, o.GetSession)
 	add(s, "read_ref", "Read the stage task or session a pasted reference names: a stage link (…/tasks/<id>, …/sessions/<id>, any host, markdown link ok), a T3 thread link, #<task id> or a thread id. Returns the task (prompt, state, handoff, runs) and/or its session (latest reply, PRs, branch, runs, children) and how to read the full conversation.", ro, o.ReadRef)
 	add(s, "get_session_questions", "Read the questions a T3 session is waiting on its owner to answer (read-only). Approvals are only counted; they are handled in T3.", ro, o.GetSessionQuestions)
 	return s
