@@ -35,8 +35,8 @@ function SessionDetail({ data }: { data: ThreadDetail }) {
   const markViewed = useMarkNotificationGroupsRead();
   const [view, setView] = useDetailView();
   useEffect(() => {
-    void notifications.closeShown(`thread-${thread.t3ThreadId}`);
-    if (taskId !== undefined) void notifications.closeShown(`task-${taskId}`);
+    void notifications?.closeShown(`thread-${thread.t3ThreadId}`);
+    if (taskId !== undefined) void notifications?.closeShown(`task-${taskId}`);
     markViewed(taskId === undefined ? [`thread:${thread.t3ThreadId}`] : [`thread:${thread.t3ThreadId}`, `task:${taskId}`]);
   }, [notifications, thread.t3ThreadId, taskId, markViewed]);
   return <>

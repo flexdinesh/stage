@@ -17,6 +17,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, listening on 127.0.0.1:7380 by default (compose publishes it on host loopback; expose it only on a trusted private network or behind a proxy), no auth.
+- Or as a per-user OS service with the Linux/macOS desktop app: the same UI in a native window over the local Unix socket; the app starts the service, stays resident when its window closes, and Quit leaves the server running. Phones and other machines keep using the browser.
 - Talks to T3 only through T3's MCP endpoint; polls active tasks every 5s, full sync every 5 min, watched transcripts every 2s while their run is active.
 - Settling a thread happens in T3, not here; linked tasks wait for it.
 

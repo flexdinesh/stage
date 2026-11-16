@@ -32,7 +32,7 @@ export function usePushRefresh() {
   const qc = useQueryClient();
   useEffect(
     () =>
-      notifications.onDelivered(() => {
+      notifications?.onDelivered(() => {
         for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.continuations, keys.stats]) {
           void qc.invalidateQueries({ queryKey });
         }
@@ -48,12 +48,14 @@ export function usePushRefresh() {
 export function useSystemNotificationSync() {
   const { notifications } = usePlatform();
   useEffect(() => {
-    void notifications.syncShown();
+    if (notifications === undefined) return;
+    const delivery = notifications;
+    void delivery.syncShown();
     function onVisible() {
-      if (document.visibilityState === "visible") void notifications.syncShown();
+      if (document.visibilityState === "visible") void delivery.syncShown();
     }
     document.addEventListener("visibilitychange", onVisible);
-    const unsubscribe = notifications.onDelivered(() => void notifications.syncShown());
+    const unsubscribe = delivery.onDelivered(() => void delivery.syncShown());
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       unsubscribe();
@@ -286,7 +288,12 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const { notifications } = usePlatform();
   const qc = useQueryClient();
   const inbox = useNotificationInbox();
-  const push = useQuery({ queryKey: PUSH_KEY, queryFn: () => notifications.state(), refetchInterval: false });
+  const push = useQuery({
+    queryKey: PUSH_KEY,
+    queryFn: () => notifications?.state() ?? Promise.resolve(undefined),
+    refetchInterval: false,
+    enabled: notifications !== undefined,
+  });
   // Snapshot at open: which rows were unread, and the newest id then.
   const [opened, setOpened] = useState<{ unread: ReadonlySet<string>; topId: number; markRead: boolean } | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -298,7 +305,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
 
   // Opening the inbox clears all system notifications.
   useEffect(() => {
-    void notifications.closeShown();
+    void notifications?.closeShown();
   }, [notifications]);
 
   // A live state change can move a group across a page boundary. The newest

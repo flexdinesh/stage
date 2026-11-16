@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markdownToHtml } from "../src/lib/markdown.ts";
+import { ALLOWED_URI, markdownToHtml } from "../src/lib/markdown.ts";
 
 test("markdownToHtml renders GFM blocks", () => {
   const html = markdownToHtml("## Done\n\n- one\n- two\n\n```go\nx := 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
@@ -22,4 +22,20 @@ test("markdownToHtml renders raw HTML as literal text", () => {
   assert.doesNotMatch(html, /<script|<img|<Panel/);
   assert.match(html, /&lt;Panel&gt;/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test("markdownToHtml autolinks bare stage deep links", () => {
+  const html = markdownToHtml("Next: stage://tasks/12. Also stage-dev://sessions/t-1 and [s](stage://tasks/3).");
+  assert.match(html, /<a href="stage:\/\/tasks\/12">stage:\/\/tasks\/12<\/a>\./);
+  assert.match(html, /<a href="stage-dev:\/\/sessions\/t-1">/);
+  assert.match(html, /<a href="stage:\/\/tasks\/3">s<\/a>/);
+});
+
+test("sanitizer keeps web, T3 app and stage links, drops script URLs", () => {
+  for (const ok of ["https://x.dev/a", "mailto:a@b.c", "t3code://threads/e/t", "stage://tasks/1", "stage-dev://sessions/x", "/tasks/1", "#top"]) {
+    assert.ok(ALLOWED_URI.test(ok), ok);
+  }
+  for (const bad of ["javascript:alert(1)", "data:text/html,x", "vbscript:x", "mygo://localhost/x", "file:///etc/passwd"]) {
+    assert.ok(!ALLOWED_URI.test(bad), bad);
+  }
 });

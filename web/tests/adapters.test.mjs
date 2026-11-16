@@ -29,7 +29,7 @@ test("clipboard API rejection reaches the caller (Copy failed)", async () => {
 test("links: copied links use the page origin; external opens a tab; app links navigate in place", () => {
   const calls = [];
   const l = browserLinks({ origin: () => "https://stage.lan", open: (u) => calls.push(["open", u]), assign: (u) => calls.push(["assign", u]) });
-  assert.equal(l.appOrigin(), "https://stage.lan");
+  assert.equal(l.stageLink("/tasks/12"), "https://stage.lan/tasks/12");
   l.openExternal("https://github.com/x/y/pull/1");
   l.openApp("t3code://threads/e/t");
   assert.deepEqual(calls, [["open", "https://github.com/x/y/pull/1"], ["assign", "t3code://threads/e/t"]]);

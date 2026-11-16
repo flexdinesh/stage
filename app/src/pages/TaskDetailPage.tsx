@@ -58,7 +58,7 @@ function TaskDetailView({ id }: { id: number }) {
   const { notifications } = usePlatform();
   const markViewed = useMarkNotificationGroupsRead();
   useEffect(() => {
-    void notifications.closeShown(`task-${id}`);
+    void notifications?.closeShown(`task-${id}`);
     markViewed([`task:${id}`]);
   }, [notifications, id, markViewed]);
   return (

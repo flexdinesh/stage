@@ -15,7 +15,7 @@ export function browserLinks(
   },
 ): Links {
   return {
-    appOrigin: () => deps.origin(),
+    stageLink: (path) => deps.origin() + path,
     openExternal: (url) => deps.open(url),
     openApp: (url) => deps.assign(url),
   };

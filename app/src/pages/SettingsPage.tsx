@@ -10,10 +10,12 @@ import {
   type Preferences,
   type T3Status,
 } from "../api/types.ts";
+import { DesktopAppCard } from "../components/Host.tsx";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { taskStateTone } from "../components/StateBadge.tsx";
 import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
+import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
@@ -274,8 +276,20 @@ function EventFilter() {
   );
 }
 
+/** The event filter always; this device's delivery only when the host has system notifications. */
 function NotificationsCard() {
   const { notifications } = usePlatform();
+  if (notifications === undefined) {
+    return (
+      <Panel title="Notifications">
+        <EventFilter />
+      </Panel>
+    );
+  }
+  return <DeviceNotificationsCard notifications={notifications} />;
+}
+
+function DeviceNotificationsCard({ notifications }: { notifications: NotificationDelivery }) {
   const qc = useQueryClient();
   // Device state, not server state: no polling; rechecked on focus (permission may change in system settings).
   const state = useQuery({ queryKey: PUSH_KEY, queryFn: () => notifications.state(), refetchInterval: false });
@@ -376,6 +390,7 @@ export function SettingsPage() {
         <PairCard />
         <NotificationsCard />
         <ThemeCard />
+        <DesktopAppCard />
       </div>
     </>
   );

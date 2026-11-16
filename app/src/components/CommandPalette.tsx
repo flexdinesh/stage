@@ -183,7 +183,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       e.preventDefault();
       const link = items[active]?.link;
       if (link === undefined) return;
-      const { markdown, name } = subjectLinks(link, links.appOrigin());
+      const { markdown, name } = subjectLinks(link, (path) => links.stageLink(path));
       setCopiedName(name);
       copy(markdown);
     } else if (e.key === "Enter") {

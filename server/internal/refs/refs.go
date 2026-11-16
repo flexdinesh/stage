@@ -1,6 +1,7 @@
 // Package refs parses references to stage tasks and sessions: the links the
-// web UI copies (and their markdown form), T3 web and app links, "#12" and
-// bare ids. Agents pass whatever the user pasted; the host of a stage link
+// web UI copies (and their markdown form), the desktop's deep links
+// (stage://tasks/12, one scheme per installation identity), T3 web and app
+// links, "#12" and bare ids. Agents pass whatever the user pasted; the host of a stage link
 // is ignored because the same stage is reached at many addresses (loopback,
 // tailnet, phone).
 package refs
@@ -30,12 +31,16 @@ type Ref struct {
 }
 
 // ErrInvalid: the input names no task or session.
-var ErrInvalid = errors.New("not a stage task or session reference: want a stage link (/tasks/<id>, /sessions/<id>), a T3 thread link, #<task id> or a thread id")
+var ErrInvalid = errors.New("not a stage task or session reference: want a stage link (/tasks/<id>, /sessions/<id>, stage://tasks/<id>), a T3 thread link, #<task id> or a thread id")
 
 // mdLink matches a whole markdown link, as "Copy link" produces.
 var mdLink = regexp.MustCompile(`^\[.*\]\((\S+)\)$`)
 
 var taskNum = regexp.MustCompile(`^#?([1-9][0-9]{0,17})$`)
+
+// deepLink matches the desktop's deep-link schemes: "stage" and the
+// developer identities' "stage-<suffix>" (docs/desktop.md).
+var deepLink = regexp.MustCompile(`(?i)^stage(-[a-z0-9-]+)?://`)
 
 // Parse reads one reference. t3PublicURL is the T3 web base that T3 thread
 // links start with ("" disables matching them).
@@ -55,6 +60,8 @@ func Parse(s, t3PublicURL string) (Ref, error) {
 	switch {
 	case strings.HasPrefix(lower, "t3code://"):
 		return parseAppLink(s)
+	case deepLink.MatchString(s):
+		return parseDeepLink(s)
 	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
 		return parseWebLink(s, t3PublicURL)
 	case strings.HasPrefix(s, "/"):
@@ -113,6 +120,32 @@ func stagePath(u *url.URL) (Ref, bool) {
 		return Ref{Kind: KindSession, ThreadID: id}, true
 	}
 	return Ref{}, false
+}
+
+// parseDeepLink reads stage://tasks/<id> and stage://sessions/<id> (the
+// host is the kind), or the same paths under stage://localhost/.
+func parseDeepLink(s string) (Ref, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return Ref{}, ErrInvalid
+	}
+	segs, ok := segments(u)
+	if !ok {
+		return Ref{}, ErrInvalid
+	}
+	if host := strings.ToLower(u.Host); host != "" && host != "localhost" {
+		segs = append([]string{host}, segs...)
+	}
+	if len(segs) != 2 {
+		return Ref{}, ErrInvalid
+	}
+	switch segs[0] {
+	case "tasks":
+		return taskRef(segs[1])
+	case "sessions":
+		return Ref{Kind: KindSession, ThreadID: segs[1]}, nil
+	}
+	return Ref{}, ErrInvalid
 }
 
 // parseAppLink reads t3code://threads/<environmentId>/<threadId>.

@@ -1,0 +1,9 @@
+# The UI build (desktop/app/ui, vite outDir ../dist), embedded by go:embed;
+# .gitkeep keeps the dir so the embed compiles without a build.
+/dist/*
+!/dist/.gitkeep
+# mygo build output and mygo dev's app.
+/build/
+/.mygo/
+# Bundled stage CLI per platform, cross-built by `mise run desktop:package`.
+/resources/
