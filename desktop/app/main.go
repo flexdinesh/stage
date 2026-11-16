@@ -18,6 +18,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/flexdinesh/stage/desktop/app/alerts"
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
 )
@@ -44,6 +45,11 @@ var StateChanged = mygo.NewEvent[launch.State]("host:state")
 // Navigate asks the UI to show an app path (deep links); a page that was
 // not listening yet reads it with Desktop.TakeNavigation().
 var Navigate = mygo.NewEvent[string]("host:navigate")
+
+// NotificationDelivered is broadcast with the newest notification id each
+// time the stream delivers notifications (shown or not), so the page
+// refetches its inbox at once.
+var NotificationDelivered = mygo.NewEvent[int64]("notifications:delivered")
 
 func main() {
 	ui, err := fs.Sub(dist, "dist")
@@ -93,6 +99,19 @@ func setup(h *host) bool {
 		devSocket = os.Getenv("STAGE_DESKTOP_SOCKET")
 		h.devOrigin = os.Getenv("MYGO_DEV_URL")
 	}
+	h.alerts = alerts.New(alerts.Config{
+		PrefsPath:  filepath.Join(h.userData, "notifications.json"),
+		Sink:       mygoSink{},
+		Foreground: h.foreground,
+		Delivered:  func(id int64) { _ = NotificationDelivered.Broadcast(id) },
+		Logf:       log.Printf,
+	})
+	// Every ready (first start, recovery, a new server) reconnects the
+	// notification stream too.
+	onSocket := func(sock string) {
+		h.api.SetSocket(sock)
+		h.alerts.Connect(sock)
+	}
 	h.l = launch.New(launch.Config{
 		CLI:            filepath.Join(res, "bin", "stage"),
 		AppName:        appName,
@@ -100,7 +119,7 @@ func setup(h *host) bool {
 		Dev:            h.dev,
 		DevSocket:      devSocket,
 		OnChange:       func(s launch.State) { _ = StateChanged.Broadcast(s) },
-		OnSocket:       h.api.SetSocket,
+		OnSocket:       onSocket,
 		OpenAtLogin:    mygo.App.OpenAtLogin,
 		SetOpenAtLogin: mygo.App.SetOpenAtLogin,
 		Logf:           log.Printf,

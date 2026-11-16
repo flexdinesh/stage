@@ -121,13 +121,18 @@ func (s *server) getTranscriptOpening(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-// streamCursor: Last-Event-ID (browser reconnect) wins over ?after.
-func streamCursor(r *http.Request) (int, error) {
-	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
-	name := "Last-Event-ID"
-	if raw == "" {
-		raw, name = strings.TrimSpace(r.URL.Query().Get("after")), "after"
+// lastEventID is an event stream's raw resume cursor and where it came from:
+// Last-Event-ID (browser reconnect) wins over ?after. "" = none.
+func lastEventID(r *http.Request) (raw, name string) {
+	if raw := strings.TrimSpace(r.Header.Get("Last-Event-ID")); raw != "" {
+		return raw, "Last-Event-ID"
 	}
+	return strings.TrimSpace(r.URL.Query().Get("after")), "after"
+}
+
+// streamCursor: the transcript cursor (lastEventID), -1 when none.
+func streamCursor(r *http.Request) (int, error) {
+	raw, name := lastEventID(r)
 	if raw == "" {
 		return -1, nil
 	}

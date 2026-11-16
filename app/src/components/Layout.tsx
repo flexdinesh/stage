@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router";
+import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
 import { useBadge, useT3Status } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
+import { INBOX_PARAM } from "../lib/inbox.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
@@ -228,9 +229,30 @@ function Shell() {
   const [palette, setPalette] = useState(false);
   const [more, setMore] = useState(false);
   const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const inboxRequested = params.has(INBOX_PARAM);
   const contentRef = useRef<HTMLElement>(null);
   const closePalette = useCallback(() => setPalette(false), []);
   const openNewTask = useCallback(() => newTask(), [newTask]);
+
+  // `?inbox` (desktop summary notification click, cold start or an existing route) opens the drawer
+  // when it appears; the effect then drops the param so a reload or Back does not reopen it.
+  const [inboxRequestSeen, setInboxRequestSeen] = useState(false);
+  if (inboxRequested !== inboxRequestSeen) {
+    setInboxRequestSeen(inboxRequested);
+    if (inboxRequested) setInbox(true);
+  }
+  useEffect(() => {
+    if (!inboxRequested) return;
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete(INBOX_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [inboxRequested, setParams]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

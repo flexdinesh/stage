@@ -246,6 +246,7 @@ func (s *server) readNotifications(w http.ResponseWriter, r *http.Request) error
 	default:
 		return db.Invalid("upTo or groups is required")
 	}
+	s.Inbox.Signal()
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

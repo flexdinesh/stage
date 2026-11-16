@@ -1,6 +1,6 @@
 // Desktop host: the shared app (@stage/app) in the MyGo webview. /api goes over the app's bridge to the Stage
 // server's Unix socket; the shell owns the connection, links, clipboard and login startup (docs/desktop.md).
-// No service worker and no Web Push: native notifications are a separate capability.
+// No service worker and no Web Push: the Go process shows native notifications and owns the app badge.
 import { StageApp } from "@stage/app";
 import "@stage/app/index.css";
 import type { Platform } from "@stage/app/platform";
@@ -9,7 +9,8 @@ import { Desktop, events } from "./mygo.ts";
 import { desktopClipboard } from "./platform/clipboard.ts";
 import { desktopHost } from "./platform/host.ts";
 import { desktopLinks } from "./platform/links.ts";
-import type { DesktopNative } from "./platform/native.ts";
+import type { DesktopNative, NativeNotifications } from "./platform/native.ts";
+import { desktopNotifications } from "./platform/notifications.ts";
 import { desktopStorage } from "./platform/storage.ts";
 import { desktopTransport } from "./platform/transport.ts";
 
@@ -29,11 +30,24 @@ const native: DesktopNative = {
   setLoginStartup: (enabled) => Desktop.setLoginStartup(enabled),
 };
 
+const nativeNotifications: NativeNotifications = {
+  notificationState: () => Desktop.notificationState(),
+  enableNotifications: () => Desktop.enableNotifications(),
+  disableNotifications: () => Desktop.disableNotifications(),
+  testNotification: () => Desktop.testNotification(),
+  closeNotifications: (tag) => Desktop.closeNotifications(tag),
+  syncNotifications: () => Desktop.syncNotifications(),
+  openNotificationSettings: () => Desktop.openNotificationSettings(),
+  onNotificationDelivered: (listener) => events.notificationsDelivered.on(() => listener()),
+};
+
 const host = desktopHost(native);
 const platform: Platform = {
   transport: desktopTransport(),
   clipboard: desktopClipboard(native),
   links: desktopLinks(native, host.current),
+  notifications: desktopNotifications(nativeNotifications),
+  // The Go process sets the badge from the notification stream (one writer, also while the window is closed).
   attention: { setNeedsInput: () => {} },
   storage: desktopStorage(),
   host,

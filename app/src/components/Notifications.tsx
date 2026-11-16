@@ -390,7 +390,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
       return next;
     });
 
-  const note = pushFooterNote(push.data);
+  const note = pushFooterNote(push.data, notifications?.channel);
   const footer =
     note === null ? null : (
       <p className="font-mono text-meta text-muted">

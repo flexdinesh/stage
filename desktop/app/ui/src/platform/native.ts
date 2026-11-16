@@ -23,6 +23,22 @@ export interface DesktopNative {
   setLoginStartup(enabled: boolean): Promise<void>;
 }
 
+/** The Go side's native notifications (desktop/app/alerts), as the notifications adapter uses it. */
+export interface NativeNotifications {
+  /** "unsupported" | "off" | "blocked" | "on"; anything else reads as unsupported. */
+  notificationState(): Promise<string>;
+  enableNotifications(): Promise<void>;
+  disableNotifications(): Promise<void>;
+  testNotification(): Promise<void>;
+  /** Closes the notification shown for `tag` (task-12, thread-x); all of them for "". */
+  closeNotifications(tag: string): Promise<void>;
+  syncNotifications(): Promise<void>;
+  /** False when the system has no known notification settings to open. */
+  openNotificationSettings(): Promise<boolean>;
+  /** Each delivery from the server's notification stream, shown or not. Returns an unsubscribe. */
+  onNotificationDelivered(listener: () => void): () => void;
+}
+
 /** Before the shell's first answer: starting, nothing known yet. */
 export const INITIAL_STATE: HostState = {
   phase: "starting",

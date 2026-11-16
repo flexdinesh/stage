@@ -18,6 +18,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/flexdinesh/stage/desktop/app/alerts"
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
 	"github.com/flexdinesh/stage/desktop/app/nav"
@@ -32,6 +33,7 @@ var e2ePreload string
 type host struct {
 	api       *bridge.APIProxy
 	l         *launch.Launcher
+	alerts    *alerts.Service
 	dev       bool
 	devOrigin string // MYGO_DEV_URL in a development build
 
@@ -75,7 +77,16 @@ func (h *host) wire() {
 	// A second instance started with a URL fires OnSecondInstance and
 	// OnOpenURL: both show, and navigating twice to one path is harmless.
 	mygo.App.OnOpenURL(h.openURL)
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { h.quitting.Store(true) })
+	// A notification click, also the one that launched the app (macOS
+	// relaunches it from Notification Center): show its target.
+	mygo.App.OnNotificationClick(func(id string) { h.navigate(h.alerts.Target(id)) })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		h.quitting.Store(true)
+		// Quit ends native notifications; keep the cursor for the next run.
+		if err := h.alerts.Flush(); err != nil {
+			log.Printf("stage desktop: notifications: %v", err)
+		}
+	})
 	mygo.App.OnQuitCanceled(func() { h.quitting.Store(false) })
 	// With a listener, closing the last window does not quit: the app
 	// stays resident until an explicit Quit.
@@ -109,6 +120,12 @@ func (h *host) ready() {
 	page := w.Page()
 	page.OnWillNavigate(h.willNavigate)
 	page.SetWindowOpenHandler(h.openWindow)
+	// The page asks for nothing: notifications are native (never the web
+	// Notification API or Web Push), and no camera, microphone or location.
+	page.SetPermissionHandler(func(req mygo.PermissionRequest) bool {
+		log.Printf("stage desktop: denied permission %v for %s", req.Permissions, req.Origin)
+		return false
+	})
 	w.OnClose(func(e *mygo.CloseEvent) {
 		if h.quitting.Load() {
 			return
@@ -121,6 +138,7 @@ func (h *host) ready() {
 	})
 	h.win.Store(w)
 	h.startTray()
+	h.alerts.Start() // before the launcher, whose ready connects it
 	h.l.Start()
 	if runtime.GOOS == "linux" && !h.dev {
 		go h.registerScheme()
@@ -133,6 +151,21 @@ func (h *host) show() {
 		w.Restore()
 		w.Focus()
 	}
+}
+
+// foreground reports whether the main window is visible and focused: then
+// the page's toasts show new notifications, not the OS.
+func (h *host) foreground() bool {
+	w := h.win.Load()
+	return w != nil && w.IsVisible() && w.IsFocused()
+}
+
+// bundleID is the app's bundle identifier (`mygo dev` appends .dev).
+func (h *host) bundleID() string {
+	if h.dev {
+		return appIdentifier + ".dev"
+	}
+	return appIdentifier
 }
 
 // identity is the deep-link scheme: the bundled CLI's identity once read.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/flexdinesh/stage/desktop/app/alerts"
 	"github.com/flexdinesh/stage/desktop/app/launch"
 	"github.com/flexdinesh/stage/desktop/app/nav"
 )
@@ -110,3 +111,61 @@ func (d *Desktop) SetLoginStartup(ctx context.Context, on bool) error {
 // TakeNavigation returns the app path of a deep link the UI has not shown
 // yet, and forgets it; "" when there is none.
 func (d *Desktop) TakeNavigation() string { return d.h.takeNavigation() }
+
+// NotificationState is this device's native notification state:
+// "unsupported", "off", "blocked" or "on".
+func (d *Desktop) NotificationState() string {
+	if d.h.alerts == nil {
+		return string(alerts.StateUnsupported)
+	}
+	return string(d.h.alerts.State())
+}
+
+// EnableNotifications turns native notifications on and shows a
+// confirmation (on macOS the first one asks for permission).
+func (d *Desktop) EnableNotifications(ctx context.Context) error {
+	if d.h.alerts == nil {
+		return errNotRunning
+	}
+	return d.h.alerts.Enable(ctx)
+}
+
+// DisableNotifications turns native notifications off and closes shown
+// ones; the badge keeps updating.
+func (d *Desktop) DisableNotifications() error {
+	if d.h.alerts == nil {
+		return errNotRunning
+	}
+	d.h.alerts.Disable()
+	return nil
+}
+
+// TestNotification shows a test notification on this device.
+func (d *Desktop) TestNotification(ctx context.Context) error {
+	if d.h.alerts == nil {
+		return errNotRunning
+	}
+	return d.h.alerts.Test(ctx)
+}
+
+// CloseNotifications closes the shown notification with tag (task-12,
+// thread-x), or all of them for "".
+func (d *Desktop) CloseNotifications(tag string) {
+	if d.h.alerts != nil {
+		d.h.alerts.CloseShown(tag)
+	}
+}
+
+// SyncNotifications closes shown notifications whose groups were read on
+// any device.
+func (d *Desktop) SyncNotifications() {
+	if d.h.alerts != nil {
+		d.h.alerts.Sync()
+	}
+}
+
+// OpenNotificationSettings opens the OS notification settings for this
+// app; false when this system has no known place to open.
+func (d *Desktop) OpenNotificationSettings() (bool, error) {
+	return alerts.OpenSettings(d.h.bundleID(), mygo.Shell.OpenExternal)
+}

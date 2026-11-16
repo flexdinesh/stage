@@ -253,3 +253,28 @@ func T3WebURL(publicURL, raw string) (string, error) {
 	}
 	return base.String() + "/" + url.PathEscape(env) + "/" + url.PathEscape(id), nil
 }
+
+// AlertPath validates the app path a native notification click opens:
+// /tasks/<n> and /sessions/<escaped id> (each optionally with #answer),
+// /settings and /?inbox. It returns p unchanged when allowed. Unlike
+// DeepLink it keeps the #answer fragment.
+func AlertPath(p string) (string, bool) {
+	switch p {
+	case "/settings", "/?inbox":
+		return p, true
+	}
+	path, frag, hasFrag := strings.Cut(p, "#")
+	if hasFrag && frag != "answer" {
+		return "", false
+	}
+	if n, ok := strings.CutPrefix(path, "/tasks/"); ok && taskNum.MatchString(n) {
+		return p, true
+	}
+	if seg, ok := strings.CutPrefix(path, "/sessions/"); ok && seg != "" {
+		id, err := url.PathUnescape(seg)
+		if err == nil && id != "." && id != ".." && url.PathEscape(id) == seg {
+			return p, true
+		}
+	}
+	return "", false
+}

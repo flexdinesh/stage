@@ -258,3 +258,125 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 		t.Fatalf("tags after new event %s", got)
 	}
 }
+
+// NotificationKey must agree with the SQL group key for every identity kind.
+func TestNotificationKeyParity(t *testing.T) {
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), context.Background()
+	p := mustProject(t, s, ctx, "proj-1")
+	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
+	deleted := mustTask(t, s, ctx, p.ID, "Gone", nil)
+	thread, other := "ext-1", "ext-2"
+	for _, n := range []db.NewNotification{
+		{Event: db.StateNeedsInput, TaskID: &task.ID, T3ThreadID: &other, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
+		{Event: db.StateDone, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d", deleted.ID)},
+		{Event: db.StateDone, Title: "Old", URL: "/tasks/007"},
+		{Event: db.StateDone, Title: "Not a task", URL: "/tasks/7x"},
+		{Event: db.StateNeedsInput, T3ThreadID: &thread, Title: "Ext", URL: "/sessions/ext-1"},
+		{Event: db.StateFailed, Title: "No identity", URL: "/"},
+	} {
+		if _, err := s.InsertNotification(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteTask(ctx, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	latest, _, err := s.NotificationReadState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := s.ListNotificationGroups(ctx, 50, nil, latest)
+	if err != nil || len(groups) != 6 {
+		t.Fatalf("groups %+v %v", groups, err)
+	}
+	want := map[string]bool{
+		fmt.Sprintf("task:%d", task.ID): true, fmt.Sprintf("task:%d", deleted.ID): true, "task:007": true,
+		"thread:ext-1": true,
+	}
+	identityless := 0
+	for _, g := range groups {
+		if got := db.NotificationKey(g.Notification); got != g.Key {
+			t.Errorf("row %d: NotificationKey %q, SQL key %q", g.ID, got, g.Key)
+		}
+		if !want[g.Key] {
+			identityless++
+			if g.Key != fmt.Sprintf("notification:%d", g.ID) {
+				t.Errorf("identity-less key %q for row %d", g.Key, g.ID)
+			}
+		}
+	}
+	if identityless != 2 {
+		t.Fatalf("identity-less groups %d, want 2 (bad task URL, none)", identityless)
+	}
+}
+
+func TestTagForKey(t *testing.T) {
+	for key, want := range map[string]string{
+		"task:7":         "task-7",
+		"thread:ext-1":   "thread-ext-1",
+		"thread:a:b":     "thread-a:b",
+		"notification:3": "",
+		"task":           "",
+		"":               "",
+	} {
+		if got := db.TagForKey(key); got != want {
+			t.Errorf("TagForKey(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestNotificationsAfter(t *testing.T) {
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), context.Background()
+	p := mustProject(t, s, ctx, "proj-1")
+	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
+	thread := "session-2"
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, ThreadID: &thread}); err != nil {
+		t.Fatal(err)
+	}
+	stale := "session-1"
+	var ids []int64
+	for i := range 5 {
+		id, err := s.InsertNotification(ctx, db.NewNotification{Event: db.StateDone, TaskID: &task.ID, T3ThreadID: &stale,
+			Title: fmt.Sprintf("n%d", i), URL: fmt.Sprintf("/tasks/%d", task.ID)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	got := func(after int64, limit int, newest bool) []int64 {
+		t.Helper()
+		rows, err := s.NotificationsAfter(ctx, after, limit, newest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []int64{}
+		for _, n := range rows {
+			out = append(out, n.ID)
+		}
+		return out
+	}
+	if r := fmt.Sprint(got(ids[0], 2, false)); r != fmt.Sprint(ids[1:3]) {
+		t.Fatalf("oldest after %d: %s", ids[0], r)
+	}
+	if r := fmt.Sprint(got(ids[0], 2, true)); r != fmt.Sprint(ids[3:5]) {
+		t.Fatalf("newest after %d: %s", ids[0], r)
+	}
+	if r := fmt.Sprint(got(0, 10, true)); r != fmt.Sprint(ids) {
+		t.Fatalf("all: %s", r)
+	}
+	if r := got(ids[4], 10, false); len(r) != 0 {
+		t.Fatalf("after latest: %v", r)
+	}
+	rows, err := s.NotificationsAfter(ctx, ids[3], 1, false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("row: %+v %v", rows, err)
+	}
+	// The task's current thread, live state and stored fields.
+	n := rows[0]
+	if n.T3ThreadID == nil || *n.T3ThreadID != thread || n.CurrentState == nil || *n.CurrentState != db.StateNeedsInput ||
+		n.Title != "n4" || n.URL != fmt.Sprintf("/tasks/%d", task.ID) || n.ReadAt != nil || n.CreatedAt.IsZero() {
+		t.Fatalf("row %+v", n)
+	}
+}

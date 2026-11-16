@@ -167,3 +167,49 @@ func TestT3WebURL(t *testing.T) {
 		t.Error("non-http public URL: want error")
 	}
 }
+
+func TestAlertPath(t *testing.T) {
+	cases := []struct {
+		in string
+		ok bool
+	}{
+		{"/tasks/12", true},
+		{"/tasks/12#answer", true},
+		{"/tasks/0", false},
+		{"/tasks/12#other", false},
+		{"/tasks/12?x=1", false},
+		{"/tasks/12/", false},
+		{"/tasks/", false},
+		{"/sessions/abc", true},
+		{"/sessions/abc#answer", true},
+		{"/sessions/a%20b", true},
+		{"/sessions/a%2Fb", true},
+		{"/sessions/a b", false},
+		{"/sessions/a/b", false},
+		{"/sessions/a%2fb", false},
+		{"/sessions/.", false},
+		{"/sessions/..", false},
+		{"/sessions/%2E%2E", false},
+		{"/sessions/", false},
+		{"/sessions/%zz", false},
+		{"/sessions/a?x=1", false},
+		{"/sessions/abc#answer#answer", false},
+		{"/settings", true},
+		{"/settings#answer", false},
+		{"/?inbox", true},
+		{"/?inbox=1", false},
+		{"/", false},
+		{"", false},
+		{"https://example.com/tasks/1", false},
+		{"//example.com/tasks/1", false},
+		{"javascript:alert(1)", false},
+		{"mygo://localhost/tasks/1", false},
+		{"/api/attachments/1", false},
+	}
+	for _, c := range cases {
+		got, ok := AlertPath(c.in)
+		if ok != c.ok || (ok && got != c.in) || (!ok && got != "") {
+			t.Errorf("AlertPath(%q) = %q, %v; want ok %v", c.in, got, ok, c.ok)
+		}
+	}
+}

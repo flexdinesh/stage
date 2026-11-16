@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { desktopHost } from "../src/platform/host.ts";
 import { desktopLinks } from "../src/platform/links.ts";
 import { INITIAL_STATE } from "../src/platform/native.ts";
+import { desktopNotifications, toPushState } from "../src/platform/notifications.ts";
 
 function fakeNative(over = {}) {
   const stateListeners = new Set();
@@ -97,4 +98,66 @@ test("links: opens go through the shell", async () => {
   links.openApp("t3code://threads/e/t");
   await tick();
   assert.deepEqual(f.calls, [["external", "https://github.com/o/r/pull/1"], ["app", "t3code://threads/e/t"]]);
+});
+
+function fakeNotifications(over = {}) {
+  const calls = [];
+  const delivered = new Set();
+  const native = {
+    notificationState: async () => "on",
+    enableNotifications: async () => void calls.push("enable"),
+    disableNotifications: async () => void calls.push("disable"),
+    testNotification: async () => void calls.push("test"),
+    closeNotifications: async (tag) => void calls.push(["close", tag]),
+    syncNotifications: async () => void calls.push("sync"),
+    openNotificationSettings: async () => false,
+    onNotificationDelivered: (l) => (delivered.add(l), () => delivered.delete(l)),
+    ...over,
+  };
+  return { native, calls, deliver: () => delivered.forEach((l) => l()), listeners: delivered };
+}
+
+test("notifications: native channel, state names map, unknown reads as unsupported", async () => {
+  for (const [name, want] of [["on", "on"], ["off", "off"], ["blocked", "blocked"], ["unsupported", "unsupported"], ["weird", "unsupported"]]) {
+    const n = desktopNotifications(fakeNotifications({ notificationState: async () => name }).native);
+    assert.equal(n.channel, "native");
+    assert.equal(await n.state(), want);
+  }
+  assert.equal(toPushState(""), "unsupported");
+});
+
+test("notifications: controls reach the shell; closeShown() closes all with an empty tag", async () => {
+  const f = fakeNotifications();
+  const n = desktopNotifications(f.native);
+  await n.enable();
+  await n.test();
+  await n.disable();
+  await n.closeShown("task-12");
+  await n.closeShown();
+  await n.syncShown();
+  assert.deepEqual(f.calls, ["enable", "test", "disable", ["close", "task-12"], ["close", ""], "sync"]);
+  assert.equal(n.openSystemSettings === undefined ? null : await n.openSystemSettings(), false);
+});
+
+const fail = async () => {
+  throw new Error("down");
+};
+
+test("notifications: closeShown and syncShown never reject; enable errors surface", async () => {
+  const n = desktopNotifications(fakeNotifications({ closeNotifications: fail, syncNotifications: fail, enableNotifications: fail }).native);
+  await n.closeShown("task-1");
+  await n.syncShown();
+  await assert.rejects(n.enable(), /down/);
+});
+
+test("notifications: onDelivered follows the shell's event until unsubscribed", () => {
+  const f = fakeNotifications();
+  const n = desktopNotifications(f.native);
+  let count = 0;
+  const off = n.onDelivered(() => count++);
+  f.deliver();
+  off();
+  f.deliver();
+  assert.equal(count, 1);
+  assert.equal(f.listeners.size, 0);
 });

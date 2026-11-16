@@ -183,6 +183,64 @@ func TestPayload(t *testing.T) {
 	}
 }
 
+// PayloadFor builds the push from a stored row; the stream shares it.
+func TestPayloadFor(t *testing.T) {
+	task, thread, project := int64(7), "provider:session/with%id", "stage"
+	created := time.Now()
+	tests := []struct {
+		name string
+		n    db.Notification
+		want Payload
+	}{
+		{"task needs input with thread", db.Notification{ID: 1, Event: db.StateNeedsInput, TaskID: &task, T3ThreadID: &thread,
+			Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7", CreatedAt: created},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/sessions/provider:session%2Fwith%25id#answer", Tag: "task-7", Badge: 3}},
+		{"task without thread", db.Notification{ID: 2, Event: db.StateDone, TaskID: &task, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
+			Payload{Title: "Done", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
+		{"deleted task keeps its URL group", db.Notification{ID: 3, Event: db.StateFailed, T3ThreadID: &thread, Title: "Gone", URL: "/tasks/9"},
+			Payload{Title: "Failed", Body: "Gone", URL: "/sessions/provider:session%2Fwith%25id", Tag: "task-9", Badge: 3}},
+		{"external thread", db.Notification{ID: 4, Event: db.StateSettled, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &project,
+			URL: "/sessions/provider:session%2Fwith%25id"},
+			Payload{Title: "Settled", Body: "Ext · stage", URL: "/sessions/provider:session%2Fwith%25id", Tag: "thread-" + thread, Badge: 3}},
+		{"identity-less", db.Notification{ID: 5, Event: db.StateNeedsInput, Title: "Old", URL: "/"},
+			Payload{Title: "Needs input", Body: "Old", URL: "/#answer", Tag: "", Badge: 3}},
+	}
+	for _, tc := range tests {
+		if got := PayloadFor(tc.n, 3); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// handle signals the inbox hub only when it records a row.
+func TestHandleSignalsInbox(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	n.Inbox = NewHub(t.Context())
+	wake, unsub := n.Inbox.Subscribe()
+	defer unsub()
+	task := seedTask(t, store, db.StateNeedsInput)
+	signalled := func() bool {
+		select {
+		case <-wake:
+			return true
+		default:
+			return false
+		}
+	}
+	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
+	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || signalled() {
+		t.Fatalf("filtered event: rows %d err %v, want no row and no signal", len(got), err)
+	}
+	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 1 || !signalled() {
+		t.Fatalf("recorded event: rows %d err %v, want one row and a signal", len(got), err)
+	}
+}
+
 func TestSendPath(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()
