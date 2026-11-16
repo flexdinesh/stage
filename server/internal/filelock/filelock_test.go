@@ -1,6 +1,7 @@
 package filelock
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -100,4 +101,24 @@ func TestKilledOwnerReleases(t *testing.T) {
 		t.Fatalf("acquire after kill: %v", err)
 	}
 	l.Release()
+}
+
+// AcquireContext waits for a held lock until ctx ends.
+func TestAcquireContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.lock")
+	l, err := Acquire(path, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := AcquireContext(ctx, path, 0o600); !errors.Is(err, ErrLocked) {
+		t.Fatalf("held: %v", err)
+	}
+	go func() { time.Sleep(50 * time.Millisecond); l.Release() }()
+	l2, err := AcquireContext(context.Background(), path, 0o600)
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	l2.Release()
 }

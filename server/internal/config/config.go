@@ -35,33 +35,41 @@ type Config struct {
 	// label): the installation identity ("stage"), plus " dev" with
 	// STAGE_ENV=dev.
 	T3ClientName string
+	// T3Fake (T3_FAKE=1) uses the in-memory fake T3 client; T3FakeSeed
+	// (T3_FAKE_SEED=1) seeds it with demo threads.
+	T3Fake, T3FakeSeed bool
 }
 
-// Load reads the environment. listenFlags (`stage serve --listen`, each a
-// comma list), when given, override STAGE_LISTEN.
-func Load(listenFlags []string) (Config, error) {
+// Load reads the process environment. listenFlags (`stage serve
+// --listen`, each a comma list), when given, override STAGE_LISTEN.
+func Load(listenFlags []string) (Config, error) { return LoadFrom(os.Getenv, listenFlags) }
+
+// LoadFrom is Load over getenv.
+func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) {
 	cfg := Config{
-		T3URL:        env("T3_URL", "http://127.0.0.1:3773"),
-		T3AdminToken: os.Getenv("T3_ADMIN_TOKEN"),
-		PublicURL:    os.Getenv("STAGE_PUBLIC_URL"),
+		T3URL:        envOr(getenv, "T3_URL", "http://127.0.0.1:3773"),
+		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
+		PublicURL:    getenv("STAGE_PUBLIC_URL"),
 		T3ClientName: buildinfo.Identity,
+		T3Fake:       getenv("T3_FAKE") == "1",
+		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
 	}
-	cfg.T3PublicURL = env("T3_PUBLIC_URL", cfg.T3URL)
-	dev := os.Getenv("STAGE_ENV") == "dev"
+	cfg.T3PublicURL = envOr(getenv, "T3_PUBLIC_URL", cfg.T3URL)
+	dev := getenv("STAGE_ENV") == "dev"
 	if dev {
 		cfg.T3ClientName += " dev"
 	}
 	var err error
-	if cfg.Listen, err = loadListen(listenFlags); err != nil {
+	if cfg.Listen, err = loadListen(getenv, listenFlags); err != nil {
 		return Config{}, err
 	}
-	if cfg.AllowedOrigins, err = loadOrigins(os.Getenv("STAGE_ALLOWED_ORIGINS"), cfg.PublicURL); err != nil {
+	if cfg.AllowedOrigins, err = loadOrigins(getenv("STAGE_ALLOWED_ORIGINS"), cfg.PublicURL); err != nil {
 		return Config{}, err
 	}
 	// The default is only needed when STAGE_DATA_DIR is unset, or for the dev
 	// guard; one that cannot be resolved cannot be STAGE_DATA_DIR's target.
-	defaultDir, defaultErr := DefaultDataDir()
-	if v := os.Getenv("STAGE_DATA_DIR"); v != "" {
+	defaultDir, defaultErr := defaultDataDir(getenv, runtime.GOOS)
+	if v := getenv("STAGE_DATA_DIR"); v != "" {
 		if cfg.DataDir, err = filepath.Abs(v); err != nil {
 			return Config{}, fmt.Errorf("STAGE_DATA_DIR: %w", err)
 		}
@@ -76,7 +84,7 @@ func Load(listenFlags []string) (Config, error) {
 	return cfg, nil
 }
 
-func loadListen(flags []string) ([]listen.Addr, error) {
+func loadListen(getenv func(string) string, flags []string) ([]listen.Addr, error) {
 	if len(flags) > 0 {
 		addrs, err := listen.ParseList(strings.Join(flags, ","))
 		if err != nil {
@@ -84,7 +92,7 @@ func loadListen(flags []string) ([]listen.Addr, error) {
 		}
 		return addrs, nil
 	}
-	addrs, err := listen.ParseList(env("STAGE_LISTEN", listen.Default))
+	addrs, err := listen.ParseList(envOr(getenv, "STAGE_LISTEN", listen.Default))
 	if err != nil {
 		return nil, fmt.Errorf("STAGE_LISTEN: %w", err)
 	}
@@ -177,6 +185,12 @@ func DataDirFrom(getenv func(string) string) (string, error) {
 // ~/.local/share/stage. Absolute.
 func DefaultDataDir() (string, error) { return defaultDataDir(os.Getenv, runtime.GOOS) }
 
+// DataDirFor is the identity's default data dir under getenv on goos (not
+// canonicalized).
+func DataDirFor(getenv func(string) string, goos string) (string, error) {
+	return defaultDataDir(getenv, goos)
+}
+
 func defaultDataDir(getenv func(string) string, goos string) (string, error) {
 	id := buildinfo.Identity
 	if x := getenv("XDG_DATA_HOME"); x != "" {
@@ -216,6 +230,11 @@ func DefaultSocket(getenv func(string) string, dataDir string) (string, error) {
 	return defaultSocket(getenv, runtime.GOOS, dataDir)
 }
 
+// DefaultSocketFor is DefaultSocket for goos.
+func DefaultSocketFor(getenv func(string) string, goos, dataDir string) (string, error) {
+	return defaultSocket(getenv, goos, dataDir)
+}
+
 func defaultSocket(getenv func(string) string, goos, dataDir string) (string, error) {
 	dataDir = Canonical(dataDir)
 	var shared string
@@ -237,14 +256,14 @@ func defaultSocket(getenv func(string) string, goos, dataDir string) (string, er
 		}
 		p = filepath.Join(shared, name)
 	}
-	if err := listen.CheckSocketPath(p); err != nil {
+	if err := listen.CheckSocketPathFor(goos, p); err != nil {
 		return "", fmt.Errorf("default socket: %w", err)
 	}
 	return p, nil
 }
 
-func env(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
+func envOr(getenv func(string) string, key, fallback string) string {
+	if v := getenv(key); v != "" {
 		return v
 	}
 	return fallback

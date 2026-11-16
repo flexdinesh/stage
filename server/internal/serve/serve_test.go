@@ -486,7 +486,7 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			os.Exit(2)
 		}
-		c := config.Config{Listen: addrs, DataDir: data, T3ClientName: "stage"}
+		c := config.Config{Listen: addrs, DataDir: data, T3ClientName: "stage", T3Fake: os.Getenv("T3_FAKE") == "1"}
 		_ = serve.Run(context.Background(), serve.Options{Config: c, Logger: quiet(), Ready: func(serve.Ready) { fmt.Println("ready") }})
 		os.Exit(1)
 	}

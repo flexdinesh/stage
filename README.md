@@ -67,6 +67,18 @@ Open `http://localhost:7380`. The binary is static (pure Go SQLite, no cgo). It 
 
 The same binary is the agent CLI: `stage` with no arguments or `serve` runs the server; any other subcommand is the CLI.
 
+### As a per-user service (Linux systemd, macOS launchd)
+
+```sh
+stage service start      # register + start; creates ~/.config/stage/service.env (macOS: ~/Library/Application Support/stage/)
+stage service status     # state, Stage health and T3 reported separately
+stage service logs -f
+stage service enable     # optional: start at login (separate from running now)
+stage service stop | restart | disable | uninstall
+```
+
+The OS supervises `stage serve --managed`: restarts with backoff, logs (journald / `~/Library/Logs/stage`), optional login startup. It listens on the private Unix socket only (add TCP in `service.env`: `STAGE_LISTEN=unix,127.0.0.1:7380`), uses the default data dir, and reads its config only from `service.env`, never the shell. It cannot share a data dir with a foreground `stage serve`. Details: [docs/service.md](docs/service.md).
+
 ## Configuration
 
 Environment variables. `.env.example` documents each one.

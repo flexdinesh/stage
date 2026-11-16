@@ -25,7 +25,7 @@ values keep their old meaning. Empty items and duplicates are errors.
 | Profile | Listeners |
 | --- | --- |
 | Foreground / compose (unchanged) | `127.0.0.1:7380` (compose: `0.0.0.0:7380` inside the container) |
-| Desktop-managed service | `stage serve --listen unix` (TCP is opt-in: `--listen unix,127.0.0.1:7380`) |
+| Per-user service ([service.md](service.md)) | `stage serve --managed`: listeners from `service.env` `STAGE_LISTEN`, default `unix`, which is required (TCP is opt-in: `unix,127.0.0.1:7380`) |
 
 ## Identity and paths
 
@@ -45,6 +45,8 @@ packaging task picks the names. The identity derives:
 | Shared socket dir | Linux: `$XDG_RUNTIME_DIR/<id>/`. macOS: `~/Library/Application Support/<id>/run/`. |
 | Default socket | `<shared>/stage.sock` for the identity's default data dir; `<shared>/stage-<8 hex of sha256(data dir)>.sock` for any other data dir. On Linux without `XDG_RUNTIME_DIR`: `<data dir>/run/stage.sock`. |
 | T3 client name | `<id>`, plus ` dev` with `STAGE_ENV=dev` |
+| Service unit / label | `<id>.service`; launchd label `buildinfo.ServiceLabel`, default `io.github.flexdinesh.<id>` |
+| Service config, definition, logs | see [service.md](service.md#paths-per-identity) |
 
 The data dir is canonical: symlinks are resolved after the directory is
 created, so one directory has one identity however it is spelled.
@@ -71,12 +73,12 @@ file nor a socket probe is ever the proof.
 
 | Lock | Guards | Holder record |
 | --- | --- | --- |
-| `<data dir>/stage.lock` | One server per data dir, on any listen addresses: no duplicate scheduler or sync on one `stage.db`. | JSON: pid, instanceId, identity, version, commit, startedAt, listener URLs. Informational only (used in error messages). |
+| `<data dir>/stage.lock` | One server per data dir, on any listen addresses: no duplicate scheduler or sync on one `stage.db`. | JSON: pid, instanceId, identity, version, commit, startedAt, listener URLs, and for `--managed` `managed`, `manager` (`systemd`/`launchd`) and `service` (unit or label). Informational (error messages, `stage service status`). |
 | `<socket>.lock` | One server per socket path. A live lock also tells clients a server owns the socket. | none |
 
 Startup order:
 
-1. **Lock the data dir.** If it is held, exit at once with `data dir … is in use by another stage server (pid N, version V, listening on …)`. The server does not wait. It also starts nothing and binds nothing.
+1. **Lock the data dir.** If it is held, exit at once (status 75) with `data dir … is in use by another stage server (pid N, version V, listening on …)`, plus a hint to run `stage service stop` when the holder is the managed service. The server does not wait. It also starts nothing and binds nothing.
 2. **Open every listener in order.** For a socket, take its lock. Under the lock, an existing socket file that refuses connections is stale (its owner died) and is replaced. A regular file is refused. So is a socket that answers (a server predating the lock) or one that cannot be probed. If any bind fails, the listeners already opened are closed, their sockets removed and their locks released. The database has not been touched yet.
 3. Record the holder in `stage.lock`.
 4. Open and migrate the database, start T3, recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
@@ -104,16 +106,30 @@ On SIGINT or SIGTERM:
 
 1. Send `STOPPING=1` to systemd.
 2. Background loops and transcript (SSE) streams end, so open streams do not delay shutdown.
-3. The HTTP server stops accepting connections and drains in-flight requests for up to 100 s. In-flight launches are bounded at 90 s. Service stop timeouts (compose `stop_grace_period: 2m`) must exceed 100 s.
+3. The HTTP server stops accepting connections and drains in-flight requests for up to 100 s. In-flight launches are bounded at 90 s. Service stop timeouts must exceed 100 s: compose `stop_grace_period: 2m`, systemd `TimeoutStopSec=110s`, launchd `ExitTimeOut 110`.
 4. T3 and the database close, sockets are removed and their locks released.
 5. The data-dir lock is released last.
 
 An explicit desktop Quit does not stop the server.
 
+## Exit status
+
+| Status | Meaning |
+| --- | --- |
+| 0 | clean shutdown (SIGINT/SIGTERM) |
+| 1 | any other failure (bind error, database, shutdown timeout) |
+| 2 | bad command line (for example `--managed` with `--listen`) |
+| 75 | the data dir is held by another server |
+| 78 | invalid configuration (`STAGE_*`/`T3_*` values, `service.env`, socket path) |
+
+systemd does not restart on 75 or 78 (`RestartPreventExitStatus`). launchd
+cannot exclude exit codes, so a `--managed` server on macOS logs the reason
+and exits 0 for those two.
+
 ## Readiness and discovery
 
 - **systemd:** with `NOTIFY_SOCKET` set (`Type=notify`), the server sends `READY=1` once every listener serves and `STOPPING=1` when shutdown begins. Without it, nothing is sent (foreground, launchd).
-- **Polling:** connections that arrive during startup wait in the listen backlog until serving starts. `stage status --wait DUR` polls `/api/health` until it answers 200.
+- **Polling:** connections that arrive during startup wait in the listen backlog until serving starts. `stage status --wait DUR` polls `/api/health` until it answers 200. `stage service start --wait DUR` waits for the service the same way and also checks that the data-dir holder is the service's own process.
 - **Client resolution** (CLI, `stage mcp`, and `stage status`):
   1. `--url`
   2. `STAGE_URL`
@@ -121,6 +137,9 @@ An explicit desktop Quit does not stop the server.
   4. `http://127.0.0.1:7380`
 
   If both a socket service and a TCP server are running, the socket wins.
+  Resolution is read-only: no agent command starts a server.
+- **`stage service`** ignores `--url`/`STAGE_URL`: it targets this
+  installation's service and its socket only ([service.md](service.md)).
 - **`stage setup mcp`** passes `STAGE_URL` to the stdio server only when one was given explicitly; otherwise the stdio server resolves the server itself. `--http` needs an http(s) URL; if the server is only on a socket, pass `--url`.
 
 ## Health and version

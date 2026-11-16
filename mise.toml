@@ -58,8 +58,12 @@ description = "Everything CI-like: go vet + go test, app/web install + test/type
 depends = ["check:go", "check:web", "check:fixture"]
 
 [tasks."check:go"]
-description = "go vet + go test"
-run = "cd server && go vet ./... && go test ./..."
+description = "go vet (with and without the smoke tag) + go test"
+run = "cd server && go vet ./... && go vet -tags smoke ./... && go test ./..."
+
+[tasks."service:smoke"]
+description = "Real user-service smoke check (Linux systemd --user) with the isolated stage-svctest identity; never the installed service"
+run = "cd server && STAGE_SERVICE_SMOKE=1 go test -tags smoke -count=1 -v -timeout 10m -run '^TestSmoke$' ./internal/service"
 
 [tasks."check:web"]
 description = "Workspace install (frozen lockfile) + app and web host test/typecheck/lint"
