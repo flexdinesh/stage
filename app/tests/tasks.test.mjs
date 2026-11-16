@@ -2,36 +2,35 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeApi } from "./fake-transport.mjs";
 import { batchPath } from "../src/lib/sessions.ts";
-import { batchSize, canReorder, canSelectForOrder, chainAction, chainProgress, moveItem } from "../src/lib/tasks.ts";
+import { batchSize, canStart, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
-  id, title: `t${id}`, state: "backlog", afterTaskId: null, afterThreadId: null, afterThreadTitle: null, startAt: null, ...extra,
+  id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
 });
 
-test("only backlog tasks can be picked to link in order", () => {
-  assert.equal(canSelectForOrder(task(1)), true);
-  assert.equal(canSelectForOrder(task(1, { afterThreadId: "plan" })), true); // its session wait is replaced or kept as head
-  for (const state of ["running", "needs_input", "done", "settled", "failed"]) assert.equal(canSelectForOrder(task(1, { state })), false);
+const tree = (id) => ({ id, title: `tree ${id}`, startMode: "auto" });
+
+test("a task waits only while blocked on its needs", () => {
+  assert.equal(isWaiting(task(1, { needs: [3], readiness: "blocked" })), true);
+  // Ready (needs settled, manual) or outside a tree: not waiting.
+  assert.equal(isWaiting(task(1, { needs: [3], readiness: "ready" })), false);
+  assert.equal(isWaiting(task(1)), false);
+  assert.equal(isWaiting(task(1, { state: "running", needs: [3] })), false);
 });
 
-test("a chain is reorderable only while every step is backlog", () => {
-  assert.equal(canReorder([task(1), task(2, { afterTaskId: 1 })]), true);
-  assert.equal(canReorder([task(1, { state: "running" }), task(2, { afterTaskId: 1 })]), false);
-  assert.equal(canReorder([task(1)]), false);
+test("wait target lists the needs", () => {
+  assert.equal(waitTarget(task(1, { needs: [12] })), "#12");
+  assert.equal(waitTarget(task(1, { needs: [3, 5] })), "#3, #5");
+  assert.equal(waitTarget(task(1)), "");
 });
 
-test("Start chain follows the head: start, start now (timed), confirm unlink (waiting), none (ran)", () => {
-  assert.equal(chainAction(task(1)), "start");
-  assert.equal(chainAction(task(1, { startAt: "2026-11-15T02:00:00Z" })), "start_now");
-  assert.equal(chainAction(task(1, { afterThreadId: "plan" })), "confirm");
-  assert.equal(chainAction(task(1, { afterTaskId: 9 })), "confirm");
-  assert.equal(chainAction(task(1, { state: "running" })), "none");
-  assert.equal(chainAction(task(1, { state: "failed" })), "none");
-});
-
-test("chain progress counts settled steps", () => {
-  assert.equal(chainProgress([task(1), task(2)]), null);
-  assert.equal(chainProgress([task(1, { state: "settled" }), task(2, { state: "running" }), task(3)]), "1 of 3 settled");
+test("start is offered for startable states, blocked included, never for an adopted session", () => {
+  assert.equal(canStart(task(1)), true);
+  assert.equal(canStart(task(1, { needs: [3], readiness: "blocked" })), true);
+  assert.equal(canStart(task(1, { state: "failed" })), true);
+  assert.equal(canStart(task(1, { state: "running" })), false);
+  assert.equal(canStart(task(1, { adopted: true })), false);
+  assert.equal(canStart(task(1, { adopted: true, state: "failed" })), false);
 });
 
 test("moveItem moves one item and clamps at the ends", () => {
@@ -41,20 +40,34 @@ test("moveItem moves one item and clamps at the ends", () => {
   assert.deepEqual(moveItem([1, 2, 3], 2, 1), [1, 2, 3]);
 });
 
-test("batch size counts chains and independent tasks", () => {
-  assert.equal(batchSize({ chains: [[task(1), task(2)], [task(3), task(4)]], independent: [task(5)] }), 5);
-  assert.equal(batchSize({ chains: [], independent: [] }), 0);
+test("batch size counts tree members and independent tasks", () => {
+  assert.equal(batchSize({ trees: [{ tree: tree(1), tasks: [task(1), task(2)] }, { tree: tree(3), tasks: [task(3), task(4)] }], independent: [task(5)] }), 5);
+  assert.equal(batchSize({ trees: [], independent: [] }), 0);
 });
 
-test("HTTP contract: order posts ids in run order; batch links anchor the session panel", async () => {
-  let call;
+test("HTTP contract: needs, trees and adopt calls; batch links anchor the session panel", async () => {
+  const calls = [];
   const { api } = fakeApi(async (path, options) => {
-    call = { path, method: options.method, body: JSON.parse(options.body) };
-    return Response.json({ tasks: [] });
+    calls.push({ path: new URL(path, "http://stage.test").pathname + new URL(path, "http://stage.test").search, method: options.method ?? "GET", body: options.body === undefined ? undefined : JSON.parse(options.body) });
+    return Response.json({});
   });
-  await api.orderTasks([7, 3, 5]);
-  assert.equal(new URL(call.path, "http://stage.test").pathname, "/tasks/order");
-  assert.equal(call.method, "POST");
-  assert.deepEqual(call.body, { taskIds: [7, 3, 5] });
+  await api.setNeeds(7, [3, 5]);
+  await api.trees({ all: true, project: 2 });
+  await api.createTree({ title: "T", tasks: [{ taskId: 3 }, { taskId: 7, needs: [3] }] });
+  await api.updateTree(4, { startMode: "manual" });
+  await api.addToTree(4, 9);
+  await api.addToTree(4, 9, [7]);
+  await api.startTree(4);
+  await api.adoptThread("a/b", { title: "Plan" });
+  assert.deepEqual(calls, [
+    { path: "/tasks/7/needs", method: "PUT", body: { needs: [3, 5] } },
+    { path: "/trees?all=1&project=2", method: "GET", body: undefined },
+    { path: "/trees", method: "POST", body: { title: "T", tasks: [{ taskId: 3 }, { taskId: 7, needs: [3] }] } },
+    { path: "/trees/4", method: "PATCH", body: { startMode: "manual" } },
+    { path: "/trees/4/tasks", method: "POST", body: { taskId: 9 } },
+    { path: "/trees/4/tasks", method: "POST", body: { taskId: 9, needs: [7] } },
+    { path: "/trees/4/start", method: "POST", body: undefined },
+    { path: "/threads/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
+  ]);
   assert.equal(batchPath("a/b"), "/sessions/a%2Fb#created-tasks");
 });

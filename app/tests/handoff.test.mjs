@@ -2,30 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { handoffHint, handoffSource, handoffSummary, pendingHandoffNote, recordedSource } from "../src/lib/handoff.ts";
 
-const task = (extra = {}) => ({ state: "backlog", handoff: true, afterTaskId: null, afterThreadId: null, afterThreadTitle: null, ...extra });
+const task = (extra = {}) => ({ state: "backlog", handoff: true, needs: [], ...extra });
 
-test("handoff source names the predecessor task, else the session title, else its id", () => {
-  assert.equal(handoffSource(task({ afterTaskId: 12 })), "#12");
-  assert.equal(handoffSource(task({ afterThreadId: "th-1", afterThreadTitle: "Plan auth" })), "Plan auth");
-  assert.equal(handoffSource(task({ afterThreadId: "th-1" })), "th-1");
+test("handoff source lists the needs, or null without any", () => {
+  assert.equal(handoffSource(task({ needs: [12] })), "#12");
+  assert.equal(handoffSource(task({ needs: [3, 5] })), "#3, #5");
   assert.equal(handoffSource(task()), null);
 });
 
 test("hint names whose context is appended", () => {
-  assert.equal(handoffHint({ afterTaskId: 12, afterThreadId: null }), "Appends #12's final reply, PRs, branch and thread link at launch.");
-  assert.equal(handoffHint({ afterTaskId: null, afterThreadId: "th-1" }), "Appends the session's final reply, PRs, branch and thread link at launch.");
-  assert.equal(handoffHint({ afterTaskId: null, afterThreadId: null }), "Appends the predecessor's final reply, PRs, branch and thread link at launch.");
+  assert.equal(handoffHint({ needs: [12] }), "Appends #12's final reply, PRs, branch and thread link at launch.");
+  assert.equal(handoffHint({ needs: [3, 5] }), "Appends each need's final reply, PRs, branch and thread link at launch.");
+  assert.equal(handoffHint({ needs: [] }), "Appends each need's final reply, PRs, branch and thread link at launch.");
 });
 
-test("backlog note shows only for a waiting backlog task with handoff on", () => {
-  assert.equal(pendingHandoffNote(task({ afterTaskId: 12 })), "+ on launch: handoff from #12 (final reply, PRs, branch, thread link)");
-  assert.equal(
-    pendingHandoffNote(task({ afterThreadId: "th-1", afterThreadTitle: "Plan auth" })),
-    "+ on launch: handoff from Plan auth (final reply, PRs, branch, thread link)",
-  );
+test("backlog note shows only for a backlog task with needs and handoff on", () => {
+  assert.equal(pendingHandoffNote(task({ needs: [12] })), "+ on launch: handoff from #12 (final reply, PRs, branch, thread link)");
+  assert.equal(pendingHandoffNote(task({ needs: [3, 5] })), "+ on launch: handoff from #3, #5 (final reply, PRs, branch, thread link)");
   assert.equal(pendingHandoffNote(task()), null);
-  assert.equal(pendingHandoffNote(task({ afterTaskId: 12, handoff: false })), null);
-  assert.equal(pendingHandoffNote(task({ afterTaskId: 12, state: "running" })), null);
+  assert.equal(pendingHandoffNote(task({ needs: [12], handoff: false })), null);
+  assert.equal(pendingHandoffNote(task({ needs: [12], state: "running" })), null);
 });
 
 test("recorded source prefers the task number, then the title, then the thread id", () => {

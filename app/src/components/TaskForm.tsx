@@ -34,25 +34,23 @@ import {
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
 import { choiceToWorkspace, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
-import { isFinal, isFullyEditable } from "../lib/tasks.ts";
+import { isFullyEditable } from "../lib/tasks.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
-import { TaskPicker, useLinkCandidates } from "./Sequence.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea, errorText } from "./ui.tsx";
 
-/** How a saved task starts: right away, parked, at a time, after another task, or as a recurring schedule. */
-export const START_MODES = ["now", "backlog", "at", "after", "repeat"] as const;
+/** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
+export const START_MODES = ["now", "backlog", "at", "repeat"] as const;
 export type StartMode = (typeof START_MODES)[number];
 
 const START_OPTIONS: Record<StartMode, { value: StartMode; label: string; short: string }> = {
   now: { value: "now", label: "Now", short: "Now" },
   backlog: { value: "backlog", label: "Backlog", short: "Backlog" },
   at: { value: "at", label: "At time", short: "At" },
-  after: { value: "after", label: "After task", short: "After" },
   repeat: { value: "repeat", label: "Repeat", short: "Repeat" },
 };
 
@@ -72,18 +70,14 @@ interface FormState {
   prompt: string;
   config: ModelConfig;
   interactionMode: InteractionMode;
-  /** root, worktree from baseRef, or worktree from the predecessor's branch (baseRef the fallback). */
+  /** root, worktree from baseRef, or worktree from a need's branch (baseRef the fallback). */
   workspaceType: WorkspaceChoice;
   baseRef: string;
   branch: string;
   tags: string;
   notes: string;
   mode: StartMode;
-  /** Runs-after predecessor id ("" none). */
-  afterTaskId: string;
-  /** Follower id ("" none). */
-  nextTaskId: string;
-  /** Append the predecessor's handoff at launch. */
+  /** Append each need's handoff at launch (a task with needs). */
   handoff: boolean;
   /** One-shot wall time "YYYY-MM-DDTHH:mm" in tz. */
   startLocal: string;
@@ -120,7 +114,7 @@ type Template = Pick<
   | "notes"
 >;
 
-function fromTemplate(t: Template): Omit<FormState, "mode" | "afterTaskId" | "nextTaskId" | "handoff" | "startLocal" | "repeat" | "tz"> {
+function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "startLocal" | "repeat" | "tz"> {
   return {
     projectId: String(t.projectId),
     title: t.title,
@@ -148,20 +142,18 @@ function initialState(
   defaults: ModelDefaults | undefined,
 ): FormState {
   const tz = browserTimeZone();
-  const timing = { afterTaskId: "", nextTaskId: "", handoff: true, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
+  const timing = { handoff: true, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
   if (schedule !== undefined) {
     return { ...fromTemplate(schedule), ...timing, mode: "repeat", repeat: parseCron(schedule.cron), tz: schedule.tz };
   }
   if (task !== undefined) {
     const startTz = task.startTz ?? tz;
     // Start timing is a backlog choice; other states keep "backlog" so it never drives the label or validation.
-    const mode: StartMode = task.state !== "backlog" ? "backlog" : task.startAt !== null ? "at" : task.afterTaskId !== null ? "after" : "backlog";
+    const mode: StartMode = task.state === "backlog" && task.startAt !== null ? "at" : "backlog";
     return {
       ...fromTemplate(task),
       ...timing,
       mode,
-      afterTaskId: task.afterTaskId === null ? "" : String(task.afterTaskId),
-      nextTaskId: task.nextTaskId === null ? "" : String(task.nextTaskId),
       handoff: task.handoff,
       startLocal: task.startAt === null ? defaultStartLocal(startTz) : toLocalInput(task.startAt, startTz),
       tz: startTz,
@@ -245,19 +237,15 @@ function TaskFormDrawer({
   const invalidate = useInvalidateWork();
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments ?? schedule?.attachments);
-  const candidates = useLinkCandidates(task);
   const isNew = task === undefined && schedule === undefined;
-  // Start options: all for a new task, timing only for a backlog task, none otherwise (or for a schedule).
-  const modes: readonly StartMode[] = isNew ? START_MODES : task !== undefined && full ? ["backlog", "at", "after"] : [];
+  // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
+  const needs = task?.needs ?? [];
+  const modes: readonly StartMode[] = isNew ? START_MODES : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
   const mode = s.mode;
-  // Then run: any task that can still gate (not settled).
-  const canLinkAfter = task !== undefined && !isFinal(task);
-  const after = mode === "after" && s.afterTaskId !== "" ? Number(s.afterTaskId) : null;
-  // The predecessor a worktree can stack on: the picked Runs after task, or (editing) the session it waits on.
-  const predName = predecessorName({
-    afterTaskId: after,
-    afterThreadId: mode === "backlog" && task !== undefined ? task.afterThreadId : null,
-  });
+  // The need a worktree can stack on (editing a task with needs); baseTaskId is kept from the task.
+  const taskWs = task?.workspace;
+  const baseTaskId = taskWs?.type === "worktree" ? (taskWs.baseTaskId ?? null) : null;
+  const predName = task === undefined ? null : predecessorName(task);
   const wsChoice = effectiveChoice(s.workspaceType, predName);
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
 
@@ -287,7 +275,7 @@ function TaskFormDrawer({
       modelOptions: s.config.modelOptions,
       runtimeMode: s.config.runtimeMode,
       interactionMode: s.interactionMode,
-      workspace: choiceToWorkspace(wsChoice, s.baseRef, s.branch),
+      workspace: choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId),
       tags: parseTags(s.tags),
       notes: s.notes,
     };
@@ -305,8 +293,7 @@ function TaskFormDrawer({
         const tags = parseTags(s.tags);
         const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags, notes: s.notes };
         if (full) {
-          if (after !== task.afterTaskId) body.afterTaskId = after;
-          if (mode === "after" && s.handoff !== task.handoff) body.handoff = s.handoff;
+          if (needs.length > 0 && s.handoff !== task.handoff) body.handoff = s.handoff;
           if (timed !== null) {
             body.startLocal = timed.startLocal;
             body.startTz = timed.startTz;
@@ -315,13 +302,12 @@ function TaskFormDrawer({
             body.startTz = null;
           }
         }
-        const saved = await api.updateTask(task.id, body);
-        return { kind: "task", task: await relinkNext(task, saved) };
+        return { kind: "task", task: await api.updateTask(task.id, body) };
       }
       const body: CreateTaskRequest = {
         ...template(),
         ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
-        ...(after !== null ? { afterTaskId: after, handoff: s.handoff } : timed !== null ? timed : { start: mode === "now" }),
+        ...(timed !== null ? timed : { start: mode === "now" }),
       };
       return { kind: "task", task: await api.createTask(body) };
     },
@@ -331,15 +317,6 @@ function TaskFormDrawer({
       onClose();
     },
   });
-
-  // "Then run" edits the follower's link: unlink the old one, link the new one.
-  async function relinkNext(self: Task, saved: Task): Promise<Task> {
-    const next = s.nextTaskId === "" ? null : Number(s.nextTaskId);
-    if (!canLinkAfter || next === self.nextTaskId) return saved;
-    if (self.nextTaskId !== null) await api.updateTask(self.nextTaskId, { afterTaskId: null });
-    if (next !== null) await api.updateTask(next, { afterTaskId: self.id });
-    return saved;
-  }
 
   const missing = [
     s.projectId === "" && "project",
@@ -351,7 +328,6 @@ function TaskFormDrawer({
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
     mode === "at" && startMs === null && "start time",
     startPast && "a future start time",
-    mode === "after" && after === null && "task to run after",
     mode === "repeat" && cron === "" && "cron",
     previewError !== null && "a valid schedule",
   ].filter((m) => m !== false);
@@ -375,13 +351,11 @@ function TaskFormDrawer({
       ? "Save schedule"
       : mode === "at" && startLabel !== null
         ? `Save · starts ${startLabel}`
-        : mode === "after" && after !== null
-          ? `Save · runs after #${after}`
-          : task !== undefined
-            ? "Save"
-            : mode === "backlog"
-              ? "Save to backlog"
-              : "Save & start";
+        : task !== undefined
+          ? "Save"
+          : mode === "backlog"
+            ? "Save to backlog"
+            : "Save & start";
 
   const footer = (
     <>
@@ -468,7 +442,7 @@ function TaskFormDrawer({
             <>
               <Field
                 label={wsChoice === "predecessor" ? "Fallback base ref" : "Base ref"}
-                hint={wsChoice === "predecessor" ? `Used when ${predName ?? "the predecessor"} has no usable branch.` : undefined}
+                hint={wsChoice === "predecessor" ? `Used when ${predName ?? "a need"} has no usable branch.` : undefined}
               >
                 {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
               </Field>
@@ -494,25 +468,8 @@ function TaskFormDrawer({
         {mode === "at" && modes.length > 0 ? (
           <StartAtFields s={s} set={set} startMs={startMs} past={startPast} now={now} />
         ) : null}
-        {mode === "after" && modes.length > 0 ? (
-          <div className="flex min-w-0 flex-col gap-2">
-            <Field label="Runs after" hint={after === null ? "Starts when that task settles in T3." : "Saved waiting; starts when that task settles in T3."}>
-              {(id) => (
-                <TaskPicker
-                  id={id}
-                  value={s.afterTaskId}
-                  onChange={(afterTaskId) => set({ afterTaskId })}
-                  options={candidates.before}
-                  none="Pick a task…"
-                />
-              )}
-            </Field>
-            <HandoffToggle
-              checked={s.handoff}
-              onChange={(handoff) => set({ handoff })}
-              hint={handoffHint({ afterTaskId: after, afterThreadId: null })}
-            />
-          </div>
+        {task !== undefined && full && needs.length > 0 ? (
+          <HandoffToggle checked={s.handoff} onChange={(handoff) => set({ handoff })} hint={handoffHint(task)} />
         ) : null}
         {mode === "repeat" ? (
           <RepeatFields
@@ -523,19 +480,6 @@ function TaskFormDrawer({
             loading={preview.isFetching || (previewStale && previewInput !== null)}
             error={previewError}
           />
-        ) : null}
-        {canLinkAfter ? (
-          <Field label="Then run" hint="A backlog task that starts when this one settles.">
-            {(id) => (
-              <TaskPicker
-                id={id}
-                value={s.nextTaskId}
-                onChange={(nextTaskId) => set({ nextTaskId })}
-                options={candidates.after}
-                none="Nothing"
-              />
-            )}
-          </Field>
         ) : null}
         <Field
           label="Tags"

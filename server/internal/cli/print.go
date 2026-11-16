@@ -113,8 +113,21 @@ func printTask(w io.Writer, t client.Task) {
 	case t.Workspace.Type == "worktree":
 		fmt.Fprintf(w, "  worktree %s (branch %s)\n", t.Workspace.BaseRef, orDash(t.Workspace.Branch))
 	}
+	if t.TreeID != nil {
+		mode := "-"
+		if t.EffectiveStartMode != nil {
+			mode = string(*t.EffectiveStartMode)
+		}
+		fmt.Fprintf(w, "  tree     %d %s (start %s)\n", *t.TreeID, orDash(t.TreeTitle), mode)
+	}
 	if s := waitsOn(t.Needs, t.StartAt); s != "-" {
 		fmt.Fprintf(w, "  waits on %s\n", s)
+	}
+	if t.Readiness != nil {
+		fmt.Fprintf(w, "  readiness %s\n", *t.Readiness)
+	}
+	if t.Adopted {
+		fmt.Fprintln(w, "  adopted  tracks an existing session (stage never starts it)")
 	}
 	if t.OriginThreadID != nil {
 		fmt.Fprintf(w, "  created by session %s %s\n", *t.OriginThreadID, orDash(t.OriginThreadTitle))
@@ -229,6 +242,81 @@ func printLaunchBase(w io.Writer, b *db.LaunchBase) {
 		reason = *b.Reason
 	}
 	fmt.Fprintf(w, "  base     %s (fallback: %s)\n", b.BaseRef, reason)
+}
+
+func printTreeRows(w io.Writer, res agenttools.TreesOut) {
+	if len(res.Trees) == 0 {
+		fmt.Fprintln(w, "no trees")
+		return
+	}
+	table(w, "ID\tMODE\tTASKS\tLEVELS\tSTATES\tPROJECTS\tTITLE", func(tw io.Writer) {
+		for _, t := range res.Trees {
+			fmt.Fprintf(tw, "%d\t%s\t%d\t%d\t%s\t%s\t%s\n", t.ID, t.StartMode, t.Tasks, t.Levels, stateCounts(t.States),
+				strings.Join(t.Projects, ","), t.Title)
+		}
+	})
+}
+
+// stateCounts is "running 1, ready 2" in lifecycle order.
+func stateCounts(m map[string]int) string {
+	var parts []string
+	for _, k := range []string{"needs_input", "ready", "running", "launching", "blocked", "backlog", "done", "failed", "interrupted", "cancelled", "settled"} {
+		if n := m[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func printAnyTree(w io.Writer, v any) {
+	if t, ok := v.(client.TreeDetail); ok {
+		printTree(w, t)
+		return
+	}
+	fmt.Fprintf(w, "%v\n", v)
+}
+
+// printTree prints a tree's levels (roots first): each member's state, id,
+// title, needs and readiness.
+func printTree(w io.Writer, t client.TreeDetail) {
+	fmt.Fprintf(w, "tree %d  %s  (%s)  %d tasks, %d levels\n", t.ID, t.Title, t.StartMode, len(t.Tasks), len(t.Levels))
+	byID := make(map[int64]client.Task, len(t.Tasks))
+	for _, m := range t.Tasks {
+		byID[m.ID] = m
+	}
+	table(w, "  LEVEL\tID\tSTATE\tTITLE\tNEEDS\tREADINESS", func(tw io.Writer) {
+		for lvl, ids := range t.Levels {
+			for _, id := range ids {
+				m, ok := byID[id]
+				if !ok {
+					continue
+				}
+				needs, ready := "-", "-"
+				if len(m.Needs) > 0 {
+					needs = needLabels(m.Needs)
+				}
+				if m.Readiness != nil {
+					ready = string(*m.Readiness)
+				}
+				fmt.Fprintf(tw, "  %d\t#%d\t%s\t%s\t%s\t%s\n", lvl, m.ID, m.State, m.Title, needs, ready)
+			}
+		}
+	})
+}
+
+func printTreeStart(w io.Writer, res client.TreeStart) {
+	if len(res.Started) == 0 && len(res.Errors) == 0 {
+		fmt.Fprintln(w, "no ready tasks")
+	}
+	for _, t := range res.Started {
+		fmt.Fprintf(w, "started #%d [%s] %s\n", t.ID, t.State, t.Title)
+	}
+	for _, e := range res.Errors {
+		fmt.Fprintf(w, "failed  #%d: %s\n", e.TaskID, e.Error)
+	}
 }
 
 func printSchedules(w io.Writer, ss []db.Schedule) {

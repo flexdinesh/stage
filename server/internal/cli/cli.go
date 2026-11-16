@@ -1,4 +1,4 @@
-// Package cli is the stage command line: task, schedule and session
+// Package cli is the stage command line: task, tree, schedule and session
 // commands over the REST API (agenttools operations), the stdio MCP server
 // and agent setup helpers. `stage` with no args (or `serve`) runs the
 // server instead (cmd/stage).
@@ -124,12 +124,22 @@ Usage:
   stage models ls
   stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--limit N]
   stage task show ID
-  stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me]
+  stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
+                   [--start-mode auto|manual|inherit] [--base-task ID]
                    [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start] [--handoff=false]
   stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
-  stage task rm|start|stop|dup ID
+                   [--start-mode auto|manual|inherit] [--base-task ID]
+  stage task needs ID [NEED...]       replace a backlog task's needs (none clears them)
+  stage task rm|start|stop|dup ID     start on a blocked task starts it early (needs kept)
   stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
+  stage tree ls [--all] [--project P]
+  stage tree show ID                  levels, states, needs, readiness
+  stage tree new --title T [--start-mode auto|manual] ID[:NEED,..]...
+  stage tree add TREE_ID TASK_ID [--needs ID,..]   a task in another tree moves
+  stage tree rm TASK_ID               take a task out of its tree (dependents take its needs)
+  stage tree edit ID [--title T] [--start-mode auto|manual]
+  stage tree start ID                 start every ready member
   stage schedule ls [--project P]
   stage schedule show ID
   stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]
@@ -140,6 +150,8 @@ Usage:
   stage sessions search QUERY [--project P] [--limit N]   title, branch, PR, project, message text
   stage sessions show THREAD_ID
   stage sessions questions THREAD_ID  pending questions (read-only)
+  stage sessions adopt [THREAD_ID] [--title T] [--notes TEXT] [--tag T]... [--tree ID]
+                                      track a session as a task (default: your session)
   stage mcp                           stdio MCP server
   stage setup mcp [--claude] [--codex] [--http]
   stage setup instructions [--claude] [--codex] [--file PATH]
@@ -151,7 +163,7 @@ Config: --project P --provider ID --model ID --effort E --option K=V... --runtim
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
 Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
-and enable --after-me.
+and enable --after-me and sessions adopt without a THREAD_ID.
 `
 
 // cmd holds a command's parsed global flags.
@@ -247,6 +259,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runTask(ctx, env, sub)
 	case "schedule", "schedules":
 		return runSchedule(ctx, env, sub)
+	case "tree", "trees":
+		return runTree(ctx, env, sub)
 	case "sessions", "session":
 		return runSessions(ctx, env, sub)
 	case "mcp":

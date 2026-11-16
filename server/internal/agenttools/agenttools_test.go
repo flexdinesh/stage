@@ -163,6 +163,8 @@ func TestToolList(t *testing.T) {
 		"delete_task", "start_task", "stop_task", "followup_task", "duplicate_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
 		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
+		"list_trees", "get_tree", "create_tree", "update_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
+		"adopt_session",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -170,7 +172,8 @@ func TestToolList(t *testing.T) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
 	init := cs.InitializeResult()
-	if init == nil || !strings.Contains(init.Instructions, "afterMe") || !strings.Contains(init.Instructions, "read_ref") {
+	if init == nil || !strings.Contains(init.Instructions, "afterMe") || !strings.Contains(init.Instructions, "read_ref") ||
+		!strings.Contains(init.Instructions, "trees are the only way to express dependencies") || !strings.Contains(init.Instructions, "adopt_session") {
 		t.Fatalf("instructions missing: %+v", init)
 	}
 }
@@ -308,6 +311,226 @@ func TestLifecycleWaitTools(t *testing.T) {
 	mustCall(t, cs, "get_session_questions", map[string]any{"id": *a.T3ThreadID}, &pq)
 	if pq.PendingRequestCount != 2 || pq.ApprovalCount != 1 || len(pq.Requests) != 1 || pq.Requests[0].RequestID != req || pq.Requests[0].Questions[0].Question != "Which?" {
 		t.Fatalf("questions %+v", pq)
+	}
+}
+
+// settle completes and settles a launched task's thread, then lets the
+// release runner react.
+func (e *env) settle(tk client.Task) {
+	e.t.Helper()
+	if tk.T3ThreadID == nil {
+		e.t.Fatalf("task %d not launched", tk.ID)
+	}
+	_ = e.fake.SetStatus(*tk.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*tk.T3ThreadID)
+	if err := e.sync.PollActive(context.Background()); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.runner.Reconcile(context.Background()); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func readiness(t client.Task) string {
+	if t.Readiness == nil {
+		return ""
+	}
+	return string(*t.Readiness)
+}
+
+func TestLifecycleTreeTools(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/trees")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/trees"}})
+	newTask := func(title string, extra map[string]any) client.Task {
+		t.Helper()
+		args := map[string]any{"title": title, "prompt": "do " + title}
+		for k, v := range extra {
+			args[k] = v
+		}
+		var tk client.Task
+		mustCall(t, cs, "create_task", args, &tk)
+		return tk
+	}
+	a, b, c := newTask("a", nil), newTask("b", nil), newTask("c", nil)
+
+	// Fan-in: c needs a and b; manual tree.
+	if msg := call(t, cs, "create_tree", map[string]any{"title": "x", "startMode": "inherit", "tasks": []map[string]any{{"id": a.ID}}}, nil); !strings.Contains(msg, "auto|manual") {
+		t.Fatalf("create_tree startMode inherit: %q", msg)
+	}
+	var tree client.TreeDetail
+	mustCall(t, cs, "create_tree", map[string]any{"title": "Ship", "startMode": "manual", "tasks": []map[string]any{
+		{"id": a.ID}, {"id": b.ID}, {"id": c.ID, "needs": []int64{a.ID, b.ID}},
+	}}, &tree)
+	if tree.Title != "Ship" || tree.StartMode != db.StartManual || len(tree.Tasks) != 3 ||
+		len(tree.Levels) != 2 || !slices.Equal(tree.Levels[0], []int64{a.ID, b.ID}) || !slices.Equal(tree.Levels[1], []int64{c.ID}) {
+		t.Fatalf("create_tree %+v", tree)
+	}
+
+	var trees agenttools.TreesOut
+	mustCall(t, cs, "list_trees", map[string]any{"project": p.Title}, &trees)
+	if len(trees.Trees) != 1 {
+		t.Fatalf("list_trees %+v", trees)
+	}
+	if r := trees.Trees[0]; r.ID != tree.ID || r.Tasks != 3 || r.Levels != 2 || r.States["ready"] != 2 || r.States["blocked"] != 1 ||
+		len(r.States) != 2 || !slices.Equal(r.Projects, []string{p.Title}) || r.SettledAt != nil {
+		t.Fatalf("tree row %+v", r)
+	}
+
+	mustCall(t, cs, "update_tree", map[string]any{"id": tree.ID, "title": "Ship it"}, &tree)
+	if tree.Title != "Ship it" || tree.StartMode != db.StartManual {
+		t.Fatalf("update_tree %+v", tree)
+	}
+	if msg := call(t, cs, "update_tree", map[string]any{"id": tree.ID, "startMode": "later"}, nil); !strings.Contains(msg, "invalid startMode") {
+		t.Fatalf("update_tree bad startMode: %q", msg)
+	}
+
+	// list_tasks rows carry tree membership and readiness.
+	var rows agenttools.TasksOut
+	mustCall(t, cs, "list_tasks", map[string]any{"project": p.Title}, &rows)
+	for _, r := range rows.Tasks {
+		want := "ready"
+		if r.ID == c.ID {
+			want = "blocked"
+		}
+		if r.TreeID == nil || *r.TreeID != tree.ID || r.Readiness == nil || string(*r.Readiness) != want || r.Adopted {
+			t.Fatalf("row %+v, want readiness %s", r, want)
+		}
+	}
+
+	// start_tree starts the ready roots only.
+	var started client.TreeStart
+	mustCall(t, cs, "start_tree", map[string]any{"id": tree.ID}, &started)
+	if len(started.Started) != 2 || started.Started[0].ID != a.ID || started.Started[1].ID != b.ID || len(started.Errors) != 0 {
+		t.Fatalf("start_tree roots %+v", started)
+	}
+	e.settle(started.Started[0])
+	e.settle(started.Started[1])
+	// Manual: c reads ready instead of launching.
+	var cd client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &cd)
+	if cd.State != db.StateBacklog || readiness(cd.Task) != "ready" || cd.ReadyAt == nil || cd.Tree == nil || cd.Tree.ID != tree.ID {
+		t.Fatalf("manual c after needs settle %+v", cd.Task)
+	}
+
+	// set_needs on a loose task joins the tree; add_to_tree with needs; remove_from_tree splices.
+	d := newTask("d", nil)
+	var dt client.Task
+	mustCall(t, cs, "set_needs", map[string]any{"taskId": d.ID, "needs": []int64{c.ID}}, &dt)
+	if dt.TreeID == nil || *dt.TreeID != tree.ID || !slices.Equal(dt.Needs, []int64{c.ID}) || readiness(dt) != "blocked" {
+		t.Fatalf("set_needs %+v", dt)
+	}
+	f := newTask("f", nil)
+	mustCall(t, cs, "add_to_tree", map[string]any{"treeId": tree.ID, "taskId": f.ID, "needs": []int64{d.ID}}, &tree)
+	if len(tree.Levels) != 4 || !slices.Equal(tree.Levels[3], []int64{f.ID}) {
+		t.Fatalf("add_to_tree levels %+v", tree.Levels)
+	}
+	var removed agenttools.RemovedOut
+	mustCall(t, cs, "remove_from_tree", map[string]any{"taskId": d.ID}, &removed)
+	if !removed.Removed || removed.TreeID != tree.ID {
+		t.Fatalf("remove_from_tree %+v", removed)
+	}
+	mustCall(t, cs, "get_tree", map[string]any{"id": tree.ID}, &tree)
+	var ft client.Task
+	for _, m := range tree.Tasks {
+		if m.ID == f.ID {
+			ft = m
+		}
+		if m.ID == d.ID {
+			t.Fatalf("d still in tree %+v", tree)
+		}
+	}
+	if !slices.Equal(ft.Needs, []int64{c.ID}) {
+		t.Fatalf("f takes over d's needs: %+v", ft)
+	}
+	if msg := call(t, cs, "remove_from_tree", map[string]any{"taskId": d.ID}, nil); !strings.Contains(msg, "not in a tree") {
+		t.Fatalf("remove_from_tree outside a tree: %q", msg)
+	}
+	mustCall(t, cs, "set_needs", map[string]any{"taskId": f.ID, "needs": []int64{}}, &ft)
+	if len(ft.Needs) != 0 || ft.TreeID == nil {
+		t.Fatalf("set_needs [] clears needs, keeps the tree: %+v", ft)
+	}
+
+	// create_task with treeId + startMode; update_task startMode and baseTaskId.
+	g := newTask("g", map[string]any{"treeId": tree.ID, "needs": []int64{c.ID, f.ID}, "startMode": "auto",
+		"baseRef": "origin/main", "base": "predecessor", "baseTaskId": c.ID})
+	if g.TreeID == nil || *g.TreeID != tree.ID || g.StartMode == nil || *g.StartMode != db.StartAuto ||
+		g.Workspace.BaseTaskID == nil || *g.Workspace.BaseTaskID != c.ID {
+		t.Fatalf("create_task tree fields %+v", g)
+	}
+	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "inherit", "baseTaskId": f.ID}, &g)
+	if g.StartMode != nil || g.EffectiveStartMode == nil || *g.EffectiveStartMode != db.StartManual ||
+		g.Workspace.BaseTaskID == nil || *g.Workspace.BaseTaskID != f.ID || !g.Workspace.FromPredecessor() {
+		t.Fatalf("update_task startMode inherit, baseTaskId: %+v", g)
+	}
+	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "manual", "baseTaskId": 0}, &g)
+	if g.StartMode == nil || *g.StartMode != db.StartManual || g.Workspace.BaseTaskID != nil {
+		t.Fatalf("update_task startMode manual, baseTaskId 0: %+v", g)
+	}
+	if msg := call(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "soon"}, nil); !strings.Contains(msg, "invalid startMode") {
+		t.Fatalf("update_task bad startMode: %q", msg)
+	}
+	if msg := call(t, cs, "create_task", map[string]any{"title": "h", "prompt": "x", "baseTaskId": c.ID}, nil); !strings.Contains(msg, "base needs a worktree") {
+		t.Fatalf("baseTaskId without a worktree: %q", msg)
+	}
+
+	// start_tree starts the ready c (manual) and f (a root now).
+	mustCall(t, cs, "start_tree", map[string]any{"id": tree.ID}, &started)
+	if len(started.Started) != 2 || started.Started[0].ID != c.ID || started.Started[1].ID != f.ID {
+		t.Fatalf("start_tree ready c %+v", started)
+	}
+}
+
+func TestAdoptSessionTool(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/adopt")
+	me := e.session(p, "Planner")
+	other := e.session(p, "Other work")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: me}})
+
+	var out agenttools.AdoptOut
+	mustCall(t, cs, "adopt_session", map[string]any{"tags": []string{"plan"}}, &out)
+	if !out.Created || !out.Task.Adopted || out.Task.T3ThreadID == nil || *out.Task.T3ThreadID != me ||
+		out.Task.Title != "Planner" || out.Task.Prompt != "" || !slices.Equal(out.Task.Tags, []string{"plan"}) {
+		t.Fatalf("adopt own session %+v", out)
+	}
+	mine := out.Task
+	mustCall(t, cs, "adopt_session", nil, &out)
+	if out.Created || out.Task.ID != mine.ID {
+		t.Fatalf("adopt again returns the task %+v", out)
+	}
+
+	// Another session by id, titled, into an existing tree.
+	var tk client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "next", "prompt": "x", "needs": []int64{mine.ID}}, &tk)
+	if tk.TreeID == nil {
+		t.Fatalf("needs on an adopted task builds a tree %+v", tk)
+	}
+	mustCall(t, cs, "adopt_session", map[string]any{"threadId": other, "title": "Side quest", "notes": "n", "treeId": *tk.TreeID}, &out)
+	if !out.Created || out.Task.Title != "Side quest" || out.Task.Notes != "n" || out.Task.TreeID == nil || *out.Task.TreeID != *tk.TreeID {
+		t.Fatalf("adopt other into tree %+v", out)
+	}
+	var rows agenttools.TasksOut
+	mustCall(t, cs, "list_tasks", nil, &rows)
+	adopted := 0
+	for _, r := range rows.Tasks {
+		if r.Adopted {
+			adopted++
+		}
+	}
+	if adopted != 2 {
+		t.Fatalf("adopted rows %+v", rows)
+	}
+	if msg := call(t, cs, "start_task", map[string]any{"id": mine.ID}, nil); msg == "" {
+		t.Fatal("start_task on an adopted task must fail")
+	}
+
+	noCaller := connect(t, &agenttools.Ops{Client: e.client})
+	if msg := call(t, noCaller, "adopt_session", nil, nil); !strings.Contains(msg, "threadId is required") {
+		t.Fatalf("adopt without a session: %q", msg)
+	}
+	if msg := call(t, noCaller, "adopt_session", map[string]any{"threadId": "nope"}, nil); !strings.Contains(msg, "404") {
+		t.Fatalf("adopt unknown session: %q", msg)
 	}
 }
 
@@ -490,7 +713,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 25 {
+	if err != nil || len(res.Tools) != 34 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

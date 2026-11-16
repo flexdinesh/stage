@@ -12,15 +12,17 @@ const Version = "1.0.0"
 
 // Guide is the agent workflow guidance: MCP server instructions, `stage
 // guide`, and the block `stage setup instructions` writes.
-const Guide = `stage is the task queue for T3 Code: a backlog of agent tasks, run order, schedules, and a cross-project view of T3 sessions. T3 stays where conversations happen; stage queues and starts them.
+const Guide = `stage is the task queue for T3 Code: a backlog of agent tasks, trees of dependent tasks, schedules, and a cross-project view of T3 sessions. T3 stays where conversations happen; stage queues and starts them.
 
 Use it to:
 - Save follow-up work you notice but should not do now: create_task (lands in backlog; does not start).
 - Kick off work: create_task with start=true, or start_task on a backlog task.
-- Chain work: needs=[ids] starts the task once every listed task settles (they form a tree); afterMe=true also needs your own session (tracked as a task). A failed need keeps it waiting.
-- Handoff: when a task with needs starts, stage appends each finished need's final reply, PR links, branch/worktree and T3 thread id to the prompt, so dependent tasks carry context forward (handoff=false turns it off). Read more of a need with t3_thread_read.
-- Stacked work: base=predecessor (with baseRef as the fallback) starts a task's worktree from its sole need's branch, so it builds on unmerged changes; it falls back to baseRef when that branch is unusable (root, other project, merged, deleted, several needs). get_task shows currentLaunchBase.
-- Verify a plan you queued: get_session on your session id returns createdTasks (grouped by tree, then independent tasks).
+- Chain work: trees are the only way to express dependencies. A tree is a DAG of tasks; a task's needs are tasks in the same tree that must settle before it starts. create_task with needs=[ids] joins their tree (or starts one); create_tree groups existing tasks; add_to_tree, remove_from_tree and set_needs edit it; get_tree shows levels and readiness. afterMe=true adopts your own session into the tree as a task and needs it. A failed need keeps its dependents blocked.
+- Start mode: a tree is auto (members launch once their needs settle) or manual (they read ready and notify; start_tree starts every ready member); a task may override (startMode auto|manual|inherit). start_task on a blocked task starts it early and keeps its needs.
+- Handoff: when a task with needs starts, stage appends one block per finished need (final reply, PR links, branch/worktree, T3 thread id) to the prompt, so dependent tasks carry context forward (handoff=false turns it off). Read more of a need with t3_thread_read.
+- Stacked work: base=predecessor (with baseRef as the fallback) starts a task's worktree from a need's branch (baseTaskId picks which need; default the sole need), so it builds on unmerged changes; it falls back to baseRef when that branch is unusable (root, other project, merged, deleted, several needs and no baseTaskId). get_task shows currentLaunchBase.
+- Track a session: adopt_session makes a top-level T3 session a task (default your own) so it can be a tree node; stage never starts it.
+- Verify a plan you queued: get_session on your session id returns createdTasks (grouped by tree, then independent tasks); list_trees and get_tree show the trees.
 - Recurring work: create_schedule (5-field cron in an IANA zone).
 - Check progress: list_tasks, get_task, wait_task, list_sessions.
 - Find a past session by what was said in it: search_sessions.
@@ -31,10 +33,10 @@ Rules:
 - Prompts must be self-contained: the new thread does not see your conversation (a task with needs also gets the handoff).
 - Project defaults to your session's project, else the project containing your cwd. Pass project (id or title) to target another one (list_projects).
 - Model defaults to the user's pinned or last-used model; list_models shows choices.
-- Over HTTP MCP, pass callerThreadId ($T3CODE_THREAD_ID) and cwd so afterMe, provenance and project defaults work; stdio and CLI read them from the environment.
+- Over HTTP MCP, pass callerThreadId ($T3CODE_THREAD_ID) and cwd so afterMe, adopt_session, provenance and project defaults work; stdio and CLI read them from the environment.
 - Settling happens in T3, not here.
 
-CLI equivalent: ` + "`stage task add|ls|show|start|stop|followup|wait ... --json`" + ` (stage help).`
+CLI equivalent: ` + "`stage task add|ls|show|start|stop|followup|wait|needs ... --json`, `stage tree ls|show|new|add|rm|edit|start`" + ` (stage help).`
 
 // NewServer returns an MCP server exposing every operation as a tool.
 func NewServer(o *Ops) *mcp.Server {
@@ -49,15 +51,25 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, "list_models", "List providers, models and model options (effort, ...) available for tasks.", ro, o.ListModels)
 
 	add(s, "list_tasks", "List tasks (compact rows, newest activity first).", ro, o.ListTasks)
-	add(s, "get_task", "Read a task with its events, thread (recent runs: ordinal, status, model, times), pull requests, run order, currentHandoff (what its launch appended from its predecessor) and currentLaunchBase (the worktree base its launch used with base=predecessor).", ro, o.GetTask)
-	add(s, "create_task", "Create a task: saved to backlog by default; start=true launches it now; needs/afterMe make it start once those tasks or your own session settle (handoff, default true, appends each need's final reply, PRs, branch and thread id at launch; base=predecessor starts its worktree from the sole need's branch, baseRef the fallback); startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
-	add(s, "update_task", "Edit a task (incl. handoff on/off, base ref|predecessor). Outside backlog only title, tags and notes change.", nil, o.UpdateTask)
-	add(s, "delete_task", "Delete a task (not while launching, running or needing input).", del, o.DeleteTask)
-	add(s, "start_task", "Launch a task in T3 now (backlog, failed, interrupted or cancelled). Unlinks it from an unfinished predecessor.", nil, o.StartTask)
+	add(s, "get_task", "Read a task with its events, thread (recent runs: ordinal, status, model, times), pull requests, tree (members, edges, levels), currentHandoffs (what its launch appended, one per need) and currentLaunchBase (the worktree base its launch used with base=predecessor).", ro, o.GetTask)
+	add(s, "create_task", "Create a task: saved to backlog by default; start=true launches it now; needs/afterMe put it in a tree and start it once those tasks or your own session settle (startMode manual makes it wait as ready instead; handoff, default true, appends each need's final reply, PRs, branch and thread id at launch; base=predecessor starts its worktree from a need's branch, baseRef the fallback); treeId joins a tree; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
+	add(s, "update_task", "Edit a task (incl. handoff on/off, base ref|predecessor, baseTaskId, startMode). Outside backlog only title, tags and notes change. Needs change with set_needs.", nil, o.UpdateTask)
+	add(s, "delete_task", "Delete a task (not while launching, running or needing input). In a tree, its dependents take over its needs.", del, o.DeleteTask)
+	add(s, "start_task", "Launch a task in T3 now (backlog, failed, interrupted or cancelled). A blocked task starts early and keeps its needs.", nil, o.StartTask)
 	add(s, "stop_task", "Interrupt a task's running thread.", nil, o.StopTask)
 	add(s, "followup_task", "Send a message (and optionally images) to a task's thread.", nil, o.FollowupTask)
 	add(s, "duplicate_task", "Copy a task into a new backlog task.", nil, o.DuplicateTask)
 	add(s, "wait_task", "Wait until a task reaches a state (default: needs input or finished) or a timeout.", ro, o.WaitTask)
+
+	add(s, "list_trees", "List trees (compact rows: member counts by state, levels, projects); default active trees.", ro, o.ListTrees)
+	add(s, "get_tree", "Read a tree: members (with needs, dependents, readiness), edges and levels (task ids per level, roots first).", ro, o.GetTree)
+	add(s, "create_tree", "Create a tree from existing tasks with the needs between them (a task in another tree moves).", nil, o.CreateTree)
+	add(s, "update_tree", "Rename a tree or set its start mode (auto | manual).", nil, o.UpdateTree)
+	add(s, "add_to_tree", "Add a task to a tree, optionally with its needs (a task in another tree moves).", nil, o.AddToTree)
+	add(s, "remove_from_tree", "Take a task out of its tree; its dependents take over its needs. The task stays.", nil, o.RemoveFromTree)
+	add(s, "set_needs", "Replace a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree.", nil, o.SetNeeds)
+	add(s, "start_tree", "Start every ready member of a tree (manual trees, ready roots).", nil, o.StartTree)
+	add(s, "adopt_session", "Track a top-level T3 session as a task (default: your own session) so it can be a tree node; stage never starts it. Returns the existing task when one owns the session.", nil, o.AdoptSession)
 
 	add(s, "list_schedules", "List recurring schedules (next fire first).", ro, o.ListSchedules)
 	add(s, "get_schedule", "Read a schedule with its recent runs.", ro, o.GetSchedule)
@@ -69,7 +81,7 @@ func NewServer(o *Ops) *mcp.Server {
 
 	add(s, "list_sessions", "List T3 sessions (root threads) across projects, newest first.", ro, o.ListSessions)
 	add(s, "search_sessions", "Find T3 sessions by title, branch, PR or project, then by message text (via T3; falls back to stage titles when T3 is offline, see t3).", ro, o.SearchSessions)
-	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, task, and the tasks it created (createdTasks: run-order chains head first, then independent tasks).", ro, o.GetSession)
+	add(s, "get_session", "Read a T3 session with its pull requests, recent runs (ordinal, status, model, times), children, task, and the tasks it created (createdTasks: grouped by tree, then independent tasks).", ro, o.GetSession)
 	add(s, "read_ref", "Read the stage task or session a pasted reference names: a stage link (…/tasks/<id>, …/sessions/<id>, any host, markdown link ok), a T3 thread link, #<task id> or a thread id. Returns the task (prompt, state, handoff, runs) and/or its session (latest reply, PRs, branch, runs, children) and how to read the full conversation.", ro, o.ReadRef)
 	add(s, "get_session_questions", "Read the questions a T3 session is waiting on its owner to answer (read-only). Approvals are only counted; they are handled in T3.", ro, o.GetSessionQuestions)
 	return s

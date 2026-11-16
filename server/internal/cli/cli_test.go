@@ -244,7 +244,7 @@ func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
 	}
 }
 
-func TestTaskNeedsAndSessionBatch(t *testing.T) {
+func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("/w/cli-o")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Planner"})
@@ -281,6 +281,163 @@ func TestTaskNeedsAndSessionBatch(t *testing.T) {
 	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID, "--json")
 	if d := decode[client.ThreadDetail](t, stdout); code != 0 || len(d.CreatedTasks.Trees) != 1 || len(d.CreatedTasks.Independent) != 1 {
 		t.Fatalf("sessions show json: %s", stdout)
+	}
+
+	// tree new with ID:NEED members, then show/ls/edit/add/rm/start.
+	third, fourth := add("--title", "third"), add("--title", "fourth")
+	code, stdout, stderr := h.run("", "tree", "new", "--title", "Stack", "--start-mode", "manual", fmt.Sprint(third.ID), fmt.Sprintf("%d:%d", fourth.ID, third.ID), "--json")
+	if code != 0 {
+		t.Fatalf("tree new: %d %s", code, stderr)
+	}
+	tree := decode[client.TreeDetail](t, stdout)
+	if tree.Title != "Stack" || tree.StartMode != db.StartManual || len(tree.Levels) != 2 || !slices.Equal(tree.Levels[1], []int64{fourth.ID}) {
+		t.Fatalf("tree new: %+v", tree)
+	}
+	if code, _, _ := h.run("", "tree", "new", fmt.Sprint(loose.ID)); code != 2 {
+		t.Fatalf("tree new without --title exit %d", code)
+	}
+	if code, _, _ := h.run("", "tree", "new", "--title", "x", "1:nope"); code != 2 {
+		t.Fatalf("tree new bad member exit %d", code)
+	}
+	code, stdout, _ = h.run("", "tree", "show", fmt.Sprint(tree.ID))
+	for _, want := range []string{
+		fmt.Sprintf("tree %d  Stack  (manual)  2 tasks, 2 levels", tree.ID),
+		fmt.Sprintf("#%d  backlog  third   -      ready", third.ID),
+		fmt.Sprintf("#%d  backlog  fourth  #%d", fourth.ID, third.ID),
+		"blocked",
+	} {
+		if code != 0 || !strings.Contains(stdout, want) {
+			t.Fatalf("tree show missing %q:\n%s", want, stdout)
+		}
+	}
+	code, stdout, _ = h.run("", "tree", "ls")
+	if code != 0 || !strings.Contains(stdout, "Stack") || !strings.Contains(stdout, "ready 1, blocked 1") {
+		t.Fatalf("tree ls:\n%s", stdout)
+	}
+	code, stdout, _ = h.run("", "tree", "ls", "--project", p.Title, "--json")
+	if rows := decode[agenttools.TreesOut](t, stdout); code != 0 || len(rows.Trees) != 2 {
+		t.Fatalf("tree ls --json: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "tree", "edit", fmt.Sprint(tree.ID), "--title", "Stacked", "--start-mode", "auto", "--json")
+	if tr := decode[client.TreeDetail](t, stdout); code != 0 || tr.Title != "Stacked" || tr.StartMode != db.StartAuto {
+		t.Fatalf("tree edit: %s", stdout)
+	}
+	code, stdout, stderr = h.run("", "tree", "add", fmt.Sprint(tree.ID), fmt.Sprint(loose.ID), "--needs", fmt.Sprint(fourth.ID), "--json")
+	if tr := decode[client.TreeDetail](t, stdout); code != 0 || len(tr.Levels) != 3 || !slices.Equal(tr.Levels[2], []int64{loose.ID}) {
+		t.Fatalf("tree add: %d %s %s", code, stdout, stderr)
+	}
+	// task needs replaces needs (space or comma separated); none clears.
+	code, stdout, stderr = h.run("", "task", "needs", fmt.Sprint(loose.ID), fmt.Sprint(third.ID), "--json")
+	if tk := decode[client.Task](t, stdout); code != 0 || !slices.Equal(tk.Needs, []int64{third.ID}) {
+		t.Fatalf("task needs: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, _ = h.run("", "task", "needs", fmt.Sprint(loose.ID), "--json")
+	if tk := decode[client.Task](t, stdout); code != 0 || len(tk.Needs) != 0 {
+		t.Fatalf("task needs clear: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(loose.ID))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("tree     %d Stacked (start auto)", tree.ID)) || !strings.Contains(stdout, "readiness ready") {
+		t.Fatalf("task show tree + readiness:\n%s", stdout)
+	}
+	code, stdout, _ = h.run("", "tree", "rm", fmt.Sprint(loose.ID))
+	if code != 0 || stdout != fmt.Sprintf("removed task %d from tree %d\n", loose.ID, tree.ID) {
+		t.Fatalf("tree rm: %q", stdout)
+	}
+	if code, _, stderr := h.run("", "tree", "rm", fmt.Sprint(loose.ID)); code != 1 || !strings.Contains(stderr, "not in a tree") {
+		t.Fatalf("tree rm twice: %d %s", code, stderr)
+	}
+	code, stdout, _ = h.run("", "tree", "start", fmt.Sprint(tree.ID))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("started #%d [running] third", third.ID)) || strings.Contains(stdout, "fourth") {
+		t.Fatalf("tree start:\n%s", stdout)
+	}
+	if code, _, _ := h.run("", "tree", "frob"); code != 2 {
+		t.Fatalf("unknown tree verb exit %d", code)
+	}
+}
+
+func TestSessionsAdoptCommand(t *testing.T) {
+	h := newHarness(t)
+	p := h.project("/w/cli-adopt")
+	launch := func(title string) string {
+		t.Helper()
+		out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
+			t.Fatal(err)
+		}
+		return out.ThreadID
+	}
+	me, other := launch("Mine"), launch("Theirs")
+	if code, _, stderr := h.run("", "sessions", "adopt"); code != 1 || !strings.Contains(stderr, "threadId is required") {
+		t.Fatalf("adopt without a session: %d %s", code, stderr)
+	}
+	h.caller = agentctx.Caller{ThreadID: me}
+	code, stdout, stderr := h.run("", "sessions", "adopt", "--tag", "x")
+	if code != 0 || !strings.Contains(stdout, "adopted session as a task") || !strings.Contains(stdout, "adopted  tracks an existing session") {
+		t.Fatalf("adopt own: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, _ = h.run("", "sessions", "adopt", "--json")
+	mine := decode[agenttools.AdoptOut](t, stdout)
+	if code != 0 || mine.Created || !mine.Task.Adopted || mine.Task.T3ThreadID == nil || *mine.Task.T3ThreadID != me || !slices.Equal(mine.Task.Tags, []string{"x"}) {
+		t.Fatalf("adopt own again: %s", stdout)
+	}
+	code, stdout, stderr = h.run("", "tree", "new", "--title", "T", fmt.Sprint(mine.Task.ID), "--json")
+	if code != 0 {
+		t.Fatalf("tree new: %s", stderr)
+	}
+	tree := decode[client.TreeDetail](t, stdout)
+	code, stdout, stderr = h.run("", "sessions", "adopt", other, "--title", "Side", "--notes", "n", "--tree", fmt.Sprint(tree.ID), "--json")
+	got := decode[agenttools.AdoptOut](t, stdout)
+	if code != 0 || !got.Created || got.Task.Title != "Side" || got.Task.Notes != "n" || got.Task.TreeID == nil || *got.Task.TreeID != tree.ID {
+		t.Fatalf("adopt other: %d %s %s", code, stdout, stderr)
+	}
+	if code, _, _ := h.run("", "sessions", "adopt", "a", "b"); code != 2 {
+		t.Fatalf("two thread ids exit %d", code)
+	}
+}
+
+func TestTreeFlags(t *testing.T) {
+	h := newHarness(t)
+	h.project("/w/cli-tree-flags")
+	h.caller = agentctx.Caller{Cwd: "/w/cli-tree-flags"}
+	add := func(args ...string) client.Task {
+		t.Helper()
+		code, stdout, stderr := h.run("", append([]string{"task", "add", "--prompt", "p", "--json"}, args...)...)
+		if code != 0 {
+			t.Fatalf("add %v: %s", args, stderr)
+		}
+		return decode[client.Task](t, stdout)
+	}
+	a := add("--title", "a")
+	b := add("--title", "b", "--needs", fmt.Sprint(a.ID), "--start-mode", "manual")
+	if b.TreeID == nil || b.StartMode == nil || *b.StartMode != db.StartManual {
+		t.Fatalf("--start-mode manual: %+v", b)
+	}
+	c := add("--title", "c", "--tree", fmt.Sprint(*b.TreeID), "--needs", fmt.Sprintf("%d,%d", a.ID, b.ID),
+		"--base-ref", "origin/main", "--base", "predecessor", "--base-task", fmt.Sprint(b.ID))
+	if c.TreeID == nil || *c.TreeID != *b.TreeID || c.Workspace.BaseTaskID == nil || *c.Workspace.BaseTaskID != b.ID {
+		t.Fatalf("--tree --base-task: %+v", c)
+	}
+	code, stdout, _ := h.run("", "task", "show", fmt.Sprint(c.ID))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch", b.ID)) {
+		t.Fatalf("show base task:\n%s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "manual", "--base-task", fmt.Sprint(a.ID), "--json")
+	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode == nil || *tk.StartMode != db.StartManual ||
+		tk.Workspace.BaseTaskID == nil || *tk.Workspace.BaseTaskID != a.ID {
+		t.Fatalf("edit --start-mode manual --base-task: %s", stdout)
+	}
+	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "inherit", "--json")
+	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode != nil || tk.EffectiveStartMode == nil || *tk.EffectiveStartMode != db.StartAuto {
+		t.Fatalf("edit --start-mode inherit: %s", stdout)
+	}
+	if code, _, stderr := h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "later"); code != 1 || !strings.Contains(stderr, "invalid startMode") {
+		t.Fatalf("bad --start-mode: %d %s", code, stderr)
+	}
+	if code, _, _ := h.run("", "task", "add", "--title", "x", "--prompt", "p", "--tree", "nope"); code != 2 {
+		t.Fatalf("bad --tree exit %d", code)
 	}
 }
 

@@ -308,8 +308,10 @@ type CreateTask struct {
 	Workspace          *db.Workspace    `json:"workspace,omitempty"`
 	Tags               []string         `json:"tags,omitempty"`
 	Notes              *string          `json:"notes,omitempty"`
+	TreeID             *int64           `json:"treeId,omitempty"`
 	Needs              []int64          `json:"needs,omitempty"`
 	NeedsSessionID     *string          `json:"needsSessionId,omitempty"`
+	StartMode          *db.StartMode    `json:"startMode,omitempty"`
 	Handoff            *bool            `json:"handoff,omitempty"`
 	OriginThreadID     *string          `json:"originThreadId,omitempty"`
 	AttachmentIDs      []int64          `json:"attachmentIds,omitempty"`
@@ -370,17 +372,23 @@ type ThreadQuery struct {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	_, err := c.doStatus(ctx, method, path, body, out)
+	return err
+}
+
+// doStatus is do returning the 2xx status code.
+func (c *Client) doStatus(ctx context.Context, method, path string, body any, out any) (int, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		r = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, r)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -388,21 +396,21 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	return c.send(req, out)
 }
 
-func (c *Client) send(req *http.Request, out any) error {
+func (c *Client) send(req *http.Request, out any) (int, error) {
 	if c.err != nil {
-		return c.err
+		return 0, c.err
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("stage unreachable at %s (set STAGE_URL, or start the local service: `stage service start`): %w", c.BaseURL, err)
+		return 0, fmt.Errorf("stage unreachable at %s (set STAGE_URL, or start the local service: `stage service start`): %w", c.BaseURL, err)
 	}
 	defer res.Body.Close()
 	if err := c.checkVersion(res); err != nil {
-		return err
+		return 0, err
 	}
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if res.StatusCode >= 400 {
 		var eb struct {
@@ -411,12 +419,12 @@ func (c *Client) send(req *http.Request, out any) error {
 		if json.Unmarshal(data, &eb) != nil || eb.Error == "" {
 			eb.Error = strings.TrimSpace(string(data))
 		}
-		return &Error{Status: res.StatusCode, Msg: eb.Error}
+		return 0, &Error{Status: res.StatusCode, Msg: eb.Error}
 	}
 	if out == nil || len(data) == 0 {
-		return nil
+		return res.StatusCode, nil
 	}
-	return json.Unmarshal(data, out)
+	return res.StatusCode, json.Unmarshal(data, out)
 }
 
 // checkVersion refuses a response from a server on another API version.
@@ -533,7 +541,7 @@ func taskPath(id int64, action string) string {
 	return p
 }
 
-// Task reads one task with events, thread and run order.
+// Task reads one task with events, thread and tree.
 func (c *Client) Task(ctx context.Context, id int64) (TaskDetail, error) {
 	var out TaskDetail
 	err := c.do(ctx, http.MethodGet, taskPath(id, ""), nil, &out)
@@ -585,6 +593,136 @@ func (c *Client) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "duplicate"), nil, &out)
 	return out, err
+}
+
+// SetNeeds replaces a task's needs (PUT /api/tasks/:id/needs); empty clears
+// them.
+func (c *Client) SetNeeds(ctx context.Context, id int64, needs []int64) (Task, error) {
+	if needs == nil {
+		needs = []int64{}
+	}
+	var out Task
+	err := c.do(ctx, http.MethodPut, taskPath(id, "needs"), map[string][]int64{"needs": needs}, &out)
+	return out, err
+}
+
+// TreeQuery filters GET /api/trees: active trees (plus ones settled since
+// SettledFrom); All lists every tree.
+type TreeQuery struct {
+	All         bool
+	ProjectID   *int64
+	SettledFrom *time.Time
+}
+
+// NewTree is the POST /api/trees body.
+type NewTree struct {
+	Title     string          `json:"title"`
+	StartMode *db.StartMode   `json:"startMode,omitempty"`
+	Tasks     []db.TreeMember `json:"tasks"`
+}
+
+// TreeStart is POST /api/trees/:id/start: the members started and the ones
+// that failed to start.
+type TreeStart struct {
+	Started []Task `json:"started"`
+	Errors  []struct {
+		TaskID int64  `json:"taskId"`
+		Error  string `json:"error"`
+	} `json:"errors"`
+}
+
+// AdoptSession is the POST /api/threads/:id/adopt body.
+type AdoptSession struct {
+	Title  *string  `json:"title,omitempty"`
+	Notes  *string  `json:"notes,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
+	TreeID *int64   `json:"treeId,omitempty"`
+}
+
+func treePath(id int64, action string) string {
+	p := "/api/trees/" + strconv.FormatInt(id, 10)
+	if action != "" {
+		p += "/" + action
+	}
+	return p
+}
+
+// Trees lists trees with their member roll-up.
+func (c *Client) Trees(ctx context.Context, f TreeQuery) ([]db.TreeSummary, error) {
+	q := url.Values{}
+	if f.All {
+		q.Set("all", "1")
+	}
+	setID(q, "project", f.ProjectID)
+	if f.SettledFrom != nil {
+		q.Set("settledFrom", f.SettledFrom.UTC().Format(time.RFC3339))
+	}
+	var out struct {
+		Trees []db.TreeSummary `json:"trees"`
+	}
+	err := c.do(ctx, http.MethodGet, withQuery("/api/trees", q), nil, &out)
+	return out.Trees, err
+}
+
+// Tree reads one tree with its members, edges and levels.
+func (c *Client) Tree(ctx context.Context, id int64) (TreeDetail, error) {
+	var out TreeDetail
+	err := c.do(ctx, http.MethodGet, treePath(id, ""), nil, &out)
+	return out, err
+}
+
+// CreateTree creates a tree from existing tasks.
+func (c *Client) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) {
+	if in.Tasks == nil {
+		in.Tasks = []db.TreeMember{}
+	}
+	var out TreeDetail
+	err := c.do(ctx, http.MethodPost, "/api/trees", in, &out)
+	return out, err
+}
+
+// UpdateTree patches a tree (title, startMode).
+func (c *Client) UpdateTree(ctx context.Context, id int64, p Patch) (TreeDetail, error) {
+	var out TreeDetail
+	err := c.do(ctx, http.MethodPatch, treePath(id, ""), p, &out)
+	return out, err
+}
+
+// DeleteTree dissolves a tree (its tasks stay, edges go).
+func (c *Client) DeleteTree(ctx context.Context, id int64) error {
+	return c.do(ctx, http.MethodDelete, treePath(id, ""), nil, nil)
+}
+
+// AddToTree adds task taskID to tree id; needs nil keeps the task's needs.
+func (c *Client) AddToTree(ctx context.Context, id, taskID int64, needs *[]int64) (TreeDetail, error) {
+	body := struct {
+		TaskID int64    `json:"taskId"`
+		Needs  *[]int64 `json:"needs,omitempty"`
+	}{taskID, needs}
+	var out TreeDetail
+	err := c.do(ctx, http.MethodPost, treePath(id, "tasks"), body, &out)
+	return out, err
+}
+
+// RemoveFromTree splices task taskID out of tree id (its dependents take
+// its needs).
+func (c *Client) RemoveFromTree(ctx context.Context, id, taskID int64) error {
+	return c.do(ctx, http.MethodDelete, treePath(id, "tasks/"+strconv.FormatInt(taskID, 10)), nil, nil)
+}
+
+// StartTree starts every ready member of tree id.
+func (c *Client) StartTree(ctx context.Context, id int64) (TreeStart, error) {
+	var out TreeStart
+	err := c.do(ctx, http.MethodPost, treePath(id, "start"), nil, &out)
+	return out, err
+}
+
+// AdoptThread tracks session threadID as a task; created is false when a
+// task already owned it.
+func (c *Client) AdoptThread(ctx context.Context, threadID string, in AdoptSession) (Task, bool, error) {
+	var out Task
+	status, err := c.doStatus(ctx, http.MethodPost, "/api/threads/"+url.PathEscape(threadID)+"/adopt", in, &out)
+	return out, status == http.StatusCreated, err
 }
 
 func schedulePath(id int64, action string) string {
@@ -748,7 +886,7 @@ func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attac
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	var out db.Attachment
-	err = c.send(req, &out)
+	_, err = c.send(req, &out)
 	return out, err
 }
 

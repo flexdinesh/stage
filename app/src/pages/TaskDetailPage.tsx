@@ -16,7 +16,6 @@ import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx
 import { PullRequestsPanel } from "../components/PullRequests.tsx";
 import { RunsPanel } from "../components/RunsPanel.tsx";
 import { NeedsInputSlot, focusAnswerPanel } from "../components/NeedsInputPanel.tsx";
-import { SequencePanel, stepText } from "../components/Sequence.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
@@ -123,7 +122,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const answerable = waiting && task.pendingQuestionCount > 0;
   const hasThread = task.t3ThreadId !== null;
   const startable = canStart(task);
-  // Waiting on a predecessor: Start now unlinks it, so it takes a second click to confirm.
+  // Blocked on its needs: Start runs it before they settle (needs kept), so it takes a second click to confirm.
   const blocked = isWaiting(task);
   const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
@@ -161,23 +160,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
               {task.projectTitle}
             </Link>
             {` / task ${task.id}`}
-            {stepText(task) === null ? null : ` · ${stepText(task)}`}
-            {task.afterTaskId === null || !isWaiting(task) ? null : (
-              <>
-                {" · waits for "}
-                <Link to={`/tasks/${task.afterTaskId}`} className={linkClass}>
-                  #{task.afterTaskId}
-                </Link>
-              </>
-            )}
-            {task.afterThreadId === null || !isWaiting(task) ? null : (
-              <>
-                {" · waits for "}
-                <Link to={sessionPath(task.afterThreadId)} className={linkClass}>
-                  {task.afterThreadTitle ?? "session"}
-                </Link>
-              </>
-            )}
             {task.startAt === null ? null : (
               <span title={dateTime(task.startAt)}>{` · starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
             )}
@@ -219,11 +201,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <Button
               variant={armed ? "primary" : "secondary"}
               busy={start.isPending}
-              title={`Unlinks it from ${waitTarget(task)} and starts it now`}
+              title={`Starts it now, before ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}; its needs are kept`}
               onClick={() => (armed ? start.mutate() : setArmed(true))}
               onBlur={() => setArmed(false)}
             >
-              {armed ? `Confirm: unlink from ${waitTarget(task)} and start` : "Start now"}
+              {armed ? `Start before ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}` : "Start"}
             </Button>
           ) : startable ? (
             <Button
@@ -242,9 +224,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </Button>
           ) : null}
           {stoppable ? stopButton("max-md:hidden") : null}
-          <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
-            Duplicate
-          </Button>
+          {task.adopted ? null : (
+            <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
+              Duplicate
+            </Button>
+          )}
           <Button onClick={() => setEditing(true)}>Edit</Button>
           <Button
             variant="danger"
@@ -283,7 +267,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
               )}
               {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
               <ImageStrip attachments={task.attachments} label="Prompt images" />
-              {task.currentHandoff === null ? null : <HandoffRecord handoff={task.currentHandoff} />}
+              {task.currentHandoffs.map((h) => (
+                <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.sourceThreadId}`} handoff={h} />
+              ))}
             </PromptPanel>
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
@@ -292,7 +278,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </div>
           )}
           <div className="flex min-w-0 flex-col gap-3.5">
-            <SequencePanel task={task} />
             <PullRequestsPanel prs={task.pullRequests} />
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
@@ -400,11 +385,15 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>
           </Detail>
         )}
-        {task.afterThreadId === null ? null : (
-          <Detail label="Runs after">
-            <Link to={sessionPath(task.afterThreadId)} className={linkClass}>
-              {task.afterThreadTitle ?? task.afterThreadId}
-            </Link>
+        {task.needs.length === 0 ? null : (
+          <Detail label="Needs">
+            <span className="flex flex-wrap gap-x-2">
+              {task.needs.map((n) => (
+                <Link key={n} to={`/tasks/${n}`} className={linkClass}>
+                  #{n}
+                </Link>
+              ))}
+            </span>
           </Detail>
         )}
         {task.originThreadId === null ? null : (
