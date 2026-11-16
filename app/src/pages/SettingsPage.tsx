@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, usePreferences, useT3Status } from "../api/queries.ts";
 import {
@@ -11,9 +11,11 @@ import {
   type T3Status,
 } from "../api/types.ts";
 import { DesktopAppCard } from "../components/Host.tsx";
+import { PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
+import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
-import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
@@ -26,25 +28,20 @@ function StatusCard({ status }: { status: T3Status }) {
     <Panel
       title="T3 connection"
       actions={
-        status.connected ? (
-          <Chip tone="ok" dot>
-            connected
-          </Chip>
-        ) : (
-          <Chip tone="bad" dot>
-            not connected
-          </Chip>
-        )
+        <Chip tone={T3_STATE_TONE[status.state]} dot>
+          {status.state}
+        </Chip>
       }
     >
       <Details>
+        <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
         <Detail label="T3 URL">{status.t3Url}</Detail>
         <Detail label="Public URL">{status.publicUrl}</Detail>
         <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
         <Detail label="Client id">{status.clientId ?? "-"}</Detail>
         <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
         <Detail label="Admin token">
-          {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured (pair manually)"}
+          {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
         </Detail>
         <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
         <Detail label="Last error">
@@ -55,40 +52,17 @@ function StatusCard({ status }: { status: T3Status }) {
   );
 }
 
-function PairCard() {
-  const api = useApi();
-  const qc = useQueryClient();
-  const [code, setCode] = useState("");
-  const pair = useMutation({
-    mutationFn: () => api.pair({ code: code.trim() }),
-    onSuccess: (status) => {
-      setCode("");
-      qc.setQueryData(keys.t3Status, status);
-    },
-  });
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (code.trim() !== "") pair.mutate();
-  };
+/** Pairing (auto through the t3 CLI, or a code) and the T3 URL. */
+function PairCard({ status }: { status: T3Status }) {
+  const paired = status.state === "connected";
   return (
-    <Panel title="Pair manually" meta="fallback">
-      <form onSubmit={submit} className="flex flex-col gap-3">
-        <Muted>
-          Use when auto-renew is unavailable: run <code className="font-mono text-fg">t3 pair</code> on the T3 host and paste the code.
-        </Muted>
-        <div className="flex flex-wrap items-end gap-2">
-          <Field label="Pairing code" className="min-w-52 flex-1">
-            {(id) => (
-              <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-1234" className="font-mono" />
-            )}
-          </Field>
-          <Button type="submit" variant="primary" busy={pair.isPending} disabled={code.trim() === ""}>
-            Pair
-          </Button>
-        </div>
-        {pair.isSuccess ? <Alert tone="plain">Paired.</Alert> : null}
-        <ErrorText error={pair.error} />
-      </form>
+    <Panel title="Pair" meta={paired ? "paired · pair again to replace the token" : status.state === "unpaired" ? "not paired" : status.state}>
+      <div className="flex flex-col gap-4">
+        <PairActions status={status} primary={!paired} />
+        <section className="flex flex-col gap-3 border-t border-line pt-3">
+          <T3UrlEditor status={status} />
+        </section>
+      </div>
     </Panel>
   );
 }
@@ -432,7 +406,7 @@ export function SettingsPage() {
         </div>
         <SyncCard />
         <DefaultModelCard />
-        <PairCard />
+        {status.data === undefined ? null : <PairCard status={status.data} />}
         <NotificationsCard />
         <ThemeCard />
         <DesktopAppCard />

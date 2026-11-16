@@ -99,8 +99,10 @@ func TestAuthorizeWithAdminTokenSendsT3Payloads(t *testing.T) {
 		t.Fatalf("mcp auth header = %v", auth)
 	}
 
+	c.Probe(ctx)
 	st := c.Status(ctx)
-	if !st.Connected || st.ClientID != saved.ClientID || st.ExpiresAt == nil || st.EnvironmentID != "env-fake" || st.LastError != "" {
+	if !st.Connected || st.ClientID != saved.ClientID || st.ExpiresAt == nil || st.EnvironmentID != "env-fake" || st.LastError != "" ||
+		st.State() != StateConnected || !st.HasToken {
 		t.Fatalf("status = %+v", st)
 	}
 	if got := c.WebURL(ctx, "thread-1"); got != "http://localhost:3773/env-fake/thread-1" {

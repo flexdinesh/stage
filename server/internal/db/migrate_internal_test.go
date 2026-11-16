@@ -360,3 +360,19 @@ func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
 		})
 	}
 }
+
+func TestMigrationT3Settings(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 5)
+	mustExec(t, pool, `UPDATE t3_connection SET client_id = 'c', token = 'tok', last_full_sync_at = '2026-11-01T00:00:00Z' WHERE id = 1`)
+	migrateTo(t, pool, 6)
+	var token string
+	var u, env *string
+	if err := pool.QueryRow(`SELECT token, t3_url, environment_id FROM t3_connection WHERE id = 1`).Scan(&token, &u, &env); err != nil {
+		t.Fatal(err)
+	}
+	// An existing pairing stays; the URL setting and binding start unset.
+	if token != "tok" || u != nil || env != nil {
+		t.Fatalf("after 0006: token %q url %v env %v", token, u, env)
+	}
+}

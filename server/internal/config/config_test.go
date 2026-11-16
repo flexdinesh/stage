@@ -92,7 +92,7 @@ func TestLoadDataDirWithoutHome(t *testing.T) {
 // clearEnv unsets every variable Load reads besides the data dir ones.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", "T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN"} {
+	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", "T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_BIN"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("STAGE_DATA_DIR", t.TempDir())
@@ -138,16 +138,18 @@ func TestLoadURLDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.T3URL != "http://127.0.0.1:3773" || cfg.T3PublicURL != cfg.T3URL || cfg.PublicURL != "" {
+	if cfg.T3URL != "http://127.0.0.1:3773" || cfg.T3PublicURL != cfg.T3URL || cfg.PublicURL != "" ||
+		cfg.T3URLFromEnv || cfg.T3PublicURLFromEnv || cfg.T3Bin != "" {
 		t.Fatalf("defaults %+v", cfg)
 	}
 	t.Setenv("T3_URL", "http://host.docker.internal:3773")
-	if cfg, _ := Load(nil); cfg.T3PublicURL != "http://host.docker.internal:3773" {
+	if cfg, _ := Load(nil); cfg.T3PublicURL != "http://host.docker.internal:3773" || !cfg.T3URLFromEnv || cfg.T3PublicURLFromEnv {
 		t.Fatalf("T3_PUBLIC_URL does not fall back to T3_URL: %+v", cfg)
 	}
 	t.Setenv("T3_PUBLIC_URL", "http://t3.lan:3773")
 	t.Setenv("STAGE_PUBLIC_URL", "https://stage.example")
-	if cfg, _ := Load(nil); cfg.T3PublicURL != "http://t3.lan:3773" || cfg.PublicURL != "https://stage.example" {
+	t.Setenv("T3_BIN", "/opt/t3/bin/t3")
+	if cfg, _ := Load(nil); cfg.T3PublicURL != "http://t3.lan:3773" || cfg.PublicURL != "https://stage.example" || !cfg.T3PublicURLFromEnv || cfg.T3Bin != "/opt/t3/bin/t3" {
 		t.Fatalf("explicit URLs %+v", cfg)
 	}
 }

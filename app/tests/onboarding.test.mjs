@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { normalizeT3Status } from "../src/api/client.ts";
+import { codeReason, dashboardAlert, firstSyncLanded, primaryAction, setupSteps, takeover } from "../src/lib/onboarding.ts";
+import { fakeApi } from "./fake-transport.mjs";
+
+const SYNCED = "2026-11-17T10:00:00Z";
+
+const base = {
+  connected: false,
+  state: "unpaired",
+  t3Url: "http://127.0.0.1:3773",
+  publicUrl: "http://127.0.0.1:3773",
+  t3UrlSource: "default",
+  environmentId: null,
+  clientId: null,
+  tokenExpiresAt: null,
+  adminTokenConfigured: false,
+  lastError: null,
+  lastFullSyncAt: null,
+  reachable: true,
+  checkedAt: "2026-11-17T09:59:58Z",
+  probeError: null,
+  t3: { environmentId: "env-1", label: "controlbox", serverVersion: "0.1.9" },
+  autoPair: { available: true, reason: null },
+  sync: { running: false, startedAt: null, projects: 0, threads: 0 },
+};
+const status = (over) => ({ ...base, ...over });
+const unreachable = status({ state: "unreachable", reachable: false, t3: null, probeError: "connection refused" });
+const connected = status({ state: "connected", connected: true, clientId: "c", tokenExpiresAt: "2026-12-17T00:00:00Z" });
+const notes = (s, checking) => setupSteps(s, checking).map((x) => `${x.key}:${x.status}:${x.note}`);
+
+test("takeover holds until the first full sync lands, whatever the state", () => {
+  assert.equal(takeover(undefined), false, "a pending status is not setup");
+  assert.equal(takeover(unreachable), true);
+  assert.equal(takeover(status({})), true);
+  assert.equal(takeover(status({ ...connected, sync: { running: true, startedAt: SYNCED, projects: 3, threads: 40 } })), true);
+  assert.equal(takeover(status({ ...connected, lastFullSyncAt: SYNCED })), false);
+  assert.equal(takeover(status({ ...unreachable, lastFullSyncAt: SYNCED })), false, "later trouble is an alert, not setup");
+});
+
+test("first sync refresh fires only on null to set, not on the first load or later syncs", () => {
+  const synced = status({ lastFullSyncAt: SYNCED });
+  assert.equal(firstSyncLanded(undefined, synced), false);
+  assert.equal(firstSyncLanded(status({}), synced), true);
+  assert.equal(firstSyncLanded(synced, status({ lastFullSyncAt: "2026-11-17T10:05:00Z" })), false);
+  assert.equal(firstSyncLanded(status({}), status({})), false);
+});
+
+test("setup steps: unreachable T3", () => {
+  assert.deepEqual(notes(unreachable), ["t3:bad:not found at http://127.0.0.1:3773", "pairing:idle:not paired", "first sync:idle:waiting"]);
+  assert.deepEqual(notes(unreachable, true)[0], "t3:active:checking", "a retry in flight shows checking");
+  assert.deepEqual(notes(status({ ...unreachable, connected: true }))[1], "pairing:ok:paired", "a valid token stays paired while T3 is away");
+  assert.deepEqual(notes(status({ ...unreachable, tokenExpiresAt: "2026-11-01T00:00:00Z" }))[1], "pairing:idle:waiting");
+  assert.deepEqual(notes(status({ ...unreachable, checkedAt: null }))[0], "t3:active:checking", "never probed yet");
+});
+
+test("setup steps: pairing states", () => {
+  assert.deepEqual(notes(status({})), ["t3:ok:controlbox · v0.1.9", "pairing:idle:not paired", "first sync:idle:waiting"]);
+  assert.equal(notes(status({ state: "expired" }))[1], "pairing:need:expired");
+  assert.equal(notes(status({ state: "rejected" }))[1], "pairing:bad:rejected");
+  assert.equal(notes(status({ t3: null }))[0], "t3:ok:reachable", "T3 did not identify itself");
+  assert.equal(notes(status({ t3: { environmentId: "e", label: "box", serverVersion: "v1.0.0" } }))[0], "t3:ok:box · v1.0.0");
+  assert.equal(notes(status({}), true)[0], "t3:ok:controlbox · v0.1.9", "checking only matters while unreachable");
+});
+
+test("setup steps: first sync counts tick while it runs", () => {
+  const running = (projects, threads) => status({ ...connected, sync: { running: true, startedAt: SYNCED, projects, threads } });
+  assert.deepEqual(notes(running(0, 0)), ["t3:ok:controlbox · v0.1.9", "pairing:ok:paired", "first sync:active:starting"]);
+  assert.equal(notes(running(12, 776))[2], "first sync:active:12 projects · 776 threads");
+  assert.equal(notes(running(1, 1))[2], "first sync:active:1 project · 1 thread");
+  assert.equal(notes(status({ ...connected, lastFullSyncAt: SYNCED }))[2], "first sync:ok:done");
+});
+
+test("one primary action per state", () => {
+  assert.equal(primaryAction(unreachable), "retry");
+  assert.equal(primaryAction(status({})), "autoPair");
+  assert.equal(primaryAction(status({ autoPair: { available: false, reason: "not_local" } })), "code");
+  assert.equal(primaryAction(status({ state: "expired" })), "autoPair");
+  assert.equal(primaryAction(status({ state: "rejected", autoPair: { available: false, reason: "cli_not_found" } })), "code");
+  assert.equal(primaryAction(connected), "sync", "paired but no sync running: start it");
+  assert.equal(primaryAction(status({ ...connected, sync: { running: true, startedAt: SYNCED, projects: 0, threads: 0 } })), null);
+  assert.equal(primaryAction(status({ ...connected, lastFullSyncAt: SYNCED })), null);
+});
+
+test("code reasons name why auto-pair is unavailable", () => {
+  assert.match(codeReason("not_local"), /another machine/);
+  assert.match(codeReason("cli_not_found"), /t3 CLI was not found/);
+  assert.match(codeReason("fake"), /any code/);
+  assert.match(codeReason(null), /pairing code/);
+});
+
+test("dashboard alert only after the first sync, toned by state", () => {
+  const after = (over) => status({ lastFullSyncAt: SYNCED, ...over });
+  assert.equal(dashboardAlert(undefined), null);
+  assert.equal(dashboardAlert(status({})), null, "setup owns the Dashboard before the first sync");
+  assert.equal(dashboardAlert(after(connected)), null);
+  assert.deepEqual(dashboardAlert(after({ state: "unreachable", reachable: false })), {
+    tone: "bad",
+    message: "No T3 server answered at http://127.0.0.1:3773.",
+  });
+  assert.equal(dashboardAlert(after({ state: "unpaired" }))?.tone, "need");
+  assert.equal(dashboardAlert(after({ state: "expired" }))?.tone, "need");
+  assert.equal(dashboardAlert(after({ state: "rejected" }))?.tone, "bad");
+});
+
+test("an older server without onboarding fields gets a derived state and safe defaults", () => {
+  const now = Date.parse("2026-11-17T10:00:00Z");
+  const {
+    state: _state,
+    t3UrlSource: _src,
+    reachable: _r,
+    checkedAt: _c,
+    probeError: _p,
+    t3: _t3,
+    autoPair: _a,
+    sync: _s,
+    ...legacy
+  } = base;
+  const s = normalizeT3Status(legacy, now);
+  assert.equal(s.state, "unpaired");
+  assert.equal(s.reachable, true);
+  assert.equal(s.t3, null);
+  assert.deepEqual(s.autoPair, { available: false, reason: null });
+  assert.deepEqual(s.sync, { running: false, startedAt: null, projects: 0, threads: 0 });
+  assert.equal(primaryAction(s), "code", "no auto-pair on an older server");
+  assert.equal(normalizeT3Status({ ...legacy, connected: true }, now).state, "connected");
+  assert.equal(normalizeT3Status({ ...legacy, tokenExpiresAt: "2026-11-17T09:00:00Z" }, now).state, "expired");
+  assert.equal(normalizeT3Status({ ...legacy, tokenExpiresAt: "2026-11-18T09:00:00Z" }, now).state, "unpaired");
+  assert.deepEqual(normalizeT3Status(base, now), base, "a current server passes through unchanged");
+});
+
+test("auto-pair and set-URL hit their endpoints and return a normalized status", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body });
+    return Response.json({ ...base, connected: true, state: "connected" });
+  });
+  assert.equal((await api.autoPair()).state, "connected");
+  assert.equal((await api.setT3Url({ url: "http://127.0.0.1:4000" })).state, "connected");
+  await api.setT3Url({ url: null });
+  assert.deepEqual(seen, [
+    { path: "/t3/pair/auto", method: "POST", body: undefined },
+    { path: "/t3/url", method: "PUT", body: JSON.stringify({ url: "http://127.0.0.1:4000" }) },
+    { path: "/t3/url", method: "PUT", body: JSON.stringify({ url: null }) },
+  ]);
+});

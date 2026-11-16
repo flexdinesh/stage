@@ -18,6 +18,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
@@ -42,6 +43,9 @@ type Deps struct {
 	// membership) so the release runner reconciles now; nil = no-op. Must
 	// not block.
 	OnTreeChange func()
+	// Setup is the T3 URL, binding and pairing (nil = one built from
+	// Config, Store and T3 with the CLI runner disabled for the fake).
+	Setup *t3setup.Service
 }
 
 type server struct {
@@ -58,6 +62,11 @@ func NewRouter(deps Deps) http.Handler {
 	if s.Inbox == nil {
 		s.Inbox = notify.NewHub(context.Background())
 	}
+	if s.Setup == nil {
+		s.Setup = t3setup.New(t3setup.Options{
+			Config: s.Config, Store: s.Store, Client: s.T3, Fake: t3setup.IsFake(s.T3), Logger: s.log,
+		})
+	}
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +80,8 @@ func NewRouter(deps Deps) http.Handler {
 
 	h("GET /api/t3/status", s.t3Status)
 	h("POST /api/t3/pair", s.t3Pair)
+	h("POST /api/t3/pair/auto", s.t3PairAuto)
+	h("PUT /api/t3/url", s.t3SetURL)
 	h("POST /api/sync", s.runSync)
 	h("GET /api/catalog", s.catalog)
 

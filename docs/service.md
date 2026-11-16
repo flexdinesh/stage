@@ -131,8 +131,9 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
 `stage service restart`.
 
 - Allowed keys: `STAGE_LISTEN`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`,
-  `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `T3_FAKE`, `T3_FAKE_SEED`.
-  Unknown keys, `STAGE_DATA_DIR` and `STAGE_ENV` are errors.
+  `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `T3_FAKE`, `T3_FAKE_SEED`,
+  `T3_BIN` (the t3 CLI auto-pair runs, when it is not in a usual install
+  dir). Unknown keys, `STAGE_DATA_DIR` and `STAGE_ENV` are errors.
 - `STAGE_LISTEN` must include `unix` (the socket desktop and CLI use); add
   TCP for a browser with `unix,127.0.0.1:7380`.
 - A file readable or writable by group or others is refused (it may hold
@@ -141,8 +142,10 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   inherited environment (`systemctl --user import-environment`,
   `launchctl setenv` can leak them), so the service never depends on a shell
   or on webview storage. A missing file means the template defaults.
-- T3 credentials: pairing (Settings, or `t3 pair`) stores Stage's T3 token in
-  `stage.db`, so a service needs nothing else. `T3_ADMIN_TOKEN` is optional
+- T3 credentials: pairing (Settings, `stage t3 pair`, or a `t3 pair` code)
+  stores Stage's T3 token in `stage.db`, so a service needs nothing else. A T3
+  URL saved in Settings (`stage t3 url`) is stored there too; `T3_URL` wins
+  over it. `T3_ADMIN_TOKEN` is optional
   (auto-renew) and is never assumed inherited by GUI launches.
 - `stage service start` validates the file before starting, so a bad file is
   an error there (exit 7) instead of a restart loop.

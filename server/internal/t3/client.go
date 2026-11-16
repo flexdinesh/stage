@@ -18,8 +18,17 @@ import (
 // for concurrent use. Calls outside a T3 thread must pass projectId/threadId
 // explicitly (OAuth clients have no implicit thread).
 type Client interface {
-	// Status reports the current connection/auth state. Never fails.
+	// Status reports the current connection/auth state from memory (the
+	// probe cache included): never fails, never calls T3.
 	Status(ctx context.Context) ConnectionStatus
+	// Probe returns the reachability probe of the T3 URL, refreshing it when
+	// older than the probe TTL (concurrent refreshes share one request). It
+	// waits at most until ctx ends, then returns the cached probe.
+	Probe(ctx context.Context) Probe
+	// Reconfigure points the client at another T3 URL (server calls) and
+	// public URL (browser links). A base URL change drops the MCP session,
+	// the known environment id and the probe cache; the token is kept.
+	Reconfigure(base, public string)
 	// Pair exchanges a pairing code (from `t3 pair`) for a full-access
 	// mcp-client token and stores it (paste fallback for auto-renew).
 	Pair(ctx context.Context, code string) error
@@ -91,11 +100,57 @@ var (
 )
 
 type ConnectionStatus struct {
-	Connected     bool
+	Connected     bool // a valid token T3 has not rejected
 	ClientID      string
 	ExpiresAt     *time.Time
 	LastError     string
 	EnvironmentID string // T3 environment id, used for web links; "" if unknown
+	HasToken      bool   // a token is stored (paired at least once)
+	Expired       bool   // the stored token is past its expiry
+	Rejected      bool   // T3 answered 401 to the current token
+	Probe         Probe  // last reachability probe (zero: none yet)
+}
+
+// State is the T3 connection state shown to users.
+type State string
+
+const (
+	StateUnreachable State = "unreachable" // nothing answered as T3 at the URL
+	StateUnpaired    State = "unpaired"    // no token
+	StateExpired     State = "expired"     // token past expiry
+	StateRejected    State = "rejected"    // T3 answered 401 to the token
+	StateConnected   State = "connected"
+)
+
+// State reports the first problem in order: unreachable, unpaired,
+// expired, rejected; else connected.
+func (s ConnectionStatus) State() State {
+	switch {
+	case !s.Probe.Reachable:
+		return StateUnreachable
+	case !s.HasToken:
+		return StateUnpaired
+	case s.Expired:
+		return StateExpired
+	case s.Rejected:
+		return StateRejected
+	}
+	return StateConnected
+}
+
+// Identity is what T3 says about itself at /.well-known/t3/environment.
+type Identity struct {
+	EnvironmentID string
+	Label         string
+	ServerVersion string
+}
+
+// Probe is one unauthenticated GET {T3 URL}/.well-known/t3/environment.
+type Probe struct {
+	Reachable bool      // answered 200 with an environment id
+	CheckedAt time.Time // zero: never probed
+	Err       string    // short reason when not reachable
+	Identity  *Identity // nil when not reachable
 }
 
 // ThreadStatus is T3 OrchestratorMcpThreadStatus ("idle" + run statuses).

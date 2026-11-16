@@ -44,8 +44,11 @@ import type {
   PushSubscriptionBody,
   Stats,
   StatsQuery,
+  SetT3UrlRequest,
   SyncResult,
+  T3State,
   T3Status,
+  T3StatusWire,
   Task,
   TaskDetail,
   TaskList,
@@ -112,7 +115,30 @@ type RequestOptions = { method?: string; body?: unknown };
 
 const post = (body?: unknown): RequestOptions => (body === undefined ? { method: "POST" } : { method: "POST", body });
 const patch = (body: unknown): RequestOptions => ({ method: "PATCH", body });
+const put = (body: unknown): RequestOptions => ({ method: "PUT", body });
 const del: RequestOptions = { method: "DELETE" };
+
+/** State an older server (no `state`) implies: `connected` is a valid token, else unpaired or expired. */
+function legacyState(w: T3StatusWire, now: number): T3State {
+  if (w.connected) return "connected";
+  if (w.tokenExpiresAt !== null && Date.parse(w.tokenExpiresAt) <= now) return "expired";
+  return "unpaired";
+}
+
+/** Fills the onboarding fields an older server does not send, so the UI never reads a missing object. */
+export function normalizeT3Status(w: T3StatusWire, now = Date.now()): T3Status {
+  return {
+    ...w,
+    state: w.state ?? legacyState(w, now),
+    t3UrlSource: w.t3UrlSource ?? "default",
+    reachable: w.reachable ?? true,
+    checkedAt: w.checkedAt ?? null,
+    probeError: w.probeError ?? null,
+    t3: w.t3 ?? null,
+    autoPair: w.autoPair ?? { available: false, reason: null },
+    sync: w.sync ?? { running: false, startedAt: null, projects: 0, threads: 0 },
+  };
+}
 
 /** Typed Stage API client over a host transport (trusted contract: docs/api.md). */
 export type Api = ReturnType<typeof createApi>;
@@ -148,8 +174,12 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
-    t3Status: () => apiFetch<T3Status>("/t3/status"),
-    pair: (body: PairRequest) => apiFetch<T3Status>("/t3/pair", post(body)),
+    t3Status: () => apiFetch<T3StatusWire>("/t3/status").then((w) => normalizeT3Status(w)),
+    pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),
+    /** Pairs through the t3 CLI on the server's machine (409 when unavailable, 502 when it fails). */
+    autoPair: () => apiFetch<T3StatusWire>("/t3/pair/auto", post()).then((w) => normalizeT3Status(w)),
+    /** 409 when T3_URL locks it or the URL is another T3; 400 when invalid. */
+    setT3Url: (body: SetT3UrlRequest) => apiFetch<T3StatusWire>("/t3/url", put(body)).then((w) => normalizeT3Status(w)),
     sync: () => apiFetch<SyncResult>("/sync", post()),
     catalog: () => apiFetch<Catalog>("/catalog"),
 

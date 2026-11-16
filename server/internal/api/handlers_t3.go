@@ -11,16 +11,43 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
+// t3StatusJSON is T3Status (docs/api.md "GET /api/t3/status").
 type t3StatusJSON struct {
-	Connected            bool       `json:"connected"`
-	T3URL                string     `json:"t3Url"`
-	PublicURL            string     `json:"publicUrl"`
-	EnvironmentID        *string    `json:"environmentId"`
-	ClientID             *string    `json:"clientId"`
-	TokenExpiresAt       *time.Time `json:"tokenExpiresAt"`
-	AdminTokenConfigured bool       `json:"adminTokenConfigured"`
-	LastError            *string    `json:"lastError"`
-	LastFullSyncAt       *time.Time `json:"lastFullSyncAt"`
+	Connected            bool             `json:"connected"`
+	State                t3.State         `json:"state"`
+	T3URL                string           `json:"t3Url"`
+	PublicURL            string           `json:"publicUrl"`
+	T3URLSource          string           `json:"t3UrlSource"`
+	EnvironmentID        *string          `json:"environmentId"`
+	ClientID             *string          `json:"clientId"`
+	TokenExpiresAt       *time.Time       `json:"tokenExpiresAt"`
+	AdminTokenConfigured bool             `json:"adminTokenConfigured"`
+	LastError            *string          `json:"lastError"`
+	LastFullSyncAt       *time.Time       `json:"lastFullSyncAt"`
+	Reachable            bool             `json:"reachable"`
+	CheckedAt            *time.Time       `json:"checkedAt"`
+	ProbeError           *string          `json:"probeError"`
+	T3                   *t3IdentityJSON  `json:"t3"`
+	AutoPair             autoPairJSON     `json:"autoPair"`
+	Sync                 syncProgressJSON `json:"sync"`
+}
+
+type t3IdentityJSON struct {
+	EnvironmentID string `json:"environmentId"`
+	Label         string `json:"label"`
+	ServerVersion string `json:"serverVersion"`
+}
+
+type autoPairJSON struct {
+	Available bool    `json:"available"`
+	Reason    *string `json:"reason"`
+}
+
+type syncProgressJSON struct {
+	Running   bool       `json:"running"`
+	StartedAt *time.Time `json:"startedAt"`
+	Projects  int        `json:"projects"`
+	Threads   int        `json:"threads"`
 }
 
 func strPtr(s string) *string {
@@ -30,21 +57,28 @@ func strPtr(s string) *string {
 	return &s
 }
 
-func (s *server) statusJSON(r *http.Request) (t3StatusJSON, error) {
-	st := s.T3.Status(r.Context())
+// statusJSON builds T3Status; refresh refreshes a stale probe first.
+func (s *server) statusJSON(r *http.Request, refresh bool) (t3StatusJSON, error) {
+	setup := s.Setup.Status(r.Context(), refresh)
+	st := setup.Conn
 	conn, err := s.Store.GetConnection(r.Context())
 	if err != nil {
 		return t3StatusJSON{}, err
 	}
 	out := t3StatusJSON{
 		Connected:            st.Connected,
-		T3URL:                s.Config.T3URL,
-		PublicURL:            s.Config.T3PublicURL,
+		State:                setup.State,
+		T3URL:                setup.Endpoint.URL,
+		PublicURL:            setup.Endpoint.PublicURL,
+		T3URLSource:          setup.Endpoint.Source,
 		EnvironmentID:        strPtr(st.EnvironmentID),
 		ClientID:             strPtr(st.ClientID),
 		AdminTokenConfigured: s.Config.T3AdminToken != "",
 		LastError:            strPtr(st.LastError),
 		LastFullSyncAt:       conn.LastFullSyncAt,
+		Reachable:            st.Probe.Reachable,
+		ProbeError:           strPtr(st.Probe.Err),
+		AutoPair:             autoPairJSON{Available: setup.AutoPair.Available, Reason: strPtr(setup.AutoPair.Reason)},
 	}
 	if st.ExpiresAt != nil {
 		exp := st.ExpiresAt.UTC()
@@ -53,16 +87,31 @@ func (s *server) statusJSON(r *http.Request) (t3StatusJSON, error) {
 	if out.LastError == nil {
 		out.LastError = conn.LastError
 	}
+	if !st.Probe.CheckedAt.IsZero() {
+		at := st.Probe.CheckedAt.UTC()
+		out.CheckedAt = &at
+	}
+	if id := st.Probe.Identity; id != nil {
+		out.T3 = &t3IdentityJSON{EnvironmentID: id.EnvironmentID, Label: id.Label, ServerVersion: id.ServerVersion}
+	}
+	if s.Sync != nil {
+		p := s.Sync.Progress()
+		out.Sync = syncProgressJSON{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+	}
 	return out, nil
 }
 
-func (s *server) t3Status(w http.ResponseWriter, r *http.Request) error {
-	out, err := s.statusJSON(r)
+func (s *server) writeStatus(w http.ResponseWriter, r *http.Request, refresh bool) error {
+	out, err := s.statusJSON(r, refresh)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
+}
+
+func (s *server) t3Status(w http.ResponseWriter, r *http.Request) error {
+	return s.writeStatus(w, r, true)
 }
 
 func (s *server) t3Pair(w http.ResponseWriter, r *http.Request) error {
@@ -76,16 +125,35 @@ func (s *server) t3Pair(w http.ResponseWriter, r *http.Request) error {
 	if code == "" {
 		return db.Invalid("code is required")
 	}
-	if err := s.T3.Pair(r.Context(), code); err != nil {
-		// Always 502 "pairing failed" (drop the chain so ErrNotConnected can't map to 503).
-		return &db.T3Error{Err: errors.New("pairing failed: " + err.Error())}
-	}
-	out, err := s.statusJSON(r)
-	if err != nil {
+	if err := s.Setup.Pair(r.Context(), code); err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return s.writeStatus(w, r, false)
+}
+
+// t3PairAuto pairs through the t3 CLI on this machine.
+func (s *server) t3PairAuto(w http.ResponseWriter, r *http.Request) error {
+	if err := s.Setup.AutoPair(r.Context()); err != nil {
+		return err
+	}
+	return s.writeStatus(w, r, false)
+}
+
+// t3SetURL saves the T3 URL setting; {"url": null} resets it.
+func (s *server) t3SetURL(w http.ResponseWriter, r *http.Request) error {
+	var body struct {
+		URL db.Optional[string] `json:"url"`
+	}
+	if err := decodeStrict(r, &body); err != nil {
+		return err
+	}
+	if !body.URL.Set {
+		return db.Invalid("url is required (null resets to the default)")
+	}
+	if err := s.Setup.SetURL(r.Context(), body.URL.Ptr()); err != nil {
+		return err
+	}
+	return s.writeStatus(w, r, true)
 }
 
 func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {

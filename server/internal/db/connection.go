@@ -55,14 +55,33 @@ func (s *Store) SetLastError(ctx context.Context, msg string) error {
 type Connection struct {
 	LastError      *string
 	LastFullSyncAt *time.Time
+	// T3URL is the T3 URL saved in Settings (nil = default).
+	T3URL *string
+	// EnvironmentID is the T3 environment this server is bound to (nil
+	// until the first successful pairing).
+	EnvironmentID *string
 }
 
 func (s *Store) GetConnection(ctx context.Context) (Connection, error) {
 	var c Connection
 	err := s.pool.QueryRow(ctx,
-		`SELECT last_error, last_full_sync_at FROM t3_connection WHERE id = 1`,
-	).Scan(&c.LastError, &c.LastFullSyncAt)
+		`SELECT last_error, last_full_sync_at, t3_url, environment_id FROM t3_connection WHERE id = 1`,
+	).Scan(&c.LastError, &c.LastFullSyncAt, &c.T3URL, &c.EnvironmentID)
 	return c, err
+}
+
+// SetT3URL saves the T3 URL setting ("" clears it: back to the default).
+func (s *Store) SetT3URL(ctx context.Context, u string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE t3_connection SET t3_url = $1, updated_at = `+nowSQL+` WHERE id = 1`, nullIfEmpty(u))
+	return err
+}
+
+// SetTokenEnvironment binds this server to a T3 environment ("" unbinds).
+func (s *Store) SetTokenEnvironment(ctx context.Context, envID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE t3_connection SET environment_id = $1, updated_at = `+nowSQL+` WHERE id = 1`, nullIfEmpty(envID))
+	return err
 }
 
 func (s *Store) SetLastFullSync(ctx context.Context, at time.Time) error {

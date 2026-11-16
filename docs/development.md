@@ -127,10 +127,14 @@ service, pairing or login setting.
 
 Stage Dev has its own database, so it starts unpaired: nothing is copied
 from the stable install. Connecting it to the same T3 is a deliberate step:
-pair it in Stage Dev's Settings, or with a code from `t3 pair`. A
-`T3_ADMIN_TOKEN` or `T3_URL` goes in Stage Dev's own `service.env`
-(`~/.config/stage-dev/service.env`, then `stage-dev service restart`). Both
-installs then run agents on that T3 as separate clients.
+the Dashboard's T3 setup ("Pair with T3" when T3 and its `t3` CLI are on
+this machine, else a code from `t3 pair`), Settings, or `stage-dev t3 pair
+[--code CODE]`. Auto-pair labels the code `stage dev mcp`; a `mise run dev`
+server pairs the same way. The T3 URL can be saved there too (`stage-dev t3
+url URL`); a `T3_ADMIN_TOKEN`, `T3_URL` or `T3_BIN` goes in Stage Dev's own
+`service.env` (`~/.config/stage-dev/service.env`, then `stage-dev service
+restart`). Both installs then run agents on that T3 as separate clients;
+each Stage server is bound to the T3 environment it first paired with.
 
 ## Troubleshooting
 

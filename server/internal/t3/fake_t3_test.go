@@ -41,6 +41,7 @@ type fakeT3 struct {
 	pairingLabels  []string // pairing-token label per call
 
 	uploads map[string]fakeUpload // upload token -> body
+	envID   string                // /.well-known/t3/environment environmentId
 
 	tools   map[string]mcp.ToolHandler
 	handler atomic.Pointer[mcp.StreamableHTTPHandler]
@@ -68,6 +69,7 @@ func newFakeT3(t *testing.T) *fakeT3 {
 		tools:        map[string]mcp.ToolHandler{},
 		uploads:      map[string]fakeUpload{},
 		expiresIn:    30 * 24 * 3600,
+		envID:        "env-fake",
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /oauth/mcp/register", f.register)
@@ -75,7 +77,10 @@ func newFakeT3(t *testing.T) *fakeT3 {
 	mux.HandleFunc("POST /oauth/mcp/decision", f.decision)
 	mux.HandleFunc("POST /oauth/mcp/token", f.token)
 	mux.HandleFunc("GET /.well-known/t3/environment", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"environmentId": "env-fake", "label": "fake"})
+		f.mu.Lock()
+		env := f.envID
+		f.mu.Unlock()
+		writeJSON(w, 200, map[string]any{"environmentId": env, "label": "fake " + env, "serverVersion": "0.1.9"})
 	})
 	mux.HandleFunc("POST /api/attachments/upload/{token}", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

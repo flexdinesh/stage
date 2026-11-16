@@ -17,16 +17,24 @@ import (
 	"github.com/flexdinesh/stage/server/internal/listen"
 )
 
+// DefaultT3URL is the T3 server address without T3_URL or a saved setting.
+const DefaultT3URL = "http://127.0.0.1:3773"
+
 type Config struct {
 	// Listen: STAGE_LISTEN (comma list) or `stage serve --listen` (repeatable),
 	// default listen.Default. A listen.DefaultSocket item stays unresolved
 	// (Address "") until ResolveSockets.
 	Listen       []listen.Addr
 	DataDir      string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With STAGE_ENV=dev never the default.
-	T3URL        string // T3_URL, default http://127.0.0.1:3773 (server-side MCP/OAuth calls)
+	T3URL        string // T3_URL, default DefaultT3URL (server-side MCP/OAuth calls)
 	T3PublicURL  string // T3_PUBLIC_URL, default T3_URL (browser "Open in T3" links)
 	T3AdminToken string // T3_ADMIN_TOKEN, optional; enables OAuth auto-renew
 	PublicURL    string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
+	// T3URLFromEnv / T3PublicURLFromEnv: T3_URL / T3_PUBLIC_URL were set
+	// (not the defaults). An env T3_URL locks the T3 URL setting.
+	T3URLFromEnv, T3PublicURLFromEnv bool
+	// T3Bin (T3_BIN) is the t3 CLI auto-pair runs; "" = look it up.
+	T3Bin string
 	// AllowedOrigins are the browser origins trusted besides loopback ones
 	// (normalized scheme://host[:port]): STAGE_ALLOWED_ORIGINS plus the
 	// origin of STAGE_PUBLIC_URL. Their hosts pass the Host check.
@@ -47,14 +55,16 @@ func Load(listenFlags []string) (Config, error) { return LoadFrom(os.Getenv, lis
 // LoadFrom is Load over getenv.
 func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) {
 	cfg := Config{
-		T3URL:        envOr(getenv, "T3_URL", "http://127.0.0.1:3773"),
+		T3URL:        envOr(getenv, "T3_URL", DefaultT3URL),
 		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
+		T3Bin:        getenv("T3_BIN"),
 		PublicURL:    getenv("STAGE_PUBLIC_URL"),
 		T3ClientName: buildinfo.Identity,
 		T3Fake:       getenv("T3_FAKE") == "1",
 		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
 	}
 	cfg.T3PublicURL = envOr(getenv, "T3_PUBLIC_URL", cfg.T3URL)
+	cfg.T3URLFromEnv, cfg.T3PublicURLFromEnv = getenv("T3_URL") != "", getenv("T3_PUBLIC_URL") != ""
 	dev := getenv("STAGE_ENV") == "dev"
 	if dev {
 		cfg.T3ClientName += " dev"

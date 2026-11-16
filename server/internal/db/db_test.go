@@ -70,6 +70,38 @@ func TestTokenStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestT3SettingsRoundTrip(t *testing.T) {
+	s, ctx := setup(t)
+	c, err := s.GetConnection(ctx)
+	if err != nil || c.T3URL != nil || c.EnvironmentID != nil {
+		t.Fatalf("fresh connection %+v %v", c, err)
+	}
+	if err := s.SetT3URL(ctx, "http://127.0.0.1:4000"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTokenEnvironment(ctx, "env-1"); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.GetConnection(ctx)
+	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" {
+		t.Fatalf("saved %+v", c)
+	}
+	// Saving a token leaves the settings alone.
+	if err := s.SaveToken(ctx, t3.StoredToken{ClientID: "c", Token: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetT3URL(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTokenEnvironment(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.GetConnection(ctx)
+	if c.T3URL != nil || c.EnvironmentID != nil {
+		t.Fatalf("cleared %+v", c)
+	}
+}
+
 func TestTransitionTask(t *testing.T) {
 	s, ctx := setup(t)
 	p := mustProject(t, s, ctx, "proj-1")

@@ -38,7 +38,7 @@ While the repository is private, use an authenticated `gh`: `gh api repos/flexdi
 
 Runs on the same machine as T3. Requires Docker with compose.
 
-1. Optional: issue a T3 admin token on the T3 host. stage uses it to mint and auto-renew its own T3 access. Without it, pair manually in Settings (`t3 pair`).
+1. Optional: issue a T3 admin token on the T3 host. stage uses it to mint and auto-renew its own T3 access. Without it, pair in the app (see [Connecting to T3](#connecting-to-t3)).
 
    ```sh
    t3 auth session issue --ttl 3650d --label stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
@@ -106,9 +106,10 @@ Server (`stage serve`):
 | `STAGE_DATA_DIR` | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS: `~/Library/Application Support/stage`) | Directory holding `stage.db`. Compose sets `/data`. |
 | `STAGE_PUBLIC_URL` | unset | Optional HTTPS URL the PWA is served at. Its origin is trusted by the request-origin policy (see [Security](#security)). It is the Web Push VAPID subject when `https`; otherwise a fallback subject is used. Push works without it. |
 | `STAGE_ALLOWED_ORIGINS` | unset | Comma list of extra browser origins (`https://host[:port]`) to trust, e.g. a Tailscale serve or Caddy hostname other than `STAGE_PUBLIC_URL`. Their hosts pass the Host check. |
-| `T3_URL` | `http://127.0.0.1:3773` | T3 server stage calls (MCP, OAuth, uploads). Compose defaults to `http://host.docker.internal:3773`. |
+| `T3_URL` | `http://127.0.0.1:3773` | T3 server stage calls (MCP, OAuth, uploads). Compose defaults to `http://host.docker.internal:3773`. Without it, the URL saved in the app (`stage t3 url`) applies; with it, that setting is locked. |
 | `T3_PUBLIC_URL` | `T3_URL` | T3 address browsers use for "Open in T3" links. Set it under compose. |
-| `T3_ADMIN_TOKEN` | unset | Admin token for minting and auto-renewing stage's T3 access. Unset: pair manually in Settings. |
+| `T3_ADMIN_TOKEN` | unset | Admin token for minting and auto-renewing stage's T3 access. Unset: pair in the app ([Connecting to T3](#connecting-to-t3)). |
+| `T3_BIN` | unset | The `t3` CLI auto-pair runs, when it is not on `PATH` or in a usual install dir. |
 | `T3_FAKE` | unset | `1` uses an in-memory fake T3 (UI work without a T3 server). |
 | `T3_FAKE_SEED` | unset | With `T3_FAKE=1`, `1` seeds demo threads waiting on questions. |
 | `STAGE_ENV` | unset | `dev` (set by `mise run dev`): names the T3 session `stage dev` and refuses the default data dir. |
@@ -119,6 +120,16 @@ Client (CLI, `stage mcp`):
 |---|---|---|
 | `STAGE_URL` | the private default socket when a server owns it, else `http://127.0.0.1:7380` | Server address: an `http(s)` URL, or `unix:///abs/path.sock`. `--url` overrides it. `stage status` shows which server the CLI reaches. |
 | `T3CODE_THREAD_ID` | set by T3 | The calling T3 session; picks the project, records provenance, enables `--after-me` and `sessions adopt` without an id. |
+
+### Connecting to T3
+
+Each stage server talks to one T3 server. Until it is paired and has synced once, the Dashboard shows the T3 setup:
+
+- **T3 not answering:** start it (`t3 serve`), or set its URL there (or `stage t3 url URL`; `--reset` for the default).
+- **Not paired:** "Pair with T3" when T3 and its `t3` CLI are on the same machine as stage (`stage t3 pair` does the same). Otherwise run `t3 pair` on the T3 host and paste the code (`stage t3 pair --code CODE`).
+- After pairing, the first sync starts at once and the Dashboard fills in.
+
+`stage t3 status` shows the URL, reachability, pairing, sync and whether auto-pair is available. The first pairing binds the server to that T3 environment; to use another T3, run another stage server (its own data dir).
 
 ### Unix socket
 

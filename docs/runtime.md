@@ -82,7 +82,7 @@ Startup order:
 1. **Lock the data dir.** If it is held, exit at once (status 75) with `data dir … is in use by another stage server (pid N, version V, listening on …)`, plus a hint to run `stage service stop` when the holder is the managed service. The server does not wait. It also starts nothing and binds nothing.
 2. **Open every listener in order.** For a socket, take its lock. Under the lock, an existing socket file that refuses connections is stale (its owner died) and is replaced. A regular file is refused. So is a socket that answers (a server predating the lock) or one that cannot be probed. If any bind fails, the listeners already opened are closed, their sockets removed and their locks released. The database has not been touched yet.
 3. Record the holder in `stage.lock`.
-4. Open the database and guard its schema ([below](#schema-and-backups)): a schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Migrate, start T3, recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
+4. Open the database and guard its schema ([below](#schema-and-backups)): a schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Migrate, start T3 (its URL: `T3_URL`, else the one saved with `PUT /api/t3/url` or `stage t3 url`, else `http://127.0.0.1:3773`), recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
 5. Serve all listeners, then send `READY=1` to systemd.
 
 `filelock.Acquire` retries for up to 500 ms. A client briefly probing a
@@ -168,6 +168,12 @@ binary knows; `/api/health` `schema` is the database's.
   database work.
 - T3 being offline is still 200, with `t3.connected: false`. "Stage is live
   and ready" is therefore separate from "T3 is reachable".
+- It never calls T3, so it answers at once while T3 hangs (desktop polls it
+  every 5s). `t3.connected` reads memory only: a valid token T3 has not
+  rejected. Reachability (a 10s-cached probe of
+  `{T3 URL}/.well-known/t3/environment`), the setup state and auto-pair are
+  `GET /api/t3/status` ([api.md](api.md#get-apit3status)), which refreshes a
+  stale probe for at most 3s.
 - 503 means the database query failed.
 - It does not expose paths or the pid.
 
