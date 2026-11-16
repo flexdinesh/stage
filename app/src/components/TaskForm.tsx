@@ -134,12 +134,26 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "startL
   };
 }
 
+/** New task joining a tree (tree view Add task): the tree and the members it needs. */
+export interface TreePrefill {
+  treeId: number;
+  treeTitle: string;
+  needs: number[];
+}
+
+/** Start options for a new task: a task with needs waits in backlog; tree tasks never repeat (schedules take no tree). */
+function newModes(tree: TreePrefill | undefined): readonly StartMode[] {
+  if (tree === undefined) return START_MODES;
+  return tree.needs.length > 0 ? ["backlog"] : ["now", "backlog", "at"];
+}
+
 function initialState(
   task: Task | undefined,
   schedule: Schedule | undefined,
   defaultProjectId: number | undefined,
   defaultMode: StartMode | undefined,
   defaults: ModelDefaults | undefined,
+  tree: TreePrefill | undefined,
 ): FormState {
   const tz = browserTimeZone();
   const timing = { handoff: true, startLocal: defaultStartLocal(tz), repeat: DEFAULT_REPEAT, tz };
@@ -179,7 +193,7 @@ function initialState(
     branch: "",
     tags: "",
     notes: "",
-    mode: defaultMode ?? "now",
+    mode: defaultMode ?? newModes(tree)[0] ?? "now",
   };
 }
 
@@ -203,6 +217,8 @@ interface TaskFormProps {
   defaultProjectId?: number;
   /** New task: preselected Start option (e.g. "repeat" for New schedule). */
   defaultMode?: StartMode;
+  /** New task: join this tree, needing these members. */
+  defaultTree?: TreePrefill;
   onClose: () => void;
   onSaved?: (saved: Saved) => void;
 }
@@ -226,12 +242,13 @@ function TaskFormDrawer({
   schedule,
   defaultProjectId,
   defaultMode,
+  defaultTree,
   onClose,
   onSaved,
   prefill,
 }: TaskFormProps & { prefill: { defaults: ModelDefaults; source: DefaultsSource } | null }) {
   const api = useApi();
-  const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, prefill?.defaults));
+  const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, prefill?.defaults, defaultTree));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
   const invalidate = useInvalidateWork();
@@ -240,7 +257,7 @@ function TaskFormDrawer({
   const isNew = task === undefined && schedule === undefined;
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
-  const modes: readonly StartMode[] = isNew ? START_MODES : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
+  const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
   const mode = s.mode;
   // The need a worktree can stack on (editing a task with needs); baseTaskId is kept from the task.
   const taskWs = task?.workspace;
@@ -308,6 +325,8 @@ function TaskFormDrawer({
         ...template(),
         ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
         ...(timed !== null ? timed : { start: mode === "now" }),
+        ...(defaultTree === undefined ? {} : { treeId: defaultTree.treeId }),
+        ...(defaultTree === undefined || defaultTree.needs.length === 0 ? {} : { needs: defaultTree.needs }),
       };
       return { kind: "task", task: await api.createTask(body) };
     },
@@ -375,6 +394,19 @@ function TaskFormDrawer({
         {task === undefined || full ? null : (
           <Alert tone="plain">
             Task is <TaskStateBadge state={task.state} />; only title, tags and notes can change.
+          </Alert>
+        )}
+        {!isNew || defaultTree === undefined ? null : (
+          <Alert tone="plain">
+            Joins tree <span className="font-medium">{defaultTree.treeTitle}</span>
+            {defaultTree.needs.length === 0 ? (
+              " as a root."
+            ) : (
+              <>
+                , needing <span className="font-mono tabular">{defaultTree.needs.map((id) => `#${id}`).join(" ")}</span>. It waits
+                in backlog until {defaultTree.needs.length === 1 ? "it settles" : "they settle"}.
+              </>
+            )}
           </Alert>
         )}
         {schedule === undefined ? null : (

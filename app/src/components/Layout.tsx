@@ -18,8 +18,8 @@ import {
   IconSearch,
   IconStage,
   IconSun,
-  IconSnippets,
   IconThemeSystem,
+  IconTree,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
@@ -28,6 +28,7 @@ import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx"
 
 const NAV = [
   { to: "/", label: "Dashboard" },
+  { to: "/trees", label: "Trees" },
   { to: "/projects", label: "Projects" },
   { to: "/sessions", label: "Sessions" },
   { to: "/schedules", label: "Schedules" },
@@ -37,7 +38,9 @@ const NAV = [
 ] as const;
 
 /** Phone More drawer: the laptop nav items the bottom tabs leave out. */
-const MORE = NAV.filter((item) => item.to === "/schedules" || item.to === "/history" || item.to === "/settings");
+const MORE = NAV.filter(
+  (item) => item.to === "/schedules" || item.to === "/history" || item.to === "/snippets" || item.to === "/settings",
+);
 
 /** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
 const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
@@ -90,9 +93,9 @@ const TAB_ICON = 22;
 
 const TABS = [
   { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
+  { to: "/trees", label: "Trees", icon: <IconTree size={TAB_ICON} /> },
   { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
   { to: "/sessions", label: "Sessions", icon: <IconHistory size={TAB_ICON} /> },
-  { to: "/snippets", label: "Snippets", icon: <IconSnippets size={TAB_ICON} /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {
@@ -274,7 +277,7 @@ function Shell() {
             className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
-            <span className="hidden xl:inline">Search tasks, threads</span>
+            <span className="hidden 2xl:inline">Search tasks, threads</span>
             <Kbd className="max-xl:hidden">Ctrl K</Kbd>
           </button>
           <NotificationsBell onOpen={openInbox} />

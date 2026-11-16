@@ -12,6 +12,8 @@ import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
 import { SnippetsPage } from "./pages/SnippetsPage.tsx";
 import { ScheduleDetailPage } from "./pages/ScheduleDetailPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
+import { TreeDetailPage } from "./pages/TreeDetailPage.tsx";
+import { TreesPage } from "./pages/TreesPage.tsx";
 
 export const router = createBrowserRouter([
   {
@@ -19,6 +21,8 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: "trees", element: <TreesPage /> },
+      { path: "trees/:id", element: <TreeDetailPage /> },
       { path: "projects", element: <ProjectsPage /> },
       { path: "projects/:id", element: <ProjectDetailPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
