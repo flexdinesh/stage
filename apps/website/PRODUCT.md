@@ -21,7 +21,7 @@ stage sits beside T3 rather than replacing it: T3 is where conversations happen;
 5. PWA and push notifications: install stage, get a push when a thread needs input, answer it from the lock screen in a tap.
 
 ## Operating Context
-- Static site (vocs, full-static) on Cloudflare Workers (static assets), worker `stage-website`.
+- Static site (vocs, full-static) on Cloudflare Workers (static assets), worker `stage-website`, deployed by Workers Builds from stage `main` (docs/website.md).
 - Source: github.com/flexdinesh/stage (stage; this site in `apps/website`).
 - Facts come from stage's engineering contracts (docs/*.md: install, desktop, service, runtime, features, api), the code, and PRODUCT.md; docs/architecture.md maps each contract to its website page. stage is self-hosted, single-user, no auth, on a private network. The site has no REST API reference (repo-only, docs/api.md).
 
