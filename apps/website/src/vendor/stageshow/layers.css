@@ -1,0 +1,5 @@
+/* Layer order: the kit's `@layer stageshow` must sit after every vocs layer,
+   or vocs' preflight (`vocs_base`) zeroes the kit's padding and margins.
+   The first @layer statement the browser sees fixes the order, so this file
+   is imported before any kit CSS (see index.ts). */
+@layer vocs_theme, theme, base, vocs_base, vocs_components, components, vocs_utilities, utilities, stageshow;

@@ -1,0 +1,45 @@
+---
+title: Introduction
+description: What stage is, how it sits beside T3 Code, what it needs to run, and how it is built.
+showAskAi: false
+---
+
+# Introduction
+
+stage is a self-hosted task manager for T3 Code. Queue tasks, launch them as T3 threads, link them to run in order, schedule them, track status, and see history across all projects. It runs on the same machine as T3 and talks to T3 only through T3's MCP endpoint.
+
+## stage beside T3
+
+stage sits beside T3 rather than replacing it.
+
+- **T3** is where conversations happen. Every task links straight to its thread ("Open in T3"). Tool calls, commands, diffs, permission approvals and settling a thread stay in T3.
+- **stage** owns what T3 does not provide: the backlog, run order between tasks (even across projects), one-shot and recurring schedules, and a cross-project view of every T3 thread, including ones started outside stage.
+- **The one exception** is a session's pending question. stage shows it and lets you answer it in place, so a thread that needs input can be unblocked from a phone in one step.
+
+Typical loop: queue work from a laptop or an agent, let linked tasks start as their predecessors settle in T3, and answer whatever needs input from your phone when a push arrives.
+
+## Requirements
+
+- A machine running the T3 Code server. stage runs on the same host.
+- Docker with compose.
+- Shell access to the T3 host to issue an admin token (`t3 auth session issue`), used by stage to mint and auto-renew its own T3 access.
+- Optional: an HTTPS reverse proxy with a trusted certificate, needed to install stage as an app (PWA) and receive Web Push notifications.
+
+:::warning
+stage has no authentication. Run it on a trusted private network (LAN or tailnet). compose publishes it on the host's loopback only by default.
+:::
+
+## Stack
+
+- **Server**: Go, shipped as a single binary. No arguments runs the server; subcommands are the [agent CLI](/docs/agents).
+- **Storage**: SQLite (`stage.db`), in the `stagedata` Docker volume under compose.
+- **Web app**: React, installable as a PWA with Web Push.
+- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`). stage polls active tasks every 5s, runs a full sync every 5 min, and polls watched transcripts every 2s while their run is active.
+- **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the [REST API](/docs/api).
+
+## Next steps
+
+- [Deploy](/docs/deploy): issue a token, configure `.env`, `docker compose up`, then set up HTTPS for the PWA and notifications.
+- [Features](/docs/features): everything stage does, grouped by area.
+- [Agents](/docs/agents): let agents running in T3 queue and manage tasks through the CLI or MCP.
+- [REST API](/docs/api): the contract every front end uses.

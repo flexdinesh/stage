@@ -1,0 +1,126 @@
+---
+title: Deploy
+description: Run stage with Docker compose on the T3 host, configure it, update it, and set up HTTPS for the PWA and Web Push notifications.
+showAskAi: false
+---
+
+# Deploy
+
+stage runs on the same machine as T3. Requires Docker with compose.
+
+## Run with Docker compose
+
+:::steps
+
+### Clone
+
+```sh
+git clone https://github.com/flexdinesh/stage.git
+cd stage
+```
+
+### Issue an admin token
+
+On the T3 host, issue an admin token. stage uses it to mint and auto-renew its own T3 access every 30 days:
+
+```sh
+t3 auth session issue --ttl 3650d --label stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
+```
+
+### Configure
+
+```sh
+cp .env.example .env
+```
+
+Set `T3_ADMIN_TOKEN` to the token, and `T3_PUBLIC_URL` to the T3 address browsers use for "Open in T3" links. See [Configuration](#configuration) for every variable.
+
+### Run
+
+```sh
+docker compose up -d --build
+```
+
+Open `http://127.0.0.1:7380` on the host. compose publishes the port on the host's loopback only; see [Ports and network](#ports-and-network) to expose it.
+
+:::
+
+:::note
+Without an admin token, connect from Settings: manual pairing exchanges a pairing code from `t3 pair` for a token. Settings also shows T3 connection status and has Sync now.
+:::
+
+## Configuration
+
+`.env` is read by compose (`env_file`, optional). Values from `.env.example`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `T3_ADMIN_TOKEN` | empty | Admin token from `t3 auth session issue`. Enables OAuth token auto-renew. |
+| `T3_URL` | `http://127.0.0.1:3773`; compose: `http://host.docker.internal:3773` | T3 Code server URL stage uses (MCP/OAuth). Under compose T3 runs on the Docker host, which must listen beyond loopback. |
+| `T3_PUBLIC_URL` | `T3_URL` | Browser-facing T3 URL for "Open in T3" links. Set it when browsers reach T3 at another address (always under compose). |
+| `STAGE_PUBLIC_URL` | empty | Public URL of the PWA, e.g. `https://stage.example.com` behind an HTTPS reverse proxy. When it is https it is also the Web Push VAPID subject. Optional. |
+| `STAGE_LISTEN` | `127.0.0.1:7380`; compose: `0.0.0.0:7380` | Listen address: `host:port`, or `unix:/abs/path.sock` for a unix socket (0660). `stage serve --listen ADDR` overrides it. |
+| `STAGE_DATA_DIR` | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`); compose: `/data` | SQLite data dir (holds `stage.db`). |
+| `T3_FAKE` | empty | `1` uses an in-memory fake T3 (UI/dev without a T3 server). |
+
+## Ports and network
+
+- Inside the container stage listens on `0.0.0.0:7380`.
+- compose publishes it as `127.0.0.1:7380:7380`: reachable from the host only, since there is no auth.
+- To expose it, change the host side in `compose.yaml` (e.g. `"7380:7380"`), ideally behind an HTTPS reverse proxy.
+- The container reaches T3 on the Docker host through `host.docker.internal` (`extra_hosts: host-gateway`).
+
+```yaml [compose.yaml]
+services:
+  app:
+    ports:
+      - "127.0.0.1:7380:7380"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      STAGE_LISTEN: 0.0.0.0:7380
+      STAGE_DATA_DIR: /data
+      T3_URL: ${T3_URL:-http://host.docker.internal:3773}
+    volumes:
+      - stagedata:/data
+```
+
+## Data
+
+The SQLite database (`stage.db`) lives in the `stagedata` volume (`STAGE_DATA_DIR=/data`). Outside Docker it defaults to `$XDG_DATA_HOME/stage` (else `~/.local/share/stage`; macOS `~/Library/Application Support/stage`).
+
+## Update
+
+```sh
+git pull && docker compose up -d --build
+```
+
+On shutdown the server waits up to 100s for in-flight launches; compose sets `stop_grace_period: 2m` above that. If you installed the [agent CLI](/docs/agents#install-and-register), rerun `mise run install-cli` after updating.
+
+## Install as an app (PWA) and notifications
+
+Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `STAGE_PUBLIC_URL` to that URL (it is also the VAPID subject).
+
+The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
+
+### Reverse proxy and SSE
+
+The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript/stream`).
+
+- Caddy's `reverse_proxy` flushes it immediately. If your config uses `encode`, exclude that path so events are not buffered.
+- Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
+
+### Install
+
+- **iOS/iPadOS 16.4+**: open the URL in Safari, Share → Add to Home Screen, open stage from the Home Screen, then Settings → Notifications → Enable.
+- **macOS**: Safari → File → Add to Dock (or use the site in Safari/Chrome), then Settings → Notifications → Enable.
+
+### Test
+
+Settings → Notifications → Send test checks the device.
+
+:::note
+The service worker registers only in production builds (`mise run build` or compose).
+:::
+
+Which events notify (needs input, failed, done, settled) is a global filter in Settings that applies to every device. See [Notifications](/docs/features#notifications) and the [notification rules](/docs/api/notifications#notification-rules).

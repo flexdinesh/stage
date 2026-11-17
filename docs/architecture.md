@@ -12,11 +12,12 @@ can render: the browser (PWA) and the MyGo desktop app
 | `packages/app/` (`@stage/app`) | The whole UI: routes, pages, components, query/state logic, API client and types (`src/api/types.ts` mirrors [api.md](api.md)), design tokens (`src/index.css`), and the platform contract (`src/platform/index.ts`) | Use browser globals at a platform boundary, import a host or MyGo, or branch on the platform |
 | `apps/web/` (`@stage/web`) | Browser host: `index.html`, `src/main.tsx` (mount, service worker registration), `src/sw.ts`, `public/` (manifest, icons, favicons), Vite config, browser adapters (`src/platform/`) | Hold product UI or business logic |
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`@stage/desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
+| `apps/website/` (`@stage/website`) | Static marketing site and public docs (user guides, REST API reference) on vocs (`renderStrategy: 'full-static'`), illustrative demos (vendored stageshow in `src/vendor/`), its own `PRODUCT.md`, `DESIGN.md` and `.impeccable/`, and the Cloudflare Workers static-assets config (`wrangler.jsonc`, worker `stage-website`). Tasks: `mise run website:dev` (:5175), `website:build`, `website:check` (also in `mise run check`), `website:preview` (wrangler dev, :8787) | Import `@stage/*` or product UI/runtime internals; be needed by a product build or release (they install with `--filter` and never build it); deploy with product releases |
 | `desktop/fixture/` | MyGo proof (ADR 0001). Separate Go module and its own pnpm lockfile, outside the workspace | Be imported by anything |
 | `tools/release/`, `scripts/release.sh` | Release builds ([release.md](release.md)): one version and commit for the desktop, its bundled CLI and the headless CLI; the manifest, checksums and verification. `tools/release` is its own Go module (standard library only) | Upload, tag, install or hold product logic |
 
-One pnpm workspace (`pnpm-workspace.yaml`: `apps/web`, `packages/app`, `desktop/app/ui`) with one lockfile at
-the root. `@stage/app` ships TypeScript source; the host's Vite build compiles
+One pnpm workspace (`pnpm-workspace.yaml`: `apps/web`, `apps/website`, `packages/app`, `desktop/app/ui`) with one lockfile at
+the root; it also holds the install-script policy (`allowBuilds`). `@stage/app` ships TypeScript source; the host's Vite build compiles
 it. Its exports: `@stage/app` (`StageApp`, `createApi`, `ApiError`, API types),
 `@stage/app/platform` (contract types), `@stage/app/index.css` (styles; Tailwind
 scans `packages/app/src` only).
@@ -63,15 +64,19 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 
 ## Builds and legacy paths
 
-- `mise run build`: workspace frozen install, `pnpm --filter @stage/web build`,
+- `mise run build`: frozen install filtered to `@stage/web...`, `pnpm --filter @stage/web build`,
   copy `apps/web/dist` into `server/internal/webui/dist`, `go build`.
 - `apps/web/dist` is a fixed path: `mise run build`, `scripts/release.sh`, the
   `Dockerfile` (`COPY --from=web /src/apps/web/dist/`), and the fixture e2e
   (`desktop/fixture/e2e`, `../../../apps/web/dist`) read it. Moving it breaks all four.
 - The `Dockerfile` (used by the compose stack) copies the root workspace
   manifests and lockfile, `packages/app/` and `apps/web/`, and `desktop/app/ui/package.json`
-  (manifest only, so the frozen install matches the lockfile). A new workspace
-  package needs a matching `COPY`.
+  (manifest only), then runs a frozen install filtered to `@stage/web...`. A
+  workspace package the browser host does not depend on (`apps/website`) needs
+  no `COPY` and stays in `.dockerignore`.
+- Product builds (`mise run build`, `scripts/release.sh`, the `Dockerfile`,
+  `desktop:e2e`) install only product packages with `--filter`; website output
+  (`apps/website/dist`) never reaches `server/internal/webui/dist` or a release asset.
 - `desktop/app/dist` is the desktop UI build (`pnpm --filter @stage/desktop build`), embedded by the desktop app; it keeps a tracked `.gitkeep`.
 - The theme key `stage-theme` is read before first paint in
   `web/index.html` and `desktop/app/ui/public/theme.js`; keep both in step with `app/src/lib/theme.ts`.

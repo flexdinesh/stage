@@ -1,0 +1,391 @@
+/* run-order demo: stage's Ink Workbench, scoped under .ro. Only --st-* / --ss-* tokens. */
+
+.ro {
+  & .ss-stage {
+    --ro-ease: cubic-bezier(0.45, 0, 0.1, 1);
+    --ro-arrive: cubic-bezier(0.25, 0.8, 0.25, 1);
+    overflow: hidden;
+    background: transparent;
+    font: 14.5px/1.45 var(--st-font);
+    color: var(--st-fg);
+  }
+
+  /* ---- type ---- */
+  .ro-label {
+    font: 11px/14px var(--st-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--st-muted);
+  }
+  .ro-label--ink { color: var(--st-fg); }
+  .ro-num {
+    font: 12px/1 var(--st-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--st-muted);
+    white-space: nowrap;
+  }
+  .ro-icon { flex: none; display: block; }
+
+  /* ---- chips (two-token tone rule) ---- */
+  .ro-chip {
+    --ro-c: var(--st-muted);
+    --ro-cf: var(--st-fg);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid color-mix(in srgb, var(--ro-c) 45%, transparent);
+    background: color-mix(in srgb, var(--ro-c) 8%, transparent);
+    color: var(--ro-cf);
+    font: 12px/18px var(--st-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    transition: border-color 220ms ease, background-color 220ms ease, color 220ms ease;
+  }
+  .ro-chip--dot::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    background: var(--ro-c);
+    transition: background-color 220ms ease;
+  }
+  .ro-chip[data-tone='run'] { --ro-c: var(--st-run); --ro-cf: var(--st-run); }
+  .ro-chip[data-tone='done'] { --ro-c: var(--st-done); --ro-cf: var(--st-done); }
+  .ro-chip[data-tone='ok'] { --ro-c: var(--st-ok); --ro-cf: var(--st-ok); }
+  .ro-chip[data-tone='idle'] { --ro-c: var(--st-idle); --ro-cf: var(--st-idle); }
+  .ro-chip--skel { border-color: var(--st-line); background: none; padding: 0 8px; }
+
+  /* Plain run order chip: fades in on its reserved column */
+  .ro-chip--link {
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 360ms ease;
+  }
+  .ro-chip--link[data-show] { opacity: 1; transition-delay: 380ms; }
+
+  /* ---- window + page ---- */
+  .ro-win {
+    position: absolute;
+    left: 24px;
+    top: 24px;
+    width: 632px;
+    height: 560px;
+    box-shadow: var(--ss-shadow-hero);
+  }
+  .ro-win .ss-window__body { background: var(--st-surface); }
+
+  .ro-rows { transition: opacity 300ms ease; }
+  .ro-rows[data-hidden] { opacity: 0; }
+
+  .ro-panel__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    height: 33px;
+    padding: 0 12px;
+    background: var(--st-panel);
+    border-bottom: 1px solid var(--st-line);
+    color: var(--st-fg);
+  }
+  .ro-panel__meta {
+    font: 11.5px/14px var(--st-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--st-muted);
+    white-space: nowrap;
+  }
+  /* Labels in a header bar center on their capitals, as stage trims them */
+  .ro-panel__head > .ro-label,
+  .ro-panel__head > .ro-panel__meta { line-height: 11px; text-box: trim-both cap alphabetic; }
+
+  /* Task row: 118px state column, fluid title, run order chip column */
+  .ro-row {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr) 96px;
+    align-items: center;
+    column-gap: 14px;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    border-left: 2px solid transparent;
+    border-bottom: 1px solid var(--st-line);
+  }
+  .ro-row__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ro-row__title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    height: 20px;
+    font-size: 14.5px;
+    line-height: 20px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .ro-row--filler .ro-row__title { align-items: center; }
+  .ro-title { overflow: hidden; text-overflow: ellipsis; }
+  .ro-row__meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 18px;
+    font: 12px/18px var(--st-mono);
+    color: var(--st-muted);
+    white-space: nowrap;
+  }
+  .ro-row__link { display: flex; }
+  .ro-row__state { will-change: transform; }
+
+  /* ---- satellite: #13's Run order panel ---- */
+  .ro-sat {
+    position: absolute;
+    left: 170px;
+    top: 209px;
+    width: 450px;
+    background: var(--st-surface);
+    box-shadow: var(--ss-shadow-satellite);
+    will-change: transform;
+    transition: opacity 300ms ease, transform 420ms var(--ro-ease);
+  }
+  .ro-sat[data-hidden] { opacity: 0; transform: translateY(10px); }
+  .ro-sat > .ro-panel__head { color: var(--st-fg); }
+  .ro-sat__body { padding: 0 12px; }
+  .ro-sat__body > .ss-collapse:last-child { margin-bottom: 0; }
+
+  /* Every block pads its own top so a closed one leaves no gap */
+  .ro-pick,
+  .ro-linked,
+  .ro-after { padding-top: 12px; }
+  .ro-sat__body::after { content: ''; display: block; height: 12px; }
+
+  /* The toggle/record slot spans the panel; the record arrives at a reading pace */
+  .ro-after .ss-states { display: grid; width: 100%; justify-items: stretch; }
+  .ro-after .ss-states__item { display: block; min-width: 0; transition-duration: 0.4s, 0.4s, 0s; }
+
+  .ro-pick { display: flex; flex-direction: column; gap: 6px; }
+  .ro-pick__row { position: relative; display: flex; gap: 8px; }
+  .ro-select {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 8px 0 10px;
+    border: 1px solid var(--st-line-strong);
+    background: var(--st-surface);
+    color: var(--st-muted);
+    font-size: 14px;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .ro-select > :first-child { flex: 1; min-width: 0; }
+  .ro-select[data-open] { border-color: var(--st-accent); box-shadow: 0 0 0 1px var(--st-accent); }
+  .ro-select__ph,
+  .ro-select__val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ro-select__val { color: var(--st-fg); }
+
+  .ro-btn.ss-button {
+    font: 500 13px/1.25 var(--st-font);
+    color: var(--st-fg);
+    background: var(--st-surface);
+    box-shadow: inset 0 0 0 1px var(--st-line-strong);
+    transition: opacity 150ms ease, background-color 150ms ease;
+  }
+  .ro-btn.ss-button[data-hover] { background: var(--st-panel); }
+  .ro-btn[data-off] { opacity: 0.45; }
+  .ro-btn--ghost.ss-button { box-shadow: none; color: var(--st-muted); background: transparent; font-size: 12px; }
+
+  /* Combobox list: flat, Strong Hairline, active row 7% ink + 2px inset bar */
+  .ro-list.ss-popover {
+    --ss-popover-bg: var(--st-surface);
+    --ss-popover-shadow: 0 0 0 1px var(--st-line-strong);
+    top: 36px;
+    left: 0;
+    right: 0;
+    padding: 0;
+  }
+  .ro-opt {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--st-line);
+    transition: background-color 150ms ease, box-shadow 150ms ease;
+  }
+  .ro-opt:last-child { border-bottom: 0; }
+  .ro-opt[data-hover] {
+    background: color-mix(in srgb, var(--st-fg) 7%, transparent);
+    box-shadow: inset 2px 0 var(--st-accent);
+  }
+  .ro-opt__title { display: flex; align-items: center; gap: 6px; height: 18px; font-size: 13px; font-weight: 500; }
+  .ro-opt__meta { display: flex; align-items: center; height: 16px; font: 11.5px/16px var(--st-mono); color: var(--st-muted); }
+
+  /* Pipeline: bordered cells joined by a 1px Strong Hairline */
+  .ro-pipe {
+    display: flex;
+    align-items: center;
+    margin: 0;
+    padding: 2px;
+    list-style: none;
+  }
+  .ro-step {
+    --ro-c: var(--st-line-strong);
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, var(--ro-c) 55%, transparent);
+    color: var(--st-fg);
+    opacity: 0;
+    transition: border-color 220ms ease, background-color 220ms ease, color 220ms ease, opacity 420ms ease;
+  }
+  /* Backlog step: a dashed edge on its own layer, faded out (never resized) */
+  .ro-step::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border: 1px dashed var(--st-line-strong);
+    opacity: 0;
+    transition: opacity 220ms ease;
+    pointer-events: none;
+  }
+  .ro-step[data-tone='none'] { --ro-c: transparent; color: var(--st-muted); }
+  .ro-step[data-tone='none']::before { opacity: 1; }
+  .ro-step[data-tone='run'] { --ro-c: var(--st-run); }
+  .ro-step[data-tone='done'] { --ro-c: var(--st-done); }
+  .ro-step[data-tone='ok'] { --ro-c: var(--st-ok); }
+  .ro-step[data-current] { outline: 1px solid var(--st-fg); outline-offset: 1px; }
+  .ro-step[data-current][data-tone='run'] {
+    background: color-mix(in srgb, var(--st-run) 14%, transparent);
+    color: var(--st-run);
+  }
+  .ro-step__mark {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    background: var(--ro-c);
+    transition: background-color 220ms ease, width 320ms var(--ro-ease), margin 320ms var(--ro-ease);
+  }
+  /* Backlog has no marker: it closes its slot, and opens it as the step starts */
+  .ro-step[data-tone='none'] .ro-step__mark { width: 0; margin-right: -6px; }
+  .ro-step__num { font: 12px/18px var(--st-mono); font-variant-numeric: tabular-nums; }
+  .ro-step__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .ro-pipe__line {
+    flex: none;
+    width: 16px;
+    height: 1px;
+    background: var(--st-line-strong);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 360ms var(--ro-ease);
+  }
+
+  /* Linked: cell one, then the connector draws, then cell two */
+  .ro-linked { display: flex; flex-direction: column; gap: 10px; }
+  .ss-collapse[data-open] .ro-step { opacity: 1; }
+  .ss-collapse[data-open] .ro-step:last-child { transition-delay: 0s, 0s, 0s, 620ms; }
+  .ss-collapse[data-open] .ro-pipe__line { transform: none; transition-delay: 300ms; }
+
+  .ro-line { display: flex; align-items: flex-start; gap: 8px; }
+  .ro-line__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ro-line__title { font-size: 13px; line-height: 18px; font-weight: 500; white-space: nowrap; }
+  .ro-line__meta { font: 11.5px/16px var(--st-mono); color: var(--st-muted); white-space: nowrap; }
+
+  /* Hand off context: checkbox row + mono hint */
+  .ro-toggle { display: flex; flex-direction: column; gap: 2px; }
+  .ro-toggle__row { display: flex; align-items: center; gap: 12px; height: 32px; font-size: 13px; }
+  .ro-check {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    background: var(--st-accent);
+    color: var(--st-on-accent);
+  }
+  .ro-hint { font: 12px/18px var(--st-mono); color: var(--st-muted); }
+
+  /* Handoff record: hairline-ruled, no color but the PR's own state */
+  .ro-handoff { display: flex; flex-direction: column; gap: 7px; }
+  .ro-handoff__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: content-box;
+    height: 14px;
+    padding-top: 11px;
+    border-top: 1px solid var(--st-line);
+  }
+  /* Held to the label's line so the record keeps the toggle's height */
+  .ro-btn--copy.ss-button { margin-left: auto; font-size: 12px; }
+  .ro-handoff__reply {
+    margin: 0;
+    padding-left: 10px;
+    border-left: 1px solid var(--st-line-strong);
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--st-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ro-handoff__refs { display: flex; align-items: center; gap: 12px; will-change: transform; }
+  .ro-branch { font: 12px/18px var(--st-mono); color: var(--st-fg); white-space: nowrap; }
+  .ro-branch__key { color: var(--st-muted); }
+
+  /* Cursor rests */
+  .ro-rest { position: absolute; width: 1px; height: 1px; left: 560px; top: 420px; }
+  .ro-rest--2 { left: 640px; top: 452px; }
+
+  /* ---- compact (358): phone rows, numbers-only pipeline ---- */
+  & .ss-stage[data-layout='compact'] {
+    .ro-win { left: 16px; top: 16px; width: 326px; height: 640px; }
+    .ro-win--bare { position: absolute; border: 1px solid var(--st-line); background: var(--st-surface); box-sizing: border-box; }
+    .ro-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 10px;
+      padding: 10px 12px;
+    }
+    .ro-row__state { order: 2; justify-self: end; align-self: start; }
+    .ro-row__main { order: 1; }
+    .ro-row__title { font-size: 15px; }
+    .ro-row__meta { font-size: 12px; }
+    .ro-row--filler .ro-row__state { align-self: center; }
+    .ro-row--filler { padding: 8px 12px; }
+    .ro-row--filler .ro-row__state { display: none; }
+    .ro-sat { left: 32px; width: 310px; }
+    /* Held to the label's line so the record keeps the toggle's height */
+  .ro-btn--copy.ss-button { margin-left: auto; font-size: 12px; }
+  .ro-handoff__reply { white-space: normal; }
+    .ro-branch__key { display: none; }
+    .ro-handoff__head > .ro-panel__meta { display: none; }
+    .ro-step { flex: none; width: 32px; justify-content: center; padding: 0; }
+    .ro-step__mark { display: none; }
+    .ro-pipe__line { width: 12px; }
+    .ro-rest { left: 300px; top: 520px; }
+    .ro-rest--2 { left: 330px; top: 540px; }
+  }
+
+  .ro-hintchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 360ms ease;
+  }
+  .ro-hintchip[data-show] { opacity: 1; transition-delay: 380ms; }
+}

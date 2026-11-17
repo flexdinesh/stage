@@ -1,0 +1,1038 @@
+/* Landing hero: stage's Dashboard (Ink Workbench) in a browser window.
+   Every color is a --st-* token, so the scene follows the site theme.
+   Sizes are stage's laptop role tokens; the compact design takes the phone
+   step (about 1px up), as stage does below 768px. */
+
+.hdb .ss-stage {
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--st-font);
+  color: var(--st-fg);
+  --hdb-edge: 2px;
+}
+
+/* ---- Window: the full width of the column, fading out at its foot ---- */
+
+.hdb-win {
+  position: absolute;
+  /* Edge to edge on the hero column: left on the text column, right on the
+     grid edge. Runs off the foot; the page's 64px foot fade softens it. */
+  top: 0;
+  right: 0;
+  bottom: -64px;
+  left: 0;
+  background: var(--st-bg);
+  box-shadow: none;
+}
+
+/* The frame's hairline is drawn inside, so the stage's mask never cuts it */
+.hdb-win::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 1px solid var(--st-line-strong);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.hdb-win .ss-window__bar {
+  background: var(--st-panel);
+  border-bottom: 1px solid var(--st-line);
+}
+
+.hdb-win .ss-window__url {
+  font-family: var(--st-mono);
+  font-size: 12px;
+  color: var(--st-muted);
+}
+
+.hdb-body {
+  flex: 1;
+  min-height: 0;
+  background: var(--st-bg);
+  color: var(--st-fg);
+}
+
+.hdb-icon {
+  flex: none;
+}
+
+/* The scene's own coordinate space: the carried row is drawn in it */
+.hdb-screen {
+  position: relative;
+  font-family: var(--st-font);
+  color: var(--st-fg);
+  background: var(--st-bg);
+}
+
+/* ---- Compact: stage installed on a phone, pinned from the top ---- */
+
+.hdb-phone {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+}
+
+.hdb-phone .hdb-screen {
+  min-height: 100%;
+}
+
+/* ---- Top bar (Layout.tsx, laptop) ---- */
+
+.hdb-top {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  height: 49px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-bg);
+  box-sizing: border-box;
+}
+
+.hdb-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--st-fg);
+}
+
+.hdb-nav {
+  display: flex;
+  align-items: stretch;
+}
+
+.hdb-tab,
+.hdb-search,
+.hdb-select,
+.hdb-kbd {
+  will-change: transform;
+}
+
+.hdb-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  transition: gap 380ms cubic-bezier(0.45, 0, 0.1, 1);
+  padding: 0 10px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  color: var(--st-muted);
+}
+
+.hdb-tab[data-need] {
+  gap: 6px;
+}
+
+.hdb-tab[data-active] {
+  border-bottom-color: var(--st-accent);
+  color: var(--st-fg);
+}
+
+/* The needs-input count chip opens its own width beside "Dashboard" */
+.hdb-tabchip {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  /* Closing: the words fade first, then the room closes, so no edge cuts them */
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.45, 0, 0.1, 1) 120ms,
+    opacity 120ms ease;
+}
+
+.hdb-tabchip[data-on] {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  /* Opening: the room opens, then the words fade into it */
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.45, 0, 0.1, 1),
+    opacity 200ms ease 260ms;
+}
+
+.hdb-tabchip__in {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hdb-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.hdb-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 32px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  font-size: 13px;
+  color: var(--st-muted);
+  white-space: nowrap;
+}
+
+.hdb-kbd .ss-kbd__key {
+  border-radius: 0;
+  background: var(--st-panel);
+  box-shadow: inset 0 0 0 1px var(--st-line);
+  font-family: var(--st-mono);
+  font-weight: 400;
+  color: var(--st-muted);
+}
+
+/* ---- Buttons: stage's square, hairline, ink-led buttons ---- */
+
+.hdb .ss-button {
+  padding: 0 var(--ss-button-pad);
+  border-radius: 0;
+  font-family: var(--st-font);
+  background: var(--st-surface);
+  color: var(--st-fg);
+  box-shadow: inset 0 0 0 1px var(--st-line-strong);
+}
+
+.hdb .ss-button[data-leading] {
+  padding-left: var(--ss-button-pad-icon);
+}
+
+.hdb .ss-button[data-hover] {
+  background: var(--st-panel);
+}
+
+.hdb .ss-button[data-variant="primary"] {
+  background: var(--st-accent);
+  color: var(--st-on-accent);
+  box-shadow: none;
+}
+
+.hdb .ss-button[data-variant="primary"][data-hover] {
+  background: color-mix(in srgb, var(--st-accent) 85%, var(--st-bg));
+}
+
+.hdb-btn {
+  --ss-button-height: 32px;
+  --ss-button-pad: 12px;
+  --ss-button-pad-icon: 12px;
+  --ss-button-icon: 14px;
+  --ss-button-gap: 6px;
+  font-size: 13px;
+}
+
+.hdb-btn--sm {
+  --ss-button-height: 24px;
+  --ss-button-pad: 8px;
+  font-size: 12px;
+}
+
+.hdb-sq {
+  --ss-button-height: 32px;
+  --ss-button-icon: 16px;
+  width: 32px;
+  padding: 0;
+}
+
+.hdb .hdb-sq[data-leading] {
+  padding: 0;
+}
+
+.hdb-ok {
+  color: var(--st-ok);
+}
+
+.hdb .hdb-ok.ss-button {
+  color: var(--st-ok);
+}
+
+.hdb-send {
+  transition:
+    opacity 150ms ease,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    padding 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hdb-send[data-disabled] {
+  opacity: 0.45;
+}
+
+/* stage's busy mark: a square border turning */
+.hdb-spin {
+  display: block;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: hdb-spin 0.8s linear infinite;
+}
+
+@keyframes hdb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Page ---- */
+
+.hdb-page {
+  padding: 24px 24px 0;
+}
+
+.hdb-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.hdb-h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  color: var(--st-fg);
+}
+
+.hdb-meta {
+  margin-top: 4px;
+  font-family: var(--st-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--st-muted);
+}
+
+.hdb-meta b {
+  font-weight: 700;
+  color: var(--st-fg);
+}
+
+.hdb-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 200px;
+  height: 32px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  font-size: 14px;
+  color: var(--st-fg);
+}
+
+.hdb-select .hdb-icon {
+  color: var(--st-muted);
+}
+
+/* ---- Tones: --c marker and border, --cf text ---- */
+
+.hdb [data-tone="need"] { --c: var(--st-need); --cf: var(--st-need-fg); }
+.hdb [data-tone="run"] { --c: var(--st-run); --cf: var(--st-run); }
+.hdb [data-tone="done"] { --c: var(--st-done); --cf: var(--st-done); }
+.hdb [data-tone="ok"] { --c: var(--st-ok); --cf: var(--st-ok); }
+.hdb [data-tone="bad"] { --c: var(--st-bad); --cf: var(--st-bad); }
+.hdb [data-tone="idle"] { --c: var(--st-idle); --cf: var(--st-idle); }
+
+.hdb-caps {
+  font-family: var(--st-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--st-muted);
+  white-space: nowrap;
+}
+
+/* ---- Stat strip ---- */
+
+.hdb-stats {
+  display: flex;
+  margin-bottom: 16px;
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.hdb-stat {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-right: 1px solid var(--st-line);
+  white-space: nowrap;
+}
+
+.hdb-stat__n {
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-fg);
+  transition: color 200ms ease;
+}
+
+.hdb-stat__n[data-zero] {
+  color: var(--st-muted);
+}
+
+/* The square marker shows only on a non-zero count: it opens its own room */
+.hdb-mk {
+  width: 0;
+  height: 6px;
+  margin-right: 0;
+  background: var(--c);
+  opacity: 0;
+  transition:
+    width 380ms cubic-bezier(0.45, 0, 0.1, 1),
+    margin 380ms cubic-bezier(0.45, 0, 0.1, 1),
+    opacity 200ms ease;
+}
+
+.hdb-mk[data-on] {
+  width: 6px;
+  margin-right: 6px;
+  opacity: 1;
+}
+
+.hdb-hint {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  color: var(--st-muted);
+  white-space: nowrap;
+}
+
+/* ---- Panels ---- */
+
+.hdb-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hdb-panel {
+  min-width: 0;
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.hdb-ph {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-panel);
+}
+
+.hdb-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 16px;
+  gap: 8px;
+  font-family: var(--st-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--st-fg);
+  white-space: nowrap;
+}
+
+.hdb-sqmk {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--c);
+  transition: background-color 200ms ease;
+}
+
+.hdb-pmeta {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-muted);
+}
+
+/* Needs input: the empty line (Paper, gray marker, the empty sentence)
+   becomes the panel header (Bench Gray bar, yellow marker) in place */
+.hdb-nh {
+  border-bottom: 1px solid transparent;
+  background: var(--st-surface);
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease;
+}
+
+.hdb-nh__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+}
+
+.hdb-nb .hdb-sqmk {
+  background: var(--st-line-strong);
+}
+
+.hdb-nb[data-panel] .hdb-nh {
+  border-bottom-color: var(--st-line);
+  background: var(--st-panel);
+}
+
+.hdb-nb[data-panel] .hdb-sqmk {
+  background: var(--c);
+}
+
+.hdb-empty {
+  display: block;
+  margin-left: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--st-muted);
+  white-space: nowrap;
+  transition: opacity 180ms ease;
+}
+
+.hdb-nb[data-panel] .hdb-nh__line .hdb-empty {
+  opacity: 0;
+}
+
+/* ---- Rows (TaskRow with the Dashboard's project column) ---- */
+
+.hdb-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdb-li {
+  border-bottom: 1px solid var(--st-line);
+}
+
+.hdb-rows > .hdb-li:last-child,
+.hdb-rows > .ss-collapse:last-child .hdb-li {
+  border-bottom: 0;
+}
+
+.hdb-row {
+  will-change: transform;
+  display: grid;
+  grid-template-columns: 118px 150px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 14px;
+  padding: 8px 12px;
+  border-left: var(--hdb-edge) solid transparent;
+  background: var(--st-surface);
+  transition: border-color 200ms ease;
+}
+
+.hdb-row[data-look="need"] {
+  border-left-color: var(--st-need);
+}
+
+.hdb-row__state {
+  display: flex;
+}
+
+.hdb-row__project {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--st-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--st-fg);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hdb-row__title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hdb-row__line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 21px;
+  white-space: nowrap;
+}
+
+.hdb-num {
+  margin-right: 6px;
+  font-family: var(--st-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-muted);
+}
+
+.hdb-title {
+  overflow: hidden;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--st-fg);
+  text-overflow: ellipsis;
+}
+
+.hdb-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 18px;
+  font-family: var(--st-mono);
+  font-size: 12px;
+  color: var(--st-muted);
+  white-space: nowrap;
+}
+
+.hdb-row__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Answer opens its own width before Open in app, which stays pinned right */
+.hdb-reveal {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  /* Closing: the words fade first, then the room closes, so no edge cuts them */
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.45, 0, 0.1, 1) 120ms,
+    opacity 120ms ease;
+}
+
+.hdb-reveal[data-on] {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  /* Opening: the room opens, then the words fade into it */
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.45, 0, 0.1, 1),
+    opacity 200ms ease 260ms;
+}
+
+.hdb-reveal__in {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 6px;
+}
+
+/* ---- Chips: tinted border, faint fill, square marker ---- */
+
+.hdb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+  font-family: var(--st-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cf);
+  white-space: nowrap;
+  transition:
+    border-color 200ms ease,
+    background-color 200ms ease,
+    color 200ms ease;
+}
+
+.hdb-chip[data-tone="need"] {
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+
+.hdb-chip--dot::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--c);
+  transition: background-color 200ms ease;
+}
+
+.hdb-chip--count {
+  padding: 0 6px;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+/* ---- The carried row ---- */
+
+.hdb-fly .ss-fly__lift {
+  animation: none;
+}
+
+.hdb-fly[data-go] .hdb-row {
+  animation: hdb-carry 700ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+
+@keyframes hdb-carry {
+  35% {
+    box-shadow: var(--ss-shadow-lift);
+  }
+  85%,
+  100% {
+    box-shadow: none;
+  }
+}
+
+/* ---- Needs input form, inline under the row (NeedsInputPanel) ---- */
+
+/* The row's yellow edge runs on down the form while it waits */
+.hdb-ans {
+  position: relative;
+  padding: 0 12px 12px 310px;
+}
+
+.hdb-ans::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--hdb-edge);
+  background: var(--st-need);
+  transition: opacity 200ms ease;
+}
+
+/* Answered: the yellow leaves with the row's */
+.hdb-ans[data-sent]::before {
+  opacity: 0;
+}
+
+.hdb-form {
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.hdb-q {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.hdb-q__text {
+  font-size: 14.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--st-fg);
+}
+
+.hdb-opts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--st-line);
+}
+
+.hdb-opt {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--st-line);
+  transition: background-color 150ms ease;
+}
+
+.hdb-opt:last-child {
+  border-bottom: 0;
+}
+
+.hdb-opt[data-hover] {
+  background: var(--st-panel);
+}
+
+.hdb-opt[data-on] {
+  background: color-mix(in srgb, var(--st-accent) 5%, transparent);
+}
+
+/* Square radio: a Strong Hairline square that fills an 8px ink square */
+.hdb-radio {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  transition: border-color 150ms ease;
+}
+
+.hdb-radio::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: var(--st-accent);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.hdb-opt[data-on] .hdb-radio {
+  border-color: var(--st-accent);
+}
+
+.hdb-opt[data-on] .hdb-radio::after {
+  opacity: 1;
+}
+
+.hdb-opt__label {
+  font-size: 14.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--st-fg);
+}
+
+.hdb-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--st-line);
+  background: var(--st-panel);
+}
+
+.hdb-answered {
+  display: flex;
+  align-items: center;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-muted);
+}
+
+.hdb-send {
+  margin-left: auto;
+}
+
+/* ---- Compact: stage's phone layout, at the phone's type step ---- */
+
+.hdb .ss-stage[data-layout="compact"] .hdb-top--phone {
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 14px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-mark {
+  font-size: 15.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-sq {
+  --ss-button-height: 40px;
+  width: 40px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-top--phone .hdb-btn {
+  --ss-button-height: 40px;
+  --ss-button-pad: 14px;
+  --ss-button-pad-icon: 14px;
+  font-size: 14px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-page {
+  padding: 16px 12px 0;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-stat {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  padding: 8px 2px;
+}
+
+/* Compact: counts and square markers only (labels would render under 10px
+   at the phone's scale). Every cell keeps its marker; a zero count's is gray. */
+.hdb .ss-stage[data-layout="compact"] .hdb-mk {
+  width: 6px;
+  margin-right: 6px;
+  opacity: 1;
+  background: var(--st-line-strong);
+  transition: background-color 200ms ease;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-mk[data-on] {
+  background: var(--c);
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-stat:last-child {
+  border-right: 0;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-stat__n {
+  font-size: 17px;
+}
+
+/* The phone draws its screen at about 0.77 of the stage, so compact type is
+   set so the smallest line still renders at 10px or more */
+.hdb .ss-stage[data-layout="compact"] .hdb-label {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-pmeta {
+  font-size: 13px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-nh__line {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 0;
+  padding: 0;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-nh__line > .hdb-label {
+  height: 32px;
+  padding-left: 12px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-empty-wrap {
+  flex-basis: 100%;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-select {
+  width: 150px;
+  height: 40px;
+  font-size: 16px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-h1 {
+  font-size: 24px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-meta {
+  font-size: 13.5px;
+}
+
+/* The empty sentence sits under its label as one item, 4 to 6px of ink apart */
+.hdb .ss-stage[data-layout="compact"] .hdb-empty-wrap {
+  margin-top: -7px;
+  transition: margin-top 380ms cubic-bezier(0.45, 0, 0.1, 1);
+  visibility: visible;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-nb[data-panel] .hdb-empty-wrap {
+  margin-top: 0;
+  /* Gone once folded, so the closed fold is not read as a line under the label */
+  visibility: hidden;
+  transition:
+    margin-top 380ms cubic-bezier(0.45, 0, 0.1, 1),
+    visibility 0s 700ms;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-empty {
+  margin: 0 12px 10px;
+  padding: 0;
+  font-size: 14px;
+  white-space: normal;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__title {
+  order: 1;
+  gap: 2px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__state {
+  order: 2;
+  justify-self: end;
+  align-self: start;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__actions {
+  order: 3;
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__project {
+  font-size: 13.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__line {
+  height: 22px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-num,
+.hdb .ss-stage[data-layout="compact"] .hdb-row__meta,
+.hdb .ss-stage[data-layout="compact"] .hdb-chip {
+  font-size: 13.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-title {
+  font-size: 15.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-row__meta {
+  height: 19px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-btn--sm {
+  --ss-button-height: 32px;
+  --ss-button-pad: 10px;
+  font-size: 13px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-ans {
+  padding: 0 12px 12px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-q__text,
+.hdb .ss-stage[data-layout="compact"] .hdb-opt__label {
+  font-size: 15.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-opt {
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-radio {
+  margin-top: 0;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-answered {
+  font-size: 13.5px;
+}
+
+.hdb .ss-stage[data-layout="compact"] .hdb-send {
+  --ss-button-height: 40px;
+  --ss-button-pad: 14px;
+  font-size: 14px;
+}

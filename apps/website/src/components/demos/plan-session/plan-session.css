@@ -1,0 +1,569 @@
+/* plan-session: a T3 Code planning session (window) and stage's Created tasks
+   panel (satellite) filling in from its MCP calls. Ink Workbench tokens only. */
+
+.ps .ss-stage {
+  overflow: hidden;
+  /* The page's own ground: no plate, the stage reads as the page */
+  background: var(--st-bg);
+  font-family: var(--st-font);
+}
+
+/* ---- the session window: inset top, left and right, off the bottom under
+   the landing's 64px foot fade (only the composer sits there) ---- */
+
+.ps .ps-win {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  width: 496px;
+  height: 500px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.ps .ps-tool {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  color: var(--st-muted);
+}
+
+.ps .ps-win .ss-window__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--st-fg);
+}
+
+.ps .ps-body {
+  height: 100%;
+  box-sizing: border-box;
+  padding-top: 12px;
+  background: var(--st-surface);
+}
+
+/* The thread sits at the bottom, the way chat apps anchor it: what streams
+   in pushes the earlier turn up and out of the window */
+.ps .ps-thread {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  /* The last call ends 16px above the composer */
+  height: 318px;
+  /* Words stop 16px short of the panel, which covers the window's last 154px */
+  padding: 0 170px 0 16px;
+  overflow: hidden;
+  /* The earlier turns fade as they go up out of the window, never sliced */
+  mask-image: linear-gradient(to bottom, transparent, var(--st-fg) 20px);
+}
+
+.ps .ps-past {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  padding-bottom: 4px;
+  transition: opacity 0.4s ease;
+}
+
+
+/* Thread content moves by layout as it grows: keep each on a layer */
+.ps .ps-thread > * {
+  will-change: transform;
+}
+
+.ps .ps-past-q {
+  justify-self: end;
+  margin-bottom: 2px;
+}
+
+.ps .ps-ask {
+  flex: none;
+  align-self: flex-end;
+  max-width: 82%;
+  padding: 8px 12px;
+  background: var(--st-panel);
+  border: 1px solid var(--st-line);
+  color: var(--st-fg);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.ps .ps-reply {
+  display: block;
+  color: var(--st-fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* T3's composer: filler at the window's foot, where the page fades it */
+.ps .ps-composer {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  margin: 16px 170px 0 16px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line);
+  background: var(--st-panel);
+}
+
+/* ---- tool calls: one ruled block, a row per MCP call ---- */
+
+.ps .ps-calls {
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.ps .ps-call-wrap + .ps-call-wrap .ps-call {
+  border-top: 1px solid var(--st-line);
+}
+
+.ps .ps-call {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+}
+
+.ps .ps-call__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 17px;
+  color: var(--st-muted);
+}
+
+.ps .ps-call__fn {
+  flex: none;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--st-muted);
+}
+
+.ps .ps-call__title {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 17px;
+  color: var(--st-fg);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ps .ps-call__args {
+  font-family: var(--st-mono);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--st-fg);
+  word-spacing: 0.2em;
+}
+
+.ps .ps-call__out {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--st-muted);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ps .ps-call[data-done] .ps-call__out {
+  opacity: 1;
+}
+
+/* stage's busy mark: a square border turning */
+.ps .ps-spin {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--st-line-strong);
+  border-top-color: var(--st-run);
+  animation: ps-spin 0.8s linear infinite;
+}
+
+@keyframes ps-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* ---- the satellite: stage's Created tasks panel ---- */
+
+.ps .ps-panel {
+  position: absolute;
+  /* Straddles the window's right edge; its own right edge on the stage's
+     24px gutter. The window's corners stay clear above and below it */
+  top: 72px;
+  left: 366px;
+  width: 290px;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  box-shadow: var(--ss-shadow-satellite);
+  opacity: 0;
+  translate: 0 10px;
+  will-change: translate;
+  transition:
+    opacity 0.45s ease,
+    translate 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.ps .ps-panel[data-show] {
+  opacity: 1;
+  translate: 0 0;
+}
+
+.ps .ps-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--st-panel);
+  border-bottom: 1px solid var(--st-line);
+}
+
+.ps .ps-label {
+  font-family: var(--st-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  line-height: 16px;
+  text-transform: uppercase;
+  color: var(--st-muted);
+}
+
+.ps .ps-label--ink {
+  color: var(--st-fg);
+}
+
+.ps .ps-meta {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ps .ps-panel__body {
+  position: relative;
+  overflow: hidden;
+  transition: height 0.46s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Section headers: Paper rows under a hairline (stage's 40px size, so the
+   small Start chain keeps 8px above and below) */
+.ps .ps-sec {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 40px over its hairline: the button centers in the 40 */
+  height: 41px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.ps .ps-sec--late {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ps .ps-sec--late[data-show] {
+  opacity: 1;
+  transition: opacity 0.35s ease 0.25s;
+}
+
+.ps .ps-start {
+  margin-left: auto;
+  font-family: var(--st-font);
+  opacity: 0;
+  transition:
+    opacity 0.25s ease,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms ease;
+}
+
+.ps .ps-start[data-show] {
+  opacity: 1;
+  transition:
+    opacity 0.3s ease 0.3s,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms ease;
+}
+
+.ps .ps-start.ss-button {
+  box-shadow: inset 0 0 0 1px var(--st-line-strong);
+}
+
+/* Rows: placed by translate so a reorder slides them into run order */
+.ps .ps-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  height: 52px;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  background: var(--st-surface);
+  opacity: 0;
+  will-change: translate;
+  transition:
+    translate 0.6s cubic-bezier(0.45, 0, 0.1, 1),
+    opacity 0.3s ease;
+}
+
+/* A new row fades in as the body finishes opening for it, never cut by
+   the body's moving edge */
+.ps .ps-row[data-show] {
+  opacity: 1;
+  transition:
+    translate 0.6s cubic-bezier(0.45, 0, 0.1, 1),
+    opacity 0.25s ease 0.36s;
+}
+
+.ps .ps-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-bottom: 1px solid var(--st-line);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ps .ps-row[data-sep]::after {
+  opacity: 1;
+}
+
+.ps .ps-lead {
+  display: grid;
+  grid-row: 1;
+  place-items: center;
+  height: 20px;
+}
+
+.ps .ps-check {
+  display: block;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+}
+
+/* A run-order step: dashed while unstarted, solid once it runs. The two
+   borders are layers that crossfade; border style never transitions */
+.ps .ps-step {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-family: var(--st-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--st-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ps .ps-step::before,
+.ps .ps-step::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ps .ps-step::before {
+  border: 1px dashed var(--st-line-strong);
+}
+
+.ps .ps-step::after {
+  border: 1px solid var(--st-fg);
+  opacity: 0;
+}
+
+.ps .ps-step[data-solid] {
+  color: var(--st-fg);
+}
+
+.ps .ps-step[data-solid]::before {
+  opacity: 0;
+}
+
+.ps .ps-step[data-solid]::after {
+  opacity: 1;
+}
+
+.ps .ps-row__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 20px;
+}
+
+.ps .ps-id {
+  flex: none;
+  font-family: var(--st-mono);
+  font-size: 12px;
+  color: var(--st-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ps .ps-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--st-fg);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ps .ps-model {
+  grid-column: 2;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--st-muted);
+  white-space: nowrap;
+}
+
+/* State chip: tinted border, faint fill, tone text, square marker */
+.ps .ps-chip {
+  --c: var(--st-idle);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0 6px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+  color: var(--c);
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 18px;
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.ps .ps-chip::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--c);
+  transition: background-color 0.2s ease;
+}
+
+.ps .ps-chip[data-tone="run"] {
+  --c: var(--st-run);
+}
+
+/* The run order's connectors, drawn down from each step */
+.ps .ps-link {
+  position: absolute;
+  left: 19.5px;
+  width: 1px;
+  z-index: 3;
+  background: var(--st-line-strong);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.45s cubic-bezier(0.45, 0, 0.1, 1);
+}
+
+.ps .ps-link[data-on] {
+  transform: scaleY(1);
+}
+
+/* ---- compact: the window off the right (top and left on one 16px gutter,
+   its foot closed), the panel straddling its foot, clear of the page's foot
+   fade ---- */
+
+.ps .ss-stage[data-layout="compact"] .ps-win {
+  top: 16px;
+  left: 16px;
+  width: 380px;
+  height: 340px;
+}
+
+.ps .ss-stage[data-layout="compact"] .ps-thread {
+  /* Ends 12px above the panel's top edge */
+  height: 114px;
+  /* Words stop 16px inside the stage's right edge */
+  padding: 0 54px 0 14px;
+}
+
+.ps .ss-stage[data-layout="compact"] .ps-call {
+  height: 28px;
+}
+
+/* Inset 16px inside the window's left edge and the stage's right; about
+   half over the window's lower body */
+.ps .ss-stage[data-layout="compact"] .ps-panel {
+  top: 192px;
+  left: 32px;
+  width: 294px;
+}
+
+.ps .ss-stage[data-layout="compact"] .ps-composer,
+.ps .ss-stage[data-layout="compact"] .ps-tool {
+  display: none;
+}
+
+/* Compact's placeholder rows: the panel's empty slots, under where each
+   task lands; a real row fades in over its slot and the bars fade out */
+.ps .ps-ghost {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-content: start;
+  column-gap: 10px;
+  row-gap: 7px;
+  height: 52px;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease 0.36s;
+}
+
+.ps .ps-ghost[data-show] {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.ps .ps-ghost[data-sep] {
+  border-bottom: 1px solid var(--st-line);
+}
+
+.ps .ps-ghost__title {
+  align-self: center;
+}
+
+.ps .ps-ghost__model {
+  grid-column: 2;
+}
+
+.ps .ps-ghost .ps-check {
+  border-color: var(--st-line);
+}

@@ -1,0 +1,20 @@
+.stage-mark {
+  display: block;
+  flex: none;
+}
+
+.stage-mark__top {
+  opacity: .44;
+  transition: fill 150ms ease-out, opacity 150ms ease-out;
+}
+
+.stage-mark__top[data-needs-input] {
+  fill: var(--st-need);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-mark__top {
+    transition: none;
+  }
+}

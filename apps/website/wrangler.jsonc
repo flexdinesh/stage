@@ -1,0 +1,11 @@
+// Cloudflare Workers static assets: output of `vocs build` (renderStrategy: 'full-static').
+// Build: `mise run website:build`. Local preview: `mise run website:preview` (:8787).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stage-website",
+  "compatibility_date": "2026-11-15",
+  "assets": {
+    "directory": "./dist/public",
+    "not_found_handling": "404-page"
+  }
+}

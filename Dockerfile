@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # pnpm workspace: the shared app (packages/app), the browser host (apps/web) and the desktop
-# host frontend (desktop/app/ui, manifest only: its install must match the lockfile), one lockfile.
+# host frontend (desktop/app/ui, manifest only), one lockfile. The install is
+# filtered to the browser host, so the website (apps/website) is not copied.
 FROM node:26-alpine AS web
 WORKDIR /src
 RUN npm install -g pnpm@12.15.0
@@ -9,7 +10,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/app/package.json packages/app/
 COPY apps/web/package.json apps/web/
 COPY desktop/app/ui/package.json desktop/app/ui/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter '@stage/web...'
 COPY packages/app/ packages/app/
 COPY apps/web/ apps/web/
 RUN pnpm --filter @stage/web build

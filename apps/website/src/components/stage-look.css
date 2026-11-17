@@ -1,0 +1,88 @@
+/* stage's Ink Workbench look for the stageshow kit.
+   Unlayered, so it wins over the kit's `@layer stageshow` defaults.
+   Every value reads the site's --st-* tokens (src/pages/_root.css), which
+   switch with the vocs theme, so demos follow light and dark. */
+
+.look-stage .ss-stage,
+.look-stage .ss-stage[data-theme="dark"],
+.look-stage .ss-stage[data-theme="light"] {
+  --ss-canvas: var(--st-bg);
+  --ss-surface: var(--st-surface);
+  --ss-chrome: var(--st-bg);
+  --ss-raised: var(--st-surface);
+  --ss-well: var(--st-panel);
+  --ss-fill: var(--st-panel);
+
+  --ss-line: var(--st-line);
+  --ss-line-faint: color-mix(in srgb, var(--st-line) 60%, transparent);
+
+  --ss-ink-1: color-mix(in srgb, var(--st-fg) 4%, transparent);
+  --ss-ink-2: color-mix(in srgb, var(--st-fg) 6%, transparent);
+  --ss-ink-3: color-mix(in srgb, var(--st-fg) 8%, transparent);
+  --ss-ink-4: color-mix(in srgb, var(--st-fg) 11%, transparent);
+  --ss-ink-5: color-mix(in srgb, var(--st-fg) 16%, transparent);
+
+  --ss-text-strong: var(--st-fg);
+  --ss-text: var(--st-muted);
+  --ss-text-faint: color-mix(in srgb, var(--st-muted) 70%, var(--st-bg));
+  --ss-icon: var(--st-muted);
+  --ss-icon-faint: color-mix(in srgb, var(--st-muted) 45%, var(--st-bg));
+
+  /* Ink accent: chrome never carries a hue. */
+  --ss-accent: var(--st-accent);
+  --ss-accent-2: var(--st-accent);
+  --ss-accent-soft: color-mix(in srgb, var(--st-accent) 8%, transparent);
+  --ss-accent-text: var(--st-fg);
+
+  /* State tones (two-token rule: marker/border + text). */
+  --ss-success: var(--st-ok);
+  --ss-success-soft: color-mix(in srgb, var(--st-ok) 10%, transparent);
+  --ss-success-text: var(--st-ok);
+  --ss-danger: var(--st-bad);
+  --ss-danger-soft: color-mix(in srgb, var(--st-bad) 10%, transparent);
+  --ss-danger-text: var(--st-bad);
+  --ss-warning: var(--st-need);
+  --ss-warning-soft: color-mix(in srgb, var(--st-need) 14%, transparent);
+  --ss-warning-text: var(--st-need-fg);
+
+  --ss-font: var(--st-font);
+  --ss-mono: var(--st-mono);
+
+  /* Zero radius on everything, the window frame included (stage: sharp corners). */
+  --ss-radius-sm: 0px;
+  --ss-radius-md: 0px;
+  --ss-radius-lg: 0px;
+  --ss-radius-pill: 0px;
+  --ss-radius-window: 0px;
+
+  --ss-control: 32px;
+  --ss-row: 26px;
+
+  /* One elevation per object: windows and grounds are a 1px hairline only;
+     only objects floating over another (satellites, popovers) cast a shadow. */
+  --ss-shadow-card: 0 0 0 1px var(--st-line);
+  --ss-shadow-window: 0 0 0 1px var(--st-line-strong);
+  --ss-shadow-hero: 0 0 0 1px var(--st-line-strong);
+  --ss-shadow-float: 0 0 0 1px var(--st-line-strong), 0 10px 28px -10px rgba(11, 13, 20, 0.24);
+  --ss-shadow-satellite: 0 0 0 1px var(--st-line-strong), 0 16px 36px -14px rgba(11, 13, 20, 0.3);
+  --ss-shadow-lift: 0 0 0 1px var(--st-line-strong), 0 12px 28px -8px rgba(11, 13, 20, 0.28);
+  --ss-shadow-ground: 0 0 0 1px var(--st-line);
+}
+
+:root[data-vocs-theme="dark"] .look-stage .ss-stage {
+  --ss-shadow-float: 0 0 0 1px var(--st-line-strong), 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --ss-shadow-satellite: 0 0 0 1px var(--st-line-strong), 0 16px 36px -14px rgba(0, 0, 0, 0.75);
+  --ss-shadow-lift: 0 0 0 1px var(--st-line-strong), 0 12px 28px -8px rgba(0, 0, 0, 0.7);
+}
+
+/* Window chrome in stage's world: the traffic lights become three square
+   ink marks (no hue: yellow belongs to needs input), the address in mono. */
+.look-stage .ss-window .ss-window__dot,
+.look-stage .ss-window .ss-window__dot:nth-child(n) {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--st-fg) 20%, transparent);
+  box-shadow: none;
+}
+.look-stage .ss-window .ss-window__url {
+  font-family: var(--st-mono);
+}

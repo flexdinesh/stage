@@ -5,3 +5,4 @@ bin
 **/node_modules
 apps/web/dist
 server/internal/webui/dist
+apps/website

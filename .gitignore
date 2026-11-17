@@ -6,3 +6,7 @@ apps/web/dist
 server/internal/webui/dist/*
 !server/internal/webui/dist/.gitkeep
 bin/
+apps/website/dist
+apps/website/src/pages.gen.ts
+.vocs/
+.wrangler/

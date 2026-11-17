@@ -1,0 +1,1066 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-15T02:08:53+11:00",
+  "title": "Design System: stage",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "cssVar": "--st-accent",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "on-accent": {
+        "role": "neutral",
+        "displayName": "On-Accent",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.4% 0.000 89.9)",
+          "oklch(37.9% 0.000 89.9)",
+          "oklch(49.3% 0.000 89.9)",
+          "oklch(60.7% 0.000 89.9)",
+          "oklch(72.1% 0.000 89.9)",
+          "oklch(83.6% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ],
+        "cssVar": "--st-on-accent",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Ink Text",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "cssVar": "--st-fg",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Slate",
+        "tonalRamp": [
+          "oklch(15.0% 0.011 268.2)",
+          "oklch(26.4% 0.015 268.2)",
+          "oklch(37.9% 0.019 268.2)",
+          "oklch(49.3% 0.023 268.2)",
+          "oklch(60.7% 0.023 268.2)",
+          "oklch(72.1% 0.019 268.2)",
+          "oklch(83.6% 0.015 268.2)",
+          "oklch(95.0% 0.011 268.2)"
+        ],
+        "cssVar": "--st-muted",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.4% 0.000 89.9)",
+          "oklch(37.9% 0.000 89.9)",
+          "oklch(49.3% 0.000 89.9)",
+          "oklch(60.7% 0.000 89.9)",
+          "oklch(72.1% 0.000 89.9)",
+          "oklch(83.6% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ],
+        "cssVar": "--st-bg",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Paper Surface",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.4% 0.000 89.9)",
+          "oklch(37.9% 0.000 89.9)",
+          "oklch(49.3% 0.000 89.9)",
+          "oklch(60.7% 0.000 89.9)",
+          "oklch(72.1% 0.000 89.9)",
+          "oklch(83.6% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ],
+        "cssVar": "--st-surface",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Bench Gray",
+        "tonalRamp": [
+          "oklch(15.0% 0.001 264.5)",
+          "oklch(26.4% 0.002 264.5)",
+          "oklch(37.9% 0.002 264.5)",
+          "oklch(49.3% 0.003 264.5)",
+          "oklch(60.7% 0.003 264.5)",
+          "oklch(72.1% 0.002 264.5)",
+          "oklch(83.6% 0.002 264.5)",
+          "oklch(95.0% 0.001 264.5)"
+        ],
+        "cssVar": "--st-panel",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "canonical": "rgba(11, 13, 20, 0.11)",
+        "cssVar": "--st-line",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "canonical": "rgba(11, 13, 20, 0.2)",
+        "cssVar": "--st-line-strong",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "canonical": "rgba(11, 13, 20, 0.28)",
+        "theme": "light",
+        "note": "No --st-scrim on the site; the backlog demo scrim mixes fg 22% (light) / on-accent 55% (dark).",
+        "source": "stage app"
+      },
+      "need": {
+        "role": "tertiary",
+        "displayName": "Waiting Yellow",
+        "tonalRamp": [
+          "oklch(15.0% 0.065 88.1)",
+          "oklch(26.4% 0.090 88.1)",
+          "oklch(37.9% 0.116 88.1)",
+          "oklch(49.3% 0.142 88.1)",
+          "oklch(60.7% 0.142 88.1)",
+          "oklch(72.1% 0.116 88.1)",
+          "oklch(83.6% 0.090 88.1)",
+          "oklch(95.0% 0.065 88.1)"
+        ],
+        "cssVar": "--st-need",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "need-fg": {
+        "role": "tertiary",
+        "displayName": "Waiting Yellow Text",
+        "tonalRamp": [
+          "oklch(15.0% 0.042 86.4)",
+          "oklch(26.4% 0.059 86.4)",
+          "oklch(37.9% 0.076 86.4)",
+          "oklch(49.3% 0.092 86.4)",
+          "oklch(60.7% 0.092 86.4)",
+          "oklch(72.1% 0.076 86.4)",
+          "oklch(83.6% 0.059 86.4)",
+          "oklch(95.0% 0.042 86.4)"
+        ],
+        "cssVar": "--st-need-fg",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "run": {
+        "role": "tertiary",
+        "displayName": "Running Sky",
+        "tonalRamp": [
+          "oklch(15.0% 0.050 242.7)",
+          "oklch(26.4% 0.070 242.7)",
+          "oklch(37.9% 0.090 242.7)",
+          "oklch(49.3% 0.109 242.7)",
+          "oklch(60.7% 0.109 242.7)",
+          "oklch(72.1% 0.090 242.7)",
+          "oklch(83.6% 0.070 242.7)",
+          "oklch(95.0% 0.050 242.7)"
+        ],
+        "cssVar": "--st-run",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "done": {
+        "role": "tertiary",
+        "displayName": "Settle Teal",
+        "tonalRamp": [
+          "oklch(15.0% 0.036 186.4)",
+          "oklch(26.4% 0.050 186.4)",
+          "oklch(37.9% 0.065 186.4)",
+          "oklch(49.3% 0.079 186.4)",
+          "oklch(60.7% 0.079 186.4)",
+          "oklch(72.1% 0.065 186.4)",
+          "oklch(83.6% 0.050 186.4)",
+          "oklch(95.0% 0.036 186.4)"
+        ],
+        "cssVar": "--st-done",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "ok": {
+        "role": "tertiary",
+        "displayName": "Settled Green",
+        "tonalRamp": [
+          "oklch(15.0% 0.057 150.1)",
+          "oklch(26.4% 0.080 150.1)",
+          "oklch(37.9% 0.103 150.1)",
+          "oklch(49.3% 0.126 150.1)",
+          "oklch(60.7% 0.126 150.1)",
+          "oklch(72.1% 0.103 150.1)",
+          "oklch(83.6% 0.080 150.1)",
+          "oklch(95.0% 0.057 150.1)"
+        ],
+        "cssVar": "--st-ok",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "bad": {
+        "role": "tertiary",
+        "displayName": "Fault Red",
+        "tonalRamp": [
+          "oklch(15.0% 0.075 28.7)",
+          "oklch(26.4% 0.104 28.7)",
+          "oklch(37.9% 0.134 28.7)",
+          "oklch(49.3% 0.163 28.7)",
+          "oklch(60.7% 0.163 28.7)",
+          "oklch(72.1% 0.134 28.7)",
+          "oklch(83.6% 0.104 28.7)",
+          "oklch(95.0% 0.075 28.7)"
+        ],
+        "cssVar": "--st-bad",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "idle": {
+        "role": "tertiary",
+        "displayName": "Idle Gray",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 264.4)",
+          "oklch(26.4% 0.014 264.4)",
+          "oklch(37.9% 0.018 264.4)",
+          "oklch(49.3% 0.021 264.4)",
+          "oklch(60.7% 0.021 264.4)",
+          "oklch(72.1% 0.018 264.4)",
+          "oklch(83.6% 0.014 264.4)",
+          "oklch(95.0% 0.010 264.4)"
+        ],
+        "cssVar": "--st-idle",
+        "theme": "light",
+        "source": "src/pages/_root.css"
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Ink (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 268.5)",
+          "oklch(26.4% 0.004 268.5)",
+          "oklch(37.9% 0.005 268.5)",
+          "oklch(49.3% 0.006 268.5)",
+          "oklch(60.7% 0.006 268.5)",
+          "oklch(72.1% 0.005 268.5)",
+          "oklch(83.6% 0.004 268.5)",
+          "oklch(95.0% 0.003 268.5)"
+        ],
+        "cssVar": "--st-accent",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "on-accent-dark": {
+        "role": "neutral",
+        "displayName": "On-Accent (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 272.2)",
+          "oklch(26.4% 0.009 272.2)",
+          "oklch(37.9% 0.011 272.2)",
+          "oklch(49.3% 0.014 272.2)",
+          "oklch(60.7% 0.014 272.2)",
+          "oklch(72.1% 0.011 272.2)",
+          "oklch(83.6% 0.009 272.2)",
+          "oklch(95.0% 0.006 272.2)"
+        ],
+        "cssVar": "--st-on-accent",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "fg-dark": {
+        "role": "neutral",
+        "displayName": "Ink Text (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 271.3)",
+          "oklch(26.4% 0.005 271.3)",
+          "oklch(37.9% 0.006 271.3)",
+          "oklch(49.3% 0.008 271.3)",
+          "oklch(60.7% 0.008 271.3)",
+          "oklch(72.1% 0.006 271.3)",
+          "oklch(83.6% 0.005 271.3)",
+          "oklch(95.0% 0.003 271.3)"
+        ],
+        "cssVar": "--st-fg",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "muted-dark": {
+        "role": "neutral",
+        "displayName": "Slate (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.011 267.8)",
+          "oklch(26.4% 0.015 267.8)",
+          "oklch(37.9% 0.020 267.8)",
+          "oklch(49.3% 0.024 267.8)",
+          "oklch(60.7% 0.024 267.8)",
+          "oklch(72.1% 0.020 267.8)",
+          "oklch(83.6% 0.015 267.8)",
+          "oklch(95.0% 0.011 267.8)"
+        ],
+        "cssVar": "--st-muted",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "bg-dark": {
+        "role": "neutral",
+        "displayName": "Paper (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 268.0)",
+          "oklch(26.4% 0.006 268.0)",
+          "oklch(37.9% 0.008 268.0)",
+          "oklch(49.3% 0.010 268.0)",
+          "oklch(60.7% 0.010 268.0)",
+          "oklch(72.1% 0.008 268.0)",
+          "oklch(83.6% 0.006 268.0)",
+          "oklch(95.0% 0.005 268.0)"
+        ],
+        "cssVar": "--st-bg",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Paper Surface (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 264.2)",
+          "oklch(26.4% 0.008 264.2)",
+          "oklch(37.9% 0.010 264.2)",
+          "oklch(49.3% 0.012 264.2)",
+          "oklch(60.7% 0.012 264.2)",
+          "oklch(72.1% 0.010 264.2)",
+          "oklch(83.6% 0.008 264.2)",
+          "oklch(95.0% 0.005 264.2)"
+        ],
+        "cssVar": "--st-surface",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "panel-dark": {
+        "role": "neutral",
+        "displayName": "Bench Gray (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.007 264.1)",
+          "oklch(26.4% 0.010 264.1)",
+          "oklch(37.9% 0.013 264.1)",
+          "oklch(49.3% 0.016 264.1)",
+          "oklch(60.7% 0.016 264.1)",
+          "oklch(72.1% 0.013 264.1)",
+          "oklch(83.6% 0.010 264.1)",
+          "oklch(95.0% 0.007 264.1)"
+        ],
+        "cssVar": "--st-panel",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "line-dark": {
+        "role": "neutral",
+        "displayName": "Hairline (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 264.5)",
+          "oklch(26.4% 0.008 264.5)",
+          "oklch(37.9% 0.011 264.5)",
+          "oklch(49.3% 0.013 264.5)",
+          "oklch(60.7% 0.013 264.5)",
+          "oklch(72.1% 0.011 264.5)",
+          "oklch(83.6% 0.008 264.5)",
+          "oklch(95.0% 0.006 264.5)"
+        ],
+        "canonical": "rgba(220, 226, 235, 0.11)",
+        "cssVar": "--st-line",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "line-strong-dark": {
+        "role": "neutral",
+        "displayName": "Strong Hairline (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 264.5)",
+          "oklch(26.4% 0.008 264.5)",
+          "oklch(37.9% 0.011 264.5)",
+          "oklch(49.3% 0.013 264.5)",
+          "oklch(60.7% 0.013 264.5)",
+          "oklch(72.1% 0.011 264.5)",
+          "oklch(83.6% 0.008 264.5)",
+          "oklch(95.0% 0.006 264.5)"
+        ],
+        "canonical": "rgba(220, 226, 235, 0.22)",
+        "cssVar": "--st-line-strong",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "scrim-dark": {
+        "role": "neutral",
+        "displayName": "Scrim (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 0.0)",
+          "oklch(26.4% 0.000 0.0)",
+          "oklch(37.9% 0.000 0.0)",
+          "oklch(49.3% 0.000 0.0)",
+          "oklch(60.7% 0.000 0.0)",
+          "oklch(72.1% 0.000 0.0)",
+          "oklch(83.6% 0.000 0.0)",
+          "oklch(95.0% 0.000 0.0)"
+        ],
+        "canonical": "rgba(0, 0, 0, 0.55)",
+        "theme": "dark",
+        "note": "No --st-scrim on the site; the backlog demo scrim mixes fg 22% (light) / on-accent 55% (dark).",
+        "source": "stage app"
+      },
+      "need-dark": {
+        "role": "tertiary",
+        "displayName": "Waiting Yellow (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.062 94.9)",
+          "oklch(26.4% 0.086 94.9)",
+          "oklch(37.9% 0.110 94.9)",
+          "oklch(49.3% 0.135 94.9)",
+          "oklch(60.7% 0.135 94.9)",
+          "oklch(72.1% 0.110 94.9)",
+          "oklch(83.6% 0.086 94.9)",
+          "oklch(95.0% 0.062 94.9)"
+        ],
+        "cssVar": "--st-need",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "need-fg-dark": {
+        "role": "tertiary",
+        "displayName": "Waiting Yellow Text (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.054 94.6)",
+          "oklch(26.4% 0.075 94.6)",
+          "oklch(37.9% 0.097 94.6)",
+          "oklch(49.3% 0.118 94.6)",
+          "oklch(60.7% 0.118 94.6)",
+          "oklch(72.1% 0.097 94.6)",
+          "oklch(83.6% 0.075 94.6)",
+          "oklch(95.0% 0.054 94.6)"
+        ],
+        "cssVar": "--st-need-fg",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "run-dark": {
+        "role": "tertiary",
+        "displayName": "Running Sky (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.047 229.0)",
+          "oklch(26.4% 0.066 229.0)",
+          "oklch(37.9% 0.085 229.0)",
+          "oklch(49.3% 0.104 229.0)",
+          "oklch(60.7% 0.104 229.0)",
+          "oklch(72.1% 0.085 229.0)",
+          "oklch(83.6% 0.066 229.0)",
+          "oklch(95.0% 0.047 229.0)"
+        ],
+        "cssVar": "--st-run",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "done-dark": {
+        "role": "tertiary",
+        "displayName": "Settle Teal (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.048 186.6)",
+          "oklch(26.4% 0.067 186.6)",
+          "oklch(37.9% 0.086 186.6)",
+          "oklch(49.3% 0.105 186.6)",
+          "oklch(60.7% 0.105 186.6)",
+          "oklch(72.1% 0.086 186.6)",
+          "oklch(83.6% 0.067 186.6)",
+          "oklch(95.0% 0.048 186.6)"
+        ],
+        "cssVar": "--st-done",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "ok-dark": {
+        "role": "tertiary",
+        "displayName": "Settled Green (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.062 153.5)",
+          "oklch(26.4% 0.087 153.5)",
+          "oklch(37.9% 0.112 153.5)",
+          "oklch(49.3% 0.137 153.5)",
+          "oklch(60.7% 0.137 153.5)",
+          "oklch(72.1% 0.112 153.5)",
+          "oklch(83.6% 0.087 153.5)",
+          "oklch(95.0% 0.062 153.5)"
+        ],
+        "cssVar": "--st-ok",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "bad-dark": {
+        "role": "tertiary",
+        "displayName": "Fault Red (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.060 26.1)",
+          "oklch(26.4% 0.084 26.1)",
+          "oklch(37.9% 0.108 26.1)",
+          "oklch(49.3% 0.131 26.1)",
+          "oklch(60.7% 0.131 26.1)",
+          "oklch(72.1% 0.108 26.1)",
+          "oklch(83.6% 0.084 26.1)",
+          "oklch(95.0% 0.060 26.1)"
+        ],
+        "cssVar": "--st-bad",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      },
+      "idle-dark": {
+        "role": "tertiary",
+        "displayName": "Idle Gray (dark)",
+        "tonalRamp": [
+          "oklch(15.0% 0.011 267.8)",
+          "oklch(26.4% 0.015 267.8)",
+          "oklch(37.9% 0.020 267.8)",
+          "oklch(49.3% 0.024 267.8)",
+          "oklch(60.7% 0.024 267.8)",
+          "oklch(72.1% 0.020 267.8)",
+          "oklch(83.6% 0.015 267.8)",
+          "oklch(95.0% 0.011 267.8)"
+        ],
+        "cssVar": "--st-idle",
+        "theme": "dark",
+        "source": "src/pages/_root.css"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page H1 only, on phone (below 768px): 24px, balanced wrapping."
+      },
+      "headline-wide": {
+        "displayName": "Headline (768px+)",
+        "purpose": "Page H1 on laptop: 26px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Drawer and sheet titles."
+      },
+      "row-title": {
+        "displayName": "Row Title",
+        "purpose": "Task and thread titles in rows; underline on hover."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base text; steps up to 15.5px below 768px."
+      },
+      "body-sm": {
+        "displayName": "Body Small",
+        "purpose": "Alerts, details, empty states, button labels (500)."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Default button labels (32px laptop, 40px phone)."
+      },
+      "button-sm": {
+        "displayName": "Button Small",
+        "purpose": "Small button labels (24px laptop, 32px phone)."
+      },
+      "stat": {
+        "displayName": "Stat",
+        "purpose": "Stat strip counts, tabular."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase mono panel headers (Ink Text), field and section labels (Slate)."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Row metadata, chips, hints, timestamps, task numbers."
+      },
+      "meta-line": {
+        "displayName": "Meta Line",
+        "purpose": "Detail values, the // context line, and the landing facts list."
+      },
+      "display": {
+        "displayName": "Display",
+        "purpose": "Landing H1 only; fluid clamp(40px, 6.2vw, 76px), max 15ch, balanced. Site display scale."
+      },
+      "display-section": {
+        "displayName": "Display Section",
+        "purpose": "Landing section H2s; clamp(28px, 3.2vw, 38px), max 18ch."
+      },
+      "lede": {
+        "displayName": "Lede",
+        "purpose": "The one Slate sentence under the landing H1; max 58ch."
+      },
+      "body-lg": {
+        "displayName": "Body Large",
+        "purpose": "Landing feature and closing copy, Slate, max 46ch; 16px on phone."
+      },
+      "button-lg": {
+        "displayName": "Button Large",
+        "purpose": "40px landing buttons and the feature docs link."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "\"stage\" in the vocs top nav after the 16px monochrome stepped glyph."
+      },
+      "headline-demo": {
+        "displayName": "Headline Demo",
+        "purpose": "Compact page H1 inside the backlog demo."
+      },
+      "stat-phone": {
+        "displayName": "Stat Phone",
+        "purpose": "Stat counts in the hero demo compact layout (phone step of Stat)."
+      },
+      "code-panel": {
+        "displayName": "Code Panel",
+        "purpose": "Quickstart commands in the landing stage panel."
+      }
+    },
+    "shadows": [
+      {
+        "name": "palette-overlay",
+        "value": "0 16px 48px rgba(0,0,0,0.28)",
+        "purpose": "Command palette on laptop only; the single cast shadow."
+      },
+      {
+        "name": "stat-selected",
+        "value": "inset 0 -2px var(--c)",
+        "purpose": "Selected stat strip cell, in its tone."
+      },
+      {
+        "name": "palette-active",
+        "value": "inset 2px 0 var(--st-accent)",
+        "purpose": "Active row over a 7% ink fill in the palette, project combobox and snippet picker."
+      },
+      {
+        "name": "input-focus",
+        "value": "0 0 0 1px var(--st-accent)",
+        "purpose": "Focused input/select ring with ink border."
+      },
+      {
+        "name": "checkbox-focus",
+        "value": "0 0 0 1px var(--st-surface), 0 0 0 2px var(--st-accent)",
+        "purpose": "Focus-visible checkbox: 1px Paper gap, 1px Ink ring."
+      },
+      {
+        "name": "focus-outline",
+        "value": "outline: 2px solid var(--st-accent); outline-offset: 2px",
+        "purpose": "Global :focus-visible."
+      },
+      {
+        "name": "ss-hairline-window",
+        "value": "0 0 0 1px var(--st-line-strong)",
+        "purpose": "Demo windows and heroes: a ring, never a drop."
+      },
+      {
+        "name": "ss-hairline-ground",
+        "value": "0 0 0 1px var(--st-line)",
+        "purpose": "Demo cards and grounds."
+      },
+      {
+        "name": "ss-float",
+        "value": "0 0 0 1px var(--st-line-strong), 0 10px 28px -10px rgba(11, 13, 20, 0.24)",
+        "purpose": "Popovers inside a demo. Dark drop rgba(0, 0, 0, 0.7)."
+      },
+      {
+        "name": "ss-satellite",
+        "value": "0 0 0 1px var(--st-line-strong), 0 16px 36px -14px rgba(11, 13, 20, 0.3)",
+        "purpose": "A panel composed over a demo window. Dark drop rgba(0, 0, 0, 0.75)."
+      },
+      {
+        "name": "ss-lift",
+        "value": "0 0 0 1px var(--st-line-strong), 0 12px 28px -8px rgba(11, 13, 20, 0.28)",
+        "purpose": "A row carried across the hero demo. Dark drop rgba(0, 0, 0, 0.7)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms (browser default ease) on background-color, opacity, color, border-color, box-shadow",
+        "purpose": "Hover and state changes only."
+      },
+      {
+        "name": "overlay-fade",
+        "value": "150ms opacity fade, no movement; none with reduced motion",
+        "purpose": "Toasts and the T3 status details card."
+      },
+      {
+        "name": "pull-settle",
+        "value": "180ms content settle back; skipped with reduced motion",
+        "purpose": "Pull to reload release or cancel."
+      },
+      {
+        "name": "toast-dismiss",
+        "value": "8s auto-dismiss, paused on hover or focus",
+        "purpose": "Done and failed toasts; needs-input toasts stay until acted on."
+      },
+      {
+        "name": "skeleton-pulse",
+        "value": "animate-pulse on 36px bench-gray bars",
+        "purpose": "Query loading."
+      },
+      {
+        "name": "busy-spin",
+        "value": "12px square border spinner, 1.5px, top edge transparent; still with reduced motion",
+        "purpose": "Busy buttons and the reloading indicator."
+      },
+      {
+        "name": "site-transition",
+        "value": "150ms ease-out on background-color, color, border-color, text-decoration-color",
+        "purpose": "Landing buttons and links, footer links, theme toggle."
+      },
+      {
+        "name": "arrow-nudge",
+        "value": "translateX(2px) over 150ms ease-out on button hover",
+        "purpose": "The trailing arrow in landing buttons; the only movement in page chrome."
+      },
+      {
+        "name": "demo-foot-fade",
+        "value": "mask-image: linear-gradient(#000 calc(100% - 64px), transparent)",
+        "purpose": "One crop grammar for every landing demo."
+      },
+      {
+        "name": "demo-playback",
+        "value": "stageshow choreography, plays only in view; payoff poster frame under reduced motion",
+        "purpose": "Demos only; no section entrance animation."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "md",
+        "value": "768px",
+        "note": "site rules use max-width: 767px; app and demo phone step below it"
+      },
+      {
+        "name": "lg",
+        "value": "1024px",
+        "note": "app detail split (depicted)"
+      },
+      {
+        "name": "container",
+        "value": "1240px",
+        "note": "landing grid and footer max width; 24px gutter, 16px below 768px"
+      }
+    ],
+    "themes": {
+      "mechanism": "vocs writes data-vocs-theme (light|dark) and color-scheme on <html>; dark tokens live under :root[data-vocs-theme=\"dark\"] in src/pages/_root.css. The footer ThemeToggle (System / Light / Dark) shares vocs' storage key \"vocs-theme\", and System follows prefers-color-scheme live. Demos read the attribute through useSiteTheme and pass it to <Stage theme>."
+    }
+  },
+  "components": [
+    {
+      "name": "Landing Primary Button",
+      "kind": "button",
+      "refersTo": "button-landing-primary",
+      "description": "40px ink action on the landing (Get started), trailing arrow nudges on hover.",
+      "html": "<a class=\"ds-lp-btn ds-lp-btn--primary\" href=\"#\">Get started<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M3 8h9M8.5 4.5 12 8l-3.5 3.5\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\"/></svg></a>",
+      "css": ".ds-lp-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border: 1px solid transparent; border-radius: 0; font-family: var(--st-font); font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out; } .ds-lp-btn svg { transition: transform 150ms ease-out; } .ds-lp-btn:hover svg { transform: translateX(2px); } .ds-lp-btn:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-lp-btn--primary { background: var(--st-accent); color: var(--st-on-accent); } .ds-lp-btn--primary:hover { background: color-mix(in srgb, var(--st-accent) 86%, var(--st-bg)); }"
+    },
+    {
+      "name": "Landing Secondary Button",
+      "kind": "button",
+      "refersTo": "button-landing-secondary",
+      "description": "40px outline action beside the primary (GitHub, Read the docs).",
+      "html": "<a class=\"ds-lp-btn2\" href=\"#\">GitHub<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M5.5 4.5h6v6M11.5 4.5l-7 7\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\"/></svg></a>",
+      "css": ".ds-lp-btn2 { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border: 1px solid var(--st-line-strong); border-radius: 0; background: var(--st-surface); color: var(--st-fg); font-family: var(--st-font); font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out; } .ds-lp-btn2 svg { transition: transform 150ms ease-out; } .ds-lp-btn2:hover { background: var(--st-panel); } .ds-lp-btn2:hover svg { transform: translateX(2px); } .ds-lp-btn2:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Feature Copy (H2, body, facts, link)",
+      "kind": "custom",
+      "refersTo": "landing-facts",
+      "description": "The copy column of a landing feature row: display-section H2, Slate body, square-marker mono facts on a hairline, docs link.",
+      "html": "<div class=\"ds-feat\"><h2 class=\"ds-feat__h2\">Write the prompt now. Start it later.</h2><p class=\"ds-feat__body\">Save a task with its prompt, provider, model, effort, runtime and workspace. It waits in the backlog until you start it.</p><ul class=\"ds-facts\"><li>provider, model, effort, worktree</li><li>save to backlog or start right away</li></ul><a class=\"ds-lp-link\" href=\"#\">How tasks work</a></div>",
+      "css": ".ds-feat { font-family: var(--st-font); color: var(--st-fg); max-width: 460px; } .ds-feat__h2 { margin: 0; max-width: 18ch; font-size: clamp(28px, 3.2vw, 38px); font-weight: 650; line-height: 1.1; letter-spacing: -0.028em; text-wrap: balance; } .ds-feat__body { margin: 16px 0 0; max-width: 46ch; font-size: 16.5px; line-height: 1.55; color: var(--st-muted); } .ds-facts { display: grid; gap: 8px; margin: 24px 0 0; padding: 16px 0 0; list-style: none; border-top: 1px solid var(--st-line); font-family: var(--st-mono); font-size: 12.5px; line-height: 1.5; color: var(--st-muted); } .ds-facts li { display: flex; align-items: baseline; gap: 10px; } .ds-facts li::before { content: \"\"; flex: none; width: 6px; height: 6px; background: var(--st-line-strong); transform: translateY(-2px); } .ds-lp-link { display: inline-flex; margin-top: 24px; font-size: 14px; font-weight: 500; color: var(--st-fg); text-decoration: underline; text-decoration-color: var(--st-line-strong); text-underline-offset: 4px; transition: text-decoration-color 150ms ease-out; } .ds-lp-link:hover { text-decoration-color: var(--st-fg); }"
+    },
+    {
+      "name": "Stage Panel (quickstart)",
+      "kind": "card",
+      "refersTo": "landing-panel",
+      "description": "Product panel as page furniture: Bench Gray mono label bar over a hairline mono command body.",
+      "html": "<figure class=\"ds-lp-panel\"><figcaption class=\"ds-lp-panel__h\">Docker compose</figcaption><pre class=\"ds-lp-panel__b\"><code><span class=\"ds-cmd\">git clone https://github.com/flexdinesh/stage.git &amp;&amp; cd stage</span><span class=\"ds-cmd\">cp .env.example .env    # set T3_ADMIN_TOKEN</span><span class=\"ds-cmd\">docker compose up -d --build</span><span class=\"ds-cmd ds-cmd--note\">open http://127.0.0.1:7380 on the host</span></code></pre></figure>",
+      "css": ".ds-lp-panel { margin: 0; border: 1px solid var(--st-line); background: var(--st-surface); } .ds-lp-panel__h { display: flex; align-items: center; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--st-line); background: var(--st-panel); font-family: var(--st-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--st-fg); } .ds-lp-panel__b { margin: 0; padding: 16px; overflow-x: auto; font-family: var(--st-mono); font-size: 13px; line-height: 1.9; color: var(--st-fg); } .ds-lp-panel__b code { display: grid; font: inherit; } .ds-cmd::before { content: \"$ \"; color: var(--st-muted); } .ds-cmd--note { color: var(--st-muted); } .ds-cmd--note::before { content: \"# \"; }"
+    },
+    {
+      "name": "Demo Frame",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Inert role=img demo wrapper: square hairline window, square ink traffic lights, mono URL, 64px foot fade.",
+      "html": "<div class=\"ds-demo\" role=\"img\" aria-label=\"stage dashboard demo\"><div class=\"ds-win\"><div class=\"ds-win__bar\"><i></i><i></i><i></i><span>stage.local/</span></div><div class=\"ds-win__body\"></div></div></div>",
+      "css": ".ds-demo { -webkit-mask-image: linear-gradient(#000 calc(100% - 64px), transparent); mask-image: linear-gradient(#000 calc(100% - 64px), transparent); } .ds-win { height: 220px; background: var(--st-bg); box-shadow: 0 0 0 1px var(--st-line-strong); } .ds-win__bar { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; background: var(--st-panel); border-bottom: 1px solid var(--st-line); } .ds-win__bar i { width: 8px; height: 8px; background: color-mix(in srgb, var(--st-fg) 20%, transparent); } .ds-win__bar span { margin-left: 12px; font-family: var(--st-mono); font-size: 12px; color: var(--st-muted); }"
+    },
+    {
+      "name": "Theme Toggle",
+      "kind": "custom",
+      "refersTo": "theme-toggle-option",
+      "description": "System / Light / Dark radiogroup in the site footer; checked cell fills Ink.",
+      "html": "<div class=\"ds-theme\" role=\"radiogroup\" aria-label=\"Theme\"><button class=\"ds-theme__o\" role=\"radio\" aria-checked=\"false\" aria-label=\"System theme\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\"/></svg></button><button class=\"ds-theme__o\" role=\"radio\" aria-checked=\"true\" aria-label=\"Light theme\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M5.5 5.5h5v5h-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\"/></svg></button><button class=\"ds-theme__o\" role=\"radio\" aria-checked=\"false\" aria-label=\"Dark theme\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\"/></svg></button></div>",
+      "css": ".ds-theme { display: inline-flex; border: 1px solid var(--st-line-strong); } .ds-theme__o { display: grid; place-items: center; width: 32px; height: 28px; border: 0; border-radius: 0; background: transparent; color: var(--st-muted); cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-theme__o + .ds-theme__o { border-left: 1px solid var(--st-line); } .ds-theme__o:hover { color: var(--st-fg); background: var(--st-panel); } .ds-theme__o[aria-checked=\"true\"] { color: var(--st-on-accent); background: var(--st-accent); } .ds-theme__o:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Site Footer",
+      "kind": "nav",
+      "refersTo": "site-footer",
+      "description": "One hairline-topped row: 16px monochrome stepped glyph, Slate links, mono meta right, theme toggle.",
+      "html": "<div class=\"ds-foot\"><a class=\"ds-foot__mark\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"1\" y=\"11\" width=\"14\" height=\"3\"/><rect x=\"3\" y=\"7\" width=\"10\" height=\"3\" opacity=\".72\"/><rect x=\"5\" y=\"3\" width=\"6\" height=\"3\" opacity=\".44\"/></svg>stage</a><nav class=\"ds-foot__links\" aria-label=\"Footer\"><a href=\"#\">Docs</a><a href=\"#\">API</a><a href=\"#\">GitHub</a></nav><p class=\"ds-foot__meta\">MIT licensed · self-hosted</p></div>",
+      "css": ".ds-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 20px 0 0; border-top: 1px solid var(--st-line); font-family: var(--st-font); font-size: 13px; color: var(--st-muted); } .ds-foot__mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.02em; color: var(--st-fg); text-decoration: none; } .ds-foot__mark svg { flex: none; } .ds-foot__links { display: flex; gap: 16px; } .ds-foot__links a { color: var(--st-muted); text-decoration: none; transition: color 150ms ease-out; } .ds-foot__links a:hover { color: var(--st-fg); } .ds-foot__meta { margin: 0 0 0 auto; font-family: var(--st-mono); font-size: 12px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ink-filled action; one per region (New task, Start/Restart, Open in app on needs input, drawer submit). Product component (drawn by the demos).",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M8 3v10M3 8h10\"/></svg>New task</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 13px; font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-primary { background: var(--st-accent); border-color: var(--st-accent); color: var(--st-on-accent); } .ds-btn-primary:hover { opacity: 0.85; } .ds-btn-primary:active { opacity: 0.75; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Default button: paper fill, strong hairline outline; Bench Gray on hover. Product component (drawn by the demos).",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Open in app</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 13px; font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-secondary { background: var(--st-surface); border-color: var(--st-line-strong); color: var(--st-fg); } .ds-btn-secondary:hover { background: var(--st-panel); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Borderless slate action for close buttons and panel-header actions. Product component (drawn by the demos).",
+      "html": "<button class=\"ds-btn ds-btn-ghost\" aria-label=\"Close\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3.5 3.5l9 9M12.5 3.5l-9 9\"/></svg></button><button class=\"ds-btn ds-btn-ghost\">Expand all</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 13px; font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-ghost { background: transparent; border-color: transparent; color: var(--st-muted); } .ds-btn-ghost:hover { background: var(--st-panel); color: var(--st-fg); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Square 32px field (40px phone) with uppercase mono label; focus turns border and 1px ring ink. Product component (drawn by the demos).",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Title</span><input class=\"ds-input\" placeholder=\"Fix flaky chain test\" /></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field-label { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--st-muted); } .ds-input { height: 32px; padding: 0 10px; border: 1px solid var(--st-line-strong); border-radius: 0; background: var(--st-surface); color: var(--st-fg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 14px; transition: border-color 150ms, box-shadow 150ms; } .ds-input::placeholder { color: var(--st-muted); } .ds-input:focus, .ds-input:focus-visible { outline: none; border-color: var(--st-accent); box-shadow: 0 0 0 1px var(--st-accent); } .ds-input:disabled { opacity: 0.55; cursor: not-allowed; } @media (max-width: 767px) { .ds-input { height: 40px; font-size: 16px; } }"
+    },
+    {
+      "name": "Checkbox",
+      "kind": "input",
+      "description": "16px square native checkbox: Strong Hairline on Paper, Ink fill with authored On-Accent check; shown in the Settings notification events ruled list. Product component (drawn by the demos).",
+      "html": "<ul class=\"ds-check-list\"><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-need\"></span><span class=\"ds-check-label\">Needs input</span><span class=\"ds-check-hint\">waits on you</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-bad\"></span><span class=\"ds-check-label\">Failed</span><span class=\"ds-check-hint\">run failed</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-done\"></span><span class=\"ds-check-label\">Done</span><span class=\"ds-check-hint\">run finished</span></label></li></ul>",
+      "css": ".ds-tone-need { --c: var(--st-need); --cf: var(--st-need-fg); } .ds-tone-run { --c: var(--st-run); --cf: var(--st-run); } .ds-tone-done { --c: var(--st-done); --cf: var(--st-done); } .ds-tone-ok { --c: var(--st-ok); --cf: var(--st-ok); } .ds-tone-bad { --c: var(--st-bad); --cf: var(--st-bad); } .ds-tone-idle { --c: var(--st-idle); --cf: var(--st-idle); } .ds-check-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--st-line); border-bottom: 1px solid var(--st-line); } .ds-check-list li { border-bottom: 1px solid var(--st-line); } .ds-check-list li:last-child { border-bottom: 0; } .ds-check-row { display: flex; align-items: center; gap: 12px; min-height: 32px; cursor: pointer; transition: background-color 150ms; } .ds-check-row:hover { background: var(--st-panel); } .ds-check { position: relative; display: inline-flex; width: 16px; height: 16px; flex-shrink: 0; } .ds-check input { appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; border: 1px solid var(--st-line-strong); border-radius: 0; background: var(--st-surface); cursor: pointer; transition: background-color 150ms, border-color 150ms, box-shadow 150ms; } .ds-check input:checked { background: var(--st-accent); border-color: var(--st-accent); } .ds-check input:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--st-surface), 0 0 0 2px var(--st-accent); } .ds-check input:disabled { opacity: 0.55; cursor: not-allowed; } .ds-check svg { position: absolute; inset: 2px; display: none; color: var(--st-on-accent); pointer-events: none; } .ds-check input:checked + svg { display: block; } .ds-sq { width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-check-label { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 13px; color: var(--st-fg); } .ds-check-hint { margin-left: auto; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 12px; color: var(--st-muted); } @media (max-width: 767px) { .ds-check-row { min-height: 44px; } }"
+    },
+    {
+      "name": "State Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Tinted-border mono chips; the dot variant prefixes a 6px square marker. Plain chips (Slate border, Ink Text) carry model, tags and run order. Product component (drawn by the demos).",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><span class=\"ds-chip ds-chip-dot ds-tone-run\">running</span><span class=\"ds-chip ds-chip-dot ds-tone-done\">done</span><span class=\"ds-chip ds-chip-dot ds-tone-ok\">settled</span><span class=\"ds-chip ds-chip-dot ds-tone-bad\">failed</span><span class=\"ds-chip ds-chip-dot ds-tone-idle\">backlog</span><span class=\"ds-chip ds-tone-plain\">then #55</span></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 6px; } .ds-tone-need { --c: var(--st-need); --cf: var(--st-need-fg); } .ds-tone-run { --c: var(--st-run); --cf: var(--st-run); } .ds-tone-done { --c: var(--st-done); --cf: var(--st-done); } .ds-tone-ok { --c: var(--st-ok); --cf: var(--st-ok); } .ds-tone-bad { --c: var(--st-bad); --cf: var(--st-bad); } .ds-tone-idle { --c: var(--st-idle); --cf: var(--st-idle); } .ds-tone-plain { --c: var(--st-muted); --cf: var(--st-fg); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--cf); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 12px; line-height: 1.5; white-space: nowrap; border-radius: 0; } .ds-chip.ds-tone-need { background: color-mix(in srgb, var(--st-need) 14%, transparent); } .ds-chip-dot::before { content: \"\"; width: 6px; height: 6px; flex-shrink: 0; background: var(--c); }"
+    },
+    {
+      "name": "Top Bar Navigation",
+      "kind": "nav",
+      "refersTo": "top-bar",
+      "description": "48px laptop bar: 16px stepped glyph (yellow top step only while input waits), text tabs with 2px ink underline, needs-input count chip on Dashboard. Product component (drawn by the demos).",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-mark\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"1\" y=\"11\" width=\"14\" height=\"3\"/><rect x=\"3\" y=\"7\" width=\"10\" height=\"3\" opacity=\".72\"/><rect x=\"5\" y=\"3\" width=\"6\" height=\"3\" fill=\"var(--st-need)\"/></svg>stage</a><a class=\"ds-tab ds-tab-active\" href=\"#\" aria-current=\"page\">Dashboard <span class=\"ds-count\">2</span></a><a class=\"ds-tab\" href=\"#\">Projects</a><a class=\"ds-tab\" href=\"#\">Sessions</a><a class=\"ds-tab\" href=\"#\">History</a><a class=\"ds-tab\" href=\"#\">Snippets</a><a class=\"ds-tab\" href=\"#\">Settings</a></nav>",
+      "css": ".ds-nav { display: flex; align-items: stretch; height: 48px; padding: 0 24px; border-bottom: 1px solid var(--st-line); background: var(--st-bg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; } .ds-mark { display: flex; align-items: center; gap: 8px; margin-right: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--st-fg); text-decoration: none; } .ds-mark svg { flex: none; } .ds-tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--st-muted); text-decoration: none; transition: color 150ms, border-color 150ms; } .ds-tab:hover { color: var(--st-fg); } .ds-tab:focus-visible { outline: 2px solid var(--st-accent); outline-offset: -2px; } .ds-tab-active { border-bottom-color: var(--st-accent); color: var(--st-fg); } .ds-count { padding: 0 6px; border: 1px solid color-mix(in srgb, var(--st-need) 45%, transparent); background: color-mix(in srgb, var(--st-need) 14%, transparent); color: var(--st-need-fg); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11.5px; line-height: 16px; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel-header",
+      "description": "Ruled container: Bench Gray 32px header with uppercase mono label and count, hairline-separated rows. Product component (drawn by the demos).",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><h2 class=\"ds-panel-title\"><span class=\"ds-sq ds-tone-run\"></span>Running</h2><span class=\"ds-panel-meta\">2</span></div><ul class=\"ds-rows\"><li>Refactor poll throttle</li><li>Chain ordering guard</li></ul></section>",
+      "css": ".ds-panel { border: 1px solid var(--st-line); background: var(--st-surface); } .ds-panel-head { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; border-bottom: 1px solid var(--st-line); background: var(--st-panel); } .ds-panel-title { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 400; color: var(--st-fg); } .ds-panel-meta { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11.5px; color: var(--st-muted); font-variant-numeric: tabular-nums; } .ds-tone-need { --c: var(--st-need); --cf: var(--st-need-fg); } .ds-tone-run { --c: var(--st-run); --cf: var(--st-run); } .ds-tone-done { --c: var(--st-done); --cf: var(--st-done); } .ds-tone-ok { --c: var(--st-ok); --cf: var(--st-ok); } .ds-tone-bad { --c: var(--st-bad); --cf: var(--st-bad); } .ds-tone-idle { --c: var(--st-idle); --cf: var(--st-idle); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-rows { list-style: none; margin: 0; padding: 0; } .ds-rows li { padding: 8px 12px; border-bottom: 1px solid var(--st-line); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 14.5px; font-weight: 500; color: var(--st-fg); transition: background-color 150ms; } .ds-rows li:last-child { border-bottom: 0; } .ds-rows li:hover { background: var(--st-panel); }"
+    },
+    {
+      "name": "Stat Strip",
+      "kind": "custom",
+      "description": "Signature: state counts that filter the Dashboard; markers only on non-zero counts, selected cell tints 10% and gains a 2px inset tone bar. Product component (drawn by the demos).",
+      "html": "<div class=\"ds-stats\" role=\"group\" aria-label=\"Filter by state\"><button class=\"ds-stat ds-tone-need\" aria-pressed=\"true\"><span class=\"ds-sq\"></span><b>2</b><span class=\"ds-stat-l\">Needs input</span></button><button class=\"ds-stat ds-tone-run\" aria-pressed=\"false\"><span class=\"ds-sq\"></span><b>3</b><span class=\"ds-stat-l\">Running</span></button><button class=\"ds-stat ds-tone-done\" aria-pressed=\"false\"><b class=\"ds-zero\">0</b><span class=\"ds-stat-l\">Awaiting settle</span></button><span class=\"ds-stats-hint\">click a count to filter</span></div>",
+      "css": ".ds-stats { display: flex; border: 1px solid var(--st-line); background: var(--st-surface); } .ds-tone-need { --c: var(--st-need); --cf: var(--st-need-fg); } .ds-tone-run { --c: var(--st-run); --cf: var(--st-run); } .ds-tone-done { --c: var(--st-done); --cf: var(--st-done); } .ds-tone-ok { --c: var(--st-ok); --cf: var(--st-ok); } .ds-tone-bad { --c: var(--st-bad); --cf: var(--st-bad); } .ds-tone-idle { --c: var(--st-idle); --cf: var(--st-idle); } .ds-stat { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 0; border-right: 1px solid var(--st-line); background: transparent; white-space: nowrap; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-stat:hover { background: var(--st-panel); } .ds-stat:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-stat[aria-pressed=\"true\"] { background: color-mix(in srgb, var(--c) 10%, transparent); box-shadow: inset 0 -2px var(--c); } .ds-stat b { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 16px; font-weight: 700; color: var(--st-fg); font-variant-numeric: tabular-nums; } .ds-stat[aria-pressed=\"true\"] b { color: var(--cf); } .ds-stat b.ds-zero { color: var(--st-muted); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-stat-l { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--st-muted); } .ds-stats-hint { flex: 1; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 11.5px; color: var(--st-muted); }"
+    },
+    {
+      "name": "Needs-Input Task Row",
+      "kind": "custom",
+      "refersTo": "task-row",
+      "description": "Signature row: user-approved 2px yellow left edge, state chip, mono task number before the title, mono meta, primary Open in app. Product component (drawn by the demos).",
+      "html": "<div class=\"ds-row\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><div class=\"ds-row-main\"><span class=\"ds-row-num\">#51</span><a class=\"ds-row-title\" href=\"#\">Wire real T3 client</a><div class=\"ds-row-meta\"><span>stage</span><span>opus-5.5 high</span><span>4m ago</span></div></div><a class=\"ds-btn ds-btn-primary ds-btn-sm\" href=\"#\">Open in app</a></div>",
+      "css": ".ds-row { display: grid; grid-template-columns: 118px minmax(0,1fr) auto; align-items: center; gap: 14px; padding: 8px 12px; border: 1px solid var(--st-line); border-left: 2px solid var(--st-need); background: var(--st-surface); } .ds-tone-need { --c: var(--st-need); --cf: var(--st-need-fg); } .ds-tone-run { --c: var(--st-run); --cf: var(--st-run); } .ds-tone-done { --c: var(--st-done); --cf: var(--st-done); } .ds-tone-ok { --c: var(--st-ok); --cf: var(--st-ok); } .ds-tone-bad { --c: var(--st-bad); --cf: var(--st-bad); } .ds-tone-idle { --c: var(--st-idle); --cf: var(--st-idle); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--cf); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 12px; line-height: 1.5; white-space: nowrap; border-radius: 0; } .ds-chip.ds-tone-need { background: color-mix(in srgb, var(--st-need) 14%, transparent); } .ds-chip-dot::before { content: \"\"; width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-row-num { margin-right: 6px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 12px; color: var(--st-muted); white-space: nowrap; font-variant-numeric: tabular-nums; } .ds-row-title { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: 14.5px; font-weight: 500; color: var(--st-fg); text-decoration: none; text-underline-offset: 3px; } .ds-row-title:hover { text-decoration: underline; } .ds-row-title:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } .ds-row-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: 12px; color: var(--st-muted); } .ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; text-decoration: none; white-space: nowrap; transition: opacity 150ms; } .ds-btn-sm { height: 24px; padding: 0 8px; font-size: 12px; } .ds-btn-primary { background: var(--st-accent); border-color: var(--st-accent); color: var(--st-on-accent); } .ds-btn-primary:hover { opacity: 0.85; } .ds-btn:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; } @media (max-width: 767px) { .ds-btn-sm { height: 32px; padding: 0 10px; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Ink Workbench",
+    "overview": "**Creative North Star: \"The Ink Workbench\"**\n\nstage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or deep slate (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the user.\n\nDensity is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.\n\nMotion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading, a square spinner on busy buttons, and no entrance choreography.\n\nThis repo is stage's website, the same world on two surfaces. The landing page (`/`, Persuade) is the workbench run in public: a display-scale Geist headline, a `//` meta line, ink and outline actions, then full-width hairline-ruled rows where copy sits left and a stageshow demo of stage's real UI plays right. The docs (`/docs/*`, Read) keep vocs' reading layout and re-ink it through the same tokens, so they read as the app's manual. The demos are faithful pictures of the product: inside them the app's own sizes, rows, panels and state tones apply unchanged (Components, Product UI). Token source of truth is `src/pages/_root.css` (`--st-*`); vocs variables and the stageshow kit (`--ss-*`, `src/components/stage-look.css`) are mapped onto it, never given their own values.",
+    "keyCharacteristics": [
+      "Zero radius on every element, including chips, markers, spinners and focus outlines.",
+      "1px hairlines (11% ink) separate rows and regions; 20% ink outlines controls.",
+      "Ink accent that inverts per theme; no brand hue in chrome.",
+      "Six state tones (need, run, done, ok, bad, idle) drawn as tinted borders, square markers and colored text.",
+      "Uppercase JetBrains Mono panel headers on a light-gray bar.",
+      "Drawers and full-screen sheets instead of modals.",
+      "Site: display-scale Geist headings on the landing only; app role sizes everywhere else.",
+      "Site: demos are inert pictures (role img, foot fade crop), never screenshots, following the site's light/dark theme."
+    ],
+    "rules": [
+      {
+        "name": "The State Earns Color Rule",
+        "body": "Hue appears only on a state: a chip, a square marker, a stat count, an alert, the needs-input row edge, or the demo brand glyph top step while input waits. Website chrome stays ink. Static favicon and notification artwork retain the canonical yellow top step outside app chrome.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two-Token Tone Rule",
+        "body": "Every tone sets a marker/border color and a text color. Borders mix the tone at 45-55% into transparent, fills at 8-14%; the need chip fills at 14% so yellow reads at a glance. Never invent a tone outside the six.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Yellow Edge Rule",
+        "body": "User-approved: a task row in needs input carries a 2px Waiting Yellow left edge and makes its primary action \"Answer\" when it has questions stage can answer, else \"Open in app\". It is the only colored row edge in the system; every other row keeps a transparent 2px edge so titles align. The same edge marks a needs-input toast, an inbox row whose task or thread is still waiting, and the Needs input panel while something still waits on the user.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono Is Metadata Rule",
+        "body": "JetBrains Mono for project names, models, times, ids, counts, chips, labels, keycaps; Geist for titles, actions and prose. Counts, times and step numbers use tabular numerals.",
+        "section": "typography"
+      },
+      {
+        "name": "The Meta Below Rule",
+        "body": "A page's context line sits directly below the H1 in 12px mono Slate, led by a bold Ink Text `//`. Nothing sits above a heading: no eyebrow, no kicker. The landing keeps the rule at its scale: the `//` line follows the lede in 12.5px mono.",
+        "section": "typography"
+      },
+      {
+        "name": "The Two Scales Rule",
+        "body": "The display scale (Display, Display Section, Lede, Body Large) is for landing copy; the product ramp is for everything a visitor would see in stage itself, including every demo and the docs chrome. Decision recorded 2026-11-15: the six detector `design-system-font-size` advisories (landing H1, H2 and lede clamps, the 18px wordmark, the 22px demo headline, the 17px demo stat) are this intentional scale, now named above. A new off-ramp size is a new step to name here, not a literal to slip in.",
+        "section": "typography"
+      },
+      {
+        "name": "The Copy Left, Proof Right Rule",
+        "body": "A landing feature row is copy in the 5fr column and its demo in the 7fr column, hairline-separated from the next row. No icon-card grids, no bento, no section numbers.",
+        "section": "layout"
+      },
+      {
+        "name": "The Ruled List Rule",
+        "body": "One bordered panel per state or concern, rows separated by hairlines. Never a grid of cards.",
+        "section": "layout"
+      },
+      {
+        "name": "The Drawer Not Modal Rule",
+        "body": "Secondary flows (new task, edit, filters, More) open in a right drawer, 580px or 680px wide, that becomes a full-screen sheet below 768px, with Esc, a focus trap and focus restore.",
+        "section": "layout"
+      },
+      {
+        "name": "The Safe Area Rule",
+        "body": "The page sets `viewport-fit=cover`, so anything pinned to a screen edge on phone pads itself with `env(safe-area-inset-*)`: the phone top bar (top), bottom tabs, task detail action bar and toasts (bottom), and every drawer sheet and the command palette (header top, footer or body bottom, sides in landscape). Primary actions never sit on the home indicator.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Bench Rule",
+        "body": "Surfaces never cast shadows. Only the floating palette may; everything else separates by hairline and bar tint. Inside a demo this holds for the product UI it pictures.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One Elevation Per Object Rule",
+        "body": "On the site, a window or ground is a hairline ring and nothing more; a shadow belongs only to an object floating over another object in the composition (satellite, popover, carried row), and that object keeps its Strong Hairline ring under the drop.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Zero Radius Rule",
+        "body": "No element rounds a corner. A circle is never a state marker; the marker is a square. On the site this covers vocs and the stageshow kit: every `--vocs-radius-*` and `--ss-radius-*` is 0px.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Ink Traffic Lights Rule",
+        "body": "Window controls in a demo are square, colorless ink marks. Red, yellow and green belong to states, never to chrome.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do keep every corner at 0px, including chips, markers, spinners and focus outlines.",
+      "Do separate rows and regions with 1px Hairline and outline controls with Strong Hairline.",
+      "Do color only what a state earns: chips, square markers, stat counts, alerts, the needs-input edge.",
+      "Do draw tones with the two-token pattern: border at 45-55% tone, fill at 8-14%, text in the tone's text color.",
+      "Do place the `//` meta line directly below the H1 in 12px mono Slate with a bold Ink Text `//`.",
+      "Do head every panel with the 32px Bench Gray bar and an uppercase 11px mono label at 0.12em.",
+      "Do set titles, actions and prose in Geist; set metadata, labels, chips, counts and keycaps in JetBrains Mono with tabular numerals.",
+      "Do draw icons as authored 16px SVGs: 1.5 stroke, square caps, miter joins, currentColor.",
+      "Do open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.",
+      "Do keep motion to 150ms color, opacity and border transitions on state change; on the site the one movement is the 2px arrow nudge in landing buttons.",
+      "Do give needs-input rows (and still-waiting needs-input toasts, inbox rows and the Needs input panel) the 2px Waiting Yellow left edge and a primary Answer (answerable questions) or Open in app; it is the only colored row edge.",
+      "Do read every site color from a `--st-*` token in `src/pages/_root.css`; map vocs and stageshow variables onto those tokens rather than giving them values.",
+      "Do keep landing type on the named display scale (Display, Display Section, Lede, Body Large) and everything inside a demo on the product ramp.",
+      "Do lay out landing features as copy 5fr / demo 7fr inside the 1240px grid (24px gutters, 16px on phone), each row ending on a full-width hairline.",
+      "Do ship every product visual as an inert `role=\"img\"` stageshow demo with an `aria-label`, cropped by the 64px foot fade and following the site theme.",
+      "Do frame demo windows with a hairline ring and square ink traffic lights; cast a shadow only from an object floating over another."
+    ],
+    "donts": [
+      "Don't round any corner.",
+      "Don't give chrome, navigation, links or primary buttons a hue; the accent is ink and inverts per theme.",
+      "Don't set text in the bright need yellow; use `need-fg`.",
+      "Don't put an eyebrow or kicker above a heading.",
+      "Don't use a text glyph as an icon; draw an SVG. Keycap legends inside a Kbd are key names, not icons.",
+      "Don't lay lists out as card grids or shadowed tiles; one ruled panel per state.",
+      "Don't cast shadows from surfaces; only the floating command palette has one. Toasts stay flat.",
+      "Don't use circles or dots as state markers; markers are squares.",
+      "Don't add colored left edges to any row other than needs input.",
+      "Don't add entrance animations or choreography.",
+      "Don't dress it as a neon terminal (glow, green-on-black, scanlines) or as a rounded-card SaaS dashboard.",
+      "Don't use a screenshot for a product visual, or let a demo take focus.",
+      "Don't put a gradient hero, an icon-card bento or section numbers on the landing.",
+      "Don't add an off-ramp font size without naming it as a step in Typography.",
+      "Don't color window traffic lights.",
+      "Don't add section entrance animations; demo choreography stays inside the demos."
+    ]
+  }
+}

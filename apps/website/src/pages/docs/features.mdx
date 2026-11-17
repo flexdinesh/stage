@@ -1,0 +1,89 @@
+---
+title: Features
+description: Everything stage does, from the backlog and run order to schedules, transcripts, answering questions, continuations, notifications and search.
+showAskAi: false
+---
+
+# Features
+
+## Projects
+
+1:1 with T3 projects. Existing T3 projects import automatically. Title, root and archive state follow T3; rename or archive in T3. Sort by name or recent activity (latest thread update/settle or task change).
+
+## Tasks and backlog
+
+- **Task config**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, notes. Save to backlog or start right away.
+- **Screenshots**: drop images on the prompt (or Add image; PNG, JPEG, GIF, WebP, up to 8 × 10 MB). They are sent to the T3 thread with the prompt on every launch; follow-ups can carry images too. Read-only once the task leaves backlog.
+- **Live status**: backlog → running → needs input → done → settled (or failed / interrupted). Polled from T3 every 5s. Settling happens in T3.
+- **Task actions**: start, follow-up, stop, duplicate, open in T3.
+- **Model defaults**: new tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
+
+## Run order and handoff
+
+- **Run order**: link a task to run after another while creating, viewing or editing it; links can span projects. It starts when that thread is settled in T3. A failed predecessor keeps it waiting. Start now unlinks it and starts it immediately.
+- **Handoff** (on by default, per task): when a linked task starts, stage appends its predecessor's final reply (up to 4000 chars), PR links, branch/worktree and T3 thread link to the prompt, so sequential work carries context forward. Task detail shows what was (or will be) appended. A failed read launches without it and logs why.
+- **Stacked work** (opt-in): a linked task's Workspace can be "#12's branch". Its worktree starts from the predecessor's branch, so it builds on unmerged changes. It falls back to its own base ref (logged, shown on task detail) when the predecessor ran at root, in another project, has no branch, its PRs are merged, or the branch is gone.
+- **Session batch**: session detail lists the tasks a session created ("Created tasks": start a chain, start a task, link selected tasks in order, reorder an unstarted chain, edit). Task detail shows it as a compact Batch panel.
+
+Details: [link rules](/docs/api/tasks#link-rules), [handoff](/docs/api/tasks#handoff), [predecessor base](/docs/api/tasks#predecessor-base), [session batch](/docs/api/tasks#session-batch).
+
+## Scheduled tasks
+
+In the New task drawer pick Start:
+
+- **At time** (one-shot): a backlog task starts at that wall time in a chosen zone. A time missed while the server was down starts late.
+- **Repeat** (a schedule): presets Hourly / Daily / Weekdays / Weekly or a raw 5-field cron, in its own IANA zone. Each fire spawns and starts a new task with the schedule's config and images. A fire is skipped while the previous run is still pending, running or needs input; fires missed while the server was down are skipped.
+
+Schedules show on the Schedules page, the project panel, and a Scheduled (next 24h) group on Stage. Actions: run now, pause/resume, edit, delete (spawned tasks are kept). Details: [schedule rules](/docs/api/schedules#schedule-rules).
+
+## Sessions and transcript
+
+- **Sessions**: browse Active or All sessions across projects, regardless of where they started. Active has no creation-date cutoff. Open local session details, inspect child sessions, or jump to T3.
+- **Transcript**: session and task detail have an Overview | Transcript switch (`?view=transcript`). Read-only user and assistant messages and plans as safe markdown (no raw HTML, no remote images), newest 50 with Load earlier, long messages collapsed. Live while a run is active: the server polls T3 every 2s (one poller per session, only while someone watches) and pushes changes over SSE. Tool calls, commands and diffs stay in T3.
+- **Last word**: each session's latest assistant reply, read during sync once a thread is at rest. Task and session detail show it as markdown (up to 4000 chars, with a link to T3 when longer); Needs input and Done rows show it as one line. Read-only: reply in T3.
+- **Pull requests and runs**: PRs T3 links to a thread show as chips with their state (open, merged, closed) on task and session rows, and as a list on task and session detail linking to the PR. Detail pages also list the thread's runs (each follow-up is a new run): status, model, start, run time and queue time, newest first.
+- **History**: every T3 thread, including ones started outside stage. Filter by time window, project, status, provider and source; shows counts per project and per day.
+- **Dashboard**: needs-input alert, plus running, done (awaiting settle), backlog and settled (last 7 days) across projects. External T3 threads (not tasks) show under needs input and running.
+
+## Answering questions
+
+When a session waits on a question (T3 user input), task and session detail show it in a Needs input panel at the top: single or multi select, or your own answer, then Send answer.
+
+- Needs-input rows, toasts and the notifications drawer get an Answer button; needs-input pushes land on the panel.
+- Permission approvals still resolve in T3. The panel counts them and links there.
+- A resent answer is idempotent; answered-elsewhere and stale requests say so.
+- Agents can read questions (CLI/MCP), not answer them.
+
+API: [pending questions](/docs/api/threads#pending-questions).
+
+## Queued continuations
+
+Open session A, choose an existing top-level session B, and save a prompt.
+
+- Both current runs continue untouched. Delivery waits for A to settle explicitly and B to finish with no pending input.
+- Linear chains track the delivered continuation run before releasing the next step.
+- Failed, interrupted, or cancelled sessions block delivery; uncertain sends are held for review rather than retried.
+- Edit, pause, resume, or cancel before delivery is claimed.
+- The saved prompt includes A's reference, without copying its transcript.
+
+API: [queued continuations](/docs/api/threads#queued-continuations).
+
+## Notifications
+
+Installable PWA with Web Push for needs input, failed, done and settled (each toggleable in Settings), covering tasks and threads started directly in T3 (subagents excluded). The app icon badge counts what needs input. Every notification also lands in an in-app inbox and toast. Setup: [Install as an app](/docs/deploy#install-as-an-app-pwa-and-notifications).
+
+## Search and palette
+
+Ctrl K jumps to tasks, projects and sessions by title, or finds a session by what was said in it. Message text, branch, PR and project matches come from T3's thread search and are labeled (`branch`, `PR`, `you said`, `agent said`) under Sessions and In messages, with a snippet. Title matches show instantly; T3 matches follow. When T3 is offline or slow the palette keeps title matches and says so in its footer.
+
+## Snippets
+
+Reusable prompt text, global or per project. Type `/` in a task prompt, follow-up or notes to pick one and insert it.
+
+## Agents
+
+Agents create, start and manage tasks via the `stage` CLI or MCP (stdio or HTTP). See [Agents](/docs/agents).
+
+## Settings
+
+T3 connection status, manual pairing, sync now, pinned model defaults, and the notification event filter.

@@ -243,15 +243,16 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then `mise
 
 - `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and the browser host on Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. Set `T3_FAKE=1` in `.env.dev` to work without T3.
 - `mise run test`: Go vet and tests; shared app, browser host and desktop UI tests, typecheck and lint.
-- `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, desktop app and fixture Go tests). Run before a PR.
+- `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, website checks, desktop app and fixture Go tests). Run before a PR.
 - `mise run build`: the browser bundle (`apps/web/dist`) embedded into `bin/stage`.
+- `mise run website:dev` (:5175), `website:build`, `website:check`, `website:preview` (:8787): the marketing and docs site in `apps/website`.
 - `mise run desktop:dev`: the desktop app against a foreground dev server on a scratch socket (no OS service). `mise run dist [TARGETS=host|all]`: a developer build of the desktop app and the headless CLI/server (`stage-dev`), verified, in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z`: the release build of a clean HEAD ([docs/release.md](docs/release.md)). `mise run desktop:e2e`: webview e2e (display and WebKitGTK 4.1, or macOS). See [docs/desktop.md](docs/desktop.md).
 - `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`. It is not an installer install: `stage update` refuses it and the installer will not overwrite it.
 - Installing a development build as Stage Dev: [docs/development.md](docs/development.md). `mise run install:smoke`: the installer against real binaries and systemd with the isolated `stage-svctest` identity ([docs/install.md](docs/install.md#verification)).
 - `mise run up` / `mise run down`: build and run, or stop, the compose stack (data volume kept).
 - Single test files: `node --test packages/app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test apps/web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
 
-Layout: `server/` (Go server, CLI, MCP), `packages/app/` (the shared React app, `@stage/app`), `apps/web/` (browser host, `@stage/web`), `desktop/app/` (desktop host; its frontend `desktop/app/ui`, `@stage/desktop`, is in the pnpm workspace), one pnpm workspace. Ownership and the platform contract: [docs/architecture.md](docs/architecture.md).
+Layout: `server/` (Go server, CLI, MCP), `packages/app/` (the shared React app, `@stage/app`), `apps/web/` (browser host, `@stage/web`), `desktop/app/` (desktop host; its frontend `desktop/app/ui`, `@stage/desktop`, is in the pnpm workspace), `apps/website/` (marketing and docs site, `@stage/website`), one pnpm workspace. Ownership and the platform contract: [docs/architecture.md](docs/architecture.md).
 
 API contract: [docs/api.md](docs/api.md) (TypeScript mirror: `packages/app/src/api/types.ts`).
 
