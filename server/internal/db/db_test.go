@@ -347,80 +347,9 @@ func TestUpsertThreadDetailStoresRunSpan(t *testing.T) {
 	}
 }
 
-func TestUpsertThreadPullRequestsAndRuns(t *testing.T) {
-	s, ctx := setup(t)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	pr := func(n int, state string) t3.PullRequest {
-		return t3.PullRequest{Host: "github.com", Repository: "o/r", Number: n, URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), Source: "created", State: state}
-	}
-
-	// Unread thread: arrays, never null.
-	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: "th-pr", ProjectID: "proj-1", Title: "x", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now}}); err != nil {
-		t.Fatal(err)
-	}
-	th, err := s.GetThread(ctx, "th-pr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runs, err := s.ThreadRuns(ctx, "th-pr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if th.PullRequests == nil || len(th.PullRequests) != 0 || runs == nil || len(runs) != 0 || th.RunCount != 0 {
-		t.Fatalf("unread thread prs=%#v runs=%#v count=%d", th.PullRequests, runs, th.RunCount)
-	}
-
-	// Detail read stores PRs, runs (newest first, capped at 50) and the count.
-	started := now.Add(-3 * time.Minute)
-	recent := make([]t3.Run, 0, 52)
-	for i := 52; i >= 1; i-- {
-		recent = append(recent, t3.Run{RunID: fmt.Sprintf("r%d", i), Ordinal: i, Status: t3.StatusCompleted, Model: "m", RequestedAt: started, StartedAt: &started, CompletedAt: &now})
-	}
-	recent[0].Status = t3.StatusRunning
-	recent[0].ExecutedModel = "m-exec"
-	recent[0].CompletedAt = nil
-	d := t3.ThreadDetail{
-		Thread:     t3.Thread{ThreadID: "th-pr", ProjectID: "proj-1", Title: "x", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{pr(1, "open")}},
-		RunCount:   60,
-		RecentRuns: recent,
-	}
-	if err := s.UpsertThreadDetail(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	// A later list upsert refreshes PRs and keeps runs.
-	d.Thread.PullRequests = []t3.PullRequest{pr(1, "merged"), pr(2, "open")}
-	if err := s.UpsertThreads(ctx, []t3.Thread{d.Thread}); err != nil {
-		t.Fatal(err)
-	}
-	th, err = s.GetThread(ctx, "th-pr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(th.PullRequests) != 2 || th.PullRequests[0] != pr(1, "merged") || th.PullRequests[1] != pr(2, "open") || th.RunCount != 60 {
-		t.Fatalf("thread prs=%#v count=%d", th.PullRequests, th.RunCount)
-	}
-	runs, err = s.ThreadRuns(ctx, "th-pr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runs) != 50 || runs[0].Ordinal != 52 || runs[49].Ordinal != 3 {
-		t.Fatalf("runs len=%d first=%+v", len(runs), runs[0])
-	}
-	r := runs[0]
-	if r.Status != "running" || r.Model == nil || *r.Model != "m" || r.ExecutedModel == nil || *r.ExecutedModel != "m-exec" ||
-		r.StartedAt == nil || !r.StartedAt.Equal(started) || r.CompletedAt != nil || !r.RequestedAt.Equal(started) {
-		t.Fatalf("run %+v", r)
-	}
-	if runs[1].ExecutedModel != nil {
-		t.Fatalf("unreported executed model = %v", *runs[1].ExecutedModel)
-	}
-	if _, err := s.ThreadRuns(ctx, "nope"); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("unknown thread err = %v", err)
-	}
-}
-
 func TestTaskCarriesThreadPullRequests(t *testing.T) {
-	s, ctx := setup(t)
+	pool := testDB.Reset(t)
+	s, ctx := db.NewStore(pool), t.Context()
 	p := mustProject(t, s, ctx, "proj-prs")
 	task := mustTask(t, s, ctx, p.ID, "t", nil)
 	got, err := s.GetTask(ctx, task.ID)
@@ -434,6 +363,17 @@ func TestTaskCarriesThreadPullRequests(t *testing.T) {
 	open := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "agent", State: "open"}
 	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: "th-task-pr", ProjectID: p.T3ProjectID, Title: "t", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{open}}}); err != nil {
 		t.Fatal(err)
+	}
+	// Historical records from an older Stage version remain readable.
+	if _, err := pool.ExecContext(ctx, `UPDATE threads SET pull_requests = ?, recent_runs = ? WHERE t3_thread_id = ?`, `[ {"host":"github.com","repository":"o/r","number":7,"url":"https://github.com/o/r/pull/7","source":"agent","state":"open"} ]`, `[{"runId":"old","ordinal":1}]`, "th-task-pr"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "th-task-pr", ProjectID: p.T3ProjectID, Title: "updated", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{{URL: "https://example.com/new"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ThreadRuns(ctx, "th-task-pr")
+	if err != nil || len(runs) != 1 || runs[0].RunID != "old" {
+		t.Fatalf("historical runs: %+v %v", runs, err)
 	}
 	thread := "th-task-pr"
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {

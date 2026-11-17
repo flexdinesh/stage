@@ -29,7 +29,7 @@ Typical loop: queue work from a laptop or an agent, let tasks in a tree start as
 ## Security
 
 :::warning
-stage has no authentication. Anyone who can reach its listener can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
+stage has no authentication. Anyone who can reach its listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host (`full-access` is the task default).
 :::
 
 - It listens on `127.0.0.1:7380` by default, or only on a private Unix socket (mode `0600`) when it runs as the per-user service.
@@ -44,7 +44,7 @@ Details: [Security](/docs/deploy#security).
 - **Storage**: SQLite (`stage.db`) in the data dir: `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`).
 - **Web app**: React, served by the server, installable as a PWA with Web Push.
 - **Desktop app**: the same UI in a native window. It bundles the CLI/server, starts the per-user service and connects over its Unix socket ([Desktop app](/docs/desktop)).
-- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, runs a full sync every 5 min, and polls watched transcripts every 2s while their run is active.
+- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, refreshes projects and tracked tasks every 5 min, and discovers active external sessions for notifications.
 - **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API.
 
 ## Next steps

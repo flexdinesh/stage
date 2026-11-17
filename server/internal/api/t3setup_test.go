@@ -194,7 +194,8 @@ func TestT3URLEndpoint(t *testing.T) {
 
 func TestT3StatusReportsSyncProgress(t *testing.T) {
 	e := newEnv(t)
-	e.fake.AddProject("p", "/w/p")
+	p := e.project("/w/p")
+	e.task(p.ID, "sync target", map[string]any{"start": true})
 	gate, reached := make(chan struct{}), make(chan struct{}, 1)
 	e.t3.listGate.Store(&listGate{gate: gate, reached: reached})
 	done := make(chan error, 1)

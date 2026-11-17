@@ -12,15 +12,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // Change is a task state transition the service applied.
-type Change struct {
-	TaskID int64
-	From   db.TaskState
-	To     db.TaskState
-	Detail string
-}
+type Change = workevent.TaskChange
 
 // Result is a full sync summary (POST /api/sync).
 type Result struct {
@@ -204,8 +200,8 @@ func t3Err(err error) error {
 	return &db.T3Error{Err: err}
 }
 
-// FullSync mirrors all T3 projects and threads (all projects, subagents
-// included) and records last_full_sync_at.
+// FullSync refreshes projects and task-owned sessions. Active external
+// discovery belongs to the notification watcher.
 func (s *Service) FullSync(ctx context.Context) (Result, error) {
 	if !s.syncing.CompareAndSwap(false, true) {
 		return Result{}, ErrSyncRunning
@@ -224,34 +220,22 @@ func (s *Service) FullSync(ctx context.Context) (Result, error) {
 		return Result{}, fmt.Errorf("upsert projects: %w", err)
 	}
 	s.syncProjects.Store(int64(nProjects))
+	// Reconcile only sessions owned by Stage tasks. External active-session
+	// discovery belongs to the T3 watcher; no historical session sweep.
+	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
+	if err != nil {
+		return Result{}, err
+	}
 	nThreads := 0
-	var cursor *int
-	for page := 0; page < 10000; page++ {
-		res, err := s.t3.ListThreads(ctx, t3.ListThreadsInput{
-			AllProjects: true, IncludeSubagents: true, Limit: 100, Cursor: cursor,
-		})
-		if err != nil {
-			return Result{}, t3Err(fmt.Errorf("list threads: %w", err))
+	for _, task := range tasks {
+		if task.T3ThreadID == nil {
+			continue
 		}
-		if err := s.store.UpsertThreads(ctx, res.Threads); err != nil {
-			return Result{}, fmt.Errorf("upsert threads: %w", err)
+		if err := s.PollTask(ctx, task); err != nil {
+			return Result{}, err
 		}
-		s.syncThreads.Add(int64(len(res.Threads)))
-		// List rows omit pending requests and active run metadata. Read root
-		// detail as well, including old, settled and task-owned sessions.
-		for _, thread := range res.Threads {
-			if thread.ParentThreadID != "" {
-				continue
-			}
-			if _, err := s.readSession(ctx, thread.ThreadID); err != nil && !errors.Is(err, t3.ErrNotFound) {
-				return Result{}, t3Err(fmt.Errorf("read session: %w", err))
-			}
-		}
-		nThreads += len(res.Threads)
-		if res.NextCursor == nil || len(res.Threads) == 0 || (cursor != nil && *res.NextCursor <= *cursor) {
-			break
-		}
-		cursor = res.NextCursor
+		nThreads++
+		s.syncThreads.Store(int64(nThreads))
 	}
 	now := time.Now().UTC()
 	if err := s.store.SetLastFullSync(ctx, now); err != nil {
@@ -423,7 +407,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task,
 		return db.Task{}, err
 	}
 	if cur.Adopted {
-		return db.Task{}, db.Conflict("task %d tracks an adopted session: follow up on it instead of starting it", id)
+		return db.Task{}, db.Conflict("task %d tracks an adopted session: open it in T3 instead of starting it", id)
 	}
 	res, err := s.transition(ctx, db.Transition{
 		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true,

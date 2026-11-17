@@ -1,5 +1,5 @@
 /**
- * Stage links: copyable references to tasks and sessions, and recognizing them in text. Agents resolve the same
+ * Stage links: copyable task references and recognition of task and historical session links. Agents resolve the same
  * links with `read_ref` (server/internal/refs); the host is ignored there and here, because one stage is reached
  * at several addresses (loopback, tailnet, phone). The desktop's deep links (`stage://tasks/12`, one scheme per
  * installation identity) read the same.
@@ -11,7 +11,6 @@ export type StageRef = { kind: "task"; id: number } | { kind: "session"; id: str
 export type StageLink = (path: string) => string;
 
 export const taskUrl = (link: StageLink, id: number) => link(`/tasks/${id}`);
-export const sessionUrl = (link: StageLink, threadId: string) => link(`/sessions/${encodeURIComponent(threadId)}`);
 
 /** Escape text for a markdown link label. */
 const label = (text: string) => text.replace(/[\\[\]]/g, (c) => `\\${c}`).replace(/\s+/g, " ").trim();
@@ -19,11 +18,6 @@ const label = (text: string) => text.replace(/[\\[\]]/g, (c) => `\\${c}`).replac
 /** `[stage task #12: Title](url)`: names itself, so an agent knows what it is even without stage's instructions. */
 export const taskMarkdown = (link: StageLink, id: number, title: string) =>
   `[stage task #${id}: ${label(title)}](${taskUrl(link, id)})`;
-
-export const sessionMarkdown = (link: StageLink, threadId: string, title: string) =>
-  `[stage session: ${label(title)}](${sessionUrl(link, threadId)})`;
-
-export const refPath = (ref: StageRef) => (ref.kind === "task" ? `/tasks/${ref.id}` : `/sessions/${encodeURIComponent(ref.id)}`);
 
 /** Desktop deep-link schemes: `stage:` and developer identities' `stage-<suffix>:`. */
 const DEEP_LINK = /^stage(-[a-z0-9-]+)?:$/;

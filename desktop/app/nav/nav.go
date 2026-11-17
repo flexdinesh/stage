@@ -218,8 +218,6 @@ func (p Policy) DeepLink(raw string) (string, bool) {
 		return "/", true
 	case len(segs) == 2 && segs[0] == "tasks" && taskNum.MatchString(segs[1]):
 		return "/tasks/" + segs[1], true
-	case len(segs) == 2 && segs[0] == "sessions" && segs[1] != "." && segs[1] != "..":
-		return "/sessions/" + url.PathEscape(segs[1]), true
 	}
 	return "", false
 }
@@ -263,18 +261,8 @@ func AlertPath(p string) (string, bool) {
 	case "/settings", "/?inbox":
 		return p, true
 	}
-	path, frag, hasFrag := strings.Cut(p, "#")
-	if hasFrag && frag != "answer" {
-		return "", false
-	}
-	if n, ok := strings.CutPrefix(path, "/tasks/"); ok && taskNum.MatchString(n) {
+	if n, ok := strings.CutPrefix(p, "/tasks/"); ok && taskNum.MatchString(n) {
 		return p, true
-	}
-	if seg, ok := strings.CutPrefix(path, "/sessions/"); ok && seg != "" {
-		id, err := url.PathUnescape(seg)
-		if err == nil && id != "." && id != ".." && url.PathEscape(id) == seg {
-			return p, true
-		}
 	}
 	return "", false
 }

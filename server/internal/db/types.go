@@ -164,9 +164,9 @@ type Task struct {
 	RunEndedAt        *time.Time       `json:"runEndedAt"`
 	LastWordPreview   *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
 	LastWordAt        *time.Time       `json:"lastWordAt"`
-	PullRequests      []t3.PullRequest `json:"pullRequests"` // thread's PRs (mirror); [] without a thread
+	PullRequests      []t3.PullRequest `json:"-"` // thread's PRs (mirror); [] without a thread
 	// PendingQuestionCount: the thread's answerable pending questions.
-	PendingQuestionCount int       `json:"pendingQuestionCount"`
+	PendingQuestionCount int       `json:"-"`
 	CreatedAt            time.Time `json:"createdAt"`
 	UpdatedAt            time.Time `json:"updatedAt"`
 	// StateSince: when the task entered its current state (latest task event
@@ -210,13 +210,13 @@ type Thread struct {
 	RunStartedAt        *time.Time       `json:"runStartedAt"` // elapsed run span (RunSpan)
 	RunEndedAt          *time.Time       `json:"runEndedAt"`
 	RunCount            int              `json:"runCount"` // runs T3 reported (detail reads); 0 until read
-	PullRequests        []t3.PullRequest `json:"pullRequests"`
+	PullRequests        []t3.PullRequest `json:"-"`
 	Settled             bool             `json:"settled"`
 	SettledAt           *time.Time       `json:"settledAt"`
 	PendingRequestCount int              `json:"pendingRequestCount"`
 	// PendingQuestionCount: pending requests stage can answer (user-input
 	// questions); the rest are approvals handled in T3.
-	PendingQuestionCount int        `json:"pendingQuestionCount"`
+	PendingQuestionCount int        `json:"-"`
 	ProviderInstanceID   *string    `json:"providerInstanceId"`
 	Model                *string    `json:"model"`
 	RuntimeMode          *string    `json:"runtimeMode"`
@@ -238,7 +238,7 @@ type Thread struct {
 	LastWord *LastWord `json:"lastWord"`
 	// RecentRuns are the mirrored runs, newest first (at most 50); set on
 	// detail reads only (ThreadRuns), null in lists.
-	RecentRuns []ThreadRun `json:"recentRuns"`
+	RecentRuns []ThreadRun `json:"-"`
 	Link       *string     `json:"-"`
 }
 

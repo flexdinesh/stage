@@ -242,7 +242,7 @@ export function T3SetupPanel({ status }: { status: T3Status }) {
       fix = <SyncNow />;
       break;
     case null:
-      fix = <Muted>Importing your T3 projects and threads. The Dashboard fills in when it finishes.</Muted>;
+      fix = <Muted>Refreshing your T3 projects and tracked tasks. The Dashboard fills in when it finishes.</Muted>;
       break;
   }
   return (

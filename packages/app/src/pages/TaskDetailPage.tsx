@@ -1,11 +1,10 @@
-import { batchPath, sessionPath } from "../lib/sessions.ts";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
-import { useShowT3Links } from "../lib/hostState.ts";
-import { SEND_MODES, type SendMode, type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
+import { useT3Destination } from "../lib/hostState.ts";
+import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
@@ -14,16 +13,11 @@ import { JournalPanel } from "../components/Journal.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
-import { ImageDropzone, ImageStrip, useImageSet } from "../components/Images.tsx";
-import { PullRequestsPanel } from "../components/PullRequests.tsx";
-import { RunsPanel } from "../components/RunsPanel.tsx";
-import { NeedsInputSlot, focusAnswerPanel } from "../components/NeedsInputPanel.tsx";
+import { ImageStrip } from "../components/Images.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { NoTreePanel, TreePanel } from "../components/trees/TreePanel.tsx";
-import { SnippetTextarea } from "../components/SnippetPicker.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
-import { DetailViewTabs, Transcript, isLiveState, useDetailView } from "../components/TranscriptView.tsx";
 import {
   Alert,
   AppButton,
@@ -33,11 +27,9 @@ import {
   Details,
   ErrorText,
   Muted,
-  buttonClass,
   PageHeader,
   Panel,
   QueryState,
-  Segmented,
   cx,
 } from "../components/ui.tsx";
 import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
@@ -74,7 +66,6 @@ function TaskDetailView({ id }: { id: number }) {
 
 const when = (iso: string | null) => (iso === null ? "-" : <span title={dateTime(iso)}>{relativeTime(iso)}</span>);
 
-const SEND_OPTIONS = SEND_MODES.map((m) => ({ value: m, label: m }));
 
 /** "10:42:03" today, "Nov 3 10:42" otherwise. */
 function stamp(iso: string): string {
@@ -101,8 +92,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
-  const [view, setView] = useDetailView();
-  const followupInput = useRef<HTMLTextAreaElement>(null);
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
   const duplicate = useMutation({
@@ -128,28 +117,18 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
-  // Questions stage can answer: the phone bar leads with Answer.
-  const answerable = waiting && task.pendingQuestionCount > 0;
-  const hasThread = task.t3ThreadId !== null;
   const startable = canStart(task);
   // Blocked on its needs: Start runs it before they settle (needs kept), so it takes a second click to confirm.
   const blocked = isWaiting(task);
   const [armed, setArmed] = useState(false);
   const stoppable = canStop(task);
-  const appUrl = useShowT3Links() ? task.t3DeepLink : null;
-  const phoneBar = appUrl !== null || hasThread || stoppable || answerable;
-
-  const focusFollowup = () => {
-    const el = followupInput.current;
-    if (el === null) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.focus({ preventScroll: true });
-  };
+  const appUrl = useT3Destination()(task);
+  const phoneBar = appUrl !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) =>
     appUrl === null ? null : (
       <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in app
+        Open in T3
       </AppButton>
     );
 
@@ -198,11 +177,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
       </div>
 
       <div className="flex flex-col gap-3.5">
-        {task.t3ThreadId !== null ? (
-          <NeedsInputSlot pending={pending} threadId={task.t3ThreadId} links={task} />
-        ) : null}
-        {/* Needs input before T3 reports the request (sync lag): no questions to show yet. */}
-        {waiting && pending === 0 ? (
+        {waiting ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
             T3 is waiting on input
           </Alert>
@@ -230,11 +205,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </Button>
           ) : null}
           {waiting ? null : openInApp("secondary", "max-md:hidden")}
-          {hasThread ? (
-            <Button onClick={focusFollowup} className="max-md:hidden">
-              Follow-up
-            </Button>
-          ) : null}
           {stoppable ? stopButton("max-md:hidden") : null}
           {task.adopted ? null : (
             <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
@@ -281,18 +251,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </Alert>
         )}
 
-        {task.t3ThreadId === null ? null : <DetailViewTabs view={view} onChange={setView} live={isLiveState(task.state)} />}
 
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
-          {task.t3ThreadId !== null && view === "transcript" ? (
-            <div className="flex min-w-0 flex-col gap-3.5">
-              <Transcript threadId={task.t3ThreadId} jumpOffset="task" />
-              <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} />
-            </div>
-          ) : (
           <div className="flex min-w-0 flex-col gap-3.5">
             {task.adopted && task.t3ThreadId !== null ? (
-              <OpeningPrompt threadId={task.t3ThreadId} live={isLiveState(task.state)} />
+              <OpeningPrompt taskId={task.id} live={isActive(task)} />
             ) : (
               <PromptPanel text={task.prompt}>
                 {pendingHandoffNote(task) === null ? null : (
@@ -306,15 +269,12 @@ function TaskBody({ task }: { task: TaskDetail }) {
               </PromptPanel>
             )}
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
-            {hasThread ? <FollowupPanel taskId={task.id} projectId={task.projectId} inputRef={followupInput} /> : null}
-            {task.thread === null ? null : <RunsPanel runs={task.thread.recentRuns ?? []} runCount={task.thread.runCount} />}
+            {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-small underline">{artifact.label}</a></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
           </div>
-          )}
           <div className="flex min-w-0 flex-col gap-3.5">
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
-            <PullRequestsPanel prs={task.pullRequests} />
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
             <ConfigPanel task={task} />
@@ -324,18 +284,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {phoneBar ? (
         <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {answerable ? (
-            <Button variant="primary" onClick={focusAnswerPanel} className="flex-1">
-              Answer
-            </Button>
-          ) : null}
-          {openInApp(waiting && !answerable ? "primary" : "secondary", "flex-1")}
-          {/* While answerable, Answer takes Follow-up's slot so the bar fits a phone. */}
-          {hasThread && !answerable ? (
-            <Button onClick={focusFollowup} className="flex-1">
-              Follow-up
-            </Button>
-          ) : null}
+          {openInApp(waiting ? "primary" : "secondary", "flex-1")}
           {stoppable ? stopButton("flex-1") : null}
         </div>
       ) : null}
@@ -346,7 +295,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 }
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
-  const showT3 = useShowT3Links();
+  const destination = useT3Destination();
   if (task.t3ThreadId === null) {
     return (
       <Panel title="Thread">
@@ -354,11 +303,11 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
       </Panel>
     );
   }
-  const links: ReactNode[] = [<Link key="session" to={sessionPath(task.t3ThreadId)} className={buttonClass("secondary", true)}>View session</Link>];
-  if (task.t3DeepLink !== null && showT3) {
+  const links: ReactNode[] = [];
+  if (destination(task) !== null) {
     links.push(
-      <AppButton key="app" href={task.t3DeepLink} small>
-        Open in app
+      <AppButton key="app" href={destination(task) ?? ""} small>
+        Open in T3
       </AppButton>,
     );
   }
@@ -434,7 +383,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         )}
         {task.originThreadId === null ? null : (
           <Detail label="Created by">
-            <Link to={batchPath(task.originThreadId)} className={linkClass}>
+            <Link to={`/tasks/${task.id}?batch=1`} className={linkClass}>
               {task.originThreadTitle ?? task.originThreadId}
             </Link>
           </Detail>
@@ -489,70 +438,6 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
           ))}
         </ol>
       )}
-    </Panel>
-  );
-}
-
-function FollowupPanel({
-  taskId,
-  projectId,
-  inputRef,
-}: {
-  taskId: number;
-  projectId: number;
-  inputRef: Ref<HTMLTextAreaElement>;
-}) {
-  const api = useApi();
-  const invalidate = useInvalidateWork();
-  const [message, setMessage] = useState("");
-  const [mode, setMode] = useState<SendMode>("auto");
-  const images = useImageSet();
-  const withImages = images.items.length > 0;
-  const send = useMutation({
-    // Images go as one new message (t3_thread_send_attachments); T3 takes no mode for them.
-    mutationFn: () =>
-      api.followupTask(taskId, withImages ? { message, attachmentIds: images.ids } : { message, mode }),
-    onSuccess: async () => {
-      setMessage("");
-      images.clear();
-      await invalidate();
-    },
-  });
-  const ready = withImages ? !images.uploading && !images.failed : message.trim() !== "";
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (ready) send.mutate();
-  };
-
-  return (
-    <Panel title="Follow-up">
-      <form onSubmit={submit} className="flex flex-col gap-2.5">
-        <ImageDropzone set={images} label="Follow-up images" disabled={send.isPending}>
-          <SnippetTextarea
-            ref={inputRef}
-            rows={3}
-            value={message}
-            onValueChange={setMessage}
-            projectId={projectId}
-            placeholder="Message to send to the thread"
-            aria-label="Follow-up message"
-          />
-        </ImageDropzone>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <fieldset
-            disabled={withImages}
-            title={withImages ? "Images send as a new message; mode doesn't apply" : undefined}
-            className="min-w-0 disabled:opacity-45"
-          >
-            <Segmented options={SEND_OPTIONS} value={mode} onChange={setMode} label="Send mode" small />
-          </fieldset>
-          {withImages ? <span className="font-mono text-meta-sm text-muted">sends as a new message</span> : null}
-          <Button type="submit" variant="primary" small className="ml-auto" busy={send.isPending} disabled={!ready}>
-            Send
-          </Button>
-        </div>
-        <ErrorText error={send.error} />
-      </form>
     </Panel>
   );
 }

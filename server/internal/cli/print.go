@@ -10,7 +10,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func table(w io.Writer, header string, rows func(tw io.Writer)) {
@@ -158,15 +157,16 @@ func printAnyTask(w io.Writer, v any) {
 }
 
 func printTaskDetail(w io.Writer, d client.TaskDetail) {
+	for _, link := range d.ArtifactLinks {
+		fmt.Fprintf(w, "artifact  %s %s\n", link.Label, link.URL)
+	}
 	printTask(w, d.Task)
 	if len(d.Tags) > 0 {
 		fmt.Fprintf(w, "  tags     %s\n", strings.Join(d.Tags, ", "))
 	}
 	printHandoff(w, d)
 	printLaunchBase(w, d.CurrentLaunchBase)
-	printPullRequests(w, d.PullRequests)
 	if d.Thread != nil {
-		printRuns(w, d.Thread.RecentRuns, d.Thread.RunCount)
 	}
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
 	if d.Thread != nil {
@@ -357,40 +357,6 @@ func printScheduleDetail(w io.Writer, d client.ScheduleDetail) {
 	}
 }
 
-func printSessions(w io.Writer, res agenttools.SessionsOut) {
-	table(w, "STATE\tPROJECT\tTITLE\tTHREAD\tTASK", func(tw io.Writer) {
-		for _, s := range res.Sessions {
-			task := "-"
-			if s.TaskID != nil {
-				task = fmt.Sprint(*s.TaskID)
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.State, orDash(s.Project), s.Title, s.T3ThreadID, task)
-		}
-	})
-	if res.Total > len(res.Sessions) {
-		fmt.Fprintf(w, "(%d of %d; --limit for more)\n", len(res.Sessions), res.Total)
-	}
-}
-
-func printSearch(w io.Writer, res agenttools.SearchSessionsOut) {
-	if len(res.Results) == 0 {
-		fmt.Fprintln(w, "no matching sessions")
-	}
-	for _, r := range res.Results {
-		fmt.Fprintf(w, "%-9s  %s  %s  %s\n", r.Match, orDash(r.Project), r.Title, r.T3ThreadID)
-		if r.Snippet != nil {
-			fmt.Fprintf(w, "           %s\n", *r.Snippet)
-		}
-	}
-	switch res.T3 {
-	case "ok":
-	case "timeout":
-		fmt.Fprintln(w, "(T3 slow: titles only)")
-	default:
-		fmt.Fprintln(w, "(T3 offline: titles only)")
-	}
-}
-
 func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	t := d.Thread
 	fmt.Fprintf(w, "session %s  %s  [%s]  %s\n", t.T3ThreadID, t.Title, t.State, orDash(t.ProjectTitle))
@@ -400,13 +366,7 @@ func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	if d.Task != nil {
 		fmt.Fprintf(w, "  task  %d %s\n", d.Task.ID, d.Task.Title)
 	}
-	for _, c := range d.Children {
-		fmt.Fprintf(w, "  child %s  %s  [%s]\n", c.T3ThreadID, c.Title, c.State)
-	}
-	printCreated(w, d.CreatedTasks)
-	printPullRequests(w, t.PullRequests)
-	printRuns(w, t.RecentRuns, t.RunCount)
-	printLastWord(w, t.LastWord)
+
 }
 
 // printRef prints what a reference names: a task (with its session id) or
@@ -426,37 +386,8 @@ func printRef(w io.Writer, r agenttools.RefOut) {
 	}
 }
 
-func printPullRequests(w io.Writer, prs []t3.PullRequest) {
-	if len(prs) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "\nprs")
-	table(w, "  PR\tSTATE\tSOURCE\tURL", func(tw io.Writer) {
-		for _, p := range prs {
-			fmt.Fprintf(tw, "  %s#%d\t%s\t%s\t%s\n", p.Repository, p.Number, p.State, p.Source, p.URL)
-		}
-	})
-}
-
 // cliRunLimit caps the runs block; --json returns every stored run.
 const cliRunLimit = 10
-
-func printRuns(w io.Writer, runs []db.ThreadRun, total int) {
-	if len(runs) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "\nruns")
-	shown := runs[:min(len(runs), cliRunLimit)]
-	table(w, "  RUN\tSTATUS\tMODEL\tSTARTED\tRAN\tQUEUED", func(tw io.Writer) {
-		for _, r := range shown {
-			fmt.Fprintf(tw, "  #%d\t%s\t%s\t%s\t%s\t%s\n", r.Ordinal, r.Status, runModel(r), ts(r.StartedAt),
-				span(r.StartedAt, r.CompletedAt), span(&r.RequestedAt, r.StartedAt))
-		}
-	})
-	if total = max(total, len(runs)); total > len(shown) {
-		fmt.Fprintf(w, "(%d of %d runs)\n", len(shown), total)
-	}
-}
 
 // runModel is the executed model, "requested -> executed" when they differ.
 func runModel(r db.ThreadRun) string {
@@ -516,32 +447,4 @@ func createdWait(t client.Task) string {
 		return "  (waits on " + s + ")"
 	}
 	return ""
-}
-
-func printQuestions(w io.Writer, threadID string, p client.PendingQuestions) {
-	n := 0
-	for _, r := range p.Requests {
-		n += len(r.Questions)
-	}
-	fmt.Fprintf(w, "session %s  %d pending request(s): %d question(s), %d approval(s) in T3\n", threadID, p.PendingRequestCount, n, p.ApprovalCount)
-	for _, r := range p.Requests {
-		fmt.Fprintf(w, "  request %s\n", r.RequestID)
-		for i, q := range r.Questions {
-			kind := ""
-			if q.MultiSelect {
-				kind = "  (multi-select)"
-			}
-			fmt.Fprintf(w, "    %d. [%s] %s%s\n", i+1, q.Header, q.Question, kind)
-			for _, o := range q.Options {
-				if o.Description == "" {
-					fmt.Fprintf(w, "       - %s\n", o.Label)
-				} else {
-					fmt.Fprintf(w, "       - %s: %s\n", o.Label, o.Description)
-				}
-			}
-			if q.CustomAllowed() {
-				fmt.Fprintln(w, "       - (custom answer allowed)")
-			}
-		}
-	}
 }

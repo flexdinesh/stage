@@ -185,19 +185,6 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		t.Fatal("no projects after sync")
 	}
 	projectID := projects.Projects[0].ID
-	var threads struct {
-		Threads []thread `json:"threads"`
-	}
-	a.json("GET", "/api/threads", nil, 200, &threads)
-	var asking string
-	for _, th := range threads.Threads {
-		if strings.HasPrefix(th.Title, "Pick the rollout plan") {
-			asking = th.T3ThreadID
-		}
-	}
-	if asking == "" {
-		t.Fatalf("seeded thread missing: %+v", threads.Threads)
-	}
 
 	var attID int64
 	t.Run("upload and attachment", func(t *testing.T) {
@@ -254,56 +241,17 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		}
 	})
 
-	t.Run("answer pending question", func(t *testing.T) {
-		var qs struct {
-			Requests []struct {
-				RequestID string `json:"requestId"`
-			} `json:"requests"`
-		}
-		a.json("GET", "/api/threads/"+asking+"/questions", nil, 200, &qs)
-		if len(qs.Requests) == 0 {
-			t.Fatal("no pending request on the seeded thread")
-		}
-		var ans struct {
-			RequestID   string `json:"requestId"`
-			RespondedAt string `json:"respondedAt"`
-		}
-		a.json("POST", "/api/threads/"+asking+"/questions/"+qs.Requests[0].RequestID+"/answer", map[string]any{
-			"answers": map[string]any{"approach": "incremental", "checks": []string{"Unit tests"}, "notes": "Ship behind a flag first"},
-		}, 200, &ans)
-		if ans.RequestID != qs.Requests[0].RequestID || ans.RespondedAt == "" {
-			t.Fatalf("answer %+v", ans)
-		}
-	})
-
-	t.Run("live stream", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		rec, done := a.stream(ctx, "/api/threads/"+tk.T3ThreadID+"/transcript/stream", "")
-		states := rec.waitEvents(t, "state", 1, 10*time.Second)
-		if !strings.Contains(states[0].data, `"active":true`) {
-			t.Fatalf("first state %q", states[0].data)
-		}
-		if ct := rec.sentHeader().Get("Content-Type"); ct != "text/event-stream" {
-			t.Fatalf("Content-Type %q", ct)
-		}
+	t.Run("stop task", func(t *testing.T) {
 		a.json("POST", fmt.Sprintf("/api/tasks/%d/stop", tk.ID), map[string]any{}, 200, nil)
-		states = rec.waitEvents(t, "state", 2, 15*time.Second)
-		if !strings.Contains(states[1].data, `"active":false`) {
-			t.Fatalf("live state after stop %q", states[1].data)
-		}
-		cancel()
-		<-done
 	})
-
 	t.Run("resume and cancel reach the server", func(t *testing.T) {
 		tp := newTap(t, e.sock)
 		ta := newApp(t, tp.sock)
-		path := "/api/threads/" + asking + "/transcript/stream"
+		path := "/api/notifications/stream"
 		ctx, cancel := context.WithCancel(context.Background())
 		rec, done := ta.stream(ctx, path, "")
-		items := rec.waitEvents(t, "item", 1, 10*time.Second)
-		rec.waitEvents(t, "state", 1, 10*time.Second)
+		items := rec.waitEvents(t, "hello", 1, 10*time.Second)
+		rec.waitEvents(t, "hello", 1, 10*time.Second)
 		last := items[len(items)-1].id
 		if _, err := strconv.Atoi(last); err != nil {
 			t.Fatalf("item id %q", last)
@@ -315,9 +263,9 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		ctx, cancel = context.WithCancel(context.Background())
 		defer cancel()
 		rec, done = ta.stream(ctx, path, last)
-		rec.waitEvents(t, "state", 1, 10*time.Second)
+		rec.waitEvents(t, "hello", 1, 10*time.Second)
 		for _, ev := range parseSSE(rec.body()) {
-			if ev.event == "item" {
+			if ev.event == "notification" {
 				id, _ := strconv.Atoi(ev.id)
 				lastN, _ := strconv.Atoi(last)
 				if id <= lastN {
@@ -330,11 +278,11 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 	})
 
 	t.Run("server killed mid-stream", func(t *testing.T) {
-		path := "/api/threads/" + asking + "/transcript/stream"
+		path := "/api/notifications/stream"
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		rec, done := a.stream(ctx, path, "")
-		items := rec.waitEvents(t, "item", 1, 10*time.Second)
+		items := rec.waitEvents(t, "hello", 1, 10*time.Second)
 		last := items[len(items)-1].id
 		srv.kill(syscall.SIGKILL)
 		select {
@@ -357,13 +305,13 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 			t.Fatalf("reconnect answered while the server is down: %v %q", h, rec.body())
 		}
 		srv = e.serve(outer, bin)
-		rec.waitEvents(t, "state", 1, 20*time.Second)
+		rec.waitEvents(t, "hello", 1, 20*time.Second)
 		if status, _ := rec.result(); status != 200 {
 			t.Fatalf("resumed status %d: %q", status, rec.body())
 		}
 		lastN, _ := strconv.Atoi(last)
 		for _, ev := range parseSSE(rec.body()) {
-			if id, err := strconv.Atoi(ev.id); ev.event == "item" && err == nil && id <= lastN {
+			if id, err := strconv.Atoi(ev.id); ev.event == "notification" && err == nil && id <= lastN {
 				t.Fatalf("resumed stream resent item at or below %s: %+v", last, ev)
 			}
 		}

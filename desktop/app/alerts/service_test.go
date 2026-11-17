@@ -468,7 +468,7 @@ func TestLiveRowsAndReconnectCursor(t *testing.T) {
 	c.hello(5, false)
 	c.unread(0)
 	n6 := row(6, "task-6", 0)
-	n6.URL = "/sessions/thr%201#answer"
+	n6.URL = "/tasks/6"
 	c.note(n6)
 	read := row(7, "task-7", 0)
 	read.Read = true
@@ -486,7 +486,7 @@ func TestLiveRowsAndReconnectCursor(t *testing.T) {
 	if got := f.deliveredIDs(); !slices.Equal(got, []int64{6, 8, 9}) {
 		t.Errorf("delivered = %v", got)
 	}
-	if got := f.targetPath("task-6"); got != "/sessions/thr%201#answer" {
+	if got := f.targetPath("task-6"); got != "/tasks/6" {
 		t.Errorf("Target = %q", got)
 	}
 
@@ -899,14 +899,14 @@ func TestReconcile(t *testing.T) {
 	if got := len(f.sink.closed()); got != 4 {
 		t.Errorf("Sync closed more: %v", f.sink.closed())
 	}
-	if got := f.targetPath("thread-a"); got != "/sessions/a#answer" {
+	if got := f.targetPath("thread-a"); got != "/?inbox" {
 		t.Errorf("target = %q", got)
 	}
 	f.svc.CloseShown(target.LocalID, "thread-a")
 	if got := f.sink.closed(); got[len(got)-1] != "local/thread-a" {
 		t.Errorf("CloseShown: %v", got)
 	}
-	if got := f.targetPath("thread-a"); got != "/sessions/a" {
+	if got := f.targetPath("thread-a"); got != "/?inbox" {
 		t.Errorf("target after close = %q", got)
 	}
 	f.svc.CloseShown(target.LocalID, "")

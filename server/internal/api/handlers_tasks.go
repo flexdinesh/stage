@@ -26,6 +26,7 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	}
 	f.Tag = strings.TrimSpace(q.Get("tag"))
 	f.Q = strings.TrimSpace(q.Get("q"))
+	f.OriginThreadID = strings.TrimSpace(q.Get("originThreadId"))
 	if f.From, err = queryTime(q, "from", time.UTC); err != nil {
 		return err
 	}
@@ -271,9 +272,6 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if err == nil {
 			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
 		}
-		if err == nil {
-			th.RecentRuns, err = s.Store.ThreadRuns(ctx, th.T3ThreadID)
-		}
 		switch {
 		case err == nil:
 			tj := s.thread(env, th)
@@ -457,72 +455,6 @@ func (s *server) threadTask(r *http.Request) (db.Task, error) {
 		return db.Task{}, db.Conflict("task has no thread")
 	}
 	return task, nil
-}
-
-// followupTask sends a message (t3_thread_send) or, with attachmentIds
-// (staged uploads), the images and optional message
-// (t3_thread_send_attachments, no mode). Sent images are deleted; on failure
-// they stay staged so the user can resend.
-func (s *server) followupTask(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Message       string  `json:"message"`
-		Mode          *string `json:"mode"`
-		AttachmentIDs []int64 `json:"attachmentIds"`
-	}
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	if len(body.AttachmentIDs) > 0 {
-		return s.followupImages(w, r, body.Message, body.Mode, body.AttachmentIDs)
-	}
-	if strings.TrimSpace(body.Message) == "" {
-		return db.Invalid("message is required")
-	}
-	mode := t3.SendAuto
-	if body.Mode != nil {
-		if err := validEnum("mode", *body.Mode, sendModes); err != nil {
-			return err
-		}
-		mode = t3.SendMode(*body.Mode)
-	}
-	task, err := s.threadTask(r)
-	if err != nil {
-		return err
-	}
-	if err := s.T3.SendMessage(r.Context(), *task.T3ThreadID, body.Message, mode); err != nil {
-		return &db.T3Error{Err: err}
-	}
-	return s.touchAndWrite(w, r, task.ID)
-}
-
-func (s *server) followupImages(w http.ResponseWriter, r *http.Request, message string, mode *string, ids []int64) error {
-	if mode != nil {
-		return db.Invalid("mode is not supported with images")
-	}
-	if err := attachmentIDs(ids); err != nil {
-		return err
-	}
-	task, err := s.threadTask(r)
-	if err != nil {
-		return err
-	}
-	ctx := r.Context()
-	images, err := s.Store.StagedAttachments(ctx, ids)
-	if err != nil {
-		return err
-	}
-	uploaded, err := s.Sync.UploadImages(ctx, images)
-	if err != nil {
-		return &db.T3Error{Err: err}
-	}
-	if err := s.T3.SendAttachments(ctx, *task.T3ThreadID, message, uploaded); err != nil {
-		s.Sync.DiscardUploads(ctx, uploaded)
-		return &db.T3Error{Err: err}
-	}
-	if err := s.Store.DeleteStagedAttachments(ctx, ids); err != nil {
-		s.log.Warn("delete sent follow-up images", "task", task.ID, "err", err)
-	}
-	return s.touchAndWrite(w, r, task.ID)
 }
 
 func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {

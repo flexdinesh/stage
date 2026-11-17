@@ -89,7 +89,7 @@ export function useImageSet(initial: readonly Attachment[] = []) {
     }
   };
 
-  /** Forget everything (after a follow-up sent the images; the server deleted them). */
+  /** Forget everything (when the draft is cleared). */
   const clear = () => {
     items.forEach((it) => {
       if (it.blob !== null) {

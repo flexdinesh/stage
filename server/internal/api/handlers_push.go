@@ -111,6 +111,7 @@ type notificationJSON struct {
 	db.Notification
 	// T3DeepLink opens the thread in the T3 desktop/mobile app.
 	T3DeepLink *string `json:"t3DeepLink"`
+	T3WebURL   *string `json:"t3WebUrl"`
 }
 
 func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error {
@@ -146,7 +147,7 @@ func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error
 	env := s.envID(r.Context())
 	out := make([]notificationJSON, len(rows))
 	for i, n := range rows {
-		out[i] = notificationJSON{Notification: n, T3DeepLink: deepLink(env, n.T3ThreadID)}
+		out[i] = notificationJSON{Notification: n, T3DeepLink: deepLink(env, n.T3ThreadID), T3WebURL: s.webURL(env, n.T3ThreadID)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notifications": out, "unread": unread, "nextBefore": nextBefore})
 	return nil
@@ -166,6 +167,7 @@ func notificationLimit(r *http.Request) (int, error) {
 type notificationGroupJSON struct {
 	db.NotificationGroup
 	T3DeepLink *string `json:"t3DeepLink"`
+	T3WebURL   *string `json:"t3WebUrl"`
 }
 
 func notificationGroupCursor(g db.NotificationGroup) string {
@@ -174,6 +176,12 @@ func notificationGroupCursor(g db.NotificationGroup) string {
 		priority = "waiting"
 	}
 	return priority + ":" + strconv.FormatInt(g.ID, 10)
+}
+
+type waitingSessionJSON struct {
+	db.WaitingSession
+	T3WebURL   *string `json:"t3WebUrl"`
+	T3DeepLink *string `json:"t3DeepLink"`
 }
 
 func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) error {
@@ -208,10 +216,19 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	env := s.envID(r.Context())
 	out := make([]notificationGroupJSON, len(rows))
 	for i, g := range rows {
-		out[i] = notificationGroupJSON{NotificationGroup: g, T3DeepLink: deepLink(env, g.T3ThreadID)}
+		out[i] = notificationGroupJSON{NotificationGroup: g, T3DeepLink: deepLink(env, g.T3ThreadID), T3WebURL: s.webURL(env, g.T3ThreadID)}
+	}
+	waiting, err := s.Store.WaitingWithoutNotifications(r.Context(), latestID)
+	if err != nil {
+		return err
+	}
+	silent := make([]waitingSessionJSON, len(waiting))
+	for i, row := range waiting {
+		silent[i] = waitingSessionJSON{WaitingSession: row, T3WebURL: s.webURL(env, &row.ThreadID), T3DeepLink: deepLink(env, &row.ThreadID)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"groups": out, "unread": unread, "latestId": latestID, "nextCursor": nextCursor,
+		"waitingSessions": silent,
+		"groups":          out, "unread": unread, "latestId": latestID, "nextCursor": nextCursor,
 	})
 	return nil
 }

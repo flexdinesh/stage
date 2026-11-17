@@ -2,116 +2,12 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// ---- threads (history) ----
-
-func (s *server) listThreads(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	f := db.ThreadFilter{Limit: 100}
-	var err error
-	f.States = multi(q, "state")
-	for _, state := range f.States {
-		if !db.TaskState(state).Valid() {
-			return db.Invalid("invalid state %q", state)
-		}
-	}
-	if parent, ok := q["parent"]; ok {
-		if len(parent) != 1 || parent[0] == "" {
-			return db.Invalid("parent is required")
-		}
-		f.Parent = &parent[0]
-	}
-	switch sort := q.Get("sort"); sort {
-	case "":
-	case "activity":
-		f.SortActivity = true
-	default:
-		return db.Invalid("invalid sort %q", sort)
-	}
-	switch active := q.Get("active"); active {
-	case "":
-	case "1", "true":
-		f.Active = true
-	default:
-		return db.Invalid("invalid active %q", active)
-	}
-	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
-		return err
-	}
-	f.Statuses = multi(q, "status")
-	for _, st := range f.Statuses {
-		if err := validEnum("status", st, threadStatuses); err != nil {
-			return err
-		}
-	}
-	if f.Settled, err = queryBool(q, "settled"); err != nil {
-		return err
-	}
-	f.Provider = strings.TrimSpace(q.Get("provider"))
-	if f.Source = strings.TrimSpace(q.Get("source")); f.Source != "" {
-		if err := validEnum("source", f.Source, []string{db.SourceApp, db.SourceT3}); err != nil {
-			return err
-		}
-	}
-	f.Q = strings.TrimSpace(q.Get("q"))
-	if f.From, err = queryTime(q, "from", time.UTC); err != nil {
-		return err
-	}
-	if f.To, err = queryTime(q, "to", time.UTC); err != nil {
-		return err
-	}
-	if f.ExcludeSubagents, err = querySubagents(q); err != nil {
-		return err
-	}
-	switch v := strings.TrimSpace(q.Get("needsInput")); v {
-	case "":
-	case "1", "true":
-		f.NeedsInput = true
-	default:
-		return db.Invalid("invalid needsInput %q (want 1|true)", v)
-	}
-	switch v := strings.TrimSpace(q.Get("running")); v {
-	case "":
-	case "1", "true":
-		f.Running = true
-	default:
-		return db.Invalid("invalid running %q (want 1|true)", v)
-	}
-	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
-		return err
-	}
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return db.Invalid("invalid limit %q", v)
-		}
-		f.Limit = min(n, 500)
-	}
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			return db.Invalid("invalid offset %q", v)
-		}
-		f.Offset = n
-	}
-	threads, total, err := s.Store.ListThreads(r.Context(), f)
-	if err != nil {
-		return err
-	}
-	env := s.envID(r.Context())
-	out := make([]threadJSON, len(threads))
-	for i, t := range threads {
-		out[i] = s.thread(env, t)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"threads": out, "total": total})
-	return nil
-}
+// ---- explicit session lookup and adoption ----
 
 // adoptThread: POST /api/threads/{id}/adopt {title?, initialNote?, tags?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
@@ -138,6 +34,13 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	}
 	status := http.StatusOK
 	if created {
+		if err := s.Sync.PollTask(r.Context(), task); err != nil {
+			return err
+		}
+		task, err = s.Store.GetTask(r.Context(), task.ID)
+		if err != nil {
+			return err
+		}
 		status = http.StatusCreated
 	}
 	if created || req.TreeID != nil {
@@ -158,21 +61,7 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if thread.LastWord, err = s.Store.GetThreadLastWord(r.Context(), id); err != nil {
-		return err
-	}
-	if thread.RecentRuns, err = s.Store.ThreadRuns(r.Context(), id); err != nil {
-		return err
-	}
-	children, _, err := s.Store.ListThreads(r.Context(), db.ThreadFilter{Parent: &id, Limit: 2147483647, SortActivity: true})
-	if err != nil {
-		return err
-	}
 	env := s.envID(r.Context())
-	childJSON := make([]threadJSON, len(children))
-	for i, c := range children {
-		childJSON[i] = s.thread(env, c)
-	}
 	var task *taskJSON
 	if thread.TaskID != nil {
 		t, err := s.Store.GetTask(r.Context(), *thread.TaskID)
@@ -182,12 +71,8 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 		shaped := s.task(env, t)
 		task = &shaped
 	}
-	created, err := s.Store.CreatedBy(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread), "children": childJSON,
-		"task": task, "createdTasks": s.createdTasks(env, created)})
+	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread),
+		"task": task})
 	return nil
 }
 
@@ -276,41 +161,5 @@ func (s *server) deleteSnippet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-// ---- stats ----
-
-func (s *server) stats(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	tz := strings.TrimSpace(q.Get("tz"))
-	if tz == "" {
-		tz = "UTC"
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil || tz == "Local" {
-		return db.Invalid("invalid tz %q", tz)
-	}
-	to := time.Now().UTC()
-	if t, err := queryTime(q, "to", loc); err != nil {
-		return err
-	} else if t != nil {
-		to = t.UTC()
-	}
-	from := to.Add(-30 * 24 * time.Hour)
-	if t, err := queryTime(q, "from", loc); err != nil {
-		return err
-	} else if t != nil {
-		from = t.UTC()
-	}
-	excludeSubagents, err := querySubagents(q)
-	if err != nil {
-		return err
-	}
-	st, err := s.Store.Stats(r.Context(), from, to, tz, excludeSubagents)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, st)
 	return nil
 }

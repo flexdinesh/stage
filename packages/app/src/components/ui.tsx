@@ -213,7 +213,7 @@ export function Field({
   );
 }
 
-/** Joined button group for small enumerations (runtime mode, time window, follow-up mode). */
+/** Joined button group for small enumerations (runtime mode, time window). */
 export function Segmented<T extends string>({
   options,
   value,

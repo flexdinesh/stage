@@ -19,7 +19,7 @@ file per test, and only `mise run up` / `mise run down` touch the compose stack.
 - `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`. It is not an installer install: `stage update` refuses it and the installer will not overwrite it ([install.md](install.md#layout)).
 - `mise run install:smoke`: the installer against real binaries and systemd with the isolated `stage-svctest` identity ([install.md](install.md#verification)).
 - `mise run up` / `mise run down`: build and run, or stop, the compose stack (`compose.yaml`, data in the `stagedata` volume, kept on down).
-- Single test files: `node --test packages/app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test apps/web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
+- Single test files: `node --test packages/app/tests/<name>.test.mjs` (e.g. `tasks`, `journal`, `api-client`, `boundaries`) or `node --test apps/web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
 
 Layout: `server/` (Go server, CLI, MCP), `packages/app/` (the shared React app, `@stage/app`), `apps/web/` (browser host, `@stage/web`), `desktop/app/` (desktop host; its frontend `desktop/app/ui`, `@stage/desktop`, is in the pnpm workspace), `apps/website/` (marketing and docs site, `@stage/website`), one pnpm workspace. Ownership and the platform contract: [architecture.md](architecture.md). API contract: [api.md](api.md) (TypeScript mirror: `packages/app/src/api/types.ts`).
 

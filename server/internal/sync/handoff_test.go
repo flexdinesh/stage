@@ -24,7 +24,7 @@ This task needs "Build API" (task #12), settled 2026-11-14T10:02:00Z.
 - T3 thread: th-1 t3-thread://env/th-1 (read more with t3_thread_read)
 - Worktree: /w/wt
 - Pull requests:
-  - me/app#41 (merged) https://x/41
+  - me/app#41 https://x/41
   - me/lib#7 https://x/7
 Final reply:
 All done.

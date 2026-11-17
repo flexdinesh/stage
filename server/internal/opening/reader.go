@@ -1,31 +1,25 @@
-// Package transcript reads a T3 session's conversation (user and assistant
-// messages, plans) through t3.Client and fans live changes out to streams
-// (contract: docs/api.md "Transcript").
-package transcript
+// Package opening reads only the first own prompt of an adopted task.
+package opening
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 const (
-	// PreviewChars caps item text in pages and stream events.
+	// PreviewChars caps the opening prompt preview.
 	PreviewChars = 2000
-	// DefaultLimit and MaxLimit bound a REST page.
-	DefaultLimit = 50
-	MaxLimit     = 200
 	// MaxFullChars caps the assembled full text of one item.
 	MaxFullChars = 1_000_000
 	// maxScanPages bounds one forward scan (100 messages per T3 page).
 	maxScanPages = 500
 )
 
-// Item is a TranscriptItem.
+// Item describes the first own user prompt returned by T3.
 type Item struct {
 	Position       int       `json:"position"`
 	ItemID         string    `json:"itemId"`
@@ -74,29 +68,7 @@ func fromT3(it t3.TimelineItem, activeRunID string) (Item, bool) {
 	}, true
 }
 
-var activeStatuses = []t3.ThreadStatus{t3.StatusPreparing, t3.StatusQueued, t3.StatusStarting, t3.StatusRunning, t3.StatusWaiting}
-
-// ActiveStatus reports whether a T3 thread status means a run is in flight.
-func ActiveStatus(s t3.ThreadStatus) bool { return slices.Contains(activeStatuses, s) }
-
-// active: a run is in flight.
-func active(d t3.ThreadDetail) bool { return d.ActiveRunID != "" || ActiveStatus(d.Status) }
-
-// advance moves cursor over ascending items until the first streaming one.
-func advance(cursor int, items []Item) int {
-	for _, it := range items {
-		if it.Position <= cursor {
-			continue
-		}
-		if it.Streaming {
-			break
-		}
-		cursor = it.Position
-	}
-	return cursor
-}
-
-// Reader reads transcripts from T3.
+// Reader locates and expands an adopted task's opening prompt.
 type Reader struct{ T3 t3.Client }
 
 // scan pages forward from after (exclusive) until T3 reports no more, or
@@ -134,61 +106,6 @@ func (r Reader) scan(ctx context.Context, threadID string, after int, stop func(
 	return t3.ThreadDetail{}, fmt.Errorf("t3 t3_thread_read: more than %d pages", maxScanPages)
 }
 
-// After reads every item after cursor and the advanced cursor.
-func (r Reader) After(ctx context.Context, threadID string, cursor int) ([]Item, int, t3.ThreadDetail, error) {
-	var items []Item
-	thread, err := r.scan(ctx, threadID, cursor, nil, func(it Item) { items = append(items, it) })
-	if err != nil {
-		return nil, cursor, t3.ThreadDetail{}, err
-	}
-	return items, advance(cursor, items), thread, nil
-}
-
-// Page is a REST transcript page.
-type Page struct {
-	Items      []Item          `json:"items"`
-	HasEarlier bool            `json:"hasEarlier"`
-	Cursor     *int            `json:"cursor"`
-	Active     bool            `json:"active"`
-	Status     t3.ThreadStatus `json:"status"`
-}
-
-// Tail returns the newest limit items (below before when set). T3 pages
-// forward only, so it scans from the start.
-func (r Reader) Tail(ctx context.Context, threadID string, before *int, limit int) (Page, error) {
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
-	limit = min(limit, MaxLimit)
-	var window []Item
-	earlier := false
-	var stop func(int) bool
-	if before != nil {
-		stop = func(last int) bool { return last >= *before }
-	}
-	all := []Item{}
-	thread, err := r.scan(ctx, threadID, -1, stop, func(it Item) {
-		if before != nil && it.Position >= *before {
-			return
-		}
-		all = append(all, it)
-	})
-	if err != nil {
-		return Page{}, err
-	}
-	window = all
-	if len(all) > limit {
-		window = all[len(all)-limit:]
-		earlier = true
-	}
-	page := Page{Items: slices.Clone(window), HasEarlier: earlier, Active: active(thread), Status: thread.Status}
-	if before == nil {
-		c := advance(-1, all)
-		page.Cursor = &c
-	}
-	return page, nil
-}
-
 // Opening returns the session's first own user message (inherited fork
 // history skipped): the prompt that started it. Nil when there is none yet.
 func (r Reader) Opening(ctx context.Context, threadID string) (*Item, error) {
@@ -205,7 +122,7 @@ func (r Reader) Opening(ctx context.Context, threadID string) (*Item, error) {
 }
 
 // ErrItemNotFound: the item is not in the session's messages view.
-var ErrItemNotFound = errors.New("transcript item not found")
+var ErrItemNotFound = errors.New("opening prompt item not found")
 
 // FullText assembles an item's text from T3 text pages (capped at
 // MaxFullChars; truncated reports the cap was hit).

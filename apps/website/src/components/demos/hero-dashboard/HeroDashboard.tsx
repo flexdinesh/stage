@@ -4,18 +4,8 @@ import { useSiteTheme } from '../shared/useSiteTheme'
 import { IconCheck, IconChevronDown, IconPlus, IconSearch, IconThemeSystem } from './icons'
 import './hero-dashboard.css'
 
-// The landing hero: stage's Dashboard in a browser window, at laptop size.
-// Beats: a Running task asks a question, so it lifts out of Running into
-// Needs input (the empty Needs input line becomes its panel, Running closes
-// the gap); counts roll and the Dashboard tab takes its count chip. The
-// cursor presses the row's Answer, stage's Needs input form opens inline,
-// an option is picked and Send answer pressed: the form folds, the row goes
-// back to Running, yellow leaves and the counts roll back. That return is
-// the loop's starting frame, so the seam is the answer being sent.
-//
-// Real strings: the chrome (mark, tabs, New task), the H1 and its meta line,
-// the stat strip, the panel labels, the focal task and its question. Every
-// other row keeps its state chip (stage's signature mark) and bars.
+// A task moves from Running to Needs input. Open in T3 handles the
+// conversation; Stage observes the task running again afterward.
 
 type Where = 'run' | 'need'
 
@@ -33,7 +23,7 @@ type S = {
   form: boolean
   picked: boolean
   sending: boolean
-  /** The answer is in: Send answer confirms on itself and the row reads running again. */
+  /** T3 resumed the task; Stage observes it running again. */
   sent: boolean
 }
 
@@ -41,7 +31,7 @@ const ZERO: Rect = { x: 0, y: 0, width: 0, height: 0 }
 
 const initial: S = { where: 'run', flying: false, look: 'run', from: ZERO, to: ZERO, counted: false, form: false, picked: false, sending: false, sent: false }
 
-/** The payoff: the answer is sent, the button confirms it, the task reads running again. */
+/** The payoff: native T3 resumed the task. */
 const POSTER: S = { ...initial, where: 'need', look: 'run', counted: true, form: true, picked: true, sent: true }
 
 /** The Needs input header in panel mode: 32px bar plus its rule. */
@@ -84,28 +74,12 @@ async function script(a: Act<S>) {
   await a.set({ flying: false, counted: true })
   await a.wait(1300)
 
-  // 2. Answer opens stage's Needs input form under the row
-  a.mark('answer')
-  await a.move({ at: 'answer', x: 0.9, y: 0.82 })
-  await a.wait(150)
+  // Open the native harness; Stage observes its next state.
+  a.mark('open-t3')
+  await a.move({ at: 'open-t3', x: 0.9, y: 0.82 })
   await a.click()
-  await a.set({ form: true })
-  await a.wait(1400)
-
-  // 3. Pick an option, send it
-  a.mark('pick')
-  await a.move({ at: 'opt-0', x: a.layout === 'compact' ? 0.82 : 0.5, y: 0.6 })
-  await a.wait(120)
-  await a.click()
-  await a.set({ picked: true })
-  await a.wait(650)
-  await a.move({ at: 'send', x: 0.78, y: 0.62 })
-  await a.wait(120)
-  await a.click()
-  await a.set({ sending: true })
-  await a.wait(650)
-
-  // The answer is in: the button confirms on itself, the row reads running again
+  await a.wait(2600)
+  // T3 resumed the task: the row reads running again
   a.mark('sent')
   await a.set({ sending: false, sent: true })
   await a.wait(1100)
@@ -309,7 +283,7 @@ function PanelHead({ tone, title, count }: { tone: Tone; title: string; count: n
 /** Needs input: the empty ruled line while nothing waits, its panel once a row lands. */
 function NeedsBlock({ s, need, compact }: { s: S; need: number; compact: boolean }) {
   const panel = s.where === 'need'
-  const empty = 'Nothing waiting on you. Tasks and threads that ask a question land here.'
+  const empty = 'Nothing waiting on you. Tasks waiting on you land here.'
   return (
     <section className="hdb-panel hdb-nb" data-target="needs-block" data-panel={panel || undefined}>
       <div className="hdb-nh" data-target="needs-head">
@@ -334,9 +308,6 @@ function NeedsBlock({ s, need, compact }: { s: S; need: number; compact: boolean
         <Collapse open={panel}>
           <li className="hdb-li">
             <Row look={s.sent ? 'run' : 'need'} compact={compact} target="row-need" hidden={s.flying} />
-            <Collapse open={s.form}>
-              <AnswerForm s={s} compact={compact} />
-            </Collapse>
           </li>
         </Collapse>
       </ul>
@@ -375,8 +346,8 @@ function Row({ look, compact, target, hidden = false }: { look: Where; compact: 
       <span className="hdb-row__actions">
         <span className="hdb-reveal" data-on={need || undefined}>
           <span className="hdb-reveal__in">
-            <Button variant="primary" size="small" className="hdb-btn hdb-btn--sm" data-target={target === 'row-need' ? 'answer' : undefined}>
-              Answer
+            <Button variant="primary" size="small" className="hdb-btn hdb-btn--sm" data-target={target === 'row-need' ? 'open-t3' : undefined}>
+              Open in T3
             </Button>
           </span>
         </span>
@@ -416,43 +387,5 @@ function Filler({ tone, label, w, compact }: { tone: Tone; label: string; w: [nu
         </span>
       </div>
     </li>
-  )
-}
-
-const OPTIONS = ['5xx and timeouts only', 'Every non-2xx response']
-
-/** stage's Needs input form (NeedsInputPanel's RequestForm): one single-select question. */
-function AnswerForm({ s, compact }: { s: S; compact: boolean }) {
-  return (
-    <div className="hdb-ans" data-sent={s.sent || undefined}>
-      <div className="hdb-form">
-        <div className="hdb-q">
-          <div className="hdb-q__text">{compact ? 'Which failures should retry?' : 'Which failures should the webhook sender retry?'}</div>
-          <ul className="hdb-opts">
-            {OPTIONS.map((o, i) => (
-              <li key={o} className="hdb-opt" data-on={(i === 0 && s.picked) || undefined} data-target={`opt-${i}`}>
-                <span className="hdb-radio" />
-                <span className="hdb-opt__label">{o}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="hdb-foot">
-          <span className="hdb-answered">
-            <Count value={s.picked ? 1 : 0} duration={420} />
-            /1 answered
-          </span>
-          <Button
-            variant="primary"
-            className="hdb-btn hdb-send"
-            data-target="send"
-            data-disabled={!s.picked || s.sending || undefined}
-            icon={s.sending ? <i className="hdb-spin" /> : s.sent ? <IconCheck size={14} /> : undefined}
-          >
-            {s.sent ? 'Sent' : 'Send answer'}
-          </Button>
-        </div>
-      </div>
-    </div>
   )
 }

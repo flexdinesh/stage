@@ -4,17 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client.ts";
 import { useApi } from "../platform/context.tsx";
-import type { Attachment, ThreadDetail } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { sessionPromptSource } from "../lib/prompt.ts";
 import { CopyButton } from "./CopyButton.tsx";
-import { ImageStrip } from "./Images.tsx";
 import { RefText } from "./StageLinks.tsx";
 import { Alert, Button, Muted, Panel, cx, errorText } from "./ui.tsx";
 
-/** A truncated T3 preview: the full text loads from the transcript item route. */
+/** A truncated T3 preview: the full text loads from the adopted task opening-prompt route. */
 interface FullSource {
-  threadId: string;
+  taskId: number;
   itemId: string;
   updatedAt: string;
 }
@@ -41,15 +38,15 @@ export function PromptPanel({
   const content = useRef<HTMLPreElement>(null);
   // Fetched up front (only for prompts over the preview cap) so Copy and Show all get the whole text.
   const fullText = useQuery({
-    queryKey: ["transcript-item", full?.threadId, full?.itemId, full?.updatedAt],
-    queryFn: () => (full === undefined ? Promise.reject(new Error("no item")) : api.transcriptItem(full.threadId, full.itemId)),
+    queryKey: ["opening-prompt-full", full?.taskId, full?.itemId, full?.updatedAt],
+    queryFn: () => (full === undefined ? Promise.reject(new Error("no item")) : api.openingPrompt(full.taskId, true)),
     enabled: full !== undefined,
     staleTime: Infinity,
     retry: false,
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });
-  const whole = fullText.data?.text ?? text;
+  const whole = fullText.data?.item?.text ?? text;
   const shown = expanded ? whole : text;
 
   useLayoutEffect(() => {
@@ -71,7 +68,7 @@ export function PromptPanel({
     <Panel title="Prompt" meta={meta} actions={<CopyButton text={whole} label="Copy" />}>
       <div className="flex flex-col gap-3">
         <div>
-          <div ref={box} className={cx("min-w-0", !expanded && "max-h-[9.75em] overflow-hidden", clamped && "transcript-clamp")}>
+          <div ref={box} className={cx("min-w-0", !expanded && "max-h-[9.75em] overflow-hidden", clamped && "prompt-clamp")}>
             <pre ref={content} className="font-mono text-small leading-relaxed break-words whitespace-pre-wrap">
               <RefText text={shown} />
             </pre>
@@ -98,27 +95,12 @@ export function PromptPanel({
   );
 }
 
-/** Session detail: the linked task's prompt and images, else the first own message read from T3. */
-export function SessionPromptPanel({ detail, live }: { detail: Pick<ThreadDetail, "thread" | "task">; live: boolean }) {
-  const source = sessionPromptSource(detail);
-  if (source.kind === "task") return <TaskPrompt prompt={source.prompt} attachments={source.attachments} />;
-  return <OpeningPrompt threadId={source.threadId} live={live} />;
-}
-
-function TaskPrompt({ prompt, attachments }: { prompt: string; attachments: readonly Attachment[] }) {
-  return (
-    <PromptPanel text={prompt}>
-      <ImageStrip attachments={attachments} label="Prompt images" />
-    </PromptPanel>
-  );
-}
-
 /** The session's first own message, read from T3 (session detail without a task; an adopted task's detail). */
-export function OpeningPrompt({ threadId, live }: { threadId: string; live: boolean }) {
+export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean }) {
   const api = useApi();
   const query = useQuery({
-    queryKey: ["transcript-opening", threadId],
-    queryFn: () => api.transcriptOpening(threadId),
+    queryKey: ["opening-prompt", taskId],
+    queryFn: () => api.openingPrompt(taskId),
     // The first message never changes once sent; a launching session is re-read until it has one.
     staleTime: Infinity,
     retry: false,
@@ -139,7 +121,7 @@ export function OpeningPrompt({ threadId, live }: { threadId: string; live: bool
       <PromptPanel
         key={item.itemId}
         text={item.text}
-        full={item.truncated ? { threadId, itemId: item.itemId, updatedAt: item.updatedAt } : undefined}
+        full={item.truncated ? { taskId, itemId: item.itemId, updatedAt: item.updatedAt } : undefined}
         meta={
           <time dateTime={item.updatedAt} title={dateTime(item.updatedAt)} className="tabular">
             {relativeTime(item.updatedAt)}

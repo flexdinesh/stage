@@ -1,17 +1,15 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useShowT3Links } from "../lib/hostState.ts";
-import { keys, useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
-import { matchLabel, mergePaletteSessions, t3SearchNote, type SessionHit } from "../lib/paletteSearch.ts";
-import { sessionPath } from "../lib/sessions.ts";
+import { useT3Destination } from "../lib/hostState.ts";
+import { useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
-import { TaskStateBadge, ThreadStatusBadge } from "./StateBadge.tsx";
+import { TaskStateBadge } from "./StateBadge.tsx";
 import { Chip, Kbd, cx } from "./ui.tsx";
 
 /** A closed item's plain chip (archived, done, tree done) beside its other badge. */
@@ -46,8 +44,6 @@ const PAGES: [string, string][] = [
   ["Dashboard", "/"],
   ["Trees", "/trees"],
   ["Projects", "/projects"],
-  ["Sessions", "/sessions"],
-  ["History", "/history"],
   ["Snippets", "/snippets"],
   ["Settings", "/settings"],
 ];
@@ -67,19 +63,10 @@ function Highlight({ text, q }: { text: string; q: string }) {
   );
 }
 
-function useDebounced(value: string, ms: number): string {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
   const api = useApi();
   const { links } = usePlatform();
-  const showT3 = useShowT3Links();
+  const destination = useT3Destination();
   const [query, setQuery] = useState("");
   /** Highlighted item by key, so late results never move the highlight; null = first. */
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -91,28 +78,9 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const [copiedName, setCopiedName] = useState("");
 
   const q = query.trim().toLowerCase();
-  const debounced = useDebounced(q, 200);
   const tasks = useTasks({ closed: "all" });
   const projects = useProjects();
   const trees = useTrees({ status: "all" });
-  const threads = useQuery({
-    queryKey: [...keys.threads, "palette", debounced],
-    queryFn: () => api.threads({ q: debounced, limit: 8, subagents: "exclude" }),
-    enabled: debounced.length >= 2,
-    refetchInterval: false,
-  });
-  // Message text via T3 (merged server side with title matches).
-  const searchQ = useDebounced(q, 250);
-  const search = useQuery({
-    queryKey: [...keys.threads, "palette-search", searchQ],
-    queryFn: () => api.searchThreads(searchQ, { limit: 20 }),
-    enabled: searchQ.length >= 2,
-    refetchInterval: false,
-    retry: false,
-  });
-  const searchCurrent = searchQ === q && q.length >= 2;
-  const note = searchCurrent ? t3SearchNote(search.isError ? "error" : search.data?.t3) : null;
-
   const items = useMemo<Item[]>(() => {
     const go = (to: string) => () => {
       onClose();
@@ -121,7 +89,6 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     const out: Item[] = [];
     if (q !== "") {
       const taskHits = (tasks.data?.tasks ?? []).filter((t) => has(t.title, q)).slice(0, 6);
-      const taskThreadIds = new Set(taskHits.map((t) => t.t3ThreadId));
       for (const t of taskHits)
         out.push({
           key: `task-${t.id}`,
@@ -129,8 +96,8 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           label: t.title,
           hint: t.projectTitle,
           badge: <ClosedBadge label={taskClosedLabel(t)}><TaskStateBadge state={t.state} /></ClosedBadge>,
-          run: go(t.t3ThreadId === null ? `/tasks/${t.id}` : sessionPath(t.t3ThreadId)),
-          t3Url: t.t3DeepLink,
+          run: go(`/tasks/${t.id}`),
+          t3Url: destination(t),
           link: { kind: "task", id: t.id, title: t.title },
         });
       for (const tr of (trees.data?.trees ?? []).filter((t) => has(t.title, q)).slice(0, 4))
@@ -144,28 +111,6 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
-      const { sessions, messages } = mergePaletteSessions(
-        debounced === q ? (threads.data?.threads ?? []) : [],
-        searchCurrent ? (search.data?.results ?? []) : [],
-        taskThreadIds,
-      );
-      const sessionItem = (hit: SessionHit, group: string): Item => {
-        const th = hit.thread;
-        return {
-          key: `${group === "Sessions" ? "thread" : "message"}-${hit.id}`,
-          group,
-          label: hit.title,
-          hint: [hit.projectTitle ?? th?.t3ProjectId, th?.source].filter(Boolean).join(" · "),
-          tag: matchLabel(hit.source),
-          detail: hit.snippet,
-          badge: th === null ? undefined : <ThreadStatusBadge status={th.status} settled={th.settled} />,
-          run: go(sessionPath(hit.id)),
-          t3Url: hit.t3DeepLink,
-          link: { kind: "session", id: hit.id, title: hit.title },
-        };
-      };
-      for (const hit of sessions) out.push(sessionItem(hit, "Sessions"));
-      for (const hit of messages) out.push(sessionItem(hit, "In messages"));
     }
     const actions: Item[] = [
       { key: "new", group: "Actions", label: "New task", hint: "N", run: () => {
@@ -173,7 +118,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           onNewTask();
         },
       },
-      { key: "sync", group: "Actions", label: "Sync now", hint: "full T3 sync", run: () => {
+      { key: "sync", group: "Actions", label: "Sync now", hint: "projects and task sessions", run: () => {
           sync.mutate();
           onClose();
         },
@@ -183,7 +128,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, debounced, searchCurrent, tasks.data, trees.data, projects.data, threads.data, search.data, navigate, onClose, onNewTask, setTheme, sync]);
+  }, [q, tasks.data, trees.data, projects.data, navigate, onClose, onNewTask, setTheme, sync, destination]);
 
   const found = items.findIndex((item) => item.key === activeKey);
   const active = found < 0 ? 0 : found;
@@ -215,7 +160,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       e.preventDefault();
       const item = items[active];
       if (item === undefined) return;
-      if ((e.ctrlKey || e.metaKey) && showT3 && typeof item.t3Url === "string") {
+      if ((e.ctrlKey || e.metaKey) && typeof item.t3Url === "string") {
         links.openApp(item.t3Url);
         onClose();
       } else item.run();
@@ -243,7 +188,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
               setActiveKey(null);
             }}
             autoFocus
-            placeholder="Search tasks, projects, sessions, messages"
+            placeholder="Search tasks, trees, projects"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"
@@ -258,7 +203,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         <div id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
           {items.length === 0 ? (
             <p className="px-4 py-6 text-small text-muted">
-              {threads.isFetching || search.isFetching ? "Searching sessions…" : `Nothing matches "${query.trim()}".`}
+              {`Nothing matches "${query.trim()}".`}
             </p>
           ) : (
             items.map((item, i) => {
@@ -304,7 +249,6 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
               );
             })
           )}
-          {note === null ? null : <p className="px-4 pt-2 pb-3 font-mono text-meta-sm text-muted md:hidden">{note}</p>}
         </div>
         <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm whitespace-nowrap text-muted md:flex">
           <span>
@@ -313,11 +257,9 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           <span>
             <Kbd>↵</Kbd> open
           </span>
-          {showT3 ? (
-            <span>
-              <Kbd>Ctrl ↵</Kbd> open in T3
-            </span>
-          ) : null}
+          <span>
+            <Kbd>Ctrl ↵</Kbd> open in T3
+          </span>
           <span>
             <Kbd>Alt C</Kbd> copy link
           </span>
@@ -325,7 +267,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             <Kbd>Esc</Kbd> close
           </span>
           <span className="ml-auto min-w-0 truncate" aria-live="polite">
-            {copyStatus === "copied" ? <span className="text-fg">Copied {copiedName}</span> : copyStatus === "failed" ? <span className="text-bad">Copy failed</span> : note}
+            {copyStatus === "copied" ? <span className="text-fg">Copied {copiedName}</span> : copyStatus === "failed" ? <span className="text-bad">Copy failed</span> : null}
           </span>
         </div>
       </div>

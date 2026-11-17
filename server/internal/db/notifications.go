@@ -24,7 +24,7 @@ type Notification struct {
 	CurrentState *TaskState `json:"currentState"`
 	// PendingQuestionCount: answerable questions the task's or external
 	// thread's session is waiting on now.
-	PendingQuestionCount int `json:"pendingQuestionCount"`
+	PendingQuestionCount int `json:"-"`
 }
 
 // NewNotification is what the notifier records.
@@ -271,4 +271,34 @@ WHERE n.read_at IS NULL ORDER BY 1`)
 func (s *Store) PruneNotifications(ctx context.Context, age time.Duration) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM notifications WHERE created_at < $1`, time.Now().Add(-age))
 	return tag.RowsAffected(), err
+}
+
+// WaitingSession is current external attention without a recorded inbox event.
+// It has no event ID or read state: reading it cannot manufacture a notification.
+type WaitingSession struct {
+	ThreadID     string  `json:"t3ThreadId"`
+	Title        string  `json:"title"`
+	ProjectTitle *string `json:"projectTitle"`
+}
+
+func (s *Store) WaitingWithoutNotifications(ctx context.Context, upToID int64) ([]WaitingSession, error) {
+	rows, err := s.pool.Query(ctx, `SELECT th.t3_thread_id, th.title, p.title
+ FROM threads th LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
+ LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id
+ WHERE `+externalNeedsInput+` AND NOT EXISTS (
+ SELECT 1 FROM notifications n WHERE n.t3_thread_id = th.t3_thread_id AND n.id <= $1)
+ ORDER BY th.updated_at DESC, th.t3_thread_id`, upToID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WaitingSession{}
+	for rows.Next() {
+		var row WaitingSession
+		if err := rows.Scan(&row.ThreadID, &row.Title, &row.ProjectTitle); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }

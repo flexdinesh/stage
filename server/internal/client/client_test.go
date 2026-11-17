@@ -90,7 +90,7 @@ func TestAPIVersionGate(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL)
-	for _, v := range []string{"", "2"} { // older server without the header; same version
+	for _, v := range []string{"", "3"} { // older server without the header; same version
 		version = v
 		if _, err := c.Projects(context.Background()); err != nil {
 			t.Fatalf("version %q: %v", v, err)
@@ -99,7 +99,7 @@ func TestAPIVersionGate(t *testing.T) {
 	version = "1"
 	_, err := c.Projects(context.Background())
 	var ve *VersionError
-	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v2") {
+	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v3") {
 		t.Fatalf("mismatch: %v", err)
 	}
 }

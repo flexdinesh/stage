@@ -19,7 +19,6 @@ import (
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
-	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
 // Deps are the API's collaborators.
@@ -30,10 +29,6 @@ type Deps struct {
 	Sync   *t3sync.Service
 	Push   *notify.Notifier
 	Logger *slog.Logger
-	// SearchTimeout bounds the T3 call in GET /api/threads/search (0 = 2s).
-	SearchTimeout time.Duration
-	// Transcript serves session transcripts; nil disables those routes.
-	Transcript *transcript.Hub
 	// Inbox wakes GET /api/notifications/stream (nil = a private hub).
 	Inbox *notify.Hub
 	// Instance identifies the running server in GET /api/health (zero in
@@ -92,10 +87,10 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)
 	h("GET /api/tasks/{id}", s.getTask)
+	h("GET /api/tasks/{id}/opening-prompt", s.getOpeningPrompt)
 	h("PATCH /api/tasks/{id}", s.updateTask)
 	h("DELETE /api/tasks/{id}", s.deleteTask)
 	h("POST /api/tasks/{id}/start", s.startTask)
-	h("POST /api/tasks/{id}/followup", s.followupTask)
 	h("POST /api/tasks/{id}/stop", s.stopTask)
 	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
 	h("POST /api/tasks/{id}/archive", s.archiveTask)
@@ -129,16 +124,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
-	h("GET /api/threads", s.listThreads)
-	h("GET /api/threads/search", s.searchThreads)
 	h("GET /api/threads/{id}", s.getThread)
 	h("POST /api/threads/{id}/adopt", s.adoptThread)
-	h("GET /api/threads/{id}/transcript", s.getTranscript)
-	h("GET /api/threads/{id}/transcript/items/{itemId}", s.getTranscriptItem)
-	h("GET /api/threads/{id}/transcript/opening", s.getTranscriptOpening)
-	h("GET /api/threads/{id}/transcript/stream", s.streamTranscript)
-	h("GET /api/threads/{id}/questions", s.listQuestions)
-	h("POST /api/threads/{id}/questions/{requestId}/answer", s.answerQuestion)
 
 	h("GET /api/snippets", s.listSnippets)
 	h("POST /api/snippets", s.createSnippet)
@@ -147,8 +134,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/snippets/{id}", s.deleteSnippet)
 
 	h("GET /api/refs/resolve", s.resolveRef)
-
-	h("GET /api/stats", s.stats)
 
 	h("GET /api/preferences", s.getPreferences)
 	h("PUT /api/preferences/pinned", s.putPinned)

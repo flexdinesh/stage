@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { useProject, useSchedules, useTasks } from "../api/queries.ts";
 import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
@@ -55,6 +56,7 @@ function ProjectDetail({ id }: { id: number }) {
             }
             actions={
               <>
+                <TrackSessionButton />
                 {scheduleList.length === 0 ? (
                   <Button onClick={() => newTask(id, "repeat")}>New schedule</Button>
                 ) : null}

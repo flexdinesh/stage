@@ -80,8 +80,7 @@ func TestAdoptSession(t *testing.T) {
 		t.Fatalf("session now owned %+v", th)
 	}
 
-	// Follow-up and stop work; start and duplicate do not.
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", a.ID), map[string]any{"message": "more"}, 200, nil)
+	// Stop works; start and duplicate do not.
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", a.ID), nil, 200, nil)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 409, nil)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", a.ID), nil, 409, nil)
@@ -264,30 +263,16 @@ func TestSessionBatchByTree(t *testing.T) {
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
 	a := e.agentTask(p.ID, "a", map[string]any{"originThreadId": s, "needsSessionId": s}, 201)
 	b := e.agentTask(p.ID, "b", map[string]any{"originThreadId": s}, 201)
-	c := e.agentTask(p.ID, "c", map[string]any{"originThreadId": s, "needs": []int64{a.ID}}, 201)
+	_ = e.agentTask(p.ID, "c", map[string]any{"originThreadId": s, "needs": []int64{a.ID}}, 201)
 	solo := e.agentTask(p.ID, "solo", nil, 201)
 
-	var empty struct {
-		CreatedTasks createdTasks `json:"createdTasks"`
+	var rows struct {
+		Tasks []task `json:"tasks"`
 	}
-	e.must("GET", "/api/threads/"+runningSession(t, e, p.T3ProjectID, "Other"), nil, 200, &empty)
-	if empty.CreatedTasks.Trees == nil || empty.CreatedTasks.Independent == nil {
-		t.Fatalf("createdTasks must be empty arrays: %+v", empty)
+	e.must("GET", "/api/tasks?originThreadId="+s, nil, 200, &rows)
+	if len(rows.Tasks) != 3 {
+		t.Fatalf("batch filter %+v", rows)
 	}
-
-	var detail struct {
-		CreatedTasks createdTasks `json:"createdTasks"`
-	}
-	e.must("GET", "/api/threads/"+s, nil, 200, &detail)
-	trees, ind := batchIDs(detail.CreatedTasks)
-	// The adopted planner task is in the tree but not in the batch (it has
-	// no origin).
-	if fmt.Sprint(trees) != fmt.Sprint([][]int64{{a.ID, c.ID}}) || fmt.Sprint(ind) != fmt.Sprint([]int64{b.ID}) ||
-		detail.CreatedTasks.Trees[0].Tree.ID != *a.TreeID || detail.CreatedTasks.Trees[0].Tree.Title != "Planner" ||
-		detail.CreatedTasks.Trees[0].Tree.StartMode != "auto" {
-		t.Fatalf("createdTasks %v %v %+v", trees, ind, detail.CreatedTasks)
-	}
-
 	var td struct {
 		Batch *createdTasks `json:"batch"`
 	}

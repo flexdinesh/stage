@@ -221,6 +221,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		return runNotes(ctx, env, "task", rest)
 	case "ls", "list":
 		var a agenttools.ListTasksArgs
+		c.fs.StringVar(&a.OriginThreadID, "origin-thread", "", "creator session id")
 		var states string
 		c.fs.StringVar(&a.Project, "project", "", "project")
 		c.fs.StringVar(&states, "state", "", "states")
@@ -382,33 +383,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			"duplicate": wrap(ops.DuplicateTask),
 		}[v]
 		res, err := fn(ctx, agenttools.IDArgs{ID: id})
-		if err != nil {
-			return err
-		}
-		return printTask(res)
-	case "followup":
-		var a agenttools.FollowupArgs
-		var images list
-		c.fs.StringVar(&a.Message, "m", "", "message (- = stdin)")
-		c.fs.StringVar(&a.Message, "message", "", "message (- = stdin)")
-		c.fs.StringVar(&a.Mode, "mode", "", "send mode")
-		c.fs.Var(&images, "image", "image file (repeatable)")
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		id, err := c.oneID()
-		if err != nil {
-			return err
-		}
-		if a.Message == "-" {
-			b, err := io.ReadAll(env.Stdin)
-			if err != nil {
-				return err
-			}
-			a.Message = string(b)
-		}
-		a.ID, a.ImagePaths = id, images
-		res, err := o().FollowupTask(ctx, a)
 		if err != nil {
 			return err
 		}
@@ -587,48 +561,6 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "ls")
 	c := newCmd(env, "sessions "+v)
 	switch v {
-	case "ls", "list":
-		var a agenttools.ListSessionsArgs
-		c.fs.StringVar(&a.Project, "project", "", "project")
-		c.fs.BoolVar(&a.Active, "active", false, "only active")
-		c.fs.StringVar(&a.Query, "q", "", "search")
-		c.fs.IntVar(&a.Limit, "limit", 20, "max rows")
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		res, err := c.ops().ListSessions(ctx, a)
-		if err != nil {
-			return err
-		}
-		return c.out(res, func(w io.Writer) { printSessions(w, res) })
-	case "search", "find":
-		var a agenttools.SearchSessionsArgs
-		c.fs.StringVar(&a.Project, "project", "", "project")
-		c.fs.IntVar(&a.Limit, "limit", 20, "max matches per source")
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		a.Query = strings.Join(c.pos, " ")
-		if strings.TrimSpace(a.Query) == "" {
-			return usagef("sessions search: want a query")
-		}
-		res, err := c.ops().SearchSessions(ctx, a)
-		if err != nil {
-			return err
-		}
-		return c.out(res, func(w io.Writer) { printSearch(w, res) })
-	case "show", "get":
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		if len(c.pos) != 1 {
-			return usagef("sessions show: want one thread id")
-		}
-		res, err := c.ops().GetSession(ctx, agenttools.SessionArgs{ID: c.pos[0]})
-		if err != nil {
-			return err
-		}
-		return c.out(res, func(w io.Writer) { printSessionDetail(w, res) })
 	case "adopt", "track":
 		var a agenttools.AdoptSessionArgs
 		var tags list
@@ -660,18 +592,7 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 			}
 			printTask(w, res.Task)
 		})
-	case "questions":
-		if err := c.parse(rest); err != nil {
-			return err
-		}
-		if len(c.pos) != 1 {
-			return usagef("sessions questions: want one thread id")
-		}
-		res, err := c.ops().GetSessionQuestions(ctx, agenttools.SessionArgs{ID: c.pos[0]})
-		if err != nil {
-			return err
-		}
-		return c.out(res, func(w io.Writer) { printQuestions(w, c.pos[0], res) })
+
 	}
 	return usagef("sessions %s: unknown", v)
 }

@@ -153,7 +153,6 @@ Usage:
   stage task rm|start|stop|dup ID     start on a blocked task starts it early (needs kept);
                                       rm only for a task that never started
   stage task archive ID [--undo]      archive a standalone task (--undo unarchives)
-  stage task followup ID -m TEXT [--mode auto|queue|steer|restart] [--image PATH]...
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
   stage tree ls [--status active|done|archived|all] [--all] [--project P]
   stage tree show ID                  levels, states, needs, readiness
@@ -170,10 +169,6 @@ Usage:
   stage schedule edit ID [config] [--cron CRON] [--tz ZONE]
   stage schedule rm|run|pause|resume ID
   stage schedule preview --cron CRON --tz ZONE
-  stage sessions ls [--project P] [--active] [-q TEXT] [--limit N]
-  stage sessions search QUERY [--project P] [--limit N]   title, branch, PR, project, message text
-  stage sessions show THREAD_ID
-  stage sessions questions THREAD_ID  pending questions (read-only)
   stage sessions adopt [THREAD_ID] [--title T] [--initial-note TEXT] [--tag T]... [--tree ID]
                                       track a session as a task (default: your session)
   stage mcp                           stdio MCP server

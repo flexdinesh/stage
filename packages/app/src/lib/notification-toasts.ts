@@ -18,9 +18,9 @@ export function reconcileToasts(queued: Notification[], latest: Notification[]):
   return queued.flatMap((n) => {
     const current = live.get(entityKey(n));
     const refreshed = current === undefined ||
-      (current.currentState === n.currentState && current.pendingQuestionCount === n.pendingQuestionCount)
+      current.currentState === n.currentState
       ? n
-      : { ...n, currentState: current.currentState, pendingQuestionCount: current.pendingQuestionCount };
+      : { ...n, currentState: current.currentState };
     if (refreshed.event === "needs_input" && refreshed.currentState !== null && refreshed.currentState !== "needs_input") {
       return [];
     }

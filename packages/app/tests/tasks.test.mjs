@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeApi } from "./fake-transport.mjs";
-import { batchPath } from "../src/lib/sessions.ts";
 import { batchSize, canStart, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
@@ -45,7 +44,7 @@ test("batch size counts tree members and independent tasks", () => {
   assert.equal(batchSize({ trees: [], independent: [] }), 0);
 });
 
-test("HTTP contract: needs, trees and adopt calls; batch links anchor the session panel", async () => {
+test("HTTP contract: needs, trees and adopt calls", async () => {
   const calls = [];
   const { api } = fakeApi(async (path, options) => {
     calls.push({ path: new URL(path, "http://stage.test").pathname + new URL(path, "http://stage.test").search, method: options.method ?? "GET", body: options.body === undefined ? undefined : JSON.parse(options.body) });
@@ -81,5 +80,4 @@ test("HTTP contract: needs, trees and adopt calls; batch links anchor the sessio
     { path: "/tasks?project=2&closed=true", method: "GET", body: undefined },
     { path: "/threads/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
   ]);
-  assert.equal(batchPath("a/b"), "/sessions/a%2Fb#created-tasks");
 });

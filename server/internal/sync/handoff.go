@@ -72,9 +72,6 @@ func ComposeHandoff(src db.HandoffSource, d t3.ThreadDetail, reply *t3.Reply, ma
 				name = fmt.Sprintf("%s#%d", pr.Repository, pr.Number)
 			}
 			line := "  - " + strings.TrimSpace(name)
-			if pr.State != "" {
-				line += " (" + pr.State + ")"
-			}
 			b.WriteString(line + " " + pr.URL + "\n")
 		}
 	}

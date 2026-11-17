@@ -172,7 +172,13 @@ func IsStatus(err error, status int) bool {
 }
 
 // Task is the API Task shape.
+type ArtifactLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type Task struct {
+	ArtifactLinks []ArtifactLink `json:"artifactLinks"`
 	db.Task
 	T3WebURL *string `json:"t3WebUrl"`
 	T3AppURL *string `json:"t3AppUrl"`
@@ -219,33 +225,8 @@ type Thread struct {
 
 // ThreadDetail is GET /api/threads/:id.
 type ThreadDetail struct {
-	Thread       Thread       `json:"thread"`
-	Children     []Thread     `json:"children"`
-	Task         *Task        `json:"task"`
-	CreatedTasks CreatedTasks `json:"createdTasks"` // tasks this session created
-}
-
-// ThreadPage is GET /api/threads.
-type ThreadPage struct {
-	Threads []Thread `json:"threads"`
-	Total   int      `json:"total"`
-}
-
-// ThreadSearch is GET /api/threads/search.
-type ThreadSearch struct {
-	Results []SearchResult `json:"results"`
-	T3      string         `json:"t3"` // ok|offline|timeout|error
-}
-
-// SearchResult is one session match. MatchSource: title|branch|project|pr|user|assistant.
-type SearchResult struct {
-	T3ThreadID       string     `json:"t3ThreadId"`
-	Title            string     `json:"title"`
-	ProjectTitle     *string    `json:"projectTitle"`
-	MatchSource      string     `json:"matchSource"`
-	Snippet          *string    `json:"snippet"`
-	MessageCreatedAt *time.Time `json:"messageCreatedAt"`
-	Thread           *Thread    `json:"thread"`
+	Thread Thread `json:"thread"`
+	Task   *Task  `json:"task"`
 }
 
 // ScheduleRun is one fire of a schedule (detail reads include the task).
@@ -345,35 +326,18 @@ type CreateSchedule struct {
 type Patch map[string]any
 
 // Followup is the POST /api/tasks/:id/followup body.
-type Followup struct {
-	Message       string  `json:"message"`
-	Mode          *string `json:"mode,omitempty"`
-	AttachmentIDs []int64 `json:"attachmentIds,omitempty"`
-}
-
-// TaskQuery filters GET /api/tasks.
 type TaskQuery struct {
-	ProjectID *int64
-	States    []string
-	Tag       string
-	Q         string
+	OriginThreadID string
+	ProjectID      *int64
+	States         []string
+	Tag            string
+	Q              string
 	// Closed: "" (open only), "true" (archived or in a done/archived tree)
 	// or "all".
 	Closed string
 }
 
 // ThreadQuery filters GET /api/threads.
-type ThreadQuery struct {
-	ProjectID        *int64
-	States           []string
-	Active           bool
-	Q                string
-	Parent           string
-	ExcludeSubagents bool
-	Limit            int
-	Offset           int
-}
-
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	_, err := c.doStatus(ctx, method, path, body, out)
 	return err
@@ -520,6 +484,7 @@ func (c *Client) Catalog(ctx context.Context) (Catalog, error) {
 // Tasks lists tasks (updatedAt desc).
 func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	q := url.Values{}
+	q.Set("originThreadId", f.OriginThreadID)
 	setID(q, "project", f.ProjectID)
 	if len(f.States) > 0 {
 		q.Set("state", strings.Join(f.States, ","))
@@ -600,13 +565,6 @@ func (c *Client) StopTask(ctx context.Context, id int64) (Task, error) {
 }
 
 // FollowupTask sends a message (and/or staged images) to a task's thread.
-func (c *Client) FollowupTask(ctx context.Context, id int64, in Followup) (Task, error) {
-	var out Task
-	err := c.do(ctx, http.MethodPost, taskPath(id, "followup"), in, &out)
-	return out, err
-}
-
-// DuplicateTask copies a task into a new backlog task.
 func (c *Client) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "duplicate"), nil, &out)
@@ -816,50 +774,6 @@ func (c *Client) PreviewSchedule(ctx context.Context, cron, tz string) ([]time.T
 }
 
 // Threads lists sessions.
-func (c *Client) Threads(ctx context.Context, f ThreadQuery) (ThreadPage, error) {
-	q := url.Values{}
-	setID(q, "project", f.ProjectID)
-	if len(f.States) > 0 {
-		q.Set("state", strings.Join(f.States, ","))
-	}
-	if f.Active {
-		q.Set("active", "1")
-		q.Set("sort", "activity")
-	}
-	if f.Q != "" {
-		q.Set("q", f.Q)
-	}
-	if f.Parent != "" {
-		q.Set("parent", f.Parent)
-	}
-	if f.ExcludeSubagents {
-		q.Set("subagents", "exclude")
-	}
-	if f.Limit > 0 {
-		q.Set("limit", strconv.Itoa(f.Limit))
-	}
-	if f.Offset > 0 {
-		q.Set("offset", strconv.Itoa(f.Offset))
-	}
-	var out ThreadPage
-	err := c.do(ctx, http.MethodGet, withQuery("/api/threads", q), nil, &out)
-	return out, err
-}
-
-// SearchThreads finds sessions by title, then by what was said in them (T3).
-func (c *Client) SearchThreads(ctx context.Context, query string, projectID *int64, limit int) (ThreadSearch, error) {
-	q := url.Values{}
-	q.Set("q", query)
-	setID(q, "project", projectID)
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
-	}
-	var out ThreadSearch
-	err := c.do(ctx, http.MethodGet, withQuery("/api/threads/search", q), nil, &out)
-	return out, err
-}
-
-// Thread reads one session (refreshed from T3 when connected).
 func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	var out ThreadDetail
 	err := c.do(ctx, http.MethodGet, "/api/threads/"+url.PathEscape(id), nil, &out)
@@ -882,20 +796,6 @@ func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
 
 // PendingQuestions is GET /api/threads/:id/questions: answerable questions
 // plus approvals stage cannot resolve (handled in T3).
-type PendingQuestions struct {
-	PendingRequestCount int                  `json:"pendingRequestCount"`
-	ApprovalCount       int                  `json:"approvalCount"`
-	Requests            []t3.PendingQuestion `json:"requests"`
-}
-
-// Questions reads a session's pending questions fresh from T3.
-func (c *Client) Questions(ctx context.Context, threadID string) (PendingQuestions, error) {
-	var out PendingQuestions
-	err := c.do(ctx, http.MethodGet, "/api/threads/"+url.PathEscape(threadID)+"/questions", nil, &out)
-	return out, err
-}
-
-// Upload stages one image (POST /api/uploads).
 func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attachment, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

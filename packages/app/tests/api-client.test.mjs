@@ -72,13 +72,7 @@ test("transport failures propagate unchanged", async () => {
   await assert.rejects(api.task(1), (err) => err === boom);
 });
 
-test("attachment URLs and streams go through the transport", () => {
-  const { api, subscriptions } = fakeApi();
+test("attachment URLs go through the transport", () => {
+  const { api } = fakeApi();
   assert.equal(api.attachmentUrl(12), "asset:/attachments/12");
-  const handlers = { events: {} };
-  const sub = api.transcriptStream("t-1", 7, handlers);
-  assert.equal(subscriptions[0].path, "/threads/t-1/transcript/stream?after=7");
-  assert.equal(subscriptions[0].handlers, handlers);
-  sub.close();
-  assert.equal(subscriptions[0].closed, true);
 });

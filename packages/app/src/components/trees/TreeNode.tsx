@@ -7,10 +7,9 @@ import { useApi } from "../../platform/context.tsx";
 import { canStart } from "../../lib/tasks.ts";
 import { dateTime, duration } from "../../lib/format.ts";
 import { inState, nodeState } from "../../lib/trees.ts";
-import { AnswerButton } from "../NeedsInputPanel.tsx";
 import { TaskStateBadge } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
-import { useShowT3Links } from "../../lib/hostState.ts";
+import { useT3Destination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
@@ -37,8 +36,8 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
 }
 
 /**
- * The node's one action: Answer (questions waiting; else Open in app while it needs input) > Start (ready; a blocked
- * task arms "Start before #N settles" first) > Retry (failed) > Open in app. A done or archived tree offers no Start or
+ * The node's one action: Open in T3 while it needs input > Start (ready; a blocked
+ * task arms "Start before #N settles" first) > Retry (failed) > Open in T3. A done or archived tree offers no Start or
  * Retry.
  */
 export function NodeAction({ task, pending, className }: { task: Task; pending: readonly number[]; className?: string }) {
@@ -49,15 +48,13 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
-  const appLink = useShowT3Links() ? task.t3DeepLink : null;
+  const appLink = useT3Destination()(task);
   let action: ReactNode = null;
   if (task.state === "needs_input") {
     action =
-      task.pendingQuestionCount > 0 ? (
-        <AnswerButton to={`/tasks/${task.id}`} className={cls} />
-      ) : appLink === null ? null : (
+      appLink === null ? null : (
         <AppButton small variant="primary" href={appLink} className={cls}>
-          Open in app
+          Open in T3
         </AppButton>
       );
   } else if (startable && task.readiness === "blocked") {
@@ -84,7 +81,7 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
   } else if (appLink !== null) {
     action = (
       <AppButton small href={appLink} className={cls}>
-        Open in app
+        Open in T3
       </AppButton>
     );
   }

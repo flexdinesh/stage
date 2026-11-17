@@ -369,8 +369,8 @@
     vertical-align: -1px;
   }
 
-  /* Collapsed long transcript message: fade the last lines into the row instead of a hard cut. */
-  .transcript-clamp {
+  /* Collapsed long prompt: fade the last lines into the row instead of a hard cut. */
+  .prompt-clamp {
     mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent);
   }
 

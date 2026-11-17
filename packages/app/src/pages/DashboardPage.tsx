@@ -1,27 +1,25 @@
 import { useState } from "react";
+import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { useSearchParams } from "react-router";
 import {
-  useNeedsInputThreads,
   useProjects,
-  useRunningThreads,
   useSchedules,
-  useSettledThreads,
   useT3Status,
   useTasks,
   useTrees,
 } from "../api/queries.ts";
-import type { Schedule, Task, TaskState, Thread, TreeSummary } from "../api/types.ts";
+import type { Schedule, Task, TaskState, TreeSummary } from "../api/types.ts";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectSelect } from "../components/ProjectSelect.tsx";
 import { ScheduleRow } from "../components/ScheduleList.tsx";
-import { ExternalThreadRows, SettledRows, TaskRow, TaskRows, type ExternalThreadState } from "../components/TaskList.tsx";
+import { SettledRows, TaskRow, TaskRows } from "../components/TaskList.tsx";
 import { TreeRow } from "../components/trees/TreeRow.tsx";
 import { T3Alert, T3SetupPanel } from "../components/T3Setup.tsx";
 import { splitTreeMembers } from "../lib/dashboard.ts";
 import { takeover } from "../lib/onboarding.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
-import { useShowT3Links } from "../lib/hostState.ts";
+import { useT3Destination } from "../lib/hostState.ts";
 
 type GroupKey = "needs" | "trees" | "running" | "done" | "failed" | "ready" | "backlog" | "scheduled" | "settled";
 
@@ -50,7 +48,7 @@ const GROUPS: Group[] = [
     short: "need",
     tone: "need",
     states: ["needs_input"],
-    empty: "Nothing waiting on you. Tasks and threads that ask a question land here.",
+    empty: "Nothing waiting on you. Tasks waiting for input land here. Session alerts are in Notifications.",
   },
   {
     key: "trees",
@@ -174,25 +172,16 @@ function ScheduledRows({ items, emptyText }: { items: ScheduledItem[]; emptyText
   );
 }
 
-/** External (non-task) threads a group lists with its tasks. */
-interface ExternalGroup {
-  threads: Thread[];
-  /** Server match count (may exceed `threads` when the page limit is hit). */
-  total: number;
-  error: unknown;
-  state: ExternalThreadState;
-}
-
 const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.key === v)?.key ?? null;
 
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   // App links open one thread, so only a lone task gets one.
-  const showT3 = useShowT3Links();
-  const href = tasks.length === 1 ? (tasks[0]?.t3DeepLink ?? null) : null;
-  if (href === null || !showT3) return null;
+  const destination = useT3Destination();
+  const href = tasks.length === 1 ? (tasks[0] === undefined ? null : destination(tasks[0])) : null;
+  if (href === null) return null;
   return (
     <AppButton href={href} small variant="ghost">
-      Open in app
+      Open in T3
     </AppButton>
   );
 }
@@ -308,33 +297,7 @@ function Dashboard() {
   const projects = useProjects();
   const projectQuery = project === "" ? {} : { project: Number(project) };
   const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
-  // External threads needing input / running join the Needs input / Running groups (count and rows)
-  // but never block the page.
-  const projectId = project === "" ? undefined : Number(project);
-  const needThreads = useNeedsInputThreads(projectId);
-  const runThreads = useRunningThreads(projectId);
   const [since] = useState(settledSince);
-  const settledThreads = useSettledThreads(since, projectId);
-  const external: Partial<Record<GroupKey, ExternalGroup>> = {
-    needs: {
-      threads: needThreads.data?.threads ?? [],
-      total: needThreads.data?.total ?? 0,
-      error: needThreads.error,
-      state: "needs_input",
-    },
-    running: {
-      threads: runThreads.data?.threads ?? [],
-      total: runThreads.data?.total ?? 0,
-      error: runThreads.error,
-      state: "running",
-    },
-    settled: {
-      threads: settledThreads.data?.threads ?? [],
-      total: settledThreads.data?.total ?? 0,
-      error: settledThreads.error,
-      state: "settled",
-    },
-  };
   const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
   const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
@@ -349,10 +312,10 @@ function Dashboard() {
   const rowsOf = (g: Group) => split.rows.filter(inGroup(g));
   const treeRows = (g: Group): TreeSummary[] => (g.key === "trees" ? split.active : g.key === "settled" ? split.settled : []);
   const groupCount = (g: Group) =>
-    g.key === "trees" ? split.active.length : byGroup(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0);
+    g.key === "trees" ? split.active.length : byGroup(g).length + (g.key === "scheduled" ? due.length : 0);
   /** Rows the group lists (tasks, external threads, schedules, tree rows). */
   const listed = (g: Group) =>
-    rowsOf(g).length + (external[g.key]?.total ?? 0) + (g.key === "scheduled" ? due.length : 0) + treeRows(g).length;
+    rowsOf(g).length + (g.key === "scheduled" ? due.length : 0) + treeRows(g).length;
   /** Members counted here but shown in a tree row. */
   const inTrees = (g: Group) => (g.key === "trees" || g.key === "ready" ? 0 : split.rolledUp.filter(inGroup(g)).length);
 
@@ -411,7 +374,7 @@ function Dashboard() {
       <PageHeader
         title="Dashboard"
         {...(meta === "" ? {} : { meta })}
-        actions={<ProjectSelect value={project} onChange={(v) => setParam("project", v)} />}
+        actions={<><TrackSessionButton /><ProjectSelect value={project} onChange={(v) => setParam("project", v)} /></>}
       />
       <QueryState isPending={tasks.isPending || settled.isPending} error={tasks.error ?? settled.error}>
         {trees.error === null ? null : (
@@ -430,7 +393,6 @@ function Dashboard() {
             const g = block;
             const list = rowsOf(g);
             const hidden = inTrees(g);
-            const ext = external[g.key];
             const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
             // self-baseline: flex baseline comes from the text, not the square/chevron (no baseline → bottom edge),
             // so Panel's cap-trimmed h2 centers the caps.
@@ -471,7 +433,7 @@ function Dashboard() {
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
               >
                 {g.key === "settled" ? (
-                  <SettledRows items={mergeSettled(list, ext?.threads ?? [], split.settled)} emptyText={g.empty} />
+                  <SettledRows items={mergeSettled(list, split.settled)} emptyText={g.empty} />
                 ) : g.key === "trees" ? (
                   <ul>
                     {split.active.map((t) => (
@@ -489,15 +451,6 @@ function Dashboard() {
                       </div>
                     )}
                   </>
-                ) : ext !== undefined && ext.threads.length > 0 ? (
-                  <>
-                    {list.length > 0 ? (
-                      <div className="border-b border-line">
-                        <TaskRows tasks={list} showProject showTree />
-                      </div>
-                    ) : null}
-                    <ExternalThreadRows threads={ext.threads} state={ext.state} />
-                  </>
                 ) : (
                   <TaskRows
                     tasks={list}
@@ -506,11 +459,6 @@ function Dashboard() {
                     showTree
                   />
                 )}
-                {ext !== undefined && ext.error !== null ? (
-                  <div className="border-t border-line p-3">
-                    <ErrorText error={ext.error} />
-                  </div>
-                ) : null}
               </Panel>
             );
           })}

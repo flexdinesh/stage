@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
@@ -185,65 +184,6 @@ func TestTaskCommands(t *testing.T) {
 	}
 }
 
-func TestShowPrintsPullRequestsAndRuns(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	p := h.project("/w/cli-prs")
-	code, stdout, stderr := h.run("", "task", "add", "--project", fmt.Sprint(p.ID), "--title", "Ship", "--prompt", "go", "--start", "--json")
-	if code != 0 {
-		t.Fatalf("add: %d %s", code, stderr)
-	}
-	tk := decode[client.Task](t, stdout)
-	if tk.T3ThreadID == nil {
-		t.Fatalf("not launched: %+v", tk)
-	}
-	thread := *tk.T3ThreadID
-	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if err := h.fake.SetThread(thread, func(d *t3.ThreadDetail) {
-		d.PullRequests = []t3.PullRequest{{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "created", State: "merged"}}
-		d.RecentRuns = nil
-		for i := 12; i >= 1; i-- {
-			req := base.Add(time.Duration(i) * time.Minute)
-			start, done := req.Add(2*time.Second), req.Add(32*time.Second)
-			d.RecentRuns = append(d.RecentRuns, t3.Run{RunID: fmt.Sprint("r", i), Ordinal: i, Status: t3.StatusCompleted,
-				Model: "m", ExecutedModel: "m", RequestedAt: req, StartedAt: &start, CompletedAt: &done})
-		}
-		d.RecentRuns[0].ExecutedModel = "m-big"
-		d.RunCount = 12
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.sync.RefreshSession(ctx, thread); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, args := range [][]string{{"task", "show", fmt.Sprint(tk.ID)}, {"session", "show", thread}} {
-		code, stdout, stderr = h.run("", args...)
-		if code != 0 {
-			t.Fatalf("%v: %d %s", args, code, stderr)
-		}
-		for _, want := range []string{"prs", "o/r#7", "merged", "https://github.com/o/r/pull/7", "runs", "#12", "m -> m-big", "30s", "2s", "(10 of 12 runs)"} {
-			if !strings.Contains(stdout, want) {
-				t.Fatalf("%v: missing %q in\n%s", args, want, stdout)
-			}
-		}
-		if strings.Contains(stdout, "#2 ") {
-			t.Fatalf("%v: runs block not capped:\n%s", args, stdout)
-		}
-	}
-
-	code, stdout, _ = h.run("", "session", "show", thread, "--json")
-	d := decode[client.ThreadDetail](t, stdout)
-	if code != 0 || len(d.Thread.RecentRuns) != 12 || d.Thread.RunCount != 12 || len(d.Thread.PullRequests) != 1 {
-		t.Fatalf("session json: %d runs=%d count=%d prs=%d", code, len(d.Thread.RecentRuns), d.Thread.RunCount, len(d.Thread.PullRequests))
-	}
-	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(tk.ID), "--json")
-	td := decode[client.TaskDetail](t, stdout)
-	if code != 0 || len(td.PullRequests) != 1 || td.Thread == nil || len(td.Thread.RecentRuns) != 12 {
-		t.Fatalf("task json: %s", stdout)
-	}
-}
-
 func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("/w/cli-o")
@@ -272,15 +212,9 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if code, _, _ := h.run("", "task", "add", "--title", "x", "--prompt", "p", "--needs", "nope"); code != 2 {
 		t.Fatalf("bad --needs exit %d", code)
 	}
-	code, stdout, _ := h.run("", "sessions", "show", out.ThreadID)
-	want := fmt.Sprintf("\ncreated tasks (3)\n  tree %d first (auto)\n    #%d [backlog] first\n    #%d [backlog] second  (waits on needs #%d)\n  task #%d [backlog] loose\n",
-		*second.TreeID, first.ID, second.ID, first.ID, loose.ID)
-	if code != 0 || !strings.Contains(stdout, want) {
-		t.Fatalf("sessions show:\n%s\nwant:\n%s", stdout, want)
-	}
-	code, stdout, _ = h.run("", "sessions", "show", out.ThreadID, "--json")
-	if d := decode[client.ThreadDetail](t, stdout); code != 0 || len(d.CreatedTasks.Trees) != 1 || len(d.CreatedTasks.Independent) != 1 {
-		t.Fatalf("sessions show json: %s", stdout)
+	code, stdout, _ := h.run("", "task", "ls", "--origin-thread", out.ThreadID, "--json")
+	if rows := decode[agenttools.TasksOut](t, stdout); code != 0 || rows.Total != 3 {
+		t.Fatalf("batch: %s", stdout)
 	}
 
 	// tree new with ID:NEED members, then show/ls/edit/add/rm/start.
@@ -476,39 +410,6 @@ func TestScheduleAndContextCommands(t *testing.T) {
 	}
 }
 
-func TestSessionsSearchCommand(t *testing.T) {
-	h := newHarness(t)
-	p := h.project("/w/cli-search")
-	ctx := context.Background()
-	res, err := h.fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "What more?"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := h.sync.RefreshSession(ctx, res.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	h.fake.AddMessage(res.ThreadID, t3.SearchUser, "…find sessions by what was said…")
-
-	code, stdout, stderr := h.run("", "sessions", "search", "what", "was", "said")
-	if code != 0 || !strings.Contains(stdout, "user") || !strings.Contains(stdout, "What more?") ||
-		!strings.Contains(stdout, "…find sessions by what was said…") || strings.Contains(stdout, "titles only") {
-		t.Fatalf("search: %d %q %q", code, stdout, stderr)
-	}
-	code, stdout, _ = h.run("", "sessions", "search", "what was said", "--project", p.Title, "--json")
-	out := decode[agenttools.SearchSessionsOut](t, stdout)
-	if code != 0 || out.T3 != "ok" || len(out.Results) != 1 || out.Results[0].T3ThreadID != res.ThreadID {
-		t.Fatalf("search --json: %d %s", code, stdout)
-	}
-	h.fake.SearchErr = errors.New("down")
-	code, stdout, _ = h.run("", "sessions", "search", "nothing here")
-	if code != 0 || !strings.Contains(stdout, "no matching sessions") || !strings.Contains(stdout, "(T3 offline: titles only)") {
-		t.Fatalf("search offline: %d %q", code, stdout)
-	}
-	if code, _, _ := h.run("", "sessions", "search"); code == 0 {
-		t.Fatal("search without query succeeded")
-	}
-}
-
 func TestSetupInstructionsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	path := filepath.Join(t.TempDir(), "AGENTS.md")
@@ -640,36 +541,6 @@ func TestHandoffFlags(t *testing.T) {
 	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--handoff=true", "--json")
 	if code != 0 || !decode[client.Task](t, stdout).Handoff {
 		t.Fatalf("edit --handoff=true: %s", stdout)
-	}
-}
-
-func TestSessionQuestionsCommand(t *testing.T) {
-	h := newHarness(t)
-	p := h.project("/w/cliq")
-	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Asks"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	no := false
-	if _, err := h.fake.AddUserInput(out.ThreadID, []t3.Question{{ID: "q", Header: "Scope", Question: "Which scope?", MultiSelect: true, AllowCustomAnswer: &no,
-		Options: []t3.QuestionOption{{Label: "Server", Description: "Go only"}, {Label: "Web"}}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.fake.AddApproval(out.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr := h.run("", "sessions", "questions", out.ThreadID)
-	if code != 0 || !strings.Contains(stdout, "2 pending request(s): 1 question(s), 1 approval(s) in T3") ||
-		!strings.Contains(stdout, "1. [Scope] Which scope?  (multi-select)") || !strings.Contains(stdout, "- Server: Go only") ||
-		strings.Contains(stdout, "custom answer") {
-		t.Fatalf("questions: %d %s %s", code, stdout, stderr)
-	}
-	code, stdout, _ = h.run("", "sessions", "questions", out.ThreadID, "--json")
-	if pq := decode[client.PendingQuestions](t, stdout); code != 0 || pq.ApprovalCount != 1 || len(pq.Requests) != 1 {
-		t.Fatalf("questions json: %d %s", code, stdout)
-	}
-	if code, _, _ := h.run("", "sessions", "questions"); code == 0 {
-		t.Fatal("missing id accepted")
 	}
 }
 
