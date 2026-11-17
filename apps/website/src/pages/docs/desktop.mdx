@@ -1,0 +1,50 @@
+---
+title: Desktop app
+description: The stage desktop app for Linux and macOS, its local server, saved remote servers, native notifications, links and login startup.
+showAskAi: false
+---
+
+# Desktop app
+
+The desktop app shows the same stage UI in a native window on Linux and macOS. It bundles the CLI/server and talks to one stage server at a time: this machine's over its private Unix socket (the default), or a saved remote server over TCP. Install it with the [installer](/docs/install) (desktop mode). Releases ship the Mac desktop only once it can be signed and notarized; until then use the headless install on a Mac.
+
+## This machine's server
+
+On launch the app starts this machine's per-user service through its bundled CLI (`stage service start`) and waits for the server to answer. The server runs separately from the window:
+
+- Closing the window hides it; the app stays resident (Dock, tray, app launcher) and native notifications continue. On Linux the first close says so, with Keep running and Quit Stage.
+- Quit (`Cmd/Ctrl+Q`, menu, tray) stops the app and its notifications only. The stage server keeps running, so schedules, trees and syncing continue.
+- When the server stops answering the app shows a banner and reconnects; when it stopped or failed, a screen with the cause, the log tail and Start Stage server. A server from another API version is blocked with Restart Stage server.
+- If a foreground `stage serve` already holds the data dir, the app uses it when it listens on the socket, and says it stops when that terminal does.
+- T3 never blocks startup. Pair from the Dashboard or Settings ([Connect to T3](/docs/t3)).
+
+Help > Copy Diagnostics copies the app, CLI and server versions, the service status (without secrets) and the last 50 server log lines.
+
+## Servers
+
+Settings > Servers (and the top-bar menu once more than one is saved) lists **This machine**, always first, and remote servers you add by name and URL (`http(s)://host[:port]`). Test connection checks a URL before saving. Switching drops the old server's data at once and shows the new one when it answers. The desktop never starts, stops or configures a remote server.
+
+A remote server is reached over TCP on a **trusted network with no authentication**, as a browser on that network would. On that machine:
+
+- The server must listen on TCP: `stage serve --listen 0.0.0.0:7380`, or `STAGE_LISTEN=unix,0.0.0.0:7380` in its `service.env` ([Listeners](/docs/deploy#listeners)).
+- A URL with an IP address or `localhost` passes its Host check. A hostname must be in its `STAGE_ALLOWED_ORIGINS` (or be its `STAGE_PUBLIC_URL`), else it answers 403 and the app names the setting to add ([Security](/docs/deploy#security)).
+
+Each server keeps its own T3 connection, data and pairing. Starting or restarting the server, login startup and server logs apply to this machine only; "Open in T3" links show only for this machine's server.
+
+## Notifications
+
+Native OS notifications come from the app itself, not the web page, so they keep working while the window is closed. They cover **every saved server at once**:
+
+- Which events notify (needs input, failed, ready, done, settled) is the global filter in Settings, shared with every device. The desktop's own on/off is per installation, on by default.
+- With the window in front on that server, toasts show instead of OS notifications.
+- With more than one server saved, titles start with the server's name (`Studio · Needs input`). Clicking switches to that server and opens the task or session (needs input opens the answer panel).
+- On reconnect, missed notifications from the last 15 minutes show (at most 3, then "N more in Stage"); older ones stay in the inbox.
+- The Dock or launcher badge counts what needs input across servers.
+- Settings > Notifications > This device: Enable, Send test, Disable and System settings. macOS asks for permission on the first notification.
+
+On Linux, notification clicks work only while the app runs. See also [Notifications](/docs/features#notifications).
+
+## Links and login startup
+
+- `stage://tasks/<n>` and `stage://sessions/<id>` open the app at that page; other web links open in your browser; T3 thread links open the T3 app, else T3 in the browser.
+- Settings > Desktop app > "Open Stage at login" starts the app at login (without a window) and turns on the service's login startup; off turns both off.

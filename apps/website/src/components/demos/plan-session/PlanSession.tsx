@@ -6,10 +6,10 @@ import './plan-session.css'
 
 // A planning session fans a job out across models. Beats: the agent says how
 // it will split the ask; four create_task calls stream in, each landing as a
-// backlog row in stage's Created tasks panel; order_tasks 41 43 42 turns the
-// first three into a run-order chain (the header rolls Independent to Chain,
-// the rows slide into run order, the step cells join); Start chain is pressed
-// and the head goes running. The batch holds, then leaves around the ask.
+// backlog row in stage's Created tasks panel; create_tree 41 43:41 42:43 makes
+// the first three a tree where each needs the one before (the header rolls
+// Independent to the tree's title, the rows slide into level order, the step
+// cells join); Start ready is pressed and the root goes running. The batch holds, then leaves around the ask.
 //
 // Gold: overlap (a smaller card in front of a window, straddling its edge)
 // with ai-chat's bottom-anchored thread and Stream reply. The session window
@@ -28,7 +28,7 @@ const TASKS: Task[] = [
   { id: 43, title: 'Backfill sessions', model: 'claude-sonnet-5-5' },
   { id: 44, title: 'Update auth docs', model: 'claude-haiku-5-5' },
 ]
-/** Run order after order_tasks 41 43 42: indexes into TASKS. */
+/** Level order after create_tree 41 43:41 42:43: indexes into TASKS. */
 const CHAIN = [0, 2, 1]
 const CALLS = TASKS.length + 1
 
@@ -178,7 +178,7 @@ export function PlanSession() {
                         </Collapse>
                       ))}
                       <Collapse open={s.calls > TASKS.length} className="ps-call-wrap">
-                        <Call done={s.done > TASKS.length} fn="order_tasks" title="41 43 42" mono out="chain" />
+                        <Call done={s.done > TASKS.length} fn="create_tree" title="41 43:41 42:43" mono out="Auth" />
                       </Collapse>
                     </div>
                   </Collapse>
@@ -198,7 +198,7 @@ export function PlanSession() {
               </div>
               <div className="ps-panel__body" style={{ height: bodyH }}>
                 <div className="ps-sec" style={{ top: 0 }}>
-                  {/* Independent becomes Chain as one header: the two crossfade in place */}
+                  {/* Independent becomes the tree's header: the two crossfade in place */}
                   <States
                     value={s.ordered ? 'chain' : 'loose'}
                     align="start"
@@ -213,7 +213,7 @@ export function PlanSession() {
                       ),
                       chain: (
                         <>
-                          <span className="ps-label">Chain</span>
+                          <span className="ps-label">Auth</span>
                           <span className="ps-meta">3 tasks</span>
                         </>
                       ),
@@ -225,7 +225,7 @@ export function PlanSession() {
                     data-target="start"
                     data-show={(s.ordered && !s.started) || undefined}
                   >
-                    Start chain
+                    Start ready
                   </Button>
                 </div>
                 <div className="ps-sec ps-sec--late" style={{ top: SH + CHAIN.length * RH }} data-show={s.ordered || undefined}>
@@ -279,7 +279,7 @@ export function PlanSession() {
                     </div>
                   )
                 })}
-                {/* The run order: 1px connectors joining the step cells */}
+                {/* The tree's levels: 1px connectors joining the step cells */}
                 {CHAIN.slice(1).map((_, k) => (
                   <span
                     key={k}

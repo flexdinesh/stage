@@ -4,10 +4,10 @@ import { useSiteTheme } from '../shared/useSiteTheme'
 import { IconChainLink, IconChevronDown, IconCheck } from './icons'
 import './run-order.css'
 
-// Run order, told as stage does it: #13's Run order panel links it after
-// #12 (picker, then Link). The rows pick up "after #12" / "then #13" and the
-// pipeline joins. #12 finishes and settles in T3 on its own; #13 launches by
-// itself, and its handoff (final reply, PR, branch) is the payoff.
+// Needs, told as stage does it: #13's Tree panel adds #12 as a need (picker,
+// then Add). The rows pick up "needs #12" / "then #13" and the levels join.
+// #12 finishes and settles in T3 on its own; #13 launches by itself, and its
+// handoff (final reply, PR, branch) is the payoff.
 
 type A = 'running' | 'done' | 'settled'
 type B = 'backlog' | 'launching' | 'running'
@@ -159,10 +159,10 @@ export function Demo() {
                       {compact ? null : <span>billing-api</span>}
                       {compact ? null : <span>gpt-6.1-sol</span>}
                       <Roll variant="fade">{bTime}</Roll>
-                      {compact ? <LinkHint label="after #12" show={waiting} /> : null}
+                      {compact ? <LinkHint label="needs #12" show={waiting} /> : null}
                     </span>
                   </span>
-                  {compact ? null : <LinkChip label="after #12" show={waiting} />}
+                  {compact ? null : <LinkChip label="needs #12" show={waiting} />}
                 </div>
                 </div>
                 <SkeletonRow w={150} m={170} />
@@ -183,26 +183,26 @@ export function Demo() {
               </Window>
             )}
 
-            {/* #13's Run order panel, from its task detail page */}
+            {/* #13's Tree panel, from its task detail page */}
             <section className="ro-sat" data-hidden={s.hidden || undefined} style={{ top: satTop }}>
               <div className="ro-panel__head">
                 <IconChainLink />
-                <span className="ro-label ro-label--ink">Run order</span>
+                <span className="ro-label ro-label--ink">Tree</span>
                 <span className="ro-panel__meta">
-                  <Roll variant="fade">{s.linked ? '#13 · step 2 of 2' : '#13'}</Roll>
+                  <Roll variant="fade">{s.linked ? '2 tasks · 2 levels' : '#13'}</Roll>
                 </span>
               </div>
               <div className="ro-sat__body">
                 <Collapse open={!s.linked}>
                   <div className="ro-pick">
-                    <span className="ro-label">Runs after</span>
+                    <span className="ro-label">Needs</span>
                     <div className="ro-pick__row">
                       <div className="ro-select" data-target="picker" data-open={s.open || undefined}>
                         <States
                           align="start"
                           value={s.picked ? 'picked' : 'empty'}
                           states={{
-                            empty: <span className="ro-select__ph">Pick a task to wait on…</span>,
+                            empty: <span className="ro-select__ph">Add a need…</span>,
                             picked: (
                               <span className="ro-select__val">
                                 <span className="ro-num">#12</span> Retry failed webhooks
@@ -213,7 +213,7 @@ export function Demo() {
                         <IconChevronDown />
                       </div>
                       <Button size="large" className="ro-btn" data-target="link" data-off={!s.picked || undefined}>
-                        Link
+                        Add
                       </Button>
                       <Popover show={s.open} className="ro-list">
                         <div className="ro-opt" data-target="opt-12">
@@ -238,7 +238,7 @@ export function Demo() {
 
                 <Collapse open={s.linked}>
                   <div className="ro-linked">
-                    <ol className="ro-pipe" aria-label="Run order">
+                    <ol className="ro-pipe" aria-label="Tree levels">
                       <li className="ro-step" data-tone={TONE[s.a]}>
                         <span className="ro-step__mark" />
                         <span className="ro-step__num">1</span>
@@ -253,7 +253,7 @@ export function Demo() {
                     </ol>
                     <div className="ro-line">
                       <div className="ro-line__text">
-                        <span className="ro-label">Runs after</span>
+                        <span className="ro-label">Needs</span>
                         <span className="ro-line__title">
                           <span className="ro-num">#12</span> Retry failed webhooks
                         </span>
@@ -262,7 +262,7 @@ export function Demo() {
                         </span>
                       </div>
                       <Button size="small" variant="ghost" className="ro-btn ro-btn--ghost">
-                        Unlink
+                        Remove
                       </Button>
                     </div>
                   </div>
@@ -322,7 +322,7 @@ export function Demo() {
   )
 }
 
-/** Laptop run order chip: the row's own column, so titles never reflow. */
+/** Laptop needs chip: the row's own column, so titles never reflow. */
 function LinkChip({ label, show }: { label: string; show: boolean }) {
   return (
     <span className="ro-row__link">

@@ -255,7 +255,7 @@
 }
 
 /* Section headers: Paper rows under a hairline (stage's 40px size, so the
-   small Start chain keeps 8px above and below) */
+   small Start ready keeps 8px above and below) */
 .ps .ps-sec {
   position: absolute;
   left: 0;

@@ -1,4 +1,39 @@
-# Development installs (Stage Dev)
+# Development
+
+Day-to-day development (no install needed) and Stage Dev, a persistent
+development install of one commit.
+
+## Day-to-day development
+
+Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then
+`mise tasks` lists them. Development never touches a deployed stack: dev uses
+a SQLite file per branch (`.scratch/dev/<branch>/stage.db`), tests use a temp
+file per test, and only `mise run up` / `mise run down` touch the compose stack.
+
+- `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and the browser host on Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. Set `T3_FAKE=1` in `.env.dev` to work without T3.
+- `mise run test`: Go vet and tests; shared app, browser host and desktop UI tests, typecheck and lint.
+- `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, website checks, desktop app and fixture Go tests, release tool). Run before a PR.
+- `mise run build`: the browser bundle (`apps/web/dist`) embedded into `bin/stage` (static, pure Go SQLite; `./bin/stage serve` runs it, config from the environment only).
+- `mise run website:dev` (:5175), `website:build`, `website:check`, `website:preview` (:8787): the marketing and docs site in `apps/website` ([architecture.md](architecture.md#documentation-ownership)).
+- `mise run desktop:dev`: the desktop app against a foreground dev server on a scratch socket (no OS service). `mise run dist [TARGETS=host|all]`: a developer build of the desktop app and the headless CLI/server (`stage-dev`), verified, in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z`: the release build of a clean HEAD ([release.md](release.md)). `mise run desktop:e2e`: webview e2e (display and WebKitGTK 4.1, or macOS). See [desktop.md](desktop.md).
+- `mise run install-cli`: the CLI and stdio MCP binary (no web bundle) at `~/.local/bin/stage`. It is not an installer install: `stage update` refuses it and the installer will not overwrite it ([install.md](install.md#layout)).
+- `mise run install:smoke`: the installer against real binaries and systemd with the isolated `stage-svctest` identity ([install.md](install.md#verification)).
+- `mise run up` / `mise run down`: build and run, or stop, the compose stack (`compose.yaml`, data in the `stagedata` volume, kept on down).
+- Single test files: `node --test packages/app/tests/<name>.test.mjs` (e.g. `sessions`, `tasks`, `api-client`, `boundaries`) or `node --test apps/web/tests/<name>.test.mjs` (browser adapters: `transport`, `adapters`, `push-state`).
+
+Layout: `server/` (Go server, CLI, MCP), `packages/app/` (the shared React app, `@stage/app`), `apps/web/` (browser host, `@stage/web`), `desktop/app/` (desktop host; its frontend `desktop/app/ui`, `@stage/desktop`, is in the pnpm workspace), `apps/website/` (marketing and docs site, `@stage/website`), one pnpm workspace. Ownership and the platform contract: [architecture.md](architecture.md). API contract: [api.md](api.md) (TypeScript mirror: `packages/app/src/api/types.ts`).
+
+Development-only environment variables (user configuration: `.env.example`):
+
+| Variable | Purpose |
+| --- | --- |
+| `T3_FAKE` | `1` uses an in-memory fake T3 (UI work without a T3 server). |
+| `T3_FAKE_SEED` | With `T3_FAKE=1`, `1` seeds demo threads waiting on questions. |
+| `STAGE_ENV` | `dev` (set by `mise run dev`): names the T3 session `stage dev` and refuses the default data dir. |
+
+Guards: with `STAGE_ENV=dev` the server refuses the default data dir. Launches send a unique `clientRequestId` per attempt (`task-<id>-<uuid>`), so dev, test or restored databases that share one T3 cannot collide with a deployed instance's launches ([api.md](api.md)).
+
+## Stage Dev installs
 
 Stage Dev is the developer identity (`stage-dev`): its own app ("Stage
 Dev"), CLI (`stage-dev`), service (`stage-dev.service` /

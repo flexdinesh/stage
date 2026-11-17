@@ -6,7 +6,7 @@ export default defineConfig({
   title: 'stage',
   titleTemplate: '%s | stage',
   description:
-    'Task manager for T3 Code. Queue tasks, link them to run in order, schedule them, and answer threads that need input from your phone.',
+    'Task manager for T3 Code. Queue tasks, run them as trees, schedule them, and answer threads that need input from your phone.',
   baseUrl,
   renderStrategy: 'full-static',
   colorScheme: 'light dark',
@@ -28,7 +28,6 @@ export default defineConfig({
   },
   topNav: [
     { text: 'Docs', link: '/docs', match: '/docs' },
-    { text: 'API', link: '/docs/api', match: '/docs/api' },
     { text: 'GitHub', link: 'https://github.com/flexdinesh/stage' },
   ],
   sidebar: {
@@ -37,21 +36,12 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Introduction', link: '/docs' },
-          { text: 'Deploy', link: '/docs/deploy' },
+          { text: 'Install', link: '/docs/install' },
+          { text: 'Connect to T3', link: '/docs/t3' },
+          { text: 'Desktop app', link: '/docs/desktop' },
+          { text: 'Headless server', link: '/docs/deploy' },
           { text: 'Features', link: '/docs/features' },
           { text: 'Agents', link: '/docs/agents' },
-        ],
-      },
-      {
-        text: 'REST API',
-        items: [
-          { text: 'Overview', link: '/docs/api' },
-          { text: 'Projects', link: '/docs/api/projects' },
-          { text: 'Tasks', link: '/docs/api/tasks' },
-          { text: 'Schedules', link: '/docs/api/schedules' },
-          { text: 'Threads', link: '/docs/api/threads' },
-          { text: 'Notifications', link: '/docs/api/notifications' },
-          { text: 'Other endpoints', link: '/docs/api/other' },
         ],
       },
     ],
