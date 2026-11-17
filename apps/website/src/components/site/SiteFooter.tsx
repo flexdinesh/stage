@@ -4,7 +4,6 @@ import './site-footer.css'
 
 const links = [
   { text: 'Docs', href: '/docs' },
-  { text: 'API', href: '/docs/api' },
   { text: 'GitHub', href: 'https://github.com/flexdinesh/stage' },
 ]
 

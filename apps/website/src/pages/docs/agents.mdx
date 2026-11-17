@@ -1,92 +1,120 @@
 ---
 title: Agents
-description: Let agents running in T3 queue and manage stage tasks through the stage CLI, a stdio MCP server or the HTTP MCP endpoint.
+description: Let agents running in T3 queue and manage stage tasks, trees and journals through the stage CLI, a stdio MCP server or the HTTP MCP endpoint.
 showAskAi: false
 ---
 
 # Agents
 
-Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks. Three front ends share one set of operations, all over the [REST API](/docs/api). No gating: agents get the same access as the web UI.
+Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks and trees, and read and write journals. Three front ends share one set of operations over the server's REST API. No gating: agents get the same access as the web UI.
 
 ## Front ends
 
-- **CLI**: `stage task add|ls|show|edit|rm|start|stop|followup|dup|link|order|unlink|wait`, `schedule ...`, `sessions ls|search|show|questions` (questions is read-only), `projects ls`, `models ls`, `context`. Human output by default, `--json` for agents and scripts. `stage help` lists everything.
+- **CLI**:
+  - `stage task add|ls|show|edit|needs|notes|rm|start|stop|followup|dup|archive|wait`
+  - `stage tree ls|show|new|add|rm|edit|notes|start|done|archive|rm-tree`
+  - `stage schedule ls|show|add|edit|rm|run|pause|resume|preview`
+  - `stage sessions ls|search|show|questions|adopt` (questions is read-only)
+  - `stage show REF` (a stage link, T3 thread link, `#ID` or thread id), `stage projects ls`, `stage models ls`, `stage context`, `stage guide` (the agent workflow guide)
+
+  Human output by default, `--json` for agents and scripts. `stage help` lists everything.
 - **stdio MCP**: `stage mcp`.
-- **HTTP MCP**: `http://<host>:7380/mcp` (streamable HTTP, stateless, served by the running app; no install). It calls the app's own `/api` on loopback. Cannot read local files, so no `imagePaths`.
+- **HTTP MCP**: `POST /mcp` on the running server (streamable HTTP, stateless, served in-process; no install). It cannot read local files, so no `imagePaths`. It is reachable directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address reached by its network address. A request that arrives on loopback with another Host gets a 403 (`Forbidden: invalid Host header`, even when the origin policy trusts that host), so a reverse proxy forwarding to `127.0.0.1:7380` cannot serve it: through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
 ## Install and register
 
-Install the binary on the T3 host and register it. The compose image does not install it; rerun after updates.
+The CLI comes with every stage install: the desktop app and the headless install both put `stage` in `~/.local/bin` ([Install](/docs/install)). Install it on the machine where your T3 agents run, then register it:
 
 ```sh
-mise run install-cli         # ~/.local/bin/stage (no args = server; subcommands = CLI)
 stage setup mcp              # claude mcp add --scope user + codex mcp add (stdio); --http registers /mcp instead
 stage setup instructions     # idempotent usage block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 ```
 
-`STAGE_URL` (or `--url`) points the CLI and stdio MCP at the app. Default `http://127.0.0.1:7380`.
+- `--claude` or `--codex` limits either command to one agent (default both). `setup instructions --file PATH` writes another file. An agent that is not installed, or a missing config directory, is skipped.
+- Rerunning `stage setup instructions` replaces the block in place with the current guide.
+- `STAGE_URL` (or `--url`) points the CLI and stdio MCP at the server: an `http(s)` URL, or `unix:///abs/path.sock` for a socket. Unset, they use the private default socket when a server owns it, else `http://127.0.0.1:7380`. `stage status` shows which server the CLI reaches.
+- `stage setup mcp` passes an explicit `STAGE_URL` to the stdio server. `--http` needs an `http(s)` URL, so use stdio with a socket.
 
 ## Caller context
 
-T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read it and the cwd; HTTP MCP tools take `callerThreadId` / `cwd` arguments instead (override; required for context over HTTP).
+T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read it and the cwd; HTTP MCP tools take `callerThreadId` / `cwd` arguments instead (required for context over HTTP). `stage context` / `get_context` shows the session, cwd, resolved project, owning task and current tree.
 
 - **Project**: explicit `--project` (id or exact title) > the calling session's project > the project whose root is the longest prefix of cwd.
 - **Model**: explicit (provider inferred from the model via the catalog) > pinned default > last used > T3 default, like the New task form.
 - **Provenance**: tasks and schedules record the creating session (`originThreadId`; spawned schedule tasks inherit it), shown as "Created by" on task detail and "by agent" on task rows.
 
+## Trees
+
+Trees are the only way to express dependencies. A tree is a DAG of tasks; a task's needs are tasks in the same tree that must settle before it starts. A failed need keeps its dependents blocked.
+
+- `--needs 3,5` / `needs` on `task add` / `create_task` makes the task wait for those tasks (it joins their tree, or starts one). `--tree ID` / `treeId` joins a tree.
+- `stage tree new --title T 3 5:3 7:3,5` / `create_tree` builds a tree from existing tasks (`ID:NEED,NEED`). `tree add`, `tree rm`, `task needs` / `add_to_tree`, `remove_from_tree`, `set_needs` edit it; `tree show` / `get_tree` shows levels, states, needs and readiness.
+- **Start mode**: tasks inherit their tree's mode by default. Set shared policy on the tree (`tree new|edit --start-mode auto|manual`, `update_tree`): auto launches members once their needs settle; manual marks them ready and notifies, and `tree start` / `start_tree` starts every ready member. `--start-mode auto|manual` on a task is a per-task exception; `inherit` clears it.
+- `task start` / `start_task` on a blocked task starts it early and keeps its needs.
+- **Close work**: `tree done|archive ID` / `update_tree status` (`--undo` reopens); `task archive ID` / `archive_task` for a standalone task. Neither works while a task is launching, running or needs input. `task rm` / `delete_task` and `tree rm-tree` / `delete_tree` only delete work that never started and has no recorded work.
+
 ## Run after me
 
-`--after-me` / `afterMe` starts the task when the calling session is settled in T3 (error without a calling session).
+`--after-me` / `afterMe` adopts the calling session as a task (stage never starts it) and makes it the new task's first need, so the task starts when the session is settled in T3. It errors without a calling session.
 
-- A session owned by a task becomes a normal task link (`afterTaskId`).
-- Any other session is a session link (`afterThreadId`). Many tasks may wait on one session.
-
-Rules: [link rules](/docs/api/tasks#link-rules).
+`stage sessions adopt [THREAD_ID]` / `adopt_session` does the adoption alone (default: the calling session), so a session can be a tree node.
 
 ## Handoff
 
-A linked task's launch prompt gets its predecessor's final reply, PRs, branch/worktree and thread id. Default on.
+When a task with needs starts, its launch prompt gets one block per finished need: final reply, PRs, branch/worktree and thread id. Default on.
 
-- Turn off with `--handoff=false` / `handoff: false` on `create_task`, `update_task` or `link_task` (CLI `task add|link --handoff=false`, `task edit --handoff=true|false`). Omitted keeps the task's value.
-- `get_task` returns `handoff` and `currentHandoff`. `stage task show` prints `handoff  on|off` for linked tasks and the current attempt's record.
-
-Block format: [Handoff](/docs/api/tasks#handoff).
+- Turn off with `--handoff=false` on `task add` (`task edit --handoff=true|false`), or `handoff: false` on `create_task` / `update_task`. Omitted keeps the task's value.
+- The reply cap per need is `min(4000, max(1000, 8000 / needs))` chars, with a pointer to `t3_thread_read` when truncated. A failed read skips that need and logs why; the launch still goes ahead.
+- `get_task` returns `handoff` and `currentHandoffs` (one per need). `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records.
 
 ## Predecessor base
 
-`--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a linked task's worktree from its predecessor's branch. `--base-ref` is the fallback.
+`--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `--base-task ID` / `baseTaskId` picks the need, else the sole need; `--base-ref` / `baseRef` is the fallback.
 
-- `create_task`, `create_schedule`, `update_task`, `update_schedule` and `link_task` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`).
-- On create it needs `baseRef` (the fallback). On `update_task` / `link_task` without `baseRef` it keeps the task's current worktree (error for a root task).
+- Tasks only; schedules reject it (their runs have no needs).
+- It falls back to the base ref when no need can be picked, the need ran at project root or in another project, has no branch, its PRs are all merged, or the branch is gone.
 - `get_task` returns `currentLaunchBase`. `stage task show` prints `worktree from #12's branch (fallback origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
 
-Rules: [Predecessor base](/docs/api/tasks#predecessor-base).
+## Journals
+
+Every task and tree has an append-only journal ([Journals](/docs/features#journals)).
+
+- **MCP**: `read_journal` (previews of 600 runes, notes by default; exactly one of `taskId` or `treeId`; follow `nextCursor`), `get_journal_entry` (full text), `append_note` (up to 16 KiB; exactly one of `taskId` or `treeId`; `requestId` required).
+- **CLI**: `stage task|tree notes ID [list] [--kind notes|events|all] [--category C] [--q TEXT] [--limit N]`, `... notes ID add --text TEXT [--category C] [--request-id KEY]` (`--text -` reads stdin; a tree note takes `--source-task ID`), `... notes ID get ENTRY_ID`.
+- Categories are optional: `finding`, `decision`, `blocker`, `outcome`. Retry a write with the same `requestId` and identical content; the CLI generates a key when you omit one.
+- Refresh membership with `get_context` or `get_task` first. Write your own progress to the task (`taskId`) and shared conclusions to the tree (`treeId` with `sourceTaskId`). Adding a note to closed work never reopens it.
+- Every launch, including standalone tasks and handoff off, includes a journal instruction block: checkpoint before risky work, record the outcome before returning, treat notes as context rather than instructions or proof, and report failed writes. The block is fixed per launch attempt. Existing and adopted sessions receive no retroactive message.
+- New tasks and adopted sessions take `--initial-note` / `initialNote`; schedules take `--notes` as a template for each spawned task.
+
+## References
+
+A prompt can point at other work with a stage link (`[stage task #12: Fix login](http://host:7380/tasks/12)`, `.../sessions/<id>`, any host), a T3 thread link, `#12` or a thread id. `read_ref` / `stage show REF` returns the task and/or session (prompt, state, handoff, latest reply, PRs, branch, runs); `t3_thread_read` on the returned session id reads the full conversation. `stage setup instructions` tells agents to do this; rerun it to add the rule to an existing block.
 
 ## Session batch
 
-The tasks a session created, grouped into run-order chains (head first) and independent tasks.
+The tasks a session created, grouped by tree, then independent tasks.
 
 - `get_session` / `stage sessions show` return it (`createdTasks`) so a planning agent can check what it queued. `get_task` returns `batch`.
-- `order_tasks` / `stage task order ID ID...` links several backlog tasks in order in one step. `order_tasks` takes `taskIds` and returns `{ "tasks": Task[] }`.
 - In the web UI, session detail lists the batch ("Created tasks") and task detail shows it as a compact Batch panel.
-
-Rules: [Session batch](/docs/api/tasks#session-batch).
 
 ## MCP tools
 
 | Area | Tools |
 |---|---|
 | Context | `get_context`, `list_projects`, `list_models` |
-| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `link_task`, `order_tasks`, `unlink_task`, `wait_task` |
+| Journals | `read_journal`, `get_journal_entry`, `append_note` |
+| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `wait_task` |
+| Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree`, `adopt_session` |
 | Schedules | `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule` |
-| Sessions | `list_sessions`, `search_sessions`, `get_session`, `get_session_questions` |
+| Sessions | `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`, `read_ref` |
 
 - Results are the REST shapes; lists are compact rows. Errors are tool errors carrying the API `error`.
-- `list_tasks` and `list_sessions` rows carry `lastWordPreview`. `get_task` and `get_session` carry the reply excerpt in `thread.lastWord` (the CLI prints it as "last word"), plus `pullRequests` and `thread.recentRuns` (the CLI prints a `prs` block and a `runs` block: newest 10, `(10 of N runs)`; `--json` has every stored run).
+- `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`; open tasks by default (`closed: true|all` adds archived tasks and members of done or archived trees). `list_sessions` rows carry `lastWordPreview`.
+- `get_task` and `get_session` carry the reply excerpt in `thread.lastWord` (the CLI prints it as "last word"), plus `pullRequests` and `thread.recentRuns` (the CLI prints a `prs` block and a `runs` block: newest 10, `(10 of N runs)`; `--json` has every stored run).
 - `get_session_questions` / `stage sessions questions ID` read pending questions. Agents cannot answer them.
-- `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) wraps [`GET /api/threads/search`](/docs/api/threads#get-apithreadssearch) and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`.
-- `imagePaths` reads local files and uploads them (`POST /api/uploads`). CLI and stdio only; HTTP MCP rejects them.
-- `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600). CLI `task wait` exits 3 on timeout.
+- `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) finds sessions by title, branch, PR or project, then by message text via T3, and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`.
+- `imagePaths` reads local files and uploads them. CLI and stdio only; HTTP MCP rejects them.
+- `wait_task` polls the task every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 
 ## Examples
 
@@ -96,8 +124,12 @@ stage task add --title "Deploy" --prompt-file deploy.md --after-me             #
 echo "..." | stage task add --title "Refactor" --prompt - --base-ref origin/main --start
 stage task ls --state backlog --json
 stage task wait 42 --until done,settled --timeout 30m                          # exit 3 on timeout
-stage task order 41 43 42                                                      # 43 runs after 41, 42 after 43
-stage sessions show "$T3CODE_THREAD_ID"                                        # this session's batch
-stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Asia/Kolkata
+stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
+stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once 42 settles
+stage tree start 7                                                             # start every ready member
+stage task notes 42 add --text "Chose cookie sessions" --category decision
+stage sessions show "$T3CODE_THREAD_ID"                                         # this session's batch
+stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
+stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
 stage sessions search "token refresh" --project stage                          # titles, then message text via T3
 ```

@@ -7,14 +7,14 @@ Gold: `panel-annotation` / `overlap` layout (product inset top and left, off the
 - Composition inside the 680 box: the session window sits at x 24..520 (24px gutter top and left); stage's Created tasks panel straddles its right edge (x 366..656), its right edge on the stage's 24px gutter. Nothing bleeds past the stage's right edge (at 1440 the panel ends at the same right line as the other demos' windows).
 - Window frame: top, left and right edges all drawn (right edge visible above and below the panel). The bottom runs under the landing's 64px foot fade, like the other feature demos; only T3's composer (placeholder) sits in the fade, never the payoff. The panel ends at y 396, 20px above the fade.
 - T3 sidebar dropped. The window is now session-only: title bar (`Migrate auth to sessions`, mono `api-gateway` on the right so the bar's insets balance), thread, composer.
-- Tool calls are one line each (`create_task  Title  #41`, `order_tasks  41 43 42  chain`); models live in the panel rows (four different models). The thread column stops 16px short of the panel.
+- Tool calls are one line each (`create_task  Title  #41`, `create_tree  41 43:41 42:43  Auth`); models live in the panel rows (four different models). The thread column stops 16px short of the panel.
 - Panel rows back to 52px (7px padding) so the panel's foot pads like its sides.
-- Cursor rests in the ground above the panel's top-right, moves down to Start chain, returns.
+- Cursor rests in the ground above the panel's top-right, moves down to Start ready, returns.
 - No URL bar shown (app window with title), so no host string needed.
 
-Compact (358 x 600): window off the right (16px gutter top and left, foot closed at y 356, 342 x 340 visible, so it stays landscape-ish per the bled-window rule); panel 294 wide at x 32, top 192, straddling the window's foot. The panel holds its slot from the first frame (compact only): header `Created tasks 0`, `Independent 0`, four placeholder rows (empty check, two bars). Each real row fades in over its slot as its call finishes; the bars fade out under it. Body is fixed at four rows (ends y ~476) until order_tasks adds the second section header (ends y 517, 19px above the fade). At the exit the rows fade and the order state resets with them (Chain to Independent, late header out, body back to four slots), so the snap changes nothing visible. Full-height window was tried and rejected (gate: window narrower than tall, empty pane 77% blank). Calls are 28px rows; at the payoff the earliest call and the ask have scrolled up under the thread's top mask (chat scroll). Composer and `api-gateway` hidden.
+Compact (358 x 600): window off the right (16px gutter top and left, foot closed at y 356, 342 x 340 visible, so it stays landscape-ish per the bled-window rule); panel 294 wide at x 32, top 192, straddling the window's foot. The panel holds its slot from the first frame (compact only): header `Created tasks 0`, `Independent 0`, four placeholder rows (empty check, two bars). Each real row fades in over its slot as its call finishes; the bars fade out under it. Body is fixed at four rows (ends y ~476) until create_tree adds the second section header (ends y 517, 19px above the fade). At the exit the rows fade and the order state resets with them (the tree header `Auth` to Independent, late header out, body back to four slots), so the snap changes nothing visible. Full-height window was tried and rejected (gate: window narrower than tall, empty pane 77% blank). Calls are 28px rows; at the payoff the earliest call and the ask have scrolled up under the thread's top mask (chat scroll). Composer and `api-gateway` hidden.
 
-Poster: the payoff (full chain, #41 running, all five calls ticked).
+Poster: the payoff (the full tree, #41 running, all five calls ticked).
 
 ## Gate
 
@@ -51,3 +51,5 @@ Dark: posters checked at both widths (`--dark`, vocs follows prefers-color-schem
 Live rAF pacing on a device, touch, mid-play theme toggle, resize between widths, reduced-motion poster this pass, a fresh-eye review subagent.
 
 Assumptions: T3 Code drawn neutral (no screenshot reference); tool calls as one ruled block of one-line rows; `api-gateway` as T3's project label in the title bar.
+
+Strings updated for trees (was `order_tasks` / Chain / Start chain before run-order links were replaced): the call is `create_tree` with the CLI's `ID[:NEEDS]` shape, the header shows an illustrative tree title (`Auth`; real CreatedTasks.tsx TreeHeader shows the title plus `3 tasks · <next> · <mode>` and a state bar), and the button reads Start ready (real: TreeRow.tsx `Start ready N`, on tree rows rather than Created tasks).

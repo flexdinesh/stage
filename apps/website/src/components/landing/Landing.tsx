@@ -111,14 +111,20 @@ export function Landing() {
           <Actions primary={closing.primary} secondary={closing.secondary} />
         </div>
         <figure className="lp-panel">
-          <figcaption className="lp-panel__header">Docker compose</figcaption>
+          <figcaption className="lp-panel__header">Install</figcaption>
           <pre className="lp-panel__body">
             <code>
-              {closing.quickstart.map((line) => (
-                <span key={line} className="lp-cmd">
-                  {line}
-                </span>
-              ))}
+              {closing.quickstart.map((line) =>
+                line.startsWith('# ') ? (
+                  <span key={line} className="lp-cmd lp-cmd--note">
+                    {line.slice(2)}
+                  </span>
+                ) : (
+                  <span key={line} className="lp-cmd">
+                    {line}
+                  </span>
+                ),
+              )}
               <span className="lp-cmd lp-cmd--note">{closing.quickstartNote}</span>
             </code>
           </pre>

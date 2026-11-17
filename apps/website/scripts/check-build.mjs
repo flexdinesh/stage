@@ -5,16 +5,12 @@ const out = new URL('../dist/public/', import.meta.url)
 const routes = [
   'index.html',
   'docs/index.html',
+  'docs/install/index.html',
+  'docs/t3/index.html',
+  'docs/desktop/index.html',
   'docs/deploy/index.html',
   'docs/features/index.html',
   'docs/agents/index.html',
-  'docs/api/index.html',
-  'docs/api/projects/index.html',
-  'docs/api/tasks/index.html',
-  'docs/api/schedules/index.html',
-  'docs/api/threads/index.html',
-  'docs/api/notifications/index.html',
-  'docs/api/other/index.html',
 ]
 
 const failures = []

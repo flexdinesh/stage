@@ -1,107 +1,144 @@
 ---
-title: Deploy
-description: Run stage with Docker compose on the T3 host, configure it, update it, and set up HTTPS for the PWA and Web Push notifications.
+title: Headless server
+description: Run the stage server as a per-user service or in the foreground, configure listeners and T3, secure it, and set up HTTPS for the PWA and push notifications.
 showAskAi: false
 ---
 
-# Deploy
+# Headless server
 
-stage runs on the same machine as T3. Requires Docker with compose.
+On a headless install (or any machine where you want stage without the desktop app), the `stage` CLI runs the server. One server owns one data dir and talks to one T3. Install first: [Install](/docs/install) with `--headless`.
 
-## Run with Docker compose
+## Run as a service
+
+The usual way: an OS per-user service (systemd user unit on Linux, launchd agent on macOS) supervises `stage serve --managed`. It runs as you, never root, restarts on failure with backoff, and logs to journald (Linux) or `~/Library/Logs/stage/stage.log` (macOS). The desktop app starts this same service itself.
 
 :::steps
 
-### Clone
+### Start
 
 ```sh
-git clone https://github.com/flexdinesh/stage.git
-cd stage
+stage service start      # register and start; waits until the server answers
 ```
 
-### Issue an admin token
+It creates `service.env` if missing and never restarts a running server.
 
-On the T3 host, issue an admin token. stage uses it to mint and auto-renew its own T3 access every 30 days:
+### Pair with T3
+
+Open the Dashboard ([Listeners](#listeners) for browser access) or run `stage t3 pair`. See [Connect to T3](/docs/t3).
+
+### Optional: start at login
 
 ```sh
-t3 auth session issue --ttl 3650d --label stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
+stage service enable     # login startup, separate from running now
 ```
-
-### Configure
-
-```sh
-cp .env.example .env
-```
-
-Set `T3_ADMIN_TOKEN` to the token, and `T3_PUBLIC_URL` to the T3 address browsers use for "Open in T3" links. See [Configuration](#configuration) for every variable.
-
-### Run
-
-```sh
-docker compose up -d --build
-```
-
-Open `http://127.0.0.1:7380` on the host. compose publishes the port on the host's loopback only; see [Ports and network](#ports-and-network) to expose it.
 
 :::
 
-:::note
-Without an admin token, connect from Settings: manual pairing exchanges a pairing code from `t3 pair` for a token. Settings also shows T3 connection status and has Sync now.
-:::
+| Command | Does |
+|---|---|
+| `stage service start [--wait 30s]` | register or update the definition, create `service.env`, start if not running, wait for readiness |
+| `stage service restart` | start, and restart a running server (apply `service.env` edits) |
+| `stage service stop` | stop through the service manager; the server drains for up to 100s |
+| `stage service status` | state, Stage health and T3 reported separately, log location, problems with fixes |
+| `stage service logs [-f] [-n 100]` | recent log lines |
+| `stage service enable` / `disable` | login startup on or off (neither starts nor stops it) |
+| `stage service uninstall` | stop, disable and remove the definition; keeps data, `service.env` and logs |
+
+Every command but `logs` takes `--json`. Service commands always act on this installation's own service; `--url` and `STAGE_URL` do not apply. Agent commands never start a server; when nothing answers, their error suggests `stage service start`.
+
+- **Config**: the service reads only `service.env`, never your shell: `~/.config/stage/service.env` (`$XDG_CONFIG_HOME/stage/`) on Linux, `~/Library/Application Support/stage/service.env` on macOS. See [Configuration](#configuration).
+- **Logout**: on Linux the user manager stops at your last logout unless lingering is on (`loginctl enable-linger`); with lingering an enabled service also starts at boot. stage never changes lingering. On macOS the agent runs in your GUI session. Without a user manager (no logind session, containers, WSL without systemd) `stage service` exits 6 with remedies; run `stage serve` in the foreground or under your own supervisor instead.
+
+## Run in the foreground
+
+```sh
+stage serve                                    # or just `stage`; listens on 127.0.0.1:7380
+stage serve --listen unix,127.0.0.1:7380       # the private socket and TCP, one process
+```
+
+A foreground server reads its config from the environment only (no `.env` file). It stops with its terminal (SIGINT/SIGTERM drain in-flight requests for up to 100s). Only one server can own a data dir: a second one, or a foreground server against the running service, exits with the holder's pid and listeners (run `stage service stop` first).
+
+`stage status [--wait DUR]` shows which server the CLI reaches, its version, readiness and T3 state.
+
+## Listeners
+
+One process serves every listener. `STAGE_LISTEN` takes a comma list; `stage serve --listen` (repeatable) replaces it.
+
+| Item | Meaning |
+|---|---|
+| `host:port` | TCP. An empty host means all interfaces. |
+| `unix` | the private default socket for this data dir, mode `0600` (e.g. `/run/user/1000/stage/stage.sock`) |
+| `unix:/abs/path.sock` | an explicit socket, mode `0660` (a proxy in its group can reach it) |
+
+- Foreground default: `127.0.0.1:7380`. Service default: `unix` only. The service requires `unix` (the socket the desktop and CLI use); add TCP for a browser with `STAGE_LISTEN=unix,127.0.0.1:7380` in `service.env`, then `stage service restart`.
+- The CLI and `stage mcp` find the private socket by themselves when a server owns it; otherwise they use `http://127.0.0.1:7380`. `STAGE_URL` (or `--url`) overrides it: an `http(s)` URL or `unix:///abs/path.sock`.
+- Browsers need TCP, or a reverse proxy in front of a socket (e.g. Caddy `reverse_proxy unix//run/stage/stage.sock`).
+- Socket paths must be absolute and fit the OS limit (107 bytes on Linux, 103 on macOS).
 
 ## Configuration
 
-`.env` is read by compose (`env_file`, optional). Values from `.env.example`:
+Environment variables: `service.env` for the service (a `KEY=VALUE` file, mode `0600`; apply edits with `stage service restart`), the shell for a foreground `stage serve`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `T3_ADMIN_TOKEN` | empty | Admin token from `t3 auth session issue`. Enables OAuth token auto-renew. |
-| `T3_URL` | `http://127.0.0.1:3773`; compose: `http://host.docker.internal:3773` | T3 Code server URL stage uses (MCP/OAuth). Under compose T3 runs on the Docker host, which must listen beyond loopback. |
-| `T3_PUBLIC_URL` | `T3_URL` | Browser-facing T3 URL for "Open in T3" links. Set it when browsers reach T3 at another address (always under compose). |
-| `STAGE_PUBLIC_URL` | empty | Public URL of the PWA, e.g. `https://stage.example.com` behind an HTTPS reverse proxy. When it is https it is also the Web Push VAPID subject. Optional. |
-| `STAGE_LISTEN` | `127.0.0.1:7380`; compose: `0.0.0.0:7380` | Listen address: `host:port`, or `unix:/abs/path.sock` for a unix socket (0660). `stage serve --listen ADDR` overrides it. |
-| `STAGE_DATA_DIR` | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`); compose: `/data` | SQLite data dir (holds `stage.db`). |
-| `T3_FAKE` | empty | `1` uses an in-memory fake T3 (UI/dev without a T3 server). |
+| `STAGE_LISTEN` | foreground `127.0.0.1:7380`; service `unix` | listen addresses ([Listeners](#listeners)) |
+| `STAGE_PUBLIC_URL` | unset | HTTPS URL the PWA is served at. Its origin is trusted by the [request origin policy](#security); when `https` it is the Web Push VAPID subject (a fallback is used otherwise). Push works without it. |
+| `STAGE_ALLOWED_ORIGINS` | unset | comma list of extra trusted browser origins (`https://host[:port]`), e.g. a Tailscale or Caddy hostname other than `STAGE_PUBLIC_URL`'s |
+| `T3_URL` | `http://127.0.0.1:3773` | the T3 server stage calls. Without it, the URL saved in the app applies; with it, that setting is locked ([T3 address](/docs/t3#t3-address)) |
+| `T3_PUBLIC_URL` | `T3_URL` | the T3 address browsers use for "Open in T3" links |
+| `T3_ADMIN_TOKEN` | unset | optional; lets stage mint and renew its own T3 session ([Admin token](/docs/t3#admin-token)) |
+| `T3_BIN` | unset | the `t3` CLI that Pair with T3 runs, when it is not on `PATH` or in a usual install dir |
+| `STAGE_DATA_DIR` | see [Data](#data) | data dir for a foreground server. Not allowed in `service.env`: the service always uses the default. |
 
-## Ports and network
-
-- Inside the container stage listens on `0.0.0.0:7380`.
-- compose publishes it as `127.0.0.1:7380:7380`: reachable from the host only, since there is no auth.
-- To expose it, change the host side in `compose.yaml` (e.g. `"7380:7380"`), ideally behind an HTTPS reverse proxy.
-- The container reaches T3 on the Docker host through `host.docker.internal` (`extra_hosts: host-gateway`).
-
-```yaml [compose.yaml]
-services:
-  app:
-    ports:
-      - "127.0.0.1:7380:7380"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      STAGE_LISTEN: 0.0.0.0:7380
-      STAGE_DATA_DIR: /data
-      T3_URL: ${T3_URL:-http://host.docker.internal:3773}
-    volumes:
-      - stagedata:/data
-```
+In `service.env`, unknown keys, `STAGE_DATA_DIR`, or a file readable by group or others make `stage service start` fail (exit 7) instead of a restart loop.
 
 ## Data
 
-The SQLite database (`stage.db`) lives in the `stagedata` volume (`STAGE_DATA_DIR=/data`). Outside Docker it defaults to `$XDG_DATA_HOME/stage` (else `~/.local/share/stage`; macOS `~/Library/Application Support/stage`).
+The SQLite database (`stage.db`) lives in the data dir: `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS: `~/Library/Application Support/stage`). Back it up.
 
-## Update
+Before migrating an existing database (after an update), the server copies it to `<data dir>/backups/stage-schema<N>-<time>.db`, keeping the newest 3. A server refuses to start on a database newer than it knows, so an older binary never runs against a migrated database. Uninstalling keeps the data dir.
 
-```sh
-git pull && docker compose up -d --build
-```
+## Security
 
-On shutdown the server waits up to 100s for in-flight launches; compose sets `stop_grace_period: 2m` above that. If you installed the [agent CLI](/docs/agents#install-and-register), rerun `mise run install-cli` after updating.
+:::warning
+stage has no authentication. Anyone who can reach a listener can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
+:::
 
-## Install as an app (PWA) and notifications
+- It binds `127.0.0.1` by default (the service: a private socket only). This keeps other machines out, not browsers.
+- `/api` and `/mcp` reject requests browsers send on behalf of other sites: a Host other than an IP, `localhost` or a trusted origin's host (DNS rebinding), cross-site and same-site requests (`Sec-Fetch-Site`, `Origin`), and form-encodable bodies (`text/plain`, urlencoded). Trusted origins are `STAGE_PUBLIC_URL`'s and those in `STAGE_ALLOWED_ORIGINS`; any other hostname gets `403 host … not allowed`.
+- That policy is not authentication. Any process or person that can reach a listener directly has full access. A private socket (`unix`, mode `0600`) limits that to your user.
+- Before exposing stage to a network, put an authenticating HTTPS reverse proxy in front and keep stage itself unreachable except through it. A tailnet limits who can connect, not what they can do.
+- `service.env` may hold `T3_ADMIN_TOKEN`; keep it private.
 
-Push and install need HTTPS. Put a reverse proxy (e.g. Caddy) with a trusted cert in front of `:7380` and set `STAGE_PUBLIC_URL` to that URL (it is also the VAPID subject).
+## HTTPS and push notifications
 
-The domain can stay private (LAN/tailnet): the server only makes outbound requests to the browser push services (Apple, Google, Mozilla). The device needs internet to receive pushes.
+Push notifications and installing the PWA need a secure context. `http://localhost` is one, so both work in a browser on the same machine with no setup. Other devices (phone, laptop) need HTTPS with a certificate they trust. Settings > Notifications says "needs https" when a page is opened over plain HTTP from another address.
+
+The server only makes outbound requests to the browser push services (Apple, Google, Mozilla), so the URL can stay private (LAN or tailnet). Devices need internet to receive pushes.
+
+Options, easiest first:
+
+- **Tailscale serve**: a real certificate for your tailnet name, nothing to install on devices; easiest for iOS. Enable HTTPS certificates for the tailnet, then on the stage host (with a TCP listener on `127.0.0.1:7380`):
+
+  ```sh
+  tailscale serve --bg http://127.0.0.1:7380
+  ```
+
+  stage is then at `https://<machine>.<tailnet>.ts.net`, reachable only from your tailnet. Add that origin to `STAGE_ALLOWED_ORIGINS` (or set it as `STAGE_PUBLIC_URL`).
+
+- **Caddy**: with a real domain, Caddy gets a certificate automatically:
+
+  ```txt
+  stage.example.com {
+      reverse_proxy 127.0.0.1:7380
+  }
+  ```
+
+  For a LAN-only name, issue a certificate with [mkcert](https://github.com/FiloSottile/mkcert) (`mkcert stage.lan`) and use `tls stage.lan.pem stage.lan-key.pem`. Every device must trust the mkcert root CA; on iOS install it as a profile, then enable it under Settings > General > About > Certificate Trust Settings.
+
+- **Any reverse proxy** that terminates TLS and forwards to stage, with the streaming settings below.
+
+Behind a proxy that forwards to `127.0.0.1`, HTTP MCP (`/mcp`) returns 403; agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL ([Agents](/docs/agents)).
 
 ### Reverse proxy and SSE
 
@@ -110,17 +147,18 @@ The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript
 - Caddy's `reverse_proxy` flushes it immediately. If your config uses `encode`, exclude that path so events are not buffered.
 - Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
 
-### Install
+## Install as an app (PWA) and notifications
 
-- **iOS/iPadOS 16.4+**: open the URL in Safari, Share → Add to Home Screen, open stage from the Home Screen, then Settings → Notifications → Enable.
-- **macOS**: Safari → File → Add to Dock (or use the site in Safari/Chrome), then Settings → Notifications → Enable.
+- **iOS/iPadOS 16.4+**: open the HTTPS URL in Safari, Share > Add to Home Screen, open stage from the Home Screen, then Settings > Notifications > Enable.
+- **macOS**: Safari > File > Add to Dock (or use the site in Safari or Chrome), then Settings > Notifications > Enable.
+- Settings > Notifications > Send test checks the device.
 
-### Test
+Which events notify (needs input, failed, ready, done, settled) is a global filter in Settings that applies to every device. See [Notifications](/docs/features#notifications). On the desktop app, notifications are native instead ([Desktop app](/docs/desktop#notifications)).
 
-Settings → Notifications → Send test checks the device.
+## Update
 
-:::note
-The service worker registers only in production builds (`mise run build` or compose).
-:::
+```sh
+stage update
+```
 
-Which events notify (needs input, failed, done, settled) is a global filter in Settings that applies to every device. See [Notifications](/docs/features#notifications) and the [notification rules](/docs/api/notifications#notification-rules).
+Installs the latest release in the same mode and restarts the service if it was running this install (in-flight requests drain for up to 100s; no task is relaunched; T3 and its agents are untouched). A foreground `stage serve` is left alone, with a note to restart it. Details: [Install](/docs/install#update).

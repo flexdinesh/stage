@@ -1,0 +1,66 @@
+---
+title: Connect to T3
+description: Pair a stage server with T3 Code from the Dashboard or the CLI, set the T3 address, and keep the connection healthy.
+showAskAi: false
+---
+
+# Connect to T3
+
+Each stage server talks to one T3 Code server, through T3's MCP endpoint and OAuth. stage needs a T3 session token, which it gets by pairing; the token is stored in the server's database, so a service or desktop app needs nothing else.
+
+## First run
+
+Until the server is paired and has synced once, the Dashboard is a setup screen ("Connect stage to T3") with three steps:
+
+- **t3**: T3 answers at the T3 URL (its label and version show). If it does not, the screen shows `t3 serve` to copy, Retry and the T3 URL (editable unless `T3_URL` sets it).
+- **pairing**: one action, below.
+- **first sync**: project and thread counts tick live. Existing T3 projects import automatically, and the Dashboard fills in place when the sync lands.
+
+## Pair with T3
+
+- **Pair with T3** (one click): works when T3 runs on the same machine as the stage server (the T3 URL is `localhost` or a loopback IP) and its `t3` CLI is found. stage runs `t3 auth pairing create` with a 5 minute code and redeems it. The CLI is looked up on `PATH`, then in the usual install dirs (`~/.local/bin`, `~/.bun/bin`, `~/.local/share/pnpm`, `~/.npm-global/bin`, `~/.volta/bin`, `/usr/local/bin`, `/opt/homebrew/bin`); set `T3_BIN` when it is elsewhere (a service manager's `PATH` is minimal).
+- **Pairing code**: when T3 runs on another machine or its CLI is missing, run `t3 pair` on the T3 host and paste the code into the setup screen (or Settings, Pair).
+
+The same from a terminal:
+
+```sh
+stage t3 pair                  # auto-pair through the t3 CLI on the server's machine
+stage t3 pair --code CODE      # redeem a code from `t3 pair` on the T3 host
+```
+
+Pairing starts a full sync. The first pairing binds the server to that T3 environment: to use another T3, run another stage server with its own data dir.
+
+## Admin token
+
+Optional. A pairing gives stage a 30-day session that is not renewed. With a T3 admin token, stage mints and renews its own session instead (renewing when less than 5 days remain). Issue one on the T3 host:
+
+```sh
+t3 auth session issue --ttl 3650d --label stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
+```
+
+Set it as `T3_ADMIN_TOKEN` in the server's environment: `service.env` for the per-user service ([Headless server](/docs/deploy#configuration)). Keep it private; `service.env` must not be readable by group or others.
+
+## T3 address
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `T3_URL` | `http://127.0.0.1:3773` | The T3 server stage calls. Without it, the URL saved in the app (setup screen, Settings or `stage t3 url`) applies; with it, that setting is locked. |
+| `T3_PUBLIC_URL` | `T3_URL` | The T3 address browsers use for "Open in T3" links. Set it when browsers reach T3 at another address. |
+
+```sh
+stage t3 url                         # show it
+stage t3 url http://10.0.0.5:3773    # save it (http(s)://host[:port])
+stage t3 url --reset                 # back to the default
+```
+
+Once the server is bound, the T3 URL can only change to an address serving the same T3 environment.
+
+## Status and troubleshooting
+
+```sh
+stage t3 status    # URL, reachability, pairing, token expiry, sync, auto-pair availability
+```
+
+Later trouble (T3 unreachable, unpaired, session expired or rejected) shows as an alert at the top of the Dashboard with the same fix, and the top bar's T3 control turns yellow (pairing) or red (T3 or its pairing failed). Settings shows the T3 connection, Pair, the T3 URL and Sync now.
+
+stage reports itself and T3 separately: a missing or offline T3 never stops the stage server from starting, and `stage service status` lists T3 apart from the server's own health.

@@ -1,45 +1,56 @@
 ---
 title: Introduction
-description: What stage is, how it sits beside T3 Code, what it needs to run, and how it is built.
+description: What stage is, how it sits beside T3 Code, what it needs to run, how to keep it private, and how it is built.
 showAskAi: false
 ---
 
 # Introduction
 
-stage is a self-hosted task manager for T3 Code. Queue tasks, launch them as T3 threads, link them to run in order, schedule them, track status, and see history across all projects. It runs on the same machine as T3 and talks to T3 only through T3's MCP endpoint.
+stage is a self-hosted task manager for T3 Code. Queue tasks, launch them as T3 threads, run them as dependency trees, schedule them, answer what blocks them, and see history across all projects. It runs as a desktop app or as a headless server, and talks to one T3 Code server.
 
 ## stage beside T3
 
 stage sits beside T3 rather than replacing it.
 
 - **T3** is where conversations happen. Every task links straight to its thread ("Open in T3"). Tool calls, commands, diffs, permission approvals and settling a thread stay in T3.
-- **stage** owns what T3 does not provide: the backlog, run order between tasks (even across projects), one-shot and recurring schedules, and a cross-project view of every T3 thread, including ones started outside stage.
+- **stage** owns what T3 does not provide: the backlog, trees of tasks that start when the tasks they need settle (even across projects), one-shot and recurring schedules, task and tree journals, and a cross-project view of every T3 thread, including ones started outside stage.
 - **The one exception** is a session's pending question. stage shows it and lets you answer it in place, so a thread that needs input can be unblocked from a phone in one step.
 
-Typical loop: queue work from a laptop or an agent, let linked tasks start as their predecessors settle in T3, and answer whatever needs input from your phone when a push arrives.
+Typical loop: queue work from a laptop or an agent, let tasks in a tree start as the tasks they need settle in T3, and answer whatever needs input from your phone when a push arrives.
 
 ## Requirements
 
-- A machine running the T3 Code server. stage runs on the same host.
-- Docker with compose.
-- Shell access to the T3 host to issue an admin token (`t3 auth session issue`), used by stage to mint and auto-renew its own T3 access.
-- Optional: an HTTPS reverse proxy with a trusted certificate, needed to install stage as an app (PWA) and receive Web Push notifications.
+- A running T3 Code server. stage usually runs on the same machine; a T3 elsewhere is paired with a code from `t3 pair` ([Connect to T3](/docs/t3)).
+- Linux or macOS (amd64 or arm64), installed per user without root ([Install](/docs/install)).
+  - **Desktop app**: Linux with glibc, GTK 3 and WebKitGTK 4.1. Mac desktop releases ship only once they can be signed and notarized; until then use the headless install on a Mac.
+  - **Headless server**: needs nothing else.
+- Push notifications and installing the web app (PWA) need a secure context: `http://localhost` on the same machine, or HTTPS with a certificate your devices trust ([HTTPS and push notifications](/docs/deploy#https-and-push-notifications)).
+
+## Security
 
 :::warning
-stage has no authentication. Run it on a trusted private network (LAN or tailnet). compose publishes it on the host's loopback only by default.
+stage has no authentication. Anyone who can reach its listener can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
 :::
 
-## Stack
+- It listens on `127.0.0.1:7380` by default, or only on a private Unix socket (mode `0600`) when it runs as the per-user service.
+- `/api` and `/mcp` reject requests browsers send on behalf of other sites (DNS rebinding, cross-site requests, form-encodable bodies). That policy is not authentication.
+- Before exposing it to a network, put an authenticating HTTPS reverse proxy in front. A tailnet limits who can connect, not what they can do.
 
-- **Server**: Go, shipped as a single binary. No arguments runs the server; subcommands are the [agent CLI](/docs/agents).
-- **Storage**: SQLite (`stage.db`), in the `stagedata` Docker volume under compose.
-- **Web app**: React, installable as a PWA with Web Push.
-- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`). stage polls active tasks every 5s, runs a full sync every 5 min, and polls watched transcripts every 2s while their run is active.
-- **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the [REST API](/docs/api).
+Details: [Security](/docs/deploy#security).
+
+## How it is built
+
+- **Server and CLI**: Go, one binary (`stage`). `stage` with no arguments or `stage serve` runs the server; other subcommands are the [agent CLI](/docs/agents) and management commands (`stage service`, `stage update`, `stage t3`).
+- **Storage**: SQLite (`stage.db`) in the data dir: `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`).
+- **Web app**: React, served by the server, installable as a PWA with Web Push.
+- **Desktop app**: the same UI in a native window. It bundles the CLI/server, starts the per-user service and connects over its Unix socket ([Desktop app](/docs/desktop)).
+- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, runs a full sync every 5 min, and polls watched transcripts every 2s while their run is active.
+- **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API.
 
 ## Next steps
 
-- [Deploy](/docs/deploy): issue a token, configure `.env`, `docker compose up`, then set up HTTPS for the PWA and notifications.
+- [Install](/docs/install): the desktop app, or the headless server for a remote machine.
+- [Connect to T3](/docs/t3): pair stage with your T3 server.
+- [Desktop app](/docs/desktop) or [Headless server](/docs/deploy): run and manage stage.
 - [Features](/docs/features): everything stage does, grouped by area.
 - [Agents](/docs/agents): let agents running in T3 queue and manage tasks through the CLI or MCP.
-- [REST API](/docs/api): the contract every front end uses.

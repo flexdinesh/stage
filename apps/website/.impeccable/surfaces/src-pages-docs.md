@@ -9,7 +9,7 @@ related_targets: ["src/pages/_root.css"]
 Docs at `/docs/*` (src/pages/docs, vocs layout themed by src/pages/_root.css). Mode: Read.
 
 ## Audience and task
-A T3 user deploying stage, installing the PWA, wiring agents via CLI/MCP, or looking up a REST endpoint. Structure: Introduction, Deploy, Features, Agents, REST API (split by resource). Wayfinding via vocs sidebar, outline and search; Ask AI disabled on every page.
+A T3 user installing stage (desktop or headless), pairing it with T3, installing the PWA, or wiring agents via CLI/MCP. Structure: Introduction, Install, Connect to T3, Desktop app, Headless server, Features, Agents. No REST API reference (repo-only). Wayfinding via vocs sidebar, outline and search; Ask AI disabled on every page.
 
 ## Direction contract
 THESIS: Vocs' reading layout kept intact, re-inked in stage's world so the docs feel like the app's manual, not a generic docs theme.
@@ -20,4 +20,4 @@ FORM: Vocs default full layout, restyled only through CSS variables and minimal 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 ## Constraints
-Ask AI never shown; no invented claims; content sourced from stage README, docs/api.md, PRODUCT.md.
+Ask AI never shown; no invented claims; content sourced from the engineering contracts (docs/*.md) and code per docs/architecture.md Documentation ownership, plus PRODUCT.md.
