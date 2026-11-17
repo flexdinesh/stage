@@ -1,7 +1,16 @@
-# One lockfile for the shared app (packages/app), the browser host (apps/web)
-# and the desktop host's frontend (desktop/app/ui). desktop/fixture/web is an
-# isolated probe with its own lockfile; it stays out.
+# One lockfile for the shared app (packages/app), the browser host (apps/web),
+# the desktop host's frontend (desktop/app/ui) and the marketing/docs site
+# (apps/website, never needed by product builds: they install with --filter).
+# desktop/fixture/web is an isolated probe with its own lockfile; it stays out.
 packages:
   - apps/web
+  - apps/website
   - packages/app
   - desktop/app/ui
+
+# Install scripts (pnpm builds only what is allowed here).
+allowBuilds:
+  esbuild: true
+  es5-ext: false
+  vue-demi: false
+  workerd: true

@@ -1,0 +1,282 @@
+/* Landing page: stage's Ink Workbench at marketing scale. Tokens: src/pages/_root.css */
+
+.lp {
+  --lp-max: 1240px;
+  --lp-gutter: 24px;
+  color: var(--st-fg);
+  font-family: var(--st-font);
+  background: var(--st-bg);
+  /* Escape vocs' content padding so hairlines run edge to edge. */
+  margin-inline: calc(-1 * var(--vocs-spacing-content-px, 0px));
+}
+
+.lp > section {
+  padding-inline: max(var(--lp-gutter), calc((100% - var(--lp-max)) / 2));
+}
+
+/* ---- type ---- */
+
+.lp-h1 {
+  margin: 0;
+  max-width: 15ch;
+  font-size: clamp(40px, 6.2vw, 76px);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  color: var(--st-fg);
+}
+
+.lp-h2 {
+  margin: 0;
+  max-width: 18ch;
+  font-size: clamp(28px, 3.2vw, 38px);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  color: var(--st-fg);
+}
+
+.lp-lede {
+  margin: 20px 0 0;
+  max-width: 58ch;
+  font-size: clamp(17px, 1.5vw, 19px);
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--st-muted);
+  text-wrap: pretty;
+}
+
+.lp-body {
+  margin: 16px 0 0;
+  max-width: 46ch;
+  font-size: 16.5px;
+  line-height: 1.55;
+  color: var(--st-muted);
+  text-wrap: pretty;
+}
+
+.lp-meta {
+  margin: 16px 0 0;
+  font-family: var(--st-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--st-muted);
+}
+.lp-meta b {
+  color: var(--st-fg);
+  font-weight: 700;
+}
+
+/* ---- actions ---- */
+
+.lp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+.lp-btn svg {
+  transition: transform 150ms ease-out;
+}
+.lp-btn:hover svg {
+  transform: translateX(2px);
+}
+.lp-btn--primary {
+  background: var(--st-accent);
+  color: var(--st-on-accent);
+}
+.lp-btn--primary:hover {
+  background: color-mix(in srgb, var(--st-accent) 86%, var(--st-bg));
+}
+.lp-btn--secondary {
+  background: var(--st-surface);
+  color: var(--st-fg);
+  border-color: var(--st-line-strong);
+}
+.lp-btn--secondary:hover {
+  background: var(--st-panel);
+}
+
+.lp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--st-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--st-line-strong);
+  text-underline-offset: 4px;
+  transition: text-decoration-color 150ms ease-out;
+}
+.lp-link:hover {
+  text-decoration-color: var(--st-fg);
+}
+
+/* ---- hero ---- */
+
+.lp-hero {
+  padding-top: clamp(48px, 8vw, 104px);
+  padding-bottom: clamp(48px, 6vw, 80px);
+  border-bottom: 1px solid var(--st-line);
+}
+
+.lp-hero__visual {
+  margin-top: clamp(40px, 5vw, 64px);
+}
+
+/* ---- feature rows ---- */
+
+.lp-feature {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+  padding-block: clamp(64px, 8vw, 112px);
+  border-bottom: 1px solid var(--st-line);
+}
+
+.lp-facts {
+  display: grid;
+  gap: 8px;
+  margin: 24px 0 0;
+  padding: 16px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--st-line);
+  font-family: var(--st-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--st-muted);
+}
+.lp-facts li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+.lp-facts li::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--st-line-strong);
+  transform: translateY(-2px);
+}
+
+.lp-feature__visual {
+  min-width: 0;
+}
+
+/* ---- closing ---- */
+
+.lp-closing {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+  padding-block: clamp(72px, 9vw, 128px);
+}
+
+/* A stage panel: tinted header bar with an uppercase mono label, hairline body. */
+.lp-panel {
+  margin: 0;
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+.lp-panel__header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-panel);
+  font-family: var(--st-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--st-fg);
+}
+.lp-panel__body {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  background: transparent;
+  font-family: var(--st-mono);
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--st-fg);
+}
+.lp-panel__body code {
+  display: grid;
+  font: inherit;
+  background: none;
+  padding: 0;
+}
+.lp-cmd::before {
+  content: "$ ";
+  color: var(--st-muted);
+}
+.lp-cmd--note {
+  color: var(--st-muted);
+}
+.lp-cmd--note::before {
+  content: "# ";
+}
+
+/* ---- demos: inert pictures with one crop grammar (a soft fade at the foot) ---- */
+
+.lp-demo {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 64px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 64px), transparent);
+}
+
+/* ---- placeholder (removed once a demo lands) ---- */
+
+.demo-placeholder {
+  aspect-ratio: 16 / 11;
+  border: 1px dashed var(--st-line-strong);
+  background: var(--st-panel);
+}
+.lp-hero__visual .demo-placeholder {
+  aspect-ratio: 1080 / 460;
+}
+
+/* ---- phone ---- */
+
+@media (max-width: 767px) {
+  .lp {
+    --lp-gutter: 16px;
+  }
+  .lp-feature,
+  .lp-closing {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+    padding-block: 56px;
+  }
+  .lp-body {
+    font-size: 16px;
+  }
+  .lp-actions .lp-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}

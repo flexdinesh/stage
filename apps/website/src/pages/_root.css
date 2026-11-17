@@ -1,0 +1,152 @@
+@layer vocs_theme, theme, base, vocs_base, vocs_components, components, vocs_utilities, utilities, stageshow;
+
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* ---- stage Ink Workbench tokens (shared by docs, landing and demos) ---- */
+
+:root {
+  --st-bg: #ffffff;
+  --st-surface: #ffffff;
+  --st-panel: #f6f7f9;
+  --st-line: rgba(11, 13, 20, 0.11);
+  --st-line-strong: rgba(11, 13, 20, 0.2);
+  --st-fg: #0b0d14;
+  --st-muted: #5b6170;
+  --st-accent: #0b0d14;
+  --st-on-accent: #ffffff;
+  --st-need: #d9a900;
+  --st-need-fg: #7a5c00;
+  --st-run: #0369a1;
+  --st-done: #0f766e;
+  --st-ok: #15803d;
+  --st-bad: #b3261e;
+  --st-idle: #6b7280;
+  --st-font: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --st-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+:root[data-vocs-theme="dark"] {
+  --st-bg: #1a1d23;
+  --st-surface: #1f2229;
+  --st-panel: #252830;
+  --st-line: rgba(220, 226, 235, 0.11);
+  --st-line-strong: rgba(220, 226, 235, 0.22);
+  --st-fg: #e6e8ee;
+  --st-muted: #9aa1b0;
+  --st-accent: #eef0f5;
+  --st-on-accent: #0b0d14;
+  --st-need: #e3c341;
+  --st-need-fg: #efd36a;
+  --st-run: #5ec4f0;
+  --st-done: #4fd1c5;
+  --st-ok: #5fd38a;
+  --st-bad: #ec8378;
+  --st-idle: #9aa1b0;
+}
+
+/* ---- vocs mapped onto stage ---- */
+
+:root:root {
+  --vocs-font-family: var(--st-font);
+  --vocs-font-family-mono: var(--st-mono);
+
+  --vocs-background-color-primary: var(--st-bg);
+  /* vocs paints the reading field with `surface`: keep it on the ground. */
+  --vocs-background-color-surface: var(--st-bg);
+  --vocs-background-color-surfaceMuted: var(--st-panel);
+  --vocs-background-color-surfaceTint: var(--st-panel);
+  --vocs-background-color-code-block: var(--st-panel);
+  --vocs-background-color-inline-code: var(--st-panel);
+  --vocs-background-color-code-highlighted: var(--st-line);
+  --vocs-background-color-blockquote: var(--st-panel);
+
+  --vocs-text-color-heading: var(--st-fg);
+  --vocs-text-color-primary: var(--st-fg);
+  --vocs-text-color-secondary: var(--st-muted);
+  --vocs-text-color-muted: var(--st-muted);
+  --vocs-text-color-link: var(--st-fg);
+  --vocs-text-color-link-hover: var(--st-muted);
+  --vocs-text-color-quote: var(--st-muted);
+
+  --vocs-border-color-primary: var(--st-line);
+  --vocs-border-color-secondary: var(--st-line);
+  --vocs-border-color-code-highlighted: var(--st-line-strong);
+  --vocs-border-color-tab-active: var(--st-accent);
+
+  --vocs-color-accent: var(--st-accent);
+  --vocs-color-blue: var(--st-run);
+  --vocs-color-green: var(--st-ok);
+  --vocs-color-red: var(--st-bad);
+  --vocs-color-yellow: var(--st-need);
+  --vocs-color-iris: var(--st-done);
+
+  --vocs-radius-xs: 0px;
+  --vocs-radius-sm: 0px;
+  --vocs-radius-md: 0px;
+  --vocs-radius-lg: 0px;
+  --vocs-radius-xl: 0px;
+  --vocs-radius-2xl: 0px;
+
+  --vocs-tracking-tight: -0.025em;
+}
+
+/* Zero radius everywhere, including vocs' literal pills. */
+[data-vocs] .vocs\:rounded-full,
+[data-vocs] [class*="rounded"],
+[data-vocs] [data-v-surface-bg],
+[data-vocs] [data-v-step-title]::before {
+  border-radius: 0;
+}
+
+/* Ask AI is disabled per page via frontmatter; this is the fallback. */
+[data-v-ask-ai-container] {
+  display: none !important;
+}
+
+/* Stage's idle stepped glyph; keep Vocs' text wordmark and accessible link. */
+[data-v-logo-text] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+[data-v-logo-text]::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--st-accent);
+  mask: url('/mark.svg') center / contain no-repeat;
+}
+
+/* Browser surfaces */
+::selection {
+  background: var(--st-accent);
+  color: var(--st-on-accent);
+}
+:focus-visible {
+  outline: 2px solid var(--st-accent);
+  outline-offset: 2px;
+  border-radius: 0;
+}
+html {
+  scrollbar-color: var(--st-line-strong) transparent;
+  accent-color: var(--st-accent);
+  caret-color: var(--st-accent);
+}
+body {
+  background: var(--st-bg);
+  font-feature-settings: "ss01" off;
+}
+code,
+kbd,
+samp,
+pre,
+td {
+  font-variant-numeric: tabular-nums;
+}
+a {
+  text-underline-offset: 3px;
+}

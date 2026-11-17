@@ -33,7 +33,7 @@ wait
 [tasks.build]
 description = "Browser host bundle (apps/web/dist) embedded into a single Go binary at bin/stage"
 run = [
-  "pnpm install --frozen-lockfile && pnpm --filter @stage/web build",
+  "pnpm install --frozen-lockfile --filter '@stage/web...' && pnpm --filter @stage/web build",
   "find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete",
   "cp -r apps/web/dist/. server/internal/webui/dist/",
   # Version/commit for /api/health and `stage status` (docs/runtime.md).
@@ -48,15 +48,15 @@ run = [
 ]
 
 [tasks.test]
-description = "Go tests + packages/app, apps/web and desktop UI tests, typecheck, lint"
+description = "Go tests + packages/app, apps/web and desktop UI tests, typecheck, lint (website: check:website)"
 run = [
   "cd server && go vet ./... && go test ./...",
-  "pnpm -r test && pnpm -r typecheck && pnpm -r lint",
+  "pnpm -r --filter '!@stage/website' test && pnpm -r --filter '!@stage/website' typecheck && pnpm -r --filter '!@stage/website' lint",
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, workspace install + test/typecheck/lint, desktop fixture and desktop app Go tests, release tool"
-depends = ["check:go", "check:web", "check:fixture", "check:desktop", "check:release"]
+description = "Everything CI-like: go vet + go test, workspace install + test/typecheck/lint, website checks, desktop fixture and desktop app Go tests, release tool"
+depends = ["check:go", "check:web", "website:check", "check:fixture", "check:desktop", "check:release"]
 
 [tasks."check:go"]
 description = "go vet (with and without the smoke tag) + go test"
@@ -67,8 +67,29 @@ description = "Real user-service smoke check (Linux systemd --user) with the iso
 run = "cd server && STAGE_SERVICE_SMOKE=1 go test -tags smoke -count=1 -v -timeout 10m -run '^TestSmoke$' ./internal/service"
 
 [tasks."check:web"]
-description = "Workspace install (frozen lockfile) + app and web host test/typecheck/lint"
-run = "pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm -r lint"
+description = "Workspace install (frozen lockfile, product packages) + app, web host and desktop UI test/typecheck/lint"
+run = "pnpm install --frozen-lockfile --filter '!@stage/website' && pnpm -r --filter '!@stage/website' test && pnpm -r --filter '!@stage/website' typecheck && pnpm -r --filter '!@stage/website' lint"
+
+# Website (apps/website, @stage/website): static marketing and public docs on
+# vocs. Independent of product builds and of a running Stage server.
+[tasks."website:dev"]
+description = "Website vocs dev server (:5175)"
+run = "pnpm install --filter '@stage/website...' && pnpm --filter @stage/website dev"
+
+[tasks."website:build"]
+description = "Website static build to apps/website/dist/public"
+run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website build"
+
+[tasks."website:check"]
+description = "Website: frontmatter (Ask AI off), typecheck, lint, vocs build (dead links), static output for every route"
+alias = "check:website"
+# Under `mise run check`, install after check:web's install, never concurrently.
+wait_for = ["check:web"]
+run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website check"
+
+[tasks."website:preview"]
+description = "Website static build served the way Cloudflare Workers does (wrangler dev, :8787)"
+run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website build && pnpm --filter @stage/website preview"
 
 [tasks."check:fixture"]
 description = "Desktop fixture (desktop/fixture): go vet (with and without e2e tag) + go test; no webview needed"
@@ -146,7 +167,7 @@ raw = true
 run = '''
 #!/usr/bin/env bash
 set -e
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --filter '@stage/desktop...'
 pnpm --filter @stage/desktop build
 cd desktop/app
 go test -tags e2e -count=1 -v -timeout 10m ./e2e
@@ -162,7 +183,7 @@ cd desktop/fixture
 find dist -mindepth 1 ! -name .gitkeep -delete
 (cd web && pnpm install --frozen-lockfile && pnpm test && pnpm lint && pnpm build)
 if [ "${STAGE_FIXTURE_REAL_UI:-}" = 1 ]; then
-  (cd ../../apps/web && pnpm install --frozen-lockfile && pnpm build)
+  (cd ../../apps/web && pnpm install --frozen-lockfile --filter '@stage/web...' && pnpm build)
 fi
 go test -tags e2e -count=1 -v ./e2e
 '''

@@ -46,8 +46,10 @@ build() {
   echo "==> $name $VERSION ($IDENTITY, ${COMMIT}) from $src"
   echo "    cli: ${CLI_TARGETS[*]}; desktop: ${DESKTOP_TARGETS[*]:-none}"
 
-  # Web assets: built once, embedded in every CLI/server binary.
-  (cd "$src" && pnpm install --frozen-lockfile && pnpm --filter @stage/web build)
+  # Web assets: built once, embedded in every CLI/server binary. Product
+  # packages only (the browser host and the desktop UI MyGo builds below);
+  # apps/website is never installed or built here.
+  (cd "$src" && pnpm install --frozen-lockfile --filter '@stage/web...' --filter '@stage/desktop...' && pnpm --filter @stage/web build)
   find "$src/server/internal/webui/dist" -mindepth 1 ! -name .gitkeep -delete
   cp -R "$src/apps/web/dist/." "$src/server/internal/webui/dist/"
 
