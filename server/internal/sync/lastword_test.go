@@ -37,6 +37,15 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := res.ThreadID
+	if err := svc.RefreshSession(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertT3Projects(ctx, []t3.Project{{ID: "p", Title: "p", WorkspaceRoot: "/w/p"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.AdoptThread(ctx, db.AdoptInput{ThreadID: id}); err != nil {
+		t.Fatal(err)
+	}
 	mutate := func(fn func(*t3.ThreadDetail)) {
 		t.Helper()
 		if err := client.SetThread(id, fn); err != nil {
@@ -92,7 +101,11 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	}
 
 	// Needs input counts as at rest despite the active run.
-	mutate(func(d *t3.ThreadDetail) { d.ActiveRunID = "run-2"; d.Status = t3.StatusWaiting; d.PendingRequestCount = 1 })
+	mutate(func(d *t3.ThreadDetail) {
+		d.ActiveRunID = "run-2"
+		d.Status = t3.StatusWaiting
+		d.PendingRequestCount = 1
+	})
 	refresh(3)
 
 	// A failed read never fails the refresh and retries on the next one.

@@ -8,17 +8,12 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // ThreadChange is an external thread's observed state change (watcher).
 // From nil = first observation.
-type ThreadChange struct {
-	ThreadID  string
-	ProjectID string // T3 project id
-	Title     string
-	From      *db.TaskState
-	To        db.TaskState
-}
+type ThreadChange = workevent.SessionChange
 
 // watchStatuses: thread statuses the watcher lists from T3 (active runs).
 // subagent is T3 relationshipToParent of a subagent thread (never watched).
@@ -30,7 +25,7 @@ var watchStatuses = []t3.ThreadStatus{
 
 // Notifiable: entering these states notifies (docs/api.md "Notification rules").
 func Notifiable(s db.TaskState) bool {
-	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed || s == db.StateSettled
+	return workevent.Notifiable(s)
 }
 
 // WatchThreads reads every active external thread (unsettled root threads in

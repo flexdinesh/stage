@@ -22,7 +22,7 @@ func threadArgs(t t3.Thread) []any {
 		nullIfEmpty(string(t.RuntimeMode)), nullIfEmpty(string(t.InteractionMode)),
 		nullIfEmpty(t.ParentThreadID), nullIfEmpty(t.RelationshipToParent),
 		nullIfEmpty(t.CreationSource), nullIfEmpty(t.Link), created, updated, nullIfEmpty(t.LatestRunID), t.Archived,
-		nonNilPRs(t.PullRequests),
+		[]t3.PullRequest{},
 	}
 }
 
@@ -31,23 +31,6 @@ func nonNilPRs(prs []t3.PullRequest) []t3.PullRequest {
 		return []t3.PullRequest{}
 	}
 	return prs
-}
-
-// maxStoredRuns caps threads.recent_runs (t3_thread_read runLimit).
-const maxStoredRuns = 50
-
-// threadRuns maps recentRuns (newest first) to the stored shape.
-func threadRuns(runs []t3.Run) []ThreadRun {
-	out := make([]ThreadRun, 0, min(len(runs), maxStoredRuns))
-	for _, r := range runs[:min(len(runs), maxStoredRuns)] {
-		out = append(out, ThreadRun{
-			RunID: r.RunID, Ordinal: r.Ordinal, Status: string(r.Status),
-			ProviderInstanceID: nullIfEmpty(r.ProviderInstanceID), Model: nullIfEmpty(r.Model),
-			ExecutedModel: nullIfEmpty(r.ExecutedModel), RequestedAt: r.RequestedAt,
-			StartedAt: r.StartedAt, CompletedAt: r.CompletedAt,
-		})
-	}
-	return out
 }
 
 const threadUpsertList = `
@@ -63,7 +46,7 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   parent_thread_id = EXCLUDED.parent_thread_id, relationship = EXCLUDED.relationship,
   creation_source = EXCLUDED.creation_source, link = COALESCE(EXCLUDED.link, threads.link),
   created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
-  latest_run_id = EXCLUDED.latest_run_id, pull_requests = EXCLUDED.pull_requests,
+  latest_run_id = EXCLUDED.latest_run_id,
   active_run_id = CASE WHEN EXCLUDED.status IN ('completed','failed','cancelled','interrupted','rolled_back','idle') THEN NULL ELSE threads.active_run_id END,
   latest_run_status = CASE WHEN EXCLUDED.latest_run_id IS NOT threads.latest_run_id THEN NULL ELSE threads.latest_run_status END,
   synced_at = ` + nowSQL + ` WHERE EXCLUDED.updated_at >= threads.updated_at`
@@ -96,7 +79,7 @@ func (s *Store) UpsertThreadDetail(ctx context.Context, d t3.ThreadDetail) error
 	}
 	start, end := RunSpan(d)
 	args := append(threadArgs(d.Thread), nullIfEmpty(d.Branch), nullIfEmpty(d.WorktreePath), d.PendingRequestCount,
-		nullIfEmpty(d.ActiveRunID), nullIfEmpty(latest), start, end, threadRuns(d.RecentRuns), d.RunCount)
+		nullIfEmpty(d.ActiveRunID), nullIfEmpty(latest), start, end, []ThreadRun{}, d.RunCount)
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, settled_at,
   provider_instance_id, model, runtime_mode, interaction_mode, parent_thread_id,
@@ -113,11 +96,10 @@ ON CONFLICT (t3_thread_id) DO UPDATE SET
   created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
   branch = EXCLUDED.branch, worktree_path = EXCLUDED.worktree_path,
   pending_request_count = EXCLUDED.pending_request_count, archived = EXCLUDED.archived,
-  pending_question_count = CASE WHEN EXCLUDED.pending_request_count = 0 THEN 0 ELSE threads.pending_question_count END,
   active_run_id = EXCLUDED.active_run_id, latest_run_id = EXCLUDED.latest_run_id,
   latest_run_status = EXCLUDED.latest_run_status,
   run_started_at = EXCLUDED.run_started_at, run_ended_at = EXCLUDED.run_ended_at,
-  pull_requests = EXCLUDED.pull_requests, recent_runs = EXCLUDED.recent_runs, run_count = EXCLUDED.run_count, synced_at = `+nowSQL+`
+    run_count = EXCLUDED.run_count, synced_at = `+nowSQL+`
 WHERE EXCLUDED.updated_at >= threads.updated_at`, args...)
 	return err
 }

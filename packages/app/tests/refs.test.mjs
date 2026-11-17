@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseStageRef, refPath, sessionMarkdown, sessionUrl, splitStageRefs, taskMarkdown, taskUrl } from "../src/lib/refs.ts";
+import { parseStageRef, splitStageRefs, taskMarkdown, taskUrl } from "../src/lib/refs.ts";
 
 const origin = "http://localhost:7380";
 const link = (path) => origin + path;
@@ -10,8 +10,6 @@ test("copied links name themselves and escape brackets in titles", () => {
   assert.equal(taskUrl(link, 12), "http://localhost:7380/tasks/12");
   assert.equal(taskMarkdown(link, 12, "Fix [login] flake"), "[stage task #12: Fix \\[login\\] flake](http://localhost:7380/tasks/12)");
   assert.equal(taskMarkdown(link, 3, "a\\b\n  c"), "[stage task #3: a\\\\b c](http://localhost:7380/tasks/3)");
-  assert.equal(sessionUrl(link, "codex:ab%c"), "http://localhost:7380/sessions/codex%3Aab%25c");
-  assert.equal(sessionMarkdown(link, "t-1", "Plan auth"), "[stage session: Plan auth](http://localhost:7380/sessions/t-1)");
 });
 
 test("stage links match by path on any host", () => {
@@ -53,11 +51,6 @@ test("desktop deep links read as stage links", () => {
     { kind: "ref", ref: { kind: "session", id: "t-1" }, text: "stage-dev://sessions/t-1", href: "stage-dev://sessions/t-1" },
     { kind: "text", text: "." },
   ]);
-});
-
-test("refPath is the in-app route", () => {
-  assert.equal(refPath({ kind: "task", id: 4 }), "/tasks/4");
-  assert.equal(refPath({ kind: "session", id: "a:b" }), "/sessions/a%3Ab");
 });
 
 test("splitStageRefs pulls markdown and bare stage links out of text", () => {

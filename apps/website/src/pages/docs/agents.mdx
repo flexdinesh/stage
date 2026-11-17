@@ -11,10 +11,10 @@ Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks 
 ## Front ends
 
 - **CLI**:
-  - `stage task add|ls|show|edit|needs|notes|rm|start|stop|followup|dup|archive|wait`
+  - `stage task add|ls|show|edit|needs|notes|rm|start|stop|dup|archive|wait`
   - `stage tree ls|show|new|add|rm|edit|notes|start|done|archive|rm-tree`
   - `stage schedule ls|show|add|edit|rm|run|pause|resume|preview`
-  - `stage sessions ls|search|show|questions|adopt` (questions is read-only)
+  - `stage sessions adopt` (explicit link or ID)
   - `stage show REF` (a stage link, T3 thread link, `#ID` or thread id), `stage projects ls`, `stage models ls`, `stage context`, `stage guide` (the agent workflow guide)
 
   Human output by default, `--json` for agents and scripts. `stage help` lists everything.
@@ -88,14 +88,11 @@ Every task and tree has an append-only journal ([Journals](/docs/features#journa
 
 ## References
 
-A prompt can point at other work with a stage link (`[stage task #12: Fix login](http://host:7380/tasks/12)`, `.../sessions/<id>`, any host), a T3 thread link, `#12` or a thread id. `read_ref` / `stage show REF` returns the task and/or session (prompt, state, handoff, latest reply, PRs, branch, runs); `t3_thread_read` on the returned session id reads the full conversation. `stage setup instructions` tells agents to do this; rerun it to add the rule to an existing block.
+A prompt can point at other work with a stage link (`[stage task #12: Fix login](http://host:7380/tasks/12)`, `.../sessions/<id>`, any host), a T3 thread link, `#12` or a thread id. `read_ref` / `stage show REF` returns the task and/or session (task prompt, state, handoff, latest reply and explicit session metadata); `t3_thread_read` on the returned session id reads the full conversation. `stage setup instructions` tells agents to do this; rerun it to add the rule to an existing block.
 
 ## Session batch
 
-The tasks a session created, grouped by tree, then independent tasks.
-
-- `get_session` / `stage sessions show` return it (`createdTasks`) so a planning agent can check what it queued. `get_task` returns `batch`.
-- In the web UI, session detail lists the batch ("Created tasks") and task detail shows it as a compact Batch panel.
+`list_tasks {originThreadId}` (CLI `stage task ls --origin-thread ID`) lists a creator session's tasks. `get_task` returns the grouped `batch`. Task detail opens a Batch drawer with selection, editing, and Parallel or Chain tree creation.
 
 ## MCP tools
 
@@ -103,16 +100,14 @@ The tasks a session created, grouped by tree, then independent tasks.
 |---|---|
 | Context | `get_context`, `list_projects`, `list_models` |
 | Journals | `read_journal`, `get_journal_entry`, `append_note` |
-| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `followup_task`, `duplicate_task`, `wait_task` |
+| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `duplicate_task`, `wait_task` |
 | Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree`, `adopt_session` |
 | Schedules | `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule` |
-| Sessions | `list_sessions`, `search_sessions`, `get_session`, `get_session_questions`, `read_ref` |
+| Sessions | `adopt_session`, `read_ref` |
 
 - Results are the REST shapes; lists are compact rows. Errors are tool errors carrying the API `error`.
-- `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`; open tasks by default (`closed: true|all` adds archived tasks and members of done or archived trees). `list_sessions` rows carry `lastWordPreview`.
-- `get_task` and `get_session` carry the reply excerpt in `thread.lastWord` (the CLI prints it as "last word"), plus `pullRequests` and `thread.recentRuns` (the CLI prints a `prs` block and a `runs` block: newest 10, `(10 of N runs)`; `--json` has every stored run).
-- `get_session_questions` / `stage sessions questions ID` read pending questions. Agents cannot answer them.
-- `search_sessions` (`stage sessions search QUERY [--project P] [--limit N]`) finds sessions by title, branch, PR or project, then by message text via T3, and returns `{ results: [{ t3ThreadId, title, match, snippet?, project?, state?, taskId?, lastWordPreview?, t3WebUrl? }], t3 }`.
+- `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`; open tasks by default (`closed: true|all` adds archived tasks and members of done or archived trees).
+- `get_task` retains `thread.lastWord` and static `artifactLinks`; the CLI prints the final reply and artifact URLs.
 - `imagePaths` reads local files and uploads them. CLI and stdio only; HTTP MCP rejects them.
 - `wait_task` polls the task every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 

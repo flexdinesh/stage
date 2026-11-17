@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -175,7 +176,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 	ev := nextSSE(t, events, true)
 	got := decodeEvent[streamRow](t, ev, "notification")
 	want := streamRow{ID: taskRow, Event: "needs_input", Read: false, Tag: fmt.Sprintf("task-%d", tk.ID),
-		Title: "Needs input", Body: "Say OK · " + project, URL: "/sessions/provider:session%2Fx#answer"}
+		Title: "Needs input", Body: "Say OK · " + project, URL: fmt.Sprintf("/tasks/%d", tk.ID)}
 	if got.CreatedAt.IsZero() || ev.id != fmt.Sprint(taskRow) {
 		t.Fatalf("createdAt/id %+v %s", got, ev.id)
 	}
@@ -183,7 +184,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 	if got != want {
 		t.Fatalf("task row %+v, want %+v", got, want)
 	}
-	if got := decodeEvent[streamRow](t, nextSSE(t, events, true), "notification"); got.ID != extRow || got.URL != "/sessions/ext-2" || got.Body != "ext-2" {
+	if got := decodeEvent[streamRow](t, nextSSE(t, events, true), "notification"); got.ID != extRow || got.URL != "/?inbox" || got.Body != "ext-2" {
 		t.Fatalf("thread row %+v", got)
 	}
 	u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread")
@@ -281,6 +282,58 @@ func TestNotificationStreamPingAndHubShutdown(t *testing.T) {
 		ev := nextSSE(t, events, true)
 		if ev.name == "EOF" {
 			break
+		}
+	}
+}
+
+type sseEvent struct{ name, id, data string }
+
+// sseReader parses an event stream; comments come back as name ":".
+func sseReader(t *testing.T, resp *http.Response) <-chan sseEvent {
+	t.Helper()
+	out := make(chan sseEvent, 64)
+	go func() {
+		defer close(out)
+		sc := bufio.NewScanner(resp.Body)
+		var ev sseEvent
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case line == "":
+				if ev != (sseEvent{}) {
+					out <- ev
+				}
+				ev = sseEvent{}
+			case strings.HasPrefix(line, ":"):
+				out <- sseEvent{name: ":", data: strings.TrimSpace(line[1:])}
+			case strings.HasPrefix(line, "event: "):
+				ev.name = line[len("event: "):]
+			case strings.HasPrefix(line, "id: "):
+				ev.id = line[len("id: "):]
+			case strings.HasPrefix(line, "data: "):
+				ev.data = line[len("data: "):]
+			case strings.HasPrefix(line, "retry: "):
+				out <- sseEvent{name: "retry", data: line[len("retry: "):]}
+			}
+		}
+	}()
+	return out
+}
+
+func nextSSE(t *testing.T, ch <-chan sseEvent, skipPings bool) sseEvent {
+	t.Helper()
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				return sseEvent{name: "EOF"}
+			}
+			if skipPings && ev.name == ":" {
+				continue
+			}
+			return ev
+		case <-time.After(3 * time.Second):
+			t.Fatal("no event")
 		}
 	}
 }

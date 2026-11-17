@@ -160,9 +160,9 @@ func TestToolList(t *testing.T) {
 	}
 	want := []string{
 		"get_context", "list_projects", "list_models", "list_tasks", "get_task", "create_task", "update_task",
-		"delete_task", "archive_task", "start_task", "stop_task", "followup_task", "duplicate_task",
+		"delete_task", "archive_task", "start_task", "stop_task", "duplicate_task",
 		"wait_task", "list_schedules", "get_schedule", "create_schedule", "update_schedule", "delete_schedule",
-		"run_schedule", "preview_schedule", "list_sessions", "search_sessions", "get_session", "get_session_questions", "read_ref",
+		"run_schedule", "preview_schedule", "read_ref",
 		"list_trees", "get_tree", "create_tree", "update_tree", "delete_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
 		"adopt_session", "read_journal", "get_journal_entry", "append_note",
 	}
@@ -253,7 +253,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 
 func TestLifecycleWaitTools(t *testing.T) {
 	e := newEnv(t)
-	p := e.project("/w/life")
+	e.project("/w/life")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/life"}, PollEvery: 10 * time.Millisecond})
 
 	var a, b client.Task
@@ -294,29 +294,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 	if !del.Deleted {
 		t.Fatal("delete")
 	}
-	mustCall(t, cs, "followup_task", map[string]any{"id": a.ID, "message": "more"}, nil)
 	mustCall(t, cs, "stop_task", map[string]any{"id": a.ID}, nil)
-
-	var sessions agenttools.SessionsOut
-	mustCall(t, cs, "list_sessions", map[string]any{"project": p.Title}, &sessions)
-	if sessions.Total != 1 || sessions.Sessions[0].TaskID == nil || *sessions.Sessions[0].TaskID != a.ID {
-		t.Fatalf("sessions %+v", sessions)
-	}
-	var sd client.ThreadDetail
-	mustCall(t, cs, "get_session", map[string]any{"id": *a.T3ThreadID}, &sd)
-	if sd.Task == nil || sd.Task.ID != a.ID {
-		t.Fatalf("session %+v", sd)
-	}
-
-	if _, err := e.fake.AddApproval(*a.T3ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	req, _ := e.fake.AddUserInput(*a.T3ThreadID, []t3.Question{{ID: "q", Header: "H", Question: "Which?", Options: []t3.QuestionOption{{Label: "A"}}}})
-	var pq client.PendingQuestions
-	mustCall(t, cs, "get_session_questions", map[string]any{"id": *a.T3ThreadID}, &pq)
-	if pq.PendingRequestCount != 2 || pq.ApprovalCount != 1 || len(pq.Requests) != 1 || pq.Requests[0].RequestID != req || pq.Requests[0].Questions[0].Question != "Which?" {
-		t.Fatalf("questions %+v", pq)
-	}
 }
 
 // settle completes and settles a launched task's thread, then lets the
@@ -635,15 +613,12 @@ func TestLastWordTools(t *testing.T) {
 	}
 	_ = e.fake.SetStatus(id, t3.StatusCompleted)
 
-	// get_session refreshes the session, which reads the reply.
-	var sd client.ThreadDetail
-	mustCall(t, cs, "get_session", map[string]any{"id": id}, &sd)
-	if sd.Thread.LastWord == nil || sd.Thread.LastWord.Text != "## Done\nFixed **the race**." || sd.Thread.LastWord.Truncated {
-		t.Fatalf("session last word %+v", sd.Thread.LastWord)
+	if err := e.sync.RefreshSession(t.Context(), id); err != nil {
+		t.Fatal(err)
 	}
 	var got client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": a.ID}, &got)
-	if got.Thread == nil || got.Thread.LastWord == nil || got.Thread.LastWord.Text != sd.Thread.LastWord.Text {
+	if got.Thread == nil || got.Thread.LastWord == nil || got.Thread.LastWord.Text != "## Done\nFixed **the race**." {
 		t.Fatalf("task thread last word %+v", got.Thread)
 	}
 	const preview = "Done Fixed the race."
@@ -655,38 +630,7 @@ func TestLastWordTools(t *testing.T) {
 	if rows.Total != 1 || rows.Tasks[0].LastWordPreview == nil || *rows.Tasks[0].LastWordPreview != preview {
 		t.Fatalf("list_tasks %+v", rows)
 	}
-	var sessions agenttools.SessionsOut
-	mustCall(t, cs, "list_sessions", map[string]any{"project": p.Title}, &sessions)
-	if sessions.Total != 1 || sessions.Sessions[0].LastWordPreview == nil || *sessions.Sessions[0].LastWordPreview != preview {
-		t.Fatalf("list_sessions %+v", sessions)
-	}
-}
 
-func TestSearchSessionsTool(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/search")
-	other := e.project("/w/search-other")
-	titled := e.session(p, "Palette search")
-	said := e.session(p, "What more?")
-	e.fake.AddMessage(said, t3.SearchAssistant, "…the palette should find sessions…")
-	e.session(other, "palette elsewhere")
-	cs := connect(t, &agenttools.Ops{Client: e.client})
-
-	var out agenttools.SearchSessionsOut
-	mustCall(t, cs, "search_sessions", map[string]any{"query": "palette", "project": p.Title}, &out)
-	if out.T3 != "ok" || len(out.Results) != 2 {
-		t.Fatalf("search %+v", out)
-	}
-	if r := out.Results[0]; r.T3ThreadID != titled || r.Match != "title" || r.State == nil || r.Snippet != nil {
-		t.Fatalf("title row %+v", r)
-	}
-	if r := out.Results[1]; r.T3ThreadID != said || r.Match != "assistant" || r.Snippet == nil ||
-		*r.Snippet != "…the palette should find sessions…" || r.Project == nil || *r.Project != p.Title {
-		t.Fatalf("message row %+v", r)
-	}
-	if msg := call(t, cs, "search_sessions", map[string]any{"query": "p"}, nil); !strings.Contains(msg, "2 to 200") {
-		t.Fatalf("short query error %q", msg)
-	}
 }
 
 // A planning session queues dependent tasks, then verifies the batch.
@@ -703,16 +647,10 @@ func TestPlanningSessionBatch(t *testing.T) {
 		t.Fatalf("b joins a's tree: %+v %+v", a, b)
 	}
 
-	var sd client.ThreadDetail
-	mustCall(t, cs, "get_session", map[string]any{"id": s}, &sd)
-	ct := sd.CreatedTasks
-	if len(ct.Trees) != 1 || ct.Trees[0].Tree.ID != *a.TreeID || ct.Trees[0].Tree.Title != "Planner" ||
-		len(ct.Trees[0].Tasks) != 2 || ct.Trees[0].Tasks[0].ID != a.ID || ct.Trees[0].Tasks[1].ID != b.ID ||
-		len(ct.Independent) != 1 || ct.Independent[0].ID != c.ID {
-		t.Fatalf("createdTasks %+v", ct)
-	}
-	if h := ct.Trees[0].Tasks[0]; len(h.Needs) != 1 || h.Needs[0] == b.ID {
-		t.Fatalf("a needs the planner's session task: %+v", h)
+	var rows agenttools.TasksOut
+	mustCall(t, cs, "list_tasks", map[string]any{"originThreadId": s}, &rows)
+	if rows.Total != 3 {
+		t.Fatalf("batch: %+v", rows)
 	}
 	var td client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &td)
@@ -796,7 +734,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 39 {
+	if err != nil || len(res.Tools) != 34 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut
@@ -818,36 +756,6 @@ func TestProjectForPath(t *testing.T) {
 		if (want == 0) == ok || (ok && p.ID != want) {
 			t.Fatalf("%q -> %+v %v, want %d", dir, p, ok, want)
 		}
-	}
-}
-
-func TestGetTaskAndSessionCarryPullRequestsAndRuns(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/prs")
-	s := e.session(p, "Agent")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s, Cwd: "/w/prs"}})
-	var tk client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "Ship", "prompt": "go", "start": true}, &tk)
-	if tk.T3ThreadID == nil {
-		t.Fatalf("not launched: %+v", tk)
-	}
-	pr := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "agent", State: "merged"}
-	if err := e.fake.SetThread(*tk.T3ThreadID, func(d *t3.ThreadDetail) { d.PullRequests = []t3.PullRequest{pr} }); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.sync.RefreshSession(context.Background(), *tk.T3ThreadID); err != nil {
-		t.Fatal(err)
-	}
-
-	var td client.TaskDetail
-	mustCall(t, cs, "get_task", map[string]any{"id": tk.ID}, &td)
-	if len(td.PullRequests) != 1 || td.PullRequests[0] != pr || td.Thread == nil || len(td.Thread.RecentRuns) != 1 || td.Thread.RunCount != 1 {
-		t.Fatalf("get_task prs=%+v thread=%+v", td.PullRequests, td.Thread)
-	}
-	var sd client.ThreadDetail
-	mustCall(t, cs, "get_session", map[string]any{"id": *tk.T3ThreadID}, &sd)
-	if len(sd.Thread.PullRequests) != 1 || sd.Thread.PullRequests[0] != pr || len(sd.Thread.RecentRuns) != 1 || sd.Thread.RecentRuns[0].Ordinal != 1 {
-		t.Fatalf("get_session thread=%+v", sd.Thread)
 	}
 }
 
@@ -995,8 +903,8 @@ func TestReadRefTool(t *testing.T) {
 	if r.Kind != "session" || r.Session == nil || r.Task == nil || r.Task.ID != tk.ID {
 		t.Fatalf("session ref %+v", r)
 	}
-	if r.Session.Thread.LastWord == nil || !strings.Contains(r.Session.Thread.LastWord.Text, "token refresh") {
-		t.Fatalf("session last word %+v", r.Session.Thread.LastWord)
+	if r.Task.Thread.LastWord == nil || !strings.Contains(r.Task.Thread.LastWord.Text, "token refresh") {
+		t.Fatalf("session last word %+v", r.Task.Thread.LastWord)
 	}
 
 	// External session: no task.

@@ -1,6 +1,6 @@
 # stage
 
-Self-hosted task manager for [T3 Code](https://github.com/pingdotgg/t3code). Queue tasks, launch them as T3 threads, run them as dependency trees, schedule them, answer what blocks them, and see history across all projects. A desktop app or a headless server beside T3, with an installable PWA and Web Push.
+Self-hosted task manager for [T3 Code](https://github.com/pingdotgg/t3code). Queue tasks, launch them as T3 threads, run them as dependency trees, schedule them, keep journals and final replies, and open T3 when work needs you. A desktop app or a headless server beside T3, with an installable PWA and Web Push.
 
 stage requires a running T3 Code server. Conversations stay in T3; every task links straight to its thread.
 

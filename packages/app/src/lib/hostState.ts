@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostState } from "../platform/index.ts";
-import { showT3Links } from "./host.ts";
+import { t3Destination } from "./host.ts";
 
 const unsubscribed = () => {};
 
@@ -23,9 +23,11 @@ export function useHostEpoch(): number {
   return useHostState()?.epoch ?? 0;
 }
 
-/** Whether "Open in app" / "Open in T3" apply (hidden while the desktop shows a remote server). */
-export function useShowT3Links(): boolean {
-  return showT3Links(useHostState());
+/** Remote Stage belongs to another machine: use its T3 web destination. */
+export function useT3Destination() {
+  const state = useHostState();
+  return useCallback((links: { t3DeepLink: string | null; t3WebUrl?: string | null }) =>
+    t3Destination(state, links), [state]);
 }
 
 export interface HostServerList {

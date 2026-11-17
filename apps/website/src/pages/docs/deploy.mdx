@@ -101,7 +101,7 @@ Before migrating an existing database (after an update), the server copies it to
 ## Security
 
 :::warning
-stage has no authentication. Anyone who can reach a listener can read every task and session, answer questions, and launch agents in full-access mode on the host (`full-access` is the task default).
+stage has no authentication. Anyone who can reach a listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host (`full-access` is the task default).
 :::
 
 - It binds `127.0.0.1` by default (the service: a private socket only). This keeps other machines out, not browsers.
@@ -142,7 +142,7 @@ Behind a proxy that forwards to `127.0.0.1`, HTTP MCP (`/mcp`) returns 403; agen
 
 ### Reverse proxy and SSE
 
-The live transcript is a Server-Sent Events stream (`/api/threads/:id/transcript/stream`).
+The notifications inbox uses a Server-Sent Events stream (`/api/notifications/stream`).
 
 - Caddy's `reverse_proxy` flushes it immediately. If your config uses `encode`, exclude that path so events are not buffered.
 - Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).

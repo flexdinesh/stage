@@ -15,12 +15,12 @@ export type Feature = {
 
 export const hero = {
   title: 'Keep T3 Code busy without babysitting it.',
-  body: 'stage is a self-hosted task manager for T3 Code. Save tasks to a backlog, run them as trees that start each task when its needs settle, put them on a schedule, and answer the threads that need you from your phone.',
+  body: 'stage is a self-hosted task manager for T3 Code. Save tasks to a backlog, run them as trees that start each task when its needs settle, put them on a schedule, and see what needs you from your phone.',
   meta: 'self-hosted beside T3 · desktop or headless · talks to T3 over MCP',
   primary: { text: 'Get started', href: '/docs/install' },
   secondary: { text: 'GitHub', href: 'https://github.com/flexdinesh/stage' },
   demoLabel:
-    "Animated demo: stage's dashboard, where a running task flips to needs input with a yellow edge, the question is answered in place, and the task goes back to running.",
+    "Animated demo: stage's dashboard, where a running task flips to needs input with a yellow edge, Open in T3 continues the conversation, and the task goes back to running.",
 }
 
 export const features: Feature[] = [
@@ -58,11 +58,11 @@ export const features: Feature[] = [
   },
   {
     id: 'pwa-push',
-    title: 'Answer from your lock screen.',
-    body: 'Install stage as an app and get a push when a thread needs input, fails or finishes. Tap it, answer the question in place, and the thread carries on.',
+    title: 'Know when work needs you.',
+    body: 'Install stage as an app and get a push when a thread needs input, fails or finishes. Tap it to view the task, then open T3 to continue.',
     facts: ['installable PWA with Web Push', 'needs input, failed, done, settled', 'the app badge counts what is waiting'],
     link: { text: 'Install and notifications', href: '/docs/deploy#install-as-an-app-pwa-and-notifications' },
-    demoLabel: "Animated demo: a stage push notification asks for input on a phone's lock screen; tapping it opens the installed app, an answer is sent, and the task runs again.",
+    demoLabel: "Animated demo: a stage push notification asks for input on a phone's lock screen; tapping it opens the installed app, Open in T3 continues the conversation.",
   },
 ]
 

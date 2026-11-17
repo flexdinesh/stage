@@ -62,25 +62,25 @@ func TestTarget(t *testing.T) {
 		"thread-../../etc": "/sessions/..",
 	}
 	cases := map[string]string{
-		"task-7":           "/sessions/thr%201#answer",
+		"task-7":           "/tasks/7",
 		"task-8":           "/tasks/8",
-		"thread-a b":       "/sessions/a%20b",
+		"thread-a b":       "/?inbox",
 		"notification-5":   "/",
 		"notification-6":   "/tasks/6",
 		"task-9":           "/tasks/9",
-		"thread-%2E%2E":    "/sessions/%252E%252E",
+		"thread-%2E%2E":    "/?inbox",
 		"summary":          "/?inbox",
 		"test":             "/settings",
 		"task-10":          "/tasks/10",
-		"thread-x":         "/sessions/x#answer",
-		"thread-../../etc": "/sessions/..%2F..%2Fetc",
+		"thread-x":         "/?inbox",
+		"thread-../../etc": "/?inbox",
 		"task-0":           "/",
 		"task-abc":         "/",
-		"thread-":          "/",
-		"thread-..":        "/",
+		"thread-":          "/?inbox",
+		"thread-..":        "/?inbox",
 		"unknown":          "/",
 		"":                 "/",
-		"thread-y":         "/sessions/y",
+		"thread-y":         "/?inbox",
 	}
 	for id, want := range cases {
 		if got := Target(id, known); got != want {

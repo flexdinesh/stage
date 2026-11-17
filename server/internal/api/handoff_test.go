@@ -102,7 +102,7 @@ func TestHandoffAppendedForNeed(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<handoff from="stage">`, fmt.Sprintf(`This task needs "Build API" (task #%d), settled `, a.ID), "T3 thread: " + thread,
-		"Branch: feat/api · Worktree: /w/wt-api", "me/app#41 (open) https://github.com/me/app/pull/41",
+		"Branch: feat/api · Worktree: /w/wt-api", "me/app#41 https://github.com/me/app/pull/41",
 		"Final reply:\nShipped the API; see PR 41.", "</handoff>",
 	} {
 		if !strings.Contains(h.Text, want) {

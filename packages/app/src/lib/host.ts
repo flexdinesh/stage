@@ -100,11 +100,13 @@ export function isServerSwitch(prev: HostState, next: HostState): boolean {
 }
 
 /**
- * Whether "Open in app" / "Open in T3" apply: always without a host-managed connection (the browser); on desktop
- * only while this machine's server is active, since a remote's T3 links name that machine's T3.
+ * Open local T3 through its app scheme. A remote Stage server uses its T3 web URL,
+ * because that server's app scheme would otherwise target this machine.
  */
-export function showT3Links(state: HostState | null): boolean {
-  return state === null || state.target.kind === "local";
+export function t3Destination(state: HostState | null, links: { t3DeepLink: string | null; t3WebUrl?: string | null }): string | null {
+  return state === null || state.target.kind === "local"
+    ? (links.t3DeepLink ?? links.t3WebUrl ?? null)
+    : (links.t3WebUrl ?? null);
 }
 
 export type ServerTone = "ok" | "run" | "bad" | "idle";

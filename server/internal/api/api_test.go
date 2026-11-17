@@ -28,7 +28,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
-	"github.com/flexdinesh/stage/server/internal/transcript"
 )
 
 var testDB dbtest.DB
@@ -88,12 +87,12 @@ func (f *flakyT3) LatestReply(ctx context.Context, in t3.LatestReplyInput) (t3.R
 
 type listGate struct{ gate, reached chan struct{} }
 
-func (f *flakyT3) ListThreads(ctx context.Context, in t3.ListThreadsInput) (t3.ThreadPage, error) {
+func (f *flakyT3) ReadThread(ctx context.Context, id string) (t3.ThreadDetail, error) {
 	if g := f.listGate.Swap(nil); g != nil {
 		g.reached <- struct{}{}
 		<-g.gate
 	}
-	return f.Fake.ListThreads(ctx, in)
+	return f.Fake.ReadThread(ctx, id)
 }
 
 func (f *flakyT3) takeLost() bool {
@@ -146,7 +145,6 @@ type env struct {
 	sync   *t3sync.Service
 	runner *release.Runner
 	store  *db.Store
-	hub    *transcript.Hub
 }
 
 const publicURL = "http://localhost:3773"
@@ -162,18 +160,15 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	svc.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)
 	runner.OnReady = push.OnReady
-	hub := transcript.NewHub(t.Context(), client, api.MirrorActive(store), log)
-	hub.PollEvery, hub.IdleEvery, hub.Grace = 10*time.Millisecond, 10*time.Millisecond, 50*time.Millisecond
 	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
 		Store:  store, T3: client, Sync: svc, Push: push, Logger: log,
-		Transcript: hub,
 	}
 	for _, opt := range opts {
 		opt(&deps)
 	}
 	h := api.NewRouter(deps)
-	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store, hub: hub}
+	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
 
 // do sends a request; out (if non-nil) receives the decoded body.
@@ -328,12 +323,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 2 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 3 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "2" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "3" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -411,7 +406,7 @@ func TestTaskLifecycle(t *testing.T) {
 	var stats struct {
 		NeedsInput int `json:"needsInput"`
 	}
-	e.must("GET", "/api/stats", nil, 200, &stats)
+	e.must("GET", "/api/badge", nil, 200, &stats)
 	if stats.NeedsInput != 1 {
 		t.Fatalf("needsInput %d", stats.NeedsInput)
 	}
@@ -469,7 +464,6 @@ func TestTaskActions(t *testing.T) {
 	p := e.project("/w/app")
 	tk := e.task(p.ID, "A", nil)
 	// No thread yet.
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", tk.ID), map[string]any{"message": "hi"}, 409, nil)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", tk.ID), nil, 409, nil)
 	// Backlog: everything editable; null clears; bad enum 400.
 	var patched task
@@ -503,13 +497,6 @@ func TestTaskActions(t *testing.T) {
 	}
 	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 409, nil)
 
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", tk.ID), map[string]any{"message": "more", "mode": "steer"}, 200, nil)
-	if len(e.fake.Sent) != 1 || e.fake.Sent[0].Mode != t3.SendSteer || e.fake.Sent[0].Message != "more" {
-		t.Fatalf("sent %+v", e.fake.Sent)
-	}
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", tk.ID), map[string]any{"message": " "}, 400, nil)
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", tk.ID), map[string]any{"message": "x", "mode": "bad"}, 400, nil)
-
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", tk.ID), nil, 200, nil)
 	if !slices.Contains(e.fake.Interrupted, threadID) {
 		t.Fatal("not interrupted")
@@ -520,7 +507,6 @@ func TestTaskActions(t *testing.T) {
 	}
 	// Recently touched interrupted task keeps being polled: a follow-up that
 	// restarts the thread is picked up.
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", tk.ID), map[string]any{"message": "again"}, 200, nil)
 	_ = e.fake.SetStatus(threadID, t3.StatusRunning)
 	e.poll()
 	if got := e.getTask(tk.ID); got.State != "running" {
@@ -803,43 +789,6 @@ func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 	t.Fatalf("runner loop did not launch s2: %+v", e.getTask(b.ID))
 }
 
-func TestFollowupDoesNotReviveReleasedSettledTask(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/one")
-	a := e.task(p.ID, "s1", map[string]any{"start": true})
-	b := e.task(p.ID, "s2", map[string]any{"needs": []int64{a.ID}})
-	threadA := *a.T3ThreadID
-	_ = e.fake.SetStatus(threadA, t3.StatusCompleted)
-	_ = e.fake.Settle(threadA)
-	e.poll()
-	e.reconcile()
-	if got := e.getTask(b.ID); got.State != "running" {
-		t.Fatalf("dependent %+v", got)
-	}
-
-	// Follow-up on the settled task whose dependent already ran: stays settled (frozen).
-	_ = e.fake.SetThread(threadA, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
-	var got task
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", a.ID), map[string]any{"message": "more"}, 200, &got)
-	if got.State != "settled" {
-		t.Fatalf("settled task after follow-up: %s", got.State)
-	}
-	if th := e.getTask(a.ID).Thread; th == nil || th.Status != "running" {
-		t.Fatalf("thread mirror not refreshed: %+v", th)
-	}
-
-	// A settled task without dependents still reopens on follow-up.
-	solo := e.task(p.ID, "solo", map[string]any{"start": true})
-	_ = e.fake.SetStatus(*solo.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*solo.T3ThreadID)
-	e.poll()
-	_ = e.fake.SetThread(*solo.T3ThreadID, func(d *t3.ThreadDetail) { d.Settled = false; d.Status = t3.StatusRunning })
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", solo.ID), map[string]any{"message": "more"}, 200, &got)
-	if got.State != "running" {
-		t.Fatalf("standalone settled task after follow-up: %s", got.State)
-	}
-}
-
 func TestCancelledTaskReopens(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
@@ -909,7 +858,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	}
 }
 
-func TestSyncHistoryAndStats(t *testing.T) {
+func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	p := e.project("/w/app")
@@ -926,7 +875,7 @@ func TestSyncHistoryAndStats(t *testing.T) {
 			_ = e.fake.Settle(res.ThreadID)
 		}
 	}
-	tk := e.task(p.ID, "app task", map[string]any{"start": true})
+	_ = e.task(p.ID, "app task", map[string]any{"start": true})
 
 	var res struct {
 		Projects   int    `json:"projects"`
@@ -934,7 +883,7 @@ func TestSyncHistoryAndStats(t *testing.T) {
 		FinishedAt string `json:"finishedAt"`
 	}
 	e.must("POST", "/api/sync", nil, 200, &res)
-	if res.Projects != 2 || res.Threads != 4 || res.FinishedAt == "" {
+	if res.Projects != 2 || res.Threads != 1 || res.FinishedAt == "" {
 		t.Fatalf("sync %+v", res)
 	}
 	var st struct {
@@ -964,104 +913,6 @@ func TestSyncHistoryAndStats(t *testing.T) {
 		t.Fatalf("imported project %+v", extProject)
 	}
 
-	type page struct {
-		Threads []thread `json:"threads"`
-		Total   int      `json:"total"`
-	}
-	var pg page
-	e.must("GET", "/api/threads", nil, 200, &pg)
-	if pg.Total != 4 || len(pg.Threads) != 4 || pg.Threads[0].TaskID == nil || *pg.Threads[0].TaskID != tk.ID {
-		t.Fatalf("all threads (newest first) %+v", pg)
-	}
-	e.must("GET", "/api/threads?source=app", nil, 200, &pg)
-	if pg.Total != 1 || pg.Threads[0].Source != "app" || pg.Threads[0].ProjectID == nil || *pg.Threads[0].ProjectID != p.ID {
-		t.Fatalf("source=app %+v", pg)
-	}
-	e.must("GET", "/api/threads?source=t3", nil, 200, &pg)
-	if pg.Total != 3 {
-		t.Fatalf("source=t3 %+v", pg)
-	}
-	e.must("GET", "/api/threads?settled=true", nil, 200, &pg)
-	if pg.Total != 1 || pg.Threads[0].Title != "alpha one" {
-		t.Fatalf("settled %+v", pg)
-	}
-	e.must("GET", "/api/threads?status=running&status=completed", nil, 200, &pg)
-	if pg.Total != 4 {
-		t.Fatalf("status %+v", pg)
-	}
-	e.must("GET", "/api/threads?status=completed", nil, 200, &pg)
-	if pg.Total != 1 {
-		t.Fatalf("status completed %+v", pg)
-	}
-	e.must("GET", "/api/threads?q=BETA", nil, 200, &pg)
-	if pg.Total != 1 || pg.Threads[0].Title != "beta two" {
-		t.Fatalf("q %+v", pg)
-	}
-	e.must("GET", "/api/threads?provider=codex", nil, 200, &pg)
-	if pg.Total != 3 {
-		t.Fatalf("provider %+v", pg)
-	}
-	e.must("GET", fmt.Sprintf("/api/threads?project=%d", extProject.ID), nil, 200, &pg)
-	if pg.Total != 3 {
-		t.Fatalf("project %+v", pg)
-	}
-	e.must("GET", "/api/threads?limit=2&offset=1", nil, 200, &pg)
-	if pg.Total != 4 || len(pg.Threads) != 2 {
-		t.Fatalf("paging %+v", pg)
-	}
-	e.must("GET", "/api/threads?from=2999-01-01", nil, 200, &pg)
-	if pg.Total != 0 || pg.Threads == nil {
-		t.Fatalf("from future %+v", pg)
-	}
-	e.must("GET", "/api/threads?status=bogus", nil, 400, nil)
-	e.must("GET", "/api/threads?source=x", nil, 400, nil)
-	e.must("GET", "/api/threads?limit=0", nil, 400, nil)
-	e.must("GET", "/api/threads?settled=maybe", nil, 400, nil)
-
-	var stats struct {
-		From         string `json:"from"`
-		TZ           string `json:"tz"`
-		ThreadsByDay []struct {
-			Day   string `json:"day"`
-			Count int    `json:"count"`
-		} `json:"threadsByDay"`
-		ThreadsByProject []struct {
-			ProjectID   *int64 `json:"projectId"`
-			T3ProjectID string `json:"t3ProjectId"`
-			Title       string `json:"title"`
-			Count       int    `json:"count"`
-		} `json:"threadsByProject"`
-		ThreadsByStatus []struct {
-			Status string `json:"status"`
-			Count  int    `json:"count"`
-		} `json:"threadsByStatus"`
-		TasksByState []struct {
-			State string `json:"state"`
-			Count int    `json:"count"`
-		} `json:"tasksByState"`
-	}
-	e.must("GET", "/api/stats?tz=Australia/Sydney", nil, 200, &stats)
-	if stats.TZ != "Australia/Sydney" || len(stats.ThreadsByDay) == 0 {
-		t.Fatalf("stats %+v", stats)
-	}
-	total := 0
-	for _, d := range stats.ThreadsByDay {
-		total += d.Count
-	}
-	if total != 4 {
-		t.Fatalf("threadsByDay total %d", total)
-	}
-	if len(stats.ThreadsByProject) != 2 || stats.ThreadsByProject[0].Count != 3 || stats.ThreadsByProject[0].ProjectID == nil {
-		t.Fatalf("byProject %+v", stats.ThreadsByProject)
-	}
-	if len(stats.TasksByState) != 1 || stats.TasksByState[0].State != "running" || stats.TasksByState[0].Count != 1 {
-		t.Fatalf("tasksByState %+v", stats.TasksByState)
-	}
-	e.must("GET", "/api/stats?from=2999-01-01&to=2999-02-01", nil, 200, &stats)
-	if len(stats.ThreadsByDay) != 0 || stats.ThreadsByDay == nil {
-		t.Fatalf("empty range %+v", stats.ThreadsByDay)
-	}
-	e.must("GET", "/api/stats?tz=Mars/Base", nil, 400, nil)
 }
 
 func TestCatalogAndPair(t *testing.T) {
@@ -1152,72 +1003,6 @@ func TestSnippets(t *testing.T) {
 }
 
 func timeAfter() <-chan time.Time { return time.After(10 * time.Millisecond) }
-
-func TestHistorySubagentsFilter(t *testing.T) {
-	e := newEnv(t)
-	now := time.Now().UTC()
-	if err := e.store.UpsertThreads(context.Background(), []t3.Thread{
-		{ThreadID: "root-1", ProjectID: "proj-1", Title: "root", Status: t3.StatusCompleted, CreatedAt: now.Add(-2 * time.Minute)},
-		{ThreadID: "sub-1", ProjectID: "proj-1", Title: "sub", Status: t3.StatusRunning, CreatedAt: now.Add(-time.Minute),
-			ParentThreadID: "root-1", RelationshipToParent: "subagent"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var pg struct {
-		Threads []thread `json:"threads"`
-		Total   int      `json:"total"`
-	}
-	for path, want := range map[string]int{
-		"/api/threads":                                  2,
-		"/api/threads?subagents=include":                2,
-		"/api/threads?subagents=exclude":                1,
-		"/api/threads?subagents=exclude&status=running": 0,
-	} {
-		e.must("GET", path, nil, 200, &pg)
-		if pg.Total != want || len(pg.Threads) != want {
-			t.Fatalf("%s: total=%d len=%d want %d", path, pg.Total, len(pg.Threads), want)
-		}
-	}
-	e.must("GET", "/api/threads?subagents=exclude", nil, 200, &pg)
-	if pg.Threads[0].T3ThreadID != "root-1" {
-		t.Fatalf("exclude kept %+v", pg.Threads)
-	}
-	e.must("GET", "/api/threads?subagents=only", nil, 400, nil)
-
-	var st struct {
-		ThreadsByDay []struct {
-			Count int `json:"count"`
-		} `json:"threadsByDay"`
-		ThreadsByProject []struct {
-			Count int `json:"count"`
-		} `json:"threadsByProject"`
-		ThreadsByStatus []struct {
-			Status string `json:"status"`
-			Count  int    `json:"count"`
-		} `json:"threadsByStatus"`
-	}
-	for path, want := range map[string]int{
-		"/api/stats":                   2,
-		"/api/stats?subagents=include": 2,
-		"/api/stats?subagents=exclude": 1,
-	} {
-		e.must("GET", path, nil, 200, &st)
-		day, project, status := 0, 0, 0
-		for _, c := range st.ThreadsByDay {
-			day += c.Count
-		}
-		for _, c := range st.ThreadsByProject {
-			project += c.Count
-		}
-		for _, c := range st.ThreadsByStatus {
-			status += c.Count
-		}
-		if day != want || project != want || status != want {
-			t.Fatalf("%s: day=%d project=%d status=%d want %d", path, day, project, status, want)
-		}
-	}
-	e.must("GET", "/api/stats?subagents=bogus", nil, 400, nil)
-}
 
 func TestPreferences(t *testing.T) {
 	e := newEnv(t)
@@ -1412,26 +1197,6 @@ func TestTaskImagesLaunchAndEdit(t *testing.T) {
 	}
 }
 
-func TestFollowupWithImages(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/fimg")
-	tk := e.task(p.ID, "f", map[string]any{"start": true})
-	img := e.mustUpload("followup.png")
-	path := fmt.Sprintf("/api/tasks/%d/followup", tk.ID)
-	e.must("POST", path, map[string]any{"message": "x", "mode": "steer", "attachmentIds": []int64{img.ID}}, 400, nil)
-	e.must("POST", path, map[string]any{"attachmentIds": []int64{999999}}, 400, nil)
-	e.must("POST", path, map[string]any{"message": "see this", "attachmentIds": []int64{img.ID}}, 200, nil)
-	if len(e.fake.SentAttachments) != 1 || e.fake.SentAttachments[0].Message != "see this" ||
-		len(e.fake.SentAttachments[0].Attachments) != 1 || e.fake.SentAttachments[0].Attachments[0].Name != "followup.png" {
-		t.Fatalf("sent = %+v", e.fake.SentAttachments)
-	}
-	// Sent images are deleted.
-	e.must("GET", fmt.Sprintf("/api/attachments/%d", img.ID), nil, 404, nil)
-	if len(e.fake.Sent) != 0 {
-		t.Fatalf("plain send used: %+v", e.fake.Sent)
-	}
-}
-
 func TestPushSubscriptionsAndConfig(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -1537,48 +1302,6 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		t.Fatalf("badge %d, want 3 (task + external thread + fork)", badge.NeedsInput)
 	}
 
-	var pg struct {
-		Threads []thread `json:"threads"`
-		Total   int      `json:"total"`
-	}
-	for _, path := range []string{"/api/threads?needsInput=1", "/api/threads?needsInput=true"} {
-		e.must("GET", path, nil, 200, &pg)
-		if pg.Total != 2 || len(pg.Threads) != 2 || pg.Threads[0].T3ThreadID != "ext-wait" || pg.Threads[1].T3ThreadID != "ext-fork" {
-			t.Fatalf("%s: %+v", path, pg)
-		}
-	}
-	e.must("GET", "/api/threads?needsInput=1&q=nomatch", nil, 200, &pg)
-	if pg.Total != 0 {
-		t.Fatalf("needsInput + q: %+v", pg)
-	}
-	e.must("GET", "/api/threads?needsInput=yes", nil, 400, nil)
-
-	// External running threads: observed running, not settled, not subagent, not task-owned.
-	if err := e.store.UpsertThreads(ctx, []t3.Thread{
-		{ThreadID: "run-sub", ProjectID: p.T3ProjectID, Title: "run sub", Status: t3.StatusRunning, CreatedAt: now,
-			ParentThreadID: "ext-running", RelationshipToParent: "subagent"},
-		{ThreadID: "run-settled", ProjectID: p.T3ProjectID, Title: "run settled", Status: t3.StatusRunning, Settled: true, CreatedAt: now},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"run-sub", "run-settled"} {
-		if err := e.store.SetObservedState(ctx, id, db.StateRunning); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusRunning); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.store.SetObservedState(ctx, *started.T3ThreadID, db.StateRunning); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"/api/threads?running=1", "/api/threads?running=true"} {
-		e.must("GET", path, nil, 200, &pg)
-		if pg.Total != 1 || len(pg.Threads) != 1 || pg.Threads[0].T3ThreadID != "ext-running" {
-			t.Fatalf("%s: %+v", path, pg)
-		}
-	}
-	e.must("GET", "/api/threads?running=yes", nil, 400, nil)
 }
 
 func TestNotificationsInbox(t *testing.T) {
@@ -1714,157 +1437,5 @@ func TestNotificationGroups(t *testing.T) {
 	}
 	for _, query := range []string{"limit=0", "cursor=x", "cursor=recent:0", "cursor=waiting:no", "cursor=other:1"} {
 		e.must("GET", "/api/notifications/groups?"+query, nil, 400, nil)
-	}
-}
-
-func TestSettledExternalThreads(t *testing.T) {
-	e := newEnv(t)
-	ctx := context.Background()
-	p := e.project("/w/settled")
-
-	// Task-owned settled thread: excluded from the external list; its task carries the run span.
-	tk := e.task(p.ID, "settles", nil)
-	var started task
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	_ = e.fake.SetStatus(*started.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*started.T3ThreadID)
-	e.poll()
-	got := e.getTask(tk.ID)
-	if got.State != "settled" || got.RunStartedAt == nil || got.RunEndedAt == nil {
-		t.Fatalf("settled task %+v", got)
-	}
-
-	now := time.Now().UTC()
-	at := func(h int) *time.Time { v := now.Add(-time.Duration(h) * time.Hour); return &v }
-	settled := func(id string, settledAt *time.Time, mut func(*t3.Thread)) t3.Thread {
-		th := t3.Thread{ThreadID: id, ProjectID: p.T3ProjectID, Title: id, Status: t3.StatusCompleted,
-			Settled: true, SettledAt: settledAt, CreatedAt: now.Add(-48 * time.Hour)}
-		if mut != nil {
-			mut(&th)
-		}
-		return th
-	}
-	if err := e.store.UpsertThreads(ctx, []t3.Thread{
-		settled("older", at(5), nil),
-		settled("newer", at(1), nil),
-		settled("fork", at(3), func(th *t3.Thread) { th.ParentThreadID = "older"; th.RelationshipToParent = "fork" }),
-		settled("archived", at(4), func(th *t3.Thread) { th.Archived = true }),
-		settled("sub", at(2), func(th *t3.Thread) { th.ParentThreadID = "older"; th.RelationshipToParent = "subagent" }),
-		settled("stale", at(24*9), nil),
-		{ThreadID: "unsettled", ProjectID: p.T3ProjectID, Title: "done", Status: t3.StatusCompleted, CreatedAt: now},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	var pg struct {
-		Threads []thread `json:"threads"`
-		Total   int      `json:"total"`
-	}
-	since := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
-	e.must("GET", "/api/threads?settledFrom="+url.QueryEscape(since), nil, 200, &pg)
-	var ids []string
-	for _, th := range pg.Threads {
-		ids = append(ids, th.T3ThreadID)
-	}
-	if want := []string{"newer", "fork", "archived", "older"}; pg.Total != len(want) || !slices.Equal(ids, want) {
-		t.Fatalf("settled external %v (total %d), want %v", ids, pg.Total, want)
-	}
-	e.must("GET", fmt.Sprintf("/api/threads?settledFrom=%s&project=%d", url.QueryEscape(since), p.ID), nil, 200, &pg)
-	if pg.Total != 4 {
-		t.Fatalf("project-scoped total %d", pg.Total)
-	}
-	e.must("GET", "/api/threads?settledFrom=yesterday", nil, 400, nil)
-}
-
-func TestPullRequestsAndRuns(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/prs")
-	tk := e.task(p.ID, "Ship", nil)
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, nil)
-	tk = e.getTask(tk.ID)
-	if tk.T3ThreadID == nil {
-		t.Fatalf("not launched: %+v", tk)
-	}
-	id := *tk.T3ThreadID
-	pr := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "created", State: "open"}
-	if err := e.fake.SetThread(id, func(d *t3.ThreadDetail) {
-		d.PullRequests = []t3.PullRequest{pr}
-		d.RecentRuns[0].ExecutedModel = "m-exec"
-	}); err != nil {
-		t.Fatal(err)
-	}
-	e.poll()
-
-	type prJSON struct {
-		Repository string `json:"repository"`
-		Number     int    `json:"number"`
-		URL        string `json:"url"`
-		State      string `json:"state"`
-		Source     string `json:"source"`
-	}
-	type runJSON struct {
-		RunID         string  `json:"runId"`
-		Ordinal       int     `json:"ordinal"`
-		Status        string  `json:"status"`
-		ExecutedModel *string `json:"executedModel"`
-		RequestedAt   string  `json:"requestedAt"`
-		StartedAt     *string `json:"startedAt"`
-	}
-	type threadJSON struct {
-		PullRequests []prJSON   `json:"pullRequests"`
-		RunCount     int        `json:"runCount"`
-		RecentRuns   *[]runJSON `json:"recentRuns"`
-	}
-	wantPR := prJSON{Repository: "o/r", Number: 7, URL: pr.URL, State: "open", Source: "created"}
-	checkRuns := func(where string, th threadJSON) {
-		t.Helper()
-		if th.RecentRuns == nil || len(*th.RecentRuns) != 1 || th.RunCount != 1 {
-			t.Fatalf("%s: runs %+v count %d", where, th.RecentRuns, th.RunCount)
-		}
-		r := (*th.RecentRuns)[0]
-		if r.Ordinal != 1 || r.Status != "running" || r.ExecutedModel == nil || *r.ExecutedModel != "m-exec" || r.StartedAt == nil || r.RequestedAt == "" {
-			t.Fatalf("%s: run %+v", where, r)
-		}
-	}
-
-	var detail struct {
-		PullRequests []prJSON   `json:"pullRequests"`
-		Thread       threadJSON `json:"thread"`
-	}
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &detail)
-	if len(detail.PullRequests) != 1 || detail.PullRequests[0] != wantPR || len(detail.Thread.PullRequests) != 1 {
-		t.Fatalf("task detail prs %+v / %+v", detail.PullRequests, detail.Thread.PullRequests)
-	}
-	checkRuns("task detail", detail.Thread)
-
-	var tasks struct {
-		Tasks []struct {
-			ID           int64    `json:"id"`
-			PullRequests []prJSON `json:"pullRequests"`
-		} `json:"tasks"`
-	}
-	e.must("GET", "/api/tasks", nil, 200, &tasks)
-	for _, x := range tasks.Tasks {
-		if x.ID == tk.ID && (len(x.PullRequests) != 1 || x.PullRequests[0] != wantPR) {
-			t.Fatalf("task list prs %+v", x.PullRequests)
-		}
-	}
-
-	var sd struct {
-		Thread threadJSON `json:"thread"`
-	}
-	e.must("GET", "/api/threads/"+url.PathEscape(id), nil, 200, &sd)
-	if len(sd.Thread.PullRequests) != 1 || sd.Thread.PullRequests[0] != wantPR {
-		t.Fatalf("thread detail prs %+v", sd.Thread.PullRequests)
-	}
-	checkRuns("thread detail", sd.Thread)
-
-	// Lists carry PRs and runCount, not runs.
-	var pg struct {
-		Threads []threadJSON `json:"threads"`
-	}
-	e.must("GET", "/api/threads", nil, 200, &pg)
-	if len(pg.Threads) != 1 || len(pg.Threads[0].PullRequests) != 1 || pg.Threads[0].RunCount != 1 || pg.Threads[0].RecentRuns != nil {
-		t.Fatalf("thread list %+v", pg.Threads)
 	}
 }

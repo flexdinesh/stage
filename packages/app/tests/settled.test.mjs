@@ -22,27 +22,13 @@ test("duration is null without both ends or for reversed spans", () => {
 });
 
 const task = (id, settledAt) => ({ id, settledAt });
-const thread = (t3ThreadId, settledAt) => ({ t3ThreadId, settledAt });
-
-test("settled tasks and threads interleave newest settle first", () => {
-  const merged = mergeSettled(
-    [task(1, "2026-11-10T01:00:00Z"), task(2, "2026-11-10T04:00:00Z"), task(3, null)],
-    [thread("a", "2026-11-10T03:00:00Z"), thread("b", "2026-11-10T00:30:00Z")],
-  );
-  assert.deepEqual(
-    merged.map((i) => (i.kind === "task" ? `task ${i.task.id}` : `thread ${i.thread.t3ThreadId}`)),
-    ["task 2", "thread a", "task 1", "thread b", "task 3"],
-  );
-});
-
-test("completed trees interleave with settled tasks and threads", () => {
+test("completed trees interleave with settled tasks", () => {
   const merged = mergeSettled(
     [task(1, "2026-11-10T01:00:00Z")],
-    [thread("a", "2026-11-10T03:00:00Z")],
     [{ id: 7, settledAt: "2026-11-10T02:00:00Z" }],
   );
   assert.deepEqual(
-    merged.map((i) => (i.kind === "task" ? i.task.id : i.kind === "thread" ? i.thread.t3ThreadId : `tree ${i.tree.id}`)),
-    ["a", "tree 7", 1],
+    merged.map((i) => (i.kind === "task" ? i.task.id : `tree ${i.tree.id}`)),
+    ["tree 7", 1],
   );
 });

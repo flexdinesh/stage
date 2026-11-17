@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -8,7 +9,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
+type artifactLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type taskJSON struct {
+	ArtifactLinks []artifactLink `json:"artifactLinks"`
 	db.Task
 	T3WebURL *string `json:"t3WebUrl"`
 	T3AppURL *string `json:"t3AppUrl"`
@@ -100,7 +107,12 @@ func deepLink(envID string, threadID *string) *string {
 }
 
 func (s *server) task(env string, t db.Task) taskJSON {
-	out := taskJSON{Task: t, T3WebURL: s.webURL(env, t.T3ThreadID), T3DeepLink: deepLink(env, t.T3ThreadID)}
+	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t, T3WebURL: s.webURL(env, t.T3ThreadID), T3DeepLink: deepLink(env, t.T3ThreadID)}
+	for _, pr := range t.PullRequests {
+		if pr.URL != "" {
+			out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: pr.Repository + "#" + strconv.Itoa(pr.Number), URL: pr.URL})
+		}
+	}
 	if t.T3ThreadID != nil {
 		out.T3AppURL = t.ThreadLink
 	}

@@ -231,6 +231,7 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface Task {
+  artifactLinks: { label: string; url: string }[];
   id: number;
   projectId: number;
   projectTitle: string;
@@ -292,9 +293,7 @@ export interface Task {
   lastWordPreview: string | null;
   lastWordAt: string | null;
   /** Pull requests of the task's thread (T3 mirror); empty without a thread. */
-  pullRequests: PullRequest[];
   /** Answerable questions the task's thread is waiting on (approvals excluded). */
-  pendingQuestionCount: number;
   createdAt: string;
   updatedAt: string;
   /** When the task entered its current state (latest event into it); null without one. */
@@ -308,32 +307,6 @@ export interface Task {
 }
 
 /** A pull request T3 associates with a thread. `state` is T3's string (open, merged, closed, draft, ...). */
-export interface PullRequest {
-  host: string;
-  /** owner/name */
-  repository: string;
-  number: number;
-  url: string;
-  /** created | agent | linked */
-  source: string;
-  state: string;
-}
-
-/** One thread run (each follow-up is a new run), newest first in `recentRuns`. */
-export interface ThreadRun {
-  runId: string;
-  ordinal: number;
-  status: ThreadStatus;
-  providerInstanceId: string | null;
-  /** Requested model. */
-  model: string | null;
-  /** Model the provider ran; null when T3 did not report it. */
-  executedModel: string | null;
-  requestedAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-}
-
 export interface TaskEvent {
   id: number;
   taskId: number;
@@ -705,15 +678,8 @@ export interface SchedulePreview {
   next: string[];
 }
 
-export interface FollowupRequest {
-  message: string;
-  /** Not allowed with attachmentIds. */
-  mode?: SendMode;
-  /** Staged uploads to send with the message. */
-  attachmentIds?: number[];
-}
-
 export interface TaskListQuery {
+  originThreadId?: string;
   project?: number;
   state?: TaskState[];
   tag?: string;
@@ -746,10 +712,8 @@ export interface Thread {
   runEndedAt: string | null;
   /** Runs T3 reported for the thread; 0 until a detail read. */
   runCount: number;
-  pullRequests: PullRequest[];
   pendingRequestCount: number;
   /** Pending requests stage can answer (user-input questions); the rest are approvals handled in T3. */
-  pendingQuestionCount: number;
   providerInstanceId: string | null;
   model: string | null;
   runtimeMode: RuntimeMode | null;
@@ -774,7 +738,6 @@ export interface Thread {
   /** Reply excerpt (markdown); set on detail reads only, null in lists. */
   lastWord: LastWord | null;
   /** Runs, newest first (at most 50; `runCount` is the T3 total); set on detail reads only, null in lists. */
-  recentRuns: ThreadRun[] | null;
 }
 
 /** A thread's latest assistant reply as last synced: markdown excerpt capped at 4000 chars. */
@@ -787,163 +750,19 @@ export interface LastWord {
   at: string | null;
 }
 
-export interface ThreadList {
-  threads: Thread[];
-  total: number;
-}
-
-/** Why a session matched: title/branch/project/pr (title-ish) or user/assistant (message text). */
-export type MatchSource = "title" | "branch" | "project" | "pr" | "user" | "assistant";
-/** T3 half of a session search: anything but ok means stage title matches only. */
-export type T3SearchStatus = "ok" | "offline" | "timeout" | "error";
-
-export interface ThreadSearchResult {
-  t3ThreadId: string;
-  title: string;
-  projectTitle: string | null;
-  matchSource: MatchSource;
-  /** Message text around the match (message matches only). */
-  snippet: string | null;
-  messageCreatedAt: string | null;
-  t3DeepLink: string | null;
-  /** null until stage syncs the session. */
-  thread: Thread | null;
-}
-
-export interface ThreadSearch {
-  results: ThreadSearchResult[];
-  t3: T3SearchStatus;
-}
-
-export type SubagentsFilter = "include" | "exclude";
-
-export interface ThreadListQuery {
-  active?: boolean;
-  sort?: "activity";
-  parent?: string;
-  state?: TaskState[];
-  project?: number;
-  status?: ThreadStatus[];
-  settled?: boolean;
-  provider?: string;
-  source?: ThreadSource;
-  q?: string;
-  from?: string;
-  to?: string;
-  subagents?: SubagentsFilter;
-  /** Only external threads needing input (the ones the badge counts). */
-  needsInput?: boolean;
-  /** Only external threads observed running. */
-  running?: boolean;
-  /** Only external threads settled at or after this (ISO), newest settle first. */
-  settledFrom?: string;
-  limit?: number;
-  offset?: number;
-}
-
 export interface ThreadDetail {
   thread: Thread;
-  children: Thread[];
   task: Task | null;
-  /** Tasks this session created (agent CLI/MCP). */
-  createdTasks: CreatedTasks;
 }
 
-// ---- Transcript (docs/api.md "Transcript") ----
-
-export const TRANSCRIPT_KINDS = ["user", "assistant", "plan"] as const;
-export type TranscriptKind = (typeof TRANSCRIPT_KINDS)[number];
-
-/** One message; an upsert keyed by `position` (newer `updatedAt` wins). */
-export interface TranscriptItem {
-  position: number;
+/** The adopted task's first own user message. */
+export interface OpeningItem {
   itemId: string;
-  sourceThreadId: string;
-  inherited: boolean;
-  kind: TranscriptKind;
-  status: string;
-  streaming: boolean;
-  createdBy: string | null;
-  runId: string | null;
-  /** At most 2000 chars; `truncated` = full text is longer. */
   text: string;
   truncated: boolean;
   updatedAt: string;
 }
-
-export interface TranscriptPage {
-  items: TranscriptItem[];
-  hasEarlier: boolean;
-  /** Stream resume point; null on a `before` page, -1 when empty. */
-  cursor: number | null;
-  active: boolean;
-  status: ThreadStatus;
-}
-
-/** The session's first own user message; null before one exists. */
-export interface TranscriptOpening {
-  item: TranscriptItem | null;
-}
-
-export interface TranscriptQuery {
-  before?: number;
-  limit?: number;
-}
-
-/** SSE `state` event. */
-export interface TranscriptState {
-  active: boolean;
-  status: ThreadStatus;
-  error: string | null;
-}
-
-export interface TranscriptItemText {
-  itemId: string;
-  text: string;
-  truncated: boolean;
-}
-
-// ---- Pending questions ----
-
-/** T3 user-input question option; `value` absent = answered by label. */
-export interface QuestionOption {
-  label: string;
-  description: string;
-  value?: string | null;
-}
-
-export interface Question {
-  id: string;
-  header: string;
-  question: string;
-  options: QuestionOption[];
-  multiSelect?: boolean | null;
-  /** Free text allowed unless false. */
-  allowCustomAnswer?: boolean | null;
-  initialAnswer?: string | null;
-  required?: boolean | null;
-}
-
-export interface PendingRequest {
-  requestId: string;
-  questions: Question[];
-}
-
-export interface PendingQuestions {
-  pendingRequestCount: number;
-  /** Pending permission requests stage cannot resolve (handled in T3). */
-  approvalCount: number;
-  requests: PendingRequest[];
-}
-
-/** An option value/label or custom text; an array of options for multi-select. */
-export type QuestionAnswer = string | string[];
-
-export interface AnswerResult {
-  requestId: string;
-  respondedAt: string;
-  thread: Thread;
-}
+export interface OpeningPromptResponse { item: OpeningItem | null; }
 
 // ---- Snippets ----
 
@@ -968,48 +787,6 @@ export interface CreateSnippetRequest {
 }
 
 export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
-
-// ---- Stats ----
-
-export interface DayCount {
-  day: string;
-  count: number;
-}
-
-export interface ProjectCount {
-  projectId: number | null;
-  t3ProjectId: string;
-  title: string;
-  count: number;
-}
-
-export interface StatusCount {
-  status: ThreadStatus;
-  count: number;
-}
-
-export interface StateCount {
-  state: TaskState;
-  count: number;
-}
-
-export interface Stats {
-  from: string;
-  to: string;
-  tz: string;
-  threadsByDay: DayCount[];
-  threadsByProject: ProjectCount[];
-  threadsByStatus: StatusCount[];
-  tasksByState: StateCount[];
-  needsInput: number;
-}
-
-export interface StatsQuery {
-  from?: string;
-  to?: string;
-  tz?: string;
-  subagents?: SubagentsFilter;
-}
 
 // ---- Preferences ----
 
@@ -1058,6 +835,7 @@ export interface Badge {
 export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled"> | "ready";
 
 export interface Notification {
+  t3WebUrl: string | null;
   id: number;
   event: NotificationEvent;
   /** null for external threads (or once the task is deleted). */
@@ -1066,14 +844,12 @@ export interface Notification {
   /** Snapshot at send time. */
   title: string;
   projectTitle: string | null;
-  /** In-app path (task detail or filtered History). */
+  /** Stored notification destination (historical values are preserved). */
   url: string;
   createdAt: string;
   readAt: string | null;
   /** Live: the task's state, or the external thread's (`settled` when settled). null = unknown. */
   currentState: TaskState | null;
-  /** Answerable questions the session is waiting on now. */
-  pendingQuestionCount: number;
   t3DeepLink: string | null;
 }
 
@@ -1090,7 +866,16 @@ export interface NotificationGroup extends Notification {
   unreadCount: number;
 }
 
+export interface WaitingSession {
+  t3ThreadId: string;
+  title: string;
+  projectTitle: string | null;
+  t3WebUrl: string | null;
+  t3DeepLink: string | null;
+}
+
 export interface NotificationGroupPage {
+  waitingSessions: WaitingSession[];
   groups: NotificationGroup[];
   unread: number;
   /** Newest event across all groups, independent of priority order. */

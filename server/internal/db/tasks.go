@@ -87,12 +87,13 @@ func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
 }
 
 type TaskFilter struct {
-	ProjectID   *int64
-	States      []string
-	Tag         string
-	Q           string
-	From, To    *time.Time
-	SettledFrom *time.Time // settled_at >= SettledFrom
+	OriginThreadID string
+	ProjectID      *int64
+	States         []string
+	Tag            string
+	Q              string
+	From, To       *time.Time
+	SettledFrom    *time.Time // settled_at >= SettledFrom
 	// Closed: "" or "false" (open only: not archived, tree open or none),
 	// "true" (archived, or in a done or archived tree) or "all".
 	Closed string
@@ -103,6 +104,9 @@ const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	var w where
+	if f.OriginThreadID != "" {
+		w.add("t.origin_thread_id = " + w.arg(f.OriginThreadID))
+	}
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
 	}

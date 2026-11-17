@@ -11,6 +11,16 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 )
 
+// Shared by the retained notification stream.
+var streamPing = 15 * time.Second
+
+func lastEventID(r *http.Request) (string, string) {
+	if v := r.Header.Get("Last-Event-ID"); v != "" {
+		return v, "Last-Event-ID"
+	}
+	return r.URL.Query().Get("after"), "after"
+}
+
 // notificationReplayMax caps the rows a (re)connecting stream replays.
 const notificationReplayMax = 100
 

@@ -28,7 +28,6 @@ import (
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
-	"github.com/flexdinesh/stage/server/internal/transcript"
 	"github.com/flexdinesh/stage/server/internal/webui"
 )
 
@@ -79,7 +78,7 @@ type Ready struct {
 //     launching tasks and start the background loops
 //  4. serve all listeners, then notify READY=1 (systemd)
 //
-// Shutdown: STOPPING=1, background loops and transcript streams end, the
+// Shutdown: STOPPING=1, background loops and notification streams end, the
 // HTTP server drains for up to ShutdownTimeout, then T3 and the database
 // close, sockets are removed with their locks released, and the data dir
 // lock is released last.
@@ -223,9 +222,8 @@ func Run(ctx context.Context, o Options) error {
 	mux := http.NewServeMux()
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
-	transcripts := transcript.NewHub(ctx, t3Client, api.MirrorActive(store), logger)
 	apiHandler := api.NewRouter(api.Deps{
-		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger, Transcript: transcripts,
+		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick, Setup: setup,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's

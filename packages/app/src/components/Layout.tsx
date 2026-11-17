@@ -14,7 +14,6 @@ import {
   IconCheck,
   IconChevronDown,
   IconClose,
-  IconHistory,
   IconMoon,
   IconMore,
   IconPlus,
@@ -35,16 +34,14 @@ const NAV = [
   { to: "/", label: "Dashboard" },
   { to: "/trees", label: "Trees" },
   { to: "/projects", label: "Projects" },
-  { to: "/sessions", label: "Sessions" },
   { to: "/schedules", label: "Schedules" },
-  { to: "/history", label: "History" },
   { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
 /** Phone More drawer: the laptop nav items the bottom tabs leave out. */
 const MORE = NAV.filter(
-  (item) => item.to === "/schedules" || item.to === "/history" || item.to === "/snippets" || item.to === "/settings",
+  (item) => item.to === "/schedules" || item.to === "/snippets" || item.to === "/settings",
 );
 
 /** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
@@ -103,7 +100,6 @@ const TABS = [
   { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
   { to: "/trees", label: "Trees", icon: <IconTree size={TAB_ICON} /> },
   { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
-  { to: "/sessions", label: "Sessions", icon: <IconHistory size={TAB_ICON} /> },
 ] as const;
 
 const THEME_ICON: Record<Theme, ReactNode> = {
@@ -315,11 +311,11 @@ function Shell() {
           <button
             type="button"
             onClick={() => setPalette(true)}
-            aria-label="Search tasks, threads"
+            aria-label="Search tasks, projects"
             className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
-            <span className="hidden 2xl:inline">Search tasks, threads</span>
+            <span className="hidden 2xl:inline">Search tasks, projects</span>
             <Kbd className="max-xl:hidden">Ctrl K</Kbd>
           </button>
           <NotificationsBell onOpen={openInbox} />
@@ -360,7 +356,7 @@ function Shell() {
       {/* Phone bottom tabs */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-5 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-4 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:hidden"
       >
         {TABS.map((t) => (
           <NavLink

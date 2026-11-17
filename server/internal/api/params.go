@@ -142,14 +142,6 @@ func validEnum(name, v string, allowed []string) error {
 	return nil
 }
 
-var threadStatuses = []string{
-	string(t3.StatusIdle), string(t3.StatusPreparing), string(t3.StatusQueued), string(t3.StatusStarting),
-	string(t3.StatusRunning), string(t3.StatusWaiting), string(t3.StatusCompleted), string(t3.StatusInterrupted),
-	string(t3.StatusFailed), string(t3.StatusCancelled), string(t3.StatusRolledBack),
-}
-
-var sendModes = []string{string(t3.SendAuto), string(t3.SendQueue), string(t3.SendSteer), string(t3.SendRestart)}
-
 func taskStateStrings() []string {
 	out := make([]string, len(db.TaskStates))
 	for i, s := range db.TaskStates {

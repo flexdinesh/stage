@@ -38,9 +38,6 @@ type Client interface {
 	CreateProject(ctx context.Context, in CreateProjectInput) (Project, error)
 	// ListThreads calls t3_thread_list for one page.
 	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
-	// SearchThreads calls t3_thread_search: active, non-subagent threads by
-	// title/branch/PR/project, then message text. Not exhaustive.
-	SearchThreads(ctx context.Context, in SearchThreadsInput) ([]SearchMatch, error)
 	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
 	ReadThread(ctx context.Context, threadID string) (ThreadDetail, error)
 	// LatestReply finds a thread's latest assistant reply (optionally for one
@@ -52,28 +49,14 @@ type Client interface {
 	ReadItems(ctx context.Context, in ReadItemsInput) (ItemPage, error)
 	// LaunchThread calls t3_thread_launch. Idempotent per ClientRequestID.
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
-	// SendMessage calls t3_thread_send (follow-up).
-	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
 	// UploadAttachment calls t3_attachment_prepare_upload, then POSTs data to
 	// the returned signed relativeUrl on T3_URL. The pending id is usable in
-	// LaunchInput.Attachments or SendAttachments until it expires (~10 min).
+	// LaunchInput.Attachments until it expires (~10 min).
 	UploadAttachment(ctx context.Context, in UploadInput) (Attachment, error)
 	// DiscardAttachment calls t3_attachment_discard (pending uploads only).
 	DiscardAttachment(ctx context.Context, attachmentID string) error
-	// SendAttachments calls t3_thread_send_attachments (1..8, no mode, no
-	// retry key).
-	SendAttachments(ctx context.Context, threadID, message string, atts []Attachment) error
 	// Interrupt calls t3_thread_interrupt with stop:true (Stop button semantics).
 	Interrupt(ctx context.Context, threadID string) error
-	// ListPendingQuestions calls t3_pending_request list: pending user-input
-	// request ids (approvals are not listed).
-	ListPendingQuestions(ctx context.Context, threadID string) ([]string, error)
-	// ReadPendingQuestion calls t3_pending_request read. ErrRequestAnswered /
-	// ErrRequestStale when the request is no longer pending.
-	ReadPendingQuestion(ctx context.Context, threadID, requestID string) (PendingQuestion, error)
-	// RespondPendingQuestion calls t3_pending_request respond (answers keyed by
-	// question id). Same errors as ReadPendingQuestion. Not retried.
-	RespondPendingQuestion(ctx context.Context, threadID, requestID string, answers map[string]Answer) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
 	// unfiltered; callers drop providers with non-empty Constraints.
 	Capabilities(ctx context.Context) (Catalog, error)

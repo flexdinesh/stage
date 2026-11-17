@@ -7,7 +7,7 @@ import {
   serverStatus,
   serverTestSteps,
   serverWhere,
-  showT3Links,
+  t3Destination,
   stepNote,
   stepStatus,
   visibleSteps,
@@ -118,10 +118,14 @@ test("a server switch is a target change after the app ran on the old one", () =
   assert.equal(isServerSwitch(remote({ phase: "unreachable", epoch: 1, serverEpoch: 0 }), state({ epoch: 1 })), false);
 });
 
-test("T3 links show in the browser and for this machine's server only", () => {
-  assert.equal(showT3Links(null), true);
-  assert.equal(showT3Links(state({ phase: "ready" })), true);
-  assert.equal(showT3Links(remote({ phase: "ready" })), false);
+test("T3 destinations use local app links and remote web links without crossing machines", () => {
+  const links = { t3DeepLink: "t3code://threads/env/thread", t3WebUrl: "https://t3.example/env/thread" };
+  assert.equal(t3Destination(null, links), links.t3DeepLink);
+  assert.equal(t3Destination(state({ phase: "ready" }), links), links.t3DeepLink);
+  assert.equal(t3Destination(remote({ phase: "ready" }), links), links.t3WebUrl);
+  assert.equal(t3Destination(null, { ...links, t3DeepLink: null }), links.t3WebUrl);
+  assert.equal(t3Destination(remote({}), { t3DeepLink: links.t3DeepLink }), null);
+  assert.equal(t3Destination(null, { t3DeepLink: null }), null);
 });
 
 const localEntry = { id: "local", name: "This machine", kind: "local", url: "", active: true, needsInput: 2 };

@@ -384,7 +384,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		if n := h.sink.notes(); len(n) != 1 {
 			t.Fatalf("shows %+v, want only %+v", n, want)
 		}
-		path := sessionAnswer(tk.T3ThreadID)
+		path := fmt.Sprintf("/tasks/%d", tk.ID)
 		waitUntil(t, "Target "+path, 5*time.Second, func() bool { return h.clickPath(taskTag(tk.ID)) == path })
 		waitUntil(t, "Delivered", 5*time.Second, func() bool { return slices.Contains(h.delivered.all(), row.ID) })
 		waitUntil(t, "badge up", notifWait, func() bool {

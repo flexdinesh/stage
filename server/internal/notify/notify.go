@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,7 +21,7 @@ import (
 	"github.com/SherClockHolmes/webpush-go"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // Payload is the JSON the service worker shows.
@@ -45,8 +44,8 @@ func (e *PushError) Error() string { return e.Msg }
 
 // event is a queued notification: exactly one of task / thread / ready set.
 type event struct {
-	task   *t3sync.Change
-	thread *t3sync.ThreadChange
+	task   *workevent.TaskChange
+	thread *workevent.SessionChange
 	ready  *int64 // a manual tree member whose needs settled
 }
 
@@ -112,15 +111,15 @@ func New(store *db.Store, publicURL string, log *slog.Logger) *Notifier {
 
 // OnTransition is the sync.Service task hook: transitions into needs_input,
 // done, failed or settled are queued.
-func (n *Notifier) OnTransition(_ context.Context, c t3sync.Change) {
-	if t3sync.Notifiable(c.To) {
+func (n *Notifier) OnTransition(_ context.Context, c workevent.TaskChange) {
+	if workevent.Notifiable(c.To) {
 		n.enqueue(event{task: &c})
 	}
 }
 
 // OnThreadChange is the sync.Service external thread hook.
-func (n *Notifier) OnThreadChange(_ context.Context, c t3sync.ThreadChange) {
-	if t3sync.Notifiable(c.To) {
+func (n *Notifier) OnThreadChange(_ context.Context, c workevent.SessionChange) {
+	if workevent.Notifiable(c.To) {
 		n.enqueue(event{thread: &c})
 	}
 }
@@ -202,12 +201,6 @@ var titles = map[db.TaskState]string{
 }
 
 // answerAnchor lands needs-input pushes on the Needs input panel.
-func answerAnchor(to db.TaskState) string {
-	if to == db.StateNeedsInput {
-		return "#answer"
-	}
-	return ""
-}
 
 // PayloadFor is the notification shown for a stored inbox row (Web Push and
 // GET /api/notifications/stream): task rows with a thread open the session.
@@ -218,9 +211,11 @@ func PayloadFor(n db.Notification, badge int) Payload {
 		p.Body += " · " + *n.ProjectTitle
 	}
 	if strings.HasPrefix(key, "task:") && n.T3ThreadID != nil {
-		p.URL = "/sessions/" + url.PathEscape(*n.T3ThreadID)
+		p.URL = "/tasks/" + strings.TrimPrefix(key, "task:")
 	}
-	p.URL += answerAnchor(n.Event)
+	if !strings.HasPrefix(key, "task:") {
+		p.URL = "/?inbox"
+	}
 	return p
 }
 
@@ -267,7 +262,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		}
 		threadID := c.ThreadID
 		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project,
-			URL: "/sessions/" + url.PathEscape(c.ThreadID)}
+			URL: "/?inbox"}
 	default:
 		return Payload{}, rec, errors.New("empty event")
 	}

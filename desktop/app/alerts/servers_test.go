@@ -128,7 +128,7 @@ func TestTwoServers(t *testing.T) {
 
 	lc.note(row(6, "task-7", 0))
 	r := row(41, "task-7", 0)
-	r.URL = "/tasks/7#answer"
+	r.URL = "/tasks/7"
 	rc.note(r)
 	lc.unread(3, "task-1", "task-7")
 	rc.unread(4, "task-9", "task-7")
@@ -148,7 +148,7 @@ func TestTwoServers(t *testing.T) {
 	if titles["local/task-7"] != "This machine · Needs input" || titles["s-box/task-7"] != "Box · Needs input" {
 		t.Errorf("titles %v", titles)
 	}
-	if server, path := m.svc.Target("s-box/task-7"); server != "s-box" || path != "/tasks/7#answer" {
+	if server, path := m.svc.Target("s-box/task-7"); server != "s-box" || path != "/tasks/7" {
 		t.Errorf("Target = %q %q", server, path)
 	}
 	if server, path := m.svc.Target("task-3"); server != target.LocalID || path != "/tasks/3" {

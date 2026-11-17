@@ -366,12 +366,13 @@ func taskRow(t client.Task) TaskRow {
 
 // ListTasksArgs is list_tasks.
 type ListTasksArgs struct {
-	Project string   `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
-	States  []string `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
-	Tag     string   `json:"tag,omitempty"`
-	Query   string   `json:"query,omitempty" jsonschema:"substring of title or prompt"`
-	Closed  string   `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
-	Limit   int      `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
+	OriginThreadID string   `json:"originThreadId,omitempty" jsonschema:"only tasks created by this session"`
+	Project        string   `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
+	States         []string `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
+	Tag            string   `json:"tag,omitempty"`
+	Query          string   `json:"query,omitempty" jsonschema:"substring of title or prompt"`
+	Closed         string   `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
+	Limit          int      `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
 }
 
 // TasksOut is list_tasks.
@@ -390,6 +391,7 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 		q.ProjectID = &p.ID
 	}
 	q.States, q.Tag, q.Q = a.States, a.Tag, a.Query
+	q.OriginThreadID = a.OriginThreadID
 	switch a.Closed {
 	case "", "false":
 	case "true", "all":
@@ -655,22 +657,6 @@ func (o *Ops) DuplicateTask(ctx context.Context, a IDArgs) (client.Task, error) 
 }
 
 // FollowupArgs is followup_task.
-type FollowupArgs struct {
-	ID         int64    `json:"id"`
-	Message    string   `json:"message" jsonschema:"message to send to the task's thread"`
-	Mode       string   `json:"mode,omitempty" jsonschema:"auto|queue|steer|restart (not with images)"`
-	ImagePaths []string `json:"imagePaths,omitempty" jsonschema:"local images to send; stdio/CLI only"`
-}
-
-func (o *Ops) FollowupTask(ctx context.Context, a FollowupArgs) (client.Task, error) {
-	ids, err := o.uploadImages(ctx, a.ImagePaths)
-	if err != nil {
-		return client.Task{}, err
-	}
-	return o.Client.FollowupTask(ctx, a.ID, client.Followup{Message: a.Message, Mode: strPtr(a.Mode), AttachmentIDs: ids})
-}
-
-// WaitTaskArgs is wait_task.
 type WaitTaskArgs struct {
 	ID             int64    `json:"id"`
 	Until          []string `json:"until,omitempty" jsonschema:"states to wait for (default: needs_input done settled failed interrupted cancelled)"`
@@ -831,131 +817,6 @@ func (o *Ops) PreviewSchedule(ctx context.Context, a PreviewArgs) (PreviewOut, e
 // ---- sessions ----
 
 // SessionRow is a compact session for lists.
-type SessionRow struct {
-	T3ThreadID     string       `json:"t3ThreadId"`
-	Title          string       `json:"title"`
-	State          db.TaskState `json:"state"`
-	Project        *string      `json:"project,omitempty"`
-	TaskID         *int64       `json:"taskId,omitempty"`
-	ParentThreadID *string      `json:"parentThreadId,omitempty"`
-	// LastWordPreview: latest assistant reply, one plain line (get_session
-	// has the excerpt in thread.lastWord).
-	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	T3WebURL        *string   `json:"t3WebUrl,omitempty"`
-}
-
-// ListSessionsArgs is list_sessions.
-type ListSessionsArgs struct {
-	Project string `json:"project,omitempty" jsonschema:"project id or title; omitted = all"`
-	Active  bool   `json:"active,omitempty" jsonschema:"only running or needs-input sessions"`
-	Query   string `json:"query,omitempty" jsonschema:"title substring"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"max rows (default 20, max 200)"`
-}
-
-// SessionsOut is list_sessions.
-type SessionsOut struct {
-	Sessions []SessionRow `json:"sessions"`
-	Total    int          `json:"total"`
-}
-
-func (o *Ops) ListSessions(ctx context.Context, a ListSessionsArgs) (SessionsOut, error) {
-	q := client.ThreadQuery{Active: a.Active, Q: a.Query, Limit: a.Limit, ExcludeSubagents: true}
-	if q.Limit <= 0 {
-		q.Limit = 20
-	}
-	q.Limit = min(q.Limit, 200)
-	if a.Project != "" {
-		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
-		if err != nil {
-			return SessionsOut{}, err
-		}
-		q.ProjectID = &p.ID
-	}
-	page, err := o.Client.Threads(ctx, q)
-	if err != nil {
-		return SessionsOut{}, err
-	}
-	out := SessionsOut{Sessions: []SessionRow{}, Total: page.Total}
-	for _, t := range page.Threads {
-		out.Sessions = append(out.Sessions, SessionRow{
-			T3ThreadID: t.T3ThreadID, Title: t.Title, State: t.State, Project: t.ProjectTitle, TaskID: t.TaskID,
-			ParentThreadID: t.ParentThreadID, LastWordPreview: t.LastWordPreview, UpdatedAt: t.UpdatedAt, T3WebURL: t.T3WebURL,
-		})
-	}
-	return out, nil
-}
-
-// SearchSessionsArgs is search_sessions.
-type SearchSessionsArgs struct {
-	Query   string `json:"query" jsonschema:"text to find (2 to 200 chars): title, branch, PR, project, then message text"`
-	Project string `json:"project,omitempty" jsonschema:"project id or title; omitted = all"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"max matches per source (default 20, max 50)"`
-}
-
-// SearchRow is one search_sessions match.
-type SearchRow struct {
-	T3ThreadID string        `json:"t3ThreadId"`
-	Title      string        `json:"title"`
-	Match      string        `json:"match"` // title|branch|project|pr|user|assistant
-	Snippet    *string       `json:"snippet,omitempty"`
-	Project    *string       `json:"project,omitempty"`
-	State      *db.TaskState `json:"state,omitempty"` // nil when stage has not synced the session yet
-	TaskID     *int64        `json:"taskId,omitempty"`
-	// LastWordPreview: latest assistant reply, one plain line.
-	LastWordPreview *string `json:"lastWordPreview,omitempty"`
-	T3WebURL        *string `json:"t3WebUrl,omitempty"`
-}
-
-// SearchSessionsOut is search_sessions. T3: ok|offline|timeout|error
-// (anything but ok means title matches from stage only).
-type SearchSessionsOut struct {
-	Results []SearchRow `json:"results"`
-	T3      string      `json:"t3"`
-}
-
-func (o *Ops) SearchSessions(ctx context.Context, a SearchSessionsArgs) (SearchSessionsOut, error) {
-	var projectID *int64
-	if a.Project != "" {
-		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
-		if err != nil {
-			return SearchSessionsOut{}, err
-		}
-		projectID = &p.ID
-	}
-	res, err := o.Client.SearchThreads(ctx, a.Query, projectID, a.Limit)
-	if err != nil {
-		return SearchSessionsOut{}, err
-	}
-	out := SearchSessionsOut{Results: []SearchRow{}, T3: res.T3}
-	for _, r := range res.Results {
-		row := SearchRow{T3ThreadID: r.T3ThreadID, Title: r.Title, Match: r.MatchSource, Snippet: r.Snippet, Project: r.ProjectTitle}
-		if r.Thread != nil {
-			state := r.Thread.State
-			row.State, row.TaskID, row.T3WebURL = &state, r.Thread.TaskID, r.Thread.T3WebURL
-			row.LastWordPreview = r.Thread.LastWordPreview
-		}
-		out.Results = append(out.Results, row)
-	}
-	return out, nil
-}
-
-// SessionArgs names one session.
-type SessionArgs struct {
-	ID string `json:"id" jsonschema:"T3 thread id"`
-}
-
-func (o *Ops) GetSession(ctx context.Context, a SessionArgs) (client.ThreadDetail, error) {
-	return o.Client.Thread(ctx, a.ID)
-}
-
-// GetSessionQuestions reads what a session is asking its owner. Read-only:
-// the owner answers in stage or T3.
-func (o *Ops) GetSessionQuestions(ctx context.Context, a SessionArgs) (client.PendingQuestions, error) {
-	return o.Client.Questions(ctx, a.ID)
-}
-
-// RefArgs is read_ref.
 type RefArgs struct {
 	Ref string `json:"ref" jsonschema:"what the user pasted: a stage task or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
 }
@@ -991,7 +852,7 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 			return RefOut{}, err
 		}
 		out.Session = &s
-		out.Next = "Full conversation: t3_thread_read " + *r.ThreadID + " (T3 MCP). The session's lastWord is its latest reply (4000-char excerpt)."
+		out.Next = "Full conversation: t3_thread_read " + *r.ThreadID + " (T3 MCP). The task retains its latest reply."
 	} else if out.Task != nil {
 		out.Next = "Not launched yet: no session or conversation. The task's prompt is what it will send."
 	}

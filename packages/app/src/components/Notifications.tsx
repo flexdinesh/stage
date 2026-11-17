@@ -10,24 +10,20 @@ import {
   useNotificationInbox,
   useNotifications,
 } from "../api/queries.ts";
-import type { Notification, NotificationEvent, NotificationGroup, NotificationPage } from "../api/types.ts";
+import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, WaitingSession } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { sessionPath } from "../lib/sessions.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
-import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, errorText, toneClass } from "./ui.tsx";
-import { useShowT3Links } from "../lib/hostState.ts";
+import { useT3Destination } from "../lib/hostState.ts";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
 
 /** A needs-input notification whose task/thread is still waiting (what the app badge counts). */
 const stillWaiting = (n: Notification) => n.event === "needs_input" && n.currentState === "needs_input";
-/** Still waiting on questions stage can answer. */
-const answerable = (n: Notification) => n.currentState === "needs_input" && n.pendingQuestionCount > 0;
 
 /** A ready notification whose task still waits in backlog: it can be started from here. */
 const startable = (n: Notification): n is Notification & { taskId: number } =>
@@ -57,7 +53,7 @@ function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => 
   );
 }
 
-const notificationPath = (n: Notification) => n.t3ThreadId === null ? n.url : sessionPath(n.t3ThreadId);
+const notificationPath = (n: Notification) => n.taskId === null ? "/?inbox" : `/tasks/${n.taskId}`;
 
 const projectOf = (n: Notification) => n.projectTitle ?? (n.taskId === null ? "external thread" : "");
 
@@ -70,7 +66,7 @@ export function usePushRefresh() {
   useEffect(
     () =>
       notifications?.onDelivered(() => {
-        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.threads, keys.thread, keys.stats, keys.trees, keys.tree]) {
+        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.thread, keys.trees, keys.tree]) {
           void qc.invalidateQueries({ queryKey });
         }
       }),
@@ -220,7 +216,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
-  const showT3 = useShowT3Links();
+  const destination = useT3Destination();
   const sticky = n.event === "needs_input";
   const [paused, setPaused] = useState(false);
   const remaining = useRef(TOAST_MS);
@@ -267,10 +263,10 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         </span>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
-          {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onDismiss} /> : <ToastView n={n} onDismiss={onDismiss} />}
-          {n.t3DeepLink === null || !showT3 ? null : (
-            <AppButton small variant={stillWaiting(n) && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
-              Open in app
+          <ToastView n={n} onDismiss={onDismiss} />
+          {destination(n) === null ? null : (
+            <AppButton small variant={stillWaiting(n) ? "primary" : "secondary"} href={destination(n) ?? ""}>
+              Open in T3
             </AppButton>
           )}
         </div>
@@ -329,6 +325,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const { notifications } = usePlatform();
   const qc = useQueryClient();
   const inbox = useNotificationInbox();
+  const silent = inbox.data?.pages[0]?.waitingSessions ?? [];
   const push = useQuery({
     queryKey: PUSH_KEY,
     queryFn: () => notifications?.state() ?? Promise.resolve(undefined),
@@ -409,10 +406,14 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   return (
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
       <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
-        {items.length === 0 ? (
+        {items.length === 0 && silent.length === 0 ? (
           <Muted>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</Muted>
         ) : (
           <div className="flex flex-col gap-3.5">
+            {silent.length === 0 ? null : <section className="border border-line">
+              <h3 className="label-caps flex min-h-8 justify-between border-b border-line bg-panel px-3 py-1">Waiting in T3 <span className="tabular text-muted">{silent.length}</span></h3>
+              <ul>{silent.map((session) => <li key={session.t3ThreadId} className="border-b border-line last:border-b-0"><SilentWaitingRow session={session} /></li>)}</ul>
+            </section>}
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
                 <h3 className="label-caps flex min-h-8 items-center justify-between gap-3 border-b border-line bg-panel px-3 py-1 text-fg">
@@ -463,7 +464,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   onNavigate: () => void;
 }) {
   const historyId = useId();
-  const showT3 = useShowT3Links();
+  const destination = useT3Destination();
   const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
   // A ready task still in backlog reads "ready": that is its current state, not a change.
@@ -520,10 +521,9 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         </Button>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
-          {answerable(n) ? <AnswerButton to={notificationPath(n)} onClick={onNavigate} /> : null}
-          {n.t3DeepLink === null || !showT3 ? null : (
-            <AppButton small variant={waiting && !answerable(n) ? "primary" : "secondary"} href={n.t3DeepLink}>
-              Open in app
+          {destination(n) === null ? null : (
+            <AppButton small variant={waiting ? "primary" : "secondary"} href={destination(n) ?? ""}>
+              Open in T3
             </AppButton>
           )}
         </div>
@@ -586,4 +586,15 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
       )}
     </div>
   );
+}
+
+/** Current attention only. No event timestamp, history, unread marker or read mutation. */
+function SilentWaitingRow({ session }: { session: WaitingSession }) {
+  const destination = useT3Destination();
+  const href = destination(session);
+  return <div className="flex flex-col gap-2 border-l-2 border-l-need px-3 py-3">
+    <p className="text-body font-medium break-words">{session.title}</p>
+    <div className="flex flex-wrap items-center gap-2"><TaskStateBadge state="needs_input" /><span className="font-mono text-meta text-muted">{session.projectTitle ?? "T3 session"}</span></div>
+    {href === null ? <Muted>Open this session in T3: {session.t3ThreadId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in T3</AppButton>}
+  </div>;
 }

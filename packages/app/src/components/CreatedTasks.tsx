@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 import type { CreatedTasks, Task, TaskDetail, TreeRef } from "../api/types.ts";
-import { CREATED_TASKS_ANCHOR, batchPath } from "../lib/sessions.ts";
+import { CREATED_TASKS_ANCHOR } from "../lib/sessions.ts";
 import { batchSize } from "../lib/tasks.ts";
 import { countMembers, nextActionText, treeRollup } from "../lib/trees.ts";
 import { TaskFormModal } from "./TaskForm.tsx";
@@ -9,7 +9,7 @@ import { TaskRow } from "./TaskList.tsx";
 import { NewTreeDrawer } from "./trees/NewTreeDrawer.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { TreeStateBar } from "./trees/TreeRow.tsx";
-import { Button, Checkbox, Panel, buttonClass, cx } from "./ui.tsx";
+import { Button, Checkbox, Drawer, Panel, buttonClass, cx } from "./ui.tsx";
 
 /** Section header for a tree: its title linking the tree view, mono roll-up of the batch's members, state bar. */
 function TreeHeader({ tree, tasks }: { tree: TreeRef; tasks: readonly Task[] }) {
@@ -147,8 +147,10 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
 
 /** Task detail side panel: the batch this task's origin session created, with a link to act on it there. */
 export function BatchPanel({ task }: { task: TaskDetail }) {
+  const [params, setParams] = useSearchParams();
   const batch = task.batch;
-  if (batch === null || task.originThreadId === null || batchSize(batch) < 2) return null;
+  const close = () => setParams((previous) => { const next = new URLSearchParams(previous); next.delete("batch"); return next; });
+  if (batch === null || task.originThreadId === null || batchSize(batch) < 1) return null;
   const row = (t: Task) => {
     const current = t.id === task.id;
     return (
@@ -173,13 +175,15 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
     );
   };
   return (
+    <>
+    {params.has("batch") ? <Drawer title="Created tasks" wide onClose={close}><CreatedTasksPanel threadId={task.originThreadId} batch={batch} /></Drawer> : null}
     <Panel
       title="Batch"
       meta={`${batchSize(batch)}`}
       flush
       actions={
-        <Link to={batchPath(task.originThreadId)} className={buttonClass("ghost", true)}>
-          Open in session
+        <Link to={`/tasks/${task.id}?batch=1`} className={buttonClass("ghost", true)}>
+          View batch
         </Link>
       }
     >
@@ -200,5 +204,6 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
         </section>
       )}
     </Panel>
+    </>
   );
 }

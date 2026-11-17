@@ -248,7 +248,7 @@ func TestListenerModes(t *testing.T) {
 			t.Fatalf("socket mode %v, %v", st.Mode().Perm(), err)
 		}
 		h := health(t, a)
-		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 2 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
+		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 3 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
 			t.Fatalf("health %+v", h)
 		}
 		if err := i.stop(t); err != nil {
@@ -405,7 +405,7 @@ func TestPartialBindFailure(t *testing.T) {
 	}
 }
 
-// An open transcript stream does not hold up shutdown, and shutdown
+// An open notification stream does not hold up shutdown, and shutdown
 // cleans up sockets and locks.
 func TestStreamShutdown(t *testing.T) {
 	short := isolate(t)
@@ -414,9 +414,9 @@ func TestStreamShutdown(t *testing.T) {
 	fake := newT3()
 	i := start(t, cfg(t, data, "unix:"+sock, freePort(t)), fake)
 	for _, a := range i.ready.Listeners {
-		task := startTask(t, fake, a)
+		_ = startTask(t, fake, a)
 		hc, base := httpFor(a)
-		res, err := hc.Get(base + "/api/threads/" + *task.T3ThreadID + "/transcript/stream")
+		res, err := hc.Get(base + "/api/notifications/stream")
 		if err != nil || res.StatusCode != 200 {
 			t.Fatalf("stream over %s: %v %v", a, res, err)
 		}

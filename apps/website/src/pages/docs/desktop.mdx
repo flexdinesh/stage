@@ -29,7 +29,7 @@ A remote server is reached over TCP on a **trusted network with no authenticatio
 - The server must listen on TCP: `stage serve --listen 0.0.0.0:7380`, or `STAGE_LISTEN=unix,0.0.0.0:7380` in its `service.env` ([Listeners](/docs/deploy#listeners)).
 - A URL with an IP address or `localhost` passes its Host check. A hostname must be in its `STAGE_ALLOWED_ORIGINS` (or be its `STAGE_PUBLIC_URL`), else it answers 403 and the app names the setting to add ([Security](/docs/deploy#security)).
 
-Each server keeps its own T3 connection, data and pairing. Starting or restarting the server, login startup and server logs apply to this machine only; "Open in T3" links show only for this machine's server.
+Each server keeps its own T3 connection, data and pairing. Starting or restarting the server, login startup and server logs apply to this machine only; Open in T3 uses native links for this machine and web links for remote servers.
 
 ## Notifications
 

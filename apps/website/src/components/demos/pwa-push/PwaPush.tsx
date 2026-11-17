@@ -1,22 +1,10 @@
-import { Bar, Button, Collapse, Expand, LockScreen, Notification, Phone, Roll, Stage, type Act, type Point } from '../../../vendor/stageshow'
+import { Bar, Button, Expand, LockScreen, Notification, Phone, Roll, Stage, type Act, type Point } from '../../../vendor/stageshow'
 import { StageMark } from '../../site/StageMark'
 import { useSiteTheme } from '../shared/useSiteTheme'
 import { IconBell, IconPlus, IconSearch, StageLogo } from './icons'
 import './pwa-push.css'
 
-// "Answer from your lock screen." A phone, pinned from the top, running off
-// the bottom of the column. Three beats: a stage push lands on the lock
-// screen (Needs input, the task and its project, as stage's notifier writes
-// it); a tap launches the installed PWA out of the banner, landing on the
-// task with its Needs input panel on top (2px yellow edge); an option and
-// Send answer later, the request folds into "Answer sent to T3", the edge
-// goes transparent and the task chip rolls to running. The loop resets the
-// way a lock-screen story can: a swipe down from the top edge pulls the lock
-// screen over the app, and the app is put back unseen behind it.
-//
-// Real strings: the push, the task title and meta, the two chips, the panel
-// (header, question, options, footer) and the confirmation. The page below
-// the panel is filler.
+// A push opens its Stage task, whose Open in T3 action continues in the harness.
 
 type S = {
   notif: boolean
@@ -36,7 +24,6 @@ const REST = { wide: { x: 590, y: 440 }, compact: { x: 320, y: 410 } }
 const TITLE = 'Needs input'
 const BODY = 'Migrate auth tokens · api-gateway'
 
-const OPTIONS = ['Revoke now', 'Grace period']
 
 const mid = (r: { x: number; y: number; width: number; height: number } | null | undefined, fx: number, fy: number): Point | null =>
   r ? { x: r.x + r.width * fx, y: r.y + r.height * fy } : null
@@ -51,10 +38,6 @@ const script = async (a: Act<S>) => {
   await a.wait(90)
   a.put({ open: true })
   await a.wait(1600)
-  a.mark('pick')
-  await a.click({ at: 'opt-1', x: 0.8, y: 0.5 })
-  a.put({ pick: 1 })
-  await a.wait(800)
   a.mark('send')
   await a.click({ at: 'send', x: 0.82, y: 0.55 })
   a.put({ busy: true })
@@ -93,9 +76,6 @@ function Push() {
   return <Notification icon={<StageLogo />} title={TITLE} body={BODY} />
 }
 
-function Radio({ on }: { on: boolean }) {
-  return <span className="pp-radio" data-on={on || undefined} />
-}
 
 function App({ s }: { s: S }) {
   const waiting = !s.sent
@@ -134,62 +114,9 @@ function App({ s }: { s: S }) {
         </div>
 
         <section className="pp-panel" data-waiting={waiting || undefined}>
-          <div className="pp-panel__head">
-            <span className="pp-label">
-              <Roll>{waiting ? 'Needs input' : 'Answered'}</Roll>
-            </span>
-            <span className="pp-chip pp-chip--dot pp-fade" data-tone="need" data-off={!waiting || undefined}>
-              1 question
-            </span>
-            <Button className="pp-btn pp-btn--small pp-fade pp-push-end" size="small" data-off={!waiting || undefined}>
-              Open in T3
-            </Button>
-          </div>
-
-          <Collapse open={s.sent}>
-            <div className="pp-notice">
-              <span className="pp-notice__mark" />
-              <span className="pp-notice__text">
-                <span className="pp-notice__title">Answer sent to T3</span>
-                <span className="pp-notice__detail">Cutover: Grace period</span>
-              </span>
-            </div>
-          </Collapse>
-
-          <Collapse open={!s.sent}>
-            <div className="pp-q">
-              <div className="pp-q__legend">
-                <span className="pp-chip pp-chip--plain">Cutover</span>
-                <span className="pp-q__text">Revoke existing refresh tokens now?</span>
-              </div>
-              <ul className="pp-options">
-                {OPTIONS.map((o, i) => (
-                  <li key={o} className="pp-option" data-target={`opt-${i}`} data-on={s.pick === i || undefined}>
-                    <Radio on={s.pick === i} />
-                    <span className="pp-option__label">{o}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="pp-foot">
-              <span className="pp-foot__count">
-                <Roll>{`${s.pick >= 0 ? 1 : 0}/1 answered`}</Roll>
-              </span>
-              <Button
-                className="pp-btn pp-send"
-                variant="primary"
-                data-target="send"
-                data-ready={s.pick >= 0 || undefined}
-              >
-                <span className="pp-send__label">
-                  <span className="pp-busy" data-on={s.busy || undefined}>
-                    <span className="pp-spin" />
-                  </span>
-                  Send answer
-                </span>
-              </Button>
-            </div>
-          </Collapse>
+          <div className="pp-panel__head"><span className="pp-label">{waiting ? 'Needs input' : 'Running'}</span></div>
+          <div className="pp-q">{waiting ? 'Continue this conversation in T3.' : 'T3 resumed the task.'}</div>
+          <div className="pp-foot"><Button className="pp-btn" variant="primary" data-target="send">Open in T3</Button></div>
         </section>
 
         {/* The rest of task detail: filler under the panel */}

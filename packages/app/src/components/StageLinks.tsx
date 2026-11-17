@@ -1,15 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
+import { useT3Destination } from "../lib/hostState.ts";
 import { keys } from "../api/queries.ts";
 import type { TaskState } from "../api/types.ts";
 import {
   parseStageRef,
-  refPath,
-  sessionMarkdown,
-  sessionUrl,
   splitStageRefs,
   taskMarkdown,
   taskUrl,
@@ -44,12 +41,10 @@ export function useCopy(): [CopyStatus, (text: string) => void] {
 }
 
 /** What a copied link points at: a task, or a session (T3 thread). */
-export type LinkSubject = { kind: "task"; id: number; title: string } | { kind: "session"; id: string; title: string };
+export type LinkSubject = { kind: "task"; id: number; title: string };
 
 export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: string; url: string; name: string } {
-  return s.kind === "task"
-    ? { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` }
-    : { markdown: sessionMarkdown(link, s.id, s.title), url: sessionUrl(link, s.id), name: "session" };
+  return { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` };
 }
 
 const statusText = (s: CopyStatus, idle: string) => (s === "copied" ? "Copied" : s === "failed" ? "Copy failed" : idle);
@@ -105,10 +100,11 @@ export function RowCopyLink({ subject, className }: { subject: LinkSubject; clas
 
 // ---- Chips ----
 
-type Resolved = { title: string; state: TaskState; number: number | null };
+type Resolved = { title: string; state: TaskState; number: number | null; href: string | null };
 
 function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } {
   const api = useApi();
+  const destination = useT3Destination();
   const task = useQuery({
     queryKey: [...keys.task, ref.kind === "task" ? ref.id : 0],
     queryFn: () => api.task(ref.kind === "task" ? ref.id : 0),
@@ -125,10 +121,10 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
   });
   if (ref.kind === "task") {
     const d = task.data;
-    return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id }, failed: task.isError };
+    return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id, href: `/tasks/${d.id}` }, failed: task.isError };
   }
   const t = thread.data?.thread;
-  return { data: t === undefined ? null : { title: t.title, state: t.state, number: t.taskId }, failed: thread.isError };
+  return { data: t === undefined ? null : { title: t.title, state: t.state, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: thread.isError };
 }
 
 /** A stage link as a live chip: mono #id (or "session"), title, square state marker; opens in stage. */
@@ -145,8 +141,8 @@ export function RefChip({ stageRef, text, href }: { stageRef: StageRef; text: st
   const tag = data.number === null ? "session" : `#${data.number}`;
   const state = taskStateLabel(data.state);
   return (
-    <Link
-      to={refPath(stageRef)}
+    <a
+      href={data.href ?? undefined}
       title={`${stageRef.kind === "task" ? `Task ${tag}` : "Session"}: ${data.title} (${state})`}
       className={cx(
         "mx-px inline-flex max-w-full items-center gap-1.5 border border-line-strong bg-surface px-1.5 align-middle font-sans text-small leading-[18px] font-medium whitespace-nowrap text-fg no-underline transition-colors duration-150 hover:bg-panel",
@@ -157,7 +153,7 @@ export function RefChip({ stageRef, text, href }: { stageRef: StageRef; text: st
       <span className="font-mono text-meta font-normal text-muted tabular">{tag}</span>
       <span className="max-w-[36ch] min-w-0 truncate">{data.title}</span>
       <span className="sr-only">, {state}</span>
-    </Link>
+    </a>
   );
 }
 
@@ -197,4 +193,10 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
   }, [html, enabled]);
   const portals = slots.map((s, i) => createPortal(<RefChip stageRef={s.ref} text={s.text} href={s.href} />, s.host, `${i}`));
   return [root, portals];
+}
+
+export function SourceSessionLink({ id }: { id: string }) {
+  const { data } = useResolved({ kind: "session", id });
+  if (data?.href == null) return <span title={id}>source session</span>;
+  return <a href={data.href} className="underline hover:text-fg">source session</a>;
 }

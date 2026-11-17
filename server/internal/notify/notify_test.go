@@ -164,13 +164,13 @@ func TestPayload(t *testing.T) {
 		want Payload
 	}{
 		{"task needs input", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d#answer", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/sessions/ext-1#answer", Tag: "thread-ext-1", Badge: 2}},
+			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "thread-ext-1", Badge: 2}},
 		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
-			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/sessions/ext-2", Tag: "thread-ext-2", Badge: 2}},
+			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "thread-ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
 		got, _, err := n.payload(ctx, tc.e)
@@ -194,16 +194,16 @@ func TestPayloadFor(t *testing.T) {
 	}{
 		{"task needs input with thread", db.Notification{ID: 1, Event: db.StateNeedsInput, TaskID: &task, T3ThreadID: &thread,
 			Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7", CreatedAt: created},
-			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/sessions/provider:session%2Fwith%25id#answer", Tag: "task-7", Badge: 3}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
 		{"task without thread", db.Notification{ID: 2, Event: db.StateDone, TaskID: &task, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
 		{"deleted task keeps its URL group", db.Notification{ID: 3, Event: db.StateFailed, T3ThreadID: &thread, Title: "Gone", URL: "/tasks/9"},
-			Payload{Title: "Failed", Body: "Gone", URL: "/sessions/provider:session%2Fwith%25id", Tag: "task-9", Badge: 3}},
+			Payload{Title: "Failed", Body: "Gone", URL: "/tasks/9", Tag: "task-9", Badge: 3}},
 		{"external thread", db.Notification{ID: 4, Event: db.StateSettled, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &project,
 			URL: "/sessions/provider:session%2Fwith%25id"},
-			Payload{Title: "Settled", Body: "Ext · stage", URL: "/sessions/provider:session%2Fwith%25id", Tag: "thread-" + thread, Badge: 3}},
+			Payload{Title: "Settled", Body: "Ext · stage", URL: "/?inbox", Tag: "thread-" + thread, Badge: 3}},
 		{"identity-less", db.Notification{ID: 5, Event: db.StateNeedsInput, Title: "Old", URL: "/"},
-			Payload{Title: "Needs input", Body: "Old", URL: "/#answer", Tag: "", Badge: 3}},
+			Payload{Title: "Needs input", Body: "Old", URL: "/?inbox", Tag: "", Badge: 3}},
 	}
 	for _, tc := range tests {
 		if got := PayloadFor(tc.n, 3); got != tc.want {
@@ -337,7 +337,7 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 		t.Fatalf("task notification %+v", tk)
 	}
 	if th.Event != db.StateDone || th.TaskID != nil || th.T3ThreadID == nil || *th.T3ThreadID != "ext-1" ||
-		th.Title != "External" || th.URL != "/sessions/ext-1" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
+		th.Title != "External" || th.URL != "/?inbox" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
 		t.Fatalf("thread notification %+v", th)
 	}
 }
@@ -454,7 +454,7 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, ThreadID: &id}); err != nil {
 		t.Fatal(err)
 	}
-	want := "/sessions/provider:session%2Fwith%25id"
+	want := "/?inbox"
 	for _, e := range []event{
 		{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
 		{thread: &t3sync.ThreadChange{ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
@@ -463,7 +463,7 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 		wantPayload, wantRecord := want, want
 		if e.task != nil {
 			// Needs input lands on the Needs input panel; the record keeps the task path.
-			wantPayload, wantRecord = want+"#answer", fmt.Sprintf("/tasks/%d", task.ID)
+			wantPayload, wantRecord = fmt.Sprintf("/tasks/%d", task.ID), fmt.Sprintf("/tasks/%d", task.ID)
 		}
 		if err != nil || payload.URL != wantPayload || record.URL != wantRecord {
 			t.Fatalf("payload=%+v record=%+v err=%v", payload, record, err)
@@ -484,7 +484,7 @@ func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 		}
 		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}
 		payload, _, err := n.payload(ctx, e)
-		if err != nil || payload.URL != "/sessions/"+thread {
+		if err != nil || payload.URL != fmt.Sprintf("/tasks/%d", task.ID) {
 			t.Fatalf("session navigation: %+v %v", payload, err)
 		}
 		n.handle(ctx, e)

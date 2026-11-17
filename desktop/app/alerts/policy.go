@@ -2,7 +2,6 @@ package alerts
 
 import (
 	"cmp"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ func PlanCatchUp(items []Item, now time.Time, window time.Duration, max int) (sh
 
 // Target is the app path a click on notification id opens: its known URL
 // (from the shown notification) when nav.AlertPath allows it, else the
-// path derived from the ID (task-N → /tasks/N, thread-X → /sessions/X,
+// path derived from the ID (task-N → /tasks/N, thread-X → /?inbox,
 // summary → /?inbox, test → /settings), else /.
 func Target(id string, known map[string]string) string {
 	if u, ok := known[id]; ok {
@@ -97,7 +96,7 @@ func Target(id string, known map[string]string) string {
 	case strings.HasPrefix(id, "task-"):
 		derived = "/tasks/" + strings.TrimPrefix(id, "task-")
 	case strings.HasPrefix(id, "thread-"):
-		derived = "/sessions/" + url.PathEscape(strings.TrimPrefix(id, "thread-"))
+		derived = "/?inbox"
 	}
 	if p, ok := nav.AlertPath(derived); ok {
 		return p

@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type Quer
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
-import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, StatsQuery, T3Status, TaskListQuery, ThreadListQuery, TreeListQuery } from "./types.ts";
+import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -10,11 +10,8 @@ export const keys = {
   projects: ["projects"],
   tasks: ["tasks"],
   task: ["task"],
-  threads: ["threads"],
   thread: ["thread"],
-  questions: ["questions"],
   snippets: ["snippets"],
-  stats: ["stats"],
   preferences: ["preferences"],
   badge: ["badge"],
   notifications: ["notifications"],
@@ -147,38 +144,10 @@ export const useSchedulePreview = (body: SchedulePreviewRequest | null) => {
   });
 };
 
-export const useThreads = (q: ThreadListQuery) => {
-  const api = useApi();
-  return useQuery({ queryKey: [...keys.threads, q], queryFn: () => api.threads(q), placeholderData: keepPreviousData });
-};
-
 export const useThread = (id: string) => {
   const api = useApi();
   return useQuery({ queryKey: [...keys.thread, id], queryFn: () => api.thread(id), enabled: id !== "" });
 };
-
-/** Pending questions, read fresh from T3; only while the thread has pending requests. */
-export const useThreadQuestions = (id: string, enabled: boolean) => {
-  const api = useApi();
-  return useQuery({ queryKey: [...keys.questions, id], queryFn: () => api.questions(id), enabled: enabled && id !== "", retry: false });
-};
-
-/** External threads needing input (not task-owned; tasks come from useTasks). */
-export const useNeedsInputThreads = (project?: number) =>
-  useThreads(project === undefined ? { needsInput: true } : { needsInput: true, project });
-
-/** External threads observed running (not task-owned; tasks come from useTasks). */
-export const useRunningThreads = (project?: number) =>
-  useThreads(project === undefined ? { running: true } : { running: true, project });
-
-/** External threads settled since `since` (not task-owned; tasks come from useTasks), newest settle first. */
-export const useSettledThreads = (since: string, project?: number) =>
-  useThreads(
-    project === undefined
-      ? { settledFrom: since, limit: SETTLED_THREAD_LIMIT }
-      : { settledFrom: since, limit: SETTLED_THREAD_LIMIT, project },
-  );
-const SETTLED_THREAD_LIMIT = 500;
 
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => {
@@ -227,21 +196,13 @@ export const usePreferences = () => {
   return useQuery({ queryKey: keys.preferences, queryFn: api.preferences, refetchInterval: false, staleTime: 30_000 });
 };
 
-export const useStats = (q: StatsQuery) => {
-  const api = useApi();
-  return useQuery({ queryKey: [...keys.stats, q], queryFn: () => api.stats(q), placeholderData: keepPreviousData });
-};
-
 /** Task mutations can change any task, thread, stat or prefill view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
     [
       keys.tasks,
       keys.task,
-      keys.threads,
       keys.thread,
-      keys.questions,
-      keys.stats,
       keys.preferences,
       keys.badge,
       keys.schedules,

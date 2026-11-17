@@ -11,16 +11,20 @@ import (
 // lastWordMaxChars caps the stored reply excerpt (T3 UTF-16 units).
 const lastWordMaxChars = 4000
 
-// mirrorDetail upserts a t3_thread_read result, counts its pending questions,
-// then refreshes the thread's last word (latest assistant reply) when due.
+// mirrorDetail refreshes execution metadata. Only task-owned sessions
+// need a cached final reply; external notifications never read conversation text.
 // Last-word failures are logged and retried on a later read; they never fail
 // the caller.
 func (s *Service) mirrorDetail(ctx context.Context, d t3.ThreadDetail) error {
 	if err := s.store.UpsertThreadDetail(ctx, d); err != nil {
 		return err
 	}
-	if err := s.refreshQuestionCount(ctx, d); err != nil {
+	thread, err := s.store.GetThread(ctx, d.ThreadID)
+	if err != nil {
 		return err
+	}
+	if thread.TaskID == nil {
+		return nil
 	}
 	if err := s.refreshLastWord(ctx, d); err != nil && ctx.Err() == nil {
 		s.log.Warn("refresh last word", "thread", d.ThreadID, "err", err)

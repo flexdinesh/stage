@@ -3,21 +3,17 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { useInvalidateWork } from "../api/queries.ts";
-import type { Task, Thread } from "../api/types.ts";
+import type { Task } from "../api/types.ts";
 import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
-import { sessionPath } from "../lib/sessions.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
 import { LastWordLine } from "./LastWord.tsx";
-import { PrChips } from "./PullRequests.tsx";
-import { TaskStateBadge } from "./StateBadge.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { AnswerButton } from "./NeedsInputPanel.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
-import { useShowT3Links } from "../lib/hostState.ts";
+import { useT3Destination } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
@@ -162,7 +158,7 @@ function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChi
     };
   if (task.originThreadId !== null && task.originThreadId !== contextThreadId)
     return {
-      to: sessionPath(task.originThreadId),
+      to: `/tasks/${task.id}?batch=1`,
       label: "by agent",
       title: `Created by session ${task.originThreadTitle ?? task.originThreadId}`,
       icon: <IconChainLink />,
@@ -197,9 +193,8 @@ export function TaskRow({
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
   const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
-  const answerable = needsInput && task.pendingQuestionCount > 0;
-  const appLink = useShowT3Links() ? task.t3DeepLink : null;
-  const hasActions = showStart || answerable || appLink !== null || extra !== undefined;
+  const appLink = useT3Destination()(task);
+  const hasActions = showStart || appLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -256,7 +251,6 @@ export function TaskRow({
           {task.tags.map((tag) => (
             <span key={tag}>#{tag}</span>
           ))}
-          <PrChips prs={task.pullRequests} detailTo={`/tasks/${task.id}`} />
         </div>
         <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
       </div>
@@ -280,10 +274,9 @@ export function TaskRow({
             {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
           </Button>
         ) : null}
-        {answerable ? <AnswerButton to={`/tasks/${task.id}`} /> : null}
         {appLink === null ? null : (
-          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={appLink}>
-            Open in app
+          <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
+            Open in T3
           </AppButton>
         )}
         {extra}
@@ -304,25 +297,6 @@ export function TaskRow({
   );
 }
 
-/** Observed state of an external thread the Dashboard lists. */
-export type ExternalThreadState = "needs_input" | "running" | "settled";
-
-/**
- * External (non-task) threads needing input, running or settled, styled as TaskRows in that state with the project
- * column (Dashboard only). Title opens History filtered to it.
- */
-export function ExternalThreadRows({ threads, state }: { threads: Thread[]; state: ExternalThreadState }) {
-  return (
-    <ul>
-      {threads.map((t) => (
-        <li key={t.t3ThreadId} className="border-b border-line last:border-b-0">
-          <ExternalThreadRow thread={t} state={state} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** Dashboard Settled group: tasks and external threads in one list (already ordered by settle time). */
 export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyText: string }) {
   if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
@@ -330,70 +304,16 @@ export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyT
     <ul>
       {items.map((item) => (
         <li
-          key={item.kind === "task" ? `task-${item.task.id}` : item.kind === "tree" ? `tree-${item.tree.id}` : `thread-${item.thread.t3ThreadId}`}
+          key={item.kind === "task" ? `task-${item.task.id}` : `tree-${item.tree.id}`}
           className="border-b border-line last:border-b-0"
         >
           {item.kind === "task" ? (
             <TaskRow task={item.task} showProject />
-          ) : item.kind === "tree" ? (
-            <TreeRow tree={item.tree} />
           ) : (
-            <ExternalThreadRow thread={item.thread} state="settled" />
+            <TreeRow tree={item.tree} />
           )}
         </li>
       ))}
     </ul>
-  );
-}
-
-function ExternalThreadRow({ thread, state }: { thread: Thread; state: ExternalThreadState }) {
-  const href = useShowT3Links() ? thread.t3DeepLink : null;
-  const project = thread.projectTitle ?? thread.t3ProjectId;
-  const needsInput = state === "needs_input";
-  const answerable = needsInput && thread.pendingQuestionCount > 0;
-  return (
-    <div
-      className={cx(
-        "group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:grid-cols-[118px_150px_minmax(0,1fr)_auto] md:gap-x-3.5 md:py-2",
-        needsInput ? "border-l-need" : "border-l-transparent",
-      )}
-    >
-      <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
-        <TaskStateBadge state={state} />
-      </div>
-
-      <ProjectCell projectId={thread.projectId} title={project} />
-
-      <div className="order-1 min-w-0 md:order-2">
-        <ProjectName projectId={thread.projectId} title={project} className="mb-0.5 block break-words md:hidden" />
-        <Link to={sessionPath(thread.t3ThreadId)} className="text-body font-medium break-words hover:underline">
-          {thread.title}
-        </Link>
-        <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
-          {state === "settled" && thread.settledAt !== null ? (
-            <SettledMeta settledAt={thread.settledAt} runStartedAt={thread.runStartedAt} runEndedAt={thread.runEndedAt} />
-          ) : (
-            <span title={dateTime(thread.updatedAt)} className="tabular">
-              {relativeTime(thread.updatedAt)}
-            </span>
-          )}
-          <span>external thread</span>
-          <PrChips prs={thread.pullRequests} detailTo={sessionPath(thread.t3ThreadId)} />
-        </div>
-        <LastWordLine state={state} preview={thread.lastWordPreview} className="mt-1 hidden md:block" />
-      </div>
-
-      <LastWordLine state={state} preview={thread.lastWordPreview} className="order-3 col-span-2 md:hidden" />
-
-      <div className={cx("order-3 col-span-2 flex-wrap items-center gap-1.5 md:col-span-1 md:flex md:justify-end", href === null && !answerable ? "hidden" : "flex")}>
-        {answerable ? <AnswerButton to={sessionPath(thread.t3ThreadId)} /> : null}
-        {href === null ? null : (
-          <AppButton small variant={needsInput && !answerable ? "primary" : "secondary"} href={href}>
-            Open in app
-          </AppButton>
-        )}
-        <RowCopyLink subject={{ kind: "session", id: thread.t3ThreadId, title: thread.title }} />
-      </div>
-    </div>
   );
 }

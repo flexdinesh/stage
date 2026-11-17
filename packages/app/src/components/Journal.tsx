@@ -7,7 +7,7 @@ import type { JournalEntry, JournalKind, JournalOwner, JournalQuery, NoteCategor
 import { useApi } from "../platform/context.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
-import { sessionPath } from "../lib/sessions.ts";
+import { SourceSessionLink } from "./StageLinks.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Select } from "./ui.tsx";
 
@@ -141,7 +141,7 @@ export function JournalRow({ entry, anchored = false, compact = false }: { entry
       ) : null}
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-meta-sm text-muted empty:hidden">
         {entry.sourceTaskId === null ? null : <Link to={`/tasks/${entry.sourceTaskId}`} className={linkClass}>source task #{entry.sourceTaskId}</Link>}
-        {entry.sourceThreadId === null ? null : <Link to={sessionPath(entry.sourceThreadId)} className={linkClass}>source session</Link>}
+        {entry.sourceThreadId === null ? null : <SourceSessionLink id={entry.sourceThreadId} />}
         {entry.fromTreeId === null ? null : <Link to={`/trees/${entry.fromTreeId}`} className={linkClass}>from tree #{entry.fromTreeId}</Link>}
         {entry.toTreeId === null ? null : <Link to={`/trees/${entry.toTreeId}`} className={linkClass}>to tree #{entry.toTreeId}</Link>}
       </div>

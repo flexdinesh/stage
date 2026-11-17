@@ -117,7 +117,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
           </Link>
         ) : next.kind === "answer" ? (
           <Link to={to} className={buttonClass("primary", true)}>
-            Answer
+            View tasks
           </Link>
         ) : next.kind === "start" ? (
           <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>

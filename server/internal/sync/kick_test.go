@@ -80,38 +80,19 @@ func TestKickRunsFullSyncAndCatalogNow(t *testing.T) {
 	}
 }
 
-func TestProgressCountsRunningSync(t *testing.T) {
+func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
-	fake := t3.NewFake()
-	client := &gateT3{Fake: fake, gate: make(chan struct{}), paused: make(chan struct{}, 1)}
-	ctx := context.Background()
-	p := fake.AddProject("app", "/w/app")
-	for range 150 { // two pages of 100
-		if _, err := fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.ID, Title: "t"}); err != nil {
+	client := &gateT3{Fake: t3.NewFake()}
+	p := client.AddProject("app", "/w/app")
+	for range 150 {
+		if _, err := client.LaunchThread(t.Context(), t3.LaunchInput{ProjectID: p.ID, Title: "external"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	svc := t3sync.New(store, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if pr := svc.Progress(); pr.Running || pr.StartedAt != nil {
-		t.Fatalf("idle progress %+v", pr)
-	}
-	res := make(chan t3sync.Result, 1)
-	go func() {
-		r, err := svc.FullSync(ctx)
-		if err != nil {
-			t.Error(err)
-		}
-		res <- r
-	}()
-	<-client.paused
-	pr := svc.Progress()
-	if !pr.Running || pr.StartedAt == nil || pr.Projects != 1 || pr.Threads != 100 {
-		t.Fatalf("mid-sync progress %+v", pr)
-	}
-	close(client.gate)
-	r := <-res
-	if r.Threads != 150 || r.Projects != 1 {
-		t.Fatalf("result %+v", r)
+	r, err := svc.FullSync(t.Context())
+	if err != nil || r.Threads != 0 || r.Projects != 1 || client.pages.Load() != 0 {
+		t.Fatalf("sync=%+v pages=%d err=%v", r, client.pages.Load(), err)
 	}
 	if pr := svc.Progress(); pr.Running || pr.Threads != 0 {
 		t.Fatalf("after sync %+v", pr)
