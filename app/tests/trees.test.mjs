@@ -17,6 +17,8 @@ import {
   taskClosedLabel,
   treeClosed,
   treeMeta,
+  treeProjectLabel,
+  treeProjects,
   treeRollup,
   treeMembers,
   treeSettled,
@@ -199,6 +201,50 @@ test("tree meta reads the same for a list row and a detail", () => {
     levels: [[1]],
   };
   assert.equal(treeMeta(detail), "1 task · 1 level · 1 project · manual");
+});
+
+test("tree projects and labels agree for a summary and its current members", () => {
+  const summary = { projects: ["beta", "alpha"] };
+  const detail = { tasks: [{ projectTitle: "alpha" }, { projectTitle: "beta" }] };
+  assert.deepEqual(treeProjects(summary), ["alpha", "beta"]);
+  assert.deepEqual(treeProjects(detail), treeProjects(summary));
+  assert.equal(treeProjectLabel(summary), "Projects: alpha · beta");
+  assert.equal(treeProjectLabel(detail), treeProjectLabel(summary));
+});
+
+test("single-project trees name their project", () => {
+  for (const tree of [{ projects: ["stage"] }, { tasks: [{ projectTitle: "stage" }] }]) {
+    assert.deepEqual(treeProjects(tree), ["stage"]);
+    assert.equal(treeProjectLabel(tree), "Project: stage");
+  }
+});
+
+test("multi-project trees use default string order without reordering their source", () => {
+  const projects = ["beta", "alpha", "Zeta"];
+  const tasks = projects.map((projectTitle) => ({ projectTitle }));
+  for (const tree of [{ projects }, { tasks }]) {
+    assert.deepEqual(treeProjects(tree), ["Zeta", "alpha", "beta"]);
+    assert.equal(treeProjectLabel(tree), "Projects: Zeta · alpha · beta");
+  }
+  assert.deepEqual(projects, ["beta", "alpha", "Zeta"]);
+  assert.deepEqual(tasks.map((task) => task.projectTitle), ["beta", "alpha", "Zeta"]);
+});
+
+test("repeated members from one project produce one project title", () => {
+  for (const tree of [
+    { projects: ["stage", "stage"] },
+    { tasks: [{ id: 1, projectTitle: "stage" }, { id: 2, projectTitle: "stage" }] },
+  ]) {
+    assert.deepEqual(treeProjects(tree), ["stage"]);
+    assert.equal(treeProjectLabel(tree), "Project: stage");
+  }
+});
+
+test("empty trees have no member projects", () => {
+  for (const tree of [{ projects: [] }, { tasks: [] }]) {
+    assert.deepEqual(treeProjects(tree), []);
+    assert.equal(treeProjectLabel(tree), "No member projects");
+  }
 });
 
 test("base candidates are the task's needs in its own project", () => {

@@ -6,7 +6,7 @@ import { bandState, edgeState, graphLayout, inState, type BandState, type EdgeSt
 import { cx } from "../ui.tsx";
 import { NodeChip } from "./TreeNode.tsx";
 
-const SIZE = { nodeW: 224, nodeH: 56, gapX: 16, gapY: 32 };
+const SIZE = { nodeW: 224, nodeH: 80, gapX: 16, gapY: 32 };
 /** Step label column on the left of every band. */
 const GUTTER = 88;
 /** Space around the graph inside the bands (half a level gap, so the first and last bands frame their row evenly). */
@@ -101,7 +101,7 @@ export function TreeGraph({
 }
 
 /**
- * One member box: state chip and time in state, then `#id` and title. Running takes the Sky border, unstarted backlog
+ * One member box: state chip and time in state, then `#id` and title, then project. Running takes the Sky border, unstarted backlog
  * a dashed one, needs input the One Yellow Edge, the selected box the inset Ink outline.
  */
 function GraphNode({
@@ -121,7 +121,7 @@ function GraphNode({
 }) {
   const when = inState(task);
   const titleCls = "min-w-0 truncate text-left text-ui font-medium after:absolute after:inset-0 hover:underline";
-  const label = `Step ${step}: #${task.id} ${task.title}`;
+  const label = `Step ${step}: #${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (
     <li
       data-node={task.id}
@@ -152,6 +152,7 @@ function GraphNode({
           {task.title}
         </Link>
       </span>
+      <span className="truncate font-mono text-meta text-fg" title={task.projectTitle}>{task.projectTitle}</span>
     </li>
   );
 }

@@ -23,7 +23,6 @@ export function TreeView({
 }) {
   const levels = useMemo(() => layoutLevels(tree.tasks), [tree.tasks]);
   const byId = useMemo(() => new Map(tree.tasks.map((t) => [t.id, t])), [tree.tasks]);
-  const showProject = useMemo(() => new Set(tree.tasks.map((t) => t.projectId)).size > 1, [tree.tasks]);
 
   return (
     <ul className={COLUMNS} aria-label="Tree tasks in level order">
@@ -46,7 +45,6 @@ export function TreeView({
               level={l}
               firstOfLevel={i === 0}
               endsLevel={i === band.length - 1 && l < levels.length - 1}
-              showProject={showProject}
               selected={selected === id}
               onSelect={onSelect}
             />
@@ -62,7 +60,7 @@ export function TreeViewSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading tree">
       {[0.6, 0.45, 0.7, 0.5, 0.4].map((w, i) => (
-        <div key={i} className="flex h-[52px] items-center gap-3 border-b border-line px-3 last:border-b-0 md:h-[34px]">
+        <div key={i} className="flex h-[76px] items-center gap-3 border-b border-line px-3 last:border-b-0 md:h-[52px]">
           <div className="h-3 w-6 animate-pulse bg-panel" />
           <div className="h-4 w-20 animate-pulse bg-panel" />
           <div className="h-3.5 animate-pulse bg-panel" style={{ width: `${w * 60}%` }} />

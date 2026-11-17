@@ -4,7 +4,7 @@ import { useInvalidateWork } from "../../api/queries.ts";
 import type { TreeSummary } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
-import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeRollup, type Rollup } from "../../lib/trees.ts";
+import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { Button, Chip, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
@@ -89,7 +89,8 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
           )}
           {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
         </div>
-        <p className="mt-0.5 font-mono text-meta text-muted tabular" title={tree.projects.join(", ")}>
+        <p className="mt-0.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</p>
+        <p className="mt-0.5 font-mono text-meta text-muted tabular">
           {treeMeta(tree)}
         </p>
         <TreeWhen tree={tree} inline />

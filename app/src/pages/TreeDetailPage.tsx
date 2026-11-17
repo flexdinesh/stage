@@ -17,7 +17,7 @@ import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { closeBlocker, closedLabel, countMembers, treeClosed, treeMeta, treeSettled } from "../lib/trees.ts";
+import { closeBlocker, closedLabel, countMembers, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
@@ -244,16 +244,19 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
         title={renaming ? <span className="sr-only">{tree.title}</span> : tree.title}
         meta={
           <>
-            {treeMeta(tree)} · <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span> ·{" "}
-            <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
-              active {relativeTime(tree.lastActivityAt)}
+            <span className="text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</span>
+            <span className="mt-1 block">
+              {treeMeta(tree)} · <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span> ·{" "}
+              <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
+                active {relativeTime(tree.lastActivityAt)}
+              </span>
+              {settled ? (
+                <Chip tone="ok" dot className="ml-2">
+                  settled
+                </Chip>
+              ) : null}
+              {closedChip === null ? null : <Chip className="ml-2">{closedChip}</Chip>}
             </span>
-            {settled ? (
-              <Chip tone="ok" dot className="ml-2">
-                settled
-              </Chip>
-            ) : null}
-            {closedChip === null ? null : <Chip className="ml-2">{closedChip}</Chip>}
           </>
         }
         actions={
