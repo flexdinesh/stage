@@ -277,6 +277,19 @@ export function nextActionText(next: NextAction): string {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** Distinct current-member project titles, sorted for tree lists and details. */
+export function treeProjects(tree: TreeSummary | TreeDetail): string[] {
+  const projects = "tasks" in tree ? tree.tasks.map((task) => task.projectTitle) : tree.projects;
+  return [...new Set(projects)].toSorted();
+}
+
+/** Named project context for a tree list row or detail. */
+export function treeProjectLabel(tree: TreeSummary | TreeDetail): string {
+  const projects = treeProjects(tree);
+  if (projects.length === 0) return "No member projects";
+  return `Project${projects.length === 1 ? "" : "s"}: ${projects.join(" · ")}`;
+}
+
 /** "7 tasks · 3 levels · 2 projects · auto" for a tree list row or a tree detail. */
 export function treeMeta(tree: TreeSummary | TreeDetail): string {
   const shape: { tasks: number; levels: number; projects: number; mode: StartMode } =

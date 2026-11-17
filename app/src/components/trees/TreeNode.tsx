@@ -102,9 +102,9 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
 }
 
 /**
- * One member as a graph list row: level (first row of a level only; laptop), state chip, `#id` and title (project when the
- * tree spans projects), needs (failed ones red), time in state, one action. Laptop rows sit on the list's subgrid;
- * phone rows wrap to two lines. Needs input takes the yellow edge; the selected row an inset Ink outline. The title
+ * One member as a graph list row: level (first row of a level only; laptop), state chip, `#id` and title with project
+ * beneath, needs (failed ones red), time in state, one action. Laptop rows sit on the list's subgrid;
+ * phone rows wrap. Needs input takes the yellow edge; the selected row an inset Ink outline. The title
  * selects the row on lg+ (side panel) and opens the task below lg.
  */
 export function TreeNode({
@@ -113,7 +113,6 @@ export function TreeNode({
   level,
   firstOfLevel,
   endsLevel,
-  showProject,
   selected,
   onSelect,
 }: {
@@ -124,7 +123,6 @@ export function TreeNode({
   firstOfLevel: boolean;
   /** The next row starts another level (stronger rule under this one). */
   endsLevel: boolean;
-  showProject: boolean;
   selected: boolean;
   onSelect: (id: number) => void;
 }) {
@@ -132,11 +130,12 @@ export function TreeNode({
   const when = inState(task);
   const ran = task.state === "done" || task.state === "settled" ? duration(task.runStartedAt, task.runEndedAt) : null;
   const titleCls = "min-w-0 truncate text-left text-ui font-medium after:absolute after:inset-0 hover:underline";
+  const label = `#${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (
     <li
       data-node={task.id}
       className={cx(
-        "relative flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 last:border-b-0 md:col-span-6 md:grid md:min-h-[34px] md:grid-cols-subgrid md:gap-0 md:px-0 md:py-0",
+        "relative flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 last:border-b-0 md:col-span-6 md:grid md:min-h-[52px] md:grid-cols-subgrid md:gap-0 md:px-0 md:py-1.5",
         endsLevel ? "border-line-strong" : "border-line",
         task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",
         selected && "outline outline-1 -outline-offset-2 outline-fg",
@@ -146,19 +145,17 @@ export function TreeNode({
       <span className="order-3 md:order-none md:px-2">
         <NodeChip task={task} className={task.state === "backlog" ? "border-dashed" : undefined} />
       </span>
-      <span className="order-1 flex min-w-0 basis-full items-baseline gap-1.5 md:order-none md:basis-auto md:px-2">
-        <span className="shrink-0 font-mono text-meta text-muted tabular">#{task.id}</span>
-        <button type="button" aria-pressed={selected} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
-          {task.title}
-        </button>
-        <Link to={`/tasks/${task.id}`} className={cx(titleCls, "lg:hidden")}>
-          {task.title}
-        </Link>
-        {showProject ? (
-          <span className="shrink-0 truncate font-mono text-meta text-muted max-md:hidden" title={task.projectTitle}>
-            {task.projectTitle}
-          </span>
-        ) : null}
+      <span className="order-1 flex min-w-0 basis-full flex-col gap-0.5 md:order-none md:basis-auto md:px-2">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0 font-mono text-meta text-muted tabular">#{task.id}</span>
+          <button type="button" aria-label={label} aria-pressed={selected} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
+            {task.title}
+          </button>
+          <Link to={`/tasks/${task.id}`} aria-label={label} className={cx(titleCls, "lg:hidden")}>
+            {task.title}
+          </Link>
+        </span>
+        <span className="font-mono text-meta text-fg [overflow-wrap:anywhere]">{task.projectTitle}</span>
       </span>
       <span
         className="order-4 font-mono text-meta text-muted tabular md:order-none md:truncate md:px-2"
