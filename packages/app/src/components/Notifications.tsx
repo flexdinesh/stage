@@ -14,6 +14,7 @@ import type { Notification, NotificationEvent, NotificationGroup, NotificationPa
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { sessionPath } from "../lib/sessions.ts";
 import { pushFooterNote } from "../lib/push.ts";
+import { reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import { AnswerButton } from "./NeedsInputPanel.tsx";
@@ -169,6 +170,8 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
       if (event.query.queryHash !== hashKey(latestNotificationsKey)) return;
       const items = qc.getQueryData<NotificationPage>(latestNotificationsKey)?.notifications;
       if (items === undefined) return;
+      // Live state changes even when no new notification was sent.
+      setToasts((t) => reconcileToasts(t, items));
       const prev = baseline;
       baseline = Math.max(prev ?? 0, maxId(items));
       const visible = document.visibilityState === "visible";
@@ -177,7 +180,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
         return;
       }
       const fresh = items.filter((n) => n.id > prev).toSorted((a, b) => a.id - b.id);
-      if (fresh.length > 0) setToasts((t) => [...t, ...fresh]);
+      if (fresh.length > 0) setToasts((t) => [...t, ...reconcileToasts(fresh, items)]);
     });
     return () => {
       unsubscribe();
