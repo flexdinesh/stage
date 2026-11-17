@@ -1,5 +1,6 @@
 // Cloudflare Workers static assets: output of `vocs build` (renderStrategy: 'full-static').
 // Build: `mise run website:build`. Local preview: `mise run website:preview` (:8787).
+// Deploy: Cloudflare Workers Builds from stage `main` (docs/website.md); never by hand.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "stage-website",
