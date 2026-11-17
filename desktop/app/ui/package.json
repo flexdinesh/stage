@@ -1,5 +1,5 @@
 {
-  "name": "stage-desktop",
+  "name": "@stage/desktop",
   "private": true,
   "version": "0.0.0",
   "type": "module",

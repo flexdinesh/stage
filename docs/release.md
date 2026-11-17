@@ -23,7 +23,7 @@ tags; installing and updating (`scripts/install.sh`, `stage update`,
 - Pre-release versions use lowercase letters, digits and dots (`1.2.0-rc.1`); there is no build metadata, so package formats need no escaping.
 - Both run `scripts/release.sh`, which builds, then `tools/release assemble` and `tools/release verify -smoke`. `scripts/release.sh` and `tools/release` (Go standard library only) are the whole implementation.
 
-Both builds embed the web UI: `web/dist` is built once and copied into `server/internal/webui/dist` before the CLI/server is compiled (`CGO_ENABLED=0 -trimpath -ldflags "-s -w -X ..."`) for each target. The desktop's bundled CLI is the same file as the headless one for that target (byte for byte; a universal macOS CLI's two slices are the darwin binaries, apart from the code signature: on a Mac, MyGo ad-hoc signs the bundled CLI, which re-signs both slices, and verification ignores only `LC_CODE_SIGNATURE`, its blob and `__LINKEDIT`'s sizes).
+Both builds embed the web UI: `apps/web/dist` (`pnpm --filter @stage/web build`) is built once and copied into `server/internal/webui/dist` before the CLI/server is compiled (`CGO_ENABLED=0 -trimpath -ldflags "-s -w -X ..."`) for each target. The desktop's bundled CLI is the same file as the headless one for that target (byte for byte; a universal macOS CLI's two slices are the darwin binaries, apart from the code signature: on a Mac, MyGo ad-hoc signs the bundled CLI, which re-signs both slices, and verification ignores only `LC_CODE_SIGNATURE`, its blob and `__LINKEDIT`'s sizes).
 
 ## Targets
 

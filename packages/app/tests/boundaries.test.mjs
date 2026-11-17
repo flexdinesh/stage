@@ -1,6 +1,6 @@
 // The shared app reaches the host only through its platform contract
 // (src/platform/index.ts). These browser APIs belong in a host adapter
-// (web/src/platform/), and no host framework may leak into product code.
+// (apps/web/src/platform/), and no host framework may leak into product code.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";

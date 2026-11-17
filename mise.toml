@@ -26,16 +26,16 @@ echo "dev db $DEV_DIR/stage.db, server $STAGE_LISTEN"
 kill_tree() { local c; for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null || true; }
 trap 'for p in $(jobs -p); do kill_tree "$p"; done' EXIT
 (cd server && go run ./cmd/stage) &
-(pnpm install && cd web && pnpm dev) &
+(pnpm install && cd apps/web && pnpm dev) &
 wait
 '''
 
 [tasks.build]
-description = "Browser host bundle (web/dist) embedded into a single Go binary at bin/stage"
+description = "Browser host bundle (apps/web/dist) embedded into a single Go binary at bin/stage"
 run = [
-  "pnpm install --frozen-lockfile && pnpm --filter stage-web build",
+  "pnpm install --frozen-lockfile && pnpm --filter @stage/web build",
   "find server/internal/webui/dist -mindepth 1 ! -name .gitkeep -delete",
-  "cp -r web/dist/. server/internal/webui/dist/",
+  "cp -r apps/web/dist/. server/internal/webui/dist/",
   # Version/commit for /api/health and `stage status` (docs/runtime.md).
   '''cd server && CGO_ENABLED=0 go build -ldflags "-X github.com/flexdinesh/stage/server/internal/buildinfo.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -X github.com/flexdinesh/stage/server/internal/buildinfo.Commit=$(git rev-parse HEAD 2>/dev/null)" -o ../bin/stage ./cmd/stage''',
 ]
@@ -48,14 +48,14 @@ run = [
 ]
 
 [tasks.test]
-description = "Go tests + app/web tests, typecheck, lint"
+description = "Go tests + packages/app, apps/web and desktop UI tests, typecheck, lint"
 run = [
   "cd server && go vet ./... && go test ./...",
   "pnpm -r test && pnpm -r typecheck && pnpm -r lint",
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, app/web install + test/typecheck/lint, desktop fixture and desktop app Go tests, release tool"
+description = "Everything CI-like: go vet + go test, workspace install + test/typecheck/lint, desktop fixture and desktop app Go tests, release tool"
 depends = ["check:go", "check:web", "check:fixture", "check:desktop", "check:release"]
 
 [tasks."check:go"]
@@ -147,7 +147,7 @@ run = '''
 #!/usr/bin/env bash
 set -e
 pnpm install --frozen-lockfile
-pnpm --filter stage-desktop build
+pnpm --filter @stage/desktop build
 cd desktop/app
 go test -tags e2e -count=1 -v -timeout 10m ./e2e
 '''
@@ -162,7 +162,7 @@ cd desktop/fixture
 find dist -mindepth 1 ! -name .gitkeep -delete
 (cd web && pnpm install --frozen-lockfile && pnpm test && pnpm lint && pnpm build)
 if [ "${STAGE_FIXTURE_REAL_UI:-}" = 1 ]; then
-  (cd ../../web && pnpm install --frozen-lockfile && pnpm build)
+  (cd ../../apps/web && pnpm install --frozen-lockfile && pnpm build)
 fi
 go test -tags e2e -count=1 -v ./e2e
 '''

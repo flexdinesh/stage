@@ -290,18 +290,18 @@ func holdStream(t *testing.T, a *automation, client *http.Client) {
 }
 
 // TestRealUI (STAGE_FIXTURE_REAL_UI=1) loads the real Stage web build
-// (web/dist) through bridge B against a real `stage serve` on a temp
+// (apps/web/dist) through bridge B against a real `stage serve` on a temp
 // socket and data dir: no web change, deep links, /api over the socket.
 func TestRealUI(t *testing.T) {
 	if os.Getenv("STAGE_FIXTURE_REAL_UI") != "1" {
-		t.Skip("set STAGE_FIXTURE_REAL_UI=1 (mise run fixture:e2e builds web/dist when set)")
+		t.Skip("set STAGE_FIXTURE_REAL_UI=1 (mise run fixture:e2e builds apps/web/dist when set)")
 	}
-	uiDir, err := filepath.Abs("../../../web/dist")
+	uiDir, err := filepath.Abs("../../../apps/web/dist")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(uiDir, "index.html")); err != nil {
-		t.Fatal("web/dist not built")
+		t.Fatal("apps/web/dist not built")
 	}
 	app, _ := bins(t)
 	stage := filepath.Join(t.TempDir(), "stage")
