@@ -343,6 +343,79 @@ func readiness(t client.Task) string {
 	return string(*t.Readiness)
 }
 
+func TestTreeStartModeDefaultsToInherit(t *testing.T) {
+	e := newEnv(t)
+	e.project("/w/inherit")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/inherit"}})
+	var root client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "root", "prompt": "root", "start": true}, &root)
+	var tree client.TreeDetail
+	mustCall(t, cs, "create_tree", map[string]any{
+		"title": "Shared policy", "startMode": "manual", "tasks": []map[string]any{{"id": root.ID}},
+	}, &tree)
+	if len(tree.Tasks) != 1 || tree.Tasks[0].StartMode != nil {
+		t.Fatalf("joining a tree must preserve default inheritance: %+v", tree.Tasks)
+	}
+
+	var members []client.Task
+	for _, mode := range []string{"", "inherit", "manual", "auto"} {
+		args := map[string]any{
+			"title": "member " + mode, "prompt": "work", "treeId": tree.ID, "needs": []int64{root.ID},
+		}
+		if mode != "" {
+			args["startMode"] = mode
+		}
+		var member client.Task
+		mustCall(t, cs, "create_task", args, &member)
+		if mode == "" || mode == "inherit" {
+			if member.StartMode != nil || member.EffectiveStartMode == nil || *member.EffectiveStartMode != db.StartManual {
+				t.Fatalf("default/explicit inheritance for %q: %+v", mode, member)
+			}
+		} else if member.StartMode == nil || string(*member.StartMode) != mode {
+			t.Fatalf("explicit override %q: %+v", mode, member)
+		}
+		members = append(members, member)
+	}
+	e.settle(root)
+	for i, member := range members {
+		var got client.TaskDetail
+		mustCall(t, cs, "get_task", map[string]any{"id": member.ID}, &got)
+		if i == 3 {
+			if got.State != db.StateRunning {
+				t.Fatalf("auto exception must launch in a manual tree: %+v", got.Task)
+			}
+		} else if got.State != db.StateBacklog || readiness(got.Task) != "ready" {
+			t.Fatalf("manual member must wait: %+v", got.Task)
+		}
+	}
+
+	mustCall(t, cs, "update_tree", map[string]any{"id": tree.ID, "startMode": "auto"}, &tree)
+	if err := e.runner.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i, member := range members[:3] {
+		var got client.TaskDetail
+		mustCall(t, cs, "get_task", map[string]any{"id": member.ID}, &got)
+		if i < 2 {
+			if got.StartMode != nil || got.State != db.StateRunning || got.EffectiveStartMode == nil || *got.EffectiveStartMode != db.StartAuto {
+				t.Fatalf("inherited task must follow tree change: %+v", got.Task)
+			}
+		} else if got.StartMode == nil || *got.StartMode != db.StartManual || got.State != db.StateBacklog || readiness(got.Task) != "ready" {
+			t.Fatalf("tree change must preserve manual exception: %+v", got.Task)
+		}
+	}
+	var inherited client.Task
+	mustCall(t, cs, "update_task", map[string]any{"id": members[2].ID, "startMode": "inherit"}, &inherited)
+	if err := e.runner.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var got client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": inherited.ID}, &got)
+	if got.StartMode != nil || got.State != db.StateRunning {
+		t.Fatalf("clearing override must follow tree and launch: %+v", got.Task)
+	}
+}
+
 func TestLifecycleTreeTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/trees")
