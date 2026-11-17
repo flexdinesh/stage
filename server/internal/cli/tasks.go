@@ -179,7 +179,7 @@ type waitFlags struct {
 func (w *waitFlags) register(c *cmd) {
 	c.fs.StringVar(&w.needs, "needs", "", "task ids this task needs (comma-separated): it starts once all settle")
 	c.fs.Int64Var(&w.tree, "tree", 0, "join this tree")
-	c.fs.StringVar(&w.startMode, "start-mode", "", "auto|manual|inherit (default: the tree's)")
+	c.fs.StringVar(&w.startMode, "start-mode", "", "inherit (default)|auto|manual; set shared policy on the tree, override only for a task exception")
 	c.fs.Int64Var(&w.baseTask, "base-task", 0, "with --base predecessor, the need whose branch the worktree starts from")
 	c.fs.BoolVar(&w.afterMe, "after-me", false, "also need your own session (adopted as a task)")
 	c.fs.BoolVar(&w.handoff, "handoff", true, "append each need's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
