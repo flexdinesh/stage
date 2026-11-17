@@ -1,12 +1,12 @@
 ---
 version: 1
 slug: "web-src"
-primary_target: "app/src"
-related_targets: ["web/src"]
+primary_target: "packages/app/src"
+related_targets: ["apps/web/src"]
 ---
 
 ## Scope
-Whole stage web app (shared app in app/src, browser host in web/src): Dashboard (with Trees and Ready groups), Trees, Tree view, Projects, Project detail, Task detail (with Tree, Runs and Pull requests panels), Sessions, Session detail (with Track as task, Created tasks and New tree, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
+Whole stage web app (shared app in packages/app/src, browser host in apps/web/src): Dashboard (with Trees and Ready groups), Trees, Tree view, Projects, Project detail, Task detail (with Tree, Runs and Pull requests panels), Sessions, Session detail (with Track as task, Created tasks and New tree, Runs, Pull requests and child inspection), PR state chips on task/session rows, History, Templates, Settings, New task drawer, Ctrl K palette. Mode: Operate.
 
 ## Audience and task
 A developer, on laptop and phone, queueing T3 tasks, catching needs-input, watching running/completed work from every starting point, browsing history.

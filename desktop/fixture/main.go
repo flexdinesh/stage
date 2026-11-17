@@ -6,7 +6,7 @@
 //
 //	STAGE_FIXTURE_SOCKET=/tmp/sf/stage.sock  the Stage socket (required)
 //	STAGE_FIXTURE_BRIDGE=scheme|fetch        the bridge (required)
-//	STAGE_FIXTURE_UI_DIR=web/dist            scheme only: serve this
+//	STAGE_FIXTURE_UI_DIR=apps/web/dist       scheme only: serve this
 //	                                         frontend (the real Stage UI)
 //	                                         instead of the probe page
 //	STAGE_FIXTURE_AUTORUN=1                  run the probe's checks on load

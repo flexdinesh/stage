@@ -1,25 +1,25 @@
 # syntax=docker/dockerfile:1
 
-# pnpm workspace: the shared app (app/), the browser host (web/) and the desktop
+# pnpm workspace: the shared app (packages/app), the browser host (apps/web) and the desktop
 # host frontend (desktop/app/ui, manifest only: its install must match the lockfile), one lockfile.
 FROM node:26-alpine AS web
 WORKDIR /src
 RUN npm install -g pnpm@12.15.0
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY app/package.json app/
-COPY web/package.json web/
+COPY packages/app/package.json packages/app/
+COPY apps/web/package.json apps/web/
 COPY desktop/app/ui/package.json desktop/app/ui/
 RUN pnpm install --frozen-lockfile
-COPY app/ app/
-COPY web/ web/
-RUN pnpm --filter stage-web build
+COPY packages/app/ packages/app/
+COPY apps/web/ apps/web/
+RUN pnpm --filter @stage/web build
 
 FROM golang:1.27-alpine AS server
 WORKDIR /src/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
-COPY --from=web /src/web/dist/ ./internal/webui/dist/
+COPY --from=web /src/apps/web/dist/ ./internal/webui/dist/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
 # Data dir for the SQLite database, owned by distroless nonroot (65532), so a
 # named volume mounted at /data starts out writable.

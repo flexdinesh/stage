@@ -47,9 +47,9 @@ build() {
   echo "    cli: ${CLI_TARGETS[*]}; desktop: ${DESKTOP_TARGETS[*]:-none}"
 
   # Web assets: built once, embedded in every CLI/server binary.
-  (cd "$src" && pnpm install --frozen-lockfile && pnpm --filter stage-web build)
+  (cd "$src" && pnpm install --frozen-lockfile && pnpm --filter @stage/web build)
   find "$src/server/internal/webui/dist" -mindepth 1 ! -name .gitkeep -delete
-  cp -R "$src/web/dist/." "$src/server/internal/webui/dist/"
+  cp -R "$src/apps/web/dist/." "$src/server/internal/webui/dist/"
 
   # One CLI/server per target: the headless artifact and the desktop's
   # bundled CLI are the same file.

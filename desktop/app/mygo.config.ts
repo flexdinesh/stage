@@ -26,11 +26,11 @@ export default {
   // The UI (desktop/app/ui) builds into dist/, which main.go embeds and
   // serves itself through bridge B, so there is no frontendDist.
   devUrl: "http://localhost:5174",
-  devCommand: "pnpm --filter stage-desktop dev",
-  buildCommand: "pnpm --filter stage-desktop build",
+  devCommand: "pnpm --filter @stage/desktop dev",
+  buildCommand: "pnpm --filter @stage/desktop build",
   bindings: "ui/src/mygo.ts",
   out: "build",
-  // The brand mark (web/public/logo.svg) rendered by rsvg-convert, outside
+  // The brand mark (apps/web/public/logo.svg) rendered by rsvg-convert, outside
   // resources/ (scripts/release.sh recreates that per build). Linux ships it
   // as <slug>.png beside the .desktop entry (Icon=<slug>); macOS uses
   // icon.icns. Regenerate both from logo.svg as docs/desktop.md#app-icon says.

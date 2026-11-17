@@ -1,4 +1,4 @@
-// Package webui serves the embedded SPA build (web/dist copied into ./dist).
+// Package webui serves the embedded SPA build (apps/web/dist copied into ./dist).
 package webui
 
 import (

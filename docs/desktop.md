@@ -25,7 +25,7 @@ Decisions: [ADR 0001](adr/0001-desktop-shell.md).
 | `notifications.go` | The MyGo side of `alerts`: OS notifications and the Dock/launcher badge. |
 | `selfcheck.go` | `STAGE_DESKTOP_SELFCHECK=1`: print how the bundled CLI resolves, then exit (release verification). |
 | `mygo.config.ts` | Build config per identity (`IDENTITY=stage` or `stage-dev`). |
-| `ui/` | pnpm workspace package `stage-desktop`: the desktop host frontend (mount, adapters, generated `src/mygo.ts`). Builds into `desktop/app/dist`. |
+| `ui/` | pnpm workspace package `@stage/desktop`: the desktop host frontend (mount, adapters, generated `src/mygo.ts`). Builds into `desktop/app/dist`. |
 | `itest/`, `e2e/` | Headless integration test against a real `stage serve`; webview e2e (build tag `e2e`). |
 
 ## Launch sequence
@@ -46,7 +46,7 @@ The app opens no TCP listener for desktop-to-Stage traffic; the integration test
 
 ## Connection states
 
-The shell publishes one `HostState` (`app/src/platform/index.ts`, mirrored by `launch.State`) through the `host:state` event.
+The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirrored by `launch.State`) through the `host:state` event.
 
 | Phase | Cause | Shown | Primary action |
 | --- | --- | --- | --- |
@@ -200,7 +200,7 @@ Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin`
 | attachment images (`/api/attachments/<id>`, new tab) | a child window without bindings |
 | anything else | refused and logged |
 
-- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12` (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `app/src/lib/refs.ts`).
+- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12` (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `packages/app/src/lib/refs.ts`).
 - Markdown stays sanitized (DOMPurify); its URI allowlist adds `t3code:` and `stage(-x):`, and bare `stage://` links autolink.
 - Only app-owned content calls Go: MyGo trusts only the top frame on `mygo://` (or the dev server), and the navigation lock keeps foreign pages out of the main frame.
 
@@ -225,7 +225,7 @@ App identifiers end in `.desktop` because `io.github.flexdinesh.<id>` is the ser
 ## Develop and package
 
 - `mise run desktop:dev`: builds a `stage-dev` CLI into `.scratch/dev/<branch>/bin`, runs a foreground `stage serve` on a short socket under `$XDG_RUNTIME_DIR/stage-desktopdev/` with data in `.scratch/dev/<branch>/desktop` (`.env.dev`, `T3_FAKE=1` to work without T3), and `go tool mygo dev` with the UI's Vite server on `localhost:5174`, which proxies `/api` to that socket. The dev-only `STAGE_DESKTOP_SOCKET` override skips the bundled CLI and the service (identity and API version come from the dev server's health) and is ignored by `mygo build` builds. No OS service is touched.
-- Preview of every connection state in a browser: `pnpm --filter stage-desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`, and for a remote `remote-starting`, `unreachable`, `unreachable-refused`, `remote-ready`, `remote-reconnecting`; the fake shell saves this machine, "Studio" and "Lab": switching plays a short connect (Lab stays unreachable) and Test connection of a `.lan` URL answers like a refused hostname).
+- Preview of every connection state in a browser: `pnpm --filter @stage/desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`, and for a remote `remote-starting`, `unreachable`, `unreachable-refused`, `remote-ready`, `remote-reconnecting`; the fake shell saves this machine, "Studio" and "Lab": switching plays a short connect (Lab stays unreachable) and Test connection of a `.lan` URL answers like a refused hostname).
 - `mise run dist [TARGETS=host|all]`: a `stage-dev` developer build ([release.md](release.md)). It builds the CLI/server (web UI embedded) per target, copies it to `desktop/app/resources/<os>-<arch>/bin/stage` with `LICENSE` (MyGo merges the darwin pair into a universal binary), runs `go tool mygo build` (the `desktop/app/build/` outputs: per Linux arch a tarball with `install.sh`, a `.deb`, an `.rpm`, a `PKGBUILD` and a `.desktop` file (scheme handler); `<Name>.app` with `CFBundleURLTypes` and `LSMinimumSystemVersion 12.0`), then assembles and verifies the assets in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z` is the `stage` build of a clean HEAD. The `.dmg` needs macOS. The app icon ships (see [App icon](#app-icon)); the tray uses a generated ink square. Installing and updating: [install.md](install.md) (Stage Dev from a checkout: [development.md](development.md)).
 - `STAGE_DESKTOP_SELFCHECK=1 <app executable>` prints how the packaged app resolves its bundled CLI (`<resources>/bin/stage`, its `version --json`) and exits before the single-instance lock, windows or the service; release verification runs it.
 - `mise run check` includes `check:desktop` (Go vet, unit tests, the headless integration test); the UI package's tests, typecheck and lint run in `check:web`.
@@ -233,11 +233,11 @@ App identifiers end in `.desktop` because `io.github.flexdinesh.<id>` is the ser
 
 ### App icon
 
-The brand mark `web/public/logo.svg`, unchanged (DESIGN.md, Brand mark): `desktop/app/icon/icon.png` (1024x1024, MyGo `icon`) and `desktop/app/icon/icon.icns` (`macos.icon`, PNG entries ic11 32, ic12 64, ic07 128, ic13/ic08 256, ic14/ic09 512, ic10 1024; no icp4/icp5, as MyGo's own renderer). Both are checked in outside `resources/`, which each build recreates. The Linux tarball and packages carry it as `<slug>.png` beside `<slug>.desktop` (`Icon=<slug>`); the `.app` gets it as `AppIcon.icns`. macOS does not mask an `.icns`, so the Dock shows the square tile. Regenerate from the repository root after changing `logo.svg`:
+The brand mark `apps/web/public/logo.svg`, unchanged (DESIGN.md, Brand mark): `desktop/app/icon/icon.png` (1024x1024, MyGo `icon`) and `desktop/app/icon/icon.icns` (`macos.icon`, PNG entries ic11 32, ic12 64, ic07 128, ic13/ic08 256, ic14/ic09 512, ic10 1024; no icp4/icp5, as MyGo's own renderer). Both are checked in outside `resources/`, which each build recreates. The Linux tarball and packages carry it as `<slug>.png` beside `<slug>.desktop` (`Icon=<slug>`); the `.app` gets it as `AppIcon.icns`. macOS does not mask an `.icns`, so the Dock shows the square tile. Regenerate from the repository root after changing `logo.svg`:
 
 ```sh
-rsvg-convert -w 1024 -h 1024 web/public/logo.svg -o desktop/app/icon/icon.png
-python3 -c 'import struct,subprocess as s,sys; e=b"".join(t.encode()+struct.pack(">I",len(p)+8)+p for t,n in [("ic11",32),("ic12",64),("ic07",128),("ic13",256),("ic08",256),("ic14",512),("ic09",512),("ic10",1024)] for p in [s.run(["rsvg-convert","-w",str(n),"-h",str(n),sys.argv[1]],capture_output=True,check=True).stdout]); open(sys.argv[2],"wb").write(b"icns"+struct.pack(">I",len(e)+8)+e)' web/public/logo.svg desktop/app/icon/icon.icns
+rsvg-convert -w 1024 -h 1024 apps/web/public/logo.svg -o desktop/app/icon/icon.png
+python3 -c 'import struct,subprocess as s,sys; e=b"".join(t.encode()+struct.pack(">I",len(p)+8)+p for t,n in [("ic11",32),("ic12",64),("ic07",128),("ic13",256),("ic08",256),("ic14",512),("ic09",512),("ic10",1024)] for p in [s.run(["rsvg-convert","-w",str(n),"-h",str(n),sys.argv[1]],capture_output=True,check=True).stdout]); open(sys.argv[2],"wb").write(b"icns"+struct.pack(">I",len(e)+8)+e)' apps/web/public/logo.svg desktop/app/icon/icon.icns
 ```
 
 ## Verification

@@ -2,7 +2,7 @@
 .env
 .env.dev
 node_modules
-web/dist
+apps/web/dist
 server/internal/webui/dist/*
 !server/internal/webui/dist/.gitkeep
 bin/

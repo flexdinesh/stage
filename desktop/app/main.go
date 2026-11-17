@@ -87,7 +87,7 @@ func main() {
 	// else may happen (no CLI, socket, paths or scheme registration).
 	if os.Getenv("MYGO_GENERATE") == "" {
 		if _, err := fs.Stat(ui, "index.html"); err != nil && os.Getenv("MYGO_DEV_URL") == "" {
-			log.Print("stage desktop: the UI is not built (desktop/app/dist); run `pnpm --filter stage-desktop build`")
+			log.Print("stage desktop: the UI is not built (desktop/app/dist); run `pnpm --filter @stage/desktop build`")
 		}
 		if !setup(h) {
 			return

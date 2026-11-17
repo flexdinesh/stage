@@ -1,4 +1,4 @@
-// Dev-only preview (`pnpm --filter stage-desktop dev`, then /preview.html?state=<name>): renders the
+// Dev-only preview (`pnpm --filter @stage/desktop dev`, then /preview.html?state=<name>): renders the
 // desktop host's connection states with a fake shell, for visual checks in a browser. Not part of the build
 // (vite builds index.html only). With STAGE_DESKTOP_DEV_SOCKET set, "ready" states reach a real dev server.
 // The fake shell saves three servers (this machine, "Studio", "Lab"); switching plays a short connect, Lab
