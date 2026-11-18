@@ -45,9 +45,9 @@ plugin registration or service installation framework.
   `Links.executionDestination`. Product code does not inspect browser location
   or dispatch native URLs directly.
 
-Task 5 can implement an OpenCode adapter against these contracts. Task 6 can
-consume connection capabilities, scoped observations and neutral configuration
-without reading T3 transport types. Neither task should add global conversation
+Task 5 can make MCP and CLI context harness-neutral using scoped observations,
+capabilities and configuration without reading T3 transport types. Task 6 can
+implement the OpenCode adapter against these contracts. Neither task should add global conversation
 browsing, transcripts, follow-ups, question answering or detailed run panels.
 OpenCode remains storage-only in this change.
 
