@@ -1,0 +1,641 @@
+/* readme-cover: Claude in T3 Code (left) and stage (right), joined by stage's
+   MCP server. Ink Workbench tokens only (--st-* from src/pages/_root.css). */
+
+.rc .ss-stage {
+  overflow: hidden;
+  /* Transparent: GitHub's own light or dark page is the ground */
+  background: transparent;
+  font-family: var(--st-font);
+  color: var(--st-fg);
+}
+
+/* ---- T3 Code: whole, on the stage's 20px gutter ---- */
+
+.rc .rc-t3 {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 480px;
+  /* Well past the stage's foot: the window runs off it under the composer */
+  height: 460px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.rc .rc-t3 .ss-window__side {
+  background: var(--st-panel);
+}
+
+.rc .rc-heading {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--st-fg);
+  white-space: nowrap;
+}
+
+.rc .rc-model {
+  white-space: nowrap;
+  font-family: var(--st-mono);
+  font-size: 11px;
+  color: var(--st-muted);
+}
+
+.rc .rc-t3__body {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: var(--st-surface);
+}
+
+/* Sidebar: brand, project, threads */
+/* The sidebar's Collapse keeps its row to the sidebar's width */
+.rc .rc-side .ss-collapse {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rc .rc-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 8px 0;
+}
+
+.rc .rc-side__brand {
+  padding: 0 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 18px;
+  color: var(--st-fg);
+}
+
+.rc .rc-side__label {
+  padding: 0 6px 6px;
+  font-family: var(--st-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  line-height: 14px;
+  text-transform: uppercase;
+  color: var(--st-muted);
+}
+
+.rc .rc-thread-row {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+  box-shadow: inset 2px 0 transparent;
+  will-change: transform;
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.rc .rc-thread-row[data-on] {
+  background: var(--st-surface);
+  color: var(--st-fg);
+  box-shadow:
+    inset 2px 0 var(--st-accent),
+    0 0 0 1px var(--st-line);
+}
+
+.rc .rc-thread-row__name {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The two thread views crossfade in place over the shared composer */
+.rc .rc-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Composer (96) and its insets (16 above, 76 below) */
+  bottom: 188px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+/* The outgoing thread is gone before the incoming one appears: no onion skin */
+.rc .rc-view[data-on] {
+  opacity: 1;
+  transition: opacity 0.3s ease 0.18s;
+}
+
+/* Planning thread: anchored at its foot, earlier turns fading out the top */
+.rc .rc-thread {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  height: 100%;
+  box-sizing: border-box;
+  /* Words stop 52px short of stage's window, which covers T3's last 28px:
+     the MCP and start lines cross that 65px channel between the two apps */
+  padding: 0 80px 0 16px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent, var(--st-fg) 28px);
+}
+
+.rc .rc-thread > * {
+  flex: none;
+  will-change: transform;
+}
+
+.rc .rc-past {
+  display: grid;
+  gap: 12px;
+}
+
+.rc .rc-ask {
+  display: block;
+  width: fit-content;
+  max-width: 86%;
+  margin-left: auto;
+  padding: 8px 11px;
+  box-sizing: border-box;
+  background: var(--st-panel);
+  border: 1px solid var(--st-line);
+  color: var(--st-fg);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.rc .rc-reply {
+  display: block;
+  color: var(--st-fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* The MCP call: server and tool, then what it made */
+.rc .rc-call {
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  transition: border-color 0.6s ease;
+}
+
+/* Lit in ink while its MCP line runs to stage */
+.rc .rc-call[data-live] {
+  border-color: var(--st-fg);
+  transition: border-color 0.25s ease;
+}
+
+.rc .rc-call__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-panel);
+}
+
+.rc .rc-call__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 16px;
+  color: var(--st-ok);
+}
+
+.rc .rc-call__fn {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+}
+
+.rc .rc-call__fn b {
+  font-weight: 500;
+  color: var(--st-fg);
+}
+
+.rc .rc-call__tag {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--st-line-strong);
+  font-family: var(--st-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 15px;
+  color: var(--st-muted);
+}
+
+.rc .rc-call__body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px 0 32px;
+}
+
+.rc .rc-call__title {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 17px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rc .rc-call__out {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--st-muted);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.rc .rc-call[data-done] .rc-call__out {
+  opacity: 1;
+}
+
+/* The task's own session, from the top */
+.rc .rc-view--run {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 80px 0 16px;
+}
+
+.rc .rc-view--run > * {
+  flex: none;
+}
+
+.rc .rc-origin {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+}
+
+.rc .rc-origin b {
+  font-weight: 500;
+  color: var(--st-fg);
+}
+
+.rc .rc-ask--run {
+  margin-left: auto;
+}
+
+.rc .rc-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+}
+
+/* stage's busy mark: a square border turning */
+.rc .rc-spin {
+  display: block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--st-line-strong);
+  border-top-color: var(--st-run);
+  animation: rc-spin 0.8s linear infinite;
+}
+
+@keyframes rc-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* Composer: the ask is typed here; its MCP chip says stage is connected */
+.rc .rc-composer {
+  position: absolute;
+  left: 16px;
+  right: 80px;
+  bottom: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* One inset on every side; the text sits 15px in from the thread's edge */
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-line-strong);
+  background: var(--st-surface);
+  transition: box-shadow 0.2s ease;
+}
+
+.rc .rc-composer[data-focused] {
+  box-shadow: 0 0 0 1px var(--st-fg);
+}
+
+.rc .rc-composer__text {
+  min-height: 36px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--st-fg);
+}
+
+.rc .rc-composer__text {
+  position: relative;
+}
+
+.rc .rc-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--ss-text-faint);
+  transition: opacity 0.25s ease 0.1s;
+}
+
+.rc .rc-placeholder[data-hide] {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.rc .rc-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 15px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--st-fg);
+}
+
+.rc .rc-composer__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rc .rc-mcp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 7px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--st-ok) 45%, transparent);
+  background: color-mix(in srgb, var(--st-ok) 8%, transparent);
+  font-family: var(--st-mono);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--st-ok);
+}
+
+.rc .rc-mcp__dot {
+  width: 6px;
+  height: 6px;
+  background: var(--st-ok);
+}
+
+/* ---- stage: in the browser, off the stage's foot ---- */
+
+.rc .rc-stage {
+  position: absolute;
+  /* The last real row ends 4px above the stage's foot (row pitch 56) */
+  top: 56px;
+  left: 472px;
+  width: 428px;
+  height: 400px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.rc .rc-stage__body {
+  background: var(--st-bg);
+}
+
+.rc .rc-top {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  /* The wordmark sits 15px past the panel's text edge */
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--st-line);
+}
+
+.rc .rc-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rc .rc-brand__name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 18px;
+}
+
+.rc .rc-brand__sep {
+  font-size: 13px;
+  color: var(--st-muted);
+}
+
+.rc .rc-brand__project {
+  font-family: var(--st-mono);
+  font-size: 12px;
+  color: var(--st-muted);
+}
+
+.rc .rc-new {
+  margin-left: auto;
+}
+
+.rc .rc-panel {
+  margin: 12px;
+  border: 1px solid var(--st-line);
+  background: var(--st-surface);
+}
+
+.rc .rc-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-panel);
+}
+
+.rc .rc-panel__title {
+  font-family: var(--st-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.rc .rc-panel__count {
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--st-muted);
+}
+
+/* A task row (TaskList.tsx): state, then title over model, then the action.
+   ROW in ReadmeCover.tsx is its height */
+.rc .rc-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  height: 56px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--st-line);
+  background: transparent;
+  transition: background-color 1s ease;
+  will-change: transform;
+}
+
+.rc .rc-row[data-fresh] {
+  background: color-mix(in srgb, var(--st-fg) 5%, transparent);
+  transition: background-color 0.3s ease;
+}
+
+.rc .rc-row__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rc .rc-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 18px;
+}
+
+.rc .rc-row__id {
+  flex: none;
+  font-family: var(--st-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-muted);
+}
+
+.rc .rc-row__name {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rc .rc-row__meta {
+  overflow: hidden;
+  min-width: 0;
+  font-family: var(--st-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--st-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rc .rc-row__bar-meta {
+  margin-block: 5px;
+}
+
+.rc .rc-chip {
+  justify-self: start;
+}
+
+/* State chip: tinted border, faint fill, 6px square marker */
+.rc .rc-chip {
+  --c: var(--st-idle);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+  color: var(--c);
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  line-height: 18px;
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.rc .rc-chip::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--c);
+  transition: background-color 0.2s ease;
+}
+
+.rc .rc-chip[data-tone="run"] {
+  --c: var(--st-run);
+}
+
+/* Kit buttons in stage's ink: square, on-accent text that inverts per theme */
+.rc .rc-btn[data-variant="primary"] {
+  color: var(--st-on-accent);
+  background: var(--st-accent);
+}
+
+.rc .rc-btn[data-variant="primary"][data-hover] {
+  background: color-mix(in srgb, var(--st-accent) 85%, var(--st-bg));
+}
+
+.rc .rc-btn[data-variant="secondary"] {
+  color: var(--st-fg);
+  background: var(--st-surface);
+  box-shadow: inset 0 0 0 1px var(--st-line-strong);
+}
+
+.rc .rc-send {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* ---- the links between them: ink lines, square mono labels ---- */
+
+.rc .rc-link .ss-connector__line,
+.rc .rc-link .ss-connector__arrow {
+  stroke: var(--st-fg);
+  stroke-width: 2;
+}
+
+.rc .ss-connector__label {
+  padding: 2px 7px;
+  border-radius: 0;
+  background: var(--st-fg);
+  box-shadow: none;
+  font-family: var(--st-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  color: var(--st-bg);
+}

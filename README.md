@@ -16,7 +16,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-cover.webp" width="880" alt="A T3 Code session plans a migration and calls stage's MCP: four create_task calls land as backlog rows in stage, create_tree groups three into a tree in run order, and Start ready runs the first.">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-cover-dark.webp">
+    <img src="docs/assets/readme-cover-light.webp" width="880" alt="Claude in T3 Code is asked to create a backlog task and calls stage · create_task over stage's MCP server; the task lands in stage's backlog. Start is pressed in stage, the row goes running, and the task's own session opens back in T3 Code with Claude working on it.">
+  </picture>
 </p>
 
 Coding agents are fast. Keeping track of what they should do next is the slow part. stage is a self-hosted task manager for [T3 Code](https://github.com/pingdotgg/t3code) and OpenCode: write prompts ahead of time, link tasks that depend on each other, and let agents plan work into it themselves. You review each final reply in stage and decide when the next task starts.

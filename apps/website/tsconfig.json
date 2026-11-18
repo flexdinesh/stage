@@ -16,6 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "vocs.config.ts"],
+  "include": ["src", "vocs.config.ts", "cover", "scripts/record-readme-cover.ts"],
   "exclude": ["src/pages.gen.ts"]
 }
