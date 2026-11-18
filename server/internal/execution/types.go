@@ -217,6 +217,12 @@ type LegacyDecoder interface {
 type LinkResolver interface {
 	ResolveLink(context.Context, string) (SessionRef, error)
 }
+
+// WorkspaceFeatures is implemented by harnesses whose configuration depends
+// on the selected checkout. Use the pinned external project and directory.
+type WorkspaceFeatures interface {
+	FeaturesForWorkspace(ctx context.Context, projectID, directory string) (Capabilities, error)
+}
 type Adapter interface {
 	Health(context.Context) Health
 	Features(context.Context) (Capabilities, error)

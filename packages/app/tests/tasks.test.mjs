@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeApi } from "./fake-transport.mjs";
-import { batchSize, canStart, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
+import { batchSize, canStart, isFullyEditable, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
   acceptanceId: null, treeStatus: null, id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
 });
 
 const tree = (id) => ({ acceptanceId: null, treeStatus: null, id, title: `tree ${id}`, startMode: "auto" });
+
+test("an adopted backlog session keeps its launch controls in the harness", () => {
+  const adopted = task(1, { adopted: true });
+  assert.equal(canStart(adopted), false);
+  assert.equal(isFullyEditable(adopted), false);
+  assert.equal(isFullyEditable(task(2)), true);
+});
 
 test("a task waits only while blocked on its needs", () => {
   assert.equal(isWaiting(task(1, { needs: [3], readiness: "blocked" })), true);

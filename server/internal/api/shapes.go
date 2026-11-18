@@ -133,18 +133,16 @@ func (s *server) task(env string, t db.Task) taskJSON {
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
 		t.Launch = &a
 	}
-	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t, T3WebURL: s.webURL(env, t.T3ThreadID), T3DeepLink: deepLink(env, t.T3ThreadID)}
-	if t.ConnectionID != db.T3ConnectionID {
-		out.T3WebURL = nil
-		out.T3DeepLink = nil
+	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
+	if t.ConnectionID == db.T3ConnectionID && t.T3ThreadID != nil {
+		out.T3WebURL = s.webURL(env, t.T3ThreadID)
+		out.T3DeepLink = deepLink(env, t.T3ThreadID)
+		out.T3AppURL = t.ThreadLink
 	}
 	for _, pr := range t.PullRequests {
 		if pr.URL != "" {
 			out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: pr.Repository + "#" + strconv.Itoa(pr.Number), URL: pr.URL})
 		}
-	}
-	if t.ConnectionID == db.T3ConnectionID && t.T3ThreadID != nil {
-		out.T3AppURL = t.ThreadLink
 	}
 	return out
 }

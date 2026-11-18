@@ -230,10 +230,14 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	if e != nil {
 		return e
 	}
-	if task.State == db.StateBacklog || o.State == "idle" {
+	if (task.State == db.StateBacklog && !task.Adopted) || o.State == "idle" {
 		return nil
 	}
-	_, e = s.transition(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: "execution observed " + o.State})
+	change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: "execution observed " + o.State}
+	if task.Adopted && task.LaunchedAt == nil {
+		change.ObservedStart = o.StartedAt
+	}
+	_, e = s.transition(ctx, change)
 	return e
 }
 func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {

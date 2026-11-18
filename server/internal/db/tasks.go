@@ -156,7 +156,7 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 // when includeStale (the poller passes it at most once a minute);
 // failed/interrupted/cancelled when touched in the last 10 minutes (e.g. a
 // follow-up restarted the thread) or the mirror shows the thread active.
-// backlog and settled are final for polling.
+// An adopted backlog session is watched for its first native execution.
 func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
 	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
 	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
@@ -165,6 +165,7 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
   t.state IN ('launching', 'running', 'needs_input')
+  OR (t.state='backlog' AND t.adopted=1)
   OR (t.state IN ('done','settled') AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
@@ -390,8 +391,8 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if state != StateBacklog && p.restrictedSet() {
 			return Conflict("task is %s: only title and tags are editable outside backlog", state)
 		}
-		if adopted && p.Prompt.Set {
-			return Conflict("an adopted session's prompt is its T3 conversation")
+		if adopted && p.restrictedSet() {
+			return Conflict("only title and tags are editable for an adopted session")
 		}
 		if p.ProviderInstanceID.Set {
 			provider = p.ProviderInstanceID.Ptr()
@@ -595,9 +596,10 @@ type Transition struct {
 	To          TaskState
 	Detail      string
 
-	BeginAttempt bool    // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
-	ThreadID     *string // set t3_thread_id (+ launched_at)
-	LastError    *string // set last_error
+	BeginAttempt  bool       // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
+	ThreadID      *string    // set t3_thread_id (+ launched_at)
+	ObservedStart *time.Time // first native execution of an adopted backlog session
+	LastError     *string    // set last_error
 	// ReuseAttempt marks the attempt's launch outcome unknown (transport
 	// failure or restart mid-launch, no thread): the next BeginAttempt keeps
 	// the attempt number and the clientRequestId.
@@ -644,7 +646,7 @@ UPDATE tasks SET
   t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
   session_id = CASE WHEN $3 THEN NULL ELSE session_id END,
   scheduled_hold = CASE WHEN $3 THEN 0 ELSE scheduled_hold END,
-  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE launched_at END,
+  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$9) END,
   last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
   finished_at = CASE WHEN $3 THEN NULL
                      WHEN $6 AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
@@ -654,7 +656,7 @@ UPDATE tasks SET
   ready_at = CASE WHEN $3 THEN NULL ELSE ready_at END,
   updated_at = `+nowSQL+`
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(),
+			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(), t.ObservedStart,
 		).Scan(&res.Attempt, &res.RequestID)
 		if err != nil {
 			return err
