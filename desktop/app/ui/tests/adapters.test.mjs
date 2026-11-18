@@ -226,3 +226,11 @@ test("execution destinations follow the selected host's machine", () => {
  assert.equal(links.executionDestination(destinations), destinations.web);
  assert.equal(links.executionDestination({ native: destinations.native, web: null }), null);
 });
+
+test("local and remote desktop targets open the configured OpenCode web client", () => {
+  const primary = "https://client.example/server/c2VydmljZQ/session/ses_one";
+  for (const kind of ["local", "remote"]) {
+    const links = desktopLinks(fakeNative().native, () => ({ ...INITIAL_STATE, target: { ...INITIAL_STATE.target, kind } }));
+    assert.equal(links.executionDestination({ native: null, web: primary }), primary);
+  }
+});

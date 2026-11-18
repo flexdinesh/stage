@@ -156,7 +156,16 @@ func (s *server) t3SetURL(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
-	res, err := s.Sync.FullSync(r.Context())
+	var skip []int64
+	if s.OpenCode != nil && s.Setup != nil {
+		if _, err := s.Sync.Adapter(s.OpenCode.ID()); err == nil {
+			st := s.Setup.Status(r.Context(), false)
+			if !st.Conn.HasToken && !st.Conn.Connected && st.Endpoint.Source == "default" {
+				skip = append(skip, db.T3ConnectionID)
+			}
+		}
+	}
+	res, err := s.Sync.FullSync(r.Context(), skip...)
 	if err != nil {
 		return err
 	}

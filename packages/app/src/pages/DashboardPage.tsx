@@ -1,10 +1,12 @@
+import { harnessName } from "../lib/tasks.ts";
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   useProjects,
   useSchedules,
   useT3Status,
+  useOpenCodeStatus,
   useTasks,
   useTrees,
 } from "../api/queries.ts";
@@ -18,7 +20,7 @@ import { T3Alert } from "../components/T3Setup.tsx";
 import { splitTreeMembers } from "../lib/dashboard.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 
 type GroupKey = "needs" | "trees" | "running" | "done" | "failed" | "ready" | "backlog" | "scheduled" | "settled";
 
@@ -50,6 +52,26 @@ const GROUPS: Group[] = [
     empty: "Nothing waiting on you. Tasks waiting for input land here. Session alerts are in Notifications.",
   },
   {
+    key: "done",
+    title: "Awaiting review",
+    stat: "Review",
+    short: "review",
+    tone: "done",
+    states: ["done", "settled"],
+    empty: "Finished runs wait here until you complete their tasks.",
+  },
+  {
+    key: "ready",
+    title: "Ready",
+    stat: "Ready",
+    short: "ready",
+    tone: "idle",
+    states: ["backlog"],
+    filter: (t) => t.readiness === "ready",
+    empty: "Nothing ready. Tree tasks whose needs are completed in manual mode, and tree roots, wait here for Start.",
+    hideEmpty: true,
+  },
+  {
     key: "trees",
     title: "Trees",
     stat: "Trees",
@@ -70,15 +92,6 @@ const GROUPS: Group[] = [
     empty: "Nothing running. Start a task from the backlog.",
   },
   {
-    key: "done",
-    title: "Run finished · awaiting completion",
-    stat: "Review",
-    short: "review",
-    tone: "done",
-    states: ["done", "settled"],
-    empty: "Finished runs wait here until you complete their tasks.",
-  },
-  {
     key: "failed",
     title: "Failed / interrupted",
     stat: "Failed",
@@ -86,17 +99,6 @@ const GROUPS: Group[] = [
     tone: "bad",
     states: ["failed", "interrupted"],
     empty: "No failed or interrupted tasks.",
-    hideEmpty: true,
-  },
-  {
-    key: "ready",
-    title: "Ready · start when you choose",
-    stat: "Ready",
-    short: "ready",
-    tone: "idle",
-    states: ["backlog"],
-    filter: (t) => t.readiness === "ready",
-    empty: "Nothing ready. Tree tasks whose needs are completed in manual mode, and tree roots, wait here for Start.",
     hideEmpty: true,
   },
   {
@@ -175,12 +177,12 @@ const parseGroup = (v: string | null): GroupKey | null => GROUPS.find((g) => g.k
 
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   // App links open one thread, so only a lone task gets one.
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const href = tasks.length === 1 ? (tasks[0] === undefined ? null : destination(tasks[0])) : null;
-  if (href === null) return null;
+  if (href === null || !tasks[0]) return null;
   return (
     <AppButton href={href} small variant="ghost">
-      Open in T3
+      Open in {harnessName(tasks[0].connectionId)}
     </AppButton>
   );
 }
@@ -273,9 +275,12 @@ function StatStrip({
 /** Planning remains available before pairing and during connection failures. */
 export function DashboardPage() {
   const t3 = useT3Status();
+  const openCode = useOpenCodeStatus();
+  const t3Configured = t3.data !== undefined && (t3.data.connected || t3.data.environmentId !== null || t3.data.t3UrlSource !== "default");
   return (
     <>
-      <T3Alert status={t3.data} />
+      {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}
+      {openCode.data?.state === "unavailable" ? <p className="mb-3 text-small">OpenCode is unavailable. <Link className="underline" to="/settings">Check connection</Link></p> : null}
       <Dashboard />
     </>
   );

@@ -21,6 +21,7 @@ import (
 const DefaultT3URL = "http://127.0.0.1:3773"
 
 type Config struct {
+	OpenCode OpenCodeSettings
 	// Listen: STAGE_LISTEN (comma list) or `stage serve --listen` (repeatable),
 	// default listen.Default. A listen.DefaultSocket item stays unresolved
 	// (Address "") until ResolveSockets.
@@ -55,6 +56,7 @@ func Load(listenFlags []string) (Config, error) { return LoadFrom(os.Getenv, lis
 // LoadFrom is Load over getenv.
 func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) {
 	cfg := Config{
+		OpenCode:     OpenCodeSettings{Endpoint: getenv("OPENCODE_URL"), BrowserEndpoint: getenv("OPENCODE_PUBLIC_URL"), WebClient: getenv("OPENCODE_WEB_URL"), Username: getenv("OPENCODE_USERNAME"), Password: getenv("OPENCODE_PASSWORD")},
 		T3URL:        envOr(getenv, "T3_URL", DefaultT3URL),
 		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
 		T3Bin:        getenv("T3_BIN"),

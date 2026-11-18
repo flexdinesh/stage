@@ -238,3 +238,7 @@ trusted.
 
 **Upgrade note:** a proxied hostname that is neither `STAGE_PUBLIC_URL`'s host
 nor listed in `STAGE_ALLOWED_ORIGINS` now gets 403. Add it before upgrading.
+
+## OpenCode connection
+
+Settings can store the service address and optional HTTP Basic credentials. Environment overrides are `OPENCODE_URL`, `OPENCODE_PUBLIC_URL` (browser-reachable service) and `OPENCODE_WEB_URL` (separate web client). Set `OPENCODE_USERNAME` and `OPENCODE_PASSWORD` together with `OPENCODE_URL` to scope credentials to that service. The managed server accepts the same keys in its private service environment. Browser links omit credentials. Stage readiness and project planning are independent of either harness.

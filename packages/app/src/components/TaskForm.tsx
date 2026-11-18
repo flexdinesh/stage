@@ -1,10 +1,10 @@
 import { Link } from "react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useConnections, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import {
-  INTERACTION_MODES,
+  type ExecutionConfig,
   type CreateScheduleRequest,
   type CreateTaskRequest,
   type InteractionMode,
@@ -14,6 +14,7 @@ import {
   type StartMode as TreeStartMode,
   type Task,
   type UpdateTaskRequest,
+  type Workspace,
 } from "../api/types.ts";
 import { parseTags } from "../lib/format.ts";
 import {
@@ -40,7 +41,9 @@ import { isFullyEditable } from "../lib/tasks.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
-import { ModelFields, type ModelConfig } from "./ModelFields.tsx";
+import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
+import { harnessName } from "../lib/tasks.ts";
+import type { ModelConfig } from "./ModelFields.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea, errorText } from "./ui.tsx";
@@ -214,7 +217,6 @@ function initialState(
   };
 }
 
-const INTERACTION_OPTIONS = INTERACTION_MODES.map((m) => ({ value: m, label: m }));
 
 /** Value that settles `ms` after its last change (preview requests while typing a cron). */
 function useDebounced<T>(value: T, ms: number): T {
@@ -270,7 +272,40 @@ function TaskFormDrawer({
   const projects = useProjects();
   const invalidate = useInvalidateWork();
   const selectedProject = projects.data?.projects.find((project) => String(project.id) === s.projectId);
-  const bound = selectedProject?.bindings.some((binding) => binding.harness === "t3" && binding.status === "available") ?? false;
+  const connections = useConnections();
+  const existing = task ?? schedule;
+  const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
+  const bindings = selectedProject?.bindings ?? [];
+  const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
+  const openCode = connection > 0 && connection !== 1;
+  const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
+  const caps = useQuery({
+    queryKey: ["capabilities", connection, s.projectId, bound],
+    enabled: connection > 0 && bound,
+    queryFn: () => api.capabilities(connection, Number(s.projectId)),
+    retry: false,
+  });
+  const acceptsImages = caps.data?.operations.images?.available ?? connection === 1;
+  const supportsPredecessor = caps.data?.operations.predecessorBase?.available ?? connection === 1;
+  const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
+  const legacy: ExecutionConfig = {
+    model: s.config.providerInstanceId && s.config.model ? JSON.stringify([s.config.providerInstanceId, s.config.model]) : "",
+    options: s.config.modelOptions,
+    permission: s.config.runtimeMode,
+    mode: s.interactionMode,
+  };
+  const originalConfig = existing?.executionConfig ?? (!existing && connection === 1 ? prefill?.defaults.executionConfig : undefined);
+  const hasLegacyConfig = existing ? existing.connectionId === 1 : connection === 1 && prefill !== null;
+  const initialConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : hasLegacyConfig ? legacy : harnessDefaults;
+  const effectiveConfig = draftConfig ?? initialConfig;
+  const issues = incompatibleSettings(effectiveConfig, caps.data);
+  const changedHarness = existing !== undefined && connection !== existing.connectionId;
+  const unverifiedConfig = changedHarness && caps.data === undefined &&
+    (effectiveConfig.model || effectiveConfig.mode || effectiveConfig.permission || effectiveConfig.options.length > 0);
+  function chooseHarness(id: number) {
+    if (existing || draftConfig) setDraftConfig(effectiveConfig);
+    setChosen(id);
+  }
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments ?? schedule?.attachments);
   const isNew = task === undefined && schedule === undefined;
@@ -283,6 +318,10 @@ function TaskFormDrawer({
   const baseTaskId = taskWs?.type === "worktree" ? (taskWs.baseTaskId ?? null) : null;
   const predName = task === undefined ? null : predecessorName(task);
   const wsChoice = effectiveChoice(s.workspaceType, predName);
+  const workspaces = workspaceOptions(supportsPredecessor ? predName : null, wsChoice === "predecessor").filter(option => {
+    const kind = option.value === "predecessor" ? "worktree" : option.value;
+    return option.value === wsChoice || !caps.data?.workspaces || caps.data.workspaces.some(w => w.available && w.id === kind);
+  });
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
   // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
@@ -305,16 +344,16 @@ function TaskFormDrawer({
   const previewError = mode === "repeat" && !previewStale && preview.isError ? errorText(preview.error) : null;
 
   function template() {
+    const workspace: Workspace = openCode && wsChoice === "worktree"
+      ? { type: "worktree", baseRef: "", branch: null }
+      : choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId);
     return {
       projectId: Number(s.projectId),
       title: s.title.trim(),
       prompt: s.prompt,
-      providerInstanceId: s.config.providerInstanceId,
-      model: s.config.model,
-      modelOptions: s.config.modelOptions,
-      runtimeMode: s.config.runtimeMode,
-      interactionMode: s.interactionMode,
-      workspace: choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId),
+      connectionId: connection,
+      executionConfig: effectiveConfig,
+      workspace,
       tags: parseTags(s.tags),
     };
   }
@@ -364,8 +403,13 @@ function TaskFormDrawer({
   const missing = [
     s.projectId === "" && "project",
     s.title.trim() === "" && "title",
-    s.prompt.trim() === "" && "prompt",
-    wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
+    full && s.prompt.trim() === "" && "prompt",
+    full && connection === 0 && "harness",
+    full && issues.length > 0 && `resolve ${issues.join(", ")}`,
+    full && unverifiedConfig && "verify or clear saved settings",
+    full && !acceptsImages && images.items.length > 0 && "remove images",
+    full && openCode && wsChoice !== "root" && (wsChoice === "predecessor" || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
+    !openCode && wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -444,14 +488,18 @@ function TaskFormDrawer({
                 projects={projects.data?.projects ?? []}
                 disabled={!full}
                 value={s.projectId}
-                onChange={(projectId) => set({ projectId })}
+                onChange={(projectId) => {set({projectId}); if (!existing) setChosen(0);}}
                 placeholder="Select project…"
                 autoFocus={isNew}
               />
             )}
           </Field>
+          <Field label="Harness">{id=><Select id={id} disabled={!full} value={connection || ""} onChange={e=>chooseHarness(Number(e.target.value))}>
+            <option value="">Choose a harness</option>{connections.data?.connections.map(c=><option key={c.id} value={c.id}>{harnessName(c.id)}</option>)}
+          </Select>}</Field>
         </div>
-        {selectedProject === undefined || bound ? null : <Alert>
+        <ErrorText error={connections.error}/>
+        {selectedProject === undefined || !connection || bound ? null : <Alert>
           Planning is available. Bind or confirm a workspace before launching.
           <div className="mt-2 flex flex-wrap gap-3">
             <Link to={`/projects/${selectedProject.id}`} className="underline">Bind workspace</Link>
@@ -464,7 +512,7 @@ function TaskFormDrawer({
         <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
           {(id) =>
             full ? (
-              <ImageDropzone set={images} label="Prompt images">
+              <ImageDropzone set={images} label="Prompt images" disabled={!acceptsImages}>
                 <SnippetTextarea
                   id={id}
                   rows={8}
@@ -481,31 +529,28 @@ function TaskFormDrawer({
             )
           }
         </Field>
-        <ModelFields value={s.config} onChange={(config) => set({ config })} disabled={!full} />
-        <fieldset disabled={!full} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
-          <div className="flex min-w-0 flex-col items-start gap-1.5">
-            <span className="label-caps">Mode</span>
-            <Segmented
-              label="Interaction mode"
-              options={INTERACTION_OPTIONS}
-              value={s.interactionMode}
-              onChange={(interactionMode) => set({ interactionMode })}
-            />
-          </div>
+        {connection ? <>
+          <HarnessFields config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} openCode={openCode} disabled={!full}/>
+          <ErrorText error={caps.error}/>
+          {unverifiedConfig ? <p className="text-small">Connect and bind this harness to verify saved choices, or clear each unavailable choice above.</p> : null}
+          {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
+        </> : null}
+        <fieldset disabled={!full || !connection} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
           <div className="flex min-w-0 flex-col items-start gap-1.5">
             <span className="label-caps">Workspace</span>
             <Segmented
               label="Workspace"
-              options={workspaceOptions(predName, wsChoice === "predecessor")}
+              options={workspaces}
               value={wsChoice}
-              onChange={(workspaceType) => set({ workspaceType })}
+              onChange={(workspaceType) => set(openCode ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
             />
           </div>
-          {wsChoice !== "root" ? (
+          {openCode && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>OpenCode chooses the worktree base and branch. Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use OpenCode worktree defaults</Button></Alert> : null}
+          {!openCode && wsChoice !== "root" ? (
             <>
               <Field
                 label={wsChoice === "predecessor" ? "Configured base ref" : "Base ref"}
-                hint={wsChoice === "predecessor" ? `Used when ${predName ?? "a need"} has no usable branch.` : undefined}
+                hint={wsChoice === "predecessor" ? `Switch to a ref-based workspace to use this ref if ${predName ?? "a need"} has no usable branch.` : undefined}
               >
                 {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
               </Field>
@@ -515,7 +560,7 @@ function TaskFormDrawer({
             </>
           ) : null}
         </fieldset>
-        {prefill === null ? null : (
+        {prefill === null || connection !== 1 || draftConfig ? null : (
           <p className="-mt-1.5 font-mono text-meta-sm text-muted">
             {prefill.source === "pinned"
               ? "model and mode prefilled from your pinned default (Settings)"

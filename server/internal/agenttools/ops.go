@@ -120,6 +120,7 @@ func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error)
 }
 
 type ModelsArgs struct {
+	ProjectID    int64 `json:"projectId,omitempty" jsonschema:"Stage project for workspace-specific models and modes"`
 	ConnectionID int64 `json:"connectionId,omitempty"`
 }
 type ModelsOut struct {
@@ -129,7 +130,7 @@ type ModelsOut struct {
 
 func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 	if a.ConnectionID != 0 {
-		c, err := o.Client.Capabilities(ctx, a.ConnectionID)
+		c, err := o.Client.ProjectCapabilities(ctx, a.ConnectionID, a.ProjectID)
 		return ModelsOut{Capabilities: &c}, err
 	}
 	c, err := o.Client.Catalog(ctx)
@@ -140,6 +141,7 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
+	WorkspaceType   string            `json:"workspaceType,omitempty" jsonschema:"root or worktree; OpenCode worktrees use the service default base"`
 	ConnectionID    int64             `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
 	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty" jsonschema:"use the selected connection model, options, permission and mode from list_models"`
 	Project         string            `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
@@ -375,26 +377,26 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 			}
 		}
 		rc.config = &config
-		if a.ExecutionConfig != nil || a.BaseRef != "" || len(a.ImagePaths) > 0 {
-			f, err := o.Client.Capabilities(ctx, rc.connectionID)
+		if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || a.BaseRef != "" || a.WorkspaceType == "worktree" || len(a.ImagePaths) > 0 {
+			f, err := o.Client.ProjectCapabilities(ctx, rc.connectionID, p.ID)
 			if err != nil {
 				return rc, err
 			}
-			if err := validateConfig(config, f); err != nil {
+			if err := f.ValidateConfig(config); err != nil {
 				return rc, err
 			}
-			if a.BaseRef != "" {
-				if err := checkChoice("workspace", "worktree", f.Workspaces); err != nil {
+			if a.BaseRef != "" || a.WorkspaceType == "worktree" {
+				if err := execution.RequireChoice("workspace", "worktree", f.Workspaces); err != nil {
 					return rc, err
 				}
 			}
 			if a.Base == db.BasePredecessor {
-				if err := available("predecessor base", f.Operations["predecessorBase"]); err != nil {
+				if err := execution.RequireAvailable("predecessor base", f.Operations["predecessorBase"]); err != nil {
 					return rc, err
 				}
 			}
 			if len(a.ImagePaths) > 0 {
-				if err := available("images", f.Operations["images"]); err != nil {
+				if err := execution.RequireAvailable("images", f.Operations["images"]); err != nil {
 					return rc, err
 				}
 			}
@@ -404,6 +406,22 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	}
 	if rc.workspace = workspace(a.BaseRef, a.Branch, a.Base); rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
 		return rc, errBaseNeedsWorktree
+	}
+	switch a.WorkspaceType {
+	case "root":
+		if rc.workspace != nil || a.Branch != "" {
+			return rc, errors.New("a root workspace cannot select a branch or base ref")
+		}
+	case "worktree":
+		if rc.workspace == nil {
+			rc.workspace = &db.Workspace{Type: "worktree", Branch: strPtr(a.Branch)}
+		}
+	case "":
+	default:
+		return rc, errors.New("choose workspaceType root or worktree")
+	}
+	if rc.connectionID != db.T3ConnectionID && (a.Branch != "" || a.Base != "" || a.BaseRef != "") {
+		return rc, errors.New("OpenCode selects the worktree base and branch; choose workspaceType worktree without a branch or base")
 	}
 	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
 	return rc, err
@@ -574,6 +592,8 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only title and tags change.
 type UpdateArgs struct {
+	WorkspaceType   *string           `json:"workspaceType,omitempty"`
+	ConnectionID    int64             `json:"connectionId,omitempty"`
 	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty"`
 	ID              int64             `json:"id"`
 	Project         *string           `json:"project,omitempty" jsonschema:"move to project (id or title)"`
@@ -595,6 +615,9 @@ type UpdateArgs struct {
 // baseRef).
 func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
 	if a.BaseRef == nil {
+		if a.WorkspaceType != nil {
+			return db.Workspace{Type: *a.WorkspaceType, Branch: a.Branch}, true
+		}
 		return db.Workspace{}, false
 	}
 	branch, base := "", ""
@@ -613,20 +636,36 @@ func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
 func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
 	p := client.Patch{}
 	legacy := a.Model != nil || a.Provider != nil || a.Effort != nil || a.Options != nil || a.RuntimeMode != nil || a.InteractionMode != nil
+	if a.WorkspaceType != nil && (*a.WorkspaceType != "root" && *a.WorkspaceType != "worktree" || *a.WorkspaceType == "root" && a.BaseRef != nil && *a.BaseRef != "") {
+		return nil, errors.New("choose root without a base or choose worktree")
+	}
+	if a.ConnectionID != 0 {
+		p["connectionId"] = a.ConnectionID
+	}
 	if legacy || a.ExecutionConfig != nil {
-		var id int64
+		var id, projectID int64
 		if schedule {
 			v, err := o.Client.Schedule(ctx, a.ID)
 			if err != nil {
 				return nil, err
 			}
-			id = v.ConnectionID
+			id, projectID = v.ConnectionID, v.ProjectID
 		} else {
 			v, err := o.Client.Task(ctx, a.ID)
 			if err != nil {
 				return nil, err
 			}
-			id = v.ConnectionID
+			id, projectID = v.ConnectionID, v.ProjectID
+		}
+		if a.ConnectionID != 0 {
+			id = a.ConnectionID
+		}
+		if a.Project != nil {
+			pr, _, e := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
+			if e != nil {
+				return nil, e
+			}
+			projectID = pr.ID
 		}
 		if legacy && (a.ExecutionConfig != nil || id != db.T3ConnectionID) {
 			return nil, errors.New("use executionConfig for this connection without legacy T3 options")
@@ -636,12 +675,14 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 			if err != nil {
 				return nil, err
 			}
-			f, err := o.Client.Capabilities(ctx, id)
-			if err != nil {
-				return nil, err
-			}
-			if err = validateConfig(cfg, f); err != nil {
-				return nil, err
+			if cfg.Model != "" || cfg.Permission != "" || cfg.Mode != "" || len(cfg.Options) > 0 {
+				f, err := o.Client.ProjectCapabilities(ctx, id, projectID)
+				if err != nil {
+					return nil, err
+				}
+				if err = f.ValidateConfig(cfg); err != nil {
+					return nil, err
+				}
 			}
 			p["executionConfig"] = cfg
 		}

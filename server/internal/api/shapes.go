@@ -17,7 +17,8 @@ type artifactLink struct {
 }
 
 type taskJSON struct {
-	ArtifactLinks []artifactLink `json:"artifactLinks"`
+	Links         execution.Links `json:"links"`
+	ArtifactLinks []artifactLink  `json:"artifactLinks"`
 	db.Task
 	T3WebURL *string `json:"t3WebUrl"`
 	T3AppURL *string `json:"t3AppUrl"`
@@ -35,7 +36,6 @@ type threadJSON struct {
 
 type taskDetailJSON struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
-	Links       execution.Links  `json:"links"`
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	taskJSON
 	Events []db.TaskEvent `json:"events"`
@@ -111,24 +111,31 @@ func deepLink(envID string, threadID *string) *string {
 	return &u
 }
 
+// Preserve the legacy T3 response fields for older clients. The canonical
+// selection retains the distinction between a harness default and an override.
+func t3Defaults(config *execution.Config, provider, model *string, options []execution.ModelOption, permission, mode string) db.ModelDefaults {
+	d := db.ModelDefaults{ExecutionConfig: config, ProviderInstanceID: provider, Model: model, ModelOptions: options, RuntimeMode: permission, InteractionMode: mode}
+	if config == nil {
+		return d
+	}
+	d.ProviderInstanceID, d.Model = nil, nil
+	if p, m, err := t3.DecodeModelKey(config.Model); err == nil {
+		d.ProviderInstanceID, d.Model = &p, &m
+	}
+	d.ModelOptions = append([]execution.ModelOption{}, config.Options...)
+	if config.Permission != "" {
+		d.RuntimeMode = config.Permission
+	}
+	if config.Mode != "" {
+		d.InteractionMode = config.Mode
+	}
+	return d
+}
+
 func (s *server) task(env string, t db.Task) taskJSON {
-	// Retained T3 response fields are compatibility output; execution uses Config.
 	if t.ConnectionID == db.T3ConnectionID && t.ExecutionConfig != nil {
-		c := t.ExecutionConfig
-		if provider, model, err := t3.DecodeModelKey(c.Model); err == nil {
-			t.ProviderInstanceID = &provider
-			t.Model = &model
-		}
-		t.ModelOptions = c.Options
-		if t.ModelOptions == nil {
-			t.ModelOptions = []execution.ModelOption{}
-		}
-		if c.Permission != "" {
-			t.RuntimeMode = c.Permission
-		}
-		if c.Mode != "" {
-			t.InteractionMode = c.Mode
-		}
+		d := t3Defaults(t.ExecutionConfig, t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode)
+		t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
 	}
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
 		t.Launch = &a
@@ -139,6 +146,9 @@ func (s *server) task(env string, t db.Task) taskJSON {
 		out.T3DeepLink = deepLink(env, t.T3ThreadID)
 		out.T3AppURL = t.ThreadLink
 	}
+	if t.Session != nil {
+		out.Links = s.sessionLinks(context.Background(), t.ConnectionID, &t.Session.ExternalSessionID)
+	}
 	for _, pr := range t.PullRequests {
 		if pr.URL != "" {
 			out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: pr.Repository + "#" + strconv.Itoa(pr.Number), URL: pr.URL})
@@ -147,6 +157,22 @@ func (s *server) task(env string, t db.Task) taskJSON {
 	return out
 }
 
+func (s *server) sessionLinks(ctx context.Context, id int64, external *string) execution.Links {
+	if external == nil {
+		return execution.Links{}
+	}
+	ref := db.SessionRef{ConnectionID: id, ExternalSessionID: *external}
+	if a, err := s.Sync.Adapter(id); err == nil {
+		links := a.Destinations(ctx, ref)
+		if links.Web != "" || links.Native != "" {
+			return links
+		}
+	}
+	if o, err := s.Store.Observation(ctx, ref); err == nil {
+		return o.Links
+	}
+	return execution.Links{}
+}
 func (s *server) tasks(env string, ts []db.Task) []taskJSON {
 	out := make([]taskJSON, len(ts))
 	for i, t := range ts {

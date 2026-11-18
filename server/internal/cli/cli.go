@@ -15,14 +15,13 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/service"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // URLEnv overrides the server address.
@@ -406,6 +405,7 @@ func runModels(ctx context.Context, env Env, args []string) error {
 	}
 	c := newCmd(env, "models ls")
 	var a agenttools.ModelsArgs
+	c.fs.Int64Var(&a.ProjectID, "project", 0, "Stage project ID for workspace-specific capabilities")
 	c.fs.Int64Var(&a.ConnectionID, "connection", 0, "show this connection’s capabilities")
 	if err := c.parse(rest); err != nil {
 		return err

@@ -16,17 +16,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 const supportedVersion = "2.3.0"
 
 type Adapter struct {
-	connection                        int64
-	endpoint, web, username, password string
-	http                              *http.Client
-	contractMu                        sync.Mutex
-	verified                          serverInfo
+	connection                                         int64
+	endpoint, browserEndpoint, web, username, password string
+	http                                               *http.Client
+	contractMu                                         sync.Mutex
+	verified                                           serverInfo
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
@@ -41,25 +42,34 @@ func serviceURL(s string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func New(connection int64, endpoint, web, username, password string) (*Adapter, error) {
+type Settings = config.OpenCodeSettings
+
+func New(connection int64, cfg Settings) (*Adapter, error) {
 	if connection <= 0 {
 		return nil, errors.New("configure a scoped OpenCode connection")
 	}
-	ep, e := serviceURL(endpoint)
+	ep, e := serviceURL(cfg.Endpoint)
 	if e != nil {
 		return nil, e
 	}
-	if web == "" {
-		web = ep
+	if cfg.BrowserEndpoint == "" {
+		cfg.BrowserEndpoint = ep
 	}
-	site, e := serviceURL(web)
+	public, e := serviceURL(cfg.BrowserEndpoint)
 	if e != nil {
 		return nil, e
 	}
-	if (username == "") != (password == "") {
+	if cfg.WebClient == "" {
+		cfg.WebClient = public
+	}
+	site, e := serviceURL(cfg.WebClient)
+	if e != nil {
+		return nil, e
+	}
+	if (cfg.Username == "") != (cfg.Password == "") {
 		return nil, errors.New("provide both OpenCode Basic credentials or neither")
 	}
-	return &Adapter{connection: connection, endpoint: ep, web: site, username: username, password: password, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 type responseError struct{ code int }
@@ -225,17 +235,29 @@ var sessionID = regexp.MustCompile(`^ses_[A-Za-z0-9_-]+$`)
 func (a *Adapter) valid(ref execution.SessionRef) bool {
 	return ref.ConnectionID == a.connection && sessionID.MatchString(ref.ExternalSessionID)
 }
-func (a *Adapter) sessionPrefix() string {
-	return a.web + "/server/" + base64.RawURLEncoding.EncodeToString([]byte(a.endpoint)) + "/session/"
+func (a *Adapter) sessionPath() string {
+	return "/server/" + base64.RawURLEncoding.EncodeToString([]byte(a.browserEndpoint)) + "/session/"
 }
 func (a *Adapter) Destinations(_ context.Context, ref execution.SessionRef) execution.Links {
 	if !a.valid(ref) {
 		return execution.Links{}
 	}
-	return execution.Links{Web: a.sessionPrefix() + ref.ExternalSessionID}
+	path := a.sessionPath() + ref.ExternalSessionID
+	links := execution.Links{Web: a.web + path}
+	if a.web != a.browserEndpoint {
+		links.Service = a.browserEndpoint + path
+	}
+	return links
 }
 func (a *Adapter) ResolveLink(_ context.Context, s string) (execution.SessionRef, error) {
-	ref := execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: strings.TrimPrefix(strings.TrimSpace(s), a.sessionPrefix())}
+	id := strings.TrimSpace(s)
+	for _, base := range []string{a.web, a.browserEndpoint} {
+		if suffix, ok := strings.CutPrefix(id, base+a.sessionPath()); ok {
+			id = suffix
+			break
+		}
+	}
+	ref := execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: id}
 	if !a.valid(ref) {
 		return execution.SessionRef{}, errors.New("paste a session ID or a session link for this OpenCode connection")
 	}

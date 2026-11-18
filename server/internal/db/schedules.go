@@ -216,22 +216,25 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETU
 // SchedulePatch is a partial schedule update (JSON body of PATCH
 // /api/schedules/:id).
 type SchedulePatch struct {
-	ExecutionConfig    Optional[execution.Config]        `json:"executionConfig"`
-	ProjectID          Optional[int64]                   `json:"projectId"`
-	Title              Optional[string]                  `json:"title"`
-	Prompt             Optional[string]                  `json:"prompt"`
-	ProviderInstanceID Optional[string]                  `json:"providerInstanceId"`
-	Model              Optional[string]                  `json:"model"`
-	ModelOptions       Optional[[]execution.ModelOption] `json:"modelOptions"`
-	RuntimeMode        Optional[string]                  `json:"runtimeMode"`
-	InteractionMode    Optional[string]                  `json:"interactionMode"`
-	Workspace          Optional[Workspace]               `json:"workspace"`
-	Tags               Optional[[]string]                `json:"tags"`
-	Notes              Optional[string]                  `json:"notes"`
-	AttachmentIDs      Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
-	Cron               Optional[string]                  `json:"cron"`
-	Tz                 Optional[string]                  `json:"tz"`
-	Paused             Optional[bool]                    `json:"paused"`
+	ValidatedConnection int64                             `json:"-"`
+	ValidatedProject    int64                             `json:"-"`
+	ConnectionID        Optional[int64]                   `json:"connectionId"`
+	ExecutionConfig     Optional[execution.Config]        `json:"executionConfig"`
+	ProjectID           Optional[int64]                   `json:"projectId"`
+	Title               Optional[string]                  `json:"title"`
+	Prompt              Optional[string]                  `json:"prompt"`
+	ProviderInstanceID  Optional[string]                  `json:"providerInstanceId"`
+	Model               Optional[string]                  `json:"model"`
+	ModelOptions        Optional[[]execution.ModelOption] `json:"modelOptions"`
+	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
+	InteractionMode     Optional[string]                  `json:"interactionMode"`
+	Workspace           Optional[Workspace]               `json:"workspace"`
+	Tags                Optional[[]string]                `json:"tags"`
+	Notes               Optional[string]                  `json:"notes"`
+	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
+	Cron                Optional[string]                  `json:"cron"`
+	Tz                  Optional[string]                  `json:"tz"`
+	Paused              Optional[bool]                    `json:"paused"`
 }
 
 // UpdateSchedule applies a validated patch. Changing cron, tz or paused
@@ -246,10 +249,14 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		var provider, model *string
 		var cron, tz string
 		var paused bool
-		err := tx.QueryRow(ctx, `SELECT provider_instance_id, model, cron, tz, paused FROM schedules WHERE id = $1`, id).
-			Scan(&provider, &model, &cron, &tz, &paused)
+		var connection, project int64
+		err := tx.QueryRow(ctx, `SELECT provider_instance_id, model, cron, tz, paused, connection_id, project_id FROM schedules WHERE id = $1`, id).
+			Scan(&provider, &model, &cron, &tz, &paused, &connection, &project)
 		if err != nil {
 			return notFound(err)
+		}
+		if p.ValidatedConnection != 0 && (connection != p.ValidatedConnection || project != p.ValidatedProject) {
+			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if p.ProviderInstanceID.Set {
 			provider = p.ProviderInstanceID.Ptr()
@@ -269,6 +276,21 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		w.arg(id)
 		var sets []string
 		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		if p.ConnectionID.Set {
+			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+				return err
+			}
+			if p.ConnectionID.V != connection && p.ConnectionID.V != T3ConnectionID {
+				var hasImages bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE schedule_id=$1)`, id).Scan(&hasImages); err != nil {
+					return err
+				}
+				if hasImages {
+					return Invalid("Remove image attachments before switching to OpenCode.")
+				}
+			}
+			set("connection_id", p.ConnectionID.V)
+		}
 		if p.ExecutionConfig.Set {
 			set("execution_config", p.ExecutionConfig.Ptr())
 		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {
@@ -472,9 +494,9 @@ INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id, detail) VALUE
 }
 
 // DueSchedules: unpaused schedules whose next fire is at or before now.
-func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]int64, error) {
+func (s *Store) DueSchedules(ctx context.Context, now time.Time, connection int64) ([]int64, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id FROM schedules WHERE NOT paused AND next_run_at <= $1 ORDER BY next_run_at, id`, now)
+		`SELECT id FROM schedules WHERE NOT paused AND next_run_at <= $1 AND ($2=0 OR connection_id=$2) ORDER BY next_run_at, id`, now, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -490,9 +512,12 @@ type DueTask struct {
 // DueOneShots: backlog tasks with start_at at or before now, oldest first
 // (archived tasks and members of a done or archived tree wait).
 func (s *Store) DueOneShots(ctx context.Context, now time.Time) ([]DueTask, error) {
+	return s.DueForConnection(ctx, now, 0)
+}
+func (s *Store) DueForConnection(ctx context.Context, now time.Time, connection int64) ([]DueTask, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT t.id, t.start_at FROM tasks t LEFT JOIN task_trees tr ON tr.id = t.tree_id
-WHERE t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at <= $1 AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now)
+WHERE t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at <= $1 AND ($2=0 OR t.connection_id=$2) AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now, connection)
 	if err != nil {
 		return nil, err
 	}

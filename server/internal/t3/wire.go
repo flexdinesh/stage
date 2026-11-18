@@ -133,18 +133,20 @@ func (t isoTime) ptr() *time.Time {
 }
 
 type wireProject struct {
-	ID            string  `json:"id"`
-	Title         string  `json:"title"`
-	WorkspaceRoot string  `json:"workspaceRoot"`
-	ArchivedAt    isoTime `json:"archivedAt"`
-	DeletedAt     isoTime `json:"deletedAt"`
-	CreatedAt     isoTime `json:"createdAt"`
-	UpdatedAt     isoTime `json:"updatedAt"`
-	CommitError   string  `json:"commitError"` // t3_project_create only
+	RepositoryIdentity struct{ Origin struct{ RemoteURL string } } `json:"repositoryIdentity"`
+	ID                 string                                      `json:"id"`
+	Title              string                                      `json:"title"`
+	WorkspaceRoot      string                                      `json:"workspaceRoot"`
+	ArchivedAt         isoTime                                     `json:"archivedAt"`
+	DeletedAt          isoTime                                     `json:"deletedAt"`
+	CreatedAt          isoTime                                     `json:"createdAt"`
+	UpdatedAt          isoTime                                     `json:"updatedAt"`
+	CommitError        string                                      `json:"commitError"` // t3_project_create only
 }
 
 func (w wireProject) toProject() Project {
 	return Project{
+		OriginRemote:  w.RepositoryIdentity.Origin.RemoteURL,
 		ID:            w.ID,
 		Title:         w.Title,
 		WorkspaceRoot: w.WorkspaceRoot,

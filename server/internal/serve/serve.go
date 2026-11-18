@@ -23,6 +23,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
@@ -190,8 +191,25 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	syncSvc := t3sync.New(store, t3.NewAdapter(t3Client), logger)
-	runner := release.NewRunner(store, syncSvc, logger)
-	scheduler := schedule.NewRunner(store, syncSvc, logger)
+	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SetAdapter)
+	if err != nil {
+		return err
+	}
+	var releases []*release.Runner
+	var schedules []*schedule.Runner
+	for _, id := range []int64{db.T3ConnectionID, openCode.ID()} {
+		r := release.NewRunner(store, syncSvc, logger)
+		r.ConnectionID = id
+		releases = append(releases, r)
+		sc := schedule.NewRunner(store, syncSvc, logger)
+		sc.ConnectionID = id
+		schedules = append(schedules, sc)
+	}
+	kickTrees := func() {
+		for _, runner := range releases {
+			runner.Kick()
+		}
+	}
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One inbox hub wakes notification streams on inserts (notifier), reads
 	// (API), prunes and task transitions (badge). Streams end with ctx.
@@ -199,7 +217,9 @@ func Run(ctx context.Context, o Options) error {
 	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	syncSvc.OnTransition = func(ctx context.Context, c t3sync.Change) {
-		runner.OnTransition(ctx, c)
+		for _, runner := range releases {
+			runner.OnTransition(ctx, c)
+		}
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
@@ -208,14 +228,20 @@ func Run(ctx context.Context, o Options) error {
 		Config: cfg, Store: store, Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
 		OnPaired: syncSvc.Kick, Logger: logger,
 	})
-	runner.OnReady = notifier.OnReady
+	for _, runner := range releases {
+		runner.OnReady = notifier.OnReady
+	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
-	wg.Add(6)
+	wg.Add(4)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
-	go func() { defer wg.Done(); runner.Run(ctx) }()
-	go func() { defer wg.Done(); scheduler.Run(ctx) }()
+	for _, runner := range releases {
+		wg.Go(func() { runner.Run(ctx) })
+	}
+	for _, scheduler := range schedules {
+		wg.Go(func() { scheduler.Run(ctx) })
+	}
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 
@@ -224,7 +250,7 @@ func Run(ctx context.Context, o Options) error {
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
-		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick, Setup: setup,
+		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: setup, OpenCode: openCode,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

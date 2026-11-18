@@ -33,3 +33,7 @@ export function moveItem<T>(items: readonly T[], from: number, by: number): T[] 
 /** Number of tasks in a batch. */
 export const batchSize = (b: { trees: readonly { tasks: readonly Task[] }[]; independent: readonly Task[] }) =>
   b.trees.reduce((n, t) => n + t.tasks.length, 0) + b.independent.length;
+
+export function harnessName(connectionId: number): string {
+  return connectionId === 1 ? "T3" : "OpenCode";
+}

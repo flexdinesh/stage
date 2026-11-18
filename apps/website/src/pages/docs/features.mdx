@@ -8,24 +8,24 @@ showAskAi: false
 
 ## Projects
 
-Create a Stage project with just a title, even offline. Stage owns its title and archive state. Bind a T3 workspace explicitly before launching; register an existing directory in T3 when needed. Changed paths need confirmation. Rebinding affects future launches; existing attempts and history stay attached to their original workspace. Sort by name or recent activity.
+Create a Stage project with just a title, even offline. Stage owns its title and archive state. Bind a workspace for each harness you use. Match can verify a shared checkout through explicit path mappings. Confirm a remote-only suggestion or choose the workspace manually. Changed paths need confirmation. Rebinding affects future launches; existing attempts and history stay attached to their original workspace. Sort by name or recent activity.
 
 ## Tasks
 
-- **Task config**: prompt, provider, model, effort, runtime mode, plan mode, worktree/branch, tags, and an optional initial journal note. Save to backlog or start right away.
+- **Task config**: prompt, harness, supported model and workspace options, tags, and an optional initial journal note. Save to backlog or start right away.
 - **Screenshots**: drop images on the prompt (or Add image; PNG, JPEG, GIF, WebP, up to 8 × 10 MB). They are sent to the T3 thread with the prompt on every launch.
 - **Live status**: backlog, Launch unconfirmed, running, needs input, done, failed, interrupted or cancelled. Connection loss preserves execution state. User completion in Stage is separate.
-- **Task actions**: start, stop, duplicate, archive, open in T3. Delete is only for a task that never started and has no recorded work; archive recorded work instead.
+- **Task actions**: start, stop, duplicate, archive, open in the selected harness. Delete is only for a task that never started and has no recorded work; archive recorded work instead.
 
 ## Trees and handoff
 
 - **Trees**: group tasks into a tree, a DAG that can span projects, where a task needs other members. A task becomes eligible when the user completes every need in Stage. Blocked tasks cannot start early.
-- **Start mode**: per tree, auto (launches a task once its needs are completed in Stage) or manual (marks it ready and notifies). Tasks inherit the tree's mode by default; a task can override it. Manual tasks whose needs are completed in Staged, and backlog roots, read ready: they list in the Dashboard Ready group and a `ready` notification offers Start.
+- **Start mode**: per tree, auto (launches a task once its needs are completed in Stage) or manual (marks it ready and notifies). Tasks inherit the tree's mode by default; a task can override it. Manual tasks whose needs are completed in Stage, and backlog roots, read ready: they list in the Dashboard Ready group and a `ready` notification offers Start.
 - **Editing**: removing a task splices it out (its dependents take over its needs). Mark a tree done when you will not work on the rest (members keep their states, nothing more starts), or archive it; Reopen or Unarchive undoes it, and member activity leaves it closed until explicitly reopened. Done and archived trees and their tasks leave the Dashboard. Dissolve detaches the tasks and archives the tree; emptying a tree also archives it. Deleting a tree deletes its tasks and is only for work that never started and has no recorded work.
-- **Track as task**: task detail can adopt an existing top-level T3 session as a task, so it can be a tree node. stage never starts it; its prompt is read from T3.
+- **Track as task**: task detail can adopt an existing top-level session from either harness as a task, so it can be a tree node. stage never starts it; its prompt is read from the harness.
 - **Views**: Trees (Active, Done, Archived, All, each with its last activity and created date); the tree view (a list in level order with each task's needs and time in its state, or a top-down graph of execution steps and which needs are met), with a side panel for the tree's day-grouped activity or, for a selected task, its needs, start mode, base and handoff. Task detail has a Tree panel with the same controls, or Add to tree (a new tree or an active one). In a session's Batch drawer, check independent backlog tasks and pick New tree from n (Parallel, or Chain in check order).
 - **Handoff** (on by default, per task): when a task with needs starts, stage appends one block per accepted need (cached reply excerpt, available artifact links, branch/worktree, task/journal and execution references) to the prompt, so work carries context forward. Task detail shows what was appended. Snapshots stay readable with the source harness offline. Missing replies remain explicitly missing.
-- **Stacked work** (opt-in): a task's Workspace can be "#12's branch". Its worktree starts from a need's branch (the sole need, or the picked one), so it builds on unmerged changes. Unavailable predecessor branches block launch. Choose the configured base explicitly to continue.
+- **Stacked T3 work on the same harness** (opt-in): a task's Workspace can be "#12's branch". Its worktree starts from a need's branch (the sole need, or the picked one), so it builds on unmerged changes. Unavailable predecessor branches block launch. Choose the configured base explicitly to continue.
 - **Session batch**: task detail lists the tasks a session created ("Batch drawer", grouped by tree, then independent tasks); task detail shows it as a compact Batch panel.
 
 ## Journals
@@ -49,19 +49,19 @@ Schedules show on the Schedules page, the project panel, and a Scheduled (next 2
 
 ## Sessions and transcript
 
-Track an existing T3 session from Stage, a project, or a tree. Paste a T3 link or thread ID, preview its title/project/state, then confirm. Optional title and initial note apply to newly tracked tasks.
+Track an existing harness session from Stage, a project, or a tree. Choose the harness and paste its session link or ID, preview its title/project/state, then confirm. Optional title and initial note apply to newly tracked tasks.
 
-Task detail keeps the opening prompt, cached final reply (up to 4000 characters), journal and historical artifact links. Open in T3 handles conversations and detailed runs. There is no global session/history browser or automatic PR tracking. Historical data remains stored.
+Task detail keeps the opening prompt, cached final reply (up to 4000 characters), journal and historical artifact links. Open the source harness for conversations and detailed runs. There is no global session/history browser or automatic PR tracking. Historical data remains stored.
 
 ## Dashboard
 
-Needs-input alert, plus trees, running, finished (awaiting user completion), failed, ready, backlog, scheduled (next 24h) and completed (last 7 days) across projects. Tree members roll up into their tree's row (state bar, next step, Start ready); needs-input and ready members also keep their own row with a tree chip, and completed trees move to Completed. External T3 alerts remain in the notifications inbox.
+Needs-input alert, plus trees, running, finished (awaiting user completion), failed, ready, backlog, scheduled (next 24h) and completed (last 7 days) across projects. Tree members roll up into their tree's row (state bar, next step, Start ready); needs-input and ready members also keep their own row with a tree chip, and completed trees move to Completed. External harness alerts remain in the notifications inbox.
 
-Until stage is paired with T3 and has synced once, the Dashboard is the T3 setup screen ([Connect to T3](/docs/t3)).
+The Dashboard stays available for planning offline. Connect either harness in Settings.
 
 ## Answering questions
 
-Needs-input tasks and notifications offer Open in T3. Questions, approvals and follow-ups are handled there. Locally, this opens native T3; remote desktop servers use their T3 web URL.
+Needs-input tasks and notifications open the source harness for questions and approvals. T3 uses native links locally and web links on remote desktop targets. OpenCode opens the configured web client. Task detail also offers **Open on service** and **Copy session ID** when a separate client is configured. Settings explains how to register the service on a fresh device.
 
 ## References
 
@@ -71,14 +71,14 @@ Needs-input tasks and notifications offer Open in T3. Questions, approvals and f
 
 ## Notifications
 
-Needs input, failed, ready and done (historical settled events remain), each toggleable in Settings (one filter for every device), covering tasks and threads started directly in T3 (subagents excluded). Every notification also lands in an in-app inbox and toast; a needs-input toast clears once the question is resolved.
+Needs input, failed, ready and done (historical settled events remain), each toggleable in Settings (one filter for every device), covering tasks and top-level sessions started in either harness (subagents excluded). Every notification also lands in an in-app inbox and toast; a needs-input toast clears once the question is resolved.
 
 - **Browser**: installable PWA with Web Push. The app icon badge counts what needs input. Needs HTTPS or localhost: [Install as an app](/docs/deploy#install-as-an-app-pwa-and-notifications).
 - **Desktop app**: native OS notifications from every saved server, also while the window is closed ([Desktop app](/docs/desktop)).
 
 ## Search and palette
 
-Ctrl K finds Stage tasks and projects by title. Enter opens the task; Ctrl Enter opens T3; Alt C copies its task reference.
+Ctrl K finds Stage tasks and projects by title. Enter opens the task; Ctrl Enter opens its harness session; Alt C copies its task reference.
 
 ## Snippets
 
@@ -86,7 +86,7 @@ Reusable prompt text, global or per project. Type `/` in a task prompt or notes 
 
 ## Model defaults
 
-New tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
+T3 tasks prefill provider, model, effort, runtime and mode from a pinned default (Settings), else from your last created task.
 
 ## Agents
 
@@ -94,10 +94,10 @@ Agents create, start and manage tasks and trees, and read and write journals, vi
 
 ## Settings
 
-T3 connection status, pairing (Pair with T3 or a pairing code), the T3 URL (locked when `T3_URL` sets it), sync now (a full sync also runs every 5 min), the default model, the notification event filter, and theme. The desktop app adds its saved servers and login startup.
+Independent T3 and OpenCode connection diagnostics, T3 pairing (Pair with T3 or a pairing code), the T3 URL (locked when `T3_URL` sets it), sync now (a full sync also runs every 5 min), the default model, the notification event filter, and theme. The desktop app adds its saved servers and login startup.
 
-Pre-existing external T3 sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row.
+Pre-existing external sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row.
 
-User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.
+User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later harness activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.
 
-Unconfirmed launches reconcile automatically without creating a new attempt. For older launches without safe identity, use **Link existing session** on task detail: paste a T3 link, preview, then attach. Attachment launches no work.
+Unconfirmed launches reconcile automatically without creating a new attempt. For older launches without safe identity, use **Link existing session** on task detail: paste a session link, preview, then attach. Attachment launches no work.

@@ -33,6 +33,9 @@ func (s *server) putPinned(w http.ResponseWriter, r *http.Request) error {
 		return db.Invalid("invalid JSON: %v", err)
 	}
 	if d != nil {
+		if d.ExecutionConfig != nil {
+			return db.Invalid("Pin the T3 provider, model, permission and interaction fields explicitly.")
+		}
 		if err := validateDefaults(d); err != nil {
 			return err
 		}

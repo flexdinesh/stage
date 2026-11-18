@@ -22,6 +22,14 @@ type scheduleDetailJSON struct {
 	Runs []scheduleRunJSON `json:"runs"`
 }
 
+func scheduleJSON(sc db.Schedule) db.Schedule {
+	if sc.ConnectionID == db.T3ConnectionID && sc.ExecutionConfig != nil {
+		d := t3Defaults(sc.ExecutionConfig, sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode)
+		sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
+	}
+	return sc
+}
+
 func (s *server) listSchedules(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	var f db.ScheduleFilter
@@ -40,6 +48,9 @@ func (s *server) listSchedules(w http.ResponseWriter, r *http.Request) error {
 	out, err := s.Store.ListSchedules(r.Context(), f)
 	if err != nil {
 		return err
+	}
+	for i := range out {
+		out[i] = scheduleJSON(out[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"schedules": out})
 	return nil
@@ -73,13 +84,14 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		req.Start || req.StartLocal != nil || req.StartTz != nil {
 		return db.Invalid("treeId, needs, needsSessionId, startMode, start, startLocal and startTz are not schedule fields")
 	}
-	if req.ConnectionID != nil {
-		if _, err := s.Sync.Adapter(*req.ConnectionID); err != nil {
-			return err
-		}
+	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
+		return err
 	}
 	in, err := req.validate()
 	if err != nil {
+		return err
+	}
+	if err := s.validateSelection(r.Context(), in.ConnectionID, in.ProjectID, in.ExecutionConfig); err != nil {
 		return err
 	}
 	if in.Workspace.FromPredecessor() {
@@ -99,7 +111,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, sc)
+	writeJSON(w, http.StatusCreated, scheduleJSON(sc))
 	return nil
 }
 
@@ -118,7 +130,7 @@ func (s *server) getSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	env := s.envID(ctx)
-	out := scheduleDetailJSON{Schedule: sc, Runs: make([]scheduleRunJSON, len(runs))}
+	out := scheduleDetailJSON{Schedule: scheduleJSON(sc), Runs: make([]scheduleRunJSON, len(runs))}
 	for i, run := range runs {
 		out.Runs[i] = scheduleRunJSON{ScheduleRun: run}
 		if run.Task != nil {
@@ -139,8 +151,32 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &p); err != nil {
 		return err
 	}
+	current, err := s.Store.GetSchedule(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	p.ValidatedConnection, p.ValidatedProject = current.ConnectionID, current.ProjectID
+	connection := current.ConnectionID
+	if p.ConnectionID.Set {
+		connection = p.ConnectionID.V
+		if err := s.plannedConnection(connection); err != nil {
+			return err
+		}
+	}
+	if connection != db.T3ConnectionID && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
+		return db.Invalid("Choose harness-specific configuration and remove unsupported attachments.")
+	}
+	projectID := current.ProjectID
+	if p.ProjectID.Set {
+		projectID = p.ProjectID.V
+	}
+	if p.ExecutionConfig.Set && (connection != current.ConnectionID || projectID != current.ProjectID || !sameSelection(current.ExecutionConfig, p.ExecutionConfig.Ptr())) {
+		if err := s.validateSelection(r.Context(), connection, projectID, p.ExecutionConfig.Ptr()); err != nil {
+			return err
+		}
+	}
 	if err := validateConfigPatch(configPatch{
-		ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
+		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
@@ -164,7 +200,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, sc)
+	writeJSON(w, http.StatusOK, scheduleJSON(sc))
 	return nil
 }
 

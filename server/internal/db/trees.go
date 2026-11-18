@@ -680,8 +680,11 @@ WHERE t.tree_id = $1 AND (`+readinessSQL+`) = 'ready' ORDER BY t.id`, treeID)
 // LaunchableTasks: auto members whose needs all accepted (the release runner
 // launches them), by id.
 func (s *Store) LaunchableTasks(ctx context.Context) ([]int64, error) {
+	return s.LaunchableForConnection(ctx, 0)
+}
+func (s *Store) LaunchableForConnection(ctx context.Context, connection int64) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT t.id FROM tasks t JOIN task_trees tr ON tr.id = t.tree_id
-WHERE `+releasedSQL+` AND `+effectiveModeSQL+` = 'auto' ORDER BY t.id`)
+WHERE `+releasedSQL+` AND `+effectiveModeSQL+` = 'auto' AND ($1=0 OR t.connection_id=$1) ORDER BY t.id`, connection)
 	if err != nil {
 		return nil, err
 	}

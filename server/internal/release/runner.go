@@ -24,9 +24,10 @@ type Launcher interface {
 // Runner launches released auto members and marks manual ones ready.
 // Reconciles are serialized.
 type Runner struct {
-	store    *db.Store
-	launcher Launcher
-	log      *slog.Logger
+	ConnectionID int64 // zero reconciles every connection
+	store        *db.Store
+	launcher     Launcher
+	log          *slog.Logger
 
 	// Every is the reconcile interval (catches changes missed while down).
 	Every time.Duration
@@ -89,7 +90,7 @@ func (r *Runner) Run(ctx context.Context) {
 func (r *Runner) Reconcile(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	ids, err := r.store.LaunchableTasks(ctx)
+	ids, err := r.store.LaunchableForConnection(ctx, r.ConnectionID)
 	if err != nil {
 		return err
 	}

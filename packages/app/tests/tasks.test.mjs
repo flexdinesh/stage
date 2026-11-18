@@ -70,7 +70,7 @@ test("HTTP contract: needs, trees and adopt calls", async () => {
   await api.archiveTask(7);
   await api.unarchiveTask(7);
   await api.tasks({ project: 2, closed: "true" });
-  await api.adoptThread("a/b", { title: "Plan" });
+  await api.adoptSession({ connectionId: 1, externalSessionId: "a/b" }, { title: "Plan" });
   assert.deepEqual(calls, [
     { path: "/tasks/7/needs", method: "PUT", body: { needs: [3, 5] } },
     { path: "/trees?status=all&project=2", method: "GET", body: undefined },

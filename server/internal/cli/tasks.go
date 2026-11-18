@@ -39,12 +39,8 @@ type configFlags struct {
 	connection                                                  int64
 	executionConfig                                             *agenttools.ConfigInput
 	project, title, prompt, promptFile, provider, model, effort string
-	runtime, mode, baseRef, branch, base                        string
+	runtime, mode, baseRef, branch, base, workspace             string
 	options, tags, images                                       list
-}
-
-func (f *configFlags) createFlags(c *cmd) {
-	c.fs.Int64Var(&f.connection, "connection", 0, "execution destination connection ID")
 }
 
 func (f *configFlags) configInputFlag(c *cmd) {
@@ -64,6 +60,8 @@ func (f *configFlags) configInputFlag(c *cmd) {
 }
 func (f *configFlags) register(c *cmd) {
 	f.configInputFlag(c)
+	c.fs.Int64Var(&f.connection, "connection", 0, "destination connection ID")
+	c.fs.StringVar(&f.workspace, "workspace", "", "root or harness-managed worktree")
 	c.fs.StringVar(&f.project, "project", "", "project id or title")
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
@@ -124,7 +122,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 		return agenttools.ConfigArgs{}, err
 	}
 	return agenttools.ConfigArgs{
-		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
+		WorkspaceType: f.workspace, ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
 		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
 		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, ImagePaths: f.images,
 	}, nil
@@ -158,7 +156,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ConnectionID: f.connection, WorkspaceType: strFlag(c, "workspace", f.workspace), ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
 		Provider: strFlag(c, "provider", f.provider), Model: strFlag(c, "model", f.model),
 		Effort: strFlag(c, "effort", f.effort), Options: opts, RuntimeMode: strFlag(c, "runtime", f.runtime),
 		InteractionMode: strFlag(c, "mode", f.mode), BaseRef: strFlag(c, "base-ref", f.baseRef),
@@ -283,7 +281,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	case "add", "create", "new":
 		caller := c.sessionFlags("caller")
 		var f configFlags
-		f.createFlags(c)
 		var wf waitFlags
 		var initialNote string
 		var start bool
@@ -492,7 +489,6 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 	case "add", "create", "new":
 		caller := c.sessionFlags("caller")
 		var f configFlags
-		f.createFlags(c)
 		var a agenttools.CreateScheduleArgs
 		f.register(c)
 		c.fs.StringVar(&a.Notes, "notes", "", "note template for spawned tasks")

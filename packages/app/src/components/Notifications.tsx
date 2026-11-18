@@ -1,3 +1,4 @@
+import { harnessName } from "../lib/tasks.ts";
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -17,7 +18,7 @@ import { reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, errorText, toneClass } from "./ui.tsx";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -216,7 +217,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const sticky = n.event === "needs_input";
   const [paused, setPaused] = useState(false);
   const remaining = useRef(TOAST_MS);
@@ -266,7 +267,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
           <ToastView n={n} onDismiss={onDismiss} />
           {destination(n) === null ? null : (
             <AppButton small variant={stillWaiting(n) ? "primary" : "secondary"} href={destination(n) ?? ""}>
-              Open in T3
+              Open in {harnessName(n.connectionId)}
             </AppButton>
           )}
         </div>
@@ -464,7 +465,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   onNavigate: () => void;
 }) {
   const historyId = useId();
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
   // A ready task still in backlog reads "ready": that is its current state, not a change.
@@ -523,7 +524,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
           {destination(n) === null ? null : (
             <AppButton small variant={waiting ? "primary" : "secondary"} href={destination(n) ?? ""}>
-              Open in T3
+              Open in {harnessName(n.connectionId)}
             </AppButton>
           )}
         </div>
@@ -590,11 +591,11 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
 
 /** Current attention only. No event timestamp, history, unread marker or read mutation. */
 function SilentWaitingRow({ session }: { session: WaitingSession }) {
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const href = destination(session);
   return <div className="flex flex-col gap-2 border-l-2 border-l-need px-3 py-3">
     <p className="text-body font-medium break-words">{session.title}</p>
-    <div className="flex flex-wrap items-center gap-2"><TaskStateBadge state="needs_input" /><span className="font-mono text-meta text-muted">{session.projectTitle ?? "T3 session"}</span></div>
-    {href === null ? <Muted>Open this session in T3: {session.externalSessionId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in T3</AppButton>}
+    <div className="flex flex-wrap items-center gap-2"><TaskStateBadge state="needs_input" /><span className="font-mono text-meta text-muted">{session.projectTitle ?? harnessName(session.connectionId)}</span></div>
+    {href === null ? <Muted>Open in {harnessName(session.connectionId)}: {session.externalSessionId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in {harnessName(session.connectionId)}</AppButton>}
   </div>;
 }

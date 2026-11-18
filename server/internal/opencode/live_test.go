@@ -56,7 +56,7 @@ func (f *liveFixture) start(t *testing.T, port string) {
 	}()
 	select {
 	case url := <-ready:
-		f.a, e = New(2, url, "", "opencode", "stage-test")
+		f.a, e = New(2, Settings{Endpoint: url, Username: "opencode", Password: "stage-test"})
 		if e != nil {
 			t.Fatal(e)
 		}

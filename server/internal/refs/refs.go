@@ -144,6 +144,13 @@ func parseDeepLink(s string) (Ref, error) {
 	if host := strings.ToLower(u.Host); host != "" && host != "localhost" {
 		segs = append([]string{host}, segs...)
 	}
+	if len(segs) == 4 && segs[0] == "connections" && segs[2] == "sessions" {
+		connection, err := strconv.ParseInt(segs[1], 10, 64)
+		if err != nil || connection <= 0 {
+			return Ref{}, ErrInvalid
+		}
+		return Ref{Kind: KindSession, ConnectionID: connection, ThreadID: segs[3]}, nil
+	}
 	if len(segs) != 2 {
 		return Ref{}, ErrInvalid
 	}

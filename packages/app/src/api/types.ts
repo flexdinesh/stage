@@ -165,6 +165,7 @@ export interface PairRequest {
 }
 
 export interface SyncResult {
+  unavailableConnections?: number[];
   projects: number;
   threads: number;
   finishedAt: string;
@@ -249,6 +250,32 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
+export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string }
+export interface HarnessConnection {id: number; configured: boolean; harness: "t3" | "opencode"}
+export interface OpenCodeStatus {
+  connectionId: number;
+  endpoint: string;
+  browserEndpoint: string;
+  webClient: string;
+  hasCredentials: boolean;
+  environmentFields: string[];
+  state: "unconfigured" | "connected" | "unavailable";
+  reason?: string;
+  checkedAt?: string;
+}
+export interface HarnessChoice {id: string; label: string; available: boolean; reason?: string}
+export interface HarnessModel extends HarnessChoice {
+  group: string;
+  options: {id: string; values: (string | boolean)[]; default?: string | boolean}[] | null;
+  permissions: HarnessChoice[] | null;
+}
+export interface Capabilities {
+  permissions?: HarnessChoice[];
+  operations: Record<string, {available: boolean; reason?: string}>;
+  models: HarnessModel[] | null;
+  modes: HarnessChoice[] | null;
+  workspaces: HarnessChoice[] | null;
+}
 export interface ExecutionConfig {
   model: string;
   options: ModelOption[];
@@ -270,6 +297,7 @@ export interface LaunchLinkPreview {
   };
 }
 export interface Task {
+  links?: ExecutionLinks;
   executionConfig?: ExecutionConfig | null;
  launch?: LaunchRecovery;
   session: SessionRef | null;
@@ -364,6 +392,7 @@ export interface TaskEvent {
 }
 
 export interface TaskDetail extends Task {
+  finalReply?: { text: string; truncated: boolean; updatedAt: string; runId: string };
   acceptances: Acceptance[];
   events: TaskEvent[];
   thread: Thread | null;
@@ -588,6 +617,8 @@ export interface TaskList {
 }
 
 export interface CreateTaskRequest {
+  connectionId?: number;
+  executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;
   prompt: string;
@@ -618,6 +649,8 @@ export interface CreateTaskRequest {
 }
 
 export interface UpdateTaskRequest {
+  connectionId?: number;
+  executionConfig?: ExecutionConfig;
   projectId?: number;
   title?: string;
   prompt?: string;
@@ -693,6 +726,7 @@ export type ScheduleRunOutcome = (typeof SCHEDULE_RUN_OUTCOMES)[number];
 
 /** Recurring task template: each cron fire spawns a task with this config. */
 export interface Schedule {
+  executionConfig?: ExecutionConfig | null;
   connectionId: number;
   originSession: SessionRef | null;
   id: number;
@@ -752,6 +786,8 @@ export interface ScheduleListQuery {
 }
 
 export interface CreateScheduleRequest {
+  connectionId?: number;
+  executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;
   prompt: string;
@@ -855,6 +891,15 @@ export interface LastWord {
   at: string | null;
 }
 
+export interface SessionPreview {
+  session: SessionRef;
+  task: Task | null;
+  project: Project | null;
+  title: string;
+  workspace?: string;
+  unavailableReason?: string;
+}
+
 export interface ThreadDetail {
   thread: Thread;
   task: Task | null;
@@ -897,6 +942,7 @@ export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
 
 /** New-task model preset. providerInstanceId/model null = T3 default. */
 export interface ModelDefaults {
+  executionConfig?: ExecutionConfig;
   providerInstanceId: string | null;
   model: string | null;
   modelOptions: ModelOption[];
@@ -940,6 +986,7 @@ export interface Badge {
 export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled"> | "ready";
 
 export interface Notification {
+  links?: ExecutionLinks;
   connectionId: number;
   t3WebUrl: string | null;
   id: number;
@@ -973,6 +1020,7 @@ export interface NotificationGroup extends Notification {
 }
 
 export interface WaitingSession {
+  links?: ExecutionLinks;
   connectionId: number;
   externalSessionId: string;
   title: string;

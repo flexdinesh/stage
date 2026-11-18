@@ -5,21 +5,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/workevent"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	gosync "sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 type Change = workevent.TaskChange
 type Result struct {
-	Projects   int       `json:"projects"`
-	Threads    int       `json:"threads"`
-	FinishedAt time.Time `json:"finishedAt"`
+	Unavailable []int64   `json:"unavailableConnections,omitempty"`
+	Projects    int       `json:"projects"`
+	Threads     int       `json:"threads"`
+	FinishedAt  time.Time `json:"finishedAt"`
 }
 type CatalogSnapshot struct {
 	Catalog   execution.Capabilities
@@ -29,6 +33,7 @@ type CatalogSnapshot struct {
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
+	adapterMu                                                                    gosync.RWMutex
 	store                                                                        *db.Store
 	adapters                                                                     map[int64]execution.Adapter
 	log                                                                          *slog.Logger
@@ -36,13 +41,13 @@ type Service struct {
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	progress                                                                     atomic.Pointer[Progress]
-	lastStalePoll                                                                atomic.Int64
+	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
 	syncing                                                                      atomic.Bool
 	catalog                                                                      atomic.Pointer[CatalogSnapshot]
 	kickSync, kickCatalog                                                        chan struct{}
 	locks                                                                        gosync.Map
 	started                                                                      time.Time
-	watchSeeded                                                                  atomic.Bool
+	watchSeeded                                                                  gosync.Map // connection IDs with a successful first observation pass
 }
 
 func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service {
@@ -55,11 +60,24 @@ func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log 
 	return &Service{store: store, adapters: adapters, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, CatalogEvery: 10 * time.Minute, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), kickCatalog: make(chan struct{}, 1), started: time.Now()}
 }
 func (s *Service) Adapter(id int64) (execution.Adapter, error) {
+	s.adapterMu.RLock()
+	defer s.adapterMu.RUnlock()
 	a := s.adapters[id]
 	if a == nil {
 		return nil, &db.ConflictError{Code: "connection_unavailable", Msg: "This harness is unavailable. Select a supported connection."}
 	}
 	return a, nil
+}
+func (s *Service) SetAdapter(id int64, a execution.Adapter) {
+	s.adapterMu.Lock()
+	s.adapters[id] = a
+	s.adapterMu.Unlock()
+	s.Kick()
+}
+func (s *Service) connections() map[int64]execution.Adapter {
+	s.adapterMu.RLock()
+	defer s.adapterMu.RUnlock()
+	return maps.Clone(s.adapters)
 }
 func (s *Service) lock(id int64) func() {
 	value, _ := s.locks.LoadOrStore(id, &gosync.Mutex{})
@@ -106,11 +124,38 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
-	wg.Add(4)
-	go loop(s.FullSyncEvery, s.kickSync, func(ctx context.Context) error { _, e := s.FullSync(ctx); return e })
-	go loop(s.PollEvery, nil, s.PollActive)
-	go loop(s.PollEvery, nil, s.WatchThreads)
+	// Each connection owns its poll and discovery timers. A slow or disconnected
+	// service can consume its own timeout without delaying the other's next tick.
+	workers := map[int64]chan struct{}{}
+	ensure := func() {
+		for id := range s.connections() {
+			if _, ok := workers[id]; ok {
+				continue
+			}
+			refresh := make(chan struct{}, 1)
+			workers[id] = refresh
+			wg.Add(3)
+			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id); return err })
+			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.pollConnection(ctx, id) })
+			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchConnection(ctx, id) })
+		}
+	}
+	ensure()
+	wg.Add(1)
 	go loop(s.CatalogEvery, s.kickCatalog, func(ctx context.Context) error { _, e := s.RefreshCatalog(ctx); return e })
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+		case <-s.kickSync:
+			for _, ch := range workers {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
+			}
+			ensure()
+		}
+	}
 	wg.Wait()
 }
 func (s *Service) RecoverLaunching(ctx context.Context) {
@@ -131,59 +176,106 @@ func harnessErr(err error) error {
 	}
 	return &db.HarnessError{Err: err}
 }
-func (s *Service) FullSync(ctx context.Context) (Result, error) {
-	if !s.syncing.CompareAndSwap(false, true) {
-		return Result{}, ErrSyncRunning
+func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
+	connections := s.connections()
+	for _, id := range skip {
+		delete(connections, id)
 	}
-	now := time.Now().UTC()
-	s.progress.Store(&Progress{Running: true, StartedAt: &now})
-	defer func() { s.syncing.Store(false); s.progress.Store(&Progress{}) }()
-	r := Result{}
+	type response struct {
+		id     int64
+		result Result
+		err    error
+	}
+	results := make(chan response, len(connections))
+	for id := range connections {
+		go func() { r, e := s.syncConnection(ctx, id); results <- response{id, r, e} }()
+	}
+	var out Result
 	var errs []error
-	for id, a := range s.adapters {
-		ps, e := a.Workspaces(ctx)
-		if e != nil {
-			errs = append(errs, e)
+	for range connections {
+		r := <-results
+		out.Projects += r.result.Projects
+		out.Threads += r.result.Threads
+		if r.err != nil {
+			out.Unavailable = append(out.Unavailable, r.id)
+			errs = append(errs, r.err)
+		}
+	}
+	out.FinishedAt = time.Now().UTC()
+	slices.Sort(out.Unavailable)
+	if len(errs) < len(connections) {
+		return out, nil
+	}
+	return out, errors.Join(errs...)
+}
+
+func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) {
+	now := time.Now().UTC()
+	if id == db.T3ConnectionID {
+		if !s.syncing.CompareAndSwap(false, true) {
+			return Result{}, ErrSyncRunning
+		}
+		s.progress.Store(&Progress{Running: true, StartedAt: &now})
+		defer func() { s.progress.Store(&Progress{}); s.syncing.Store(false) }()
+	}
+	a, err := s.Adapter(id)
+	if err != nil {
+		return Result{}, err
+	}
+	inventory, err := a.Workspaces(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	n, err := s.store.RefreshWorkspaces(ctx, id, inventory)
+	if err != nil {
+		return Result{}, err
+	}
+	r := Result{Projects: n}
+	if id == db.T3ConnectionID {
+		s.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
+	}
+	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
+	if err != nil {
+		return r, err
+	}
+	var errs []error
+	for _, t := range tasks {
+		if t.ConnectionID != id || t.Session == nil {
 			continue
 		}
-		n, e := s.store.RefreshWorkspaces(ctx, id, ps)
-		if e != nil {
-			errs = append(errs, e)
+		if err := s.PollTask(ctx, t); err != nil {
+			errs = append(errs, err)
 		} else {
-			r.Projects += n
-			s.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: r.Projects})
-		}
-	}
-	tasks, e := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
-	if e != nil {
-		return r, e
-	}
-	for _, t := range tasks {
-		if t.Session != nil {
-			if e := s.PollTask(ctx, t); e != nil {
-				errs = append(errs, e)
-			} else {
-				r.Threads++
-			}
+			r.Threads++
 		}
 	}
 	r.FinishedAt = time.Now().UTC()
-	if len(errs) == 0 {
-		if e = s.store.SetLastFullSync(ctx, r.FinishedAt); e != nil {
-			return r, e
-		}
+	if id == db.T3ConnectionID && len(errs) == 0 {
+		errs = append(errs, s.store.SetLastFullSync(ctx, r.FinishedAt))
 	}
 	return r, errors.Join(errs...)
 }
 func (s *Service) PollActive(ctx context.Context) error {
+	var errs []error
+	for id := range s.connections() {
+		errs = append(errs, s.pollConnection(ctx, id))
+	}
+	return errors.Join(errs...)
+}
+func (s *Service) pollConnection(ctx context.Context, id int64) error {
+	v, _ := s.lastStalePoll.LoadOrStore(id, &atomic.Int64{})
+	lastPoll := v.(*atomic.Int64)
 	now := time.Now()
-	last := s.lastStalePoll.Load()
-	stale := now.Sub(time.Unix(0, last)) >= s.StalePollEvery && s.lastStalePoll.CompareAndSwap(last, now.UnixNano())
+	last := lastPoll.Load()
+	stale := now.Sub(time.Unix(0, last)) >= s.StalePollEvery && lastPoll.CompareAndSwap(last, now.UnixNano())
 	tasks, e := s.store.PollableTasks(ctx, stale)
 	if e != nil {
 		return e
 	}
 	for _, t := range tasks {
+		if t.ConnectionID != id {
+			continue
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

@@ -313,14 +313,14 @@ func TestLiveNativeReplay(t *testing.T) {
 		proxy.ServeHTTP(w, r)
 	}))
 	defer open.Close()
-	unauthenticated, e := New(2, open.URL, "", "", "")
+	unauthenticated, e := New(2, Settings{Endpoint: open.URL})
 	if e != nil {
 		t.Fatal(e)
 	}
 	if h := unauthenticated.Health(ctx); !h.Available {
 		t.Fatal(h.Reason)
 	}
-	denied, e := New(2, a.endpoint, "", "opencode", "incorrect-test-password")
+	denied, e := New(2, Settings{Endpoint: a.endpoint, Username: "opencode", Password: "incorrect-test-password"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -363,7 +363,7 @@ func TestClientContract(t *testing.T) {
 				fmt.Fprint(w, `{"paths":{}}`)
 			}))
 			defer srv.Close()
-			a, e := New(2, srv.URL, "", "", "")
+			a, e := New(2, Settings{Endpoint: srv.URL})
 			if e != nil {
 				t.Fatal(e)
 			}

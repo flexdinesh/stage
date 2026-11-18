@@ -14,9 +14,9 @@ export type Feature = {
 }
 
 export const hero = {
-  title: 'Keep T3 Code busy without babysitting it.',
-  body: 'stage is a self-hosted task manager for T3 Code. Save tasks to a backlog, run them as trees that start each task when its needs are completed in Stage, put them on a schedule, and see what needs you from your phone.',
-  meta: 'self-hosted beside T3 · desktop or headless · talks to T3 over MCP',
+  title: 'Manage tasks across T3 Code and OpenCode.',
+  body: 'Queue work in either harness, review final replies, and choose when to release the next task. Keep projects, journals and schedules together on your own server.',
+  meta: 'desktop or headless · self-hosted',
   primary: { text: 'Get started', href: '/docs/install' },
   secondary: { text: 'GitHub', href: 'https://github.com/flexdinesh/stage' },
   demoLabel:
@@ -28,7 +28,7 @@ export const features: Feature[] = [
     id: 'backlog',
     title: 'Write the prompt now. Start it later.',
     body: 'Save a task with its prompt, provider, model, effort, runtime and workspace. It waits in the backlog until you start it, or until something you queued starts it for you.',
-    facts: ['provider, model, effort, worktree', 'screenshots ride along on every launch', 'save to backlog or start right away'],
+    facts: ['provider, model, effort, worktree', 'T3 supports prompt images', 'save to backlog or start right away'],
     link: { text: 'How tasks work', href: '/docs/features#tasks' },
     demoLabel: "Animated demo: in stage's New task drawer a prompt is typed, a model and effort are picked, and Save to backlog adds the task to the top of the project's backlog.",
   },
@@ -36,7 +36,7 @@ export const features: Feature[] = [
     id: 'run-order',
     title: 'Tasks wait for what they need.',
     body: "Put tasks in a tree, across projects if you need to. A task starts when the tasks it needs are completed in Stage, with each one's accepted result and available references appended to its prompt.",
-    facts: ['starts when its needs are completed in Stage', 'handoff: final reply, PRs, branch', "optional: build on a need's branch"],
+    facts: ['ready after user completion', 'handoff: final reply, PRs, branch', "optional: build on a need's branch"],
     link: { text: 'Trees and handoff', href: '/docs/features#trees-and-handoff' },
     demoLabel: "Animated demo: #12 is added as a need of task #13 in its Tree panel; the user completes #12, then explicitly automatic task #13 starts with #12's final reply, pull request and branch handed off.",
   },
@@ -59,7 +59,7 @@ export const features: Feature[] = [
   {
     id: 'pwa-push',
     title: 'Know when work needs you.',
-    body: 'Install stage as an app and get a push when a thread needs input, fails or finishes. Tap it to view the task, then open T3 to continue.',
+    body: 'Install stage as an app and get a push when a thread needs input, fails or finishes. Tap it to view the task, then open the session to continue.',
     facts: ['installable PWA with Web Push', 'needs input, failed, done, settled', 'the app badge counts what is waiting'],
     link: { text: 'Install and notifications', href: '/docs/deploy#install-as-an-app-pwa-and-notifications' },
     demoLabel: "Animated demo: a stage push notification asks for input on a phone's lock screen; tapping it opens the installed app, Open in T3 continues the conversation.",
@@ -67,8 +67,8 @@ export const features: Feature[] = [
 ]
 
 export const closing = {
-  title: 'Run it next to T3.',
-  body: 'Install the desktop app, or the headless server on a remote machine, pair it with T3, and stage imports your projects.',
+  title: 'Connect your harness.',
+  body: 'Install the desktop app, or the headless server on a remote machine, then connect your harness and bind a project workspace.',
   primary: { text: 'Install stage', href: '/docs/install' },
   secondary: { text: 'Read the docs', href: '/docs' },
   // Condensed from /docs/install (desktop, then headless).
@@ -79,5 +79,5 @@ export const closing = {
     '# CLI/server only',
     'curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless',
   ],
-  quickstartNote: 'then pair with T3 from the Dashboard',
+  quickstartNote: 'then connect your harness in Settings',
 }

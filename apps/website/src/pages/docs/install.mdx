@@ -32,7 +32,7 @@ The script detects the OS (Linux, macOS) and CPU (amd64, arm64), downloads the l
 
 Releases are not signed: the checks catch corrupt, truncated or substituted downloads and wrong-platform releases; trust in the release itself rests on the GitHub account and HTTPS.
 
-Next: [connect to T3](/docs/t3). Desktop: open stage from your app launcher. Headless: `stage service start` ([Headless server](/docs/deploy#run-as-a-service)).
+Open Settings to connect OpenCode or [pair T3](/docs/t3). Desktop: open stage from your app launcher. Headless: `stage service start` ([Headless server](/docs/deploy#run-as-a-service)).
 
 ## Requirements
 
@@ -40,7 +40,7 @@ Next: [connect to T3](/docs/t3). Desktop: open stage from your app launcher. Hea
 - **Linux desktop**: glibc, GTK 3 and WebKitGTK 4.1. When they are missing the install stops (exit 7) and prints the install command for your distribution (`apt-get`, `dnf`, `pacman`, `zypper`); it never installs packages itself.
 - **macOS**: 12 or later. Releases ship the Mac desktop app only once it can be signed and notarized; until then use `--headless` on a Mac.
 - **Headless**: nothing else (a static binary).
-- A [T3 Code](https://github.com/pingdotgg/t3code) server that stage can reach.
+- For execution, an existing T3 Code or OpenCode V2 service that Stage can reach.
 
 ## What it installs
 

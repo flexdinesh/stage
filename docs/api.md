@@ -129,6 +129,8 @@ Pair with no code: runs `t3 auth pairing create --json --label "<client name> mc
 Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is bound and the new URL does not serve that environment (`This stage server is bound to T3 '<label>'. Run another stage server for a different T3.`), or cannot be checked because nothing answers there. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
 
 ### `POST /api/sync`
+
+A mixed-harness sync refreshes connections independently. A partial success includes `unavailableConnections` with the IDs that could not finish. With only OpenCode configured, the T3 default endpoint is skipped.
 Refresh external workspace discovery and task-owned sessions. Stage project titles/archive remain Stage-owned; binding changes require confirmation. External active-session discovery belongs to the notification watcher. No historical thread sweep. Synchronous.
 200 `SyncResult`:
 ```json
@@ -177,13 +179,12 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/connections`: `{connections: [{id, harness}]}`. Only implemented
-  integrations are exposed. T3 uses connection 1. OpenCode is storage-only.
-- `GET /api/connections/t3/projects`: live discovery, returns
+- `GET /api/connections`: `{connections: [{id, harness, configured}]}`. T3 uses connection 1. Select the returned OpenCode ID. Both can be planned before setup.
+- `GET /api/connections/:connectionId/projects` (also `/api/connections/t3/projects`): live discovery, returns
   `{projects: [{connectionId, externalId, title, workspace, projectId}]}`.
   `projectId` is the current explicit owner, or null.
 - `PUT /api/projects/:id/binding`: `{connectionId, externalProjectId, workspace}`.
-  Revalidates the exact external project/path with T3 before binding. One active
+  Revalidates the exact external project and path on the selected harness before binding. One active
   binding per project/connection; one Stage owner per external workspace.
   Rebinding retires the previous revision. Conflicts return 409.
 - `DELETE /api/projects/:id/binding`: unbind T3, retaining history.
@@ -191,12 +192,11 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
   an existing directory in T3. No directory creation, cloning or provisioning.
   After an uncertain response, refresh discovery before registering again.
 
-Titles and directory strings are never matching evidence. T3 currently provides
-neither verified shared filesystem/worktree-family identity nor remote evidence,
-so selection is explicit. Future adapters may auto-match a verified shared family
-and subproject, and suggest Git-remote matches for confirmation. Remote equality
-alone must never bind clones. Manual correction handles remote/inaccessible
-paths, ambiguous clones and monorepo subprojects.
+Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject can bind. A Git remote match requires confirmation. DELETE the scoped binding to unbind.
+
+`GET /api/opencode/status` reports connectionId, state, diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials and environmentFields. `PUT /api/opencode/settings` accepts changed endpoint, browserEndpoint, webClient, username and password. A successful test and save returns 204. Credentials are write-only. Replacing an address already in use requires matching stored identity evidence.
+
+Request `/api/connections/:connectionId/capabilities?projectId=ID` for workspace-specific options. A REST create with one binding can omit connectionId. Multiple bindings require an explicit connectionId. Legacy unbound requests retain the T3 planning default. Task and schedule edits can change the destination with an explicit connectionId, executionConfig and workspace before launch. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply and links.web, links.native or links.service when available.
 
 External deletion or connection failure retains Stage metadata, tasks and history.
 An observed path change requires explicit confirmation. Future unclaimed launches

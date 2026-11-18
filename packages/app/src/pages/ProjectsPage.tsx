@@ -1,3 +1,4 @@
+import { harnessName } from "../lib/tasks.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -156,7 +157,7 @@ export function ProjectsPage() {
                   </div>
                   <div className="flex items-center gap-1.5 justify-self-end md:justify-self-start">
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
-                    <Chip>{p.bindings.length === 0 ? "not bound" : p.bindings.some((binding) => binding.status !== "available") ? "check workspace" : "T3"}</Chip>
+                    <Chip>{p.bindings.length === 0 ? "not bound" : p.bindings.some((binding) => binding.status !== "available") ? "check workspace" : p.bindings.map(b => harnessName(b.connectionId)).join(" · ")}</Chip>
                   </div>
                   <div className="flex flex-col font-mono text-meta text-muted tabular">
                     <span>

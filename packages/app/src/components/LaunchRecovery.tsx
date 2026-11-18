@@ -33,7 +33,7 @@ export function LaunchRecovery({ task }: { task: Task }) {
         {task.launch?.reason ? <p className="break-words text-small">{task.launch.reason}</p> : null}
         {editing ? (
           <>
-            <Field label="T3 session link">
+            <Field label="Session link">
               {(id) => (
                 <Input
                   id={id}

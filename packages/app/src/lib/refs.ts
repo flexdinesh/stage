@@ -5,7 +5,7 @@
  * installation identity) read the same.
  */
 
-export type StageRef = { kind: "task"; id: number } | { kind: "session"; id: string };
+export type StageRef = { kind: "task"; id: number } | { kind: "session"; id: string; connectionId?: number };
 
 /** Turns an app path into the copyable link (the platform's `links.stageLink`). */
 export type StageLink = (path: string) => string;
@@ -37,7 +37,7 @@ export function parseStageRef(href: string): StageRef | null {
   if (DEEP_LINK.test(u.protocol)) {
     const host = u.hostname.toLowerCase();
     if (host !== "" && host !== "localhost") segs = [host, ...segs];
-    if (segs.length !== 2) return null;
+    if (segs.length !== 2 && !(segs.length===4 && segs[0]==="connections" && segs[2]==="sessions")) return null;
   } else if (u.protocol !== "http:" && u.protocol !== "https:") return null;
   if (segs.length < 2) return null;
   const kind = segs[segs.length - 2];
@@ -49,7 +49,12 @@ export function parseStageRef(href: string): StageRef | null {
   if (kind === "sessions") {
     try {
       const id = decodeURIComponent(raw);
-      return id === "" ? null : { kind: "session", id };
+      if (!id) return null;
+      if(segs.at(-4)==="connections") {
+        const connectionId=Number(segs.at(-3));
+        return Number.isSafeInteger(connectionId) && connectionId>0 ? {kind:"session",id,connectionId}:null;
+      }
+      return { kind: "session", id };
     } catch {
       return null;
     }

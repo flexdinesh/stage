@@ -6,14 +6,15 @@ import { useInvalidateWork } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
 import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
-import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
+import { harnessName, canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
+import { CompletionButton } from "./Completion.tsx";
 import { LastWordLine } from "./LastWord.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
@@ -146,7 +147,7 @@ function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChi
     return {
       to: `/tasks/${firstNeed}`,
       label: `needs ${task.needs.map((id) => `#${id}`).join(" ")}`,
-      title: `Starts when ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}`,
+      title: `Ready after user completion of ${waitTarget(task)}`,
       icon: <IconChainLink />,
     };
   if (task.scheduleId !== null)
@@ -156,11 +157,11 @@ function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChi
       title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
       icon: <IconRepeat />,
     };
-  if (task.originThreadId !== null && task.originThreadId !== contextThreadId)
+  if (task.originSession && task.originSession.externalSessionId !== contextThreadId)
     return {
       to: `/tasks/${task.id}?batch=1`,
       label: "by agent",
-      title: `Created by session ${task.originThreadTitle ?? task.originThreadId}`,
+      title: `Created by session ${task.originThreadTitle ?? task.originSession.externalSessionId}`,
       icon: <IconChainLink />,
     };
   return null;
@@ -193,8 +194,9 @@ export function TaskRow({
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
   const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
-  const appLink = useT3Destination()(task);
-  const hasActions = showStart || appLink !== null || extra !== undefined;
+  const appLink = useSessionDestination()(task);
+  const review = task.acceptanceId === null && (task.state === "done" || task.state === "settled");
+  const hasActions = review || showStart || appLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -230,7 +232,7 @@ export function TaskRow({
               {task.projectTitle}
             </Link>
           )}
-          <span>{modelText(task.model, task.modelOptions)}</span>
+          <span>{harnessName(task.connectionId)} · {task.connectionId === 1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
           {task.completedAt !== null ? (
             <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (
@@ -269,6 +271,7 @@ export function TaskRow({
       </div>
 
       <div className={cx("order-4 col-span-2 flex-wrap items-center gap-1.5 md:col-span-1 md:flex md:justify-end", hasActions ? "flex" : "hidden")}>
+        {review ? <CompletionButton task={task} review /> : null}
         {showStart ? (
           <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
             {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
@@ -276,7 +279,7 @@ export function TaskRow({
         ) : null}
         {appLink === null ? null : (
           <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
-            Open in T3
+            Open in {harnessName(task.connectionId)}
           </AppButton>
         )}
         {extra}

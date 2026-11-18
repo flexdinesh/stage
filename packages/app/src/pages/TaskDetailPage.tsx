@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
@@ -40,7 +40,7 @@ import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../l
 import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
-import { canStart, canStop, isActive } from "../lib/tasks.ts";
+import { harnessName, canStart, canStop, isActive } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -122,13 +122,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const startable = canStart(task);
   // Blocked on its needs: Start runs it before they are completed (needs kept), so it takes a second click to confirm.
   const stoppable = canStop(task);
-  const appUrl = useT3Destination()(task);
+  const appUrl = useSessionDestination()(task);
   const phoneBar = appUrl !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) =>
     appUrl === null ? null : (
       <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in T3
+        Open in {harnessName(task.connectionId)}
       </AppButton>
     );
 
@@ -166,8 +166,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <NodeChip task={task} />
         {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
-        {task.adopted ? <Chip title="An existing T3 session stage tracks; it never starts it">tracked session</Chip> : null}
-        <Chip>{modelText(task.model, task.modelOptions)}</Chip>
+        {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
+        <Chip>{task.connectionId===1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "OpenCode default"}</Chip>
         <Chip>{task.runtimeMode}</Chip>
         {task.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceChip(task)}</Chip>
@@ -179,7 +179,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {waiting ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            T3 is waiting on input
+            {harnessName(task.connectionId)} needs input
           </Alert>
         ) : null}
 
@@ -261,7 +261,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
               </PromptPanel>
             )}
             {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} />)}
-            {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
+            <LastWordPanel task={task} />
             {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-small underline">{artifact.label}</a></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
@@ -288,7 +288,10 @@ function TaskBody({ task }: { task: TaskDetail }) {
 }
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
+  if (task.connectionId !== 1) {
+    return <Panel title="OpenCode session">{task.session === null ? <Muted>No session attached.</Muted> : <div className="flex flex-wrap items-center gap-2"><code className="break-all text-meta">{task.session.externalSessionId}</code><CopyButton text={task.session.externalSessionId} label="Copy session ID" />{task.links?.service ? <AppButton small href={task.links.service}>Open on service</AppButton> : null}{!destination(task) ? <Link to="/settings" className="underline">Configure browser address</Link> : null}</div>}</Panel>;
+  }
   if (task.externalSessionId === null) {
     return (
       <Panel title="Thread">
@@ -300,7 +303,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   if (destination(task) !== null) {
     links.push(
       <AppButton key="app" href={destination(task) ?? ""} small>
-        Open in T3
+        Open in {harnessName(task.connectionId)}
       </AppButton>,
     );
   }
@@ -348,10 +351,16 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
   return (
     <Panel title="Config">
       <Details>
+        <Detail label="Harness">{harnessName(task.connectionId)}</Detail>
+        {task.connectionId !== 1 ? <>
+          <Detail label="Model">{modelText(task.executionConfig?.model || "Harness default", task.executionConfig?.options ?? [])}</Detail>
+          <Detail label="Agent">{task.executionConfig?.mode || "Harness default"}</Detail>
+        </> : <>
         <Detail label="Provider">{task.providerInstanceId ?? "T3 default"}</Detail>
         <Detail label="Model">{modelText(task.model, task.modelOptions)}</Detail>
-        <Detail label="Runtime">{task.runtimeMode}</Detail>
-        <Detail label="Interaction">{task.interactionMode}</Detail>
+        <Detail label="Runtime">{task.executionConfig ? task.executionConfig.permission || "Harness default" : task.runtimeMode}</Detail>
+        <Detail label="Interaction">{task.executionConfig ? task.executionConfig.mode || "Harness default" : task.interactionMode}</Detail>
+        </>}
         <Detail label="Workspace">
           {predecessorWorkspaceText(task, task.currentLaunchBase) ?? workspaceText(task.workspace)}
           {task.currentLaunchBase?.reason == null ? null : (
@@ -374,10 +383,10 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
             </span>
           </Detail>
         )}
-        {task.originThreadId === null ? null : (
+        {task.originSession === null ? null : (
           <Detail label="Created by">
             <Link to={`/tasks/${task.id}?batch=1`} className={linkClass}>
-              {task.originThreadTitle ?? task.originThreadId}
+              {task.originThreadTitle ?? task.originSession.externalSessionId}
             </Link>
           </Detail>
         )}

@@ -18,7 +18,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
   COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at,
+  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, coalesce(th.last_word_preview, substr(json_extract(obs.observation,'$.reply.text'),1,200)), coalesce(th.last_word_at,json_extract(obs.observation,'$.reply.updatedAt')),
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
   COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id=1),t.origin_thread_id), oth.title, t.handoff,
@@ -33,6 +33,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
+LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
 LEFT JOIN threads th ON th.session_id = t.session_id
 LEFT JOIN schedules sc ON sc.id = t.schedule_id
 LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
@@ -346,20 +347,23 @@ func projectExists(ctx context.Context, tx *Tx, id int64) error {
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
 // Nullable fields: providerInstanceId, model, startMode (Null clears).
 type TaskPatch struct {
-	ExecutionConfig    Optional[execution.Config]        `json:"executionConfig"`
-	ProjectID          Optional[int64]                   `json:"projectId"`
-	Title              Optional[string]                  `json:"title"`
-	Prompt             Optional[string]                  `json:"prompt"`
-	ProviderInstanceID Optional[string]                  `json:"providerInstanceId"`
-	Model              Optional[string]                  `json:"model"`
-	ModelOptions       Optional[[]execution.ModelOption] `json:"modelOptions"`
-	RuntimeMode        Optional[string]                  `json:"runtimeMode"`
-	InteractionMode    Optional[string]                  `json:"interactionMode"`
-	Workspace          Optional[Workspace]               `json:"workspace"`
-	Tags               Optional[[]string]                `json:"tags"`
-	AttachmentIDs      Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
-	Handoff            Optional[bool]                    `json:"handoff"`       // append the needs' handoff at launch
-	StartMode          Optional[StartMode]               `json:"startMode"`     // null = inherit the tree's
+	ValidatedConnection int64                             `json:"-"`
+	ValidatedProject    int64                             `json:"-"`
+	ConnectionID        Optional[int64]                   `json:"connectionId"`
+	ExecutionConfig     Optional[execution.Config]        `json:"executionConfig"`
+	ProjectID           Optional[int64]                   `json:"projectId"`
+	Title               Optional[string]                  `json:"title"`
+	Prompt              Optional[string]                  `json:"prompt"`
+	ProviderInstanceID  Optional[string]                  `json:"providerInstanceId"`
+	Model               Optional[string]                  `json:"model"`
+	ModelOptions        Optional[[]execution.ModelOption] `json:"modelOptions"`
+	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
+	InteractionMode     Optional[string]                  `json:"interactionMode"`
+	Workspace           Optional[Workspace]               `json:"workspace"`
+	Tags                Optional[[]string]                `json:"tags"`
+	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
+	Handoff             Optional[bool]                    `json:"handoff"`       // append the needs' handoff at launch
+	StartMode           Optional[StartMode]               `json:"startMode"`     // null = inherit the tree's
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
 	StartLocal Optional[string]    `json:"startLocal"`
@@ -369,7 +373,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
+	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
 		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
@@ -382,11 +386,15 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		var provider, model *string
 		var adopted bool
 		var nNeeds int
-		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,
+		var connection, project int64
+		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,connection_id, project_id,
   (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
-			Scan(&state, &provider, &model, &adopted, &nNeeds)
+			Scan(&state, &provider, &model, &adopted, &connection, &project, &nNeeds)
 		if err != nil {
 			return notFound(err)
+		}
+		if p.ValidatedConnection != 0 && (connection != p.ValidatedConnection || project != p.ValidatedProject) {
+			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if state != StateBacklog && p.restrictedSet() {
 			return Conflict("task is %s: only title and tags are editable outside backlog", state)
@@ -420,6 +428,21 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		w.arg(id)
 		var sets []string
 		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		if p.ConnectionID.Set {
+			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+				return err
+			}
+			if p.ConnectionID.V != connection && p.ConnectionID.V != T3ConnectionID {
+				var hasImages bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE task_id=$1)`, id).Scan(&hasImages); err != nil {
+					return err
+				}
+				if hasImages {
+					return Invalid("Remove image attachments before switching to OpenCode.")
+				}
+			}
+			set("connection_id", p.ConnectionID.V)
+		}
 		if p.ExecutionConfig.Set {
 			set("execution_config", p.ExecutionConfig.Ptr())
 		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {

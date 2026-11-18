@@ -24,6 +24,7 @@ const ServiceEnvFile = "service.env"
 var ServiceEnvKeys = []string{
 	"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS",
 	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED", "T3_BIN",
+	"OPENCODE_URL", "OPENCODE_PUBLIC_URL", "OPENCODE_WEB_URL", "OPENCODE_USERNAME", "OPENCODE_PASSWORD",
 }
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in

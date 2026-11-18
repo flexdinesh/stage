@@ -1,26 +1,22 @@
 ---
 title: Introduction
-description: What stage is, how it sits beside T3 Code, what it needs to run, how to keep it private, and how it is built.
+description: What stage is, how it works with T3 Code and OpenCode, what it needs to run, how to keep it private, and how it is built.
 showAskAi: false
 ---
 
 # Introduction
 
-stage is a self-hosted task manager for T3 Code. Queue tasks, launch them as T3 threads, run them as dependency trees, schedule them, answer what blocks them, and see history across all projects. It runs as a desktop app or as a headless server, and talks to one T3 Code server.
+Stage manages tasks, schedules, dependency trees and journals across T3 Code and OpenCode V2. Choose a harness per task. Open its session for questions and approvals. When execution finishes, review the bounded final reply and complete the task in Stage. A dependent in a manual tree becomes ready for you to start.
 
-## stage beside T3
+## Connect a harness
 
-stage sits beside T3 rather than replacing it.
+Open Settings to pair T3 or connect an existing OpenCode 2.3.0 service. For OpenCode, enter the service address reachable from Stage. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
 
-- **T3** is where conversations happen. Every task links straight to its thread ("Open in T3"). Tool calls, commands, diffs, permission approvals and settling a thread stay in T3.
-- **stage** owns what T3 does not provide: the backlog, trees of tasks that start when the tasks they need settle (even across projects), one-shot and recurring schedules, task and tree journals, and a cross-project view of every T3 thread, including ones started outside stage.
-- **The one exception** is a session's pending question. stage shows it and lets you answer it in place, so a thread that needs input can be unblocked from a phone in one step.
-
-Typical loop: queue work from a laptop or an agent, let tasks in a tree start as the tasks they need settle in T3, and answer whatever needs input from your phone when a push arrives.
+Create a Stage project and bind its workspace on each harness you use. Select the destination on each new task when a project has both bindings. Planning and accepted-result handoff work with a disconnected predecessor.
 
 ## Requirements
 
-- A running T3 Code server. stage usually runs on the same machine; a T3 elsewhere is paired with a code from `t3 pair` ([Connect to T3](/docs/t3)).
+- For execution, an existing T3 Code or OpenCode V2 service. Planning works offline.
 - Linux or macOS (amd64 or arm64), installed per user without root ([Install](/docs/install)).
   - **Desktop app**: Linux with glibc, GTK 3 and WebKitGTK 4.1. Mac desktop releases ship only once they can be signed and notarized; until then use the headless install on a Mac.
   - **Headless server**: needs nothing else.
@@ -45,6 +41,7 @@ Details: [Security](/docs/deploy#security).
 - **Web app**: React, served by the server, installable as a PWA with Web Push.
 - **Desktop app**: the same UI in a native window. It bundles the CLI/server, starts the per-user service and connects over its Unix socket ([Desktop app](/docs/desktop)).
 - **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, refreshes projects and tracked tasks every 5 min, and discovers active external sessions for notifications.
+- **OpenCode integration**: V2 HTTP API for execution, workspace discovery and supported model and agent choices.
 - **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API.
 
 ## Next steps
@@ -53,4 +50,4 @@ Details: [Security](/docs/deploy#security).
 - [Connect to T3](/docs/t3): pair stage with your T3 server.
 - [Desktop app](/docs/desktop) or [Headless server](/docs/deploy): run and manage stage.
 - [Features](/docs/features): everything stage does, grouped by area.
-- [Agents](/docs/agents): let agents running in T3 queue and manage tasks through the CLI or MCP.
+- [Agents](/docs/agents): let agents running in either harness queue and manage tasks through the CLI or MCP.
