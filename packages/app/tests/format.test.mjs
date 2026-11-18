@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, clockTime, dayLabel, groupByDay, shortDate } from "../src/lib/format.ts";
+import { age, clockTime, dayLabel, executionModes, groupByDay, shortDate } from "../src/lib/format.ts";
 
 // Local times, so the expectations hold in any TZ.
 const now = new Date(2026, 10, 16, 15, 0).getTime();
@@ -53,4 +53,16 @@ test("groupByDay keeps order and splits on local day changes", () => {
     ],
   );
   assert.deepEqual(groupByDay([], now), []);
+});
+
+test("executionModes prefers executionConfig over stale legacy fields", () => {
+  const legacy = { runtimeMode: "full-access", interactionMode: "plan" };
+  assert.deepEqual(executionModes({ ...legacy, executionConfig: null }), { permission: "full-access", mode: "plan" });
+  assert.deepEqual(executionModes(legacy), { permission: "full-access", mode: "plan" });
+  const config = { model: "", options: [], permission: "", mode: "" };
+  assert.deepEqual(executionModes({ ...legacy, executionConfig: config }), { permission: "", mode: "" });
+  assert.deepEqual(
+    executionModes({ ...legacy, executionConfig: { ...config, permission: "auto", mode: "plan" } }),
+    { permission: "auto", mode: "plan" },
+  );
 });

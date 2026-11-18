@@ -471,6 +471,36 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+// A task saved with legacy interactionMode "plan", then given an
+// executionConfig with the harness-default mode, launches without plan mode,
+// so the legacy field must not keep reporting the stale "plan".
+func TestExecutionConfigOverridesLegacyInteractionMode(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/modes")
+	tk := e.task(p.ID, "A", map[string]any{"interactionMode": "plan"})
+	type modes struct {
+		InteractionMode string `json:"interactionMode"`
+	}
+	var got modes
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &got)
+	if got.InteractionMode != "plan" {
+		t.Fatalf("legacy mode %q", got.InteractionMode)
+	}
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{
+		"executionConfig": map[string]any{"model": `["claude","claude-haiku-5-5"]`, "options": []any{}, "permission": "", "mode": ""},
+	}, 200, nil)
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &got)
+	if got.InteractionMode != "default" {
+		t.Fatalf("config-backed mode %q, want default", got.InteractionMode)
+	}
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
+	d, err := e.fake.ReadThread(context.Background(), *started.T3ThreadID)
+	if err != nil || d.InteractionMode != t3.InteractionDefault {
+		t.Fatalf("launched mode %q err %v", d.InteractionMode, err)
+	}
+}
+
 func TestTaskActions(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/app")

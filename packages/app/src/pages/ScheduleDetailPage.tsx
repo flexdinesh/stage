@@ -12,7 +12,7 @@ import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
 import { TaskStateBadge } from "../components/StateBadge.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import { Alert, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, cx } from "../components/ui.tsx";
-import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
+import { dateTime, executionModes, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { cronSummary, wallTime } from "../lib/schedules.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -50,6 +50,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
   });
   const actionError = run.error ?? pause.error ?? remove.error;
 
+  const modes = executionModes(s);
   return (
     <div>
       <PageHeader
@@ -66,8 +67,8 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />
         <Chip>{s.connectionId===1 ? modelText(s.model, s.modelOptions) : s.executionConfig?.model || "OpenCode default"}</Chip>
-        <Chip>{s.runtimeMode}</Chip>
-        {s.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
+        {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
+        {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceText(s.workspace)}</Chip>
         {s.tags.map((t) => (
           <Chip key={t}>#{t}</Chip>

@@ -1,4 +1,4 @@
-import type { ModelOption, Workspace } from "../api/types.ts";
+import type { ExecutionConfig, ModelOption, Workspace } from "../api/types.ts";
 
 const UNITS: [number, string][] = [
   [86_400_000, "d"],
@@ -114,6 +114,16 @@ export function modelText(model: string | null, options: ModelOption[]): string 
   const opts = optionsText(options);
   const base = model ?? "T3 default";
   return opts === "" ? base : `${base} · ${opts}`;
+}
+
+/** Permission and interaction mode a launch uses: executionConfig when set ("" = harness default), else the legacy T3 fields. */
+export function executionModes(x: {
+  executionConfig?: ExecutionConfig | null;
+  runtimeMode: string;
+  interactionMode: string;
+}): { permission: string; mode: string } {
+  if (x.executionConfig) return { permission: x.executionConfig.permission, mode: x.executionConfig.mode };
+  return { permission: x.runtimeMode, mode: x.interactionMode };
 }
 
 export function workspaceText(w: Workspace): string {

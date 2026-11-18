@@ -126,6 +126,9 @@ func t3Defaults(config *execution.Config, provider, model *string, options []exe
 	if config.Permission != "" {
 		d.RuntimeMode = config.Permission
 	}
+	// An empty mode is the harness default: launch sends no interaction mode,
+	// so never echo a stale legacy column (e.g. "plan" from before the config).
+	d.InteractionMode = string(t3.InteractionDefault)
 	if config.Mode != "" {
 		d.InteractionMode = config.Mode
 	}

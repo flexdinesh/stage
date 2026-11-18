@@ -34,7 +34,7 @@ import {
   QueryState,
   cx,
 } from "../components/ui.tsx";
-import { dateTime, modelText, relativeTime, workspaceText } from "../lib/format.ts";
+import { dateTime, executionModes, modelText, relativeTime, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
@@ -116,6 +116,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   });
   const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
   const archived = task.archivedAt !== null;
+  const modes = executionModes(task);
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
@@ -168,8 +169,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
         {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
         <Chip>{task.connectionId===1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "OpenCode default"}</Chip>
-        <Chip>{task.runtimeMode}</Chip>
-        {task.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
+        {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
+        {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceChip(task)}</Chip>
         {task.tags.map((t) => (
           <Chip key={t}>#{t}</Chip>
