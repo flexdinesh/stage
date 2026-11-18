@@ -221,8 +221,13 @@ func PayloadFor(n db.Notification, badge int) Payload {
 
 // notificationFrom is the row rec will be stored as (no id or timestamps).
 func notificationFrom(rec db.NewNotification) db.Notification {
-	return db.Notification{Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
+	n := db.Notification{ConnectionID: db.T3ConnectionID, Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
 		Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
+	if rec.Session != nil {
+		n.ConnectionID = rec.Session.ConnectionID
+		n.T3ThreadID = &rec.Session.ExternalSessionID
+	}
+	return n
 }
 
 // payload builds the push payload and its inbox record (lookups at send time).
@@ -238,7 +243,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		project := t.ProjectTitle
 		// Retain task identity across restarts and ON DELETE SET NULL. Push
 		// navigation can open the current session without changing this key.
-		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, T3ThreadID: t.T3ThreadID,
+		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, Session: t.Session, T3ThreadID: t.T3ThreadID,
 			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
 	case e.ready != nil:
 		t, err := n.store.GetTask(ctx, *e.ready)

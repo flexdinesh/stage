@@ -9,16 +9,16 @@ import (
 
 func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
 	e := newEnv(t)
-	for _, path := range []string{"/api/threads", "/api/threads/search?q=work", "/api/stats", "/api/threads/x/transcript", "/api/threads/x/transcript/stream", "/api/threads/x/transcript/opening", "/api/threads/x/transcript/items/y", "/api/threads/x/questions"} {
+	for _, path := range []string{"/api/threads", "/api/connections/1/sessions/search?q=work", "/api/stats", "/api/connections/1/sessions/x/transcript", "/api/connections/1/sessions/x/transcript/stream", "/api/connections/1/sessions/x/transcript/opening", "/api/connections/1/sessions/x/transcript/items/y", "/api/connections/1/sessions/x/questions"} {
 		e.must("GET", path, nil, 404, nil)
 	}
-	e.must("POST", "/api/threads/x/questions/y/answer", map[string]any{}, 404, nil)
+	e.must("POST", "/api/connections/1/sessions/x/questions/y/answer", map[string]any{}, 404, nil)
 	p := e.project("/w/retirement")
 	task := e.task(p.ID, "Retained task", map[string]any{"start": true})
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", task.ID), map[string]any{"message": "retired"}, 404, nil)
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/opening-prompt", task.ID), nil, 400, nil)
 	var metadata map[string]any
-	e.must("GET", "/api/threads/"+*task.T3ThreadID, nil, 200, &metadata)
+	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID, nil, 200, &metadata)
 	for _, field := range []string{"children", "createdTasks"} {
 		if _, exists := metadata[field]; exists {
 			t.Fatalf("retired field %s", field)
@@ -46,7 +46,7 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	}
 	var inbox struct {
 		Waiting []struct {
-			ID   string  `json:"t3ThreadId"`
+			ID   string  `json:"externalSessionId"`
 			Deep *string `json:"t3DeepLink"`
 			Web  *string `json:"t3WebUrl"`
 		} `json:"waitingSessions"`

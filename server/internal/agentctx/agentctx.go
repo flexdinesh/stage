@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -59,9 +58,8 @@ func (c Caller) ThreadPtr() *string {
 var ErrNoProject = errors.New("no project")
 
 // ResolveProject picks the project: explicit (id or exact title,
-// case-insensitive) > the caller session's project > the project whose
-// workspaceRoot is the longest prefix of the caller's cwd. Source names how
-// it was resolved: explicit | session | cwd.
+// case-insensitive, unambiguous) > the caller session's project. Paths are
+// not evidence of shared filesystem identity. Source: explicit | session.
 func ResolveProject(ctx context.Context, c *client.Client, caller Caller, explicit string) (db.Project, string, error) {
 	projects, err := c.Projects(ctx)
 	if err != nil {
@@ -86,9 +84,6 @@ func ResolveProject(ctx context.Context, c *client.Client, caller Caller, explic
 			return db.Project{}, "", err
 		}
 	}
-	if p, ok := ProjectForPath(projects, caller.Cwd); ok {
-		return p, "cwd", nil
-	}
 	return db.Project{}, "", fmt.Errorf("%w for this session or directory; pass a project (id or title): %s", ErrNoProject, projectNames(projects))
 }
 
@@ -100,35 +95,18 @@ func matchProject(projects []db.Project, s string) (db.Project, bool) {
 			}
 		}
 	}
-	for _, p := range projects {
-		if strings.EqualFold(p.Title, s) {
-			return p, true
-		}
-	}
-	return db.Project{}, false
-}
-
-// ProjectForPath returns the project whose workspaceRoot is the longest
-// path prefix of dir.
-func ProjectForPath(projects []db.Project, dir string) (db.Project, bool) {
-	if dir == "" {
-		return db.Project{}, false
-	}
-	dir = filepath.Clean(dir)
-	var best db.Project
+	var match db.Project
 	found := false
 	for _, p := range projects {
-		root := filepath.Clean(p.WorkspaceRoot)
-		if !filepath.IsAbs(root) {
-			continue
-		}
-		if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
-			if !found || len(root) > len(filepath.Clean(best.WorkspaceRoot)) {
-				best, found = p, true
+		if strings.EqualFold(p.Title, s) {
+			if found {
+				return db.Project{}, false
 			}
+			match = p
+			found = true
 		}
 	}
-	return best, found
+	return match, found
 }
 
 func projectNames(projects []db.Project) string {

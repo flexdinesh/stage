@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
@@ -268,6 +269,8 @@ function TaskFormDrawer({
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
   const invalidate = useInvalidateWork();
+  const selectedProject = projects.data?.projects.find((project) => String(project.id) === s.projectId);
+  const bound = selectedProject?.bindings.some((binding) => binding.harness === "t3" && binding.status === "available") ?? false;
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments ?? schedule?.attachments);
   const isNew = task === undefined && schedule === undefined;
@@ -372,7 +375,7 @@ function TaskFormDrawer({
     previewError !== null && "a valid schedule",
   ].filter((m) => m !== false);
 
-  const blocked = missing.length > 0 || save.isPending;
+  const blocked = missing.length > 0 || save.isPending || (mode === "now" && !bound);
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (!blocked) save.mutate();
@@ -448,6 +451,13 @@ function TaskFormDrawer({
             )}
           </Field>
         </div>
+        {selectedProject === undefined || bound ? null : <Alert>
+          Planning is available. Bind or confirm a workspace before launching.
+          <div className="mt-2 flex flex-wrap gap-3">
+            <Link to={`/projects/${selectedProject.id}`} className="underline">Bind workspace</Link>
+            {mode === "now" ? <Button small onClick={() => set({mode: "backlog"})}>Save to backlog instead</Button> : null}
+          </div>
+        </Alert>}
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus={isNew ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>

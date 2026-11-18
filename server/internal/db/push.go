@@ -132,7 +132,7 @@ func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `
 SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
-  + (SELECT count(*) FROM threads th LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id
+  + (SELECT count(*) FROM threads th LEFT JOIN tasks tk ON tk.session_id = th.session_id
      WHERE `+externalNeedsInput+`)`).Scan(&n)
 	return n, err
 }
@@ -170,7 +170,7 @@ type ThreadObservation struct {
 // ThreadObservations returns an entry for every id.
 func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.t3_thread_id = i.id)
+SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.connection_id=1 AND tk.t3_thread_id = i.id)
 FROM (SELECT value AS id FROM json_each($1)) AS i LEFT JOIN threads th ON th.t3_thread_id = i.id`, jsonArray(ids))
 	if err != nil {
 		return nil, err

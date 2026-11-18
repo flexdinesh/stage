@@ -224,7 +224,7 @@ type Thread struct {
 	T3AppURL *string `json:"t3AppUrl"`
 }
 
-// ThreadDetail is GET /api/threads/:id.
+// ThreadDetail is GET /api/connections/1/sessions/:id.
 type ThreadDetail struct {
 	Thread Thread `json:"thread"`
 	Task   *Task  `json:"task"`
@@ -610,12 +610,14 @@ type TreeStart struct {
 	} `json:"errors"`
 }
 
-// AdoptSession is the POST /api/threads/:id/adopt body.
+// AdoptSession is the POST /api/connections/1/sessions/:id/adopt body.
 type AdoptSession struct {
-	Title       *string  `json:"title,omitempty"`
-	InitialNote *string  `json:"initialNote,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	TreeID      *int64   `json:"treeId,omitempty"`
+	ProjectID       *int64   `json:"projectId,omitempty"`
+	NewProjectTitle string   `json:"newProjectTitle,omitempty"`
+	Title           *string  `json:"title,omitempty"`
+	InitialNote     *string  `json:"initialNote,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	TreeID          *int64   `json:"treeId,omitempty"`
 }
 
 func treePath(id int64, action string) string {
@@ -709,7 +711,7 @@ func (c *Client) StartTree(ctx context.Context, id int64) (TreeStart, error) {
 // task already owned it.
 func (c *Client) AdoptThread(ctx context.Context, threadID string, in AdoptSession) (Task, bool, error) {
 	var out Task
-	status, err := c.doStatus(ctx, http.MethodPost, "/api/threads/"+url.PathEscape(threadID)+"/adopt", in, &out)
+	status, err := c.doStatus(ctx, http.MethodPost, "/api/connections/1/sessions/"+url.PathEscape(threadID)+"/adopt", in, &out)
 	return out, status == http.StatusCreated, err
 }
 
@@ -777,15 +779,16 @@ func (c *Client) PreviewSchedule(ctx context.Context, cron, tz string) ([]time.T
 // Threads lists sessions.
 func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	var out ThreadDetail
-	err := c.do(ctx, http.MethodGet, "/api/threads/"+url.PathEscape(id), nil, &out)
+	err := c.do(ctx, http.MethodGet, "/api/connections/1/sessions/"+url.PathEscape(id), nil, &out)
 	return out, err
 }
 
 // Ref is GET /api/refs/resolve: what a pasted reference names.
 type Ref struct {
-	Kind     string  `json:"kind"` // task | session
-	TaskID   *int64  `json:"taskId"`
-	ThreadID *string `json:"threadId"`
+	Session  *db.SessionRef `json:"session"`
+	Kind     string         `json:"kind"` // task | session
+	TaskID   *int64         `json:"taskId"`
+	ThreadID *string        `json:"threadId"`
 }
 
 // ResolveRef reads a stage link, T3 thread link, #task id or thread id.
@@ -795,7 +798,7 @@ func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
 	return out, err
 }
 
-// PendingQuestions is GET /api/threads/:id/questions: answerable questions
+// PendingQuestions is GET /api/connections/1/sessions/:id/questions: answerable questions
 // plus approvals stage cannot resolve (handled in T3).
 func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attachment, error) {
 	var buf bytes.Buffer

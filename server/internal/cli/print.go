@@ -36,7 +36,7 @@ func ts(t *time.Time) string {
 func printContext(w io.Writer, c agenttools.ContextOut) {
 	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(c.ThreadID), dash(c.Cwd), c.APIURL)
 	if c.Project != nil {
-		fmt.Fprintf(w, "project  %d %s (%s, from %s)\n", c.Project.ID, c.Project.Title, c.Project.WorkspaceRoot, c.ProjectSource)
+		fmt.Fprintf(w, "project  %d %s (%s, from %s)\n", c.Project.ID, c.Project.Title, projectWorkspace(*c.Project), c.ProjectSource)
 	} else {
 		fmt.Fprintf(w, "project  - (%s)\n", c.ProjectError)
 	}
@@ -58,7 +58,7 @@ func dash(s string) string {
 func printProjects(w io.Writer, ps []db.Project) {
 	table(w, "ID\tTITLE\tROOT", func(tw io.Writer) {
 		for _, p := range ps {
-			fmt.Fprintf(tw, "%d\t%s\t%s\n", p.ID, p.Title, p.WorkspaceRoot)
+			fmt.Fprintf(tw, "%d\t%s\t%s\n", p.ID, p.Title, projectWorkspace(p))
 		}
 	})
 }
@@ -447,4 +447,11 @@ func createdWait(t client.Task) string {
 		return "  (waits on " + s + ")"
 	}
 	return ""
+}
+
+func projectWorkspace(p db.Project) string {
+	if len(p.Bindings) == 0 {
+		return "workspace not bound"
+	}
+	return p.Bindings[0].Workspace
 }

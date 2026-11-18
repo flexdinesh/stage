@@ -10,10 +10,11 @@ import (
 
 // Notification is an inbox entry (docs/api.md "Notifications inbox").
 type Notification struct {
+	ConnectionID int64      `json:"connectionId"`
 	ID           int64      `json:"id"`
 	Event        TaskState  `json:"event"` // needs_input | ready | done | failed | settled
 	TaskID       *int64     `json:"taskId"`
-	T3ThreadID   *string    `json:"t3ThreadId"` // external thread, or the task's thread
+	T3ThreadID   *string    `json:"externalSessionId"` // external thread, or the task's thread
 	Title        string     `json:"title"`
 	ProjectTitle *string    `json:"projectTitle"`
 	URL          string     `json:"url"`
@@ -29,6 +30,7 @@ type Notification struct {
 
 // NewNotification is what the notifier records.
 type NewNotification struct {
+	Session      *SessionRef
 	Event        TaskState
 	TaskID       *int64
 	T3ThreadID   *string
@@ -56,7 +58,8 @@ type NotificationCursor struct {
 const notificationKeySQL = `CASE
   WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
   WHEN n.url GLOB '/tasks/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'task:' || substr(n.url, 8)
-  WHEN n.t3_thread_id IS NOT NULL THEN 'thread:' || n.t3_thread_id
+  WHEN n.session_id IS NOT NULL THEN 'thread:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
+ WHEN n.t3_thread_id IS NOT NULL THEN 'thread:1:' || n.t3_thread_id
   ELSE 'notification:' || n.id END`
 
 // NotificationKey is notificationKeySQL for a loaded row. n.T3ThreadID is the
@@ -68,7 +71,11 @@ func NotificationKey(n Notification) string {
 	case isTaskURL(n.URL):
 		return "task:" + strings.TrimPrefix(n.URL, "/tasks/")
 	case n.T3ThreadID != nil:
-		return "thread:" + *n.T3ThreadID
+		connection := n.ConnectionID
+		if connection == 0 {
+			connection = T3ConnectionID
+		}
+		return "thread:" + strconv.FormatInt(connection, 10) + ":" + *n.T3ThreadID
 	}
 	return "notification:" + strconv.FormatInt(n.ID, 10)
 }
@@ -96,7 +103,7 @@ func TagForKey(key string) string {
 	return ""
 }
 
-const notificationColumns = `n.id, n.event, n.task_id, COALESCE(tk.t3_thread_id, n.t3_thread_id), n.title, n.project_title,
+const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),1), n.id, n.event, n.task_id, COALESCE((SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),tk.t3_thread_id,n.t3_thread_id), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
        WHEN th.settled THEN 'settled'
@@ -106,16 +113,28 @@ const notificationColumns = `n.id, n.event, n.task_id, COALESCE(tk.t3_thread_id,
 
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
-LEFT JOIN threads tth ON tth.t3_thread_id = tk.t3_thread_id
-LEFT JOIN threads th ON n.task_id IS NULL AND th.t3_thread_id = n.t3_thread_id`
+LEFT JOIN threads tth ON tth.session_id = tk.session_id
+LEFT JOIN threads th ON n.task_id IS NULL AND th.session_id = n.session_id`
 
 // InsertNotification stores n and returns its id.
 func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int64, error) {
 	var id int64
-	err := s.pool.QueryRow(ctx, `
-INSERT INTO notifications (event, task_id, t3_thread_id, title, project_title, url)
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		string(n.Event), n.TaskID, n.T3ThreadID, n.Title, n.ProjectTitle, n.URL).Scan(&id)
+	err := s.inTx(ctx, func(tx *Tx) error {
+		var sid *int64
+		ref := n.Session
+		if ref == nil && n.T3ThreadID != nil {
+			ref = &SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: *n.T3ThreadID}
+		}
+		if ref != nil {
+			value, err := sessionIdentity(ctx, tx, *ref)
+			if err != nil {
+				return err
+			}
+			sid = &value
+		}
+		return tx.QueryRow(ctx, `INSERT INTO notifications(event,task_id,t3_thread_id,title,project_title,url,session_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+			string(n.Event), n.TaskID, n.T3ThreadID, n.Title, n.ProjectTitle, n.URL, sid).Scan(&id)
+	})
 	return id, err
 }
 
@@ -148,7 +167,7 @@ func scanNotifications(rows *rowSet) ([]Notification, error) {
 	out := []Notification{}
 	for rows.Next() {
 		var n Notification
-		if err := rows.Scan(&n.ID, &n.Event, &n.TaskID, &n.T3ThreadID, &n.Title, &n.ProjectTitle,
+		if err := rows.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.T3ThreadID, &n.Title, &n.ProjectTitle,
 			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState, &n.PendingQuestionCount); err != nil {
 			return nil, err
 		}
@@ -216,7 +235,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID)
 	out := []NotificationGroup{}
 	for rows.Next() {
 		var g NotificationGroup
-		if err := rows.Scan(&g.ID, &g.Event, &g.TaskID, &g.T3ThreadID, &g.Title, &g.ProjectTitle,
+		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.T3ThreadID, &g.Title, &g.ProjectTitle,
 			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.PendingQuestionCount, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}
@@ -276,17 +295,18 @@ func (s *Store) PruneNotifications(ctx context.Context, age time.Duration) (int6
 // WaitingSession is current external attention without a recorded inbox event.
 // It has no event ID or read state: reading it cannot manufacture a notification.
 type WaitingSession struct {
-	ThreadID     string  `json:"t3ThreadId"`
+	ConnectionID int64   `json:"connectionId"`
+	ThreadID     string  `json:"externalSessionId"`
 	Title        string  `json:"title"`
 	ProjectTitle *string `json:"projectTitle"`
 }
 
 func (s *Store) WaitingWithoutNotifications(ctx context.Context, upToID int64) ([]WaitingSession, error) {
 	rows, err := s.pool.Query(ctx, `SELECT th.t3_thread_id, th.title, p.title
- FROM threads th LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
- LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id
+ FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+ LEFT JOIN tasks tk ON tk.session_id = th.session_id
  WHERE `+externalNeedsInput+` AND NOT EXISTS (
- SELECT 1 FROM notifications n WHERE n.t3_thread_id = th.t3_thread_id AND n.id <= $1)
+ SELECT 1 FROM notifications n WHERE n.session_id = th.session_id AND n.id <= $1)
  ORDER BY th.updated_at DESC, th.t3_thread_id`, upToID)
 	if err != nil {
 		return nil, err
@@ -294,7 +314,7 @@ func (s *Store) WaitingWithoutNotifications(ctx context.Context, upToID int64) (
 	defer rows.Close()
 	out := []WaitingSession{}
 	for rows.Next() {
-		var row WaitingSession
+		row := WaitingSession{ConnectionID: T3ConnectionID}
 		if err := rows.Scan(&row.ThreadID, &row.Title, &row.ProjectTitle); err != nil {
 			return nil, err
 		}

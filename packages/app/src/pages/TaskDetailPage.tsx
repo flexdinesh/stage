@@ -244,7 +244,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-3.5">
-            {task.adopted && task.t3ThreadId !== null ? (
+            {task.adopted && task.externalSessionId !== null ? (
               <OpeningPrompt taskId={task.id} live={isActive(task)} />
             ) : (
               <PromptPanel text={task.prompt}>
@@ -287,7 +287,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
   const destination = useT3Destination();
-  if (task.t3ThreadId === null) {
+  if (task.externalSessionId === null) {
     return (
       <Panel title="Thread">
         <Muted>{task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
@@ -330,10 +330,10 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
         )}
         <Detail label="Thread id">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate" title={task.t3ThreadId}>
-              {task.t3ThreadId}
+            <span className="min-w-0 truncate" title={task.externalSessionId}>
+              {task.externalSessionId}
             </span>
-            <CopyButton text={task.t3ThreadId} label="Copy" />
+            <CopyButton text={task.externalSessionId} label="Copy" />
           </span>
         </Detail>
       </Details>

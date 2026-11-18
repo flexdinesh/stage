@@ -78,6 +78,6 @@ test("HTTP contract: needs, trees and adopt calls", async () => {
     { path: "/tasks/7/archive", method: "POST", body: undefined },
     { path: "/tasks/7/unarchive", method: "POST", body: undefined },
     { path: "/tasks?project=2&closed=true", method: "GET", body: undefined },
-    { path: "/threads/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
+    { path: "/connections/1/sessions/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
   ]);
 });

@@ -40,7 +40,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	if err := svc.RefreshSession(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertT3Projects(ctx, []t3.Project{{ID: "p", Title: "p", WorkspaceRoot: "/w/p"}}); err != nil {
+	if _, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.AdoptThread(ctx, db.AdoptInput{ThreadID: id}); err != nil {

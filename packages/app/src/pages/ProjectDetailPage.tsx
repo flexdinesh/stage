@@ -1,3 +1,5 @@
+import { ProjectWorkspace } from "../components/ProjectWorkspace.tsx";
+import { projectWorkspace } from "../lib/projects.ts";
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { useProject, useSchedules, useTasks } from "../api/queries.ts";
@@ -49,8 +51,8 @@ function ProjectDetail({ id }: { id: number }) {
           <PageHeader
             title={project.data.title}
             meta={
-              <span title={`${project.data.source} · ${project.data.t3ProjectId}`} className="break-all">
-                {project.data.workspaceRoot}
+              <span title={`Stage project #${project.data.id}`} className="break-all">
+                {projectWorkspace(project.data)}
                 {project.data.archivedAt === null ? null : " · archived"}
               </span>
             }
@@ -67,6 +69,7 @@ function ProjectDetail({ id }: { id: number }) {
             }
           />
           <div className="flex flex-col gap-5">
+            <ProjectWorkspace project={project.data} />
             {scheduleList.length === 0 && schedules.error === null ? null : (
               <Panel
                 flush

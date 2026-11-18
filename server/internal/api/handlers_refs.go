@@ -13,9 +13,10 @@ import (
 // threadId is its T3 thread (null before launch); a session's taskId is the
 // task that owns it (null for sessions started outside stage).
 type refJSON struct {
-	Kind     refs.Kind `json:"kind"`
-	TaskID   *int64    `json:"taskId"`
-	ThreadID *string   `json:"threadId"`
+	Session  *db.SessionRef `json:"session"`
+	Kind     refs.Kind      `json:"kind"`
+	TaskID   *int64         `json:"taskId"`
+	ThreadID *string        `json:"threadId"`
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
@@ -32,6 +33,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return notFoundAs(err, fmt.Sprintf("task %d not found", ref.TaskID))
 		}
 		out.TaskID, out.ThreadID = &t.ID, t.T3ThreadID
+		out.Session = t.Session
 	case refs.KindSession:
 		th, err := s.Store.GetThread(ctx, ref.ThreadID)
 		if errors.Is(err, db.ErrNotFound) && s.T3.Status(ctx).Connected {
@@ -44,6 +46,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return notFoundAs(err, fmt.Sprintf("session %s not found", ref.ThreadID))
 		}
 		out.TaskID, out.ThreadID = th.TaskID, &th.T3ThreadID
+		out.Session = &th.Session
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil

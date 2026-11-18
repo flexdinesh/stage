@@ -62,20 +62,20 @@ func TestAdoptSession(t *testing.T) {
 	s := launchSession(t, e, p.T3ProjectID, "Planner")
 
 	var a agentTask
-	e.must("POST", "/api/threads/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
+	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
 		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || !slices.Equal(a.Tags, []string{"plan"}) || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)
 	}
 	var again agentTask
-	e.must("POST", "/api/threads/"+s+"/adopt", map[string]any{"title": "ignored"}, 200, &again)
+	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"title": "ignored"}, 200, &again)
 	if again.ID != a.ID || again.Title != "Planner" {
 		t.Fatalf("adopt again %+v", again)
 	}
 	var td struct {
 		Thread thread `json:"thread"`
 	}
-	e.must("GET", "/api/threads/"+s, nil, 200, &td)
+	e.must("GET", "/api/connections/1/sessions/"+s, nil, 200, &td)
 	if th := td.Thread; th.TaskID == nil || *th.TaskID != a.ID || th.Source != "app" {
 		t.Fatalf("session now owned %+v", th)
 	}
@@ -98,12 +98,34 @@ func TestAdoptSession(t *testing.T) {
 	}
 
 	// Refusals.
-	e.must("POST", "/api/threads/nope/adopt", nil, 404, nil)
+	e.must("POST", "/api/connections/1/sessions/nope/adopt", nil, 404, nil)
 	sub := runningSession(t, e, p.T3ProjectID, "Sub")
 	_ = e.fake.SetThread(sub, func(d *t3.ThreadDetail) { d.ParentThreadID, d.RelationshipToParent = s, "subagent" })
-	e.must("POST", "/api/threads/"+sub+"/adopt", nil, 409, nil)
+	e.must("POST", "/api/connections/1/sessions/"+sub+"/adopt", nil, 409, nil)
 	other := runningSession(t, e, p.T3ProjectID, "Other")
-	e.must("POST", "/api/threads/"+other+"/adopt", map[string]any{"treeId": 9999}, 404, nil)
+	e.must("POST", "/api/connections/1/sessions/"+other+"/adopt", map[string]any{"treeId": 9999}, 404, nil)
+}
+
+func TestAdoptionCreatesBindingAtomically(t *testing.T) {
+	e := newEnv(t)
+	external := e.fake.AddProject("External", "/adoption")
+	session := launchSession(t, e, external.ID, "Planner")
+	path := "/api/connections/1/sessions/" + session + "/adopt"
+	e.must("POST", path, map[string]any{"newProjectTitle": "Plan", "treeId": 9999}, 404, nil)
+	var projects struct {
+		Projects []project `json:"projects"`
+	}
+	e.must("GET", "/api/projects", nil, 200, &projects)
+	if len(projects.Projects) != 0 {
+		t.Fatal("failed adoption left a project", projects)
+	}
+	var adopted agentTask
+	e.must("POST", path, map[string]any{"newProjectTitle": "Plan"}, 201, &adopted)
+	e.must("POST", path, map[string]any{"newProjectTitle": "Duplicate"}, 200, nil)
+	e.must("GET", "/api/projects", nil, 200, &projects)
+	if len(projects.Projects) != 1 || projects.Projects[0].ID != adopted.ProjectID || projects.Projects[0].Title != "Plan" {
+		t.Fatal("adoption duplicated project", projects)
+	}
 }
 
 // needsSessionId (agent afterMe) adopts the caller's session and needs it.

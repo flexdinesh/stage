@@ -228,7 +228,7 @@ func (e *env) reconcile() {
 
 type project struct {
 	ID            int64   `json:"id"`
-	T3ProjectID   string  `json:"t3ProjectId"`
+	T3ProjectID   string  `json:"externalProjectId"`
 	Title         string  `json:"title"`
 	WorkspaceRoot string  `json:"workspaceRoot"`
 	Source        string  `json:"source"`
@@ -246,7 +246,7 @@ type task struct {
 	Workspace     map[string]any    `json:"workspace"`
 	Tags          []string          `json:"tags"`
 	State         string            `json:"state"`
-	T3ThreadID    *string           `json:"t3ThreadId"`
+	T3ThreadID    *string           `json:"externalSessionId"`
 	TreeID        *int64            `json:"treeId"`
 	Needs         []int64           `json:"needs"`
 	Dependents    []int64           `json:"dependents"`
@@ -283,7 +283,7 @@ type attachment struct {
 }
 
 type thread struct {
-	T3ThreadID  string  `json:"t3ThreadId"`
+	T3ThreadID  string  `json:"externalSessionId"`
 	ProjectID   *int64  `json:"projectId"`
 	Status      string  `json:"status"`
 	Settled     bool    `json:"settled"`
@@ -294,14 +294,17 @@ type thread struct {
 	T3DeepLink  *string `json:"t3DeepLink"`
 	ProviderID  *string `json:"providerInstanceId"`
 	Title       string  `json:"title"`
-	T3ProjectID string  `json:"t3ProjectId"`
+	T3ProjectID string  `json:"externalProjectId"`
 	SettledAt   *string `json:"settledAt"`
 }
 
 func (e *env) project(root string) project {
 	e.t.Helper()
 	var p project
-	e.must("POST", "/api/projects", map[string]any{"title": "P " + root, "workspaceRoot": root}, 201, &p)
+	e.must("POST", "/api/projects", map[string]any{"title": "P " + root}, 201, &p)
+	ext := e.fake.AddProject(p.Title, root)
+	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": root}, 200, &p)
+	p.T3ProjectID, p.WorkspaceRoot, p.Source = ext.ID, root, "app"
 	return p
 }
 
@@ -327,12 +330,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 4 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 5 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "4" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "5" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -634,6 +637,55 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	}
 }
 
+func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/original")
+	pending := e.task(p.ID, "Pinned", nil)
+	e.t3.lostLaunches.Store(2)
+	endpoint := fmt.Sprintf("/api/tasks/%d/start", pending.ID)
+	e.must("POST", endpoint, nil, 502, nil)
+	replacement := e.fake.AddProject("Replacement", "/w/replacement")
+	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": replacement.ID, "workspace": replacement.WorkspaceRoot}, 200, nil)
+	// A moved original path is unsafe even with a valid replacement binding.
+	if err := e.fake.SetProject(p.T3ProjectID, func(p *t3.Project) { p.WorkspaceRoot = "/w/moved" }); err != nil {
+		t.Fatal(err)
+	}
+	e.must("POST", endpoint, nil, 409, nil)
+	if len(e.t3.launchRequestIDs()) != 2 {
+		t.Fatal("retried into a changed workspace")
+	}
+	if err := e.fake.SetProject(p.T3ProjectID, func(p *t3.Project) { p.WorkspaceRoot = "/w/original" }); err != nil {
+		t.Fatal(err)
+	}
+	var started task
+	e.must("POST", endpoint, nil, 200, &started)
+	inputs := e.fake.Launched
+	if len(inputs) != 3 || inputs[2].ProjectID != p.T3ProjectID || inputs[2].ClientRequestID != inputs[0].ClientRequestID || started.LaunchAttempt != 1 {
+		t.Fatalf("redirected retry %+v", inputs)
+	}
+	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	e.poll()
+	e.must("POST", endpoint, nil, 200, &started)
+	if e.fake.Launched[3].ProjectID != replacement.ID || started.LaunchAttempt != 2 {
+		t.Fatal("future attempt did not use new binding")
+	}
+}
+
+func TestSaveAndStartWithoutBindingRetainsActionableBacklog(t *testing.T) {
+	e := newEnv(t)
+	var p project
+	e.must("POST", "/api/projects", map[string]any{"title": "Offline"}, 201, &p)
+	task := e.task(p.ID, "Plan", map[string]any{"start": true})
+	if task.State != "backlog" || task.LaunchAttempt != 0 || task.LastError == nil || !strings.Contains(*task.LastError, "Bind or confirm") {
+		t.Fatalf("silent launch refusal %+v", task)
+	}
+	if len(e.t3.launchRequestIDs()) != 0 {
+		t.Fatal("unbound launch reached T3")
+	}
+}
+
 // validRequestID: "task-<id>-<uuid>", unique per attempt and database.
 func validRequestID(taskID int64, id string) bool {
 	rest, ok := strings.CutPrefix(id, fmt.Sprintf("task-%d-", taskID))
@@ -690,83 +742,40 @@ func TestRecoverLaunching(t *testing.T) {
 
 func TestProjects(t *testing.T) {
 	e := newEnv(t)
-	ext := e.fake.AddProject("External", "/w/ext")
-	var linked project
-	e.must("POST", "/api/projects", map[string]any{"title": " Mine ", "workspaceRoot": "/w/ext/"}, 201, &linked)
-	// T3 owns the title: the requested one is ignored.
-	if linked.Source != "t3" || linked.T3ProjectID != ext.ID || linked.Title != "External" || linked.WorkspaceRoot != "/w/ext" {
-		t.Fatalf("linked %+v", linked)
-	}
-	app := e.project("/w/app")
-	e.must("POST", "/api/projects", map[string]any{"title": "dup", "workspaceRoot": "/w/app"}, 409, nil)
-	e.must("POST", "/api/projects", map[string]any{"title": "", "workspaceRoot": "/w/x"}, 400, nil)
-	t3Projects, _ := e.fake.ListProjects(context.Background())
-	if len(t3Projects) != 2 {
-		t.Fatalf("t3 projects %d", len(t3Projects))
-	}
-	// Projects are read-only here.
-	e.must("PATCH", fmt.Sprintf("/api/projects/%d", app.ID), map[string]any{"archived": true}, 404, nil)
-
-	// Archive and rename in T3 follow on sync.
-	sync := func() {
-		t.Helper()
-		if _, err := e.sync.FullSync(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	archivedAt := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	if err := e.fake.SetProject(app.T3ProjectID, func(p *t3.Project) { p.ArchivedAt = &archivedAt; p.Title = "Renamed" }); err != nil {
+	p := e.project("/w/app")
+	ext := e.fake.AddProject("Unimported", "/w/elsewhere")
+	if _, err := e.sync.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sync()
-	var got project
-	e.must("GET", fmt.Sprintf("/api/projects/%d", app.ID), nil, 200, &got)
-	if got.ArchivedAt == nil || got.Title != "Renamed" {
-		t.Fatalf("after T3 archive/rename %+v", got)
+	ps, err := e.store.ListProjects(context.Background(), "all")
+	if err != nil || len(ps) != 1 {
+		t.Fatalf("implicit import: %+v %v", ps, err)
 	}
-	// An archived app project still claims its root.
-	e.must("POST", "/api/projects", map[string]any{"title": "x", "workspaceRoot": "/w/app"}, 409, nil)
-	var list struct {
-		Projects []project `json:"projects"`
+	at := time.Now()
+	if err := e.fake.SetProject(p.T3ProjectID, func(x *t3.Project) { x.Title = "External rename"; x.ArchivedAt = &at; x.WorkspaceRoot = "/moved" }); err != nil {
+		t.Fatal(err)
 	}
-	e.must("GET", "/api/projects", nil, 200, &list)
-	if len(list.Projects) != 1 || list.Projects[0].ID != linked.ID {
-		t.Fatalf("active %+v", list.Projects)
+	if _, err := e.sync.FullSync(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	e.must("GET", "/api/projects?archived=true", nil, 200, &list)
-	if len(list.Projects) != 1 || list.Projects[0].ID != app.ID {
-		t.Fatalf("archived %+v", list.Projects)
+	got, err := e.store.GetProject(context.Background(), p.ID)
+	if err != nil || got.Title != p.Title || got.ArchivedAt != nil || got.Bindings[0].Status != "changed" {
+		t.Fatalf("metadata overwritten: %+v %v", got, err)
 	}
-	e.must("GET", "/api/projects?archived=all", nil, 200, &list)
-	if len(list.Projects) != 2 {
-		t.Fatalf("all %d", len(list.Projects))
+	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": p.T3ProjectID, "workspace": "/moved"}, 200, nil)
+	e.must("PATCH", fmt.Sprintf("/api/projects/%d", p.ID), map[string]any{"title": "Stage title", "archived": true}, 200, nil)
+	if err := e.fake.SetProject(ext.ID, func(x *t3.Project) { x.DeletedAt = &at }); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := e.sync.FullSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = e.store.GetProject(context.Background(), p.ID)
+	if got.Title != "Stage title" || got.ArchivedAt == nil {
+		t.Fatalf("Stage metadata lost: %+v", got)
+	}
+	e.must("POST", "/api/projects", map[string]any{"title": ""}, 400, nil)
 	e.must("GET", "/api/projects?archived=maybe", nil, 400, nil)
-	if err := e.fake.SetProject(app.T3ProjectID, func(p *t3.Project) { p.ArchivedAt = nil }); err != nil {
-		t.Fatal(err)
-	}
-	sync()
-	e.must("GET", fmt.Sprintf("/api/projects/%d", app.ID), nil, 200, &got)
-	if got.ArchivedAt != nil || got.Title != "Renamed" {
-		t.Fatalf("after T3 unarchive %+v", got)
-	}
-	e.must("GET", "/api/projects/999", nil, 404, nil)
-
-	// T3 delete: row archived, root released; creating it again makes a new T3 project.
-	deletedAt := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
-	if err := e.fake.SetProject(ext.ID, func(p *t3.Project) { p.DeletedAt = &deletedAt }); err != nil {
-		t.Fatal(err)
-	}
-	sync()
-	e.must("GET", fmt.Sprintf("/api/projects/%d", linked.ID), nil, 200, &got)
-	if got.ArchivedAt == nil {
-		t.Fatalf("deleted not archived %+v", got)
-	}
-	var recreated project
-	e.must("POST", "/api/projects", map[string]any{"title": "Again", "workspaceRoot": "/w/ext"}, 201, &recreated)
-	if recreated.ID == linked.ID || recreated.T3ProjectID == ext.ID || recreated.Source != "app" || recreated.Title != "Again" {
-		t.Fatalf("recreated %+v (old %+v)", recreated, linked)
-	}
 }
 
 func TestReleaseRunLoopProcessesKicks(t *testing.T) {
@@ -908,18 +917,12 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 		Projects []project `json:"projects"`
 	}
 	e.must("GET", "/api/projects", nil, 200, &projects)
-	if len(projects.Projects) != 2 {
-		t.Fatalf("imported projects %+v", projects.Projects)
+	if len(projects.Projects) != 1 {
+		t.Fatalf("sync imported projects: %+v", projects.Projects)
 	}
 	var extProject project
-	for _, pr := range projects.Projects {
-		if pr.T3ProjectID == ext.ID {
-			extProject = pr
-		}
-	}
-	if extProject.Source != "t3" {
-		t.Fatalf("imported project %+v", extProject)
-	}
+	e.must("POST", "/api/projects", map[string]any{"title": ext.Title}, 201, &extProject)
+	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", extProject.ID), map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": ext.WorkspaceRoot}, 200, nil)
 
 }
 
@@ -1375,22 +1378,22 @@ func TestNotificationGroupRead(t *testing.T) {
 		Tags []string `json:"tags"`
 	}
 	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
-	if fmt.Sprint(tags.Tags) != "[thread-ext-1 thread-ext-2]" {
+	if fmt.Sprint(tags.Tags) != "[thread-1:ext-1 thread-1:ext-2]" {
 		t.Fatalf("unread tags %v", tags.Tags)
 	}
 
-	e.must("POST", "/api/notifications/read", map[string]any{"upTo": 1, "groups": []string{"thread:ext-1"}}, 400, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"upTo": 1, "groups": []string{"thread:1:ext-1"}}, 400, nil)
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{}}, 400, nil)
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{" "}}, 400, nil)
 	many := make([]string, 21)
 	for i := range many {
-		many[i] = fmt.Sprintf("thread:x%d", i)
+		many[i] = fmt.Sprintf("thread:1:x%d", i)
 	}
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": many}, 400, nil)
 
-	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:ext-1"}}, 204, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:1:ext-1"}}, 204, nil)
 	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
-	if fmt.Sprint(tags.Tags) != "[thread-ext-2]" {
+	if fmt.Sprint(tags.Tags) != "[thread-1:ext-2]" {
 		t.Fatalf("unread tags after group read %v", tags.Tags)
 	}
 }
@@ -1420,7 +1423,7 @@ func TestNotificationGroups(t *testing.T) {
 		NextCursor *string `json:"nextCursor"`
 	}
 	e.must("GET", "/api/notifications/groups?limit=1", nil, 200, &pg)
-	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:ext-1" || pg.Groups[0].EventCount != 2 ||
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:1:ext-1" || pg.Groups[0].EventCount != 2 ||
 		pg.Groups[0].UnreadCount != 2 || pg.LatestID != latest || pg.Unread != 3 || pg.NextCursor == nil {
 		t.Fatalf("first group page: %+v", pg)
 	}
@@ -1428,18 +1431,18 @@ func TestNotificationGroups(t *testing.T) {
 		t.Fatalf("group deep link: %v", link)
 	}
 	e.must("GET", "/api/notifications/groups?limit=1&cursor="+url.QueryEscape(*pg.NextCursor), nil, 200, &pg)
-	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:ext-2" || pg.NextCursor != nil {
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:1:ext-2" || pg.NextCursor != nil {
 		t.Fatalf("next group page: %+v", pg)
 	}
 	var history struct {
 		Notifications []db.Notification `json:"notifications"`
 		NextBefore    *int64            `json:"nextBefore"`
 	}
-	e.must("GET", "/api/notifications?group=thread%3Aext-1&limit=1", nil, 200, &history)
+	e.must("GET", "/api/notifications?group=thread%3A1%3Aext-1&limit=1", nil, 200, &history)
 	if len(history.Notifications) != 1 || history.Notifications[0].ID != latest || history.NextBefore == nil {
 		t.Fatalf("first history page: %+v", history)
 	}
-	e.must("GET", fmt.Sprintf("/api/notifications?group=thread%%3Aext-1&limit=1&before=%d", *history.NextBefore), nil, 200, &history)
+	e.must("GET", fmt.Sprintf("/api/notifications?group=thread%%3A1%%3Aext-1&limit=1&before=%d", *history.NextBefore), nil, 200, &history)
 	if len(history.Notifications) != 1 || *history.Notifications[0].T3ThreadID != "ext-1" || history.NextBefore != nil {
 		t.Fatalf("next history page: %+v", history)
 	}

@@ -23,7 +23,7 @@ Sits beside T3 rather than replacing it: T3 remains where conversations happen (
 - Settling a thread happens in T3, not here; dependent tasks wait for it.
 
 ## Capabilities and Constraints
-- Projects mirror T3 projects 1:1; existing T3 projects import automatically.
+- Projects have stable Stage IDs and Stage-owned titles/archive. Create and plan offline. Explicit workspace bindings gate launch; T3 discovery never imports automatically. Bind existing workspaces or explicitly register existing directories. Changed paths require confirmation, and external removal never erases Stage history.
 - Onboarding: until the first full sync the Dashboard is T3 setup (T3 reachable, pairing, first sync with live counts), one action per state; pairing kicks a full sync. After that, T3 trouble is a Dashboard Alert with the same fix, never a takeover. Each stage server is bound to one T3 backend.
 - Task states: backlog, launching, running, needs input, done, settled, failed, interrupted, cancelled.
 - Task actions: start, stop, duplicate, archive/unarchive, delete unstarted work without recorded history, and Open in T3. Adopted sessions are stopped or opened in T3, never started or duplicated by Stage.

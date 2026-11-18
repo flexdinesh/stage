@@ -164,7 +164,7 @@ func TestNotificationGroups(t *testing.T) {
 	}
 	cursor := &db.NotificationCursor{Waiting: false, ID: groups[1].ID}
 	older, err := s.ListNotificationGroups(ctx, 2, cursor, latest)
-	if err != nil || len(older) != 2 || older[0].Key != "thread:ext-2" || older[1].Key != "thread:ext-1" {
+	if err != nil || len(older) != 2 || older[0].Key != "thread:1:ext-2" || older[1].Key != "thread:1:ext-1" {
 		t.Fatalf("group pagination/identity: %+v %v", older, err)
 	}
 	waitingCursor := &db.NotificationCursor{Waiting: true, ID: waitingID}
@@ -237,7 +237,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 	}
 	taskTag := fmt.Sprintf("task-%d", task.ID)
 	// A task-owned thread notification is tagged by its task, never its thread.
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "task-99", "thread-ext-1"}) {
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "task-99", "thread-1:ext-1"}) {
 		t.Fatalf("unread tags %s", got)
 	}
 
@@ -245,7 +245,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 	if err := s.MarkNotificationGroupsRead(ctx, []string{fmt.Sprintf("task:%d", task.ID), "task:99"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"thread-ext-1"}) {
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"thread-1:ext-1"}) {
 		t.Fatalf("tags after group read %s", got)
 	}
 	if n, err := s.UnreadNotificationCount(ctx); err != nil || n != 2 {
@@ -254,7 +254,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 
 	// A new event makes a read group unread again.
 	insert(db.NewNotification{Event: db.StateFailed, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "thread-ext-1"}) {
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "thread-1:ext-1"}) {
 		t.Fatalf("tags after new event %s", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestNotificationKeyParity(t *testing.T) {
 	}
 	want := map[string]bool{
 		fmt.Sprintf("task:%d", task.ID): true, fmt.Sprintf("task:%d", deleted.ID): true, "task:007": true,
-		"thread:ext-1": true,
+		"thread:1:ext-1": true,
 	}
 	identityless := 0
 	for _, g := range groups {
@@ -314,8 +314,8 @@ func TestNotificationKeyParity(t *testing.T) {
 func TestTagForKey(t *testing.T) {
 	for key, want := range map[string]string{
 		"task:7":         "task-7",
-		"thread:ext-1":   "thread-ext-1",
-		"thread:a:b":     "thread-a:b",
+		"thread:1:ext-1": "thread-1:ext-1",
+		"thread:1:a:b":   "thread-1:a:b",
 		"notification:3": "",
 		"task":           "",
 		"":               "",

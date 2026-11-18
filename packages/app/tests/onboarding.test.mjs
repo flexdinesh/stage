@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizeT3Status } from "../src/api/client.ts";
-import { codeReason, dashboardAlert, firstSyncLanded, primaryAction, setupSteps, takeover } from "../src/lib/onboarding.ts";
+import { codeReason, dashboardAlert, firstSyncLanded, primaryAction, setupSteps } from "../src/lib/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const SYNCED = "2026-11-17T10:00:00Z";
@@ -29,15 +29,6 @@ const status = (over) => ({ ...base, ...over });
 const unreachable = status({ state: "unreachable", reachable: false, t3: null, probeError: "connection refused" });
 const connected = status({ state: "connected", connected: true, clientId: "c", tokenExpiresAt: "2026-12-17T00:00:00Z" });
 const notes = (s, checking) => setupSteps(s, checking).map((x) => `${x.key}:${x.status}:${x.note}`);
-
-test("takeover holds until the first full sync lands, whatever the state", () => {
-  assert.equal(takeover(undefined), false, "a pending status is not setup");
-  assert.equal(takeover(unreachable), true);
-  assert.equal(takeover(status({})), true);
-  assert.equal(takeover(status({ ...connected, sync: { running: true, startedAt: SYNCED, projects: 3, threads: 40 } })), true);
-  assert.equal(takeover(status({ ...connected, lastFullSyncAt: SYNCED })), false);
-  assert.equal(takeover(status({ ...unreachable, lastFullSyncAt: SYNCED })), false, "later trouble is an alert, not setup");
-});
 
 test("first sync refresh fires only on null to set, not on the first load or later syncs", () => {
   const synced = status({ lastFullSyncAt: SYNCED });
@@ -90,10 +81,10 @@ test("code reasons name why auto-pair is unavailable", () => {
   assert.match(codeReason(null), /pairing code/);
 });
 
-test("dashboard alert only after the first sync, toned by state", () => {
+test("dashboard alert before and after first sync, toned by state", () => {
   const after = (over) => status({ lastFullSyncAt: SYNCED, ...over });
   assert.equal(dashboardAlert(undefined), null);
-  assert.equal(dashboardAlert(status({})), null, "setup owns the Dashboard before the first sync");
+  assert.equal(dashboardAlert(status({}))?.tone, "need", "connection recovery remains visible while planning offline");
   assert.equal(dashboardAlert(after(connected)), null);
   assert.deepEqual(dashboardAlert(after({ state: "unreachable", reachable: false })), {
     tone: "bad",

@@ -27,7 +27,10 @@ type TreeRef struct {
 
 // CreatedBy returns the batch created by T3 session threadID.
 func (s *Store) CreatedBy(ctx context.Context, threadID string) (CreatedTasks, error) {
-	rows, err := s.pool.Query(ctx, taskSelect+` WHERE t.origin_thread_id = $1 ORDER BY t.id`, threadID)
+	return s.CreatedBySession(ctx, SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: threadID})
+}
+func (s *Store) CreatedBySession(ctx context.Context, ref SessionRef) (CreatedTasks, error) {
+	rows, err := s.pool.Query(ctx, taskSelect+` WHERE t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2) ORDER BY t.id`, ref.ConnectionID, ref.ExternalSessionID)
 	tasks, err := collectTasks(rows, err)
 	if err != nil {
 		return CreatedTasks{}, err

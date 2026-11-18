@@ -1,3 +1,4 @@
+import { projectWorkspace } from "../lib/projects.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -110,7 +111,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           run: go(`/trees/${tr.id}`),
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
-        out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: p.workspaceRoot, run: go(`/projects/${p.id}`) });
+        out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: projectWorkspace(p), run: go(`/projects/${p.id}`) });
     }
     const actions: Item[] = [
       { key: "new", group: "Actions", label: "New task", hint: "N", run: () => {

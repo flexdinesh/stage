@@ -127,14 +127,14 @@ func RunSpan(d t3.ThreadDetail) (start, end *time.Time) {
 }
 
 const threadSelect = `
-SELECT th.t3_thread_id, th.t3_project_id, p.id, p.title, th.title, th.status, th.settled,
+SELECT th.t3_thread_id, th.t3_project_id, COALESCE(tk.project_id,p.id), COALESCE((SELECT title FROM projects WHERE id=tk.project_id),p.title), th.title, th.status, th.settled,
   th.settled_at, th.pending_request_count, min(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
   th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
   th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `
 FROM threads th
-LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
-LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id`
+LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+LEFT JOIN tasks tk ON tk.session_id = th.session_id`
 
 func scanThread(row rowScanner) (Thread, error) {
 	var t Thread
@@ -147,6 +147,8 @@ func scanThread(row rowScanner) (Thread, error) {
 		return Thread{}, notFound(err)
 	}
 	t.PullRequests = nonNilPRs(t.PullRequests)
+	t.ConnectionID = T3ConnectionID
+	t.Session = SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: t.T3ThreadID}
 	t.Source = SourceT3
 	if t.TaskID != nil {
 		t.Source = SourceApp
@@ -255,8 +257,8 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 	}
 	var total int
 	countSQL := `SELECT count(*) FROM threads th
-LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id
-LEFT JOIN tasks tk ON tk.t3_thread_id = th.t3_thread_id` + w.sql()
+LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+LEFT JOIN tasks tk ON tk.session_id = th.session_id` + w.sql()
 	if err := s.pool.QueryRow(ctx, countSQL, w.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}

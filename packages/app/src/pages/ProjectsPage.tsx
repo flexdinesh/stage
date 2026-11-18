@@ -1,3 +1,4 @@
+import { projectWorkspace } from "../lib/projects.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
@@ -26,15 +27,14 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
   const api = useApi();
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
-  const [root, setRoot] = useState("");
   const create = useMutation({
-    mutationFn: () => api.createProject({ title: title.trim(), workspaceRoot: root.trim() }),
+    mutationFn: () => api.createProject({ title: title.trim() }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: keys.projects });
       onClose();
     },
   });
-  const valid = title.trim() !== "" && root.trim() !== "";
+  const valid = title.trim() !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (valid) create.mutate();
@@ -57,17 +57,7 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}
         </Field>
-        <Field label="Workspace path" hint="Links the T3 project at this path if one exists (T3 keeps its title), otherwise creates it in T3.">
-          {(id) => (
-            <Input
-              id={id}
-              value={root}
-              onChange={(e) => setRoot(e.target.value)}
-              placeholder="/home/user/workspace/my-app"
-              className="font-mono"
-            />
-          )}
-        </Field>
+        <p className="text-small text-muted">Plan tasks now. Bind a harness workspace when you are ready to run them.</p>
         <ErrorText error={create.error} />
       </form>
     </Drawer>
@@ -145,7 +135,7 @@ export function ProjectsPage() {
         isPending={projects.isPending}
         error={projects.error}
         empty={list.length === 0}
-        emptyText="No projects yet. Create one from a workspace path."
+        emptyText="No projects yet. Create one to start planning."
       >
         <Panel flush title={filter === "all" ? "All projects" : "Active projects"} meta={list.length}>
           <ul>
@@ -160,13 +150,13 @@ export function ProjectsPage() {
                     <Link to={`/projects/${p.id}`} className="block truncate text-body font-medium hover:underline">
                       {p.title}
                     </Link>
-                    <div className="truncate font-mono text-meta text-muted" title={p.workspaceRoot}>
-                      {p.workspaceRoot}
+                    <div className="truncate font-mono text-meta text-muted" title={projectWorkspace(p)}>
+                      {projectWorkspace(p)}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 justify-self-end md:justify-self-start">
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
-                    <Chip title={p.source === "app" ? "Created here" : "Imported from T3"}>{p.source === "app" ? "app" : "t3"}</Chip>
+                    <Chip>{p.bindings.length === 0 ? "not bound" : p.bindings.some((binding) => binding.status !== "available") ? "check workspace" : "T3"}</Chip>
                   </div>
                   <div className="flex flex-col font-mono text-meta text-muted tabular">
                     <span>

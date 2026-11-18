@@ -412,7 +412,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col gap-3.5">
             {silent.length === 0 ? null : <section className="border border-line">
               <h3 className="label-caps flex min-h-8 justify-between border-b border-line bg-panel px-3 py-1">Waiting in T3 <span className="tabular text-muted">{silent.length}</span></h3>
-              <ul>{silent.map((session) => <li key={session.t3ThreadId} className="border-b border-line last:border-b-0"><SilentWaitingRow session={session} /></li>)}</ul>
+              <ul>{silent.map((session) => <li key={`${session.connectionId}:${session.externalSessionId}`} className="border-b border-line last:border-b-0"><SilentWaitingRow session={session} /></li>)}</ul>
             </section>}
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
@@ -595,6 +595,6 @@ function SilentWaitingRow({ session }: { session: WaitingSession }) {
   return <div className="flex flex-col gap-2 border-l-2 border-l-need px-3 py-3">
     <p className="text-body font-medium break-words">{session.title}</p>
     <div className="flex flex-wrap items-center gap-2"><TaskStateBadge state="needs_input" /><span className="font-mono text-meta text-muted">{session.projectTitle ?? "T3 session"}</span></div>
-    {href === null ? <Muted>Open this session in T3: {session.t3ThreadId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in T3</AppButton>}
+    {href === null ? <Muted>Open this session in T3: {session.externalSessionId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in T3</AppButton>}
   </div>;
 }

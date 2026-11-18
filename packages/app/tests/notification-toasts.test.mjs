@@ -6,7 +6,7 @@ const notification = (id, extra = {}) => ({
   id,
   event: "needs_input",
   taskId: 7,
-  t3ThreadId: "thread-a",
+  externalSessionId: "thread-a",
   title: `Event ${id}`,
   projectTitle: "Original project",
   url: "/tasks/7",
@@ -39,7 +39,7 @@ test("still-waiting toasts retain waiting state while preserving the event snaps
     url: "/sessions/thread-b",
     createdAt: "2026-11-17T01:00:00Z",
     readAt: "2026-11-17T01:01:00Z",
-    t3ThreadId: "thread-b",
+    externalSessionId: "thread-b",
     t3DeepLink: "t3://thread-b",
   });
   assert.deepEqual(reconcileToasts([queued], [latest]), [
@@ -78,12 +78,12 @@ test("the highest notification ID supplies live state regardless of latest row o
 
 test("external threads reconcile by thread ID and keep unrelated threads", () => {
   const resolved = notification(1, { taskId: null });
-  const waiting = notification(2, { taskId: null, t3ThreadId: "thread-b" });
-  const unmatched = notification(3, { taskId: null, t3ThreadId: "thread-c" });
+  const waiting = notification(2, { taskId: null, externalSessionId: "thread-b" });
+  const unmatched = notification(3, { taskId: null, externalSessionId: "thread-c" });
   const latest = [
     notification(10, { taskId: null, currentState: "settled",}),
     notification(8, { taskId: null }),
-    notification(11, { taskId: null, t3ThreadId: "thread-b",}),
+    notification(11, { taskId: null, externalSessionId: "thread-b",}),
   ];
   assert.deepEqual(reconcileToasts([resolved, waiting, unmatched], latest), [
     { ...waiting,}, unmatched,
@@ -95,7 +95,7 @@ test("task identity wins over overlapping thread IDs, including external threads
   const otherTask = notification(2, { taskId: 8 });
   const external = notification(3, { taskId: null });
   const latest = [
-    notification(10, { t3ThreadId: "replacement-thread",}),
+    notification(10, { externalSessionId: "replacement-thread",}),
     notification(20, { taskId: 8, currentState: "done",}),
     notification(30, { taskId: null,}),
   ];
@@ -106,19 +106,19 @@ test("task identity wins over overlapping thread IDs, including external threads
 });
 
 test("notifications without a task or thread match only their own notification ID", () => {
-  const queued = notification(1, { taskId: null, t3ThreadId: null });
-  const unmatched = notification(2, { taskId: null, t3ThreadId: null });
+  const queued = notification(1, { taskId: null, externalSessionId: null });
+  const unmatched = notification(2, { taskId: null, externalSessionId: null });
   const latest = [
-    notification(1, { taskId: null, t3ThreadId: null, currentState: "running",}),
-    notification(3, { taskId: null, t3ThreadId: null, currentState: "done",}),
+    notification(1, { taskId: null, externalSessionId: null, currentState: "running",}),
+    notification(3, { taskId: null, externalSessionId: null, currentState: "done",}),
   ];
   assert.deepEqual(reconcileToasts([queued, unmatched], latest), [unmatched]);
 });
 
 test("task, external thread and notification ID namespaces remain distinct", () => {
   const task = notification(1);
-  const external = notification(2, { taskId: null, t3ThreadId: "7" });
-  const unbound = notification(7, { taskId: null, t3ThreadId: null });
+  const external = notification(2, { taskId: null, externalSessionId: "7" });
+  const unbound = notification(7, { taskId: null, externalSessionId: null });
   const latest = [notification(20, { taskId: 7, currentState: "done",})];
   assert.deepEqual(reconcileToasts([task, external, unbound], latest), [external, unbound]);
 });

@@ -35,7 +35,7 @@ type Ops struct {
 // CallerArgs override the environment's caller.
 type CallerArgs struct {
 	CallerThreadID string `json:"callerThreadId,omitempty" jsonschema:"your T3 session id (env T3CODE_THREAD_ID); stdio/CLI read it from the environment"`
-	Cwd            string `json:"cwd,omitempty" jsonschema:"your working directory, used to pick the project; stdio/CLI use the process cwd"`
+	Cwd            string `json:"cwd,omitempty" jsonschema:"your working directory for context only; never used to infer a project"`
 }
 
 func (o *Ops) caller(a CallerArgs) agentctx.Caller { return o.Caller.Merge(a.CallerThreadID, a.Cwd) }
@@ -52,7 +52,7 @@ type ContextOut struct {
 	ThreadID      string      `json:"threadId"`
 	Cwd           string      `json:"cwd"`
 	Project       *db.Project `json:"project"`
-	ProjectSource string      `json:"projectSource"` // session | cwd | "" (unresolved)
+	ProjectSource string      `json:"projectSource"` // session | "" (unresolved)
 	ProjectError  string      `json:"projectError,omitempty"`
 	// CallerTaskID: the stage task that owns the caller's session.
 	CallerTaskID *int64  `json:"callerTaskId"`
@@ -103,7 +103,7 @@ func (o *Ops) ListModels(ctx context.Context, _ struct{}) (client.Catalog, error
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
-	Project         string            `json:"project,omitempty" jsonschema:"project id or exact title; default: your session's project, else the project containing cwd"`
+	Project         string            `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
 	Title           string            `json:"title" jsonschema:"short task title"`
 	Prompt          string            `json:"prompt" jsonschema:"the full prompt the agent thread starts with; self-contained"`
 	Provider        string            `json:"provider,omitempty" jsonschema:"providerInstanceId (list_models); inferred from model when omitted"`
@@ -332,14 +332,15 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 
 // TaskRow is a compact task for lists.
 type TaskRow struct {
-	ID         int64        `json:"id"`
-	Title      string       `json:"title"`
-	State      db.TaskState `json:"state"`
-	ProjectID  int64        `json:"projectId"`
-	Project    string       `json:"project"`
-	T3ThreadID *string      `json:"t3ThreadId,omitempty"`
-	TreeID     *int64       `json:"treeId,omitempty"`
-	Needs      []int64      `json:"needs,omitempty"`
+	ConnectionID int64        `json:"connectionId"`
+	ID           int64        `json:"id"`
+	Title        string       `json:"title"`
+	State        db.TaskState `json:"state"`
+	ProjectID    int64        `json:"projectId"`
+	Project      string       `json:"project"`
+	T3ThreadID   *string      `json:"externalSessionId,omitempty"`
+	TreeID       *int64       `json:"treeId,omitempty"`
+	Needs        []int64      `json:"needs,omitempty"`
 	// Readiness: blocked | ready for a backlog tree member.
 	Readiness  *db.Readiness  `json:"readiness,omitempty"`
 	TreeStatus *db.TreeStatus `json:"treeStatus,omitempty"` // its tree's status (open | done | archived)
@@ -356,7 +357,8 @@ type TaskRow struct {
 
 func taskRow(t client.Task) TaskRow {
 	return TaskRow{
-		ID: t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
+		ConnectionID: t.ConnectionID,
+		ID:           t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
 		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
 		Archived: t.ArchivedAt != nil, Adopted: t.Adopted,
 		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, LastWordPreview: t.LastWordPreview,

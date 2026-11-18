@@ -1,11 +1,5 @@
-// Pure logic of T3 onboarding (components/T3Setup.tsx): when the Dashboard
-// becomes setup, what each setup step shows, and the one action per state.
+// T3 connection status and recovery actions. Planning remains available offline.
 import type { AutoPairReason, T3State, T3Status } from "../api/types.ts";
-
-/** The Dashboard is the setup screen until the first full sync lands (a pending status is not setup). */
-export function takeover(status: T3Status | undefined): boolean {
-  return status !== undefined && status.lastFullSyncAt === null;
-}
 
 /** True once, when a refetch sees the first full sync land: work, projects and catalog refresh then. */
 export function firstSyncLanded(prev: T3Status | undefined, next: T3Status): boolean {
@@ -117,9 +111,9 @@ export interface DashboardAlert {
   message: string;
 }
 
-/** After the first sync, trouble is an Alert above the Dashboard instead of the setup screen. */
+/** Connection trouble is an Alert; planning never depends on pairing or sync. */
 export function dashboardAlert(s: T3Status | undefined): DashboardAlert | null {
-  if (s === undefined || takeover(s)) return null;
+  if (s === undefined) return null;
   switch (s.state) {
     case "connected":
       return null;
