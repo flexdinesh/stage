@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostState } from "../platform/index.ts";
-import { t3Destination } from "./host.ts";
+
 
 const unsubscribed = () => {};
 
@@ -25,9 +25,10 @@ export function useHostEpoch(): number {
 
 /** Remote Stage belongs to another machine: use its T3 web destination. */
 export function useT3Destination() {
-  const state = useHostState();
+  const { links: hostLinks } = usePlatform();
+  useHostState();
   return useCallback((links: { t3DeepLink: string | null; t3WebUrl?: string | null }) =>
-    t3Destination(state, links), [state]);
+    hostLinks.executionDestination({ native: links.t3DeepLink, web: links.t3WebUrl ?? null }), [hostLinks]);
 }
 
 export interface HostServerList {

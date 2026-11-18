@@ -36,7 +36,7 @@ func TestThreadLastWord(t *testing.T) {
 	s, ctx := setup(t)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "x", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}}); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "x", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}})); err != nil {
 		t.Fatal(err)
 	}
 	if at, err := s.LastWordCheckedAt(ctx, "th-1"); err != nil || at != nil {

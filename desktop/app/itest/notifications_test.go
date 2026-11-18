@@ -560,32 +560,25 @@ func TestNotificationsServerRestart(t *testing.T) {
 	e.serve(t, bin)
 	h.svc.Connect(target.Local(e.sock)) // the launcher's OnServer on every ready server
 
-	// The fake T3 forgot the thread: the task fails (a new row). Start it
-	// again for a fresh needs_input.
-	waitUntil(t, "task failed after restart", notifWait, func() bool { return a.task(tk.ID).State == "failed" })
-	a.do("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), map[string]any{}, 200, nil)
-	var after []inboxRow
-	waitUntil(t, "needs_input row after restart", notifWait, func() bool {
-		after = after[:0]
-		for _, r := range a.rows() {
-			if r.ID > row.ID {
-				after = append(after, r)
-			}
-		}
-		return len(after) > 0 && after[len(after)-1].Event == "needs_input"
-	})
-	for _, r := range after {
-		t.Logf("row after restart: %d %s task %d", r.ID, r.Event, *r.TaskID)
+	// A missing harness session preserves execution state. A new Stage-only
+	// readiness event proves the notification stream reconnects without replay.
+	var source, dependent task
+	a.do("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "Review prerequisite", "prompt": "review"}, 201, &source)
+	a.do("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "Ready after restart", "prompt": "continue", "needs": []int64{source.ID}, "startMode": "manual"}, 201, &dependent)
+	var preview struct {
+		Revision        int64  `json:"revision"`
+		EvidenceVersion string `json:"evidenceVersion"`
 	}
-	titles := map[string]string{"needs_input": "Needs input", "failed": "Failed"}
-	var want []alerts.Note
-	for _, r := range after {
-		want = append(want, alerts.Note{ID: noteID(taskTag(tk.ID)), Title: titles[r.Event], Body: r.Title + " · " + projectTitle})
+	a.do("GET", fmt.Sprintf("/api/tasks/%d/completion-preview", source.ID), nil, 200, &preview)
+	a.do("POST", fmt.Sprintf("/api/tasks/%d/complete", source.ID), map[string]any{"requestId": "restart-ready", "revision": preview.Revision, "evidenceVersion": preview.EvidenceVersion}, 200, nil)
+	want := alerts.Note{ID: noteID(taskTag(dependent.ID)), Title: "Ready", Body: "Ready after restart · " + projectTitle}
+	waitUntil(t, "ready after restart", notifWait, func() bool { return slices.Contains(h.sink.notes(), want) })
+	time.Sleep(500 * time.Millisecond)
+	if got := a.task(tk.ID).State; got != "needs_input" {
+		t.Fatalf("missing session changed execution state: %s", got)
 	}
-	waitUntil(t, "shows after restart", notifWait, func() bool { return len(h.sink.notes()) >= shows+len(want) })
-	time.Sleep(500 * time.Millisecond) // nothing more may follow
-	if got := h.sink.notes()[shows:]; !slices.Equal(got, want) {
-		t.Fatalf("shows after restart (rows %+v)\n got %+v\nwant %+v", after, got, want)
+	if got := h.sink.notes()[shows:]; !slices.Equal(got, []alerts.Note{want}) {
+		t.Fatalf("notifications after restart: got %+v, want %+v", got, want)
 	}
 }
 

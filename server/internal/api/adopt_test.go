@@ -10,6 +10,8 @@ import (
 )
 
 type agentTask struct {
+	ProviderInstanceID *string `json:"providerInstanceId"`
+	RuntimeMode        string  `json:"runtimeMode"`
 	task
 	OriginThreadID    *string `json:"originThreadId"`
 	OriginThreadTitle *string `json:"originThreadTitle"`
@@ -60,9 +62,20 @@ func TestAdoptSession(t *testing.T) {
 	p := e.project("/w/adopt")
 	// Not mirrored yet: adopt reads it from T3 first.
 	s := launchSession(t, e, p.T3ProjectID, "Planner")
+	if err := e.fake.SetThread(s, func(d *t3.ThreadDetail) {
+		d.ProviderInstanceID = "codex"
+		d.Model = "model-from-session"
+		d.RuntimeMode = "auto"
+		d.InteractionMode = "plan"
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var a agentTask
 	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
+	if a.Model == nil || *a.Model != "model-from-session" || a.ProviderInstanceID == nil || *a.ProviderInstanceID != "codex" || a.RuntimeMode != "auto" {
+		t.Fatalf("adoption lost compatibility fields: %+v", a)
+	}
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
 		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || !slices.Equal(a.Tags, []string{"plan"}) || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)
@@ -93,7 +106,7 @@ func TestAdoptSession(t *testing.T) {
 	}
 	_ = e.fake.Settle(s)
 	e.poll()
-	if got := e.getTask(a.ID); got.State != "settled" {
+	if got := e.getTask(a.ID); got.State != "done" {
 		t.Fatalf("adopted task after settle %s", got.State)
 	}
 

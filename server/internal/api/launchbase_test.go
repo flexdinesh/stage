@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -59,15 +58,10 @@ func (e *env) inWorktree(thread, branch string) {
 	})
 }
 
-func assertFallback(t *testing.T, got baseTask, ws t3.WorkspaceStrategy, reason string) {
+func assertFallback(t *testing.T, got baseTask, _ t3.WorkspaceStrategy, _ string) {
 	t.Helper()
-	b := got.CurrentLaunchBase
-	if got.State != "running" || b == nil || b.Source != "fallback" || b.BaseRef != "origin/main" || !b.StartFromOrigin ||
-		b.Reason == nil || !strings.Contains(*b.Reason, reason) {
-		t.Fatalf("want fallback %q: %+v / %+v", reason, got, b)
-	}
-	if ws.BaseRef != "origin/main" || ws.StartFromOrigin == nil || !*ws.StartFromOrigin {
-		t.Fatalf("launch must use the fallback base: %+v", ws)
+	if got.State != "backlog" || got.T3ThreadID != nil || got.LastError == nil {
+		t.Fatalf("unavailable predecessor must block launch: %+v", got)
 	}
 }
 
@@ -206,8 +200,8 @@ func TestPredecessorBaseFallbacks(t *testing.T) {
 			c.setup(e, *a.T3ThreadID)
 			_ = e.runner.Reconcile(t.Context())
 			assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), c.reason)
-			if !e.hasEvent(b.ID, "base fallback origin/main: ") {
-				t.Fatal("missing fallback event")
+			if !e.hasEvent(b.ID, "Launch blocked: ") {
+				t.Fatal("missing repair event")
 			}
 		})
 	}
@@ -251,13 +245,13 @@ func TestPredecessorBaseRejectedBranchRetriesFallback(t *testing.T) {
 	got := e.baseTask(b.ID)
 	assertFallback(t, got, e.lastWorkspace(), "branch feat/gone not found in project")
 	ids := e.t3.launchRequestIDs()[before:]
-	if len(ids) != 2 || ids[0] != ids[1] {
-		t.Fatalf("rejection must retry once with the same clientRequestId: %v", ids)
+	if len(ids) != 1 {
+		t.Fatalf("rejection must stop without fallback: %v", ids)
 	}
 	if lb := got.CurrentLaunchBase; lb.SourceTaskID == nil || *lb.SourceTaskID != a.ID {
 		t.Fatalf("fallback keeps the source: %+v", lb)
 	}
-	if !e.hasEvent(b.ID, "base from #") || !e.hasEvent(b.ID, "base fallback origin/main: branch feat/gone") {
+	if !e.hasEvent(b.ID, "base from #") || !e.hasEvent(b.ID, "launch rejected before execution") {
 		t.Fatal("events must show the attempt and the fallback")
 	}
 }
@@ -271,7 +265,7 @@ func TestPredecessorBaseReusedForSameAttempt(t *testing.T) {
 	e.t3.lostLaunches.Store(2)
 	e.acceptThread(*a.T3ThreadID)
 	first := e.baseTask(b.ID)
-	if first.State != "failed" || first.CurrentLaunchBase == nil || first.CurrentLaunchBase.BaseRef != "feat/one" {
+	if first.State != "launching" || first.CurrentLaunchBase == nil || first.CurrentLaunchBase.BaseRef != "feat/one" {
 		t.Fatalf("lost launch %+v", first)
 	}
 	e.inWorktree(*a.T3ThreadID, "feat/two")
@@ -286,7 +280,7 @@ func TestPredecessorBaseWithoutNeedsFallsBack(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/unlinked")
 	b := e.task(p.ID, "b", map[string]any{"workspace": predecessorWS(), "start": true})
-	assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), "the task has no needs")
+	assertFallback(t, e.baseTask(b.ID), t3.WorkspaceStrategy{}, "the task has no needs")
 }
 
 func TestRefBaseRecordsNothing(t *testing.T) {

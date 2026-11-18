@@ -113,12 +113,12 @@ func (s *Store) RecordPushResult(ctx context.Context, endpoint string, errMsg *s
 // externalNeedsInput: external threads needing input (badge,
 // threads?needsInput=1). Needs th + LEFT JOIN tasks tk. Subagents excluded,
 // forks included.
-const externalNeedsInput = `th.observed_state = 'needs_input' AND NOT th.settled
+const externalNeedsInput = `th.observed_state = 'needs_input'
   AND th.relationship IS NOT 'subagent' AND tk.id IS NULL`
 
 // externalRunning: external threads observed running (dashboard,
 // threads?running=1). Same scope as externalNeedsInput.
-const externalRunning = `th.observed_state = 'running' AND NOT th.settled
+const externalRunning = `th.observed_state = 'running'
   AND th.relationship IS NOT 'subagent' AND tk.id IS NULL`
 
 // externalSettled: external threads whose mirror state is settled
@@ -133,13 +133,15 @@ func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
 	err := s.pool.QueryRow(ctx, `
 SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
   + (SELECT count(*) FROM threads th LEFT JOIN tasks tk ON tk.session_id = th.session_id
-     WHERE `+externalNeedsInput+`)`).Scan(&n)
+     WHERE `+externalNeedsInput+` AND NOT EXISTS (SELECT 1 FROM execution_observations o WHERE o.session_id=th.session_id))
+  + (SELECT count(*) FROM execution_observations o WHERE json_extract(o.observation,'$.state')='needs_input'
+     AND json_extract(o.observation,'$.child')=0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.session_id=o.session_id))`).Scan(&n)
 	return n, err
 }
 
 // WatchedThreadIDs: external non-subagent threads the watcher last saw running,
 // needing input or done (re-read until they leave those states; done until
-// settled, so settling notifies).
+// observed again, including when work resumes).
 func (s *Store) WatchedThreadIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT th.t3_thread_id FROM threads th

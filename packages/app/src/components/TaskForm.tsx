@@ -72,7 +72,7 @@ interface FormState {
   prompt: string;
   config: ModelConfig;
   interactionMode: InteractionMode;
-  /** root, worktree from baseRef, or worktree from a need's branch (baseRef the fallback). */
+  /** root, worktree from baseRef, or worktree from a need's branch (baseRef retained for an explicit ref choice). */
   workspaceType: WorkspaceChoice;
   baseRef: string;
   branch: string;
@@ -365,7 +365,7 @@ function TaskFormDrawer({
     s.projectId === "" && "project",
     s.title.trim() === "" && "title",
     s.prompt.trim() === "" && "prompt",
-    wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "fallback base ref" : "base ref"),
+    wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -496,7 +496,7 @@ function TaskFormDrawer({
             <span className="label-caps">Workspace</span>
             <Segmented
               label="Workspace"
-              options={workspaceOptions(predName)}
+              options={workspaceOptions(predName, wsChoice === "predecessor")}
               value={wsChoice}
               onChange={(workspaceType) => set({ workspaceType })}
             />
@@ -504,7 +504,7 @@ function TaskFormDrawer({
           {wsChoice !== "root" ? (
             <>
               <Field
-                label={wsChoice === "predecessor" ? "Fallback base ref" : "Base ref"}
+                label={wsChoice === "predecessor" ? "Configured base ref" : "Base ref"}
                 hint={wsChoice === "predecessor" ? `Used when ${predName ?? "a need"} has no usable branch.` : undefined}
               >
                 {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}

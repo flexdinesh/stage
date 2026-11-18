@@ -4,22 +4,20 @@ import (
 	"context"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-var _ t3.TokenStore = (*Store)(nil)
-
 // LoadToken implements t3.TokenStore (zero value when none stored).
-func (s *Store) LoadToken(ctx context.Context) (t3.StoredToken, error) {
+func (s *Store) LoadToken(ctx context.Context) (execution.Credential, error) {
 	var clientID, token *string
 	var expires *time.Time
 	err := s.pool.QueryRow(ctx,
 		`SELECT client_id, token, expires_at FROM t3_connection WHERE id = 1`,
 	).Scan(&clientID, &token, &expires)
 	if err != nil {
-		return t3.StoredToken{}, err
+		return execution.Credential{}, err
 	}
-	var out t3.StoredToken
+	var out execution.Credential
 	if clientID != nil {
 		out.ClientID = *clientID
 	}
@@ -33,7 +31,7 @@ func (s *Store) LoadToken(ctx context.Context) (t3.StoredToken, error) {
 }
 
 // SaveToken implements t3.TokenStore.
-func (s *Store) SaveToken(ctx context.Context, tok t3.StoredToken) error {
+func (s *Store) SaveToken(ctx context.Context, tok execution.Credential) error {
 	var expires *time.Time
 	if !tok.ExpiresAt.IsZero() {
 		expires = &tok.ExpiresAt

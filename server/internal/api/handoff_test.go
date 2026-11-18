@@ -111,7 +111,7 @@ func TestHandoffAppendedForNeed(t *testing.T) {
 		t.Fatalf("launch prompt must be prompt + stored block:\n%q\nblock:\n%q", msg, h.Text)
 	}
 	for _, want := range []string{
-		`<handoff from="stage">`, fmt.Sprintf(`This task needs "Build API" (task #%d), completed `, a.ID), "T3 thread: " + thread,
+		`<handoff from="stage">`, fmt.Sprintf(`This task needs "Build API" (task #%d), completed `, a.ID), "Harness session: " + thread,
 		"Branch: feat/api\nWorktree: /w/wt-api",
 		"Cached final-reply excerpt:\nShipped the API; see PR 41.", "</handoff>",
 	} {
@@ -272,7 +272,7 @@ func TestHandoffAcceptedSnapshotSurvivesNewAttempt(t *testing.T) {
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "first"})
 	e.t3.failLaunch.Store(true)
 	e.acceptThread(thread)
-	if got := e.handoffTask(b.ID); got.State != "failed" || got.one(t) == nil || got.one(t).Attempt != 1 {
+	if got := e.handoffTask(b.ID); got.State != "backlog" || got.one(t) == nil || got.one(t).Attempt != 1 {
 		t.Fatalf("first attempt %+v", got)
 	}
 	e.t3.failLaunch.Store(false)
@@ -298,7 +298,7 @@ func TestHandoffReusedForSameAttempt(t *testing.T) {
 	e.t3.lostLaunches.Store(2) // launch + same-id retry both lose the response
 	e.acceptThread(thread)
 	first := e.handoffTask(b.ID)
-	if first.State != "failed" || first.one(t) == nil {
+	if first.State != "launching" || first.one(t) == nil {
 		t.Fatalf("lost launch %+v", first)
 	}
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "changed"})

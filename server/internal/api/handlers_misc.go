@@ -42,9 +42,13 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		if thread.TaskID == nil {
-			projects, err := s.T3.ListProjects(r.Context())
+			adapter, err := s.Sync.Adapter(db.T3ConnectionID)
 			if err != nil {
-				return &db.T3Error{Err: err}
+				return err
+			}
+			projects, err := adapter.Workspaces(r.Context())
+			if err != nil {
+				return &db.HarnessError{Err: err}
 			}
 			for _, p := range projects {
 				if p.ID == thread.T3ProjectID && p.DeletedAt == nil {
@@ -88,7 +92,7 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	id := r.PathValue("id")
-	if s.T3.Status(r.Context()).Connected {
+	if s.connected(r.Context(), db.T3ConnectionID) {
 		if err := s.Sync.RefreshSession(r.Context(), id); err != nil {
 			return err
 		}

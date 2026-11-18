@@ -189,7 +189,7 @@ func Run(ctx context.Context, o Options) error {
 		logger.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
 	}
 
-	syncSvc := t3sync.New(store, t3Client, logger)
+	syncSvc := t3sync.New(store, t3.NewAdapter(t3Client), logger)
 	runner := release.NewRunner(store, syncSvc, logger)
 	scheduler := schedule.NewRunner(store, syncSvc, logger)
 	notifier := notify.New(store, cfg.PublicURL, logger)
@@ -223,7 +223,7 @@ func Run(ctx context.Context, o Options) error {
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
-		Config: cfg, Store: store, T3: t3Client, Sync: syncSvc, Push: notifier, Logger: logger,
+		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: runner.Kick, Setup: setup,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's

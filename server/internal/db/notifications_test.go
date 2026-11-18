@@ -18,12 +18,12 @@ func TestNotificationsInbox(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertThreads(ctx, []t3.Thread{
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Ext", Status: t3.StatusWaiting, CreatedAt: time.Now().UTC()},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetObservedState(ctx, "ext-1", db.StateNeedsInput); err != nil {
+	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", Status: t3.StatusWaiting, UpdatedAt: time.Now().UTC()}, PendingRequestCount: 1}); err != nil {
 		t.Fatal(err)
 	}
 	proj := "proj-1"
@@ -57,7 +57,7 @@ func TestNotificationsInbox(t *testing.T) {
 		t.Fatalf("current states %q %q", state(all[2]), state(all[1]))
 	}
 
-	// Current state follows the live task / thread.
+	// Current state follows normalized execution; historical settlement cannot hide activity.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestNotificationsInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state(all[2]) != db.StateDone || state(all[1]) != db.StateSettled {
+	if state(all[2]) != db.StateDone || state(all[1]) != db.StateNeedsInput {
 		t.Fatalf("live states %q %q", state(all[2]), state(all[1]))
 	}
 

@@ -257,16 +257,18 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID
-		if th, err := n.store.GetThread(ctx, c.ThreadID); err == nil {
-			title = th.Title
-			if th.ProjectTitle != nil {
-				project = *th.ProjectTitle
+		if c.Session == nil || c.Session.ConnectionID == db.T3ConnectionID {
+			if th, err := n.store.GetThread(ctx, c.ThreadID); err == nil {
+				title = th.Title
+				if th.ProjectTitle != nil {
+					project = *th.ProjectTitle
+				}
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return Payload{}, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 			}
-		} else if !errors.Is(err, db.ErrNotFound) {
-			return Payload{}, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
 		}
 		threadID := c.ThreadID
-		rec = db.NewNotification{Event: c.To, T3ThreadID: &threadID, Title: title, ProjectTitle: &project,
+		rec = db.NewNotification{Event: c.To, Session: c.Session, T3ThreadID: &threadID, Title: title, ProjectTitle: &project,
 			URL: "/?inbox"}
 	default:
 		return Payload{}, rec, errors.New("empty event")

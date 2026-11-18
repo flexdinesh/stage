@@ -8,7 +8,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/cronexpr"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
@@ -57,27 +57,28 @@ type createTaskReq struct {
 }
 
 type taskConfigReq struct {
-	OriginSession      *db.SessionRef   `json:"originSession"`
-	ProjectID          *int64           `json:"projectId"`
-	Title              string           `json:"title"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId"`
-	Model              *string          `json:"model"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode        *string          `json:"runtimeMode"`
-	InteractionMode    *string          `json:"interactionMode"`
-	Workspace          *db.Workspace    `json:"workspace"`
-	Tags               []string         `json:"tags"`
-	TreeID             *int64           `json:"treeId"`
-	Needs              []int64          `json:"needs"`
-	NeedsSessionID     *string          `json:"needsSessionId"`
-	StartMode          *db.StartMode    `json:"startMode"`
-	OriginThreadID     *string          `json:"originThreadId"`
-	AttachmentIDs      []int64          `json:"attachmentIds"`
-	StartLocal         *string          `json:"startLocal"`
-	StartTz            *string          `json:"startTz"`
-	Handoff            *bool            `json:"handoff"`
-	Start              bool             `json:"start"`
+	ExecutionConfig    *execution.Config       `json:"executionConfig"`
+	OriginSession      *db.SessionRef          `json:"originSession"`
+	ProjectID          *int64                  `json:"projectId"`
+	Title              string                  `json:"title"`
+	Prompt             string                  `json:"prompt"`
+	ProviderInstanceID *string                 `json:"providerInstanceId"`
+	Model              *string                 `json:"model"`
+	ModelOptions       []execution.ModelOption `json:"modelOptions"`
+	RuntimeMode        *string                 `json:"runtimeMode"`
+	InteractionMode    *string                 `json:"interactionMode"`
+	Workspace          *db.Workspace           `json:"workspace"`
+	Tags               []string                `json:"tags"`
+	TreeID             *int64                  `json:"treeId"`
+	Needs              []int64                 `json:"needs"`
+	NeedsSessionID     *string                 `json:"needsSessionId"`
+	StartMode          *db.StartMode           `json:"startMode"`
+	OriginThreadID     *string                 `json:"originThreadId"`
+	AttachmentIDs      []int64                 `json:"attachmentIds"`
+	StartLocal         *string                 `json:"startLocal"`
+	StartTz            *string                 `json:"startTz"`
+	Handoff            *bool                   `json:"handoff"`
+	Start              bool                    `json:"start"`
 }
 
 func (req createTaskReq) validate() (db.NewTask, error) {
@@ -87,7 +88,11 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 }
 
 func (req taskConfigReq) validate() (db.NewTask, error) {
+	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
+		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
+	}
 	in := db.NewTask{
+		ExecutionConfig:    req.ExecutionConfig,
 		OriginSession:      req.OriginSession,
 		Title:              strings.TrimSpace(req.Title),
 		Prompt:             req.Prompt,
@@ -302,7 +307,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := validateConfigPatch(configPatch{
-		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
+		ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
@@ -341,12 +346,13 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 // configPatch points at the task-config fields shared by task and schedule
 // patches.
 type configPatch struct {
+	ExecutionConfig    *db.Optional[execution.Config]
 	ProjectID          *db.Optional[int64]
 	Title              *db.Optional[string]
 	Prompt             *db.Optional[string]
 	ProviderInstanceID *db.Optional[string]
 	Model              *db.Optional[string]
-	ModelOptions       *db.Optional[[]t3.ModelOption]
+	ModelOptions       *db.Optional[[]execution.ModelOption]
 	RuntimeMode        *db.Optional[string]
 	InteractionMode    *db.Optional[string]
 	Workspace          *db.Optional[db.Workspace]
@@ -357,6 +363,9 @@ type configPatch struct {
 // validateConfigPatch validates and normalizes the shared config fields.
 func validateConfigPatch(c configPatch) error {
 	var err error
+	if c.ExecutionConfig != nil && c.ExecutionConfig.Set && (c.ProviderInstanceID.Set || c.Model.Set || c.ModelOptions.Set || c.RuntimeMode.Set || c.InteractionMode.Set) {
+		return db.Invalid("executionConfig cannot be combined with legacy T3 configuration fields")
+	}
 	if c.ProjectID.Set && c.ProjectID.Null {
 		return db.Invalid("projectId must not be null")
 	}
@@ -470,10 +479,11 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if task.ConnectionID != db.T3ConnectionID {
-		return db.Conflict("this harness cannot be stopped by the T3 integration")
+	adapter, err := s.Sync.Adapter(task.ConnectionID)
+	if err != nil {
+		return err
 	}
-	if err := s.T3.Interrupt(r.Context(), *task.T3ThreadID); err != nil {
+	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
 		return &db.T3Error{Err: err}
 	}
 	return s.touchAndWrite(w, r, task.ID)
@@ -544,7 +554,7 @@ func (s *server) setNeeds(w http.ResponseWriter, r *http.Request) error {
 // refreshSession reads session id from T3 into the mirror when T3 is
 // connected (so a session not mirrored yet can be adopted).
 func (s *server) refreshSession(r *http.Request, id string) error {
-	if !s.T3.Status(r.Context()).Connected {
+	if !s.connected(r.Context(), db.T3ConnectionID) {
 		return nil
 	}
 	return s.Sync.RefreshSession(r.Context(), id)

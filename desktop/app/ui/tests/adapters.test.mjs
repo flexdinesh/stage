@@ -215,3 +215,14 @@ test("notifications: onDelivered follows the shell's event until unsubscribed", 
   assert.equal(count, 1);
   assert.equal(f.listeners.size, 0);
 });
+
+test("execution destinations follow the selected host's machine", () => {
+ const f = fakeNative();
+ let state = INITIAL_STATE;
+ const links = desktopLinks(f.native, () => state);
+ const destinations = { native: "harness://session", web: "https://harness.example/session" };
+ assert.equal(links.executionDestination(destinations), destinations.native);
+ state = { ...INITIAL_STATE, target: { id: "other", name: "Remote", kind: "remote", url: "https://stage.example" } };
+ assert.equal(links.executionDestination(destinations), destinations.web);
+ assert.equal(links.executionDestination({ native: destinations.native, web: null }), null);
+});

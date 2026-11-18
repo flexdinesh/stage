@@ -315,6 +315,12 @@ func (c *MCPClient) isRejected() bool {
 // rejected is a token T3 just answered 401 to ("" if none): it is renewed
 // unless another caller already replaced it.
 func (c *MCPClient) accessToken(ctx context.Context, rejected string) (string, error) {
+	if token, ok := ctx.Value(pinnedTokenKey{}).(string); ok {
+		if rejected != "" {
+			return "", ErrNotConnected
+		}
+		return token, nil
+	}
 	c.authMu.Lock()
 	defer c.authMu.Unlock()
 	tok := c.current(ctx)
@@ -476,6 +482,9 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.c.mu.Lock()
 	tok := t.c.tok.Token
 	t.c.mu.Unlock()
+	if pinned, ok := req.Context().Value(pinnedTokenKey{}).(string); ok {
+		tok = pinned
+	}
 	r := req.Clone(req.Context())
 	if tok != "" {
 		r.Header.Set("Authorization", "Bearer "+tok)

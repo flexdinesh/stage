@@ -13,6 +13,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -56,8 +57,10 @@ type setupT3 struct {
 func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 	return func(d *api.Deps) {
 		d.Config = cfg
+		a, _ := d.Sync.Adapter(db.T3ConnectionID)
+		client := a.(*t3.Adapter).Client
 		d.Setup = t3setup.New(t3setup.Options{
-			Config: cfg, Store: d.Store, Client: d.T3, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: cfg, Store: d.Store, Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 			OnPaired: func() { s.paired.Add(1) },
 			Run: func(context.Context, string, []string) ([]byte, error) {
 				return []byte(s.runOut), s.runErr

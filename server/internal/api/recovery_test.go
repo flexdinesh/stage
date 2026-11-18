@@ -1,0 +1,65 @@
+package api_test
+
+import (
+	"fmt"
+	"github.com/flexdinesh/stage/server/internal/db"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
+	"testing"
+)
+
+func TestLegacyUnconfirmedLaunchLinksOnlyAfterPreview(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/repair")
+	pending := e.task(p.ID, "Repair", nil)
+	if _, err := e.store.TransitionTask(t.Context(), db.Transition{TaskID: pending.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy attempt has no safe replay identity.
+	if _, err := testDB.Pool.ExecContext(t.Context(), "UPDATE execution_attempts SET phase='unconfirmed' WHERE task_id=?", pending.ID); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := e.fake.LaunchThread(t.Context(), t3.LaunchInput{ProjectID: p.T3ProjectID, Title: "Existing work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.fake.Launched)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", pending.ID), nil, 409, nil)
+	endpoint := fmt.Sprintf("/api/tasks/%d/launch-link", pending.ID)
+	link := t3.AppThreadURL(t3.FakeEnvironmentID, existing.ThreadID)
+	var preview coordinator.LinkPreview
+	e.must("POST", endpoint+"/preview", map[string]any{"link": link}, 200, &preview)
+	if preview.Observation.Title != "Existing work" || preview.Attempt != 1 {
+		t.Fatalf("preview %+v", preview)
+	}
+	if got := e.getTask(pending.ID); got.State != "launching" || got.T3ThreadID != nil {
+		t.Fatal("preview attached")
+	}
+	body := map[string]any{"link": link, "attempt": preview.Attempt, "revision": preview.Revision + 1, "environment": preview.Environment}
+	e.must("POST", endpoint, body, 409, nil)
+	body["revision"] = preview.Revision
+	var attached task
+	e.must("POST", endpoint, body, 200, &attached)
+	if attached.State != "running" || attached.T3ThreadID == nil || *attached.T3ThreadID != existing.ThreadID || attached.LaunchAttempt != 1 || len(e.fake.Launched) != before {
+		t.Fatalf("link launched or changed identity %+v", attached)
+	}
+	e.must("POST", endpoint, body, 409, nil)
+}
+func TestRecoveryPreviewRejectsForeignOwnedAndUnverifiedSessions(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/repair")
+	pending := e.task(p.ID, "Repair", nil)
+	if _, err := e.store.TransitionTask(t.Context(), db.Transition{TaskID: pending.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := fmt.Sprintf("/api/tasks/%d/launch-link/preview", pending.ID)
+	owned := e.task(p.ID, "Owned", map[string]any{"start": true})
+	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL(t3.FakeEnvironmentID, *owned.T3ThreadID)}, 409, nil)
+	other := e.project("/w/other")
+	foreign, err := e.fake.LaunchThread(t.Context(), t3.LaunchInput{ProjectID: other.T3ProjectID, Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL(t3.FakeEnvironmentID, foreign.ThreadID)}, 409, nil)
+	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL("other-environment", foreign.ThreadID)}, 400, nil)
+}

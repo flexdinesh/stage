@@ -69,11 +69,11 @@ When a task with needs starts, its launch prompt gets one block per accepted nee
 
 ## Predecessor base
 
-`--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `--base-task ID` / `baseTaskId` picks the need, else the sole need; `--base-ref` / `baseRef` is the fallback.
+`--base predecessor --base-ref origin/main` / `base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `--base-task ID` / `baseTaskId` picks the need, else the sole need; `--base-ref` / `baseRef` is retained for an explicit base choice.
 
 - Tasks only; schedules reject it (their runs have no needs).
-- It falls back to the base ref when no need can be picked, the need ran at project root or in another project, has no branch, its PRs are all merged, or the branch is gone.
-- `get_task` returns `currentLaunchBase`. `stage task show` prints `worktree from #12's branch (fallback origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
+- Unavailable, ambiguous, merged or deleted predecessor branches block launch. Choose the configured base explicitly to continue.
+- `get_task` returns `currentLaunchBase`. `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
 
 ## Journals
 

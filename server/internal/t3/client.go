@@ -8,9 +8,8 @@ package t3
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"time"
 )
 
@@ -70,16 +69,12 @@ type TokenStore interface {
 	SetLastError(ctx context.Context, msg string) error // "" clears
 }
 
-type StoredToken struct {
-	ClientID  string
-	Token     string
-	ExpiresAt time.Time
-}
+type StoredToken = execution.Credential
 
 var (
-	ErrNotConnected = errors.New("t3: not connected")
-	ErrNotFound     = errors.New("t3: not found")
-	ErrNoReply      = errors.New("t3: no assistant reply")
+	ErrNotConnected error = unavailableError{}
+	ErrNotFound           = execution.ErrNotFound
+	ErrNoReply            = errors.New("t3: no assistant reply")
 )
 
 type ConnectionStatus struct {
@@ -182,15 +177,7 @@ const (
 	SendRestart SendMode = "restart"
 )
 
-type Project struct {
-	ID            string
-	Title         string
-	WorkspaceRoot string
-	ArchivedAt    *time.Time
-	DeletedAt     *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
+type Project = execution.WorkspaceInfo
 
 type CreateProjectInput struct {
 	Title         string
@@ -270,14 +257,7 @@ type Thread struct {
 
 // PullRequest is a PR T3 associates with a thread. State is T3's string
 // (open, merged, closed, draft, ...); Source is created, agent or linked.
-type PullRequest struct {
-	Host       string `json:"host"`
-	Repository string `json:"repository"` // owner/name
-	Number     int    `json:"number"`
-	URL        string `json:"url"`
-	Source     string `json:"source"`
-	State      string `json:"state"`
-}
+type PullRequest = execution.Artifact
 
 // ThreadDetail is t3_thread_read: thread + detail fields + recentRuns.
 type ThreadDetail struct {
@@ -301,15 +281,7 @@ type LatestReplyInput struct {
 
 // Reply is an assistant_message timeline item. Truncated: the message is
 // longer than the returned Text.
-type Reply struct {
-	ItemID    string
-	RunID     string
-	MessageID string
-	Text      string
-	Truncated bool
-	Position  int
-	UpdatedAt time.Time
-}
+type Reply = execution.Reply
 
 // Item limits of t3_thread_read.
 const (
@@ -388,41 +360,11 @@ type ModelSelection struct {
 }
 
 // ModelOption is T3 ProviderOptionSelection {id, value: string|boolean}.
-type ModelOption struct {
-	ID    string      `json:"id"`
-	Value OptionValue `json:"value"`
-}
+type ModelOption = execution.ModelOption
+type OptionValue = execution.OptionValue
 
-// OptionValue is T3 ProviderOptionSelectionValue: a non-empty string or a boolean.
-type OptionValue struct {
-	Str    string
-	Bool   bool
-	IsBool bool
-}
-
-func StringValue(s string) OptionValue { return OptionValue{Str: s} }
-func BoolValue(b bool) OptionValue     { return OptionValue{Bool: b, IsBool: true} }
-
-func (v OptionValue) MarshalJSON() ([]byte, error) {
-	if v.IsBool {
-		return json.Marshal(v.Bool)
-	}
-	return json.Marshal(v.Str)
-}
-
-func (v *OptionValue) UnmarshalJSON(data []byte) error {
-	var b bool
-	if err := json.Unmarshal(data, &b); err == nil {
-		*v = BoolValue(b)
-		return nil
-	}
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
-		return fmt.Errorf("option value must be string or boolean: %w", err)
-	}
-	*v = StringValue(s)
-	return nil
-}
+var StringValue = execution.StringValue
+var BoolValue = execution.BoolValue
 
 // WorkspaceType is t3_thread_launch workspaceStrategy.type.
 type WorkspaceType string
@@ -509,3 +451,8 @@ type ModelOptionSpec struct {
 	Values  []OptionValue
 	Default *OptionValue
 }
+
+type unavailableError struct{}
+
+func (unavailableError) Error() string     { return "t3: not connected" }
+func (unavailableError) Is(err error) bool { return err == execution.ErrUnavailable }

@@ -29,6 +29,8 @@ test("clipboard API rejection reaches the caller (Copy failed)", async () => {
 test("links: copied links use the page origin; external opens a tab; app links navigate in place", () => {
   const calls = [];
   const l = browserLinks({ origin: () => "https://stage.lan", open: (u) => calls.push(["open", u]), assign: (u) => calls.push(["assign", u]) });
+  assert.equal(l.executionDestination({ native: "t3code://threads/e/t", web: "https://t3.example/t" }), "t3code://threads/e/t");
+  assert.equal(l.executionDestination({ native: null, web: "https://harness.example/t" }), "https://harness.example/t");
   assert.equal(l.stageLink("/tasks/12"), "https://stage.lan/tasks/12");
   l.openExternal("https://github.com/x/y/pull/1");
   l.openApp("t3code://threads/e/t");

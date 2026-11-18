@@ -273,14 +273,14 @@ func TestUpsertThreadsKeepsDetailColumns(t *testing.T) {
 	if err := s.UpsertThreadDetail(ctx, d); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "renamed", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}}); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "renamed", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}})); err != nil {
 		t.Fatal(err)
 	}
 	th, err := s.GetThread(ctx, "th-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.Title != "renamed" || th.Status != "completed" || th.Branch == nil || *th.Branch != "feat" || th.PendingRequestCount != 2 {
+	if th.Title != "renamed" || th.Status != "done" || th.Branch == nil || *th.Branch != "feat" || th.PendingRequestCount != 0 {
 		t.Fatalf("thread %+v", th)
 	}
 	if th.Source != db.SourceT3 || th.ProjectID != nil {
@@ -335,7 +335,7 @@ func TestUpsertThreadDetailStoresRunSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A list upsert leaves the span alone.
-	if err := s.UpsertThreads(ctx, []t3.Thread{d.Thread}); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{d.Thread})); err != nil {
 		t.Fatal(err)
 	}
 	th, err := s.GetThread(ctx, "th-span")
@@ -361,7 +361,7 @@ func TestTaskCarriesThreadPullRequests(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	open := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "agent", State: "open"}
-	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: "th-task-pr", ProjectID: p.Bindings[0].ExternalProjectID, Title: "t", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{open}}}); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-task-pr", ProjectID: p.Bindings[0].ExternalProjectID, Title: "t", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{open}}})); err != nil {
 		t.Fatal(err)
 	}
 	// Historical records from an older Stage version remain readable.
@@ -396,11 +396,11 @@ func TestProjectLastActivity(t *testing.T) {
 	}
 	created := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
 	settled := created.Add(3 * time.Hour)
-	if err := s.UpsertThreads(ctx, []t3.Thread{
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour), Settled: true, SettledAt: &settled},
 		{ThreadID: "th-2", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(2 * time.Hour)},
 		{ThreadID: "th-x", ProjectID: "proj-other", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: settled.Add(time.Hour)},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.GetProject(ctx, p.ID)
@@ -428,7 +428,7 @@ func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
 		{ThreadID: "sub-1", ProjectID: "proj-1", Title: "sub", Status: t3.StatusRunning, CreatedAt: now.Add(-time.Minute),
 			ParentThreadID: "root-1", RelationshipToParent: "subagent"},
 	}
-	if err := s.UpsertThreads(ctx, threads); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations(threads)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -465,7 +465,7 @@ func TestListThreadsAndStatsExcludeSubagents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d, p, ss := sum(st); d != 1 || p != 1 || ss != 1 || st.ThreadsByStatus[0].Status != "completed" {
+	if d, p, ss := sum(st); d != 1 || p != 1 || ss != 1 || st.ThreadsByStatus[0].Status != "done" {
 		t.Fatalf("stats exclude: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
 	}
 }

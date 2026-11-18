@@ -47,12 +47,12 @@ func TestJournalLaunchRetryAfterRestartAndMove(t *testing.T) {
 	e.t3.lostLaunches.Store(2)
 	e.must("POST", taskPath(a.ID, "/start"), nil, 502, nil)
 	failed := e.getTask(a.ID)
-	if failed.State != "failed" {
+	if failed.State != "launching" {
 		t.Fatalf("lost launch state %s", failed.State)
 	}
 	e.must("POST", treePath(newTree, "/tasks"), map[string]any{"taskId": a.ID}, 200, nil)
 	// A new service uses the persisted attempt, with no in-memory launch context.
-	restarted := t3sync.New(e.store, e.t3, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	restarted := t3sync.New(e.store, t3.NewAdapter(e.t3), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	restarted.RecoverLaunching(t.Context())
 	started, err := restarted.StartTask(t.Context(), a.ID)
 	if err != nil || started.LaunchAttempt != failed.LaunchAttempt || started.TreeID == nil || *started.TreeID != newTree {
@@ -68,6 +68,7 @@ func TestJournalLaunchRetryAfterRestartAndMove(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.poll()
+	e.must("POST", treePath(newTree, "/tasks"), map[string]any{"taskId": a.ID}, 200, nil)
 	e.must("POST", taskPath(a.ID, "/start"), nil, 200, nil)
 	if msg := e.lastMessage(); !strings.Contains(msg, fmt.Sprintf("TreeId at launch: %d.", newTree)) {
 		t.Fatalf("new attempt did not refresh launch membership: %q", msg)

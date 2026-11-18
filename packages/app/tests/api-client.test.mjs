@@ -76,3 +76,18 @@ test("attachment URLs go through the transport", () => {
   const { api } = fakeApi();
   assert.equal(api.attachmentUrl(12), "asset:/attachments/12");
 });
+
+test("launch repair sends structured preview and revision-guarded attach requests", async () => {
+ const seen = [];
+ const { api } = fakeApi(async (path, init) => {
+   seen.push({ path, body: JSON.parse(init.body) });
+   return Response.json({});
+ });
+ const link = "t3code://threads/env/existing";
+ await api.previewLaunchLink(4, link);
+ await api.attachLaunchLink(4, link, { attempt: 2, revision: 9, environment: "env" });
+ assert.deepEqual(seen, [
+   { path: "/tasks/4/launch-link/preview", body: { link } },
+   { path: "/tasks/4/launch-link", body: { link, attempt: 2, revision: 9, environment: "env" } },
+ ]);
+});

@@ -61,8 +61,8 @@ function MemberLine({ task, onSelect, trailing }: { task: Task; onSelect?: ((id:
 /** Selected base value: "" (stable base) or the need id whose branch the worktree starts from. */
 function baseValue(w: Workspace, candidates: readonly Task[]): string {
   if (w.type !== "worktree" || w.base !== "predecessor") return "";
-  const id = w.baseTaskId ?? candidates[0]?.id;
-  return id === undefined ? "" : String(id);
+  const id = w.baseTaskId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
+  return id === undefined || !candidates.some((c) => c.id === id) ? "unavailable" : String(id);
 }
 
 /**
@@ -261,6 +261,7 @@ export function TreeNodeEditor({
                 className="w-full font-mono"
               >
                 <option value="">Stable base ({w.baseRef})</option>
+                {baseValue(w, bases) === "unavailable" ? <option value="unavailable" disabled>Predecessor unavailable: choose a base</option> : null}
                 {bases.map((b) => (
                   <option key={b.id} value={b.id}>
                     #{b.id}&apos;s branch
@@ -269,8 +270,8 @@ export function TreeNodeEditor({
               </Select>
               <p className="font-mono text-meta text-muted">
                 {bases.length === 0
-                  ? "Its needs run in other projects; only the stable base applies."
-                  : `A need's branch stacks on its unmerged work; falls back to ${w.baseRef}.`}
+                  ? "No eligible predecessor. Choose the stable base explicitly."
+                  : "An unavailable predecessor blocks launch. Choose the stable base explicitly to continue."}
               </p>
             </>
           )}

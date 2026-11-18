@@ -612,7 +612,7 @@ func TestTreeTimesAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	later := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
-	if err := s.UpsertThreads(ctx, []t3.Thread{{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}}); err != nil {
+	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}})); err != nil {
 		t.Fatal(err)
 	}
 	setState(t, s, ctx, x.ID, db.StateRunning) // member update, older than the thread's

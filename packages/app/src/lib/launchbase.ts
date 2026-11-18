@@ -7,7 +7,7 @@ export type WorkspaceChoice = "root" | "worktree" | "predecessor";
 
 /**
  * The need a worktree would stack on: workspace.baseTaskId when it is a need, else the sole need ("#12");
- * "a need" with several needs and none picked (the launch falls back); null without needs.
+ * "a need" with several needs and none picked (launch requires a choice); null without needs.
  */
 export function predecessorName(t: Predecessor): string | null {
   const w = t.workspace;
@@ -34,17 +34,17 @@ export function workspaceChoice(w: Workspace): WorkspaceChoice {
 }
 
 /** Workspace segmented options; the need's-branch cell only when the task has needs. */
-export function workspaceOptions(name: string | null): { value: WorkspaceChoice; label: string }[] {
+export function workspaceOptions(name: string | null, retainPredecessor = false): { value: WorkspaceChoice; label: string }[] {
   const base: { value: WorkspaceChoice; label: string }[] = [
     { value: "root", label: "root" },
     { value: "worktree", label: "worktree" },
   ];
-  return name === null ? base : [...base, { value: "predecessor", label: branchLabel(name) }];
+  return name === null && !retainPredecessor ? base : [...base, { value: "predecessor", label: name === null ? "Predecessor unavailable" : branchLabel(name) }];
 }
 
-/** The choice in effect: a predecessor choice falls back to worktree once the task has no needs (the cell is hidden). */
-export function effectiveChoice(choice: WorkspaceChoice, name: string | null): WorkspaceChoice {
-  return choice === "predecessor" && name === null ? "worktree" : choice;
+/** Keep the requested base until the user explicitly changes it. */
+export function effectiveChoice(choice: WorkspaceChoice, _name: string | null): WorkspaceChoice {
+  return choice;
 }
 
 /** The form's workspace; baseTaskId (kept from the task) applies only to a predecessor choice. */
@@ -72,7 +72,7 @@ export function predecessorWorkspaceText(t: Predecessor, base: LaunchBase | null
   const w = t.workspace;
   if (w.type !== "worktree" || !fromPredecessor(w)) return null;
   const into = w.branch === null ? "" : ` → ${w.branch}`;
-  if (base === null) return `worktree from ${branchLabel(predecessorName(t))} · fallback ${w.baseRef}${into}`;
+  if (base === null) return `worktree from ${branchLabel(predecessorName(t))} · requires available branch${into}`;
   if (base.source === "predecessor") return `worktree from ${base.baseRef} (${recordedSource(base)})${into}`;
   return `worktree from ${base.baseRef} · fallback${into}`;
 }
@@ -89,5 +89,5 @@ export function pendingBaseNote(t: Predecessor & Pick<Task, "state">): string | 
   const name = predecessorName(t);
   const w = t.workspace;
   if (t.state !== "backlog" || name === null || w.type !== "worktree" || !fromPredecessor(w)) return null;
-  return `+ on launch: worktree from ${branchLabel(name)} (fallback ${w.baseRef})`;
+  return `+ on launch: worktree from ${branchLabel(name)} (requires available branch)`;
 }

@@ -13,6 +13,7 @@ type TaskChange struct {
 // SessionChange is emitted by a harness-specific observer. IDs are scoped
 // to the configured harness; connection identities arrive before a second harness.
 type SessionChange struct {
+	Session   *db.SessionRef
 	ThreadID  string
 	ProjectID string
 	Title     string

@@ -248,7 +248,30 @@ export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
+export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
+export interface ExecutionConfig {
+  model: string;
+  options: ModelOption[];
+  permission: string;
+  mode: string;
+}
+
+export interface LaunchLinkPreview {
+  attempt: number;
+  revision: number;
+  environment: string;
+  observation: {
+    session: { connectionId: number; externalSessionId: string };
+    title: string;
+    state: string;
+    project: string;
+    branch: string;
+    directory: string;
+  };
+}
 export interface Task {
+  executionConfig?: ExecutionConfig | null;
+ launch?: LaunchRecovery;
   session: SessionRef | null;
   originSession: SessionRef | null;
   connectionId: number;

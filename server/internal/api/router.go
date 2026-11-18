@@ -14,10 +14,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
-	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
@@ -25,7 +25,6 @@ import (
 type Deps struct {
 	Config config.Config
 	Store  *db.Store
-	T3     t3.Client
 	Sync   *t3sync.Service
 	Push   *notify.Notifier
 	Logger *slog.Logger
@@ -38,8 +37,7 @@ type Deps struct {
 	// membership) so the release runner reconciles now; nil = no-op. Must
 	// not block.
 	OnTreeChange func()
-	// Setup is the T3 URL, binding and pairing (nil = one built from
-	// Config, Store and T3 with the CLI runner disabled for the fake).
+	// Setup owns the retained T3 connection settings and pairing endpoints.
 	Setup *t3setup.Service
 }
 
@@ -56,11 +54,6 @@ func NewRouter(deps Deps) http.Handler {
 	}
 	if s.Inbox == nil {
 		s.Inbox = notify.NewHub(context.Background())
-	}
-	if s.Setup == nil {
-		s.Setup = t3setup.New(t3setup.Options{
-			Config: s.Config, Store: s.Store, Client: s.T3, Fake: t3setup.IsFake(s.T3), Logger: s.log,
-		})
 	}
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
@@ -87,6 +80,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/projects/{id}/binding", s.bindProject)
 	h("DELETE /api/projects/{id}/binding", s.unbindProject)
 	h("GET /api/connections", s.connections)
+	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
+	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
+	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/t3/projects", s.externalProjects)
 	h("POST /api/connections/t3/projects", s.registerWorkspace)
 
@@ -218,8 +214,8 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	if u := strings.TrimRight(s.Config.PublicURL, "/"); u != "" {
 		h.PublicURL = &u
 	}
-	if s.T3 != nil {
-		st := s.T3.Status(r.Context())
+	if s.Setup != nil {
+		st := s.Setup.Status(r.Context(), false).Conn
 		h.T3.Connected = st.Connected
 		if st.LastError != "" {
 			h.T3.LastError = &st.LastError
@@ -252,12 +248,12 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		invalid  *db.InvalidError
 		conflict *db.ConflictError
-		t3Err    *db.T3Error
+		t3Err    *db.HarnessError
 		pushErr  *notify.PushError
 	)
 	switch {
-	case errors.Is(err, t3.ErrNotConnected):
-		writeError(w, http.StatusServiceUnavailable, "T3 not connected")
+	case errors.Is(err, execution.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Harness unavailable")
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, db.ErrNotFound):

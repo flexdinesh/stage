@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"strconv"
 	"time"
 
@@ -108,6 +110,27 @@ func deepLink(envID string, threadID *string) *string {
 }
 
 func (s *server) task(env string, t db.Task) taskJSON {
+	// Retained T3 response fields are compatibility output; execution uses Config.
+	if t.ConnectionID == db.T3ConnectionID && t.ExecutionConfig != nil {
+		c := t.ExecutionConfig
+		if provider, model, err := t3.DecodeModelKey(c.Model); err == nil {
+			t.ProviderInstanceID = &provider
+			t.Model = &model
+		}
+		t.ModelOptions = c.Options
+		if t.ModelOptions == nil {
+			t.ModelOptions = []execution.ModelOption{}
+		}
+		if c.Permission != "" {
+			t.RuntimeMode = c.Permission
+		}
+		if c.Mode != "" {
+			t.InteractionMode = c.Mode
+		}
+	}
+	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
+		t.Launch = &a
+	}
 	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t, T3WebURL: s.webURL(env, t.T3ThreadID), T3DeepLink: deepLink(env, t.T3ThreadID)}
 	if t.ConnectionID != db.T3ConnectionID {
 		out.T3WebURL = nil
@@ -133,14 +156,24 @@ func (s *server) tasks(env string, ts []db.Task) []taskJSON {
 }
 
 func (s *server) thread(env string, t db.Thread) threadJSON {
+	// Preserve the retained T3 response vocabulary at this compatibility edge.
+	switch t.Status {
+	case "done":
+		t.Status = "completed"
+	case "needs_input":
+		t.Status = "waiting"
+		t.Settled = false
+	case "running":
+		t.Settled = false
+	}
 	id := t.T3ThreadID
 	return threadJSON{Thread: t, T3WebURL: s.webURL(env, &id), T3AppURL: t.Link, T3DeepLink: deepLink(env, &id)}
 }
 
 type catalogOptionJSON struct {
-	ID      string           `json:"id"`
-	Values  []t3.OptionValue `json:"values"`
-	Default *t3.OptionValue  `json:"default"`
+	ID      string                  `json:"id"`
+	Values  []execution.OptionValue `json:"values"`
+	Default *execution.OptionValue  `json:"default"`
 }
 
 type catalogModelJSON struct {
@@ -154,7 +187,7 @@ type catalogProviderJSON struct {
 	DriverKind         string             `json:"driverKind"`
 	DisplayName        string             `json:"displayName"`
 	Models             []catalogModelJSON `json:"models"`
-	RuntimeModes       []t3.RuntimeMode   `json:"runtimeModes"`
+	RuntimeModes       []string           `json:"runtimeModes"`
 }
 
 type catalogJSON struct {
@@ -164,34 +197,46 @@ type catalogJSON struct {
 
 // catalogShape drops providers with constraints and applies fallbacks.
 func catalogShape(snap *t3sync.CatalogSnapshot) catalogJSON {
-	fetched := snap.FetchedAt
-	out := catalogJSON{Providers: []catalogProviderJSON{}, FetchedAt: &fetched}
-	for _, p := range snap.Catalog.Providers {
-		if len(p.Constraints) > 0 {
+	out := catalogJSON{Providers: []catalogProviderJSON{}, FetchedAt: &snap.FetchedAt}
+	for _, m := range snap.Catalog.Models {
+		if !m.Available {
 			continue
 		}
-		cp := catalogProviderJSON{
-			ProviderInstanceID: p.ProviderInstanceID, DriverKind: p.DriverKind, DisplayName: p.DisplayName,
-			Models: []catalogModelJSON{}, RuntimeModes: p.RuntimeModes,
+		provider, name, err := t3.DecodeModelKey(m.ID)
+		if err != nil {
+			continue
 		}
-		if cp.DisplayName == "" {
-			cp.DisplayName = p.ProviderInstanceID
-		}
-		for _, m := range p.Models {
-			cm := catalogModelJSON{ID: m.ID, Label: m.Label, Options: []catalogOptionJSON{}}
-			if cm.Label == "" {
-				cm.Label = m.ID
+		index := -1
+		for i, p := range out.Providers {
+			if p.ProviderInstanceID == provider {
+				index = i
+				break
 			}
-			for _, o := range m.Options {
-				vals := o.Values
-				if vals == nil {
-					vals = []t3.OptionValue{}
+		}
+		if index < 0 {
+			out.Providers = append(out.Providers, catalogProviderJSON{ProviderInstanceID: provider, DriverKind: provider, DisplayName: m.Group, Models: []catalogModelJSON{}, RuntimeModes: nil})
+			index = len(out.Providers) - 1
+		}
+		model := catalogModelJSON{ID: name, Label: m.Label, Options: []catalogOptionJSON{}}
+		for _, o := range m.Options {
+			values := o.Values
+			if values == nil {
+				values = []execution.OptionValue{}
+			}
+			model.Options = append(model.Options, catalogOptionJSON{ID: o.ID, Values: values, Default: o.Default})
+		}
+		out.Providers[index].Models = append(out.Providers[index].Models, model)
+		for _, mode := range m.Permissions {
+			found := false
+			for _, v := range out.Providers[index].RuntimeModes {
+				if v == mode.ID {
+					found = true
 				}
-				cm.Options = append(cm.Options, catalogOptionJSON{ID: o.ID, Values: vals, Default: o.Default})
 			}
-			cp.Models = append(cp.Models, cm)
+			if !found {
+				out.Providers[index].RuntimeModes = append(out.Providers[index].RuntimeModes, mode.ID)
+			}
 		}
-		out.Providers = append(out.Providers, cp)
 	}
 	return out
 }

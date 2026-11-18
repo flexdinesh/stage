@@ -36,7 +36,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		out.Session = t.Session
 	case refs.KindSession:
 		th, err := s.Store.GetThread(ctx, ref.ThreadID)
-		if errors.Is(err, db.ErrNotFound) && s.T3.Status(ctx).Connected {
+		if errors.Is(err, db.ErrNotFound) && s.connected(ctx, db.T3ConnectionID) {
 			// Not mirrored yet: read it from T3 once.
 			if err = s.Sync.RefreshSession(ctx, ref.ThreadID); err == nil {
 				th, err = s.Store.GetThread(ctx, ref.ThreadID)
