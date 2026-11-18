@@ -44,6 +44,39 @@ func TestWorkspaceSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestSeparateWebClientResolvesTheSameSessionOnBothOrigins(t *testing.T) {
+	cfg := Settings{Endpoint: "http://stage-internal:7400", BrowserEndpoint: "https://service.example/oc", WebClient: "https://client.example/ui"}
+	a, err := New(2, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := execution.SessionRef{ConnectionID: 2, ExternalSessionID: "ses_origin"}
+	links := a.Destinations(t.Context(), ref)
+	if !strings.HasPrefix(links.Web, cfg.WebClient+"/server/") || !strings.HasPrefix(links.Service, cfg.BrowserEndpoint+"/server/") || strings.TrimPrefix(links.Web, cfg.WebClient) != strings.TrimPrefix(links.Service, cfg.BrowserEndpoint) {
+		t.Fatal(links)
+	}
+	for _, input := range []string{ref.ExternalSessionID, links.Web, links.Service} {
+		got, err := a.ResolveLink(t.Context(), input)
+		if err != nil || got != ref {
+			t.Errorf("%q: %+v, %v", input, got, err)
+		}
+	}
+	for _, input := range []string{strings.Replace(links.Web, "client.example", "foreign.example", 1), links.Web + "?token=x", strings.Replace(links.Service, "/session/", "/project/", 1)} {
+		if _, err := a.ResolveLink(t.Context(), input); err == nil {
+			t.Errorf("accepted %q", input)
+		}
+	}
+	cfg.WebClient = ""
+	a, err = New(2, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := a.Destinations(t.Context(), ref)
+	if direct.Web != links.Service || direct.Service != "" {
+		t.Fatal(direct)
+	}
+}
 func TestObservationEvidence(t *testing.T) {
 	base := wireTime{Created: 10, Updated: 40, Busy: 30, Idle: 40}
 	for _, tc := range []struct {
@@ -92,7 +125,7 @@ func TestObservationEvidence(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-			a, e := New(2, srv.URL, "", "", "")
+			a, e := New(2, Settings{Endpoint: srv.URL})
 			if e != nil {
 				t.Fatal(e)
 			}

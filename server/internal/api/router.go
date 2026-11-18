@@ -38,7 +38,12 @@ type Deps struct {
 	// not block.
 	OnTreeChange func()
 	// Setup owns the retained T3 connection settings and pairing endpoints.
-	Setup *t3setup.Service
+	Setup    *t3setup.Service
+	OpenCode interface {
+		ID() int64
+		Status(context.Context) config.OpenCodeStatus
+		Save(context.Context, config.OpenCodeEdit) error
+	}
 }
 
 type server struct {
@@ -70,20 +75,27 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/t3/pair", s.t3Pair)
 	h("POST /api/t3/pair/auto", s.t3PairAuto)
 	h("PUT /api/t3/url", s.t3SetURL)
+	h("GET /api/opencode/status", s.openCodeStatus)
+	h("PUT /api/opencode/settings", s.openCodeSettings)
 	h("POST /api/sync", s.runSync)
 	h("GET /api/catalog", s.catalog)
 
 	h("GET /api/projects", s.listProjects)
+	h("GET /api/shared-paths", s.sharedPaths)
+	h("PUT /api/shared-paths", s.sharedPaths)
+	h("POST /api/projects/{id}/bindings/{connectionId}/match", s.matchWorkspace)
 	h("POST /api/projects", s.createProject)
 	h("GET /api/projects/{id}", s.getProject)
 	h("PATCH /api/projects/{id}", s.updateProject)
 	h("PUT /api/projects/{id}/binding", s.bindProject)
 	h("DELETE /api/projects/{id}/binding", s.unbindProject)
+	h("DELETE /api/projects/{id}/bindings/{connectionId}", s.unbindProject)
 	h("GET /api/connections", s.connections)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/t3/projects", s.externalProjects)
+	h("GET /api/connections/{connectionId}/projects", s.externalProjects)
 	h("POST /api/connections/t3/projects", s.registerWorkspace)
 
 	h("GET /api/tasks", s.listTasks)

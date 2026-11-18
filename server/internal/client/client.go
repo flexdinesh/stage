@@ -818,8 +818,15 @@ func (c *Client) Connections(ctx context.Context) ([]db.HarnessConnection, error
 	return out.Connections, err
 }
 func (c *Client) Capabilities(ctx context.Context, id int64) (execution.Capabilities, error) {
+	return c.ProjectCapabilities(ctx, id, 0)
+}
+func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (execution.Capabilities, error) {
 	var out execution.Capabilities
-	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/connections/%d/capabilities", id), nil, &out)
+	path := fmt.Sprintf("/api/connections/%d/capabilities", id)
+	if projectID != 0 {
+		path += fmt.Sprintf("?projectId=%d", projectID)
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	return out, err
 }
 

@@ -46,9 +46,13 @@ opencode mcp add stage --url http://127.0.0.1:7380/mcp
 opencode mcp list
 ```
 
+For workspace-specific choices use `stage models ls --connection ID --project PROJECT_ID` or `list_models` with `connectionId` and `projectId`. Select the harness default worktree with `--workspace worktree` or `workspaceType: "worktree"`. OpenCode selects its base and branch. Use `--execution-config` or `executionConfig` for the advertised model, agent and options.
+
 Invoke `get_context` from a conversation. Check the session, project and owning task. An external session can legitimately have no Stage task. OpenCode attaches the session ID to individual calls, including calls over shared connections. [OpenCode MCP context](https://opencode.ai/docs/mcp-servers/#context)
 
 ## Caller context
+
+OpenCode 2.3.0 sends native caller identity per MCP call. To expose named Stage tools directly in its MCP server configuration, use `"codemode": false` and `"protocol": "legacy"` alongside the Stage HTTP URL.
 
 The T3 CLI reads `T3CODE_THREAD_ID`. A shared MCP process uses per-call identity. For T3 over HTTP or shared stdio, pass `callerThreadId` from the current session. When migrating a stdio registration dedicated to exactly one T3 session, rerun `stage setup mcp --t3-session-env` or change its command to `stage mcp --t3-session-env` to retain environment attribution.
 

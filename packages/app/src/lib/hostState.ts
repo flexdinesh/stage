@@ -23,12 +23,12 @@ export function useHostEpoch(): number {
   return useHostState()?.epoch ?? 0;
 }
 
-/** Remote Stage belongs to another machine: use its T3 web destination. */
-export function useT3Destination() {
+/** Let the host choose a session destination for the active Stage server. */
+export function useSessionDestination() {
   const { links: hostLinks } = usePlatform();
   useHostState();
-  return useCallback((links: { t3DeepLink: string | null; t3WebUrl?: string | null }) =>
-    hostLinks.executionDestination({ native: links.t3DeepLink, web: links.t3WebUrl ?? null }), [hostLinks]);
+  return useCallback((links: { t3DeepLink: string | null; t3WebUrl?: string | null; links?: {native?: string; web?: string} }) =>
+    hostLinks.executionDestination({ native: links.links?.native ?? links.t3DeepLink, web: links.links?.web ?? links.t3WebUrl ?? null }), [hostLinks]);
 }
 
 export interface HostServerList {

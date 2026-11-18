@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 import { keys } from "../api/queries.ts";
 import type { TaskState } from "../api/types.ts";
 import {
@@ -100,11 +100,11 @@ export function RowCopyLink({ subject, className }: { subject: LinkSubject; clas
 
 // ---- Chips ----
 
-type Resolved = { title: string; state: TaskState; number: number | null; href: string | null };
+type Resolved = { title: string; state: TaskState | null; number: number | null; href: string | null };
 
 function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } {
   const api = useApi();
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const task = useQuery({
     queryKey: [...keys.task, ref.kind === "task" ? ref.id : 0],
     queryFn: () => api.task(ref.kind === "task" ? ref.id : 0),
@@ -112,9 +112,10 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     refetchInterval: 30_000,
     retry: false,
   });
+  const sessionPath=ref.kind==="session" ? `/connections/${ref.connectionId ?? 1}/sessions/${encodeURIComponent(ref.id)}` : "";
   const thread = useQuery({
-    queryKey: [...keys.thread, ref.kind === "session" ? ref.id : ""],
-    queryFn: () => api.thread(ref.kind === "session" ? ref.id : ""),
+    queryKey: ["session-reference",sessionPath],
+    queryFn: () => api.resolveRef(sessionPath,undefined,true),
     enabled: ref.kind === "session",
     refetchInterval: 30_000,
     retry: false,
@@ -123,8 +124,8 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     const d = task.data;
     return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id, href: `/tasks/${d.id}` }, failed: task.isError };
   }
-  const t = thread.data?.thread;
-  return { data: t === undefined ? null : { title: t.title, state: t.state, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: thread.isError };
+  const t = thread.data;
+  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination({links:t.links,t3DeepLink:null}) : `/tasks/${t.taskId}` }, failed: thread.isError };
 }
 
 /** A stage link as a live chip: mono #id (or "session"), title, square state marker; opens in stage. */
@@ -139,14 +140,14 @@ export function RefChip({ stageRef, text, href }: { stageRef: StageRef; text: st
     );
   }
   const tag = data.number === null ? "session" : `#${data.number}`;
-  const state = taskStateLabel(data.state);
+  const state = data.state === null ? "session" : taskStateLabel(data.state);
   return (
     <a
       href={data.href ?? undefined}
       title={`${stageRef.kind === "task" ? `Task ${tag}` : "Session"}: ${data.title} (${state})`}
       className={cx(
         "mx-px inline-flex max-w-full items-center gap-1.5 border border-line-strong bg-surface px-1.5 align-middle font-sans text-small leading-[18px] font-medium whitespace-nowrap text-fg no-underline transition-colors duration-150 hover:bg-panel",
-        toneClass(taskStateTone(data.state)),
+        toneClass(data.state === null ? "idle" : taskStateTone(data.state)),
       )}
     >
       <span aria-hidden className="size-[7px] shrink-0 bg-[var(--c)]" />
@@ -195,8 +196,8 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
   return [root, portals];
 }
 
-export function SourceSessionLink({ id }: { id: string }) {
-  const { data } = useResolved({ kind: "session", id });
+export function SourceSessionLink({ id,connectionId=1 }: { id: string;connectionId?:number }) {
+  const { data } = useResolved({ kind: "session", id,connectionId });
   if (data?.href == null) return <span title={id}>source session</span>;
   return <a href={data.href} className="underline hover:text-fg">source session</a>;
 }

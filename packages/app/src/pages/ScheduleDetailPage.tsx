@@ -1,3 +1,4 @@
+import { harnessName } from "../lib/tasks.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -64,7 +65,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />
-        <Chip>{modelText(s.model, s.modelOptions)}</Chip>
+        <Chip>{s.connectionId===1 ? modelText(s.model, s.modelOptions) : s.executionConfig?.model || "OpenCode default"}</Chip>
         <Chip>{s.runtimeMode}</Chip>
         {s.interactionMode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceText(s.workspace)}</Chip>
@@ -185,10 +186,11 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
             {s.projectTitle}
           </Link>
         </Detail>
-        <Detail label="Provider">{s.providerInstanceId ?? "T3 default"}</Detail>
+        <Detail label="Harness">{harnessName(s.connectionId)}</Detail>
+        {s.connectionId !== 1 ? <><Detail label="Model">{modelText(s.executionConfig?.model || "Harness default", s.executionConfig?.options ?? [])}</Detail><Detail label="Agent">{s.executionConfig?.mode || "Harness default"}</Detail></> : <><Detail label="Provider">{s.providerInstanceId ?? "T3 default"}</Detail>
         <Detail label="Model">{modelText(s.model, s.modelOptions)}</Detail>
-        <Detail label="Runtime">{s.runtimeMode}</Detail>
-        <Detail label="Interaction">{s.interactionMode}</Detail>
+        <Detail label="Runtime">{s.executionConfig ? s.executionConfig.permission || "Harness default" : s.runtimeMode}</Detail>
+        <Detail label="Interaction">{s.executionConfig ? s.executionConfig.mode || "Harness default" : s.interactionMode}</Detail></>}
         <Detail label="Workspace">{workspaceText(s.workspace)}</Detail>
         <Detail label="Tags">{s.tags.length === 0 ? "-" : s.tags.map((t) => `#${t}`).join(" ")}</Detail>
         <Detail label="Created">

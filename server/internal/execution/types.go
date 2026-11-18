@@ -30,11 +30,13 @@ type Health struct {
 	CheckedAt time.Time `json:"checkedAt"`
 }
 type Links struct {
-	Web    string `json:"web,omitempty"`
-	App    string `json:"app,omitempty"`
-	Native string `json:"native,omitempty"`
+	Service string `json:"service,omitempty"`
+	Web     string `json:"web,omitempty"`
+	App     string `json:"app,omitempty"`
+	Native  string `json:"native,omitempty"`
 }
 type WorkspaceInfo struct {
+	OriginRemote  string `json:"-"`
 	ID            string
 	Title         string
 	WorkspaceRoot string
@@ -95,6 +97,7 @@ type Model struct {
 	Permissions []Choice `json:"permissions"`
 }
 type Capabilities struct {
+	Permissions        []Choice                `json:"permissions,omitempty"`
 	Operations         map[string]Availability `json:"operations"`
 	Models             []Model                 `json:"models"`
 	Modes              []Choice                `json:"modes"`

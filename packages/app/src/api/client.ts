@@ -1,4 +1,5 @@
 import type {
+  OpenCodeStatus, HarnessConnection, Capabilities, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -15,7 +16,7 @@ import type {
   TreeListQuery,
   UpdateTreeRequest,
   Attachment,
-  ThreadDetail,
+  ThreadDetail, SessionRef, SessionPreview,
   Badge,
   Catalog,
   CreateProjectRequest,
@@ -167,6 +168,10 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
+    connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
+    openCodeStatus: () => apiFetch<OpenCodeStatus>("/opencode/status"),
+    saveOpenCode: (body: Partial<Record<"endpoint" | "browserEndpoint" | "webClient" | "username" | "password", string>>) => apiSend("/opencode/settings", put(body)),
+    capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     t3Status: () => apiFetch<T3StatusWire>("/t3/status").then((w) => normalizeT3Status(w)),
     pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),
     /** Pairs through the t3 CLI on the server's machine (409 when unavailable, 502 when it fails). */
@@ -180,9 +185,12 @@ export function createApi(transport: Transport) {
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
-    externalProjects: () => apiFetch<{projects: ExternalProject[]}>("/connections/t3/projects"),
+    matchWorkspace: (project: number, connection: number) => apiFetch<{bound: Project | null; projects: ExternalProject[]; suggestions: Record<string,string>}>(`/projects/${project}/bindings/${connection}/match`, post()),
+    sharedPaths: () => apiFetch<{paths:{connectionId:number;harnessRoot:string;stageRoot:string}[]}>("/shared-paths"),
+    setSharedPath: (connectionId:number,harnessRoot:string,stageRoot:string) => apiFetch("/shared-paths",put({connectionId,harnessRoot,stageRoot})),
+    externalProjects: (connectionId = 1) => apiFetch<{projects: ExternalProject[]}>(`/connections/${connectionId}/projects`),
     bindProject: (id: number, project: ExternalProject) => apiFetch<Project>(`/projects/${id}/binding`, put({connectionId: project.connectionId, externalProjectId: project.externalId, workspace: project.workspace})),
-    unbindProject: (id: number) => apiFetch<Project>(`/projects/${id}/binding`, {method: "DELETE"}),
+    unbindProject: (id: number, connectionId = 1) => apiFetch<Project>(`/projects/${id}/bindings/${connectionId}`, {method: "DELETE"}),
     registerWorkspace: (body: {title: string; workspace: string}) => apiFetch<ExternalProject>("/connections/t3/projects", post(body)),
 
     tasks: (q: TaskListQuery = {}) =>
@@ -247,11 +255,12 @@ export function createApi(transport: Transport) {
 
     thread: (id: string) => apiFetch<ThreadDetail>(`/connections/1/sessions/${encodeURIComponent(id)}`),
     /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
-    adoptThread: (id: string, body: AdoptSessionRequest = {}) =>
-      apiFetch<Task>(`/connections/1/sessions/${encodeURIComponent(id)}/adopt`, post(body)),
+    sessionContext: (ref: SessionRef) => apiFetch<SessionPreview>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/context`),
+    adoptSession: (ref: SessionRef, body: AdoptSessionRequest = {}) =>
+      apiFetch<Task>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/adopt`, post(body)),
     openingPrompt: (taskId: number, full = false) =>
       apiFetch<OpeningPromptResponse>(`/tasks/${taskId}/opening-prompt${full ? "?full=true" : ""}`),
-    resolveRef: (ref: string) => apiFetch<{ kind: string; taskId: number | null; threadId: string | null }>(`/refs/resolve${toQuery({ ref })}`),
+    resolveRef: (ref: string, connectionId?: number, cached?: boolean) => apiFetch<{ kind: string; taskId: number | null; session: SessionRef | null; links: ExecutionLinks; state?: TaskState; sessionTitle?: string }>(`/refs/resolve${toQuery({ ref, connectionId,cached })}`),
 
     snippets: () => apiFetch<SnippetList>("/snippets"),
     createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),

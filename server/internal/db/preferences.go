@@ -10,6 +10,7 @@ import (
 // ModelDefaults is a new-task model preset (pinned or last used).
 // ProviderInstanceID / Model nil = T3 default; set together.
 type ModelDefaults struct {
+	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
 	ProviderInstanceID *string                 `json:"providerInstanceId"`
 	Model              *string                 `json:"model"`
 	ModelOptions       []execution.ModelOption `json:"modelOptions"`

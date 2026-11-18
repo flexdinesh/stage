@@ -151,6 +151,18 @@ func taskStateStrings() []string {
 }
 
 func validateWorkspace(w db.Workspace) (db.Workspace, error) {
+	return validateWorkspaceFor(w, db.T3ConnectionID)
+}
+
+func validateWorkspaceFor(w db.Workspace, connection int64) (db.Workspace, error) {
+	if connection > 0 && connection != db.T3ConnectionID {
+		if w.Base != "" || w.BaseRef != "" || w.Branch != nil || w.BaseTaskID != nil {
+			return w, db.Invalid("OpenCode manages the worktree base and branch. Choose root or worktree without a ref, branch or predecessor.")
+		}
+		if w.Type == "worktree" {
+			return w, nil
+		}
+	}
 	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
 		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
 	}
@@ -253,11 +265,10 @@ func enumField(name string, o *db.Optional[string], allowed []string) error {
 
 // envID returns the T3 environment id for web links ("" if unknown).
 func (s *server) envID(ctx context.Context) string {
-	a, e := s.Sync.Adapter(db.T3ConnectionID)
-	if e != nil {
-		return ""
+	if s.Setup != nil {
+		return s.Setup.Status(ctx, false).Conn.EnvironmentID
 	}
-	return a.Health(ctx).Identity
+	return ""
 }
 
 func (s *server) connected(ctx context.Context, id int64) bool {

@@ -45,7 +45,7 @@ plugin registration or service installation framework.
   `Links.executionDestination`. Product code does not inspect browser location
   or dispatch native URLs directly.
 
-Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. Task 6 supplies the live OpenCode adapter. Task 245 verifies the agent interface with isolated adapters. See [agent interface](api.md#agent-interface) for inputs and compatibility.
+Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. OpenCode attaches its native session ID to each MCP call. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
 
 ## Durable launch lifecycle
 
@@ -87,10 +87,9 @@ checkpoint failures. API tests cover compatibility, frozen handoff/journals,
 explicit base repair and link-preview-attach ownership/revision checks.
 These contract tests use isolated harnesses. The OpenCode live suite is described below.
 
-## Internal OpenCode V2 adapter
+## OpenCode V2 adapter
 
-Task 246 provides an adapter for test composition with the real Stage coordinator.
-Product wiring and connection setup belong to task 7. Stage connects to an existing
+Stage connects to an existing
 service using its URL and optional HTTP Basic credentials. The tested release is
 OpenCode 2.3.0. Stage checks the reported version, required V2 operations and worktree
 request schema. The server does not advertise a binary digest. Repeat the live suite
@@ -138,7 +137,7 @@ only to work Stage can launch.
 
 ### Reproduce the live gate
 
-Run `STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:live`.
+Run `STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:live`. Include `STAGE_TEST_T3` (T3 executable) and `STAGE_TEST_FX` (upstream `scripts/mobile-behavior/fake-fx.ts`) to exercise a real T3 to OpenCode to T3 tree with both predecessor services disconnected in turn.
 The test starts foreground loopback servers with temporary homes, repositories and
 databases. A scripted local model supplies success, failure and interruptible runs.
 The standalone CLI requires Basic authentication. The suite also tests an existing
@@ -151,3 +150,5 @@ Fault injection covers every launch checkpoint, lost HTTP responses, racing Stag
 retries, failed worktree setup, session identity collisions and server reconnect.
 The suite also checks adoption, input requests, the web-client route and offline
 acceptance. No provider account or production service is required.
+
+`STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:workflow` starts a scratch Stage server and OpenCode with a local scripted model. It verifies connection setup, model selection, native MCP task and journal provenance, explicit adoption, a clock-driven schedule and restart recovery through the public interfaces. It requires Python 3.9 or newer.

@@ -159,11 +159,13 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx := r.Context()
 	out := struct {
-		Session db.SessionRef   `json:"session"`
-		Task    *taskJSON       `json:"task"`
-		Project *db.Project     `json:"project"`
-		Title   string          `json:"title"`
-		Links   execution.Links `json:"links"`
+		UnavailableReason string          `json:"unavailableReason,omitempty"`
+		Workspace         string          `json:"workspace,omitempty"`
+		Session           db.SessionRef   `json:"session"`
+		Task              *taskJSON       `json:"task"`
+		Project           *db.Project     `json:"project"`
+		Title             string          `json:"title"`
+		Links             execution.Links `json:"links"`
 	}{Session: ref}
 	t, err := s.Store.TaskBySession(ctx, ref)
 	if err == nil {
@@ -194,10 +196,16 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 		}
 		out.Title = o.Title
 		out.Links = o.Links
+		if o.Archived || o.Child {
+			out.UnavailableReason = "Choose a top-level, unarchived session."
+			writeJSON(w, 200, out)
+			return nil
+		}
 		b, e := s.workspaceFor(r, o)
 		if e != nil {
 			return e
 		}
+		out.Workspace = b.Workspace
 		p, e := s.Store.BoundProject(ctx, *b)
 		if e == nil {
 			out.Project = &p

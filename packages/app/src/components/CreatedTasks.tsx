@@ -150,7 +150,7 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
   const [params, setParams] = useSearchParams();
   const batch = task.batch;
   const close = () => setParams((previous) => { const next = new URLSearchParams(previous); next.delete("batch"); return next; });
-  if (batch === null || task.originThreadId === null || batchSize(batch) < 1) return null;
+  if (batch === null || task.originSession === null || batchSize(batch) < 1) return null;
   const row = (t: Task) => {
     const current = t.id === task.id;
     return (
@@ -176,7 +176,7 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
   };
   return (
     <>
-    {params.has("batch") ? <Drawer title="Created tasks" wide onClose={close}><CreatedTasksPanel threadId={task.originThreadId} batch={batch} /></Drawer> : null}
+    {params.has("batch") ? <Drawer title="Created tasks" wide onClose={close}><CreatedTasksPanel threadId={task.originSession.externalSessionId} batch={batch} /></Drawer> : null}
     <Panel
       title="Batch"
       meta={`${batchSize(batch)}`}

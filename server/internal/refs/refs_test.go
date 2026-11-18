@@ -29,6 +29,7 @@ func TestParse(t *testing.T) {
 		{"http://localhost:3773/t3/env-1/thread-9", "http://localhost:3773/t3/", Ref{Kind: KindSession, ThreadID: "thread-9"}},
 		// A stage path on the T3 host still reads as stage.
 		{"http://localhost:3773/tasks/5", t3, Ref{Kind: KindTask, TaskID: 5}},
+		{"stage-dev://connections/2/sessions/ses_abc", t3, Ref{Kind: KindSession, ConnectionID: 2, ThreadID: "ses_abc"}},
 		{"stage://tasks/12", t3, Ref{Kind: KindTask, TaskID: 12}},
 		{"stage://localhost/tasks/12", t3, Ref{Kind: KindTask, TaskID: 12}},
 		{"stage-dev://sessions/codex%3Aabc", t3, Ref{Kind: KindSession, ThreadID: "codex:abc"}},

@@ -25,6 +25,16 @@ export const keys = {
 } as const;
 
 /** Default poll; 1s while a full sync runs so its counts tick. */
+export function useConnections() {
+  const api = useApi();
+  return useQuery({queryKey:["connections"], queryFn: api.connections});
+}
+
+export function useOpenCodeStatus() {
+  const api = useApi();
+  return useQuery({queryKey:["opencode-status"], queryFn: api.openCodeStatus, refetchInterval: 15000});
+}
+
 const T3_STATUS_POLL_MS = 5000;
 const T3_SYNC_POLL_MS = 1000;
 

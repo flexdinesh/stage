@@ -6,7 +6,7 @@ const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "s
 const tree = (id, settledAt = null, status = "open") => ({ id, settledAt, status });
 const ids = (list) => list.map((t) => t.id);
 
-test("members of an active tree roll up; loose tasks keep their rows", () => {
+test("awaiting review and loose tasks have their own rows", () => {
   const tasks = [
     task(1, "running", { treeId: 10 }),
     task(2, "done", { treeId: 10 }),
@@ -16,8 +16,8 @@ test("members of an active tree roll up; loose tasks keep their rows", () => {
     task(6, "backlog"),
   ];
   const split = splitTreeMembers(tasks, [tree(10)]);
-  assert.deepEqual(ids(split.rolledUp), [1, 2, 3, 4]);
-  assert.deepEqual(ids(split.rows), [5, 6]);
+  assert.deepEqual(ids(split.rolledUp), [1, 3, 4]);
+  assert.deepEqual(ids(split.rows), [2, 5, 6]);
   assert.deepEqual(ids(split.active), [10]);
   assert.deepEqual(split.settled, []);
 });

@@ -4,7 +4,7 @@ import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useT3Destination } from "../lib/hostState.ts";
+import { useSessionDestination } from "../lib/hostState.ts";
 import { useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
@@ -36,7 +36,7 @@ interface Item {
   badge?: ReactNode;
   run: () => void;
   /** Ctrl+Enter target. */
-  t3Url?: string | null;
+  sessionUrl?: string | null;
   /** Alt+C copies a link to it. */
   link?: LinkSubject;
 }
@@ -67,7 +67,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
   const api = useApi();
   const { links } = usePlatform();
-  const destination = useT3Destination();
+  const destination = useSessionDestination();
   const [query, setQuery] = useState("");
   /** Highlighted item by key, so late results never move the highlight; null = first. */
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -98,7 +98,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           hint: t.projectTitle,
           badge: <ClosedBadge label={taskClosedLabel(t)}><TaskStateBadge state={t.state} /></ClosedBadge>,
           run: go(`/tasks/${t.id}`),
-          t3Url: destination(t),
+          sessionUrl: destination(t),
           link: { kind: "task", id: t.id, title: t.title },
         });
       for (const tr of (trees.data?.trees ?? []).filter((t) => has(t.title, q)).slice(0, 4))
@@ -161,8 +161,9 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
       e.preventDefault();
       const item = items[active];
       if (item === undefined) return;
-      if ((e.ctrlKey || e.metaKey) && typeof item.t3Url === "string") {
-        links.openApp(item.t3Url);
+      if ((e.ctrlKey || e.metaKey) && typeof item.sessionUrl === "string") {
+        if (/^https?:\/\//i.test(item.sessionUrl)) links.openExternal(item.sessionUrl);
+        else links.openApp(item.sessionUrl);
         onClose();
       } else item.run();
     }
@@ -259,7 +260,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             <Kbd>↵</Kbd> open
           </span>
           <span>
-            <Kbd>Ctrl ↵</Kbd> open in T3
+            <Kbd>Ctrl ↵</Kbd> open session
           </span>
           <span>
             <Kbd>Alt C</Kbd> copy link

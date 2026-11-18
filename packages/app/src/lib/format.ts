@@ -118,6 +118,7 @@ export function modelText(model: string | null, options: ModelOption[]): string 
 
 export function workspaceText(w: Workspace): string {
   if (w.type === "root") return "project root";
+  if (!w.baseRef) return "harness-managed worktree";
   return `worktree from ${w.baseRef}${w.branch === null ? "" : ` → ${w.branch}`}`;
 }
 

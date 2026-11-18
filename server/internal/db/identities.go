@@ -4,15 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 const T3ConnectionID int64 = 1
 
+func checkDestinationChange(ctx context.Context, tx *Tx, old, next int64, c Optional[execution.Config], w Optional[Workspace]) error {
+	if err := connectionExists(ctx, tx, next); err != nil {
+		return err
+	}
+	if old != next && (!c.Set || c.Null || !w.Set || w.Null) {
+		return Invalid("Choose the new harness configuration and workspace when changing destination.")
+	}
+	return nil
+}
+
 type SessionRef = execution.SessionRef
 type HarnessConnection struct {
-	ID      int64  `json:"id"`
-	Harness string `json:"harness"`
+	Configured bool   `json:"configured"`
+	ID         int64  `json:"id"`
+	Harness    string `json:"harness"`
 }
 type ProjectBinding struct {
 	ID                int64   `json:"id"`

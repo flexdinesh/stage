@@ -11,6 +11,8 @@ import {
   type T3Status,
 } from "../api/types.ts";
 import { DesktopAppCard } from "../components/Host.tsx";
+import { SharedPaths } from "../components/SharedPaths.tsx";
+import { OpenCodeSetup } from "../components/OpenCodeSetup.tsx";
 import { ServersCard } from "../components/Servers.tsx";
 import { PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
 import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
@@ -20,6 +22,7 @@ import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButt
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
+import { harnessName } from "../lib/tasks.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
 const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
@@ -84,7 +87,7 @@ function SyncCard() {
   return (
     <Panel title="Sync" meta="every 5 min">
       <div className="flex flex-col gap-3">
-        <Muted>Full sync of all T3 projects and threads runs every 5 minutes. Run it now to refresh history immediately.</Muted>
+        <Muted>Refresh workspace inventory and tracked sessions. Stage checks them every five minutes.</Muted>
         <div>
           <Button variant="primary" busy={sync.isPending} onClick={() => sync.mutate()}>
             Sync now
@@ -93,8 +96,9 @@ function SyncCard() {
         {sync.data === undefined ? null : (
           <Alert tone="plain">
             Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
-            <span className="tabular font-mono">{sync.data.threads}</span> threads at{" "}
+            <span className="tabular font-mono">{sync.data.threads}</span> sessions at{" "}
             <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
+            {sync.data.unavailableConnections?.map(id => <p key={id}>{harnessName(id)} could not finish syncing. Check its connection above.</p>)}
           </Alert>
         )}
         <ErrorText error={sync.error} />
@@ -117,7 +121,7 @@ function DefaultModelCard() {
   const prefs = usePreferences();
   const pinned = prefs.data?.pinned != null;
   return (
-    <Panel title="Default model" {...(prefs.data === undefined ? {} : { meta: pinned ? "pinned" : "last used" })}>
+    <Panel title="T3 default model" {...(prefs.data === undefined ? {} : { meta: pinned ? "pinned" : "last used" })}>
       <QueryState isPending={prefs.isPending} error={prefs.error}>
         {prefs.data === undefined ? null : <DefaultModelForm prefs={prefs.data} />}
       </QueryState>
@@ -142,10 +146,10 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
   });
   const pinned = prefs.pinned !== null;
   const note = pinned
-    ? "New tasks start from this pinned model and mode."
+    ? "New T3 tasks use this pinned selection."
     : prefs.lastUsed === null
       ? "Not pinned. New tasks start from the T3 default until you create one; after that, from your last task."
-      : "Not pinned. New tasks start from your last task's model and mode (shown). Pin to keep them fixed.";
+      : "New T3 tasks reuse the last T3 selection, including harness defaults. Pin the values shown below to use them explicitly.";
   return (
     <div className="flex flex-col gap-3">
       <Muted>{note}</Muted>
@@ -191,7 +195,7 @@ const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }
   { event: "failed", label: "Failed", hint: "run failed" },
   { event: "ready", label: "Ready", hint: "needs are completed, start it" },
   { event: "done", label: "Done", hint: "run finished" },
-  { event: "settled", label: "Settled", hint: "settled in T3" },
+  { event: "settled", label: "Completed", hint: "accepted in Stage" },
 ];
 
 const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];
@@ -398,12 +402,14 @@ export function SettingsPage() {
   const status = useT3Status();
   return (
     <>
-      <PageHeader title="Settings" meta="T3 connection, sync, defaults, notifications, appearance" />
+      <PageHeader title="Settings" meta="Harness connections, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
         <div className="flex flex-col gap-3.5 lg:row-span-5">
           <QueryState isPending={status.isPending} error={status.error}>
             {status.data === undefined ? null : <StatusCard status={status.data} />}
           </QueryState>
+          <OpenCodeSetup />
+          <SharedPaths />
           <ServersCard />
         </div>
         <SyncCard />

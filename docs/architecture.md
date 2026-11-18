@@ -10,7 +10,7 @@ Execution contracts and adapter responsibilities: [execution.md](execution.md).
 
 | Path | Owns | Must not |
 | --- | --- | --- |
-| `server/` (Go module `github.com/flexdinesh/stage/server`) | REST API, `/mcp`, CLI, stdio MCP, SQLite, the T3 connection, scheduling, business rules; embeds the browser host build (`internal/webui`) | Be imported by another module's `internal` path (promote a small public package instead, per ADR 0001) |
+| `server/` (Go module `github.com/flexdinesh/stage/server`) | REST API, `/mcp`, CLI, stdio MCP, SQLite, harness connections, scheduling, business rules; embeds the browser host build (`internal/webui`) | Be imported by another module's `internal` path (promote a small public package instead, per ADR 0001) |
 | `packages/app/` (`@stage/app`) | The whole UI: routes, pages, components, query/state logic, API client and types (`src/api/types.ts` mirrors [api.md](api.md)), design tokens (`src/index.css`), and the platform contract (`src/platform/index.ts`) | Use browser globals at a platform boundary, import a host or MyGo, or branch on the platform |
 | `apps/web/` (`@stage/web`) | Browser host: `index.html`, `src/main.tsx` (mount, service worker registration), `src/sw.ts`, `public/` (manifest, icons, favicons), Vite config, browser adapters (`src/platform/`) | Hold product UI or business logic |
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`@stage/desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
@@ -120,16 +120,10 @@ identities and immutable launch destinations. Existing IDs, journal bytes,
 accepted snapshot JSON and T3 credentials survive. Legacy columns remain adapter
 and migration data; new project rows use inert unique markers there, never routing.
 
-T3 is the only usable integration. A unique harness constraint permits one T3
-and one future OpenCode connection. Core identity has no OpenCode-specific fields.
-T3 discovery updates availability, never Stage title/archive or project existence.
-No automatic title/path matching: the current adapter cannot prove filesystem
-identity. All selection is explicit. A future matcher must require authoritative
-shared family/subproject evidence for automatic binding; Git remotes only suggest.
+The server configures one adapter per harness. T3 retains connection 1. OpenCode gets a stable database ID. Discovery refreshes workspace availability. Binding compares Git common directories and relative subprojects only below operator-declared shared paths. An unambiguous verified family can bind automatically during the explicit match action. Equal Git remotes suggest candidates for confirmation. Manual binding and correction remain available.
 
 Tasks pin connection/project/workspace/binding revision atomically with an attempt.
 Unknown outcomes keep the same destination and request ID on retry. A binding
 change applies only to a future unclaimed attempt. Connection-scoped session IDs
 own task lookup, provenance, notification groups and accepted evidence. Retained
-T3-specific cache reads are explicitly scoped to connection 1. Generic execution
-adapters and OpenCode launch support remain separate roadmap tasks.
+T3-specific cache reads are explicitly scoped to connection 1. The coordinator polls each configured harness independently. Release and scheduling workers also isolate their launches by connection.

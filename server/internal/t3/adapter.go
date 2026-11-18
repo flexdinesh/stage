@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"net/url"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Adapter exposes retained Stage operations, not the T3 protocol surface.
@@ -64,6 +65,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	for _, name := range []string{"launch", "stop", "adopt", "opening", "reply", "attention", "images", "registerWorkspace", "predecessorBase"} {
 		out.Operations[name] = yes
 	}
+	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
+		out.Permissions = append(out.Permissions, execution.Choice{ID: mode, Label: mode, Availability: yes})
+	}
 	for _, mode := range []string{"default", "plan"} {
 		out.Modes = append(out.Modes, execution.Choice{ID: mode, Label: mode, Availability: yes})
 	}
@@ -107,7 +111,7 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 	if in.Config.Model == "" && len(in.Config.Options) > 0 {
 		return &execution.Rejected{Reason: "Choose a model before setting model options."}
 	}
-	if in.Config.Model == "" && !slices.Contains([]string{"approval-required", "auto-accept-edits", "auto", "full-access"}, in.Config.Permission) {
+	if in.Config.Model == "" && in.Config.Permission != "" && !slices.Contains([]string{"approval-required", "auto-accept-edits", "auto", "full-access"}, in.Config.Permission) {
 		return &execution.Rejected{Reason: "Permission mode is unavailable. Choose a supported mode."}
 	}
 	if in.Config.Model != "" {
@@ -128,7 +132,7 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 			}
 		}
 	}
-	if !slices.ContainsFunc(c.Modes, func(m execution.Choice) bool { return m.ID == in.Config.Mode }) {
+	if in.Config.Mode != "" && !slices.ContainsFunc(c.Modes, func(m execution.Choice) bool { return m.ID == in.Config.Mode }) {
 		return &execution.Rejected{Reason: "Interaction mode is unavailable. Choose a supported mode."}
 	}
 	return nil

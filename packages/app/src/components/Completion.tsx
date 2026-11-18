@@ -16,7 +16,7 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
   const earlier = e.runId === null || e.replyRunId === null || e.runId !== e.replyRunId;
   return <div className="flex min-w-0 flex-col gap-3">
     <p className="text-small">Execution at capture: {taskStateLabel(e.executionState)}.</p>
-    <p className="font-mono text-meta text-muted">{e.observedAt === null ? "Execution observation unavailable." : `Cached execution observation: ${dateTime(e.observedAt)}.`} May predate the latest T3 activity.</p>
+    <p className="font-mono text-meta text-muted">{e.observedAt === null ? "Execution observation unavailable." : `Cached execution observation: ${dateTime(e.observedAt)}.`} Later harness activity may have occurred.</p>
     {e.reply === null || e.reply.trim() === "" ? <p className="text-small text-muted">Final reply missing. No reply was available in Stage.</p> : <>
       {earlier ? <Alert>Reply belongs to an earlier or unverified run. It is not a verified current-run result.</Alert> : null}
       <Suspense fallback={<p className="whitespace-pre-wrap break-words">{e.reply}</p>}><ReplyMarkdown text={e.reply} /></Suspense>
@@ -43,11 +43,11 @@ export function AcceptedResult({ acceptance, current }: { acceptance: Acceptance
   </Panel>;
 }
 
-export function CompletionButton({ task }: { task: Task }) {
+export function CompletionButton({ task, review = false }: { task: Task; review?: boolean }) {
   const [open, setOpen] = useState(false);
   const completed = task.acceptanceId !== null;
   return <>
-    <Button variant={completed || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Reopen task" : "Complete task"}</Button>
+    <Button small={review} variant={completed || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Reopen task" : review ? "Review" : "Complete task"}</Button>
     {open ? <CompletionDrawer task={task} reopen={completed} onClose={() => setOpen(false)} /> : null}
   </>;
 }

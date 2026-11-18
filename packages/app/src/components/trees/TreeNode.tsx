@@ -9,7 +9,9 @@ import { dateTime, duration } from "../../lib/format.ts";
 import { inState, nodeState } from "../../lib/trees.ts";
 import { TaskStateBadge } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
-import { useT3Destination } from "../../lib/hostState.ts";
+import { CompletionButton } from "../Completion.tsx";
+import { harnessName } from "../../lib/tasks.ts";
+import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
@@ -48,15 +50,17 @@ export function NodeAction({ task, className }: { task: Task; pending: readonly 
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
-  const appLink = useT3Destination()(task);
+  const appLink = useSessionDestination()(task);
   let action: ReactNode = null;
   if (task.state === "needs_input") {
     action =
       appLink === null ? null : (
         <AppButton small variant="primary" href={appLink} className={cls}>
-          Open in T3
+          Open in {harnessName(task.connectionId)}
         </AppButton>
       );
+  } else if (task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
+    action = <CompletionButton task={task} review />;
   } else if (startable) {
     action = (
       <Button small variant={task.state === "backlog" ? "primary" : "secondary"} busy={start.isPending} onClick={() => start.mutate()} className={cls}>
@@ -66,7 +70,7 @@ export function NodeAction({ task, className }: { task: Task; pending: readonly 
   } else if (appLink !== null) {
     action = (
       <AppButton small href={appLink} className={cls}>
-        Open in T3
+        Open in {harnessName(task.connectionId)}
       </AppButton>
     );
   }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -56,6 +55,12 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 	}
 	id := a.ConnectionID
 	if id == 0 {
+		var configured []int64
+		for _, conn := range cs {
+			if conn.Configured {
+				configured = append(configured, conn.ID)
+			}
+		}
 		switch {
 		case len(p.Bindings) == 1:
 			id = p.Bindings[0].ConnectionID
@@ -65,6 +70,8 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 			return 0, errors.New("this project has multiple harness bindings; select connectionId from list_projects")
 		case c.Session != nil:
 			id = c.Session.ConnectionID
+		case len(configured) == 1:
+			id = configured[0]
 		case len(cs) == 1:
 			id = cs[0].ID
 		default:
@@ -75,56 +82,4 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 		return 0, fmt.Errorf("connection %d is unavailable; select a configured connection from list_projects", id)
 	}
 	return id, nil
-}
-
-func available(what string, a execution.Availability) error {
-	if a.Available {
-		return nil
-	}
-	reason := a.Reason
-	if strings.TrimSpace(reason) == "" {
-		reason = "choose an available value from list_models for this connection"
-	}
-	return fmt.Errorf("%s is unavailable: %s", what, reason)
-}
-
-func checkChoice(what, id string, choices []execution.Choice) error {
-	if id == "" {
-		return nil
-	}
-	for _, c := range choices {
-		if c.ID == id {
-			return available(what+" "+id, c.Availability)
-		}
-	}
-	return available(what+" "+id, execution.Availability{})
-}
-func validateConfig(c execution.Config, f execution.Capabilities) error {
-	if err := checkChoice("interaction mode", c.Mode, f.Modes); err != nil {
-		return err
-	}
-	if c.Model == "" {
-		if c.Permission != "" || len(c.Options) > 0 {
-			return errors.New("choose a model before setting permissions or model options")
-		}
-		return nil
-	}
-	for _, m := range f.Models {
-		if m.ID != c.Model {
-			continue
-		}
-		if err := available("model "+m.ID, m.Availability); err != nil {
-			return err
-		}
-		if err := checkChoice("permission", c.Permission, m.Permissions); err != nil {
-			return err
-		}
-		for _, v := range c.Options {
-			if !slices.ContainsFunc(m.Options, func(o execution.Option) bool { return o.ID == v.ID && slices.Contains(o.Values, v.Value) }) {
-				return fmt.Errorf("option %s is unavailable for this model; choose a value from list_models", v.ID)
-			}
-		}
-		return nil
-	}
-	return available("model "+c.Model, execution.Availability{})
 }

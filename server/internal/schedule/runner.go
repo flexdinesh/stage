@@ -27,9 +27,10 @@ const lateAfter = time.Minute
 
 // Runner fires due schedules, then launches due one-shot tasks. Serialized.
 type Runner struct {
-	store    *db.Store
-	launcher Launcher
-	log      *slog.Logger
+	ConnectionID int64 // zero reconciles every connection
+	store        *db.Store
+	launcher     Launcher
+	log          *slog.Logger
 
 	// Every is the tick interval.
 	Every time.Duration
@@ -72,7 +73,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 	defer r.mu.Unlock()
 	now := r.Now()
 	var errs []error
-	due, err := r.store.DueSchedules(ctx, now)
+	due, err := r.store.DueSchedules(ctx, now, r.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 			r.log.Info("schedule fired", "schedule", id, "outcome", res.Outcome)
 		}
 	}
-	tasks, err := r.store.DueOneShots(ctx, now)
+	tasks, err := r.store.DueForConnection(ctx, now, r.ConnectionID)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}

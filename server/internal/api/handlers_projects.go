@@ -1,10 +1,54 @@
 package api
 
 import (
-	"github.com/flexdinesh/stage/server/internal/db"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func (s *server) openCodeStatus(w http.ResponseWriter, r *http.Request) error {
+	if s.OpenCode == nil {
+		return db.Conflict("OpenCode setup is unavailable on this server.")
+	}
+	writeJSON(w, 200, s.OpenCode.Status(r.Context()))
+	return nil
+}
+func (s *server) openCodeSettings(w http.ResponseWriter, r *http.Request) error {
+	if s.OpenCode == nil {
+		return db.Conflict("OpenCode setup is unavailable on this server.")
+	}
+	var in config.OpenCodeEdit
+	if err := decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if err := s.OpenCode.Save(r.Context(), in); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *server) plannedConnection(id int64) error {
+	if s.OpenCode != nil && s.OpenCode.ID() == id {
+		return nil
+	}
+	_, err := s.Sync.Adapter(id)
+	return err
+}
+
+func connectionPath(r *http.Request) (int64, error) {
+	if r.PathValue("connectionId") == "" {
+		return db.T3ConnectionID, nil
+	}
+	id, err := strconv.ParseInt(r.PathValue("connectionId"), 10, 64)
+	if err != nil || id < 1 {
+		return 0, db.Invalid("Choose a valid harness connection.")
+	}
+	return id, nil
+}
 
 func (s *server) updateProject(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
@@ -30,10 +74,15 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	// Unimplemented integrations are storage-only, not selectable product options.
 	out := []db.HarnessConnection{}
 	for _, c := range cs {
-		if _, err := s.Sync.Adapter(c.ID); err == nil {
+		if s.plannedConnection(c.ID) == nil {
+			_, adapterErr := s.Sync.Adapter(c.ID)
+			c.Configured = adapterErr == nil
+			if c.ID == db.T3ConnectionID && s.Setup != nil {
+				st := s.Setup.Status(r.Context(), false)
+				c.Configured = st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != "default"
+			}
 			out = append(out, c)
 		}
 	}
@@ -41,7 +90,11 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error {
-	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
+	id, err := connectionPath(r)
+	if err != nil {
+		return err
+	}
+	adapter, err := s.Sync.Adapter(id)
 	if err != nil {
 		return err
 	}
@@ -49,10 +102,10 @@ func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return &db.HarnessError{Err: err}
 	}
-	if _, err = s.Store.UpsertT3Projects(r.Context(), ps); err != nil {
+	if _, err = s.Store.RefreshWorkspaces(r.Context(), id, ps); err != nil {
 		return err
 	}
-	out, err := s.Store.ExternalProjects(r.Context(), db.T3ConnectionID)
+	out, err := s.Store.ExternalProjects(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -72,10 +125,7 @@ func (s *server) bindProject(w http.ResponseWriter, r *http.Request) error {
 	if err = decodeStrict(r, &in); err != nil {
 		return err
 	}
-	if in.ConnectionID != db.T3ConnectionID {
-		return db.Invalid("this connection is not available; select T3")
-	}
-	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
+	adapter, err := s.Sync.Adapter(in.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -104,7 +154,11 @@ func (s *server) unbindProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	p, err := s.Store.UnbindProject(r.Context(), id, db.T3ConnectionID)
+	connection, err := connectionPath(r)
+	if err != nil {
+		return err
+	}
+	p, err := s.Store.UnbindProject(r.Context(), id, connection)
 	if err != nil {
 		return err
 	}

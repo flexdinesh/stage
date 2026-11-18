@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
-import { useBadge, useT3Status } from "../api/queries.ts";
+import { useBadge, useConnections, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
@@ -152,7 +152,16 @@ const T3_LABEL: Record<T3State, string> = {
 function ConnectionStatus() {
   const status = useT3Status();
   const detailsId = useId();
+  const connections = useConnections();
+  const openCode = useOpenCodeStatus();
   const data = status.data;
+  if (connections.data && !connections.data.connections.some(c => c.id === 1 && c.configured)) {
+    const info = openCode.data;
+    const label = !info || info.state === "unconfigured" ? "Connect a harness" : "OpenCode " + info.state;
+    return <Link to="/settings" title={label} aria-label={label} className={cx(buttonClass("secondary"),"w-10 px-0 md:w-8")}>
+      {info?.state==="connected" ? <IconCheck/> : <IconChainLink size={16}/>}
+    </Link>;
+  }
   // A data-less query returns to pending on every refetch; after the first error keep showing offline.
   const checking = status.isPending && status.errorUpdateCount === 0;
   const state = checking ? "checking" : data === undefined ? "offline" : data.state;
@@ -188,6 +197,7 @@ function ConnectionStatus() {
           <dl className="flex flex-col gap-1">
             <StatusRow label="T3">{identity ?? "-"}</StatusRow>
             <StatusRow label="URL">{data?.t3Url ?? "-"}</StatusRow>
+            {openCode.data && openCode.data.state!=="unconfigured" ? <StatusRow label="OpenCode">{openCode.data.state}</StatusRow> : null}
             <StatusRow label="Last sync">{relativeTime(data?.lastFullSyncAt ?? null)}</StatusRow>
             <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `${data?.state === "expired" ? "expired" : "expires"} ${relativeTime(tokenExpiresAt)}`}</StatusRow>
           </dl>

@@ -85,7 +85,7 @@ test("task creation and adoption use initialNote; schedules retain notes", async
   const bodies = [];
   const { api } = fakeApi(async (_path, init) => { bodies.push(JSON.parse(init.body)); return Response.json({}); });
   await api.createTask({ projectId: 1, title: "Task", prompt: "Work", initialNote: "Initial context" });
-  await api.adoptThread("thread-1", { initialNote: "Tracked context" });
+  await api.adoptSession({ connectionId: 1, externalSessionId: "thread-1" }, { initialNote: "Tracked context" });
   await api.createSchedule({ projectId: 1, title: "Schedule", prompt: "Work", cron: "0 9 * * *", tz: "UTC", notes: "Template context" });
   assert.equal(bodies[0].initialNote, "Initial context");
   assert.equal(bodies[0].notes, undefined);

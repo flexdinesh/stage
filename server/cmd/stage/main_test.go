@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/instance"
@@ -62,7 +63,7 @@ func env(t *testing.T) (string, []string) {
 	var out []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "STAGE_") || strings.HasPrefix(k, "T3_") || strings.HasPrefix(k, "XDG_") || k == "HOME" || k == "NOTIFY_SOCKET" {
+		if strings.HasPrefix(k, "STAGE_") || strings.HasPrefix(k, "T3_") || strings.HasPrefix(k, "OPENCODE_") || strings.HasPrefix(k, "XDG_") || k == "HOME" || k == "NOTIFY_SOCKET" {
 			continue
 		}
 		out = append(out, kv)
@@ -183,6 +184,20 @@ func TestManagedServe(t *testing.T) {
 	code, fg := runMain(t, append(environ, "STAGE_DATA_DIR="+data), "serve", "--listen", "unix:"+filepath.Join(short, "b.sock"))
 	if code != 75 || !strings.Contains(fg, "stage service stop") {
 		t.Fatalf("foreground: %d %s", code, fg)
+	}
+	// Listener ownership precedes database migration. Exercise shutdown after readiness.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	api := client.New(holder.Listeners[0])
+	for {
+		health, err := api.Health(ctx)
+		if err == nil && health.Status == "ok" {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("managed readiness: %v %+v", err, health)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	if err := cmd.Wait(); err != nil {
