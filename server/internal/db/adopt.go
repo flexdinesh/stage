@@ -4,73 +4,39 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"slices"
 	"strings"
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// adoptStateSQL is an adopted session's initial task state from its mirror
-// row th: an SQL copy of sync.MapThreadState with current = done (an idle
-// session without runs reads done). Migration 0003 inlines the same CASE.
-const adoptStateSQL = `CASE WHEN th.execution_state='idle' THEN 'done' ELSE COALESCE(th.execution_state,'done') END`
-
-// AdoptInput adopts a T3 session as a task ("Track as task").
+// AdoptInput names the target independently of the caller who wrote the note.
 type AdoptInput struct {
+	Session         SessionRef
+	ThreadID        string // legacy T3 target
+	CallerSession   *SessionRef
 	ProjectID       *int64
 	NewProjectTitle string
 	Binding         *ProjectBinding
-	ThreadID        string
-	Title           *string  // nil or blank = the session title (else "Session <id8>")
-	InitialNote     *string  // nil = ""
-	Tags            []string // cleaned by the API
-	TreeID          *int64   // join this tree (no needs)
+	Title           *string
+	InitialNote     *string
+	Tags            []string
+	TreeID          *int64
 }
 
-// AdoptThread makes mirrored session in.ThreadID a task (docs/api.md "Adopt
-// session"): prompt "", state from the session (adoptStateSQL), never
-// started by stage. A session a task already owns returns that task
-// (created false). Errors: unknown session 404; a subagent, an archived
-// session or one whose project is not in stage 409; unknown tree 404.
 func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, error) {
 	var id int64
 	var created bool
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var err error
-		var owner bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE t3_thread_id=$1 AND connection_id=1)`, in.ThreadID).Scan(&owner); err != nil {
-			return err
-		}
-		if !owner && in.Binding != nil {
-			var projectID int64
-			if in.ProjectID != nil {
-				projectID = *in.ProjectID
-			} else {
-				if strings.TrimSpace(in.NewProjectTitle) == "" {
-					return Invalid("choose a Stage project or enter a new project title")
-				}
-				projectID, err = insertProject(ctx, tx, Project{Title: strings.TrimSpace(in.NewProjectTitle)})
-				if err != nil {
-					return err
-				}
-			}
-			binding := *in.Binding
-			binding.ProjectID = projectID
-			if _, err = bindProject(ctx, tx, binding); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `UPDATE threads SET stage_project_id=$2 WHERE t3_thread_id=$1`, in.ThreadID, projectID); err != nil {
-				return err
+		id, created, err = adoptThread(ctx, tx, in)
+		if err == nil && in.TreeID != nil {
+			if err = treeExists(ctx, tx, *in.TreeID); err == nil {
+				err = joinTree(ctx, tx, id, *in.TreeID)
 			}
 		}
-		if id, created, err = adoptThread(ctx, tx, in); err != nil {
-			return err
-		}
-		if in.TreeID != nil {
-			if err := treeExists(ctx, tx, *in.TreeID); err != nil {
-				return err
-			}
-			return joinTree(ctx, tx, id, *in.TreeID)
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return Task{}, false, err
@@ -79,77 +45,123 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 	return t, created, err
 }
 
-// adoptThread is AdoptThread's insert, inside tx; returns the task id.
 func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error) {
-	var owner int64
-	err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE t3_thread_id = $1 AND connection_id=1`, in.ThreadID).Scan(&owner)
-	switch {
-	case err == nil:
-		return owner, false, nil
-	case !errors.Is(err, sql.ErrNoRows):
-		return 0, false, err
+	ref := in.Session
+	if in.ThreadID != "" {
+		ref = SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: in.ThreadID}
 	}
-	var child bool
-	var archived bool
-	var project *int64
-	err = tx.QueryRow(ctx, `
-SELECT COALESCE(th.relationship,'')='subagent', th.archived, p.id FROM threads th
-LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1)) WHERE th.t3_thread_id = $1`, in.ThreadID).
-		Scan(&child, &archived, &project)
+	sid, err := sessionIdentity(ctx, tx, ref)
 	if err != nil {
-		return 0, false, fmt.Errorf("session %s: %w", in.ThreadID, notFound(err))
-	}
-	switch {
-	case child:
-		return 0, false, Conflict("session %s is a subagent: only a top-level session can be adopted", in.ThreadID)
-	case archived:
-		return 0, false, Conflict("session %s is archived", in.ThreadID)
-	case project == nil:
-		return 0, false, Conflict("session %s belongs to a project stage does not have", in.ThreadID)
-	}
-	var title *string
-	if in.Title != nil && strings.TrimSpace(*in.Title) != "" {
-		v := strings.TrimSpace(*in.Title)
-		title = &v
+		return 0, false, err
 	}
 	var id int64
-	var state TaskState
-	err = tx.QueryRow(ctx, `
-INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, runtime_mode, interaction_mode,
-  tags, state, t3_thread_id, launch_attempt, launched_at, finished_at, settled_at, adopted)
-SELECT $2, COALESCE($3, NULLIF(trim(th.title), ''), 'Session ' || substr(th.t3_thread_id, 1, 8)), '',
-  CASE WHEN th.provider_instance_id IS NOT NULL AND th.model IS NOT NULL THEN th.provider_instance_id END,
-  CASE WHEN th.provider_instance_id IS NOT NULL AND th.model IS NOT NULL THEN th.model END,
-  CASE WHEN th.runtime_mode IN ('approval-required', 'auto-accept-edits', 'auto', 'full-access')
-       THEN th.runtime_mode ELSE 'full-access' END,
-  CASE WHEN th.interaction_mode IN ('default', 'plan') THEN th.interaction_mode ELSE 'default' END,
-  $4, st, th.t3_thread_id, 1, th.created_at,
-  CASE WHEN st IN ('done', 'failed', 'interrupted', 'cancelled', 'settled') THEN COALESCE(th.run_ended_at, th.updated_at) END,
-  CASE WHEN st = 'settled' THEN COALESCE(th.settled_at, th.updated_at) END, 1
-FROM (SELECT th.*, `+adoptStateSQL+` AS st FROM threads th WHERE th.t3_thread_id = $1) th
-RETURNING id, state`, in.ThreadID, *project, title, nonNilStrings(in.Tags)).Scan(&id, &state)
+	err = tx.QueryRow(ctx, "SELECT id FROM tasks WHERE session_id=$1", sid).Scan(&id)
+	if err == nil {
+		return id, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+	var o execution.Observation
+	if err = tx.QueryRow(ctx, "SELECT observation FROM execution_observations WHERE session_id=$1", sid).Scan(&o); err != nil {
+		return 0, false, notFound(err)
+	}
+	if o.Child || o.Parent != nil {
+		return 0, false, Conflict("only a top-level session can be adopted")
+	}
+	if o.Archived {
+		return 0, false, Conflict("session is archived")
+	}
+	projectID, err := adoptionProject(ctx, tx, in, o)
 	if err != nil {
 		return 0, false, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE tasks SET execution_config=(SELECT json_extract(observation,'$.config') FROM execution_observations WHERE session_id=tasks.session_id) WHERE id=$1`, id); err != nil {
+	title := strings.TrimSpace(o.Title)
+	if in.Title != nil && strings.TrimSpace(*in.Title) != "" {
+		title = strings.TrimSpace(*in.Title)
+	}
+	if title == "" {
+		r := []rune(ref.ExternalSessionID)
+		title = "Session " + string(r[:min(8, len(r))])
+	}
+	state := TaskState(o.State)
+	if state == "idle" {
+		state = StateDone
+	}
+	var finished *time.Time
+	if !o.Active {
+		finished = o.EndedAt
+		if finished == nil {
+			finished = &o.UpdatedAt
+		}
+	}
+	var legacyID *string
+	permission, mode := "full-access", "default"
+	if ref.ConnectionID == T3ConnectionID {
+		legacyID = &ref.ExternalSessionID
+		if slices.Contains(RuntimeModes, o.Config.Permission) {
+			permission = o.Config.Permission
+		}
+		if slices.Contains(InteractionModes, o.Config.Mode) {
+			mode = o.Config.Mode
+		}
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,tags,connection_id,session_id,t3_thread_id,
+	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at)
+	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,$10,1,1,$11,$12) RETURNING id`, projectID, title, state, nonNilStrings(in.Tags), ref.ConnectionID, sid, legacyID, o.Config, permission, mode, o.CreatedAt, finished).Scan(&id)
+	if err != nil {
 		return 0, false, err
 	}
-	if in.TreeID != nil {
-		if err := treeExists(ctx, tx, *in.TreeID); err != nil {
-			return 0, false, err
-		}
-		if err := joinTree(ctx, tx, id, *in.TreeID); err != nil {
-			return 0, false, err
-		}
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, $2, 'adopted session')`, id, string(state))
-	if err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO task_events(task_id,to_state,detail) VALUES($1,$2,'adopted session')`, id, state); err != nil {
 		return 0, false, err
 	}
 	if in.InitialNote != nil && *in.InitialNote != "" {
-		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: *in.InitialNote, RequestID: "initial-note", SourceThreadID: &in.ThreadID}); err != nil {
-			return 0, false, err
+		_, err = appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: *in.InitialNote, RequestID: "initial-note", SourceSession: in.CallerSession})
+	}
+	return id, true, err
+}
+
+func adoptionProject(ctx context.Context, tx *Tx, in AdoptInput, o execution.Observation) (int64, error) {
+	q := "SELECT project_id FROM project_bindings WHERE active=1 AND status='available' AND connection_id=$1 AND external_project_id=$2"
+	args := []any{o.Session.ConnectionID, o.Project}
+	if in.Binding != nil {
+		if in.Binding.ExternalProjectID != o.Project || in.Binding.ConnectionID != o.Session.ConnectionID {
+			return 0, Conflict("session workspace changed; retry adoption")
+		}
+		q += " AND workspace=$3"
+		args = append(args, in.Binding.Workspace)
+	}
+	var id int64
+	err := tx.QueryRow(ctx, "SELECT min(project_id) FROM ("+q+") HAVING count(*)=1", args...).Scan(&id)
+	if err == nil {
+		if in.ProjectID != nil && *in.ProjectID != id || in.NewProjectTitle != "" {
+			return 0, Conflict("session already has a bound Stage project")
+		}
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	if in.Binding == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
+		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
+	}
+	if in.ProjectID != nil {
+		id = *in.ProjectID
+	} else {
+		id, err = insertProject(ctx, tx, Project{Title: strings.TrimSpace(in.NewProjectTitle)})
+		if err != nil {
+			return 0, err
 		}
 	}
-	return id, true, nil
+	b := *in.Binding
+	b.ProjectID = id
+	var active bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM project_bindings WHERE active=1 AND project_id=$1 AND connection_id=$2)", id, b.ConnectionID).Scan(&active); err != nil {
+		return 0, err
+	}
+	if active {
+		return 0, Conflict("project already has a binding; confirm the workspace in project settings")
+	}
+	_, err = bindProject(ctx, tx, b)
+	return id, err
 }

@@ -95,6 +95,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
 
 type TaskFilter struct {
 	OriginThreadID string
+	OriginSession  *SessionRef
 	ProjectID      *int64
 	States         []string
 	Tag            string
@@ -111,6 +112,9 @@ const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	var w where
+	if f.OriginSession != nil {
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
+	}
 	if f.OriginThreadID != "" {
 		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=1 AND external_id=" + w.arg(f.OriginThreadID) + ")")
 	}
@@ -214,6 +218,8 @@ type NewTask struct {
 	// NeedsThreadID ("afterMe"): adopt this T3 session (or take its owning
 	// task) and need it, before Needs.
 	NeedsThreadID *string
+	NeedsSession  *SessionRef
+	NeedsBinding  *ProjectBinding
 	StartMode     *StartMode // nil = inherit the tree's
 }
 
@@ -243,7 +249,7 @@ func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx *Tx, i
 // insertTask is createTask's insert, inside tx: insert, adopt
 // NeedsThreadID, resolve and join the tree, set needs.
 func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id int64) error) (int64, error) {
-	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsThreadID != nil) {
+	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsThreadID != nil || in.NeedsSession != nil) {
 		return 0, errStartAndNeeds
 	}
 	if err := projectExists(ctx, tx, in.ProjectID); err != nil {
@@ -277,8 +283,14 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16,$
 	}
 
 	needs := slices.Clone(in.Needs)
-	if in.NeedsThreadID != nil {
-		owner, _, err := adoptThread(ctx, tx, AdoptInput{ThreadID: *in.NeedsThreadID})
+	if in.NeedsThreadID != nil || in.NeedsSession != nil {
+		input := AdoptInput{Binding: in.NeedsBinding}
+		if in.NeedsSession != nil {
+			input.Session = *in.NeedsSession
+		} else {
+			input.ThreadID = *in.NeedsThreadID
+		}
+		owner, _, err := adoptThread(ctx, tx, input)
 		if err != nil {
 			return 0, err
 		}

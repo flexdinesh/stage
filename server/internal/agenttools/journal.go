@@ -81,8 +81,12 @@ func (o *Ops) AppendNote(ctx context.Context, a AppendNoteArgs) (db.JournalEntry
 	if strings.TrimSpace(a.Text) == "" || len(a.Text) > 16*1024 {
 		return db.JournalEntry{}, errors.New("text must be nonempty and at most 16 KiB")
 	}
+	c, err := o.caller(ctx, a.CallerArgs)
+	if err != nil {
+		return db.JournalEntry{}, err
+	}
 	return o.Client.AppendNote(ctx, owner, db.AppendNoteInput{
 		Text: a.Text, Category: a.Category, RequestID: a.RequestID,
-		SourceTaskID: a.SourceTaskID, SourceThreadID: o.caller(a.CallerArgs).ThreadPtr(),
+		SourceTaskID: a.SourceTaskID, SourceSession: c.Session,
 	})
 }

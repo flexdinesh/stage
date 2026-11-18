@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
@@ -24,11 +22,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
- "github.com/flexdinesh/stage/server/internal/t3setup"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var testDB dbtest.DB
@@ -45,16 +45,26 @@ type env struct {
 }
 
 func newEnv(t *testing.T) *env {
+	return harnessEnv(t, nil)
+}
+func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	fake := t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.New(store, t3.NewAdapter(fake), log)
+	adapters := map[int64]execution.Adapter{1: t3.NewAdapter(fake)}
+	if other != nil {
+		if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness) VALUES(7,'opencode')"); err != nil {
+			t.Fatal(err)
+		}
+		adapters[7] = other
+	}
+	svc := t3sync.NewWithAdapters(store, adapters, log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, Setup:t3setup.New(t3setup.Options{Config:config.Config{T3PublicURL:"http://localhost:3773"},Store:store,Client:fake,Fake:true,Logger:log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store, Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -112,7 +122,11 @@ func connect(t *testing.T, o *agenttools.Ops) *mcp.ClientSession {
 // Returns the tool error text ("" on success).
 func call(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any, out any) string {
 	t.Helper()
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	return callMeta(t, cs, name, args, nil, out)
+}
+func callMeta(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any, meta mcp.Meta, out any) string {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args, Meta: meta})
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}

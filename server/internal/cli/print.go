@@ -10,6 +10,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 func table(w io.Writer, header string, rows func(tw io.Writer)) {
@@ -34,6 +35,9 @@ func ts(t *time.Time) string {
 }
 
 func printContext(w io.Writer, c agenttools.ContextOut) {
+	if c.Session != nil {
+		c.ThreadID = fmt.Sprintf("%s (connection %d)", c.Session.ExternalSessionID, c.Session.ConnectionID)
+	}
 	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(c.ThreadID), dash(c.Cwd), c.APIURL)
 	if c.Project != nil {
 		fmt.Fprintf(w, "project  %d %s (%s, from %s)\n", c.Project.ID, c.Project.Title, projectWorkspace(*c.Project), c.ProjectSource)
@@ -61,6 +65,19 @@ func printProjects(w io.Writer, ps []db.Project) {
 			fmt.Fprintf(tw, "%d\t%s\t%s\n", p.ID, p.Title, projectWorkspace(p))
 		}
 	})
+}
+
+func printCapabilities(w io.Writer, c execution.Capabilities) {
+	for _, m := range c.Models {
+		fmt.Fprintf(w, "%s  %s  %s\n", m.ID, m.Label, m.Reason)
+	}
+	for _, v := range c.Workspaces {
+		fmt.Fprintf(w, "workspace %s  %s\n", v.ID, v.Reason)
+	}
+	for _, v := range c.Modes {
+		fmt.Fprintf(w, "mode %s  %s\n", v.ID, v.Reason)
+	}
+	fmt.Fprintln(w, "Use --json for model options, permissions and operation availability.")
 }
 
 func printCatalog(w io.Writer, c client.Catalog) {
@@ -104,11 +121,20 @@ func waitsOn(needs []int64, start *time.Time) string {
 
 func printTask(w io.Writer, t client.Task) {
 	fmt.Fprintf(w, "task %d  %s  [%s]  %s\n", t.ID, t.Title, t.State, t.ProjectTitle)
-	model := "T3 default"
-	if t.Model != nil {
+	model, permission, mode := "T3 default", t.RuntimeMode, t.InteractionMode
+	if t.ConnectionID > 0 && t.ConnectionID != db.T3ConnectionID {
+		fmt.Fprintf(w, "  connection %d\n", t.ConnectionID)
+		model, permission, mode = "harness default", "", ""
+		if cfg := t.ExecutionConfig; cfg != nil {
+			if cfg.Model != "" {
+				model = cfg.Model
+			}
+			permission, mode = cfg.Permission, cfg.Mode
+		}
+	} else if t.Model != nil {
 		model = orDash(t.ProviderInstanceID) + "/" + *t.Model
 	}
-	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, t.RuntimeMode, t.InteractionMode)
+	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, permission, mode)
 	switch {
 	case t.Workspace.FromPredecessor():
 		fmt.Fprintf(w, "  worktree from %s's branch (configured ref %s, branch %s)\n", predecessorLabel(t), t.Workspace.BaseRef, orDash(t.Workspace.Branch))
@@ -131,10 +157,14 @@ func printTask(w io.Writer, t client.Task) {
 	if t.Adopted {
 		fmt.Fprintln(w, "  adopted  tracks an existing session (stage never starts it)")
 	}
-	if t.OriginThreadID != nil {
+	if t.OriginSession != nil && t.OriginSession.ConnectionID != db.T3ConnectionID {
+		fmt.Fprintf(w, "  created by connection %d session %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID)
+	} else if t.OriginThreadID != nil {
 		fmt.Fprintf(w, "  created by session %s %s\n", *t.OriginThreadID, orDash(t.OriginThreadTitle))
 	}
-	if t.T3ThreadID != nil {
+	if t.Session != nil && t.Session.ConnectionID != db.T3ConnectionID {
+		fmt.Fprintf(w, "  session  %s\n", t.Session.ExternalSessionID)
+	} else if t.T3ThreadID != nil {
 		fmt.Fprintf(w, "  thread   %s\n", *t.T3ThreadID)
 	}
 	if t.T3WebURL != nil {
@@ -166,11 +196,11 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	}
 	printHandoff(w, d)
 	printLaunchBase(w, d.CurrentLaunchBase)
-	if d.Thread != nil {
-	}
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
 	if d.Thread != nil {
 		printLastWord(w, d.Thread.LastWord)
+	} else if d.FinalReply != nil {
+		fmt.Fprintf(w, "\nFinal reply\n%s\n", d.FinalReply.Text)
 	}
 	if len(d.Events) > 0 {
 		fmt.Fprintln(w)
@@ -381,6 +411,14 @@ func printRef(w io.Writer, r agenttools.RefOut) {
 			fmt.Fprintf(w, "\nsession %s\n", r.Session.Thread.T3ThreadID)
 		}
 	}
+	if r.SessionRef != nil && r.Session == nil {
+		fmt.Fprintf(w, "session %s (connection %d)  %s\n", r.SessionRef.ExternalSessionID, r.SessionRef.ConnectionID, r.SessionTitle)
+	}
+	for _, link := range []string{r.Links.Web, r.Links.App, r.Links.Native} {
+		if link != "" {
+			fmt.Fprintln(w, link)
+		}
+	}
 	if r.Next != "" {
 		fmt.Fprintf(w, "\n%s\n", r.Next)
 	}
@@ -453,5 +491,9 @@ func projectWorkspace(p db.Project) string {
 	if len(p.Bindings) == 0 {
 		return "workspace not bound"
 	}
-	return p.Bindings[0].Workspace
+	var bindings []string
+	for _, b := range p.Bindings {
+		bindings = append(bindings, fmt.Sprintf("%s %d: %s", b.Harness, b.ConnectionID, b.Workspace))
+	}
+	return strings.Join(bindings, ", ")
 }

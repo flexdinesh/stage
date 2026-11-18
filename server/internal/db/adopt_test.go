@@ -58,7 +58,7 @@ func TestAdoptThread(t *testing.T) {
 		t.Fatalf("settled adopt %+v %v", settled, err)
 	}
 	notes := journal(t, s, ctx, db.JournalOwner{TaskID: &settled.ID}, db.JournalQuery{})
-	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" || notes.Entries[0].SourceThreadID == nil || *notes.Entries[0].SourceThreadID != "done-1" {
+	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" || notes.Entries[0].SourceSession != nil || notes.Entries[0].SourceThreadID != nil {
 		t.Fatalf("adoption initial note: %+v", notes)
 	}
 	// A blank title falls back to "Session <id8>"; a joined tree is kept.

@@ -14,6 +14,7 @@ import (
 // runNotes accepts notes OWNER_ID [list|add|get], with flags anywhere.
 func runNotes(ctx context.Context, env Env, kind string, args []string) error {
 	c := newCmd(env, kind+" notes")
+	caller := c.sessionFlags("caller")
 	var read agenttools.ReadJournalArgs
 	var appendArgs agenttools.AppendNoteArgs
 	var filterTask, sourceTask int64
@@ -84,6 +85,10 @@ func runNotes(ctx context.Context, env Env, kind string, args []string) error {
 		if !c.set("request-id") {
 			appendArgs.RequestID = rand.Text()
 		}
+		appendArgs.CallerSession, err = caller()
+		if err != nil {
+			return err
+		}
 		appendArgs.JournalOwnerArgs = owner
 		appendArgs.Category = read.Category
 		appendArgs.SourceTaskID = int64Flag(c, "source-task", sourceTask)
@@ -122,7 +127,9 @@ func printJournalEntry(w io.Writer, entry db.JournalEntry) {
 	if entry.SourceTaskID != nil {
 		source = append(source, fmt.Sprintf("source task #%d", *entry.SourceTaskID))
 	}
-	if entry.SourceThreadID != nil {
+	if entry.SourceSession != nil {
+		source = append(source, fmt.Sprintf("connection %d session %s", entry.SourceSession.ConnectionID, entry.SourceSession.ExternalSessionID))
+	} else if entry.SourceThreadID != nil {
 		source = append(source, "session "+*entry.SourceThreadID)
 	}
 	if len(source) > 0 {

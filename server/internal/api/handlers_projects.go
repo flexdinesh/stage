@@ -33,7 +33,7 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	// Unimplemented integrations are storage-only, not selectable product options.
 	out := []db.HarnessConnection{}
 	for _, c := range cs {
-		if c.Harness == "t3" {
+		if _, err := s.Sync.Adapter(c.ID); err == nil {
 			out = append(out, c)
 		}
 	}

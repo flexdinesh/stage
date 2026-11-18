@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/refs"
 )
 
@@ -13,10 +14,12 @@ import (
 // threadId is its T3 thread (null before launch); a session's taskId is the
 // task that owns it (null for sessions started outside stage).
 type refJSON struct {
-	Session  *db.SessionRef `json:"session"`
-	Kind     refs.Kind      `json:"kind"`
-	TaskID   *int64         `json:"taskId"`
-	ThreadID *string        `json:"threadId"`
+	Links        execution.Links `json:"links"`
+	SessionTitle string          `json:"sessionTitle,omitempty"`
+	Session      *db.SessionRef  `json:"session"`
+	Kind         refs.Kind       `json:"kind"`
+	TaskID       *int64          `json:"taskId"`
+	ThreadID     *string         `json:"threadId"`
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
@@ -32,21 +35,49 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return notFoundAs(err, fmt.Sprintf("task %d not found", ref.TaskID))
 		}
-		out.TaskID, out.ThreadID = &t.ID, t.T3ThreadID
+		out.TaskID = &t.ID
+		if t.ConnectionID == db.T3ConnectionID {
+			out.ThreadID = t.T3ThreadID
+		}
 		out.Session = t.Session
 	case refs.KindSession:
-		th, err := s.Store.GetThread(ctx, ref.ThreadID)
-		if errors.Is(err, db.ErrNotFound) && s.connected(ctx, db.T3ConnectionID) {
-			// Not mirrored yet: read it from T3 once.
-			if err = s.Sync.RefreshSession(ctx, ref.ThreadID); err == nil {
-				th, err = s.Store.GetThread(ctx, ref.ThreadID)
+		id := ref.ConnectionID
+		if id == 0 {
+			id = db.T3ConnectionID
+		}
+		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
+		out.Session = &target
+		if id == db.T3ConnectionID {
+			out.ThreadID = &target.ExternalSessionID
+		}
+		owner, err := s.Store.TaskBySession(ctx, target)
+		if err == nil {
+			out.TaskID = &owner.ID
+			break
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		obs, err := s.Store.Observation(ctx, target)
+		if errors.Is(err, db.ErrNotFound) && id == db.T3ConnectionID {
+			th, e := s.Store.GetThread(ctx, target.ExternalSessionID)
+			if e == nil {
+				out.SessionTitle = th.Title
+				break
+			}
+			if !errors.Is(e, db.ErrNotFound) {
+				return e
+			}
+		}
+		if errors.Is(err, db.ErrNotFound) {
+			if err = s.Sync.RefreshScopedSession(ctx, target); err == nil {
+				obs, err = s.Store.Observation(ctx, target)
 			}
 		}
 		if err != nil {
 			return notFoundAs(err, fmt.Sprintf("session %s not found", ref.ThreadID))
 		}
-		out.TaskID, out.ThreadID = th.TaskID, &th.T3ThreadID
-		out.Session = &th.Session
+		out.SessionTitle, out.Links = obs.Title, obs.Links
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil

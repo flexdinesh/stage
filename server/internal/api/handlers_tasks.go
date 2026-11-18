@@ -27,6 +27,13 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	f.Tag = strings.TrimSpace(q.Get("tag"))
 	f.Q = strings.TrimSpace(q.Get("q"))
 	f.OriginThreadID = strings.TrimSpace(q.Get("originThreadId"))
+	if q.Has("originConnectionId") || q.Has("originSessionId") {
+		id, e := queryInt64(q, "originConnectionId")
+		if e != nil || id == nil || *id <= 0 || strings.TrimSpace(q.Get("originSessionId")) == "" || f.OriginThreadID != "" {
+			return db.Invalid("supply originConnectionId and originSessionId together, or originThreadId for T3")
+		}
+		f.OriginSession = &db.SessionRef{ConnectionID: *id, ExternalSessionID: q.Get("originSessionId")}
+	}
 	if f.From, err = queryTime(q, "from", time.UTC); err != nil {
 		return err
 	}
@@ -57,6 +64,8 @@ type createTaskReq struct {
 }
 
 type taskConfigReq struct {
+	ConnectionID       *int64                  `json:"connectionId"`
+	NeedsSession       *db.SessionRef          `json:"needsSession"`
 	ExecutionConfig    *execution.Config       `json:"executionConfig"`
 	OriginSession      *db.SessionRef          `json:"originSession"`
 	ProjectID          *int64                  `json:"projectId"`
@@ -91,7 +100,11 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
 		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
 	}
+	if req.NeedsSession != nil && req.NeedsSessionID != nil {
+		return db.NewTask{}, db.Invalid("choose needsSession or needsSessionId")
+	}
 	in := db.NewTask{
+		NeedsSession:       req.NeedsSession,
 		ExecutionConfig:    req.ExecutionConfig,
 		OriginSession:      req.OriginSession,
 		Title:              strings.TrimSpace(req.Title),
@@ -110,10 +123,19 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 		AttachmentIDs:      req.AttachmentIDs,
 		Handoff:            req.Handoff,
 	}
+	if req.ConnectionID != nil {
+		if *req.ConnectionID <= 0 {
+			return db.NewTask{}, db.Invalid("choose a positive connectionId")
+		}
+		in.ConnectionID = *req.ConnectionID
+	}
+	if in.ConnectionID > 0 && in.ConnectionID != db.T3ConnectionID && (req.Model != nil || req.ProviderInstanceID != nil || req.RuntimeMode != nil || req.InteractionMode != nil || req.ModelOptions != nil) {
+		return db.NewTask{}, db.Invalid("use executionConfig with this destination connection")
+	}
 	if in.StartMode != nil && !in.StartMode.Valid() {
 		return in, db.Invalid("invalid startMode %q (want auto|manual)", *in.StartMode)
 	}
-	hasNeeds := len(in.Needs) > 0 || in.NeedsThreadID != nil
+	hasNeeds := len(in.Needs) > 0 || in.NeedsThreadID != nil || in.NeedsSession != nil
 	if req.Start && hasNeeds {
 		return in, db.Invalid("a task with needs cannot also start now (complete its needs in Stage before starting)")
 	}
@@ -201,12 +223,22 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
+	if req.ConnectionID != nil {
+		if _, err := s.Sync.Adapter(*req.ConnectionID); err != nil {
+			return err
+		}
+	}
 	in, err := req.validate()
 	if err != nil {
 		return err
 	}
 	if in.NeedsThreadID != nil {
-		if err := s.refreshSession(r, *in.NeedsThreadID); err != nil {
+		in.NeedsSession = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: *in.NeedsThreadID}
+		in.NeedsThreadID = nil
+	}
+	if in.NeedsSession != nil {
+		in.NeedsBinding, err = s.prepareAdoption(r, *in.NeedsSession)
+		if err != nil {
 			return err
 		}
 	}
@@ -215,11 +247,13 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	if err := s.Store.SetLastUsed(r.Context(), db.ModelDefaults{
-		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
-		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
-	}); err != nil {
-		s.log.Warn("record last-used model", "task", task.ID, "err", err)
+	if task.ConnectionID == db.T3ConnectionID && in.ExecutionConfig == nil {
+		if err := s.Store.SetLastUsed(r.Context(), db.ModelDefaults{
+			ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
+			RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
+		}); err != nil {
+			s.log.Warn("record last-used model", "task", task.ID, "err", err)
+		}
 	}
 	if req.Start {
 		// Start errors after save: the task stays created (failed + lastError).
@@ -253,6 +287,21 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	env := s.envID(ctx)
 	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, CurrentHandoffs: []db.Handoff{}}
+	if task.Session != nil {
+		obs, e := s.Store.Observation(ctx, *task.Session)
+		if e == nil {
+			out.FinalReply, out.Links = obs.Reply, obs.Links
+			if task.ConnectionID != db.T3ConnectionID {
+				for _, link := range obs.Artifacts {
+					if link.URL != "" {
+						out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: link.Repository, URL: link.URL})
+					}
+				}
+			}
+		} else if !errors.Is(e, db.ErrNotFound) {
+			return e
+		}
+	}
 	if out.Acceptances, err = s.Store.Acceptances(ctx, id); err != nil {
 		return err
 	}
@@ -549,13 +598,4 @@ func (s *server) setNeeds(w http.ResponseWriter, r *http.Request) error {
 	s.treeChanged()
 	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
 	return nil
-}
-
-// refreshSession reads session id from T3 into the mirror when T3 is
-// connected (so a session not mirrored yet can be adopted).
-func (s *server) refreshSession(r *http.Request, id string) error {
-	if !s.connected(r.Context(), db.T3ConnectionID) {
-		return nil
-	}
-	return s.Sync.RefreshSession(r.Context(), id)
 }

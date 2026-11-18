@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,8 +23,7 @@ import (
 // Ops runs agent operations against the REST API.
 type Ops struct {
 	Client *client.Client
-	// Caller is the environment's caller (CLI, stdio MCP); zero for HTTP
-	// /mcp, where tool arguments carry it.
+	// Caller is process-local only for the CLI or dedicated T3 stdio.
 	Caller agentctx.Caller
 	// LocalFiles allows imagePaths (reads files on this host). False for
 	// HTTP /mcp: the server cannot read the agent's files.
@@ -34,11 +34,17 @@ type Ops struct {
 
 // CallerArgs override the environment's caller.
 type CallerArgs struct {
-	CallerThreadID string `json:"callerThreadId,omitempty" jsonschema:"your T3 session id (env T3CODE_THREAD_ID); stdio/CLI read it from the environment"`
-	Cwd            string `json:"cwd,omitempty" jsonschema:"your working directory for context only; never used to infer a project"`
+	CallerSession  *db.SessionRef `json:"callerSession,omitempty" jsonschema:"explicit caller connectionId and externalSessionId for intermediaries"`
+	CallerThreadID string         `json:"callerThreadId,omitempty" jsonschema:"your T3 session id (env T3CODE_THREAD_ID); CLI and dedicated T3 stdio can read it from the environment"`
+	Cwd            string         `json:"cwd,omitempty" jsonschema:"your working directory for context only; never used to infer a project"`
 }
 
-func (o *Ops) caller(a CallerArgs) agentctx.Caller { return o.Caller.Merge(a.CallerThreadID, a.Cwd) }
+type metadataKey struct{}
+
+func (o *Ops) caller(ctx context.Context, a CallerArgs) (agentctx.Caller, error) {
+	meta, _ := ctx.Value(metadataKey{}).(*db.SessionRef)
+	return o.Caller.Resolve(a.CallerSession, a.CallerThreadID, a.Cwd, meta)
+}
 
 // IDArgs names one task or schedule.
 type IDArgs struct {
@@ -49,11 +55,12 @@ type IDArgs struct {
 
 // ContextOut is get_context.
 type ContextOut struct {
-	ThreadID      string      `json:"threadId"`
-	Cwd           string      `json:"cwd"`
-	Project       *db.Project `json:"project"`
-	ProjectSource string      `json:"projectSource"` // session | "" (unresolved)
-	ProjectError  string      `json:"projectError,omitempty"`
+	Session       *db.SessionRef `json:"session"`
+	ThreadID      string         `json:"threadId"`
+	Cwd           string         `json:"cwd"`
+	Project       *db.Project    `json:"project"`
+	ProjectSource string         `json:"projectSource"` // session | "" (unresolved)
+	ProjectError  string         `json:"projectError,omitempty"`
 	// CallerTaskID: the stage task that owns the caller's session.
 	CallerTaskID *int64  `json:"callerTaskId"`
 	TreeID       *int64  `json:"treeId"`
@@ -63,46 +70,78 @@ type ContextOut struct {
 
 // Context resolves the caller's session, directory and project.
 func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
-	c := o.caller(a)
-	out := ContextOut{ThreadID: c.ThreadID, Cwd: c.Cwd, APIURL: o.Client.BaseURL}
-	p, src, err := agentctx.ResolveProject(ctx, o.Client, c, "")
-	switch {
-	case err == nil:
-		out.Project, out.ProjectSource = &p, src
-	case errors.Is(err, agentctx.ErrNoProject):
-		out.ProjectError = err.Error()
-	default:
+	c, err := o.caller(ctx, a)
+	if err != nil {
+		return ContextOut{}, err
+	}
+	out := ContextOut{Session: c.Session, Cwd: c.Cwd, APIURL: o.Client.BaseURL}
+	if c.Session == nil {
+		out.ProjectError = "No caller session. Pass callerSession or specify a project on creation."
+		return out, nil
+	}
+	if c.Session.ConnectionID == db.T3ConnectionID {
+		out.ThreadID = c.Session.ExternalSessionID
+	}
+	d, err := o.Client.SessionContext(ctx, *c.Session)
+	if err != nil {
+		if client.IsStatus(err, 404) || client.IsStatus(err, 409) || client.IsStatus(err, 502) || client.IsStatus(err, 503) {
+			out.ProjectError = err.Error() + "; pass project explicitly or check the session binding"
+			return out, nil
+		}
 		return out, err
 	}
-	if c.ThreadID != "" {
-		d, err := o.Client.Thread(ctx, c.ThreadID)
-		if err == nil && d.Task != nil {
-			id := d.Task.ID
-			out.CallerTaskID = &id
-			out.TreeID, out.TreeTitle = d.Task.TreeID, d.Task.TreeTitle
-		}
+	out.Project = d.Project
+	if d.Project != nil {
+		out.ProjectSource = "session"
+	} else {
+		out.ProjectError = "No bound project for this session. Choose a project explicitly."
+	}
+	if d.Task != nil {
+		out.CallerTaskID = &d.Task.ID
+		out.TreeID = d.Task.TreeID
+		out.TreeTitle = d.Task.TreeTitle
 	}
 	return out, nil
 }
 
 // ProjectsOut is list_projects.
 type ProjectsOut struct {
-	Projects []db.Project `json:"projects"`
+	Connections []db.HarnessConnection `json:"connections"`
+	Projects    []db.Project           `json:"projects"`
 }
 
 func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error) {
 	ps, err := o.Client.Projects(ctx)
-	return ProjectsOut{Projects: ps}, err
+	if err != nil {
+		return ProjectsOut{}, err
+	}
+	cs, err := o.Client.Connections(ctx)
+	return ProjectsOut{Projects: ps, Connections: cs}, err
 }
 
-func (o *Ops) ListModels(ctx context.Context, _ struct{}) (client.Catalog, error) {
-	return o.Client.Catalog(ctx)
+type ModelsArgs struct {
+	ConnectionID int64 `json:"connectionId,omitempty"`
+}
+type ModelsOut struct {
+	client.Catalog
+	Capabilities *execution.Capabilities `json:"capabilities,omitempty"`
+}
+
+func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
+	if a.ConnectionID != 0 {
+		c, err := o.Client.Capabilities(ctx, a.ConnectionID)
+		return ModelsOut{Capabilities: &c}, err
+	}
+	c, err := o.Client.Catalog(ctx)
+	return ModelsOut{Catalog: c}, err
 }
 
 // ---- task config shared by tasks and schedules ----
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
+	ConnectionID    int64             `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
+	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty" jsonschema:"use the selected connection model, options, permission and mode from list_models"`
 	Project         string            `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
 	Title           string            `json:"title" jsonschema:"short task title"`
 	Prompt          string            `json:"prompt" jsonschema:"the full prompt the agent thread starts with; self-contained"`
@@ -113,7 +152,7 @@ type ConfigArgs struct {
 	RuntimeMode     string            `json:"runtimeMode,omitempty" jsonschema:"approval-required|auto-accept-edits|auto|full-access"`
 	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
-	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name (with baseRef); omitted = T3 picks"`
+	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
 	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only)"`
 	Tags            []string          `json:"tags,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
@@ -121,6 +160,8 @@ type ConfigArgs struct {
 
 // resolvedConfig is ConfigArgs resolved against the API.
 type resolvedConfig struct {
+	connectionID    int64
+	config          *execution.Config
 	project         db.Project
 	provider, model *string
 	options         []execution.ModelOption
@@ -318,7 +359,47 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 		return rc, err
 	}
 	rc.project = p
-	if err := o.resolveModel(ctx, a, true, &rc); err != nil {
+	rc.connectionID, err = o.destination(ctx, a, p, c)
+	if err != nil {
+		return rc, err
+	}
+	if a.ExecutionConfig != nil || rc.connectionID != db.T3ConnectionID {
+		if a.legacyConfig() {
+			return rc, errors.New("use executionConfig for the selected harness; legacy T3 configuration cannot be combined with it")
+		}
+		config := execution.Config{}
+		if a.ExecutionConfig != nil {
+			config, err = a.ExecutionConfig.config()
+			if err != nil {
+				return rc, err
+			}
+		}
+		rc.config = &config
+		if a.ExecutionConfig != nil || a.BaseRef != "" || len(a.ImagePaths) > 0 {
+			f, err := o.Client.Capabilities(ctx, rc.connectionID)
+			if err != nil {
+				return rc, err
+			}
+			if err := validateConfig(config, f); err != nil {
+				return rc, err
+			}
+			if a.BaseRef != "" {
+				if err := checkChoice("workspace", "worktree", f.Workspaces); err != nil {
+					return rc, err
+				}
+			}
+			if a.Base == db.BasePredecessor {
+				if err := available("predecessor base", f.Operations["predecessorBase"]); err != nil {
+					return rc, err
+				}
+			}
+			if len(a.ImagePaths) > 0 {
+				if err := available("images", f.Operations["images"]); err != nil {
+					return rc, err
+				}
+			}
+		}
+	} else if err := o.resolveModel(ctx, a, true, &rc); err != nil {
 		return rc, err
 	}
 	if rc.workspace = workspace(a.BaseRef, a.Branch, a.Base); rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
@@ -368,13 +449,14 @@ func taskRow(t client.Task) TaskRow {
 
 // ListTasksArgs is list_tasks.
 type ListTasksArgs struct {
-	OriginThreadID string   `json:"originThreadId,omitempty" jsonschema:"only tasks created by this session"`
-	Project        string   `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
-	States         []string `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
-	Tag            string   `json:"tag,omitempty"`
-	Query          string   `json:"query,omitempty" jsonschema:"substring of title or prompt"`
-	Closed         string   `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
-	Limit          int      `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
+	OriginSession  *db.SessionRef `json:"originSession,omitempty"`
+	OriginThreadID string         `json:"originThreadId,omitempty" jsonschema:"only tasks created by this session"`
+	Project        string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
+	States         []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
+	Tag            string         `json:"tag,omitempty"`
+	Query          string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
+	Closed         string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
+	Limit          int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
 }
 
 // TasksOut is list_tasks.
@@ -394,6 +476,7 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 	}
 	q.States, q.Tag, q.Q = a.States, a.Tag, a.Query
 	q.OriginThreadID = a.OriginThreadID
+	q.OriginSession = a.OriginSession
 	switch a.Closed {
 	case "", "false":
 	case "true", "all":
@@ -436,14 +519,14 @@ type WaitArgs struct {
 }
 
 // needsSession resolves afterMe to the caller's session id.
-func needsSession(w WaitArgs, c agentctx.Caller) (*string, error) {
+func needsSession(w WaitArgs, c agentctx.Caller) (*db.SessionRef, error) {
 	if !w.AfterMe {
 		return nil, nil
 	}
-	if c.ThreadID == "" {
-		return nil, errors.New("afterMe needs your session id: run inside a T3 session (T3CODE_THREAD_ID) or pass callerThreadId")
+	if c.Session == nil {
+		return nil, errors.New("afterMe needs your session id: pass callerSession or use per-call harness context")
 	}
-	return c.ThreadPtr(), nil
+	return c.Session, nil
 }
 
 // CreateTaskArgs is create_task.
@@ -456,7 +539,10 @@ type CreateTaskArgs struct {
 }
 
 func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, error) {
-	c := o.caller(a.CallerArgs)
+	c, err := o.caller(ctx, a.CallerArgs)
+	if err != nil {
+		return client.Task{}, err
+	}
 	session, err := needsSession(a.WaitArgs, c)
 	if err != nil {
 		return client.Task{}, err
@@ -476,11 +562,11 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		rc.workspace.BaseTaskID = a.BaseTaskID
 	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
-		ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
 		Tags: a.Tags, InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
-		TreeID: a.TreeID, Needs: a.Needs, NeedsSessionID: session, StartMode: mode.mode, OriginThreadID: c.ThreadPtr(),
+		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
 }
@@ -488,6 +574,7 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only title and tags change.
 type UpdateArgs struct {
+	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty"`
 	ID              int64             `json:"id"`
 	Project         *string           `json:"project,omitempty" jsonschema:"move to project (id or title)"`
 	Title           *string           `json:"title,omitempty"`
@@ -523,8 +610,42 @@ func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
 	return db.Workspace{Type: "root", Base: base}, true
 }
 
-func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, error) {
+func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
 	p := client.Patch{}
+	legacy := a.Model != nil || a.Provider != nil || a.Effort != nil || a.Options != nil || a.RuntimeMode != nil || a.InteractionMode != nil
+	if legacy || a.ExecutionConfig != nil {
+		var id int64
+		if schedule {
+			v, err := o.Client.Schedule(ctx, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			id = v.ConnectionID
+		} else {
+			v, err := o.Client.Task(ctx, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			id = v.ConnectionID
+		}
+		if legacy && (a.ExecutionConfig != nil || id != db.T3ConnectionID) {
+			return nil, errors.New("use executionConfig for this connection without legacy T3 options")
+		}
+		if a.ExecutionConfig != nil {
+			cfg, err := a.ExecutionConfig.config()
+			if err != nil {
+				return nil, err
+			}
+			f, err := o.Client.Capabilities(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if err = validateConfig(cfg, f); err != nil {
+				return nil, err
+			}
+			p["executionConfig"] = cfg
+		}
+	}
 	if a.Project != nil {
 		pr, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
 		if err != nil {
@@ -586,7 +707,7 @@ type UpdateTaskArgs struct {
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs)
+	p, err := o.configPatch(ctx, a.UpdateArgs, false)
 	if err != nil {
 		return client.Task{}, err
 	}
@@ -748,16 +869,19 @@ type CreateScheduleArgs struct {
 }
 
 func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Schedule, error) {
-	c := o.caller(a.CallerArgs)
+	c, err := o.caller(ctx, a.CallerArgs)
+	if err != nil {
+		return db.Schedule{}, err
+	}
 	rc, err := o.resolveConfig(ctx, a.ConfigArgs, c)
 	if err != nil {
 		return db.Schedule{}, err
 	}
 	return o.Client.CreateSchedule(ctx, client.CreateSchedule{
-		ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginThreadID: c.ThreadPtr(),
+		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})
 }
@@ -772,7 +896,7 @@ type UpdateScheduleArgs struct {
 }
 
 func (o *Ops) UpdateSchedule(ctx context.Context, a UpdateScheduleArgs) (db.Schedule, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs)
+	p, err := o.configPatch(ctx, a.UpdateArgs, true)
 	if err != nil {
 		return db.Schedule{}, err
 	}
@@ -818,45 +942,65 @@ func (o *Ops) PreviewSchedule(ctx context.Context, a PreviewArgs) (PreviewOut, e
 
 // ---- sessions ----
 
-// SessionRow is a compact session for lists.
+// RefArgs accepts one pasted reference or a connection-scoped session.
 type RefArgs struct {
-	Ref string `json:"ref" jsonschema:"what the user pasted: a stage task or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
+	Session *db.SessionRef `json:"session,omitempty" jsonschema:"explicit scoped session instead of ref"`
+	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
 }
 
 // RefOut is read_ref: the task and/or session a reference names. A task
 // reference includes its session (once launched); a session reference
 // includes the task that owns it (if any).
 type RefOut struct {
-	Kind    string               `json:"kind"` // task | session
-	Task    *client.TaskDetail   `json:"task"`
-	Session *client.ThreadDetail `json:"session"`
+	SessionRef   *db.SessionRef       `json:"sessionRef,omitempty"`
+	Links        execution.Links      `json:"links"`
+	SessionTitle string               `json:"sessionTitle,omitempty"`
+	Kind         string               `json:"kind"` // task | session
+	Task         *client.TaskDetail   `json:"task"`
+	Session      *client.ThreadDetail `json:"session"`
 	// Next: how to read the full conversation.
 	Next string `json:"next,omitempty"`
 }
 
 // ReadRef resolves a pasted reference and reads what it names.
 func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
+	if a.Session != nil {
+		if a.Ref != "" || a.Session.ConnectionID <= 0 || strings.TrimSpace(a.Session.ExternalSessionID) == "" {
+			return RefOut{}, errors.New("pass a reference or a session with connectionId and externalSessionId")
+		}
+		a.Ref = fmt.Sprintf("/connections/%d/sessions/%s", a.Session.ConnectionID, url.PathEscape(a.Session.ExternalSessionID))
+	}
 	r, err := o.Client.ResolveRef(ctx, a.Ref)
 	if err != nil {
 		return RefOut{}, err
 	}
-	out := RefOut{Kind: r.Kind}
+	out := RefOut{Kind: r.Kind, SessionRef: r.Session, SessionTitle: r.SessionTitle, Links: r.Links}
 	if r.TaskID != nil {
 		t, err := o.Client.Task(ctx, *r.TaskID)
 		if err != nil {
-			return RefOut{}, err
+			return out, err
 		}
 		out.Task = &t
-	}
-	if r.ThreadID != nil {
-		s, err := o.Client.Thread(ctx, *r.ThreadID)
-		if err != nil {
-			return RefOut{}, err
+		out.Links = t.Links
+		if t.Thread != nil {
+			out.Session = &client.ThreadDetail{Thread: *t.Thread, Task: &t.Task}
 		}
-		out.Session = &s
-		out.Next = "Full conversation: t3_thread_read " + *r.ThreadID + " (T3 MCP). The task retains its latest reply."
-	} else if out.Task != nil {
-		out.Next = "Not launched yet: no session or conversation. The task's prompt is what it will send."
+	}
+	if r.Session == nil {
+		out.Next = "Not launched yet: no session or conversation."
+		return out, nil
+	}
+	if r.Session.ConnectionID == db.T3ConnectionID {
+		if out.Task == nil {
+			d, err := o.Client.Thread(ctx, r.Session.ExternalSessionID)
+			if err != nil {
+				return out, err
+			}
+			out.Session = &d
+		}
+		out.Next = "Open in T3 or use t3_thread_read " + r.Session.ExternalSessionID + " in T3."
+	} else {
+		out.Next = "Open the session in its native harness."
 	}
 	return out, nil
 }

@@ -186,7 +186,9 @@ type Task struct {
 
 // TaskDetail is GET /api/tasks/:id.
 type TaskDetail struct {
-	Acceptances []db.Acceptance `json:"acceptances"`
+	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
+	Links       execution.Links  `json:"links"`
+	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
 	Thread *Thread        `json:"thread"`
@@ -279,6 +281,10 @@ type Catalog struct {
 
 // CreateTask is the POST /api/tasks body (nil = omitted).
 type CreateTask struct {
+	NeedsSession       *db.SessionRef          `json:"needsSession,omitempty"`
+	ConnectionID       int64                   `json:"connectionId,omitempty"`
+	OriginSession      *db.SessionRef          `json:"originSession,omitempty"`
+	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
 	ProjectID          int64                   `json:"projectId"`
 	Title              string                  `json:"title"`
 	Prompt             string                  `json:"prompt"`
@@ -304,6 +310,9 @@ type CreateTask struct {
 
 // CreateSchedule is the POST /api/schedules body.
 type CreateSchedule struct {
+	ConnectionID       int64                   `json:"connectionId,omitempty"`
+	OriginSession      *db.SessionRef          `json:"originSession,omitempty"`
+	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
 	ProjectID          int64                   `json:"projectId"`
 	Title              string                  `json:"title"`
 	Prompt             string                  `json:"prompt"`
@@ -328,6 +337,7 @@ type Patch map[string]any
 
 // Followup is the POST /api/tasks/:id/followup body.
 type TaskQuery struct {
+	OriginSession  *db.SessionRef
 	OriginThreadID string
 	ProjectID      *int64
 	States         []string
@@ -486,6 +496,10 @@ func (c *Client) Catalog(ctx context.Context) (Catalog, error) {
 func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	q := url.Values{}
 	q.Set("originThreadId", f.OriginThreadID)
+	if f.OriginSession != nil {
+		q.Set("originConnectionId", strconv.FormatInt(f.OriginSession.ConnectionID, 10))
+		q.Set("originSessionId", f.OriginSession.ExternalSessionID)
+	}
 	setID(q, "project", f.ProjectID)
 	if len(f.States) > 0 {
 		q.Set("state", strings.Join(f.States, ","))
@@ -612,12 +626,13 @@ type TreeStart struct {
 
 // AdoptSession is the POST /api/connections/1/sessions/:id/adopt body.
 type AdoptSession struct {
-	ProjectID       *int64   `json:"projectId,omitempty"`
-	NewProjectTitle string   `json:"newProjectTitle,omitempty"`
-	Title           *string  `json:"title,omitempty"`
-	InitialNote     *string  `json:"initialNote,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
-	TreeID          *int64   `json:"treeId,omitempty"`
+	CallerSession   *db.SessionRef `json:"callerSession,omitempty"`
+	ProjectID       *int64         `json:"projectId,omitempty"`
+	NewProjectTitle string         `json:"newProjectTitle,omitempty"`
+	Title           *string        `json:"title,omitempty"`
+	InitialNote     *string        `json:"initialNote,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	TreeID          *int64         `json:"treeId,omitempty"`
 }
 
 func treePath(id int64, action string) string {
@@ -710,8 +725,14 @@ func (c *Client) StartTree(ctx context.Context, id int64) (TreeStart, error) {
 // AdoptThread tracks session threadID as a task; created is false when a
 // task already owned it.
 func (c *Client) AdoptThread(ctx context.Context, threadID string, in AdoptSession) (Task, bool, error) {
+	return c.AdoptScoped(ctx, db.SessionRef{ConnectionID: 1, ExternalSessionID: threadID}, in)
+}
+func sessionPath(ref db.SessionRef) string {
+	return "/api/connections/" + strconv.FormatInt(ref.ConnectionID, 10) + "/sessions/" + url.PathEscape(ref.ExternalSessionID)
+}
+func (c *Client) AdoptScoped(ctx context.Context, ref db.SessionRef, in AdoptSession) (Task, bool, error) {
 	var out Task
-	status, err := c.doStatus(ctx, http.MethodPost, "/api/connections/1/sessions/"+url.PathEscape(threadID)+"/adopt", in, &out)
+	status, err := c.doStatus(ctx, http.MethodPost, sessionPath(ref)+"/adopt", in, &out)
 	return out, status == http.StatusCreated, err
 }
 
@@ -776,7 +797,32 @@ func (c *Client) PreviewSchedule(ctx context.Context, cron, tz string) ([]time.T
 	return out.Next, err
 }
 
-// Threads lists sessions.
+type SessionContext struct {
+	Session db.SessionRef   `json:"session"`
+	Task    *Task           `json:"task"`
+	Project *db.Project     `json:"project"`
+	Links   execution.Links `json:"links"`
+	Title   string          `json:"title"`
+}
+
+func (c *Client) SessionContext(ctx context.Context, ref db.SessionRef) (SessionContext, error) {
+	var out SessionContext
+	err := c.do(ctx, http.MethodGet, sessionPath(ref)+"/context", nil, &out)
+	return out, err
+}
+func (c *Client) Connections(ctx context.Context) ([]db.HarnessConnection, error) {
+	var out struct {
+		Connections []db.HarnessConnection `json:"connections"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/connections", nil, &out)
+	return out.Connections, err
+}
+func (c *Client) Capabilities(ctx context.Context, id int64) (execution.Capabilities, error) {
+	var out execution.Capabilities
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/connections/%d/capabilities", id), nil, &out)
+	return out, err
+}
+
 func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	var out ThreadDetail
 	err := c.do(ctx, http.MethodGet, "/api/connections/1/sessions/"+url.PathEscape(id), nil, &out)
@@ -785,10 +831,12 @@ func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 
 // Ref is GET /api/refs/resolve: what a pasted reference names.
 type Ref struct {
-	Session  *db.SessionRef `json:"session"`
-	Kind     string         `json:"kind"` // task | session
-	TaskID   *int64         `json:"taskId"`
-	ThreadID *string        `json:"threadId"`
+	Links        execution.Links `json:"links"`
+	SessionTitle string          `json:"sessionTitle,omitempty"`
+	Session      *db.SessionRef  `json:"session"`
+	Kind         string          `json:"kind"` // task | session
+	TaskID       *int64          `json:"taskId"`
+	ThreadID     *string         `json:"threadId"`
 }
 
 // ResolveRef reads a stage link, T3 thread link, #task id or thread id.

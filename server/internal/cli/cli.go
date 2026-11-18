@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/service"
 )
@@ -141,7 +142,7 @@ Usage:
   stage show REF                      the task or session a stage link, T3 thread link,
                                       #TASK_ID or thread id names (with its session/task)
   stage projects ls
-  stage models ls
+  stage models ls [--connection ID]
   stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
@@ -150,7 +151,7 @@ Usage:
   stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
                    [--start-mode auto|manual|inherit] [--base-task ID]
   stage task needs ID [NEED...]       replace a backlog task's needs (none clears them)
-  stage task rm|start|stop|dup ID     start on a blocked task starts it early (needs kept);
+  stage task rm|start|stop|dup ID     start requires completed prerequisites;
                                       rm only for a task that never started
   stage task archive ID [--undo]      archive a standalone task (--undo unarchives)
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
@@ -171,8 +172,8 @@ Usage:
   stage schedule preview --cron CRON --tz ZONE
   stage sessions adopt [THREAD_ID] [--title T] [--initial-note TEXT] [--tag T]... [--tree ID]
                                       track a session as a task (default: your session)
-  stage mcp                           stdio MCP server
-  stage setup mcp [--claude] [--codex] [--http]
+  stage mcp [--t3-session-env]        opt in only for a dedicated T3 stdio process
+  stage setup mcp [--claude] [--codex] [--http|--t3-session-env]
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
 
@@ -188,8 +189,11 @@ Start mode: tasks inherit their tree by default. Set shared policy on the tree;
   stage task|tree notes ID get ENTRY_ID
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
-Inside a T3 session, T3CODE_THREAD_ID and cwd pick the project, record provenance
-and enable --after-me and sessions adopt without a THREAD_ID.
+Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID.
+The CLI also reads T3CODE_THREAD_ID. OpenCode MCP sends per-call session metadata.
+Creation: --connection ID selects the destination. --execution-config JSON sets harness options.
+References/adoption: --target-connection ID --target-session ID names a scoped session.
+Creator filter: task ls --origin-connection ID --origin-session ID.
 `
 
 // cmd holds a command's parsed global flags.
@@ -207,6 +211,22 @@ func newCmd(env Env, name string) *cmd {
 	c.fs.StringVar(&c.url, "url", "", "server URL")
 	c.fs.BoolVar(&c.json, "json", false, "JSON output")
 	return c
+}
+
+// sessionFlags keeps the external ID and its connection together.
+func (c *cmd) sessionFlags(prefix string) func() (*db.SessionRef, error) {
+	var ref db.SessionRef
+	c.fs.Int64Var(&ref.ConnectionID, prefix+"-connection", 0, "Stage harness connection ID")
+	c.fs.StringVar(&ref.ExternalSessionID, prefix+"-session", "", "external session ID")
+	return func() (*db.SessionRef, error) {
+		if !c.set(prefix+"-connection") && !c.set(prefix+"-session") {
+			return nil, nil
+		}
+		if ref.ConnectionID <= 0 || strings.TrimSpace(ref.ExternalSessionID) == "" {
+			return nil, usagef("supply --%s-connection and --%s-session together", prefix, prefix)
+		}
+		return &ref, nil
+	}
 }
 
 // parse parses flags interspersed with positional args.
@@ -315,9 +335,15 @@ func verb(args []string, def string) (string, []string) {
 func runContext(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "context")
 	var a agenttools.CallerArgs
+	caller := c.sessionFlags("caller")
 	c.fs.StringVar(&a.CallerThreadID, "thread", "", "session id")
 	c.fs.StringVar(&a.Cwd, "cwd", "", "working directory")
 	if err := c.parse(args); err != nil {
+		return err
+	}
+	var err error
+	a.CallerSession, err = caller()
+	if err != nil {
 		return err
 	}
 	res, err := c.ops().Context(ctx, a)
@@ -329,13 +355,23 @@ func runContext(ctx context.Context, env Env, args []string) error {
 
 func runShow(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "show")
+	target := c.sessionFlags("target")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	if len(c.pos) != 1 {
-		return usagef("show: want one reference (stage link, T3 thread link, #TASK_ID or thread id)")
+	ref, err := target()
+	if err != nil {
+		return err
 	}
-	res, err := c.ops().ReadRef(ctx, agenttools.RefArgs{Ref: c.pos[0]})
+	a := agenttools.RefArgs{Session: ref}
+	switch {
+	case len(c.pos) == 1 && ref == nil:
+		a.Ref = c.pos[0]
+	case len(c.pos) == 0 && ref != nil:
+	default:
+		return usagef("show: pass one reference or --target-connection and --target-session")
+	}
+	res, err := c.ops().ReadRef(ctx, a)
 	if err != nil {
 		return err
 	}
@@ -355,7 +391,12 @@ func runProjects(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(res, func(w io.Writer) { printProjects(w, res.Projects) })
+	return c.out(res, func(w io.Writer) {
+		printProjects(w, res.Projects)
+		for _, v := range res.Connections {
+			fmt.Fprintf(w, "connection %d  %s\n", v.ID, v.Harness)
+		}
+	})
 }
 
 func runModels(ctx context.Context, env Env, args []string) error {
@@ -364,20 +405,33 @@ func runModels(ctx context.Context, env Env, args []string) error {
 		return usagef("models %s: unknown", v)
 	}
 	c := newCmd(env, "models ls")
+	var a agenttools.ModelsArgs
+	c.fs.Int64Var(&a.ConnectionID, "connection", 0, "show this connection’s capabilities")
 	if err := c.parse(rest); err != nil {
 		return err
 	}
-	res, err := c.ops().ListModels(ctx, struct{}{})
+	res, err := c.ops().ListModels(ctx, a)
 	if err != nil {
 		return err
 	}
-	return c.out(res, func(w io.Writer) { printCatalog(w, res) })
+	return c.out(res, func(w io.Writer) {
+		if res.Capabilities != nil {
+			printCapabilities(w, *res.Capabilities)
+		} else {
+			printCatalog(w, res.Catalog)
+		}
+	})
 }
 
 func runMCP(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "mcp")
+	dedicated := c.fs.Bool("t3-session-env", false, "dedicated T3 process: read T3CODE_THREAD_ID")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	return agenttools.NewServer(c.ops()).Run(ctx, &mcp.StdioTransport{})
+	ops := c.ops()
+	if !*dedicated {
+		ops.Caller = agentctx.Caller{}
+	}
+	return agenttools.NewServer(ops).Run(ctx, &mcp.StdioTransport{})
 }
