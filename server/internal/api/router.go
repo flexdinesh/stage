@@ -83,6 +83,12 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/projects", s.listProjects)
 	h("POST /api/projects", s.createProject)
 	h("GET /api/projects/{id}", s.getProject)
+	h("PATCH /api/projects/{id}", s.updateProject)
+	h("PUT /api/projects/{id}/binding", s.bindProject)
+	h("DELETE /api/projects/{id}/binding", s.unbindProject)
+	h("GET /api/connections", s.connections)
+	h("GET /api/connections/t3/projects", s.externalProjects)
+	h("POST /api/connections/t3/projects", s.registerWorkspace)
 
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)
@@ -127,8 +133,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
-	h("GET /api/threads/{id}", s.getThread)
-	h("POST /api/threads/{id}/adopt", s.adoptThread)
+	h("GET /api/connections/{connectionId}/sessions/{id}", s.getThread)
+	h("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptThread)
 
 	h("GET /api/snippets", s.listSnippets)
 	h("POST /api/snippets", s.createSnippet)

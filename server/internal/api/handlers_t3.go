@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"path"
 	"strings"
@@ -199,55 +198,19 @@ func normalizeRoot(root string) string {
 	return root
 }
 
-// createProject: app project with the root → 409; T3 project with the root
-// (mirror, refreshed from T3 first) → returned as mirrored (T3 owns title and
-// archive state; the requested title is ignored); else create in T3.
+// createProject saves Stage metadata without contacting a harness.
 func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
-		Title         string `json:"title"`
-		WorkspaceRoot string `json:"workspaceRoot"`
+		Title string `json:"title"`
 	}
-	if err := decode(r, &body); err != nil {
+	if err := decodeStrict(r, &body); err != nil {
 		return err
 	}
-	title, root := strings.TrimSpace(body.Title), normalizeRoot(body.WorkspaceRoot)
-	if title == "" || root == "" {
-		return db.Invalid("title and workspaceRoot are required")
+	body.Title = strings.TrimSpace(body.Title)
+	if body.Title == "" {
+		return db.Invalid("title is required")
 	}
-	ctx := r.Context()
-	existing, err := s.Store.ProjectByWorkspaceRoot(ctx, root)
-	switch {
-	case err == nil && existing.Source == db.SourceApp:
-		return db.Conflict("project for %s already exists", root)
-	case err == nil:
-		writeJSON(w, http.StatusCreated, existing)
-		return nil
-	case !errors.Is(err, db.ErrNotFound):
-		return err
-	}
-	t3Projects, err := s.T3.ListProjects(ctx)
-	if err != nil {
-		return &db.T3Error{Err: err}
-	}
-	if _, err := s.Store.UpsertT3Projects(ctx, t3Projects); err != nil {
-		return err
-	}
-	if existing, err := s.Store.ProjectByWorkspaceRoot(ctx, root); err == nil {
-		writeJSON(w, http.StatusCreated, existing)
-		return nil
-	} else if !errors.Is(err, db.ErrNotFound) {
-		return err
-	}
-	tp, err := s.T3.CreateProject(ctx, t3.CreateProjectInput{Title: title, WorkspaceRoot: root})
-	if err != nil {
-		return &db.T3Error{Err: err}
-	}
-	if tp.Title != "" {
-		title = tp.Title
-	}
-	p, err := s.Store.InsertProject(ctx, db.Project{
-		T3ProjectID: tp.ID, Title: title, WorkspaceRoot: root, Source: db.SourceApp,
-	})
+	p, err := s.Store.InsertProject(r.Context(), db.Project{Title: body.Title})
 	if err != nil {
 		return err
 	}

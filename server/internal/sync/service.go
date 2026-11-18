@@ -274,6 +274,9 @@ func (s *Service) PollActive(ctx context.Context) error {
 // PollTask reads one task's thread, refreshes the mirror row and applies
 // the mapped task state, except for frozen tasks (see frozen).
 func (s *Service) PollTask(ctx context.Context, task db.Task) error {
+	if task.ConnectionID != db.T3ConnectionID {
+		return nil
+	}
 	if task.T3ThreadID == nil {
 		return nil
 	}
@@ -383,6 +386,39 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	}
 	if cur.Adopted {
 		return db.Task{}, db.Conflict("task %d tracks an adopted session: open it in T3 instead of starting it", id)
+	}
+	if cur.ConnectionID != db.T3ConnectionID {
+		return db.Task{}, db.Conflict("this harness is not available yet; select a usable T3 binding")
+	}
+	if !s.t3.Status(ctx).Connected {
+		return db.Task{}, &db.ConflictError{Code: "connection_unavailable", Msg: "T3 is disconnected. Reconnect it in Settings before starting."}
+	}
+	// Verify external routing before claiming or retrying. A changed directory
+	// must never silently redirect an idempotent launch request.
+	projects, err := s.t3.ListProjects(ctx)
+	if err != nil {
+		return db.Task{}, &db.ConflictError{Code: "connection_unavailable", Msg: "Cannot verify the T3 workspace. Check the connection in Settings before starting."}
+	}
+	if _, err = s.store.UpsertT3Projects(ctx, projects); err != nil {
+		return db.Task{}, err
+	}
+	if old, err := s.store.LaunchDestination(ctx, id, cur.LaunchAttempt); err == nil {
+		// Only uncertain retries reuse this claim; new attempts use the current binding.
+		reuse, err := s.store.ReusesLaunch(ctx, id)
+		if err != nil {
+			return db.Task{}, err
+		}
+		if reuse {
+			found := false
+			for _, p := range projects {
+				if p.ID == old.ExternalProjectID && p.WorkspaceRoot == old.Workspace && p.DeletedAt == nil {
+					found = true
+				}
+			}
+			if !found {
+				return db.Task{}, db.Conflict("original launch workspace is unavailable or changed; restore it before reconciling this attempt")
+			}
+		}
 	}
 	res, err := s.transition(ctx, db.Transition{
 		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true, RequireAuto: automatic,

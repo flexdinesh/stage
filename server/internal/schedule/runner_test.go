@@ -41,7 +41,7 @@ func (f *fakeLauncher) LaunchScheduled(ctx context.Context, id int64, detail str
 func TestReconcileLaunchesDueStarts(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
-	p, err := store.InsertProject(ctx, db.Project{T3ProjectID: "p", Title: "p", WorkspaceRoot: "/w/p", Source: db.SourceApp})
+	p, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,5 +105,51 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	defer l.mu.Unlock()
 	if len(l.got) != n {
 		t.Fatalf("second pass launched %+v", l.got[n:])
+	}
+}
+
+func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
+	store := db.NewStore(testDB.Reset(t))
+	ctx := context.Background()
+	p, err := store.InsertProject(ctx, db.Project{Title: "Offline plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ProjectID: p.ID, Title: "Review", Prompt: "Review", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := sc.NextRunAt.Add(time.Second)
+	launcher := &fakeLauncher{store: store}
+	runner := schedule.NewRunner(store, launcher, nil)
+	runner.Now = func() time.Time { return now }
+	if err = runner.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetSchedule(ctx, sc.ID)
+	if err != nil || got.LastTaskID == nil {
+		t.Fatal(got, err)
+	}
+	task, err := store.GetTask(ctx, *got.LastTaskID)
+	if err != nil || task.State != db.StateBacklog || task.StartAt != nil || task.LastError == nil || task.LaunchAttempt != 0 {
+		t.Fatalf("not held %+v %v", task, err)
+	}
+	if _, err = store.BindProject(ctx, db.ProjectBinding{ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: "repaired", Workspace: "/repaired"}); err != nil {
+		t.Fatal(err)
+	}
+	now = got.NextRunAt.Add(time.Second)
+	if err = runner.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.GetSchedule(ctx, sc.ID)
+	if err != nil || after.LastTaskID == nil || *after.LastTaskID != task.ID {
+		t.Fatal("spawned duplicate occurrence", after, err)
+	}
+	task, err = store.GetTask(ctx, task.ID)
+	if err != nil || task.State != db.StateBacklog || task.LaunchAttempt != 0 {
+		t.Fatal("repair auto-started task", task, err)
+	}
+	if _, err = launcher.LaunchScheduled(ctx, task.ID, "manual start"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -153,17 +153,9 @@ func TestDesktopRemote(t *testing.T) {
 		if status, body := rec.result(); status != 200 {
 			t.Fatalf("POST /api/sync to the remote: %d %s", status, body)
 		}
-		var projects struct {
-			Projects []struct {
-				ID int64 `json:"id"`
-			} `json:"projects"`
-		}
-		a.json("GET", "/api/projects", nil, 200, &projects)
-		if len(projects.Projects) == 0 {
-			t.Fatal("no projects on the remote after sync")
-		}
+		projectID, _ := bindDemoProject(t, a.json)
 		a.json("POST", "/api/tasks", map[string]any{
-			"projectId": projects.Projects[0].ID, "title": "Remote task", "prompt": "reply OK",
+			"projectId": projectID, "title": "Remote task", "prompt": "reply OK",
 		}, 201, nil)
 	})
 

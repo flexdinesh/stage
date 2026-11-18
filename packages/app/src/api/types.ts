@@ -47,10 +47,14 @@ export type StartMode = (typeof START_MODES)[number];
 /** A backlog tree member: blocked (a need is not settled) or ready (every need settled and manual, or no needs). */
 export type Readiness = "blocked" | "ready";
 
-export type ProjectSource = "app" | "t3";
 export type ThreadSource = "app" | "t3";
 
 // ---- Shared ----
+
+export interface SessionRef {
+  connectionId: number;
+  externalSessionId: string;
+}
 
 export interface ApiErrorBody {
   error: string;
@@ -195,10 +199,8 @@ export interface Catalog {
 
 export interface Project {
   id: number;
-  t3ProjectId: string;
   title: string;
-  workspaceRoot: string;
-  source: ProjectSource;
+  bindings: ProjectBinding[];
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -210,10 +212,26 @@ export interface ProjectList {
   projects: Project[];
 }
 
-export interface CreateProjectRequest {
-  title: string;
-  workspaceRoot: string;
+export interface CreateProjectRequest { title: string }
+export interface ProjectBinding {
+ id: number;
+ projectId: number;
+ connectionId: number;
+ harness: "t3" | "opencode";
+ externalProjectId: string;
+ workspace: string;
+ revision: number;
+ status: "available" | "missing" | "changed";
+ observedWorkspace: string | null;
 }
+export interface ExternalProject {
+ connectionId: number;
+ externalId: string;
+ title: string;
+ workspace: string;
+ projectId: number | null;
+}
+
 
 // ---- Tasks ----
 
@@ -231,6 +249,9 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface Task {
+  session: SessionRef | null;
+  originSession: SessionRef | null;
+  connectionId: number;
   acceptanceId: number | null;
   acceptanceRevision: number;
   completedAt: string | null;
@@ -248,7 +269,7 @@ export interface Task {
   workspace: Workspace;
   tags: string[];
   state: TaskState;
-  t3ThreadId: string | null;
+  externalSessionId: string | null;
   /** The task's tree; null outside one. */
   treeId: number | null;
   treeTitle: string | null;
@@ -334,6 +355,7 @@ export interface TaskDetail extends Task {
 }
 
 export interface AcceptedEvidence {
+  session: SessionRef | null;
   taskId: number;
   title: string;
   treeId: number | null;
@@ -530,6 +552,8 @@ export interface StartTreeResponse {
 }
 
 export interface AdoptSessionRequest {
+  projectId?: number;
+  newProjectTitle?: string;
   title?: string;
   initialNote?: string;
   tags?: string[];
@@ -599,6 +623,7 @@ export type JournalKind = "notes" | "events" | "all";
 export type NoteCategory = "" | "finding" | "decision" | "blocker" | "outcome";
 
 export interface JournalEntry {
+  sourceSession: SessionRef | null;
   id: number;
   kind: "note" | "event";
   taskId: number | null;
@@ -645,6 +670,8 @@ export type ScheduleRunOutcome = (typeof SCHEDULE_RUN_OUTCOMES)[number];
 
 /** Recurring task template: each cron fire spawns a task with this config. */
 export interface Schedule {
+  connectionId: number;
+  originSession: SessionRef | null;
   id: number;
   projectId: number;
   projectTitle: string;
@@ -748,8 +775,10 @@ export interface TaskListQuery {
 // ---- Threads (history) ----
 
 export interface Thread {
-  t3ThreadId: string;
-  t3ProjectId: string;
+  session: SessionRef;
+  connectionId: number;
+  externalSessionId: string;
+  externalProjectId: string;
   projectId: number | null;
   projectTitle: string | null;
   title: string;
@@ -888,12 +917,13 @@ export interface Badge {
 export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled"> | "ready";
 
 export interface Notification {
+  connectionId: number;
   t3WebUrl: string | null;
   id: number;
   event: NotificationEvent;
   /** null for external threads (or once the task is deleted). */
   taskId: number | null;
-  t3ThreadId: string | null;
+  externalSessionId: string | null;
   /** Snapshot at send time. */
   title: string;
   projectTitle: string | null;
@@ -920,7 +950,8 @@ export interface NotificationGroup extends Notification {
 }
 
 export interface WaitingSession {
-  t3ThreadId: string;
+  connectionId: number;
+  externalSessionId: string;
   title: string;
   projectTitle: string | null;
   t3WebUrl: string | null;

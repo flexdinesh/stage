@@ -19,6 +19,7 @@ import type {
   Badge,
   Catalog,
   CreateProjectRequest,
+  ExternalProject,
   CreateTaskRequest,
   CreateSnippetRequest,
   CreateScheduleRequest,
@@ -177,6 +178,11 @@ export function createApi(transport: Transport) {
     projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
+    updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
+    externalProjects: () => apiFetch<{projects: ExternalProject[]}>("/connections/t3/projects"),
+    bindProject: (id: number, project: ExternalProject) => apiFetch<Project>(`/projects/${id}/binding`, put({connectionId: project.connectionId, externalProjectId: project.externalId, workspace: project.workspace})),
+    unbindProject: (id: number) => apiFetch<Project>(`/projects/${id}/binding`, {method: "DELETE"}),
+    registerWorkspace: (body: {title: string; workspace: string}) => apiFetch<ExternalProject>("/connections/t3/projects", post(body)),
 
     tasks: (q: TaskListQuery = {}) =>
       apiFetch<TaskList>(
@@ -236,10 +242,10 @@ export function createApi(transport: Transport) {
     },
     deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
 
-    thread: (id: string) => apiFetch<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+    thread: (id: string) => apiFetch<ThreadDetail>(`/connections/1/sessions/${encodeURIComponent(id)}`),
     /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
     adoptThread: (id: string, body: AdoptSessionRequest = {}) =>
-      apiFetch<Task>(`/threads/${encodeURIComponent(id)}/adopt`, post(body)),
+      apiFetch<Task>(`/connections/1/sessions/${encodeURIComponent(id)}/adopt`, post(body)),
     openingPrompt: (taskId: number, full = false) =>
       apiFetch<OpeningPromptResponse>(`/tasks/${taskId}/opening-prompt${full ? "?full=true" : ""}`),
     resolveRef: (ref: string) => apiFetch<{ kind: string; taskId: number | null; threadId: string | null }>(`/refs/resolve${toQuery({ ref })}`),

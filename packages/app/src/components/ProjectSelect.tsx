@@ -1,3 +1,4 @@
+import { projectWorkspace } from "../lib/projects.ts";
 import { useCallback, useMemo } from "react";
 import { useProjects } from "../api/queries.ts";
 import type { Project } from "../api/types.ts";
@@ -9,7 +10,7 @@ function toOption(m: ProjectMatch): ComboboxOption {
     value: String(m.project.id),
     label: m.project.title,
     labelMatch: m.title,
-    detail: m.project.workspaceRoot,
+    detail: projectWorkspace(m.project),
     detailMatch: m.path,
     ...(m.project.archivedAt === null ? {} : { chip: "archived" }),
   };

@@ -268,3 +268,7 @@ Build with `mise run dist` (`TARGETS=all` for every platform) and install or ope
 | 16 | Window hidden during events: no stale toast pile-up on return | | | |
 
 Task completion uses the shared app review drawer (full width on phones), with cached evidence, dependent impact and optional acceptance note. Accepted history stays available without T3. Reopen preserves history and never reopens a closed tree. Execution chips and notifications remain live beside acceptance; API v4 separates these contracts.
+
+Project planning remains available without T3. The shared project form creates
+Stage metadata offline; Workspace explicitly binds a T3 workspace before launch.
+The bridge integration tests exercise creation and binding against isolated fake T3.

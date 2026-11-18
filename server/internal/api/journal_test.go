@@ -219,9 +219,9 @@ func TestInitialNoteAndRemovedTaskNotes(t *testing.T) {
 		t.Fatalf("duplicate copied notes %+v", page)
 	}
 	thread := runningSession(t, e, p.T3ProjectID, "external")
-	e.must("POST", "/api/threads/"+thread+"/adopt", map[string]any{"notes": "removed"}, 400, nil)
+	e.must("POST", "/api/connections/1/sessions/"+thread+"/adopt", map[string]any{"notes": "removed"}, 400, nil)
 	var adopted task
-	e.must("POST", "/api/threads/"+thread+"/adopt", map[string]any{"initialNote": "adopted context"}, 201, &adopted)
+	e.must("POST", "/api/connections/1/sessions/"+thread+"/adopt", map[string]any{"initialNote": "adopted context"}, 201, &adopted)
 	if page := e.journal(taskPath(adopted.ID, "/journal")); len(page.Entries) != 1 || page.Entries[0].Text != "adopted context" {
 		t.Fatalf("adopt note %+v", page)
 	}

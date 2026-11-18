@@ -17,7 +17,7 @@ import (
 func TestAdoptStateMatchesMapThreadState(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
-	if _, err := store.InsertProject(ctx, db.Project{T3ProjectID: "proj-1", Title: "app", WorkspaceRoot: "/w", Source: db.SourceApp}); err != nil {
+	if _, err := store.InsertProject(ctx, db.Project{Title: "app", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "proj-1", Workspace: "/w"}}}); err != nil {
 		t.Fatal(err)
 	}
 	statuses := []t3.ThreadStatus{

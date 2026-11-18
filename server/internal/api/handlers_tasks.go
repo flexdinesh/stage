@@ -57,6 +57,7 @@ type createTaskReq struct {
 }
 
 type taskConfigReq struct {
+	OriginSession      *db.SessionRef   `json:"originSession"`
 	ProjectID          *int64           `json:"projectId"`
 	Title              string           `json:"title"`
 	Prompt             string           `json:"prompt"`
@@ -87,6 +88,7 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 
 func (req taskConfigReq) validate() (db.NewTask, error) {
 	in := db.NewTask{
+		OriginSession:      req.OriginSession,
 		Title:              strings.TrimSpace(req.Title),
 		Prompt:             req.Prompt,
 		ProviderInstanceID: trimmedPtr(req.ProviderInstanceID),
@@ -218,6 +220,9 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
+			if noteErr := s.Store.NoteBlockedLaunch(r.Context(), task.ID, err.Error()); noteErr != nil {
+				return noteErr
+			}
 		}
 		if task, err = s.Store.GetTask(r.Context(), task.ID); err != nil {
 			return err
@@ -262,15 +267,15 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if task.OriginThreadID != nil {
-		batch, err := s.Store.CreatedBy(ctx, *task.OriginThreadID)
+	if task.OriginSession != nil {
+		batch, err := s.Store.CreatedBySession(ctx, *task.OriginSession)
 		if err != nil {
 			return err
 		}
 		shaped := s.createdTasks(env, batch)
 		out.Batch = &shaped
 	}
-	if task.T3ThreadID != nil {
+	if task.ConnectionID == db.T3ConnectionID && task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		if err == nil {
 			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
@@ -464,6 +469,9 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	task, err := s.threadTask(r)
 	if err != nil {
 		return err
+	}
+	if task.ConnectionID != db.T3ConnectionID {
+		return db.Conflict("this harness cannot be stopped by the T3 integration")
 	}
 	if err := s.T3.Interrupt(r.Context(), *task.T3ThreadID); err != nil {
 		return &db.T3Error{Err: err}

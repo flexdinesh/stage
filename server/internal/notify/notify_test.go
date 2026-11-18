@@ -92,7 +92,7 @@ func subscribe(t *testing.T, store *db.Store, endpoint string) {
 func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 	t.Helper()
 	ctx := context.Background()
-	p, err := store.InsertProject(ctx, db.Project{T3ProjectID: "proj-1", Title: "stage", WorkspaceRoot: "/w/1", Source: db.SourceApp})
+	p, err := store.InsertProject(ctx, db.Project{Title: "stage", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "proj-1", Workspace: "/w/1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,9 +168,9 @@ func TestPayload(t *testing.T) {
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "thread-ext-1", Badge: 2}},
+			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "thread-1:ext-1", Badge: 2}},
 		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
-			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "thread-ext-2", Badge: 2}},
+			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "thread-1:ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
 		got, _, err := n.payload(ctx, tc.e)
@@ -201,7 +201,7 @@ func TestPayloadFor(t *testing.T) {
 			Payload{Title: "Failed", Body: "Gone", URL: "/tasks/9", Tag: "task-9", Badge: 3}},
 		{"external thread", db.Notification{ID: 4, Event: db.StateSettled, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &project,
 			URL: "/sessions/provider:session%2Fwith%25id"},
-			Payload{Title: "Settled", Body: "Ext · stage", URL: "/?inbox", Tag: "thread-" + thread, Badge: 3}},
+			Payload{Title: "Settled", Body: "Ext · stage", URL: "/?inbox", Tag: "thread-1:" + thread, Badge: 3}},
 		{"identity-less", db.Notification{ID: 5, Event: db.StateNeedsInput, Title: "Old", URL: "/"},
 			Payload{Title: "Needs input", Body: "Old", URL: "/?inbox", Tag: "", Badge: 3}},
 	}

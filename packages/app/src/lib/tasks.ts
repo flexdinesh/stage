@@ -12,7 +12,7 @@ export const isWaiting = (t: Task) => t.readiness === "blocked";
 export const waitTarget = (t: Pick<Task, "needs">) => t.needs.map((id) => `#${id}`).join(", ");
 /** Thread is live: stop allowed, delete refused. */
 export const isActive = (t: Task) => ACTIVE.includes(t.state);
-export const canStop = (t: Task) => t.t3ThreadId !== null && isActive(t);
+export const canStop = (t: Task) => t.externalSessionId !== null && isActive(t);
 /** Outside backlog only title and tags may change. */
 export const isFullyEditable = (t: Task) => t.state === "backlog";
 /** Accepted: satisfies dependents until explicitly reopened. */

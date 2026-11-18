@@ -9,16 +9,22 @@ import (
 
 // ---- explicit session lookup and adoption ----
 
-// adoptThread: POST /api/threads/{id}/adopt {title?, initialNote?, tags?,
+// adoptThread: POST /api/connections/1/sessions/{id}/adopt {title?, initialNote?, tags?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
 // task already owns it.
 func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
+	if r.PathValue("connectionId") != "1" {
+		return db.Invalid("this session connection is unavailable; use a supported connection")
+	}
+
 	id := r.PathValue("id")
 	var req struct {
-		Title       *string  `json:"title"`
-		InitialNote *string  `json:"initialNote"`
-		Tags        []string `json:"tags"`
-		TreeID      *int64   `json:"treeId"`
+		ProjectID       *int64   `json:"projectId"`
+		NewProjectTitle string   `json:"newProjectTitle"`
+		Title           *string  `json:"title"`
+		InitialNote     *string  `json:"initialNote"`
+		Tags            []string `json:"tags"`
+		TreeID          *int64   `json:"treeId"`
 	}
 	if err := decodeStrict(r, &req); err != nil {
 		return err
@@ -26,7 +32,33 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	if err := s.refreshSession(r, id); err != nil {
 		return err
 	}
+	var binding *db.ProjectBinding
+	if req.ProjectID != nil || strings.TrimSpace(req.NewProjectTitle) != "" {
+		if req.ProjectID != nil && strings.TrimSpace(req.NewProjectTitle) != "" {
+			return db.Invalid("choose an existing project or a new project title, not both")
+		}
+		thread, err := s.Store.GetThread(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		if thread.TaskID == nil {
+			projects, err := s.T3.ListProjects(r.Context())
+			if err != nil {
+				return &db.T3Error{Err: err}
+			}
+			for _, p := range projects {
+				if p.ID == thread.T3ProjectID && p.DeletedAt == nil {
+					binding = &db.ProjectBinding{ConnectionID: db.T3ConnectionID, ExternalProjectID: p.ID, Workspace: p.WorkspaceRoot}
+					break
+				}
+			}
+			if binding == nil {
+				return db.Conflict("session workspace is unavailable; restore its T3 project before adopting")
+			}
+		}
+	}
 	task, created, err := s.Store.AdoptThread(r.Context(), db.AdoptInput{
+		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Binding: binding,
 		ThreadID: id, Title: req.Title, InitialNote: req.InitialNote, Tags: cleanTags(req.Tags), TreeID: req.TreeID,
 	})
 	if err != nil {
@@ -51,6 +83,10 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
+	if r.PathValue("connectionId") != "1" {
+		return db.Invalid("this session connection is unavailable; use a supported connection")
+	}
+
 	id := r.PathValue("id")
 	if s.T3.Status(r.Context()).Connected {
 		if err := s.Sync.RefreshSession(r.Context(), id); err != nil {

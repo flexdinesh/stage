@@ -2,7 +2,9 @@ package serve_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -171,36 +173,41 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	t.Helper()
 	ctx := context.Background()
 	root := fmt.Sprintf("/w%d", projectSeq.Add(1))
-	if _, err := fake.CreateProject(ctx, t3.CreateProjectInput{Title: "P " + root, WorkspaceRoot: root}); err != nil {
+	ext, err := fake.CreateProject(ctx, t3.CreateProjectInput{Title: "P " + root, WorkspaceRoot: root})
+	if err != nil {
 		t.Fatal(err)
 	}
 	hc, base := httpFor(a)
 	c := clientFor(a)
-	var projectID int64
-	deadline := time.Now().Add(5 * time.Second)
-	for projectID == 0 {
-		// The startup sync may be running: retry until one sees the project.
-		res, err := hc.Post(base+"/api/sync", "", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = res.Body.Close()
-		ps, err := c.Projects(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range ps {
-			if p.WorkspaceRoot == root {
-				projectID = p.ID
-			}
-		}
-		if projectID == 0 {
-			if time.Now().After(deadline) {
-				t.Fatalf("project %s never synced", root)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+	res, err := hc.Post(base+"/api/projects", "application/json", strings.NewReader(`{"title":"Test project"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
+	var project struct {
+		ID int64 `json:"id"`
+	}
+	if err = json.NewDecoder(res.Body).Decode(&project); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("create project: %d", res.StatusCode)
+	}
+	body, _ := json.Marshal(map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": root})
+	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/api/projects/%d/binding", base, project.ID), bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("bind project: %d", res.StatusCode)
+	}
+	projectID := project.ID
 	task, err := c.CreateTask(ctx, client.CreateTask{ProjectID: projectID, Title: "T", Prompt: "do it", Start: true})
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +255,7 @@ func TestListenerModes(t *testing.T) {
 			t.Fatalf("socket mode %v, %v", st.Mode().Perm(), err)
 		}
 		h := health(t, a)
-		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 4 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
+		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 5 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
 			t.Fatalf("health %+v", h)
 		}
 		if err := i.stop(t); err != nil {

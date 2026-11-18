@@ -118,9 +118,9 @@ func TestTaskNotesSchemas(t *testing.T) {
 func TestJournalLifecycleMCP(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/journal")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: p.WorkspaceRoot}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: p.Bindings[0].Workspace}})
 	var task client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "Journal", "prompt": "work", "initialNote": "initial"}, &task)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Journal", "prompt": "work", "initialNote": "initial"}, &task)
 	var page db.JournalPage
 	mustCall(t, cs, "read_journal", map[string]any{"taskId": task.ID}, &page)
 	if len(page.Entries) != 1 || page.Entries[0].Text != "initial" {

@@ -15,6 +15,7 @@ import (
 
 // AcceptedEvidence is copied once. No source-harness read is needed to use it.
 type AcceptedEvidence struct {
+	Session             *SessionRef      `json:"session"`
 	TaskID              int64            `json:"taskId"`
 	Title               string           `json:"title"`
 	TreeID              *int64           `json:"treeId"`
@@ -47,11 +48,15 @@ type Acceptance struct {
 	Note       string           `json:"note"`
 }
 
-const acceptanceColumns = `a.id,a.task_id,a.accepted_at,a.captured_at,a.provenance,a.evidence,a.note`
+const acceptanceColumns = `a.id,a.task_id,a.accepted_at,a.captured_at,a.provenance,a.evidence,a.note,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=a.source_session_id)`
 
 func scanAcceptance(r rowScanner) (Acceptance, error) {
 	var a Acceptance
-	err := r.Scan(&a.ID, &a.TaskID, &a.AcceptedAt, &a.CapturedAt, &a.Provenance, &a.Evidence, &a.Note)
+	var session *SessionRef
+	err := r.Scan(&a.ID, &a.TaskID, &a.AcceptedAt, &a.CapturedAt, &a.Provenance, &a.Evidence, &a.Note, &session)
+	if a.Evidence.Session == nil {
+		a.Evidence.Session = session
+	}
 	return a, notFound(err)
 }
 func (s *Store) Acceptances(ctx context.Context, id int64) ([]Acceptance, error) {
@@ -84,6 +89,7 @@ func completionPreview(ctx context.Context, tx *Tx, id int64) (CompletionPreview
 	}
 	p.Revision = task.AcceptanceRevision
 	e := &p.Evidence
+	e.Session = task.Session
 	e.TaskID, e.Title, e.TreeID, e.TreeTitle, e.ProjectID = id, task.Title, task.TreeID, task.TreeTitle, task.ProjectID
 	e.ThreadID, e.ThreadLink, e.ExecutionState = task.T3ThreadID, task.ThreadLink, task.State
 	e.Artifacts = []t3.PullRequest{}
@@ -104,7 +110,7 @@ func completionPreview(ctx context.Context, tx *Tx, id int64) (CompletionPreview
 		var status string
 		var pending int
 		var active *string
-		err = tx.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_item_id,last_word_text,last_word_truncated,last_word_at,updated_at,pull_requests,status,pending_request_count,active_run_id FROM threads WHERE t3_thread_id=$1`, task.T3ThreadID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.ReplyItemID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Artifacts, &status, &pending, &active)
+		err = tx.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_item_id,last_word_text,last_word_truncated,last_word_at,updated_at,pull_requests,status,pending_request_count,active_run_id FROM threads WHERE session_id=$1`, task.SessionIdentityID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.ReplyItemID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Artifacts, &status, &pending, &active)
 		if err != nil && !errors.Is(notFound(err), ErrNotFound) {
 			return p, err
 		}
@@ -206,11 +212,12 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 			if p.EvidenceVersion != in.EvidenceVersion {
 				return Conflict("Evidence changed. Refresh and review it again.")
 			}
-			a, err := scanAcceptance(tx.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES($1,'user',$2,$3) RETURNING id,task_id,accepted_at,captured_at,provenance,evidence,note`, id, p.Evidence, in.Note))
+			var acceptanceID int64
+			err := tx.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES($1,'user',$2,$3) RETURNING id`, id, p.Evidence, in.Note).Scan(&acceptanceID)
 			if err != nil {
 				return err
 			}
-			result.AcceptanceID = &a.ID
+			result.AcceptanceID = &acceptanceID
 			event, detail = "task_completed", "Completed by user; accepted evidence saved in Stage."
 			if strings.TrimSpace(in.Note) != "" {
 				if _, err = appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.Note, Category: "outcome", RequestID: "acceptance:" + in.RequestID}); err != nil {

@@ -39,7 +39,7 @@ stage setup instructions     # idempotent usage block in ~/.claude/CLAUDE.md and
 
 T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read it and the cwd; HTTP MCP tools take `callerThreadId` / `cwd` arguments instead (required for context over HTTP). `stage context` / `get_context` shows the session, cwd, resolved project, owning task and current tree.
 
-- **Project**: explicit `--project` (id or exact title) > the calling session's project > the project whose root is the longest prefix of cwd.
+- **Project**: explicit `--project` (id or unambiguous exact title) > the calling session's explicitly bound project. Cwd is context only; directory strings across machines do not establish identity.
 - **Model**: explicit (provider inferred from the model via the catalog) > pinned default > last used > T3 default, like the New task form.
 - **Provenance**: tasks and schedules record the creating session (`originThreadId`; spawned schedule tasks inherit it), shown as "Created by" on task detail and "by agent" on task rows.
 

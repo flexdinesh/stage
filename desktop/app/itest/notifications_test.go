@@ -206,7 +206,7 @@ type inboxRow struct {
 	ID         int64   `json:"id"`
 	Event      string  `json:"event"`
 	TaskID     *int64  `json:"taskId"`
-	T3ThreadID *string `json:"t3ThreadId"`
+	T3ThreadID *string `json:"externalSessionId"`
 	Title      string  `json:"title"`
 	ReadAt     *string `json:"readAt"`
 }
@@ -257,21 +257,31 @@ func (a api) read(groups ...string) {
 	a.do("POST", "/api/notifications/read", map[string]any{"groups": groups}, 204, nil)
 }
 
-// project syncs the fake T3 and returns the seeded demo project.
-func (a api) project() (id int64, title string) {
-	a.t.Helper()
-	a.do("POST", "/api/sync", map[string]any{}, 200, nil)
-	var res struct {
+// project explicitly imports and binds the isolated fake's demo workspace.
+func (a api) project() (int64, string) { return bindDemoProject(a.t, a.do) }
+
+// Exercise the same explicit create/bind workflow over both bridge and socket.
+func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) (int64, string) {
+	t.Helper()
+	var discovered struct {
 		Projects []struct {
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
+			ExternalID string `json:"externalId"`
+			Workspace  string `json:"workspace"`
+			Title      string `json:"title"`
 		} `json:"projects"`
 	}
-	a.do("GET", "/api/projects", nil, 200, &res)
-	if len(res.Projects) == 0 {
-		a.t.Fatal("no projects after sync")
+	request("GET", "/api/connections/t3/projects", nil, 200, &discovered)
+	if len(discovered.Projects) == 0 {
+		t.Fatal("fake has no workspace")
 	}
-	return res.Projects[0].ID, res.Projects[0].Title
+	workspace := discovered.Projects[0]
+	var project struct {
+		ID    int64  `json:"id"`
+		Title string `json:"title"`
+	}
+	request("POST", "/api/projects", map[string]any{"title": workspace.Title}, 201, &project)
+	request("PUT", fmt.Sprintf("/api/projects/%d/binding", project.ID), map[string]any{"connectionId": 1, "externalProjectId": workspace.ExternalID, "workspace": workspace.Workspace}, 200, nil)
+	return project.ID, project.Title
 }
 
 // launch creates and starts a task; the fake T3 makes it ask a question.

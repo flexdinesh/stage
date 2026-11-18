@@ -15,6 +15,8 @@ import (
 
 // Schedule is a recurring task template (docs/api.md "Schedules").
 type Schedule struct {
+	ConnectionID       int64            `json:"connectionId"`
+	OriginSession      *SessionRef      `json:"originSession"`
 	ID                 int64            `json:"id"`
 	ProjectID          int64            `json:"projectId"`
 	ProjectTitle       string           `json:"projectTitle"`
@@ -67,9 +69,9 @@ SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s
   (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
   (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
-  s.origin_thread_id, s.created_at, s.updated_at,
+  COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id=1)), s.created_at, s.updated_at,
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]')
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id)
 FROM schedules s
 JOIN projects p ON p.id = s.project_id`
 
@@ -78,7 +80,7 @@ func scanSchedule(row rowScanner) (Schedule, error) {
 	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
 		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Tags, &s.Notes, &s.Cron, &s.Tz,
 		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.OriginThreadID, &s.CreatedAt, &s.UpdatedAt,
-		&s.Attachments)
+		&s.Attachments, &s.ConnectionID, &s.OriginSession)
 	if err != nil {
 		return Schedule{}, notFound(err)
 	}
@@ -127,6 +129,7 @@ func (s *Store) ListSchedules(ctx context.Context, f ScheduleFilter) ([]Schedule
 
 // NewSchedule is a validated create input (cron and tz already parse).
 type NewSchedule struct {
+	OriginSession      *SessionRef
 	ProjectID          int64
 	Title              string
 	Prompt             string
@@ -174,13 +177,24 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 			return err
 		}
+		var originID *int64
+		if in.OriginSession != nil {
+			if in.OriginThreadID != nil {
+				return Invalid("use originSession or originThreadId, not both")
+			}
+			value, err := sessionIdentity(ctx, tx, *in.OriginSession)
+			if err != nil {
+				return err
+			}
+			originID = &value
+		}
 		err := tx.QueryRow(ctx, `
 INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, cron, tz, paused, next_run_at, origin_thread_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID,
+			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID,
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -413,9 +427,9 @@ func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64
 	var tz, notes string
 	err := tx.QueryRow(ctx, `
 SELECT project_id, title, prompt, provider_instance_id, model, model_options, runtime_mode,
-  interaction_mode, workspace, tags, notes, tz, origin_thread_id FROM schedules WHERE id = $1`, id).
+  interaction_mode, workspace, tags, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id) FROM schedules WHERE id = $1`, id).
 		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.ProviderInstanceID, &in.Model, &in.ModelOptions,
-			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.OriginThreadID)
+			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.ConnectionID, &in.OriginSession)
 	if err != nil {
 		return 0, notFound(err)
 	}
@@ -433,7 +447,7 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 			if len(parts) > 1 {
 				key = fmt.Sprintf("initial-note-%d", i+1)
 			}
-			if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceThreadID: in.OriginThreadID}); err != nil {
+			if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceSession: in.OriginSession}); err != nil {
 				return err
 			}
 		}
@@ -528,7 +542,7 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 			var prevState TaskState
 			err = tx.QueryRow(ctx, `
 SELECT id, state FROM tasks WHERE schedule_id = $1
-  AND (state IN ('launching', 'running', 'needs_input') OR (state = 'backlog' AND acceptance_id IS NULL AND start_at IS NOT NULL))
+  AND (state IN ('launching', 'running', 'needs_input') OR (state = 'backlog' AND acceptance_id IS NULL AND (start_at IS NOT NULL OR scheduled_hold=1)))
 ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
 			switch {
 			case err == nil:

@@ -2,7 +2,7 @@ import type { Notification } from "../api/types.ts";
 
 const entityKey = (n: Notification) => {
   if (n.taskId !== null) return `task:${n.taskId}`;
-  if (n.t3ThreadId !== null) return `thread:${n.t3ThreadId}`;
+  if (n.externalSessionId !== null) return `thread:${n.connectionId ?? 1}:${n.externalSessionId}`;
   return `notification:${n.id}`;
 };
 

@@ -106,6 +106,28 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 - The theme key `stage-theme` is read before first paint in
   `web/index.html` and `desktop/app/ui/public/theme.js`; keep both in step with `app/src/lib/theme.ts`.
 
-T3 synchronization refreshes projects and tracked task sessions, with active external discovery for notifications. The `workevent` package owns shared task/session transition events; the T3 watcher produces them and `notify` delivers them. No historical transcript sweep, question enrichment or automatic PR tracking. Raw retired database columns are preserved for historical records.
+T3 synchronization refreshes external workspace discovery and tracked task sessions, with active external discovery for notifications. The `workevent` package owns shared task/session transition events; the T3 watcher produces them and `notify` delivers them. No historical transcript sweep, question enrichment or automatic PR tracking. Raw retired database columns are preserved for historical records.
 
 Stage owns task acceptance separately from observed execution. SQLite stores immutable accepted evidence and idempotent acceptance requests; a launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [API v4 acceptance](api.md#user-acceptance-api-v4).
+
+## Project and session identity
+
+Stage project IDs and metadata are independent of harness data. Migration 0008
+adds harness connection slots, versioned workspace bindings, scoped session
+identities and immutable launch destinations. Existing IDs, journal bytes,
+accepted snapshot JSON and T3 credentials survive. Legacy columns remain adapter
+and migration data; new project rows use inert unique markers there, never routing.
+
+T3 is the only usable integration. A unique harness constraint permits one T3
+and one future OpenCode connection. Core identity has no OpenCode-specific fields.
+T3 discovery updates availability, never Stage title/archive or project existence.
+No automatic title/path matching: the current adapter cannot prove filesystem
+identity. All selection is explicit. A future matcher must require authoritative
+shared family/subproject evidence for automatic binding; Git remotes only suggest.
+
+Tasks pin connection/project/workspace/binding revision atomically with an attempt.
+Unknown outcomes keep the same destination and request ID on retry. A binding
+change applies only to a future unclaimed attempt. Connection-scoped session IDs
+own task lookup, provenance, notification groups and accepted evidence. Retained
+T3-specific cache reads are explicitly scoped to connection 1. Generic execution
+adapters and OpenCode launch support remain separate roadmap tasks.

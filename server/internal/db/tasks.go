@@ -12,7 +12,7 @@ import (
 )
 
 const taskSelect = `
-SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provider_instance_id,
+SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt, t.provider_instance_id,
   t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags,
   t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
@@ -21,19 +21,21 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at,
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
-  t.origin_thread_id, oth.title, t.handoff,
+  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id=1),t.origin_thread_id), oth.title, t.handoff,
   COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
   (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
   t.archived_at, tr.status, ` + unstartedSQL + `,
-  t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id)
+  t.connection_id,t.session_id,t.origin_session_id,
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id)
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
-LEFT JOIN threads th ON th.t3_thread_id = t.t3_thread_id
+LEFT JOIN threads th ON th.session_id = t.session_id
 LEFT JOIN schedules sc ON sc.id = t.schedule_id
-LEFT JOIN threads oth ON oth.t3_thread_id = t.origin_thread_id`
+LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
 
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
@@ -46,9 +48,12 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt)
 	if err != nil {
 		return Task{}, notFound(err)
+	}
+	if t.Session != nil {
+		t.T3ThreadID = &t.Session.ExternalSessionID
 	}
 	t.ModelOptions = nonNilOptions(t.ModelOptions)
 	t.Tags = nonNilStrings(t.Tags)
@@ -107,7 +112,7 @@ const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	var w where
 	if f.OriginThreadID != "" {
-		w.add("t.origin_thread_id = " + w.arg(f.OriginThreadID))
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=1 AND external_id=" + w.arg(f.OriginThreadID) + ")")
 	}
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
@@ -182,6 +187,8 @@ func scanTaskEvent(r rowScanner) (TaskEvent, error) {
 
 // NewTask is a validated create input.
 type NewTask struct {
+	ConnectionID       int64
+	OriginSession      *SessionRef
 	ProjectID          int64
 	Title              string
 	Prompt             string
@@ -242,14 +249,28 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	if err := projectExists(ctx, tx, in.ProjectID); err != nil {
 		return 0, err
 	}
+	var originID *int64
+	if in.ConnectionID == 0 {
+		in.ConnectionID = T3ConnectionID
+	}
+	if in.OriginSession != nil {
+		if in.OriginThreadID != nil {
+			return 0, Invalid("use originSession or the legacy T3 originThreadId, not both")
+		}
+		value, err := sessionIdentity(ctx, tx, *in.OriginSession)
+		if err != nil {
+			return 0, err
+		}
+		originID = &value
+	}
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16,$17,$18) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags),
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -288,7 +309,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16) 
 		}
 	}
 	if in.InitialNote != "" {
-		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID}); err != nil {
+		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID, SourceSession: in.OriginSession}); err != nil {
 			return 0, err
 		}
 	}
@@ -603,6 +624,8 @@ UPDATE tasks SET
   launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
                       WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
   t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
+  session_id = CASE WHEN $3 THEN NULL ELSE session_id END,
+  scheduled_hold = CASE WHEN $3 THEN 0 ELSE scheduled_hold END,
   launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE launched_at END,
   last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
   finished_at = CASE WHEN $3 THEN NULL
@@ -619,6 +642,9 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 			return err
 		}
 		if t.BeginAttempt {
+			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt); err != nil {
+				return err
+			}
 			claim, err := tx.Exec(ctx, `INSERT INTO task_launch_claims(task_id,attempt) VALUES($1,$2) ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt)
 			if err != nil {
 				return err

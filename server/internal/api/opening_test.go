@@ -24,7 +24,7 @@ func TestAdoptedOpeningPrompt(t *testing.T) {
 	}
 	run := d.ActiveRunID
 	var adopted task
-	e.must("POST", "/api/threads/"+url.PathEscape(id)+"/adopt", map[string]any{}, 201, &adopted)
+	e.must("POST", "/api/connections/1/sessions/"+url.PathEscape(id)+"/adopt", map[string]any{}, 201, &adopted)
 	base := fmt.Sprintf("/api/tasks/%d/opening-prompt", adopted.ID)
 	var got struct {
 		Item *opening.Item `json:"item"`

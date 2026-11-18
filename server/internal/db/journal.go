@@ -21,20 +21,21 @@ type JournalOwner struct {
 }
 
 type JournalEntry struct {
-	ID             int64     `json:"id"`
-	Kind           string    `json:"kind"`
-	TaskID         *int64    `json:"taskId"`
-	TreeID         *int64    `json:"treeId"`
-	SourceTaskID   *int64    `json:"sourceTaskId"`
-	SourceThreadID *string   `json:"sourceThreadId"`
-	Attempt        *int      `json:"attempt"`
-	Category       string    `json:"category"`
-	Text           string    `json:"text"`
-	EventType      string    `json:"eventType"`
-	FromTreeID     *int64    `json:"fromTreeId"`
-	ToTreeID       *int64    `json:"toTreeId"`
-	CreatedAt      time.Time `json:"createdAt"`
-	Truncated      bool      `json:"truncated"`
+	SourceSession  *SessionRef `json:"sourceSession"`
+	ID             int64       `json:"id"`
+	Kind           string      `json:"kind"`
+	TaskID         *int64      `json:"taskId"`
+	TreeID         *int64      `json:"treeId"`
+	SourceTaskID   *int64      `json:"sourceTaskId"`
+	SourceThreadID *string     `json:"sourceThreadId"`
+	Attempt        *int        `json:"attempt"`
+	Category       string      `json:"category"`
+	Text           string      `json:"text"`
+	EventType      string      `json:"eventType"`
+	FromTreeID     *int64      `json:"fromTreeId"`
+	ToTreeID       *int64      `json:"toTreeId"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	Truncated      bool        `json:"truncated"`
 }
 
 type JournalQuery struct {
@@ -47,18 +48,19 @@ type JournalPage struct {
 	NextCursor *string        `json:"nextCursor"`
 }
 type AppendNoteInput struct {
-	Text           string  `json:"text"`
-	Category       string  `json:"category"`
-	RequestID      string  `json:"requestId"`
-	SourceTaskID   *int64  `json:"sourceTaskId"`
-	SourceThreadID *string `json:"sourceThreadId"`
+	SourceSession  *SessionRef `json:"sourceSession,omitempty"`
+	Text           string      `json:"text"`
+	Category       string      `json:"category"`
+	RequestID      string      `json:"requestId"`
+	SourceTaskID   *int64      `json:"sourceTaskId"`
+	SourceThreadID *string     `json:"sourceThreadId"`
 }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, source_thread_id, attempt, category, text, event_type, from_tree_id, to_tree_id, created_at`
+const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id=1)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id)`
 
 func scanJournal(r rowScanner) (JournalEntry, error) {
 	var e JournalEntry
-	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.SourceThreadID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt)
+	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.SourceThreadID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt, &e.SourceSession)
 	return e, notFound(err)
 }
 
@@ -106,6 +108,26 @@ func validateJournalCategory(category string) error {
 }
 
 func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput) (JournalEntry, error) {
+	var sourceID *int64
+	if in.SourceSession != nil {
+		if in.SourceThreadID != nil {
+			return JournalEntry{}, Invalid("use sourceSession or the legacy T3 sourceThreadId, not both")
+		}
+		id, err := sessionIdentity(ctx, tx, *in.SourceSession)
+		if err != nil {
+			return JournalEntry{}, err
+		}
+		sourceID = &id
+	} else if in.SourceThreadID != nil {
+		ref := SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: *in.SourceThreadID}
+		in.SourceSession = &ref
+		id, err := sessionIdentity(ctx, tx, ref)
+		if err != nil {
+			return JournalEntry{}, err
+		}
+		sourceID = &id
+	}
+
 	if err := validateOwner(o); err != nil {
 		return JournalEntry{}, err
 	}
@@ -124,7 +146,7 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 	// A committed retry succeeds even if provenance's task has since moved.
 	existing, err := scanJournal(tx.QueryRow(ctx, `SELECT `+journalColumns+` FROM journal_entries WHERE kind = 'note' AND task_id IS $1 AND tree_id IS $2 AND request_id = $3`, o.TaskID, o.TreeID, in.RequestID))
 	if err == nil {
-		if existing.Text != in.Text || existing.Category != in.Category || !equalPtr(existing.SourceTaskID, in.SourceTaskID) || !equalPtr(existing.SourceThreadID, in.SourceThreadID) {
+		if existing.Text != in.Text || existing.Category != in.Category || !equalPtr(existing.SourceTaskID, in.SourceTaskID) || !equalPtr(existing.SourceSession, in.SourceSession) {
 			return JournalEntry{}, Conflict("requestId already used with different note content")
 		}
 		return existing, nil
@@ -141,7 +163,7 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 			return JournalEntry{}, Conflict("source task is no longer a member of this tree")
 		}
 	}
-	return scanJournal(tx.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID))
+	return scanJournal(tx.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id,source_session_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID, sourceID))
 }
 
 func equalPtr[T comparable](a, b *T) bool {

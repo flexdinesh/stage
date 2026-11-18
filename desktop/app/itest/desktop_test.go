@@ -103,7 +103,7 @@ func (a *app) stream(ctx context.Context, path, lastID string) (*streamRecorder,
 }
 
 type thread struct {
-	T3ThreadID           string `json:"t3ThreadId"`
+	T3ThreadID           string `json:"externalSessionId"`
 	Title                string `json:"title"`
 	PendingQuestionCount int    `json:"pendingQuestionCount"`
 }
@@ -112,7 +112,7 @@ type task struct {
 	ID         int64  `json:"id"`
 	Title      string `json:"title"`
 	State      string `json:"state"`
-	T3ThreadID string `json:"t3ThreadId"`
+	T3ThreadID string `json:"externalSessionId"`
 }
 
 // TestDesktopAgainstRealServer drives the desktop bridge against a real
@@ -173,18 +173,7 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		}
 	})
 
-	a.json("POST", "/api/sync", map[string]any{}, 200, nil)
-	var projects struct {
-		Projects []struct {
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
-		} `json:"projects"`
-	}
-	a.json("GET", "/api/projects", nil, 200, &projects)
-	if len(projects.Projects) == 0 {
-		t.Fatal("no projects after sync")
-	}
-	projectID := projects.Projects[0].ID
+	projectID, _ := bindDemoProject(t, a.json)
 
 	var attID int64
 	t.Run("upload and attachment", func(t *testing.T) {

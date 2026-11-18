@@ -70,24 +70,18 @@ func (e *env) project(root string) db.Project {
 	if _, err := e.sync.FullSync(ctx); err != nil {
 		e.t.Fatal(err)
 	}
-	ps, err := e.client.Projects(ctx)
+	out, err := e.store.InsertProject(ctx, db.Project{Title: p.Title, Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: p.ID, Workspace: root}}})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	for _, x := range ps {
-		if x.T3ProjectID == p.ID {
-			return x
-		}
-	}
-	e.t.Fatalf("project %s not mirrored", root)
-	return db.Project{}
+	return out
 }
 
 // session launches a running external thread in project p.
 func (e *env) session(p db.Project, title string) string {
 	e.t.Helper()
 	ctx := context.Background()
-	out, err := e.fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.T3ProjectID, Title: title})
+	out, err := e.fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: p.Bindings[0].ExternalProjectID, Title: title})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -193,7 +187,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 
 	var tk client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high", "tags": []string{"agent"}}, &tk)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high", "tags": []string{"agent"}}, &tk)
 	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || len(tk.Needs) != 1 || tk.Readiness == nil || *tk.Readiness != db.ReadinessBlocked ||
 		tk.OriginThreadID == nil || *tk.OriginThreadID != s || len(tk.ModelOptions) != 1 || tk.ModelOptions[0].ID != "effort" {
 		t.Fatalf("task %+v", tk)
@@ -218,13 +212,13 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 	var cx2 agenttools.ContextOut
 	mustCall(t, cs, "get_context", map[string]any{"callerThreadId": "unknown-thread", "cwd": "/w/other/x"}, &cx2)
-	if cx2.ThreadID != "unknown-thread" || cx2.Project == nil || cx2.Project.ID != other.ID || cx2.ProjectSource != "cwd" {
+	if cx2.ThreadID != "unknown-thread" || cx2.Project != nil || cx2.ProjectSource != "" {
 		t.Fatalf("cwd fallback %+v", cx2)
 	}
 
 	// afterMe without a session id is an error.
 	noCaller := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/agent"}})
-	if msg := call(t, noCaller, "create_task", map[string]any{"title": "c", "prompt": "x", "afterMe": true}, nil); !strings.Contains(msg, "session id") {
+	if msg := call(t, noCaller, "create_task", map[string]any{"project": "1", "title": "c", "prompt": "x", "afterMe": true}, nil); !strings.Contains(msg, "session id") {
 		t.Fatalf("afterMe without session: %q", msg)
 	}
 	if msg := call(t, noCaller, "create_task", map[string]any{"title": "c", "prompt": "x", "project": "nope"}, nil); !strings.Contains(msg, "no project") {
@@ -258,14 +252,14 @@ func TestLifecycleWaitTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/life"}, PollEvery: 10 * time.Millisecond})
 
 	var a, b client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x", "start": true}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x", "start": true}, &a)
 	if a.State == db.StateBacklog || a.T3ThreadID == nil {
 		t.Fatalf("start=true %+v", a)
 	}
-	if msg := call(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "start": true}, nil); !strings.Contains(msg, "cannot also start now") {
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}, "start": true}, nil); !strings.Contains(msg, "cannot also start now") {
 		t.Fatalf("needs with start=true: %q", msg)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}}, &b)
 	if !slices.Equal(b.Needs, []int64{a.ID}) || b.TreeID == nil {
 		t.Fatalf("needs %+v", b)
 	}
@@ -334,7 +328,7 @@ func TestTreeStartModeDefaultsToInherit(t *testing.T) {
 	e.project("/w/inherit")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/inherit"}})
 	var root client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "root", "prompt": "root", "start": true}, &root)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "root", "prompt": "root", "start": true}, &root)
 	var tree client.TreeDetail
 	mustCall(t, cs, "create_tree", map[string]any{
 		"title": "Shared policy", "startMode": "manual", "tasks": []map[string]any{{"id": root.ID}},
@@ -346,7 +340,8 @@ func TestTreeStartModeDefaultsToInherit(t *testing.T) {
 	var members []client.Task
 	for _, mode := range []string{"", "inherit", "manual", "auto"} {
 		args := map[string]any{
-			"title": "member " + mode, "prompt": "work", "treeId": tree.ID, "needs": []int64{root.ID},
+			"project": "1",
+			"title":   "member " + mode, "prompt": "work", "treeId": tree.ID, "needs": []int64{root.ID},
 		}
 		if mode != "" {
 			args["startMode"] = mode
@@ -408,7 +403,7 @@ func TestLifecycleTreeTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/trees"}})
 	newTask := func(title string, extra map[string]any) client.Task {
 		t.Helper()
-		args := map[string]any{"title": title, "prompt": "do " + title}
+		args := map[string]any{"project": "1", "title": title, "prompt": "do " + title}
 		for k, v := range extra {
 			args[k] = v
 		}
@@ -534,7 +529,7 @@ func TestLifecycleTreeTools(t *testing.T) {
 	if msg := call(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "soon"}, nil); !strings.Contains(msg, "invalid startMode") {
 		t.Fatalf("update_task bad startMode: %q", msg)
 	}
-	if msg := call(t, cs, "create_task", map[string]any{"title": "h", "prompt": "x", "baseTaskId": c.ID}, nil); !strings.Contains(msg, "base needs a worktree") {
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "h", "prompt": "x", "baseTaskId": c.ID}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatalf("baseTaskId without a worktree: %q", msg)
 	}
 
@@ -566,7 +561,7 @@ func TestAdoptSessionTool(t *testing.T) {
 
 	// Another session by id, titled, into an existing tree.
 	var tk client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "next", "prompt": "x", "needs": []int64{mine.ID}}, &tk)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "next", "prompt": "x", "needs": []int64{mine.ID}}, &tk)
 	if tk.TreeID == nil {
 		t.Fatalf("needs on an adopted task builds a tree %+v", tk)
 	}
@@ -608,7 +603,7 @@ func TestLastWordTools(t *testing.T) {
 	p := e.project("/w/word")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/word"}})
 	var a client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x", "start": true}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x", "start": true}, &a)
 	if a.T3ThreadID == nil {
 		t.Fatalf("not launched %+v", a)
 	}
@@ -648,9 +643,9 @@ func TestPlanningSessionBatch(t *testing.T) {
 	s := e.session(p, "Planner")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
 	var a, b, c client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "do a", "afterMe": true}, &a)
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "do b", "needs": []int64{a.ID}}, &b)
-	mustCall(t, cs, "create_task", map[string]any{"title": "c", "prompt": "do c"}, &c)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "do a", "afterMe": true}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "do b", "needs": []int64{a.ID}}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "c", "prompt": "do c"}, &c)
 	if b.TreeID == nil || a.TreeID == nil || *b.TreeID != *a.TreeID {
 		t.Fatalf("b joins a's tree: %+v %+v", a, b)
 	}
@@ -674,7 +669,7 @@ func TestScheduleTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
 
 	var sc db.Schedule
-	mustCall(t, cs, "create_schedule", map[string]any{"title": "nightly", "prompt": "bump", "cron": "0 2 * * *", "tz": "UTC"}, &sc)
+	mustCall(t, cs, "create_schedule", map[string]any{"project": "1", "title": "nightly", "prompt": "bump", "cron": "0 2 * * *", "tz": "UTC"}, &sc)
 	if sc.ProjectID != p.ID || sc.OriginThreadID == nil || *sc.OriginThreadID != s || sc.NextRunAt == nil {
 		t.Fatalf("schedule %+v", sc)
 	}
@@ -752,18 +747,8 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	var cx agenttools.ContextOut
 	mustCall(t, cs, "get_context", map[string]any{"cwd": "/w/http/pkg"}, &cx)
-	if cx.Project == nil || cx.ProjectSource != "cwd" {
+	if cx.Project != nil || cx.ProjectSource != "" {
 		t.Fatalf("http context %+v", cx)
-	}
-}
-
-func TestProjectForPath(t *testing.T) {
-	ps := []db.Project{{ID: 1, WorkspaceRoot: "/w"}, {ID: 2, WorkspaceRoot: "/w/app"}, {ID: 3, WorkspaceRoot: "/w/app-two"}, {ID: 4, WorkspaceRoot: "rel"}}
-	for dir, want := range map[string]int64{"/w/app/src": 2, "/w/app": 2, "/w/app-two/x": 3, "/w/x": 1, "/other": 0, "": 0, "/w/app/": 2} {
-		p, ok := agentctx.ProjectForPath(ps, dir)
-		if (want == 0) == ok || (ok && p.ID != want) {
-			t.Fatalf("%q -> %+v %v, want %d", dir, p, ok, want)
-		}
 	}
 }
 
@@ -773,11 +758,11 @@ func TestHandoffFlagTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/handoff"}, PollEvery: 10 * time.Millisecond})
 
 	var a, b client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x"}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x"}, &a)
 	if !a.Handoff {
 		t.Fatalf("create_task: handoff defaults on: %+v", a)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "handoff": false}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}, "handoff": false}, &b)
 	if b.Handoff {
 		t.Fatalf("create_task handoff=false: %+v", b)
 	}
@@ -806,8 +791,8 @@ func TestBaseTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/base"}, PollEvery: 10 * time.Millisecond})
 
 	var a, b, r client.Task
-	mustCall(t, cs, "create_task", map[string]any{"title": "a", "prompt": "x"}, &a)
-	mustCall(t, cs, "create_task", map[string]any{"title": "b", "prompt": "y", "needs": []int64{a.ID}, "baseRef": "origin/main", "base": "predecessor"}, &b)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x"}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}, "baseRef": "origin/main", "base": "predecessor"}, &b)
 	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
 		t.Fatalf("create_task base=predecessor: %+v", b.Workspace)
 	}
@@ -824,11 +809,11 @@ func TestBaseTools(t *testing.T) {
 	if !d.Workspace.FromPredecessor() || d.CurrentLaunchBase != nil {
 		t.Fatalf("get_task %+v", d)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"title": "r", "prompt": "z"}, &r)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "r", "prompt": "z"}, &r)
 	if msg := call(t, cs, "update_task", map[string]any{"id": r.ID, "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatal("update_task base=predecessor on a root task must fail")
 	}
-	if msg := call(t, cs, "create_task", map[string]any{"title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatal("create_task base without baseRef must fail")
 	}
 }

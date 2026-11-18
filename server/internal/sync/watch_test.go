@@ -44,12 +44,13 @@ func TestWatchThreads(t *testing.T) {
 	ctx := context.Background()
 	fake := t3.NewFake()
 	client := &hookT3{Fake: fake}
-	if _, err := store.InsertProject(ctx, db.Project{T3ProjectID: "proj-1", Title: "app", WorkspaceRoot: "/w", Source: db.SourceApp}); err != nil {
+	external := fake.AddProject("app", "/w")
+	if _, err := store.InsertProject(ctx, db.Project{Title: "app", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: external.ID, Workspace: "/w"}}}); err != nil {
 		t.Fatal(err)
 	}
 	launch := func(title string) string {
 		t.Helper()
-		res, err := fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: "proj-1", Title: title})
+		res, err := fake.LaunchThread(ctx, t3.LaunchInput{ProjectID: external.ID, Title: title})
 		if err != nil {
 			t.Fatal(err)
 		}

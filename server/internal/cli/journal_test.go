@@ -92,7 +92,7 @@ func TestJournalCommands(t *testing.T) {
 		{"tree", "notes", "2", "--kind", "invalid"},
 		{"tree", "notes", "2", "--limit", "0"},
 		{"tree", "notes", "2", "add", "--text", "a", "--q", "ignored"},
-		{"task", "add", "--title", "T", "--prompt", "P", "--notes", "legacy"},
+		{"task", "add", "--project", "1", "--title", "T", "--prompt", "P", "--notes", "legacy"},
 		{"task", "edit", "1", "--notes", "legacy"},
 		{"task", "edit", "1", "--initial-note", "legacy"},
 		{"sessions", "adopt", "--notes", "legacy"},
@@ -111,7 +111,7 @@ func TestTaskInitialNoteAndScheduleTemplateCommands(t *testing.T) {
 	h := newHarness(t)
 	h.project("/w/cli-notes")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-notes"}
-	code, out, stderr := h.run("", "task", "add", "--title", "T", "--prompt", "P", "--initial-note", "initial", "--json")
+	code, out, stderr := h.run("", "task", "add", "--project", "1", "--title", "T", "--prompt", "P", "--initial-note", "initial", "--json")
 	if code != 0 {
 		t.Fatalf("create: %s", stderr)
 	}
@@ -124,7 +124,7 @@ func TestTaskInitialNoteAndScheduleTemplateCommands(t *testing.T) {
 	if len(page.Entries) != 1 || page.Entries[0].Text != "initial" {
 		t.Fatalf("initial note %+v", page)
 	}
-	code, out, stderr = h.run("", "schedule", "add", "--title", "S", "--prompt", "P", "--cron", "@daily", "--tz", "UTC", "--notes", "template", "--json")
+	code, out, stderr = h.run("", "schedule", "add", "--project", "1", "--title", "S", "--prompt", "P", "--cron", "@daily", "--tz", "UTC", "--notes", "template", "--json")
 	if code != 0 {
 		t.Fatalf("schedule add: %s", stderr)
 	}

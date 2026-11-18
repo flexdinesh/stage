@@ -114,7 +114,7 @@ const treeEventLimit = 50
 
 // treeActivitySQL is TreeTimes.LastActivityAt for tree tr in SQL.
 const treeActivitySQL = `max(tr.created_at, tr.updated_at, COALESCE((SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), ''), COALESCE((SELECT max(max(m.updated_at, COALESCE(th.updated_at, '')))
- FROM tasks m LEFT JOIN threads th ON th.t3_thread_id = m.t3_thread_id WHERE m.tree_id = tr.id), ''))`
+ FROM tasks m LEFT JOIN threads th ON th.session_id = m.session_id WHERE m.tree_id = tr.id), ''))`
 
 func treeTimes(t Tree, members []Task) TreeTimes {
 	tt := TreeTimes{LastActivityAt: t.CreatedAt}

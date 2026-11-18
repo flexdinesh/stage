@@ -5,14 +5,14 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ## Conventions
 
 - Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
-- IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`t3ProjectId`, `t3ThreadId`) are strings.
+- IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`externalProjectId`, `externalSessionId`) are strings.
 - Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
 - Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
 - Errors: non-2xx responses have body `{ "error": string }`. Some 409s add a machine-readable `"code"`.
-- Every response carries `Stage-Api-Version: <n>` (currently `4`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
+- Every response carries `Stage-Api-Version: <n>` (currently `5`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
 - Request origin policy (`/api` and `/mcp`; [runtime.md](runtime.md#request-origin-policy)): requests with a Host that is not allowed, cross-site requests and untrusted cross-origin writes get 403; a non-empty write body that is not `application/json` (or `multipart/form-data` for uploads) gets 415.
 
 | Status | Meaning |
@@ -69,7 +69,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   "identity": "stage",
   "version": "v1.4.0",
   "commit": "4202029f...",
-  "apiVersion": 3,
+  "apiVersion": 5,
   "instanceId": "9f2c4e1a7b3d5c60",
   "startedAt": "2026-11-16T09:00:00Z",
   "schema": 4,
@@ -163,39 +163,76 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
 
 ## Projects
 
-`Project`:
-```json
-{
-  "id": 1,
-  "t3ProjectId": "proj_abc",
-  "title": "stage",
-  "workspaceRoot": "/home/user/workspace/stage",
-  "source": "app",
-  "archivedAt": null,
-  "createdAt": "2026-11-08T10:00:00Z",
-  "updatedAt": "2026-11-08T10:00:00Z",
-  "lastActivityAt": "2026-11-08T11:30:00Z"
-}
-```
+Stage owns project IDs, titles and archive state. Creating a project needs no
+harness. Discovery never imports, renames, archives or deletes Stage projects.
+Existing T3 projects keep their Stage IDs and migrate to explicit bindings.
 
-`lastActivityAt`: latest of the project's thread `updatedAt` / `settledAt` (incl. subagents) and task `updatedAt`; null when none.
+`Project`: `{id, title, bindings, archivedAt, createdAt, updatedAt, lastActivityAt}`.
+`bindings` contains active `{id, projectId, connectionId, harness,
+externalProjectId, workspace, revision, status, observedWorkspace}` records.
+Status is `available`, `missing` or `changed`. Paths belong to bindings, never
+to Stage identity. Activity includes tracked sessions, tasks and journals.
 
-T3 is the source of truth: `title`, `workspaceRoot` and `archivedAt` follow T3 on every sync (empty T3 title → `workspaceRoot`). Projects are read-only here; rename/archive in T3. A project deleted in T3 stays (tasks reference it) and is archived (`archivedAt` = T3 `deletedAt` unless already archived).
+- `GET /api/projects?archived=false|true|all`: `{projects: Project[]}`.
+- `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
+- `GET /api/projects/:id`: Project or 404.
+- `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
+- `GET /api/connections`: `{connections: [{id, harness}]}`. Only implemented
+  integrations are exposed. T3 uses connection 1. OpenCode is storage-only.
+- `GET /api/connections/t3/projects`: live discovery, returns
+  `{projects: [{connectionId, externalId, title, workspace, projectId}]}`.
+  `projectId` is the current explicit owner, or null.
+- `PUT /api/projects/:id/binding`: `{connectionId, externalProjectId, workspace}`.
+  Revalidates the exact external project/path with T3 before binding. One active
+  binding per project/connection; one Stage owner per external workspace.
+  Rebinding retires the previous revision. Conflicts return 409.
+- `DELETE /api/projects/:id/binding`: unbind T3, retaining history.
+- `POST /api/connections/t3/projects`: `{title, workspace}` explicitly registers
+  an existing directory in T3. No directory creation, cloning or provisioning.
+  After an uncertain response, refresh discovery before registering again.
 
-### `GET /api/projects`
-Query: `archived` = `true` (only archived) | `false` (default, only active) | `all`.
-200 `{ "projects": Project[] }` ordered by `title`.
+Titles and directory strings are never matching evidence. T3 currently provides
+neither verified shared filesystem/worktree-family identity nor remote evidence,
+so selection is explicit. Future adapters may auto-match a verified shared family
+and subproject, and suggest Git-remote matches for confirmation. Remote equality
+alone must never bind clones. Manual correction handles remote/inaccessible
+paths, ambiguous clones and monorepo subprojects.
 
-### `POST /api/projects`
-Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; absolute roots are path-cleaned, e.g. trailing `/` dropped).
-- An app project with the same `workspaceRoot` exists → 409.
-- A T3 project with the same `workspaceRoot` exists (already imported, or found after refreshing `t3_project_list`) → return it as mirrored (`source: "t3"`): `title` and archive state stay T3's; the requested `title` is ignored. Projects deleted in T3 do not count: their root can be created again.
-- Otherwise create it in T3 (`t3_project_create`) → `source: "app"`.
+External deletion or connection failure retains Stage metadata, tasks and history.
+An observed path change requires explicit confirmation. Future unclaimed launches
+use the active binding; claimed attempts and uncertain retries retain their original
+connection, external project, workspace and binding revision. Restoring connectivity
+cannot redirect a retry.
 
-201 `Project`. 502 T3 error. 503 not connected.
+### Identity contract (API 5)
 
-### `GET /api/projects/:id`
-200 `Project`. 404.
+Use matching API 5 server, CLI and desktop builds. Project `externalProjectId`,
+`workspaceRoot` and `source` are replaced by `bindings`. Session/task wire names
+use `externalSessionId` and `externalProjectId`, with `connectionId`.
+A scoped reference is `{connectionId, externalSessionId}`; tasks expose `session`
+and `originSession`, journal entries `sourceSession`, accepted evidence `session`,
+and resolved references `session`. A raw ID is never globally unique.
+
+Legacy `originThreadId`, `sourceThreadId`, `callerThreadId` and bare historical
+session references explicitly mean T3 connection 1. New task requests may use
+`originSession`; journal notes may use `sourceSession`, mutually exclusive with
+their legacy alias. T3 cache tables and historical links remain intact. Migration
+does not rewrite accepted snapshot JSON or journal text.
+
+Session lookup/adoption uses `/api/connections/:connectionId/sessions/:id`.
+Only connection 1 is currently usable. Adoption of an unbound session accepts
+`projectId` or `newProjectTitle`, with binding and task creation in one transaction.
+A failed adoption leaves neither a project nor a binding behind.
+
+Tasks and schedules can be saved without a binding. Launch returns 409
+`binding_required` or `connection_unavailable` before claiming an attempt.
+A scheduled occurrence blocked this way becomes one untimed backlog task with an
+actionable error. Further recurring occurrences are suppressed while it remains
+pending. Repair alone never starts it; start it manually.
+
+Save-and-start requests retain the saved task if launch preflight fails. The task
+stays in backlog with `lastError` and a journal event naming the repair; no launch
+attempt is consumed.
 
 
 ## Tasks
@@ -216,7 +253,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "workspace": { "type": "root" },
   "tags": ["smoke"],
   "state": "running",
-  "t3ThreadId": "thread_abc",
+  "externalSessionId": "thread_abc",
   "treeId": 3,
   "treeTitle": "Ship auth",
   "startMode": null,
@@ -267,7 +304,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
 - `handoff`: append one handoff block per accepted need to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
-- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread). `t3DeepLink` = `t3code://threads/<environmentId>/<t3ThreadId>` (T3 desktop/mobile app; null without thread or environment id). Thread carries the same three.
+- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<externalSessionId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread). `t3DeepLink` = `t3code://threads/<environmentId>/<externalSessionId>` (T3 desktop/mobile app; null without thread or environment id). Thread carries the same three.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
@@ -333,7 +370,7 @@ Only a task that never started and has no recorded work (`deletable`). 204. 409 
 Archive (sets `archivedAt`) or unarchive a standalone task. Archive 409 when the task is in a tree (`archive the tree, or remove it from the tree first`) or is `launching|running|needs_input` (`#N is running: stop it first`). Unarchive of a task that is not archived is a no-op. 200 `Task`. 404.
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Every need must have current Stage acceptance at the atomic launch claim; otherwise 409 names the missing prerequisites. Start early is unavailable through every entry point. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Every need must have current Stage acceptance at the atomic launch claim; otherwise 409 names the missing prerequisites. Start early is unavailable through every entry point. Each start clears `externalSessionId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one. The same applies to a task left in `launching` by a server restart (failed at startup with `launch interrupted by server restart`). On shutdown the server waits up to 100s for in-flight launches (compose `stop_grace_period: 2m`).
 Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
@@ -528,9 +565,9 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 
 ## Explicit session lookup and adoption
 
-`GET /api/threads/:id` returns `{thread, task}` for an explicitly supplied T3 thread ID. It refreshes execution identity, title, project, state, model/workspace and native links when T3 is connected, or uses cached metadata offline. No child-session list, created-task browser, transcript, question payload, PR state or run history. `task` is the owner or null. Task detail separately includes `thread.lastWord`.
+`GET /api/connections/:connectionId/sessions/:id` returns `{thread, task}` for an explicitly supplied T3 thread ID. It refreshes execution identity, title, project, state, model/workspace and native links when T3 is connected, or uses cached metadata offline. No child-session list, created-task browser, transcript, question payload, PR state or run history. `task` is the owner or null. Task detail separately includes `thread.lastWord`.
 
-`POST /api/threads/:id/adopt` accepts `{title?, initialNote?, tags?, treeId?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. The UI previews before confirming. See Adopt session below.
+`POST /api/connections/:connectionId/sessions/:id/adopt` accepts `{title?, initialNote?, tags?, treeId?, projectId?, newProjectTitle?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. The UI previews before confirming. See Adopt session below.
 
 ### `GET /api/tasks/:id/opening-prompt`
 
@@ -617,7 +654,7 @@ JSON, shown by the service worker. Built from the stored inbox row by one server
 { "title": "Needs input", "body": "Say OK · stage", "url": "/tasks/7", "tag": "task-7", "badge": 2 }
 ```
 Needs-input payloads open their task or the inbox. Open in T3 continues the conversation.
-`tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<t3ThreadId>`); the service worker sets `renotify` so a replacement alerts again. iOS ignores tag replacement (WebKit bug 258922), so the service worker also closes shown notifications with the same tag (`tag`, or the copy in `data.tag`) before showing the new one. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise. Header `Topic` = first 32 chars of base64url(sha256(tag)): the push service keeps only the latest undelivered push per task/thread.
+`tag` replaces an older notification for the same task (`task-<id>`) or thread (`thread-<connectionId>:<externalSessionId>`); the service worker sets `renotify` so a replacement alerts again. iOS ignores tag replacement (WebKit bug 258922), so the service worker also closes shown notifications with the same tag (`tag`, or the copy in `data.tag`) before showing the new one. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise. Header `Topic` = first 32 chars of base64url(sha256(tag)): the push service keeps only the latest undelivered push per task/thread.
 
 Clear on view: opening a task page closes its `task-<id>` system notification and marks group `task:<id>` read; opening session detail closes its `thread-<id>` notification and the related task notification when present, and marks those groups read (`POST /api/notifications/read` with `groups`). Clicking a notification opens one of these pages. Opening the notifications inbox closes all of them and marks everything read.
 
@@ -635,7 +672,7 @@ Every notification the notifier sends is stored first (also when no browser is s
   "id": 12,
   "event": "needs_input",
   "taskId": 7,
-  "t3ThreadId": "thread-abc",
+  "externalSessionId": "thread-abc",
   "title": "Say OK",
   "projectTitle": "stage",
   "url": "/tasks/7",
@@ -662,7 +699,7 @@ Groups whose current state is `needs_input` come first, then other groups; each 
 Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `ready`, `done`, `failed`, and `settled` notifications, not every lifecycle transition. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
-Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `{ "groups": string[] }` (1 to 20 group keys, e.g. `task:12`, `thread:<t3ThreadId>`): marks every unread entry in those groups read. 204. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
+Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `{ "groups": string[] }` (1 to 20 group keys, e.g. `task:12`, `thread:<connectionId>:<externalSessionId>`): marks every unread entry in those groups read. 204. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
 
 ### `GET /api/notifications/unread-tags`
 200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `thread:<id>` → `thread-<id>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
@@ -750,7 +787,7 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 
 ## Adopt session
 
-`POST /api/threads/:id/adopt` ("Track as task") and `needsSessionId` ("afterMe") make a top-level T3 session a task:
+`POST /api/connections/:connectionId/sessions/:id/adopt` ("Track as task") and `needsSessionId` ("afterMe") make a top-level T3 session a task:
 
 - `adopted: true`, `prompt: ""`, title from the request, else the session title, else `Session <id8>`; model, runtime and interaction mode copied from the session; state from the session (State mapping, idle reads `done`); `launchAttempt` 1. Task event `adopted session`.
 - stage never starts, restarts or duplicates it (409); stop works; sync keeps its state.
@@ -817,7 +854,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - Caller: `T3CODE_THREAD_ID` and cwd from the environment (CLI, stdio), or tool args `callerThreadId` / `cwd` (override; required for context over HTTP).
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerThreadId?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.
-- Project: explicit `project` (id or exact title) > the caller session's project (`GET /api/threads/:id`) > the project whose `workspaceRoot` is the longest prefix of cwd.
+- Project: explicit `project` (id or unambiguous exact title) > the caller session's explicitly bound project. Cwd is context only; paths across machines are not verified identity.
 - Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
 - `get_session` returns `batch` (see "Session batch"); `get_task` returns `batch` and `tree`.
 - `create_task` / `create_schedule` set `originThreadId` to the caller session. `afterMe` = `needsSessionId` of the caller session (adopted into the tree as a task; error without a session).
@@ -830,4 +867,4 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.
 
-`GET /api/notifications/groups` also returns `waitingSessions: [{t3ThreadId, title, projectTitle, t3DeepLink, t3WebUrl}]`. These are current external needs-input sessions with no recorded notification up to `latestId`. They have no notification ID, timestamp or read state. Resolving input, adopting the session, or receiving a real event removes the silent row. Startup suppression and delivery preferences remain unchanged.
+`GET /api/notifications/groups` also returns `waitingSessions: [{externalSessionId, title, projectTitle, t3DeepLink, t3WebUrl}]`. These are current external needs-input sessions with no recorded notification up to `latestId`. They have no notification ID, timestamp or read state. Resolving input, adopting the session, or receiving a real event removes the silent row. Startup suppression and delivery preferences remain unchanged.

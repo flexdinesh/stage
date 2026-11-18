@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { matchProjects } from "../src/lib/projects.ts";
+import { fakeApi } from "./fake-transport.mjs";
+
+test("project edits and bindings send JSON objects through the shared transport", async () => {
+  const received = [];
+  const { api } = fakeApi(async (path, init) => {
+    received.push({ path, method: init.method, body: JSON.parse(init.body) });
+    return Response.json({ id: 7, title: "Plan", bindings: [] });
+  });
+  await api.updateProject(7, {title: "Plan", archived: false});
+  await api.bindProject(7, {connectionId: 1, externalId: "remote", workspace: "/work", title: "External", projectId: null});
+  assert.deepEqual(received, [
+    {path: "/projects/7", method: "PATCH", body: {title: "Plan", archived: false}},
+    {path: "/projects/7/binding", method: "PUT", body: {connectionId: 1, externalProjectId: "remote", workspace: "/work"}},
+  ]);
+});
 
 const project = (id, title, workspaceRoot, lastActivityAt) => ({
-  id, t3ProjectId: `t3-${id}`, title, workspaceRoot, source: "t3", archivedAt: null,
+  id, title, bindings: [{connectionId: 1, externalProjectId: `t3-${id}`, workspace: workspaceRoot}], archivedAt: null,
   createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt,
 });
 

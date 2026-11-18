@@ -88,7 +88,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
 		Tags: in.Tags, Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
-		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginThreadID: in.OriginThreadID,
+		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginThreadID: in.OriginThreadID, OriginSession: in.OriginSession,
 	})
 	if err != nil {
 		return err

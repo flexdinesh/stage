@@ -59,14 +59,12 @@ var (
 )
 
 type Project struct {
-	ID            int64      `json:"id"`
-	T3ProjectID   string     `json:"t3ProjectId"`
-	Title         string     `json:"title"`
-	WorkspaceRoot string     `json:"workspaceRoot"`
-	Source        string     `json:"source"`
-	ArchivedAt    *time.Time `json:"archivedAt"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID         int64            `json:"id"`
+	Bindings   []ProjectBinding `json:"bindings"`
+	Title      string           `json:"title"`
+	ArchivedAt *time.Time       `json:"archivedAt"`
+	CreatedAt  time.Time        `json:"createdAt"`
+	UpdatedAt  time.Time        `json:"updatedAt"`
 	// LastActivityAt: latest thread update/settle or task update; nil when none.
 	LastActivityAt *time.Time `json:"lastActivityAt"`
 }
@@ -120,25 +118,30 @@ func (w Workspace) MarshalJSON() ([]byte, error) {
 }
 
 type Task struct {
-	AcceptanceID       *int64           `json:"acceptanceId"`
-	AcceptanceRevision int64            `json:"acceptanceRevision"`
-	CompletedAt        *time.Time       `json:"completedAt"`
-	ID                 int64            `json:"id"`
-	ProjectID          int64            `json:"projectId"`
-	ProjectTitle       string           `json:"projectTitle"`
-	Title              string           `json:"title"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId"`
-	Model              *string          `json:"model"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode        string           `json:"runtimeMode"`
-	InteractionMode    string           `json:"interactionMode"`
-	Workspace          Workspace        `json:"workspace"`
-	Tags               []string         `json:"tags"`
-	State              TaskState        `json:"state"`
-	T3ThreadID         *string          `json:"t3ThreadId"`
-	TreeID             *int64           `json:"treeId"` // the task's tree (docs/api.md "Trees")
-	TreeTitle          *string          `json:"treeTitle"`
+	ConnectionID            int64            `json:"connectionId"`
+	SessionIdentityID       *int64           `json:"-"`
+	OriginSessionIdentityID *int64           `json:"-"`
+	Session                 *SessionRef      `json:"session"`
+	OriginSession           *SessionRef      `json:"originSession"`
+	AcceptanceID            *int64           `json:"acceptanceId"`
+	AcceptanceRevision      int64            `json:"acceptanceRevision"`
+	CompletedAt             *time.Time       `json:"completedAt"`
+	ID                      int64            `json:"id"`
+	ProjectID               int64            `json:"projectId"`
+	ProjectTitle            string           `json:"projectTitle"`
+	Title                   string           `json:"title"`
+	Prompt                  string           `json:"prompt"`
+	ProviderInstanceID      *string          `json:"providerInstanceId"`
+	Model                   *string          `json:"model"`
+	ModelOptions            []t3.ModelOption `json:"modelOptions"`
+	RuntimeMode             string           `json:"runtimeMode"`
+	InteractionMode         string           `json:"interactionMode"`
+	Workspace               Workspace        `json:"workspace"`
+	Tags                    []string         `json:"tags"`
+	State                   TaskState        `json:"state"`
+	T3ThreadID              *string          `json:"externalSessionId"`
+	TreeID                  *int64           `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle               *string          `json:"treeTitle"`
 	// StartMode is the task's own start mode (nil = inherit the tree's);
 	// EffectiveStartMode applies the tree's (nil outside a tree without one).
 	StartMode          *StartMode `json:"startMode"`
@@ -200,8 +203,10 @@ type TaskEvent struct {
 
 // Thread is a T3 mirror row joined with its app project and task.
 type Thread struct {
-	T3ThreadID          string           `json:"t3ThreadId"`
-	T3ProjectID         string           `json:"t3ProjectId"`
+	ConnectionID        int64            `json:"connectionId"`
+	Session             SessionRef       `json:"session"`
+	T3ThreadID          string           `json:"externalSessionId"`
+	T3ProjectID         string           `json:"externalProjectId"`
 	ProjectID           *int64           `json:"projectId"`
 	ProjectTitle        *string          `json:"projectTitle"`
 	Title               string           `json:"title"`

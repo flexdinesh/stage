@@ -21,11 +21,14 @@ const adoptStateSQL = `CASE WHEN th.settled THEN 'settled'
 
 // AdoptInput adopts a T3 session as a task ("Track as task").
 type AdoptInput struct {
-	ThreadID    string
-	Title       *string  // nil or blank = the session title (else "Session <id8>")
-	InitialNote *string  // nil = ""
-	Tags        []string // cleaned by the API
-	TreeID      *int64   // join this tree (no needs)
+	ProjectID       *int64
+	NewProjectTitle string
+	Binding         *ProjectBinding
+	ThreadID        string
+	Title           *string  // nil or blank = the session title (else "Session <id8>")
+	InitialNote     *string  // nil = ""
+	Tags            []string // cleaned by the API
+	TreeID          *int64   // join this tree (no needs)
 }
 
 // AdoptThread makes mirrored session in.ThreadID a task (docs/api.md "Adopt
@@ -38,6 +41,32 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 	var created bool
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var err error
+		var owner bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE t3_thread_id=$1 AND connection_id=1)`, in.ThreadID).Scan(&owner); err != nil {
+			return err
+		}
+		if !owner && in.Binding != nil {
+			var projectID int64
+			if in.ProjectID != nil {
+				projectID = *in.ProjectID
+			} else {
+				if strings.TrimSpace(in.NewProjectTitle) == "" {
+					return Invalid("choose a Stage project or enter a new project title")
+				}
+				projectID, err = insertProject(ctx, tx, Project{Title: strings.TrimSpace(in.NewProjectTitle)})
+				if err != nil {
+					return err
+				}
+			}
+			binding := *in.Binding
+			binding.ProjectID = projectID
+			if _, err = bindProject(ctx, tx, binding); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE threads SET stage_project_id=$2 WHERE t3_thread_id=$1`, in.ThreadID, projectID); err != nil {
+				return err
+			}
+		}
 		if id, created, err = adoptThread(ctx, tx, in); err != nil {
 			return err
 		}
@@ -59,7 +88,7 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 // adoptThread is AdoptThread's insert, inside tx; returns the task id.
 func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error) {
 	var owner int64
-	err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE t3_thread_id = $1`, in.ThreadID).Scan(&owner)
+	err := tx.QueryRow(ctx, `SELECT id FROM tasks WHERE t3_thread_id = $1 AND connection_id=1`, in.ThreadID).Scan(&owner)
 	switch {
 	case err == nil:
 		return owner, false, nil
@@ -71,7 +100,7 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	var project *int64
 	err = tx.QueryRow(ctx, `
 SELECT th.parent_thread_id, th.archived, p.id FROM threads th
-LEFT JOIN projects p ON p.t3_project_id = th.t3_project_id WHERE th.t3_thread_id = $1`, in.ThreadID).
+LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1)) WHERE th.t3_thread_id = $1`, in.ThreadID).
 		Scan(&parent, &archived, &project)
 	if err != nil {
 		return 0, false, fmt.Errorf("session %s: %w", in.ThreadID, notFound(err))

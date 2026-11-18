@@ -44,7 +44,11 @@ export function matchProjects(projects: readonly Project[], query: string): Proj
   const q = query.trim().toLowerCase();
   if (q === "") return projects.toSorted(byRecency).map((project) => ({ project, title: null, path: null }));
   return projects
-    .map((project) => ({ project, title: find(project.title, q), path: find(project.workspaceRoot, q) }))
+    .map((project) => ({ project, title: find(project.title, q), path: find(projectWorkspace(project), q) }))
     .filter((m) => m.title !== null || m.path !== null)
     .toSorted((a, b) => rank(a) - rank(b) || byRecency(a.project, b.project));
+}
+
+export function projectWorkspace(project: Project): string {
+ return project.bindings.map((binding) => binding.workspace).join(" · ") || "Workspace not bound";
 }
