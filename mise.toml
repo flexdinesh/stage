@@ -99,6 +99,10 @@ alias = "check:website"
 wait_for = ["check:web"]
 run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website check"
 
+[tasks."readme:cover"]
+description = "Record the README cover (docs/assets/readme-cover-*.webp/png) at 60 fps from apps/website's ReadmeCover scene; needs ffmpeg with libwebp_anim. `-- --keep` keeps the frames"
+run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website exec playwright install chromium && node apps/website/scripts/record-readme-cover.ts"
+
 [tasks."website:preview"]
 description = "Website static build served the way Cloudflare Workers does (wrangler dev, :8787)"
 run = "pnpm install --frozen-lockfile --filter '@stage/website...' && pnpm --filter @stage/website build && pnpm --filter @stage/website preview"

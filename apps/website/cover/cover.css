@@ -1,0 +1,15 @@
+/* The README cover's capture page: the scene alone on a transparent page, so
+   GitHub's own light or dark ground shows around the windows. */
+
+/* `html body` outranks _root.css's `body { background }` whatever order the
+   stylesheets load in */
+html,
+html body {
+  margin: 0;
+  background: transparent;
+}
+
+.cover-frame {
+  width: 920px;
+  height: 420px;
+}
