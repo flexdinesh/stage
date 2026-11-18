@@ -137,7 +137,7 @@ func TestSetNeedsRules(t *testing.T) {
 	// auto tree named after the first need.
 	a := mustTask(t, s, ctx, p.ID, "Plan", nil)
 	b := mustTask(t, s, ctx, p.ID, "Build", []int64{a.ID})
-	if b.TreeID == nil || b.TreeTitle == nil || *b.TreeTitle != "Plan" || *b.EffectiveStartMode != db.StartAuto || !slices.Equal(b.Needs, []int64{a.ID}) {
+	if b.TreeID == nil || b.TreeTitle == nil || *b.TreeTitle != "Plan" || *b.EffectiveStartMode != db.StartManual || !slices.Equal(b.Needs, []int64{a.ID}) {
 		t.Fatalf("created with needs %+v", b)
 	}
 	tree := *b.TreeID
@@ -194,6 +194,7 @@ func TestSetNeedsRules(t *testing.T) {
 	}
 	// A settled need is allowed.
 	setState(t, s, ctx, solo.ID, db.StateSettled)
+	acceptTask(t, s, ctx, solo.ID)
 	d := mustTask(t, s, ctx, p.ID, "d", []int64{solo.ID})
 	if !slices.Equal(d.Needs, []int64{solo.ID}) {
 		t.Fatalf("settled need %+v", d)
@@ -353,6 +354,9 @@ func TestReadinessAndLaunchable(t *testing.T) {
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
+	if _, err := s.UpdateTree(ctx, *b.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartAuto}}); err != nil {
+		t.Fatal(err)
+	}
 	launchable := func() []int64 {
 		t.Helper()
 		ids, err := s.LaunchableTasks(ctx)
@@ -378,6 +382,7 @@ func TestReadinessAndLaunchable(t *testing.T) {
 		t.Fatalf("done but unsettled a=%s b=%s", ra, rb)
 	}
 	setState(t, s, ctx, a.ID, db.StateSettled)
+	acceptTask(t, s, ctx, a.ID)
 	// Auto with needs settled: no readiness, launchable.
 	if rb := readiness(getTask(t, s, ctx, b.ID)); rb != "-" {
 		t.Fatalf("auto released b=%s", rb)
@@ -458,7 +463,7 @@ func TestMarkReadyOnce(t *testing.T) {
 		}
 		n := 0
 		for _, e := range events {
-			if e.Detail == "ready: needs settled" {
+			if e.Detail == "ready: needs completed" {
 				n++
 			}
 		}
@@ -469,6 +474,7 @@ func TestMarkReadyOnce(t *testing.T) {
 		t.Fatalf("before settle %v", ids)
 	}
 	setState(t, s, ctx, a.ID, db.StateSettled)
+	acceptTask(t, s, ctx, a.ID)
 	if ids := mark(); !slices.Equal(ids, []int64{b.ID}) {
 		t.Fatalf("first mark %v", ids)
 	}
@@ -489,6 +495,7 @@ func TestMarkReadyOnce(t *testing.T) {
 		t.Fatalf("blocked b keeps readyAt %+v", got.ReadyAt)
 	}
 	setState(t, s, ctx, c.ID, db.StateSettled)
+	acceptTask(t, s, ctx, c.ID)
 	if ids := mark(); !slices.Equal(ids, []int64{b.ID}) || readyEvents() != 2 {
 		t.Fatalf("new episode %v, %d events", ids, readyEvents())
 	}
@@ -519,7 +526,9 @@ func TestListTreesRollup(t *testing.T) {
 	y := mustTask(t, s, ctx, q.ID, "y", []int64{x.ID})
 	done := *y.TreeID
 	setState(t, s, ctx, x.ID, db.StateSettled)
+	acceptTask(t, s, ctx, x.ID)
 	setState(t, s, ctx, y.ID, db.StateSettled)
+	acceptTask(t, s, ctx, y.ID)
 
 	list := func(f db.TreeFilter) []db.TreeSummary {
 		t.Helper()

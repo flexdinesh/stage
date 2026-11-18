@@ -11,14 +11,14 @@ test("handoff source lists the needs, or null without any", () => {
 });
 
 test("hint names whose context is appended", () => {
-  assert.equal(handoffHint({ needs: [12] }), "Appends #12's final reply, PRs, branch and thread link at launch.");
-  assert.equal(handoffHint({ needs: [3, 5] }), "Appends each need's final reply, PRs, branch and thread link at launch.");
-  assert.equal(handoffHint({ needs: [] }), "Appends each need's final reply, PRs, branch and thread link at launch.");
+  assert.equal(handoffHint({ needs: [12] }), "Appends #12's accepted result and available references from Stage at launch.");
+  assert.equal(handoffHint({ needs: [3, 5] }), "Appends each need's accepted result and available references from Stage at launch.");
+  assert.equal(handoffHint({ needs: [] }), "Appends each need's accepted result and available references from Stage at launch.");
 });
 
 test("backlog note shows only for a backlog task with needs and handoff on", () => {
-  assert.equal(pendingHandoffNote(task({ needs: [12] })), "+ on launch: handoff from #12 (final reply, PRs, branch, thread link)");
-  assert.equal(pendingHandoffNote(task({ needs: [3, 5] })), "+ on launch: handoff from #3, #5 (final reply, PRs, branch, thread link)");
+  assert.equal(pendingHandoffNote(task({ needs: [12] })), "+ on launch: handoff from #12 (accepted result and available references)");
+  assert.equal(pendingHandoffNote(task({ needs: [3, 5] })), "+ on launch: handoff from #3, #5 (accepted result and available references)");
   assert.equal(pendingHandoffNote(task()), null);
   assert.equal(pendingHandoffNote(task({ needs: [12], handoff: false })), null);
   assert.equal(pendingHandoffNote(task({ needs: [12], state: "running" })), null);

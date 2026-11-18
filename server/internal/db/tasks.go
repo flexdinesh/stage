@@ -26,7 +26,8 @@ SELECT t.id, t.project_id, p.title, p.t3_project_id, t.title, t.prompt, t.provid
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
   (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
-  t.archived_at, tr.status, ` + unstartedSQL + `
+  t.archived_at, tr.status, ` + unstartedSQL + `,
+  t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id)
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
@@ -44,7 +45,8 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
-		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable)
+		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
+		&t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -127,7 +129,7 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 		w.add("t.created_at < " + w.arg(*f.To))
 	}
 	if f.SettledFrom != nil {
-		w.add("t.settled_at >= " + w.arg(*f.SettledFrom))
+		w.add("(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id) >= " + w.arg(*f.SettledFrom))
 	}
 	switch f.Closed {
 	case "all":
@@ -154,7 +156,7 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	rows, err := s.pool.Query(ctx, taskSelect+`
 WHERE t.t3_thread_id IS NOT NULL AND (
   t.state IN ('launching', 'running', 'needs_input')
-  OR (t.state = 'done' AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
+  OR (t.state IN ('done','settled') AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
     OR (NOT th.settled AND (th.pending_request_count > 0
@@ -548,10 +550,11 @@ func (s *Store) TouchTask(ctx context.Context, id int64) error {
 
 // Transition is a guarded task state change.
 type Transition struct {
-	TaskID int64
-	From   []TaskState // allowed current states; empty = any
-	To     TaskState
-	Detail string
+	RequireAuto bool // release runner: recheck policy while claiming the launch
+	TaskID      int64
+	From        []TaskState // allowed current states; empty = any
+	To          TaskState
+	Detail      string
 
 	BeginAttempt bool    // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
 	ThreadID     *string // set t3_thread_id (+ launched_at)
@@ -586,6 +589,11 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 		if (len(t.From) > 0 && !slices.Contains(t.From, res.From)) || (res.From == t.To && !t.BeginAttempt) {
 			return nil
 		}
+		if t.BeginAttempt {
+			if err := checkLaunchClaim(ctx, tx, t, res.Attempt); err != nil {
+				return err
+			}
+		}
 		err = tx.QueryRow(ctx, `
 UPDATE tasks SET
   state = $2,
@@ -609,6 +617,20 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 		).Scan(&res.Attempt, &res.RequestID)
 		if err != nil {
 			return err
+		}
+		if t.BeginAttempt {
+			claim, err := tx.Exec(ctx, `INSERT INTO task_launch_claims(task_id,attempt) VALUES($1,$2) ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt)
+			if err != nil {
+				return err
+			}
+			if claim.RowsAffected() > 0 {
+				if _, err := tx.Exec(ctx, `INSERT INTO task_launch_inputs(task_id,attempt,source_task_id,acceptance_id)
+    SELECT $1,$2,d.id,d.acceptance_id FROM task_needs n JOIN tasks d ON d.id=n.need_id
+    WHERE n.task_id=$1 AND d.acceptance_id IS NOT NULL
+    ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $3, $4)`,
@@ -641,17 +663,6 @@ func reopenOnActivity(ctx context.Context, tx *Tx, id int64, to TaskState) error
 	if tag.RowsAffected() > 0 {
 		if _, err := tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $2, $3)`,
 			id, string(to), "unarchived: became "+label); err != nil {
-			return err
-		}
-	}
-	tag, err = tx.Exec(ctx, `UPDATE task_trees SET status = 'open', closed_at = NULL, updated_at = `+nowSQL+`
-WHERE status <> 'open' AND id = (SELECT tree_id FROM tasks WHERE id = $1)`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $2, $3)`,
-			id, string(to), "tree reopened: became "+label); err != nil {
 			return err
 		}
 	}

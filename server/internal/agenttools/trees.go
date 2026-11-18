@@ -50,7 +50,7 @@ func treeRow(t db.TreeSummary) TreeRow {
 // ListTreesArgs is list_trees.
 type ListTreesArgs struct {
 	All     bool   `json:"all,omitempty" jsonschema:"every tree (status all)"`
-	Status  string `json:"status,omitempty" jsonschema:"active (default: open with a member not settled) | done (marked done, or every member settled) | archived | all"`
+	Status  string `json:"status,omitempty" jsonschema:"active (default: open with a member not accepted) | done (marked done, or every member accepted) | archived | all"`
 	Project string `json:"project,omitempty" jsonschema:"project id or title: trees with a member there; omitted = all projects"`
 }
 
@@ -97,7 +97,7 @@ type TreeTaskArgs struct {
 // CreateTreeArgs is create_tree.
 type CreateTreeArgs struct {
 	Title     string         `json:"title" jsonschema:"tree title"`
-	StartMode string         `json:"startMode,omitempty" jsonschema:"auto (default: members launch once their needs settle) | manual (they read ready; start them yourself)"`
+	StartMode string         `json:"startMode,omitempty" jsonschema:"manual (default: ready when prerequisites are completed) | auto (explicit: launch when prerequisites are completed)"`
 	Tasks     []TreeTaskArgs `json:"tasks" jsonschema:"existing tasks to put in the tree, with the needs between them"`
 }
 

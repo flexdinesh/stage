@@ -152,7 +152,7 @@ function Scene({ s, layout, dark }: { s: S; layout: Layout; dark: boolean }) {
               </ul>
             </section>
             <section className="hdb-panel">
-              <PanelHead tone="done" title="Done · awaiting settle in T3" count={3} />
+              <PanelHead tone="done" title="Finished · awaiting completion" count={3} />
               <ul className="hdb-rows">
                 <Filler tone="done" label="done" w={[84, 204, 120]} compact={compact} />
                 <Filler tone="done" label="done" w={[104, 150, 96]} compact={compact} />
@@ -240,7 +240,7 @@ type Tone = 'need' | 'run' | 'done' | 'bad' | 'idle' | 'ok'
 const STATS: { tone: Tone; label: string; n?: number }[] = [
   { tone: 'need', label: 'Needs input' },
   { tone: 'run', label: 'Running' },
-  { tone: 'done', label: 'Awaiting settle', n: 3 },
+  { tone: 'done', label: 'Awaiting completion', n: 3 },
   { tone: 'bad', label: 'Failed', n: 0 },
   { tone: 'idle', label: 'Backlog', n: 4 },
   { tone: 'ok', label: 'Settled', n: 12 },

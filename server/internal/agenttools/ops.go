@@ -425,8 +425,8 @@ func (o *Ops) GetTask(ctx context.Context, a IDArgs) (client.TaskDetail, error) 
 type WaitArgs struct {
 	TreeID     *int64  `json:"treeId,omitempty" jsonschema:"join this tree (default: the needs' tree, else a new tree when there are needs)"`
 	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task needs (same tree): it starts once all of them settle"`
-	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task starts once it settles (needs your session id)"`
-	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit to follow the tree). Set shared policy on the tree; auto (launch when needs settle) or manual (reads ready) only for a per-task exception, preserved when the tree mode changes"`
+	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task waits for its user completion in Stage (needs your session id)"`
+	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit to follow the tree). Set shared policy on the tree; auto (launch when needs are completed) or manual (reads ready) only for a per-task exception, preserved when the tree mode changes"`
 	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from (default: the sole need)"`
 	StartLocal string  `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
 	StartTz    string  `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`

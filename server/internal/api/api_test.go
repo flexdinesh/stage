@@ -50,6 +50,7 @@ type flakyT3 struct {
 	failReply      atomic.Bool // LatestReply transport failure
 	// failReplyFor fails LatestReply for this thread only.
 	failReplyFor atomic.Pointer[string]
+	failReadFor  atomic.Pointer[string]
 
 	// listGate, when set, makes the next ListThreads signal reached and
 	// wait for gate.
@@ -88,6 +89,9 @@ func (f *flakyT3) LatestReply(ctx context.Context, in t3.LatestReplyInput) (t3.R
 type listGate struct{ gate, reached chan struct{} }
 
 func (f *flakyT3) ReadThread(ctx context.Context, id string) (t3.ThreadDetail, error) {
+	if p := f.failReadFor.Load(); p != nil && *p == id {
+		return t3.ThreadDetail{}, errors.New("source harness offline")
+	}
 	if g := f.listGate.Swap(nil); g != nil {
 		g.reached <- struct{}{}
 		<-g.gate
@@ -323,12 +327,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 3 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 4 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "3" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "4" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -423,6 +427,7 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.State != "settled" || got.SettledAt == nil {
 		t.Fatalf("settled %+v", got)
 	}
+	e.complete(tk.ID)
 	var settledList struct {
 		Tasks []task `json:"tasks"`
 	}
@@ -452,9 +457,9 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.Thread.T3DeepLink == nil || *got.Thread.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
 		t.Fatalf("thread deep link %v", got.Thread.T3DeepLink)
 	}
-	// Settled tasks are no longer polled.
+	// Accepted tasks remain observable.
 	tasks, _ := e.store.PollableTasks(context.Background(), true)
-	if len(tasks) != 0 {
+	if len(tasks) != 1 {
 		t.Fatalf("pollable %d", len(tasks))
 	}
 }
@@ -768,7 +773,7 @@ func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")
 	a := e.task(p.ID, "s1", map[string]any{"start": true})
-	b := e.task(p.ID, "s2", map[string]any{"needs": []int64{a.ID}})
+	b := e.task(p.ID, "s2", map[string]any{"needs": []int64{a.ID}, "startMode": "auto"})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { e.runner.Run(ctx); close(done) }()
@@ -776,7 +781,9 @@ func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 
 	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*a.T3ThreadID)
-	e.poll() // transition hook kicks the runner loop
+	e.poll()
+	e.complete(a.ID)
+	e.runner.Kick() // user completion wakes release
 	for range 200 {
 		if got := e.getTask(b.ID); got.State == "running" {
 			return
@@ -831,7 +838,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	// Cancelled with a dependent: the dependent stays blocked; the task keeps
 	// following T3 and the dependent starts once it settles.
 	b := e.task(p.ID, "b", map[string]any{"start": true})
-	c := e.task(p.ID, "c", map[string]any{"needs": []int64{b.ID}})
+	c := e.task(p.ID, "c", map[string]any{"needs": []int64{b.ID}, "startMode": "auto"})
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCancelled)
 	e.poll()
 	e.reconcile()
@@ -849,6 +856,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*b.T3ThreadID)
 	e.poll()
+	e.complete(b.ID)
 	e.reconcile()
 	if got := e.getTask(b.ID); got.State != "settled" {
 		t.Fatalf("need %s", got.State)

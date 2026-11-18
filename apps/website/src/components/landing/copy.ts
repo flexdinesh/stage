@@ -15,7 +15,7 @@ export type Feature = {
 
 export const hero = {
   title: 'Keep T3 Code busy without babysitting it.',
-  body: 'stage is a self-hosted task manager for T3 Code. Save tasks to a backlog, run them as trees that start each task when its needs settle, put them on a schedule, and see what needs you from your phone.',
+  body: 'stage is a self-hosted task manager for T3 Code. Save tasks to a backlog, run them as trees that start each task when its needs are completed in Stage, put them on a schedule, and see what needs you from your phone.',
   meta: 'self-hosted beside T3 · desktop or headless · talks to T3 over MCP',
   primary: { text: 'Get started', href: '/docs/install' },
   secondary: { text: 'GitHub', href: 'https://github.com/flexdinesh/stage' },
@@ -35,10 +35,10 @@ export const features: Feature[] = [
   {
     id: 'run-order',
     title: 'Tasks wait for what they need.',
-    body: "Put tasks in a tree, across projects if you need to. A task starts when the tasks it needs settle in T3, with each one's final reply, PRs and branch appended to its prompt.",
-    facts: ['starts when its needs settle', 'handoff: final reply, PRs, branch', "optional: build on a need's branch"],
+    body: "Put tasks in a tree, across projects if you need to. A task starts when the tasks it needs are completed in Stage, with each one's accepted result and available references appended to its prompt.",
+    facts: ['starts when its needs are completed in Stage', 'handoff: final reply, PRs, branch', "optional: build on a need's branch"],
     link: { text: 'Trees and handoff', href: '/docs/features#trees-and-handoff' },
-    demoLabel: "Animated demo: #12 is added as a need of task #13 in its Tree panel; when #12 settles, #13 starts on its own with #12's final reply, pull request and branch handed off.",
+    demoLabel: "Animated demo: #12 is added as a need of task #13 in its Tree panel; the user completes #12, then explicitly automatic task #13 starts with #12's final reply, pull request and branch handed off.",
   },
   {
     id: 'schedules',
@@ -52,7 +52,7 @@ export const features: Feature[] = [
     id: 'plan-session',
     title: 'Plan in one session. Fan out across models.',
     body: 'Let a session plan a complex job and split it into independent pieces. Through stage’s MCP it creates the tasks, puts the ones that depend on each other in a tree, and gives each the model that suits it.',
-    facts: ['create_task and create_tree over MCP or CLI', 'run after me: start when the planner settles', 'session detail shows the batch it created'],
+    facts: ['create_task and create_tree over MCP or CLI', 'run after me: wait for user completion', 'task detail shows the batch it created'],
     link: { text: 'Agents, CLI and MCP', href: '/docs/agents' },
     demoLabel: "Animated demo: a T3 Code session plans a migration and calls stage's MCP to create four tasks on different models, groups three into a tree, and starts it.",
   },

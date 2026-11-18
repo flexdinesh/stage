@@ -50,7 +50,7 @@ var Stamp = ""
 
 // APIVersion is the /api contract version. It changes only on breaking
 // API changes; clients refuse a server that reports a different one.
-const APIVersion = 3
+const APIVersion = 4
 
 // APIVersionHeader carries APIVersion on every /api response.
 const APIVersionHeader = "Stage-Api-Version"

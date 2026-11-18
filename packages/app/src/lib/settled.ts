@@ -4,7 +4,7 @@ import type { Task, TreeSummary } from "../api/types.ts";
 export type SettledItem = { kind: "task"; task: Task } | { kind: "tree"; tree: TreeSummary };
 
 const settledAt = (item: SettledItem): string | null =>
-  item.kind === "task" ? item.task.settledAt : item.tree.settledAt;
+  item.kind === "task" ? item.task.completedAt : item.tree.settledAt;
 
 const settledMs = (item: SettledItem): number => {
   const iso = settledAt(item);

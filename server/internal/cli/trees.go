@@ -61,7 +61,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 	case "new", "create":
 		var a agenttools.CreateTreeArgs
 		c.fs.StringVar(&a.Title, "title", "", "tree title")
-		c.fs.StringVar(&a.StartMode, "start-mode", "", "auto|manual (default auto)")
+		c.fs.StringVar(&a.StartMode, "start-mode", "", "auto|manual (default manual)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}

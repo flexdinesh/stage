@@ -21,7 +21,7 @@ test("duration is null without both ends or for reversed spans", () => {
   assert.equal(duration("nope", "2026-11-10T00:00:00Z"), null);
 });
 
-const task = (id, settledAt) => ({ id, settledAt });
+const task = (id, settledAt) => ({ id, completedAt: settledAt });
 test("completed trees interleave with settled tasks", () => {
   const merged = mergeSettled(
     [task(1, "2026-11-10T01:00:00Z")],

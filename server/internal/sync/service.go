@@ -309,20 +309,9 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	return err
 }
 
-// frozen: the thread no longer drives the task state. backlog tasks, and
-// settled tasks with dependents (they have been released). Other settled
-// tasks and all cancelled tasks may reopen: T3 reports a cancelled turn (e.g.
-// a denied permission) as thread status cancelled, then the thread runs on;
-// a cancelled need keeps its dependents blocked until it settles.
-func frozen(t db.Task) bool {
-	switch t.State {
-	case db.StateBacklog:
-		return true
-	case db.StateSettled:
-		return len(t.Dependents) > 0
-	}
-	return false
-}
+// Backlog tasks have not launched. Every observed execution state stays live;
+// execution changes never modify user acceptance.
+func frozen(t db.Task) bool { return t.State == db.StateBacklog }
 
 // describe is the event detail: the observed T3 status.
 func describe(d t3.ThreadDetail) string {
@@ -358,34 +347,20 @@ func (s *Service) Catalog(ctx context.Context) (*CatalogSnapshot, error) {
 
 var launchable = []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}
 
-// StartTask is a manual start (POST /api/tasks/:id/start). A tree member
-// may start before its needs settle ("start early"): its needs stay, and the
-// launching event names the unsettled ones.
+// StartTask is a manual start. Every prerequisite must be accepted at claim time.
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
-	detail := "launch requested"
-	unsettled, err := s.store.UnsettledNeeds(ctx, id)
-	if err != nil {
-		return db.Task{}, err
-	}
-	if len(unsettled) > 0 {
-		labels := make([]string, len(unsettled))
-		for i, n := range unsettled {
-			labels[i] = fmt.Sprintf("#%d", n)
-		}
-		detail = "launch requested before " + strings.Join(labels, ", ") + " settled"
-	}
-	return s.launch(ctx, id, detail)
+	return s.launch(ctx, id, "launch requested", false)
 }
 
 // LaunchTask starts a task in T3 (release runner path).
 func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
-	return s.launch(ctx, id, "launch requested")
+	return s.launch(ctx, id, "launch requested", true)
 }
 
 // LaunchScheduled starts a task whose start time has come (scheduler path).
 // detail is the launching event's detail.
 func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error) {
-	return s.launch(ctx, id, detail)
+	return s.launch(ctx, id, detail, false)
 }
 
 // launch: launching (attempt+1, or the same attempt when the previous launch
@@ -397,7 +372,7 @@ func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) 
 // retried once with the same clientRequestId. On T3 error the task lands in
 // failed with lastError and a *db.T3Error is returned alongside the updated
 // task. An adopted session is never launched (Conflict).
-func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task, error) {
+func (s *Service) launch(ctx context.Context, id int64, detail string, automatic bool) (db.Task, error) {
 	// The launch must finish (or fail) even if the HTTP client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
@@ -410,7 +385,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task,
 		return db.Task{}, db.Conflict("task %d tracks an adopted session: open it in T3 instead of starting it", id)
 	}
 	res, err := s.transition(ctx, db.Transition{
-		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true,
+		TaskID: id, From: launchable, To: db.StateLaunching, Detail: detail, BeginAttempt: true, RequireAuto: automatic,
 	})
 	if err != nil {
 		return db.Task{}, err
@@ -425,7 +400,12 @@ func (s *Service) launch(ctx context.Context, id int64, detail string) (db.Task,
 	}
 	in := launchInput(task, res.RequestID)
 	deps := s.depSourcesOf(task)
-	if block := s.prepareHandoff(ctx, task, deps); block != "" {
+	block, err := s.prepareHandoff(ctx, task)
+	if err != nil {
+		s.failLaunching(ctx, id, "launch aborted", "persist accepted handoff: "+err.Error(), nil, true)
+		return db.Task{}, err
+	}
+	if block != "" {
 		in.Message = task.Prompt + "\n\n" + block
 	}
 	journal, err := s.store.JournalLaunchContext(ctx, task, journalInstructions(task))

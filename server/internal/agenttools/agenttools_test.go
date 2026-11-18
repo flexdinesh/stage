@@ -39,6 +39,7 @@ type env struct {
 	sync    *t3sync.Service
 	runner  *release.Runner
 	client  *client.Client
+	store   *db.Store
 	url     string
 }
 
@@ -56,7 +57,7 @@ func newEnv(t *testing.T) *env {
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &env{t: t, handler: h, fake: fake, sync: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
+	return &env{store: store, t: t, handler: h, fake: fake, sync: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
 }
 
 func (e *env) project(root string) db.Project {
@@ -241,12 +242,12 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 	var got client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": tk.ID}, &got)
-	if got.State != db.StateRunning {
+	if got.State != db.StateBacklog || got.Readiness == nil || *got.Readiness != db.ReadinessBlocked {
 		t.Fatalf("after settle %+v", got.Task)
 	}
 	var rows agenttools.TasksOut
 	mustCall(t, cs, "list_tasks", map[string]any{"project": fmt.Sprint(p.ID), "states": []string{"running"}}, &rows)
-	if rows.Total != 1 || rows.Tasks[0].ID != tk.ID {
+	if rows.Total != 0 {
 		t.Fatalf("list %+v", rows)
 	}
 }
@@ -299,7 +300,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 
 // settle completes and settles a launched task's thread, then lets the
 // release runner react.
-func (e *env) settle(tk client.Task) {
+func (e *env) acceptTask(tk client.Task) {
 	e.t.Helper()
 	if tk.T3ThreadID == nil {
 		e.t.Fatalf("task %d not launched", tk.ID)
@@ -307,6 +308,13 @@ func (e *env) settle(tk client.Task) {
 	_ = e.fake.SetStatus(*tk.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*tk.T3ThreadID)
 	if err := e.sync.PollActive(context.Background()); err != nil {
+		e.t.Fatal(err)
+	}
+	p, err := e.store.CompletionPreview(context.Background(), tk.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err = e.store.ChangeAcceptance(context.Background(), tk.ID, db.AcceptanceRequest{RequestID: fmt.Sprintf("accept-%d", tk.ID), Revision: p.Revision, EvidenceVersion: p.EvidenceVersion}, false); err != nil {
 		e.t.Fatal(err)
 	}
 	if err := e.runner.Reconcile(context.Background()); err != nil {
@@ -354,7 +362,7 @@ func TestTreeStartModeDefaultsToInherit(t *testing.T) {
 		}
 		members = append(members, member)
 	}
-	e.settle(root)
+	e.acceptTask(root)
 	for i, member := range members {
 		var got client.TaskDetail
 		mustCall(t, cs, "get_task", map[string]any{"id": member.ID}, &got)
@@ -460,8 +468,8 @@ func TestLifecycleTreeTools(t *testing.T) {
 	if len(started.Started) != 2 || started.Started[0].ID != a.ID || started.Started[1].ID != b.ID || len(started.Errors) != 0 {
 		t.Fatalf("start_tree roots %+v", started)
 	}
-	e.settle(started.Started[0])
-	e.settle(started.Started[1])
+	e.acceptTask(started.Started[0])
+	e.acceptTask(started.Started[1])
 	// Manual: c reads ready instead of launching.
 	var cd client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &cd)

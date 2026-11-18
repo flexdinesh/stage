@@ -44,24 +44,6 @@ func (s HandoffSource) Label() string {
 	return fmt.Sprintf("session %q", s.Title)
 }
 
-// HandoffSources are task's needs a launch reads: settled or done (a start
-// before they settle) with a thread, by id.
-func (s *Store) HandoffSources(ctx context.Context, taskID int64) ([]HandoffSource, error) {
-	rows, err := s.pool.Query(ctx, `
-SELECT d.id, d.t3_thread_id, d.title, CASE WHEN d.state = 'settled' THEN d.settled_at END
-FROM task_needs n JOIN tasks d ON d.id = n.need_id
-WHERE n.task_id = $1 AND d.state IN ('settled', 'done') AND d.t3_thread_id IS NOT NULL
-ORDER BY d.id`, taskID)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(r rowScanner) (HandoffSource, error) {
-		var src HandoffSource
-		err := r.Scan(&src.TaskID, &src.ThreadID, &src.Title, &src.SettledAt)
-		return src, err
-	})
-}
-
 // RecordHandoff stores attempt's handoff for one source (replacing an
 // earlier record of the same attempt and source) and a launching task event
 // describing it, in one transaction.

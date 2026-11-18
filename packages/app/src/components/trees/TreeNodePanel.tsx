@@ -6,6 +6,7 @@ import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "
 import { useApi } from "../../platform/context.tsx";
 import { handoffHint } from "../../lib/handoff.ts";
 import { baseCandidates, needCandidates, treeClosed } from "../../lib/trees.ts";
+import { CompletionButton } from "../Completion.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconClose } from "../icons.tsx";
 import { Button, ErrorText, Panel, Segmented, Select, buttonClass } from "../ui.tsx";
@@ -97,6 +98,7 @@ export function TreeNodePanel({
         </Link>
         <p className="font-mono text-meta text-muted">{task.projectTitle}</p>
       </div>
+      <div className="px-3 pb-3"><CompletionButton task={task} /></div>
       <TreeNodeEditor
         tree={tree}
         task={task}
@@ -236,8 +238,8 @@ export function TreeNodeEditor({
         <p className="font-mono text-meta text-muted">
           {mode === "inherit" ? `Tree is ${tree.startMode}. ` : ""}
           {task.effectiveStartMode === "manual"
-            ? "Reads ready when its needs settle; you start it."
-            : "Starts on its own once every need settles."}
+            ? "Reads ready when its needs are completed; you start it."
+            : "Starts on its own once every need is completed."}
         </p>
       </Section>
 

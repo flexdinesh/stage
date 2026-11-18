@@ -252,7 +252,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               </span>
               {settled ? (
                 <Chip tone="ok" dot className="ml-2">
-                  settled
+                  completed
                 </Chip>
               ) : null}
               {closedChip === null ? null : <Chip className="ml-2">{closedChip}</Chip>}

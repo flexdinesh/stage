@@ -43,8 +43,8 @@ var TreeStatuses = []string{string(TreeOpen), string(TreeDone), string(TreeArchi
 
 func (s TreeStatus) Valid() bool { return slices.Contains(TreeStatuses, string(s)) }
 
-// Readiness of a backlog tree member: blocked (a need is not settled) or
-// ready (every need settled, no start time, and manual or no needs).
+// Readiness of a backlog tree member: blocked (a need is not accepted) or
+// ready (every need accepted, no start time, and manual or no needs).
 type Readiness string
 
 const (
@@ -54,16 +54,16 @@ const (
 
 // SQL over taskSelect's aliases (t = task, tr = its tree).
 const (
-	effectiveModeSQL = `COALESCE(t.start_mode, tr.start_mode)`
-	hasNeedsSQL      = `EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = t.id)`
-	unsettledNeedSQL = `EXISTS (SELECT 1 FROM task_needs n JOIN tasks d ON d.id = n.need_id WHERE n.task_id = t.id AND d.state <> 'settled')`
-	readinessSQL     = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR tr.status <> 'open' THEN NULL
- WHEN ` + unsettledNeedSQL + ` THEN 'blocked'
+	effectiveModeSQL  = `COALESCE(t.start_mode, tr.start_mode)`
+	hasNeedsSQL       = `EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = t.id)`
+	unacceptedNeedSQL = `EXISTS (SELECT 1 FROM task_needs n JOIN tasks d ON d.id = n.need_id WHERE n.task_id = t.id AND d.acceptance_id IS NULL)`
+	readinessSQL      = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR t.acceptance_id IS NOT NULL OR tr.status <> 'open' THEN NULL
+ WHEN ` + unacceptedNeedSQL + ` THEN 'blocked'
  WHEN t.start_at IS NULL AND (` + effectiveModeSQL + ` = 'manual' OR NOT ` + hasNeedsSQL + `) THEN 'ready'
  END`
-	// releasedSQL: a backlog task with needs, all settled, and no start time
+	// releasedSQL: a backlog task with needs, all accepted, and no start time
 	// (auto launches it; manual reads ready and notifies).
-	releasedSQL = `t.state = 'backlog' AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unsettledNeedSQL
+	releasedSQL = `t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unacceptedNeedSQL
 	// unstartedSQL: task t has no notes or execution history (deletable).
 	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0 AND t.recorded_work = 0)`
 )
@@ -278,7 +278,7 @@ func (s *Store) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) 
 	}
 	mode := in.StartMode
 	if mode == "" {
-		mode = StartAuto
+		mode = StartManual
 	}
 	var id int64
 	err := s.inTx(ctx, func(tx *Tx) error {
@@ -365,7 +365,7 @@ func (s *Store) ListTrees(ctx context.Context, f TreeFilter) ([]TreeSummary, err
 	if f.ProjectID != nil {
 		w.add("EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.project_id = " + w.arg(*f.ProjectID) + ")")
 	}
-	unsettled := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.state <> 'settled')"
+	unsettled := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.acceptance_id IS NULL)"
 	switch f.View {
 	case TreeViewAll:
 	case TreeViewDone:
@@ -375,7 +375,7 @@ func (s *Store) ListTrees(ctx context.Context, f TreeFilter) ([]TreeSummary, err
 	default:
 		active := unsettled
 		if f.SettledFrom != nil {
-			active = "(" + active + " OR (SELECT max(m.settled_at) FROM tasks m WHERE m.tree_id = tr.id) >= " + w.arg(*f.SettledFrom) + ")"
+			active = "(" + active + " OR (SELECT max((SELECT accepted_at FROM task_acceptances a WHERE a.id=m.acceptance_id)) FROM tasks m WHERE m.tree_id = tr.id) >= " + w.arg(*f.SettledFrom) + ")"
 		}
 		w.add("tr.status = 'open' AND " + active)
 	}
@@ -422,8 +422,13 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 	var latest *time.Time
 	for _, m := range members {
 		c.Total++
-		switch m.State {
-		case StateBacklog:
+		switch {
+		case m.AcceptanceID != nil:
+			c.Settled++
+			if m.CompletedAt != nil && (latest == nil || m.CompletedAt.After(*latest)) {
+				latest = m.CompletedAt
+			}
+		case m.State == StateBacklog:
 			c.Backlog++
 			if m.Readiness != nil && *m.Readiness == ReadinessBlocked {
 				c.Blocked++
@@ -431,24 +436,19 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 			if m.Readiness != nil && *m.Readiness == ReadinessReady {
 				c.Ready++
 			}
-		case StateLaunching:
+		case m.State == StateLaunching:
 			c.Launching++
-		case StateRunning:
+		case m.State == StateRunning:
 			c.Running++
-		case StateNeedsInput:
+		case m.State == StateNeedsInput:
 			c.NeedsInput++
-		case StateDone:
+		case m.State == StateDone || m.State == StateSettled:
 			c.Done++
-		case StateSettled:
-			c.Settled++
-			if m.SettledAt != nil && (latest == nil || m.SettledAt.After(*latest)) {
-				latest = m.SettledAt
-			}
-		case StateFailed:
+		case m.State == StateFailed:
 			c.Failed++
-		case StateInterrupted:
+		case m.State == StateInterrupted:
 			c.Interrupted++
-		case StateCancelled:
+		case m.State == StateCancelled:
 			c.Cancelled++
 		}
 		if !slices.Contains(sum.Projects, m.ProjectTitle) {
@@ -677,7 +677,7 @@ WHERE t.tree_id = $1 AND (`+readinessSQL+`) = 'ready' ORDER BY t.id`, treeID)
 	return collectRows(rows, rowTo[int64])
 }
 
-// LaunchableTasks: auto members whose needs all settled (the release runner
+// LaunchableTasks: auto members whose needs all accepted (the release runner
 // launches them), by id.
 func (s *Store) LaunchableTasks(ctx context.Context) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT t.id FROM tasks t JOIN task_trees tr ON tr.id = t.tree_id
@@ -710,7 +710,7 @@ WHERE ` + releasedSQL + ` AND ` + effectiveModeSQL + ` = 'manual'`
 		slices.Sort(ids)
 		for _, id := range ids {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, 'backlog', 'backlog', 'ready: needs settled')`, id); err != nil {
+				`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, 'backlog', 'backlog', 'ready: needs completed')`, id); err != nil {
 				return err
 			}
 		}
@@ -719,10 +719,10 @@ WHERE ` + releasedSQL + ` AND ` + effectiveModeSQL + ` = 'manual'`
 	return ids, err
 }
 
-// UnsettledNeeds: task id's needs that are not settled, by id.
+// UnsettledNeeds: task id's needs that are not accepted, by id.
 func (s *Store) UnsettledNeeds(ctx context.Context, id int64) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT n.need_id FROM task_needs n JOIN tasks d ON d.id = n.need_id
-WHERE n.task_id = $1 AND d.state <> 'settled' ORDER BY n.need_id`, id)
+WHERE n.task_id = $1 AND d.acceptance_id IS NULL ORDER BY n.need_id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -809,7 +809,7 @@ func resolveTree(ctx context.Context, tx *Tx, tree *int64, needs []int64) (int64
 	case len(trees) == 1:
 		target = trees[0]
 	default:
-		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title) VALUES ($1) RETURNING id`, found[needs[0]].title).Scan(&target); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title,start_mode) VALUES ($1,'manual') RETURNING id`, found[needs[0]].title).Scan(&target); err != nil {
 			return 0, err
 		}
 	}

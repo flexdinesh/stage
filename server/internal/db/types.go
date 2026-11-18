@@ -120,6 +120,9 @@ func (w Workspace) MarshalJSON() ([]byte, error) {
 }
 
 type Task struct {
+	AcceptanceID       *int64           `json:"acceptanceId"`
+	AcceptanceRevision int64            `json:"acceptanceRevision"`
+	CompletedAt        *time.Time       `json:"completedAt"`
 	ID                 int64            `json:"id"`
 	ProjectID          int64            `json:"projectId"`
 	ProjectTitle       string           `json:"projectTitle"`

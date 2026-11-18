@@ -40,7 +40,7 @@ export type InteractionMode = (typeof INTERACTION_MODES)[number];
 export const SEND_MODES = ["auto", "queue", "steer", "restart"] as const;
 export type SendMode = (typeof SEND_MODES)[number];
 
-/** When a tree member launches once its needs settle: auto (the server launches it) or manual (it reads ready). */
+/** When a tree member launches once its needs are completed: auto (the server launches it) or manual (it reads ready). */
 export const START_MODES = ["auto", "manual"] as const;
 export type StartMode = (typeof START_MODES)[number];
 
@@ -231,6 +231,9 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface Task {
+  acceptanceId: number | null;
+  acceptanceRevision: number;
+  completedAt: string | null;
   artifactLinks: { label: string; url: string }[];
   id: number;
   projectId: number;
@@ -317,6 +320,7 @@ export interface TaskEvent {
 }
 
 export interface TaskDetail extends Task {
+  acceptances: Acceptance[];
   events: TaskEvent[];
   thread: Thread | null;
   /** The task's tree; null outside one. */
@@ -327,6 +331,55 @@ export interface TaskDetail extends Task {
   currentHandoffs: Handoff[];
   /** Worktree base the current launch attempt used (base predecessor); null when none was recorded. */
   currentLaunchBase: LaunchBase | null;
+}
+
+export interface AcceptedEvidence {
+  taskId: number;
+  title: string;
+  treeId: number | null;
+  treeTitle: string | null;
+  projectId: number;
+  threadId: string | null;
+  threadLink: string | null;
+  branch: string | null;
+  worktreePath: string | null;
+  executionState: TaskState;
+  runId: string | null;
+  replyRunId: string | null;
+  replyItemId: string | null;
+  reply: string | null;
+  replyTruncated: boolean;
+  replyAt: string | null;
+  observedAt: string | null;
+  historicalSettledAt: string | null;
+  artifacts: { url: string; repository: string; number: number }[];
+  journalThroughId: number;
+}
+export interface Acceptance {
+  id: number;
+  taskId: number;
+  acceptedAt: string;
+  capturedAt: string;
+  provenance: "user" | "historical_settlement";
+  evidence: AcceptedEvidence;
+  note: string;
+}
+export interface CompletionPreview {
+  revision: number;
+  evidenceVersion: string;
+  evidence: AcceptedEvidence;
+  blockedReason: string;
+  dependents: { taskId: number; title: string; claimed: boolean; startMode: StartMode | null }[];
+}
+export interface AcceptanceRequest {
+  requestId: string;
+  revision: number;
+  evidenceVersion?: string;
+  note?: string;
+}
+export interface AcceptanceResult {
+  revision: number;
+  acceptanceId: number | null;
 }
 
 /** The worktree base a launch attempt with base "predecessor" used: a need's branch, or the fallback and why. */

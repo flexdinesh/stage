@@ -12,7 +12,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
 - Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
 - Errors: non-2xx responses have body `{ "error": string }`. Some 409s add a machine-readable `"code"`.
-- Every response carries `Stage-Api-Version: <n>` (currently `3`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
+- Every response carries `Stage-Api-Version: <n>` (currently `4`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
 - Request origin policy (`/api` and `/mcp`; [runtime.md](runtime.md#request-origin-policy)): requests with a Host that is not allowed, cross-site requests and untrusted cross-origin writes get 403; a non-empty write body that is not `application/json` (or `multipart/form-data` for uploads) gets 415.
 
 | Status | Meaning |
@@ -35,8 +35,8 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
 | InteractionMode | `default` `plan` (default `default`) |
 | SendMode | `auto` `queue` `steer` `restart` (default `auto`) |
-| StartMode | `auto` (a tree member launches once its needs settle) `manual` (it reads `ready` and notifies; the user starts it). Tree default `auto`; a task's own `startMode` null inherits the tree's |
-| Readiness | `blocked` (a need is not settled) `ready` (every need settled, no start time, and manual or no needs); backlog tree members only, else null |
+| StartMode | `auto` (a tree member launches once its needs are completed in Stage) `manual` (it reads `ready` and notifies; the user starts it). New tree default `manual`; a task's own `startMode` null inherits the tree's |
+| Readiness | `blocked` (a need lacks user acceptance) `ready` (every need has user acceptance, no start time, and manual or no needs); backlog tree members only, else null |
 | NotificationEvent | `needs_input` `failed` `ready` `done` `settled` |
 | ProjectSource | `app` (created via stage) `t3` (imported from T3) |
 | ThreadSource | `app` (thread belongs to a task) `t3` (any other thread) |
@@ -242,6 +242,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
+  "acceptanceId": null, "acceptanceRevision": 0, "completedAt": null,
   "runStartedAt": null,
   "runEndedAt": null,
   "lastWordPreview": null,
@@ -259,12 +260,12 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 - `archivedAt`: when the task was archived (null = not archived); `treeStatus`: its tree's `status` (null outside a tree); `deletable`: the task never launched, has no session and has no recorded work, so it can be deleted; recorded work must be archived. See "Done, archive and delete".
 - `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
 - `treeId` / `treeTitle`: the task's tree (see "Trees"); null outside one. `needs`: tasks in the same tree this one needs (by id); `dependents`: tasks that need this one. Both `[]` outside a tree.
-- `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all settled (the `ready` notification); cleared when it stops being ready or launches.
+- `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all have user acceptance (the `ready` notification); cleared when it stops being ready or launches.
 - `adopted`: the task tracks an existing T3 session (see "Adopt session"); `prompt` is `""`.
 - `startAt` (UTC instant) / `startTz` (IANA zone it was entered in): one-shot start time of a `backlog` task; the scheduler launches it at that time (see "Schedule rules"). Both null or both set; non-null only while the task is in `backlog` (any launch clears them). Never set together with `needs`.
 - `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
 - `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
-- `handoff`: append one handoff block per finished need to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
+- `handoff`: append one handoff block per accepted need to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
 - `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<t3ThreadId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread). `t3DeepLink` = `t3code://threads/<environmentId>/<t3ThreadId>` (T3 desktop/mobile app; null without thread or environment id). Thread carries the same three.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
@@ -281,7 +282,7 @@ Body: `{ "title": string, "workspaceRoot": string }` (both required, trimmed; ab
 `TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null }`. `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt.
 
 ### `GET /api/tasks`
-Query (all optional): `originThreadId` (exact creator session ID), `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`settledAt >= settledFrom`), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
+Query (all optional): `originThreadId` (exact creator session ID), `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -332,7 +333,7 @@ Only a task that never started and has no recorded work (`deletable`). 204. 409 
 Archive (sets `archivedAt`) or unarchive a standalone task. Archive 409 when the task is in a tree (`archive the tree, or remove it from the tree first`) or is `launching|running|needs_input` (`#N is running: stop it first`). Unarchive of a task that is not archived is a no-op. 200 `Task`. 404.
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Start early: a `blocked` task starts before its needs settle and keeps them (the `launching` event reads `launch requested before #3, #5 settled`); it gets a handoff only from needs that have finished. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
+Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Every need must have current Stage acceptance at the atomic launch claim; otherwise 409 names the missing prerequisites. Start early is unavailable through every entry point. Each start clears `t3ThreadId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
 A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one. The same applies to a task left in `launching` by a server restart (failed at startup with `launch interrupted by server restart`). On shutdown the server waits up to 100s for in-flight launches (compose `stop_grace_period: 2m`).
 Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
 200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
@@ -340,7 +341,7 @@ Images: before each launch every task image is uploaded to T3 afresh (`t3_attach
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
 
-Stop bumps `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). It then polls the thread once: the thread mirror is refreshed, but task state does not change for `backlog` tasks or `settled` tasks that have dependents (others may reopen).
+Stop bumps `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). It then polls the thread once: the thread mirror is refreshed, but task state does not change for `backlog` tasks. Execution observations never alter acceptance.
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
@@ -390,7 +391,7 @@ Appending is allowed on closed work. It records context without reopening, sched
 
 ## Trees
 
-A tree is a DAG of tasks: each member's `needs` are members that must settle before it starts. It is the only way to express dependencies. A task is in at most one tree; trees may span projects. Rules in "Tree rules".
+A tree is a DAG of tasks: each member's `needs` are members that must be completed by the user in Stage before it starts. It is the only way to express dependencies. A task is in at most one tree; trees may span projects. Rules in "Tree rules".
 
 `Tree`:
 ```json
@@ -401,10 +402,10 @@ A tree is a DAG of tasks: each member's `needs` are members that must settle bef
 
 `TreeTimes` = `{ "startedAt": string | null, "lastActivityAt": string }`. `startedAt`: the earliest member `launchedAt` (null before any launch). `lastActivityAt`: the latest tree metadata, journal entry, current member update or member thread update (so an agent working counts as activity).
 
-`TreeSummary` = `Tree` + `TreeTimes` + `{ "counts": TreeCounts, "levels": number, "projects": string[] (member project titles, sorted), "settledAt": string | null }`. `counts`: `{ total, backlog, blocked, ready, launching, running, needsInput, done, settled, failed, interrupted, cancelled }` (`blocked` and `ready` split `backlog`). `settledAt`: the latest member settle once every member is settled, else null.
+`TreeSummary` = `Tree` + `TreeTimes` + `{ "counts": TreeCounts, "levels": number, "projects": string[] (member project titles, sorted), "settledAt": string | null }`. `counts`: `{ total, backlog, blocked, ready, launching, running, needsInput, done, settled, failed, interrupted, cancelled }` (`blocked` and `ready` split `backlog`). `settledAt`: the latest member acceptance once every member is accepted, else null (legacy field name).
 
 ### `GET /api/trees`
-Query (all optional): `status` (`active` default: open trees with a member not settled; `done`: marked done, or open with every member settled; `archived`; `all`; else 400), `all=1` (= `status=all`), `settledFrom` (with `active`: also open trees whose latest settle is at or after it), `project` (a member is in that project). 200 `{ "trees": TreeSummary[] }`, `lastActivityAt` desc.
+Query (all optional): `status` (`active` default: open trees with an unaccepted member; `done`: marked done, or open with every member accepted; `archived`; `all`; else 400), `all=1` (= `status=all`), `settledFrom` (with `active`: also open trees whose latest acceptance is at or after it), `project` (a member is in that project). 200 `{ "trees": TreeSummary[] }`, `lastActivityAt` desc.
 
 ### `POST /api/trees`
 Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, "needs"?: number[] }] }`: creates the tree, moves each listed task into it (a member of another tree is spliced out there), then sets each listed `needs` (omitted keeps the task's needs). One transaction. 201 `TreeDetail`. 400 blank title, no tasks, a task listed twice, bad `startMode`. 404 task / need. 409 tree rule broken.
@@ -684,7 +685,7 @@ Live: every new inbox row, read (`POST /api/notifications/read`), prune and task
 - Filter: an event not in `preferences.notifyEvents` (read when the event is sent) is dropped entirely: no inbox row (so no toast or bell entry) and no push, on any device. If the filter cannot be read, the event notifies.
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done"), `failed` ("Failed") or `settled` ("Settled") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
-- Ready: a manual tree member with at least one need whose needs all settled (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
+- Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
 - External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input|done` (done until settled), and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed|settled` notifies with the same titles; `url` = `/?inbox`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
 - External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
 - External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
@@ -696,7 +697,7 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 
 | # | Condition | Task state |
 |---|---|---|
-| 1 | `settled == true` | `settled` |
+| 1 | `settled == true` with no active run or pending requests | `settled` |
 | 2 | `pendingRequestCount > 0` | `needs_input` |
 | 3 | `status in (preparing, queued, starting, running, waiting)` | `running` |
 | 4 | `status == completed` | `done` |
@@ -708,22 +709,35 @@ Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the lat
 
 T3 `waiting` is the checkpoint gap after a provider turn ends (T3 shows it as "Working"), not a wait on the user; a pending approval or question keeps the thread `running` with `pendingRequestCount > 0`. T3's UI "Waiting" (blocked on a child thread, or awaited background work such as a PR watch after the turn ended) is not exposed over MCP: those threads report `running` or `completed` and map to `running` or `done`.
 
-Applied only to tasks with a thread whose state is not `backlog`, and not to `settled` tasks with dependents (they have been released). T3 reports a cancelled turn (e.g. a denied permission) as thread status `cancelled` and the thread can run on, so a `cancelled` task reopens like a settled one (a cancelled need keeps its dependents blocked until it settles). A change writes a `task_events` row (`detail` = observed T3 status) and sets `finishedAt` / `settledAt` as above.
+Applied to tasks with a thread outside `backlog`, including accepted tasks. Later execution activity changes the observed state and notifications but never changes user acceptance, snapshots or tree closure.
 
-Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|running|needs_input`, `done` tasks updated in the last hour (older ones at most every 60s), plus `failed|interrupted|cancelled` tasks updated in the last 10 minutes or whose thread mirror (targeted refresh, every 5 min) shows the thread unsettled and active (`preparing|queued|starting|running|waiting` or pending requests); `settled` is not polled. A thread T3 no longer knows moves the task to `failed` (`lastError` "thread not found in T3"). Tasks left in `launching` by a server restart move to `failed` on startup.
+Polling scope (every 5s): `launching|running|needs_input`, `done|settled` updated in the last hour (older ones at most every 60s), plus recently updated `failed|interrupted|cancelled` or those whose mirrored thread becomes active. Missing T3 threads become execution `failed`; acceptance remains intact. Restarted in-flight launches retain their attempt identity and accepted input pins.
+
+## User acceptance (API v4)
+
+Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable), `acceptanceRevision` and `completedAt` (nullable) describe Stage acceptance. Task detail adds `acceptances`, newest first. Legacy tree `counts.settled` counts currently accepted members, and tree `settledAt` is their latest acceptance when all members are accepted. Unaccepted execution `done|settled` contributes to `counts.done`.
+
+- `GET /api/tasks/:id/completion-preview`: `revision`, `evidenceVersion`, `evidence`, `blockedReason`, `dependents`. Reads Stage's local cache only. Dependents identify claimed work and effective start mode.
+- `POST /api/tasks/:id/complete`: `{requestId, revision, evidenceVersion, note?}`. Rejects active `launching|running|needs_input`, mirrored active runs/pending requests, and uncertain launch outcomes. Any known stopped state or unstarted task may be accepted, including interrupted/cancelled/failed work. The optional note is UTF-8, at most 16 KiB.
+- `POST /api/tasks/:id/reopen`: `{requestId, revision}`. Clears current acceptance; retains immutable history, execution and existing launch claims. Does not start a run. A successful execution continues in T3; ordinary failed/interrupted/cancelled retries remain available.
+- Both writes return `{revision, acceptanceId}`. Exact request replay returns its original result without applying it again, even after a later reopen. Reusing a request ID with changed content, stale revision or changed evidence yields 409; refresh and review before a new submission.
+- Acceptance records contain `id, taskId, acceptedAt, capturedAt, provenance, evidence, note`. Evidence captures task/title/project/tree, execution/thread/branch/worktree references, bounded cached reply with run/item IDs, timestamps, truncation, available artifact links, and the latest journal entry ID at capture. Cache observation time, earlier/unverified run and missing reply are explicit. No live read is required to review, accept or use handoff.
+- Confirmation and launch claims serialize in SQLite. Reopen before claim blocks it; claim before reopen continues with pinned inputs. Completing again cannot launch an existing attempt twice. Manual trees become ready; explicitly automatic trees retain automatic release. Closed trees stay closed.
+- Migration accepts only tasks currently `settled`, with `historical_settlement` provenance and cache-only evidence. A previous settlement timestamp on running work does not qualify. Existing IDs, notes, histories, execution links, policies and overrides survive.
+- Completion/reopening are user-facing REST actions. There is no CLI/MCP completion or reopen tool. Agents report outcomes using notes; ordinary task updates cannot set acceptance.
 
 ## Tree rules
 
-- Needs (create `needs`, `PUT /api/tasks/:id/needs`, tree `needs`), 409 unless noted: change only in `backlog` (an unchanged set is a no-op in any state); not with a start time (400); each need exists (404), is not the task, is in the task's tree, and does not (transitively) need the task (no loops). A settled need is allowed.
-- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `auto` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
+- Needs (create `needs`, `PUT /api/tasks/:id/needs`, tree `needs`), 409 unless noted: change only in `backlog` (an unchanged set is a no-op in any state); not with a start time (400); each need exists (404), is not the task, is in the task's tree, and does not (transitively) need the task (no loops). An accepted need is allowed.
+- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `manual` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
 - Tasks inherit the tree's start mode by default (`startMode` omitted or null; CLI/MCP also accept `inherit`). Set shared policy on the tree, and explicit task `auto` or `manual` only for an exception. Tree mode changes preserve explicit overrides; clear a task's override to make it inherit again.
 - `start: true` or a start time with needs is 400. A non-backlog task may join a tree only without needs.
-- A need is passed when it is `settled`. `failed|interrupted|cancelled` (or still running / `done`) keep dependents `blocked`. Restart the need, change the needs, or start the dependent early.
-- `readiness` (backlog members only, else null): `blocked` while a need is not settled; `ready` when every need settled, there is no start time, and the task is manual or has no needs. Roots read `ready` (auto never launches them; the user starts them, or Start ready).
-- Release runner (on every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all settled (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs settled` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
+- A need is passed only when `acceptanceId` is non-null. Execution success, stopping, settlement, archive and PR merge never release new work. Complete the need in Stage or edit dependencies.
+- `readiness` (backlog members only, else null): `blocked` while a need lacks user acceptance; `ready` when every need has user acceptance, there is no start time, and the task is manual or has no needs. Roots read `ready` (auto never launches them; the user starts them, or Start ready).
+- Release runner (on user completion/reopening, every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all have user acceptance (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs completed` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
 - Splice (remove from tree, delete, move to another tree): each dependent drops the task and takes over its needs (A→X→B becomes A→B, deduplicated); the task loses its needs and leaves the tree; stale `workspace.baseTaskId` values are cleared; an emptied tree is archived. Splicing an unfinished middle task can make dependents ready at once.
 - Moving between trees = remove + add (no merge). `POST /api/trees/:id/dissolve` dissolves a tree.
-- A settled task with dependents is frozen: its thread no longer changes its state.
+- Launch claims atomically check dependencies, tree status and effective policy, then pin acceptance IDs. Reopen blocks future claims; already claimed attempts continue with their original snapshots. Unknown launch outcomes reconcile with the same attempt, request ID and pins. A fresh retry checks current acceptance again.
 
 ## Done, archive and delete
 
@@ -731,7 +745,7 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 - Marking done or archiving needs no member (or the task itself) in `launching|running|needs_input` (409 naming it). Members keep their states. Only standalone tasks are archived one by one; a tree member is closed with its tree.
 - A closed tree releases nothing (no auto launch, no `readiness`, no `ready` notification, no due one-shot start), and rejects structural changes with 409 (`tree N is done: reopen it first`): add or move a task into or out of it, set needs, remove from tree, delete a member, create a task with its `treeId`, adopt into it, change `startMode`, start ready. Rename, status, delete and dissolve stay allowed. An archived task waits too (no due one-shot start) and cannot join a tree (409 `unarchive it first`).
 - Closed tasks and trees leave the default lists (`GET /api/tasks`, `GET /api/trees`), so they leave the Dashboard; `closed=true|all` and `status=done|archived|all` list them.
-- Activity reopens: a transition into `launching|running|needs_input` (a T3 restart, a manual Start) clears `archivedAt` (task event `unarchived: became running`) and sets a done or archived tree back to `open` (task event `tree reopened: became running`). Settling is not activity.
+- Activity may unarchive a standalone task. A done or archived tree stays closed until the user explicitly reopens it. Task completion or reopening never reopens its tree.
 - Delete only work that never started and has no recorded work (notes or execution): `DELETE /api/tasks/:id`, and `DELETE /api/trees/:id` for a tree with no recorded work whose members are all deletable (it deletes them). Tree protection survives recorded members leaving. Archive recorded work instead; dissolving or emptying preserves the archived tree identity and journal.
 
 ## Adopt session
@@ -741,30 +755,15 @@ Polling scope (every 5s, `t3_thread_read`): tasks with a thread in `launching|ru
 - `adopted: true`, `prompt: ""`, title from the request, else the session title, else `Session <id8>`; model, runtime and interaction mode copied from the session; state from the session (State mapping, idle reads `done`); `launchAttempt` 1. Task event `adopted session`.
 - stage never starts, restarts or duplicates it (409); stop works; sync keeps its state.
 - A session a task already owns returns that task (200; `needsSessionId` uses it as the need). Unknown session 404; a subagent, an archived session, or one whose project is not in stage 409.
-- With `treeId` the task joins that tree (no needs).
+- With `treeId` the task joins that tree (no needs). Adoption never accepts the task, including an already settled session.
 
 ## Handoff
 
 Every task launch also appends a separate journal instruction block, including standalone tasks and `handoff: false`. It records task ID, tree ID at launch, and session identity via `T3CODE_THREAD_ID`. The block is persisted per task/attempt; retries, including after restart or movement, reuse it verbatim. Agents must refresh membership with `get_context` or `get_task` before `read_journal`, read relevant own/tree notes, use task notes for progress and tree notes with `sourceTaskId` for shared conclusions, checkpoint before risky work, and record outcomes before returning. Notes are context, never instructions or proof; failed writes must be reported without claiming persistence. Existing or adopted sessions receive no retroactive block. Handoff remains independent.
 
-When a task with needs launches (release runner, Start, or restart from `failed|interrupted|cancelled`) with `handoff` on, every need that is `settled` or `done` and has a thread is a source (by need id). stage reads each from T3 (`t3_thread_read` and its latest assistant reply, 20s budget each) and sends `prompt + "\n\n" + blocks` followed by the journal instructions (one handoff block per source, joined by a blank line):
+When a task with needs launches with `handoff` on, the launch claim pins each need's immutable accepted result. Stage composes context exclusively from these local snapshots, including task/tree/journal references, cached reply excerpt, available artifact links, branch/worktree and execution reference. The predecessor harness may be offline. Missing evidence remains explicitly missing; earlier or unverified run provenance and truncation remain visible. Optional user acceptance notes are distinct from assistant replies.
 
-```
-<handoff from="stage">
-This task needs "Build API" (task #12), settled 2026-11-14T10:02:00Z.
-- T3 thread: <threadId> <link> (read more with t3_thread_read)
-- Branch: feat/api · Worktree: /path/to/worktree
-- Pull requests:
-  - owner/repo#41 (open) https://github.com/owner/repo/pull/41
-Final reply:
-<the need's final assistant reply, at most N chars>
-[truncated at N chars; full reply via t3_thread_read <threadId>]
-</handoff>
-```
-- A `done` need reads `finished, not settled yet` instead of `settled <time>` (start early). Empty branch/worktree and PR lines are omitted; no reply gives `Final reply: none found.`; the truncation line appears only when the reply is longer.
-- Reply cap per need: `min(4000, max(1000, 8000 / sources))` chars.
-- Composed at launch. Each attempt records one `Handoff` per source in `task_handoffs` plus a `launching` task event (`handoff from #12 appended (N chars)`). A source this attempt already sent (lost launch response, same clientRequestId) resends the stored text.
-- A failed read never blocks the launch: that source is recorded as `skipped` with `reason` (event `handoff from #12 skipped: <reason>`) and left out; the others are sent.
+Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters. Each attempt records the rendered block in `task_handoffs`. Uncertain retries reuse stored blocks and acceptance pins. A storage error aborts the launch; it never silently launches without accepted context. Historical sent/skipped handoffs remain readable.
 
 `Handoff`:
 ```jsonc
@@ -778,7 +777,7 @@ Final reply:
 
 ## Predecessor base
 
-A task with `workspace.base` `predecessor` (opt-in per task, default `ref`) starts its T3 worktree from a need's branch, so stacked work builds on unmerged changes. The need is `workspace.baseTaskId` when it is a need, else the sole need. Resolved at launch (release runner, Start, restart), from the same live `t3_thread_read` as the handoff:
+A task with `workspace.base` `predecessor` (opt-in per task, default `ref`) starts its T3 worktree from a need's branch, so stacked work builds on unmerged changes. The need is `workspace.baseTaskId` when it is a need, else the sole need. Resolved at launch (release runner, Start, restart), using the pinned accepted source and a separate live `t3_thread_read` for workspace suitability:
 
 - Uses the need's local branch: `{type:"worktree", baseRef: <branch>, startFromOrigin: false, branch: <the task's branch, else T3 picks>}`. Worktrees share refs, so the need's worktree branch resolves in the project repo, unpushed commits included.
 - Falls back to the task's own `baseRef` (same `startFromOrigin` rule as `Workspace`) when, in order: the task has no needs; it has several needs and no `baseTaskId` among them; the chosen need has not finished or has no thread; the read fails; the need ran in another T3 project; it ran at project root (no worktree); it has no branch; it has pull requests and all are `merged` (its work is already on the default branch).

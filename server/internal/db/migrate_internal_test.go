@@ -118,6 +118,9 @@ func TestMigrationTrees(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO notifications (event, task_id, title, url) VALUES ('done', 1, 'Build', '/tasks/1')`)
 
 	migrateTo(t, pool, 5) // the store reads the latest schema
+	if err := Migrate(context.Background(), pool); err != nil {
+		t.Fatal(err)
+	}
 	s := NewStore(pool)
 	ctx := context.Background()
 
@@ -272,6 +275,9 @@ func TestJournalMigrationPreservesHistoryAndDiscardsLegacyNotes(t *testing.T) {
 	if err := pool.QueryRow(`SELECT notes FROM schedules WHERE id = 1`).Scan(&text); err != nil || text != "template survives" {
 		t.Fatalf("schedule template: %q %v", text, err)
 	}
+	if err := Migrate(context.Background(), pool); err != nil {
+		t.Fatal(err)
+	}
 	s := NewStore(pool)
 	ctx := context.Background()
 	if got, err := s.TaskEvents(ctx, 1); err != nil || len(got) != 1 || got[0].ID != 9 || got[0].Detail != "historical result" {
@@ -312,6 +318,9 @@ func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
 			mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
 			mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,notes,cron,tz,next_run_at,origin_thread_id) VALUES(1,1,'schedule','prompt',?,'* * * * *','UTC','2026-11-01T00:00:00.000000Z','source-session')`, template)
 			migrateTo(t, pool, 5)
+			if err := Migrate(context.Background(), pool); err != nil {
+				t.Fatal(err)
+			}
 			s := NewStore(pool)
 			ctx := context.Background()
 			manual, err := s.RunScheduleNow(ctx, 1)

@@ -186,6 +186,7 @@ type Task struct {
 
 // TaskDetail is GET /api/tasks/:id.
 type TaskDetail struct {
+	Acceptances []db.Acceptance `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
 	Thread *Thread        `json:"thread"`

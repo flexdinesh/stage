@@ -10,44 +10,21 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-func TestComposeHandoff(t *testing.T) {
-	id := int64(12)
-	settled := time.Date(2026, 11, 14, 10, 2, 0, 0, time.UTC)
-	src := db.HandoffSource{TaskID: &id, ThreadID: "th-1", Title: "Build API", SettledAt: &settled}
-	d := t3.ThreadDetail{Thread: t3.Thread{Title: "ignored", Link: "t3-thread://env/th-1", PullRequests: []t3.PullRequest{
-		{Repository: "me/app", Number: 41, URL: "https://x/41", State: "merged"},
-		{Repository: "me/lib", Number: 7, URL: "https://x/7"},
-	}}, WorktreePath: "/w/wt"}
-	got := t3sync.ComposeHandoff(src, d, &t3.Reply{Text: "All done.\n\n", Truncated: true}, 2666)
-	want := `<handoff from="stage">
-This task needs "Build API" (task #12), settled 2026-11-14T10:02:00Z.
-- T3 thread: th-1 t3-thread://env/th-1 (read more with t3_thread_read)
-- Worktree: /w/wt
-- Pull requests:
-  - me/app#41 https://x/41
-  - me/lib#7 https://x/7
-Final reply:
-All done.
-[truncated at 2666 chars; full reply via t3_thread_read th-1]
-</handoff>`
-	if got != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+func TestComposeAcceptedHandoff(t *testing.T) {
+	reply := "Accepted answer"
+	run := "r1"
+	thread := "thread-1"
+	at := time.Date(2026, 11, 14, 10, 2, 0, 0, time.UTC)
+	a := db.Acceptance{ID: 7, TaskID: 12, AcceptedAt: at, CapturedAt: at, Provenance: "user", Note: "Reviewed", Evidence: db.AcceptedEvidence{TaskID: 12, Title: "Build API", ThreadID: &thread, RunID: &run, ReplyRunID: &run, Reply: &reply, JournalThroughID: 99, Artifacts: []t3.PullRequest{{URL: "https://x/41"}}}}
+	got := t3sync.ComposeAcceptedHandoff(a, 4000)
+	for _, want := range []string{"task #12", "Accepted result #7", "entry #99", "Accepted answer", "User acceptance note:\nReviewed", "https://x/41"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q: %s", want, got)
+		}
 	}
-
-	// A need finished but not settled (started early), without link,
-	// workspace, PRs or reply; the title falls back to the thread's.
-	seven := int64(7)
-	got = t3sync.ComposeHandoff(db.HandoffSource{TaskID: &seven, ThreadID: "th-2"}, t3.ThreadDetail{Thread: t3.Thread{Title: "Planner"}}, nil, 4000)
-	want = `<handoff from="stage">
-This task needs "Planner" (task #7), finished, not settled yet.
-- T3 thread: th-2 (read more with t3_thread_read)
-Final reply: none found.
-</handoff>`
-	if got != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
-	}
-	if strings.Contains(got, "Branch") {
-		t.Fatal("empty workspace must be omitted")
+	a.Evidence.Reply = nil
+	if got = t3sync.ComposeAcceptedHandoff(a, 4000); !strings.Contains(got, "Final reply: missing at acceptance.") {
+		t.Fatal(got)
 	}
 }
 

@@ -112,10 +112,10 @@ func TestTaskNeedsSession(t *testing.T) {
 	p := e.project("/w/after-session")
 	s := runningSession(t, e, p.T3ProjectID, "Agent session")
 
-	e.agentTask(p.ID, "x", map[string]any{"needsSessionId": s, "start": true}, 400)
-	e.agentTask(p.ID, "y", map[string]any{"needsSessionId": s, "startLocal": "2999-01-01T10:00", "startTz": "UTC"}, 400)
-	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s, "originThreadId": s}, 201)
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s}, 201) // fan-out
+	e.agentTask(p.ID, "x", map[string]any{"needsSessionId": s, "startMode": "auto", "start": true}, 400)
+	e.agentTask(p.ID, "y", map[string]any{"needsSessionId": s, "startMode": "auto", "startLocal": "2999-01-01T10:00", "startTz": "UTC"}, 400)
+	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s, "startMode": "auto", "originThreadId": s}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201) // fan-out
 	if a.State != "backlog" || len(a.Needs) != 1 || a.Readiness == nil || *a.Readiness != "blocked" ||
 		a.OriginThreadID == nil || *a.OriginThreadID != s || a.OriginThreadTitle == nil || *a.OriginThreadTitle != "Agent session" {
 		t.Fatalf("a %+v", a)
@@ -143,6 +143,7 @@ func TestTaskNeedsSession(t *testing.T) {
 	_ = e.fake.SetStatus(s, t3.StatusCompleted)
 	_ = e.fake.Settle(s)
 	e.poll()
+	e.complete(a.Needs[0])
 	e.reconcile()
 	for _, id := range []int64{a.ID, b.ID} {
 		got := e.getTask(id)
@@ -153,7 +154,7 @@ func TestTaskNeedsSession(t *testing.T) {
 
 	// A settled session can still be needed (it releases at once); unknown
 	// sessions are 404.
-	c := e.agentTask(p.ID, "c", map[string]any{"needsSessionId": s}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
 	e.reconcile()
 	if got := e.getTask(c.ID); got.State != "running" {
 		t.Fatalf("needing a settled session releases: %+v", got)
@@ -165,7 +166,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-cancelled-session")
 	s := runningSession(t, e, p.T3ProjectID, "Agent session")
-	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s}, 201)
+	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
 
 	// Cancelled: keeps waiting, and can still be needed.
 	_ = e.fake.SetStatus(s, t3.StatusCancelled)
@@ -177,7 +178,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 	if got := e.getTask(a.Needs[0]); got.State != "cancelled" {
 		t.Fatalf("caller task %s", got.State)
 	}
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
 
 	// Settled with the last run still cancelled: passes.
 	_ = e.fake.Settle(s)
@@ -185,6 +186,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.poll()
+	e.complete(a.Needs[0])
 	e.reconcile()
 	for _, id := range []int64{a.ID, b.ID} {
 		if got := e.getTask(id); got.State != "running" {
@@ -222,7 +224,7 @@ func TestScheduleOriginInherited(t *testing.T) {
 		t.Fatalf("schedule %+v", sc)
 	}
 	e.must("POST", "/api/schedules", map[string]any{
-		"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSessionId": s,
+		"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSessionId": s, "startMode": "auto",
 	}, 400, nil)
 	var spawned agentTask
 	e.must("POST", fmt.Sprintf("/api/schedules/%d/run", sc.ID), nil, 201, &spawned)
@@ -261,7 +263,7 @@ func TestSessionBatchByTree(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/batch")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	a := e.agentTask(p.ID, "a", map[string]any{"originThreadId": s, "needsSessionId": s}, 201)
+	a := e.agentTask(p.ID, "a", map[string]any{"originThreadId": s, "needsSessionId": s, "startMode": "auto"}, 201)
 	b := e.agentTask(p.ID, "b", map[string]any{"originThreadId": s}, 201)
 	_ = e.agentTask(p.ID, "c", map[string]any{"originThreadId": s, "needs": []int64{a.ID}}, 201)
 	solo := e.agentTask(p.ID, "solo", nil, 201)

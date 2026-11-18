@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { breaksOut, splitTreeMembers } from "../src/lib/dashboard.ts";
 
-const task = (id, state, extra = {}) => ({ id, state, treeId: null, readiness: null, ...extra });
+const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "settled" ? id : null, treeId: null, readiness: null, ...extra });
 const tree = (id, settledAt = null, status = "open") => ({ id, settledAt, status });
 const ids = (list) => list.map((t) => t.id);
 

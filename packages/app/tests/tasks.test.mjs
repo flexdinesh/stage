@@ -4,10 +4,10 @@ import { fakeApi } from "./fake-transport.mjs";
 import { batchSize, canStart, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
-  id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
+  acceptanceId: null, treeStatus: null, id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
 });
 
-const tree = (id) => ({ id, title: `tree ${id}`, startMode: "auto" });
+const tree = (id) => ({ acceptanceId: null, treeStatus: null, id, title: `tree ${id}`, startMode: "auto" });
 
 test("a task waits only while blocked on its needs", () => {
   assert.equal(isWaiting(task(1, { needs: [3], readiness: "blocked" })), true);
@@ -23,9 +23,9 @@ test("wait target lists the needs", () => {
   assert.equal(waitTarget(task(1)), "");
 });
 
-test("start is offered for startable states, blocked included, never for an adopted session", () => {
+test("start is offered for startable states, blocked excluded, never for an adopted session", () => {
   assert.equal(canStart(task(1)), true);
-  assert.equal(canStart(task(1, { needs: [3], readiness: "blocked" })), true);
+  assert.equal(canStart(task(1, { needs: [3], readiness: "blocked" })), false);
   assert.equal(canStart(task(1, { state: "failed" })), true);
   assert.equal(canStart(task(1, { state: "running" })), false);
   assert.equal(canStart(task(1, { adopted: true })), false);

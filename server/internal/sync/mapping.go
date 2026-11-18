@@ -54,5 +54,5 @@ func mapDetail(current db.TaskState, d t3.ThreadDetail) db.TaskState {
 	if len(d.RecentRuns) > 0 {
 		latest = d.RecentRuns[0].Status
 	}
-	return MapThreadState(current, d.Status, d.Settled, d.PendingRequestCount, latest)
+	return MapThreadState(current, d.Status, d.Settled && d.ActiveRunID == "" && d.PendingRequestCount == 0, d.PendingRequestCount, latest)
 }

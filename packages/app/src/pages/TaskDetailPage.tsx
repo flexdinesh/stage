@@ -10,6 +10,7 @@ import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
+import { AcceptedResult, CompletionButton } from "../components/Completion.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
@@ -38,7 +39,7 @@ import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../l
 import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
-import { canStart, canStop, isActive, isWaiting, waitTarget } from "../lib/tasks.ts";
+import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -118,9 +119,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
   const startable = canStart(task);
-  // Blocked on its needs: Start runs it before they settle (needs kept), so it takes a second click to confirm.
-  const blocked = isWaiting(task);
-  const [armed, setArmed] = useState(false);
+  // Blocked on its needs: Start runs it before they are completed (needs kept), so it takes a second click to confirm.
   const stoppable = canStop(task);
   const appUrl = useT3Destination()(task);
   const phoneBar = appUrl !== null || stoppable;
@@ -184,17 +183,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          {startable && blocked ? (
-            <Button
-              variant={armed ? "primary" : "secondary"}
-              busy={start.isPending}
-              title={`Starts it now, before ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}; its needs are kept`}
-              onClick={() => (armed ? start.mutate() : setArmed(true))}
-              onBlur={() => setArmed(false)}
-            >
-              {armed ? `Start before ${waitTarget(task)} settle${task.needs.length === 1 ? "s" : ""}` : "Start"}
-            </Button>
-          ) : startable ? (
+          <CompletionButton task={task} />
+          {startable ? (
             <Button
               variant="primary"
               busy={start.isPending}
@@ -268,6 +258,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 ))}
               </PromptPanel>
             )}
+            {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} />)}
             {task.thread === null ? null : <LastWordPanel thread={task.thread} />}
             {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-small underline">{artifact.label}</a></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
@@ -299,7 +290,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   if (task.t3ThreadId === null) {
     return (
       <Panel title="Thread">
-        <Muted>No T3 thread yet. Start the task to launch one.</Muted>
+        <Muted>{task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
       </Panel>
     );
   }
@@ -328,7 +319,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
                   yes{thread.settledAt === null ? null : <span className="text-muted"> ({when(thread.settledAt)})</span>}
                 </span>
               ) : (
-                "no (settle in T3 to finish)"
+                "no (execution metadata only)"
               )}
             </Detail>
             <Detail label="Model">{thread.model ?? "-"}</Detail>

@@ -372,7 +372,7 @@ func TestTreeFlags(t *testing.T) {
 		t.Fatalf("edit --start-mode manual --base-task: %s", stdout)
 	}
 	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "inherit", "--json")
-	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode != nil || tk.EffectiveStartMode == nil || *tk.EffectiveStartMode != db.StartAuto {
+	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode != nil || tk.EffectiveStartMode == nil || *tk.EffectiveStartMode != db.StartManual {
 		t.Fatalf("edit --start-mode inherit: %s", stdout)
 	}
 	if code, _, stderr := h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "later"); code != 1 || !strings.Contains(stderr, "invalid startMode") {

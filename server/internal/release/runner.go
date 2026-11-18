@@ -1,4 +1,4 @@
-// Package release releases tree members whose needs have settled
+// Package release releases tree members whose needs have user acceptance
 // (docs/api.md "Tree rules"): auto members launch; manual members with
 // needs read ready once per episode and are reported to OnReady (the ready
 // notification). A failed, interrupted or cancelled need keeps dependents
@@ -83,7 +83,7 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-// Reconcile launches every auto member whose needs all settled, then
+// Reconcile launches every auto member whose needs all have user acceptance, then
 // records readiness episodes of manual members and reports new ones to
 // OnReady.
 func (r *Runner) Reconcile(ctx context.Context) error {
@@ -98,7 +98,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return errors.Join(errs...) // shutting down: start no new launch (an in-flight one finishes)
 		}
-		r.log.Info("needs settled; launching", "task", id)
+		r.log.Info("needs accepted; launching", "task", id)
 		_, err := r.launcher.LaunchTask(ctx, id)
 		var conflict *db.ConflictError
 		if errors.As(err, &conflict) {
@@ -113,7 +113,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	for _, id := range ready {
-		r.log.Info("needs settled; ready to start", "task", id)
+		r.log.Info("needs accepted; ready to start", "task", id)
 		if r.OnReady != nil {
 			r.OnReady(ctx, id)
 		}

@@ -11,14 +11,14 @@ export function handoffSource(t: Needs): string | null {
 export function handoffHint(t: Needs): string {
   const [only] = t.needs;
   const whose = t.needs.length === 1 && only !== undefined ? `#${only}'s` : "each need's";
-  return `Appends ${whose} final reply, PRs, branch and thread link at launch.`;
+  return `Appends ${whose} accepted result and available references from Stage at launch.`;
 }
 
 /** Prompt panel note for a backlog task that will append a handoff at launch; null otherwise. */
 export function pendingHandoffNote(t: Needs & Pick<Task, "state" | "handoff">): string | null {
   const source = handoffSource(t);
   if (t.state !== "backlog" || !t.handoff || source === null) return null;
-  return `+ on launch: handoff from ${source} (final reply, PRs, branch, thread link)`;
+  return `+ on launch: handoff from ${source} (accepted result and available references)`;
 }
 
 /** Who a recorded handoff came from: "#12" or the session title (id fallback). */
