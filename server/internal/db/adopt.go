@@ -87,9 +87,16 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	state := TaskState(o.State)
 	if state == "idle" {
 		state = StateDone
+		if ref.ConnectionID != T3ConnectionID && o.StartedAt == nil && o.EndedAt == nil {
+			state = StateBacklog
+		}
+	}
+	launched := &o.CreatedAt
+	if state == StateBacklog {
+		launched = nil
 	}
 	var finished *time.Time
-	if !o.Active {
+	if state.Finished() {
 		finished = o.EndedAt
 		if finished == nil {
 			finished = &o.UpdatedAt
@@ -108,7 +115,7 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,tags,connection_id,session_id,t3_thread_id,
 	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at)
-	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,$10,1,1,$11,$12) RETURNING id`, projectID, title, state, nonNilStrings(in.Tags), ref.ConnectionID, sid, legacyID, o.Config, permission, mode, o.CreatedAt, finished).Scan(&id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,$10,1,1,$11,$12) RETURNING id`, projectID, title, state, nonNilStrings(in.Tags), ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished).Scan(&id)
 	if err != nil {
 		return 0, false, err
 	}

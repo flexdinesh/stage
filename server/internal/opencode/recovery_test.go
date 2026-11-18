@@ -200,6 +200,40 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	if stop.Code != 200 {
 		t.Fatalf("stop adopted scoped session: %d %s", stop.Code, stop.Body.String())
 	}
+
+	var idle envelope[session]
+	if e = a.request(ctx, "POST", "/api/session", map[string]any{"location": location{Directory: f.dir}}, &idle); e != nil {
+		t.Fatal(e)
+	}
+	idleRef := execution.SessionRef{ConnectionID: 2, ExternalSessionID: idle.Data.ID}
+	req := httptest.NewRequest("POST", "/api/connections/2/sessions/"+idle.Data.ID+"/adopt", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	result := httptest.NewRecorder()
+	router.ServeHTTP(result, req)
+	if result.Code != 201 {
+		t.Fatalf("idle adoption: %d %s", result.Code, result.Body.String())
+	}
+	waiting, e := store.TaskBySession(ctx, idleRef)
+	if e != nil || waiting.State != db.StateBacklog || waiting.Session == nil || waiting.LaunchedAt != nil || waiting.FinishedAt != nil || waiting.AcceptanceID != nil {
+		t.Fatalf("idle adoption recorded work: %+v %v", waiting, e)
+	}
+	if _, e = svc.StartTask(ctx, waiting.ID); e == nil {
+		t.Fatal("Stage started an adopted idle session")
+	}
+	if e = a.request(ctx, "POST", "/api/session/"+idle.Data.ID+"/prompt", map[string]string{"text": "fixture-interrupt"}, nil); e != nil {
+		t.Fatal(e)
+	}
+	observeUntil(t, a, idleRef, "running")
+	if e = svc.PollActive(ctx); e != nil {
+		t.Fatal(e)
+	}
+	active, e := store.TaskBySession(ctx, idleRef)
+	if e != nil || active.ID != waiting.ID || active.State != db.StateRunning || active.LaunchedAt == nil || active.FinishedAt != nil || active.AcceptanceID != nil {
+		t.Fatalf("missed first native execution: %+v %v", active, e)
+	}
+	if e = a.Stop(ctx, idleRef); e != nil {
+		t.Fatal(e)
+	}
 }
 
 func TestLiveNativeReplay(t *testing.T) {

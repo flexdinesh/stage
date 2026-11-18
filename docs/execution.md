@@ -131,6 +131,11 @@ matching OpenCode web-client session URL supports explicit adoption. Browsers an
 desktop hosts use the configured web-client destination. User acceptance and offline
 handoff use Stage's stored evidence.
 
+Adopting an idle OpenCode session before its first execution creates an attached
+Backlog task with no start or finish time. Stage polls it and records execution
+when work begins in OpenCode. Stage start, scheduling and tree readiness apply
+only to work Stage can launch.
+
 ### Reproduce the live gate
 
 Run `STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:live`.

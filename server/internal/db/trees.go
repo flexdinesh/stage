@@ -57,7 +57,7 @@ const (
 	effectiveModeSQL  = `COALESCE(t.start_mode, tr.start_mode)`
 	hasNeedsSQL       = `EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = t.id)`
 	unacceptedNeedSQL = `EXISTS (SELECT 1 FROM task_needs n JOIN tasks d ON d.id = n.need_id WHERE n.task_id = t.id AND d.acceptance_id IS NULL)`
-	readinessSQL      = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR t.acceptance_id IS NOT NULL OR tr.status <> 'open' THEN NULL
+	readinessSQL      = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR t.adopted=1 OR t.acceptance_id IS NOT NULL OR tr.status <> 'open' THEN NULL
  WHEN ` + unacceptedNeedSQL + ` THEN 'blocked'
  WHEN t.start_at IS NULL AND (` + effectiveModeSQL + ` = 'manual' OR NOT ` + hasNeedsSQL + `) THEN 'ready'
  END`

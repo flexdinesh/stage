@@ -409,7 +409,10 @@ connection. Omitting it requests connection-wide capabilities.
 Interrupt the task's scoped session through its adapter. State updates via the
 poller. A task without an execution session returns 409.
 
-Stop bumps `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). It then polls the thread once: the thread mirror is refreshed, but task state does not change for `backlog` tasks. Execution observations never alter acceptance.
+Stop bumps `updatedAt` and re-arms polling of a `failed|interrupted` task for
+10 minutes. It then polls the session once. An adopted session waiting in
+Backlog can advance when execution begins in its harness. Execution observations
+never alter acceptance.
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`

@@ -13,8 +13,8 @@ export const waitTarget = (t: Pick<Task, "needs">) => t.needs.map((id) => `#${id
 /** Thread is live: stop allowed, delete refused. */
 export const isActive = (t: Task) => ACTIVE.includes(t.state);
 export const canStop = (t: Task) => t.externalSessionId !== null && isActive(t);
-/** Outside backlog only title and tags may change. */
-export const isFullyEditable = (t: Task) => t.state === "backlog";
+/** Stage edits launch settings only for work it can start. */
+export const isFullyEditable = (t: Task) => t.state === "backlog" && !t.adopted;
 /** Accepted: satisfies dependents until explicitly reopened. */
 export const isFinal = (t: Task) => t.acceptanceId !== null;
 
