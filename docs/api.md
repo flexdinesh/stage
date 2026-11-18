@@ -401,8 +401,13 @@ interaction modes and workspace kinds. Task/schedule `executionConfig` is
 Legacy T3 request fields remain supported through translation. Create requests
 cannot combine neutral config with legacy model/permission fields.
 
+For an adapter with workspace-scoped catalogs, pass an optional Stage
+`projectId` to read the models and agents for its verified binding on that
+connection. Omitting it requests connection-wide capabilities.
+
 ### `POST /api/tasks/:id/stop`
-`t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
+Interrupt the task's scoped session through its adapter. State updates via the
+poller. A task without an execution session returns 409.
 
 Stop bumps `updatedAt`; that re-arms polling of a `failed|interrupted` task for 10 minutes (see polling scope). It then polls the thread once: the thread mirror is refreshed, but task state does not change for `backlog` tasks. Execution observations never alter acceptance.
 200 `Task`. 502 / 503.

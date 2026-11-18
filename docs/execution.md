@@ -85,4 +85,64 @@ two-step creation, optional capabilities, lost replies, restart, offline reads,
 malformed states and offline acceptance. T3 tests cover namespace rotation and
 checkpoint failures. API tests cover compatibility, frozen handoff/journals,
 explicit base repair and link-preview-attach ownership/revision checks.
-These are isolated tests, not live validation of a T3 or OpenCode service.
+These contract tests use isolated harnesses. The OpenCode live suite is described below.
+
+## Internal OpenCode V2 adapter
+
+Task 246 provides an adapter for test composition with the real Stage coordinator.
+Product wiring and connection setup belong to task 7. Stage connects to an existing
+service using its URL and optional HTTP Basic credentials. The tested release is
+OpenCode 2.3.0. Stage checks the reported version, required V2 operations and worktree
+request schema. The server does not advertise a binary digest. Repeat the live suite
+before adding another supported release.
+
+OpenCode owns project inventory, workspace strategy, model selection and agent policy.
+An empty selection uses its defaults. A bound directory provides the model catalog,
+variants and visible primary agents. The capabilities endpoint accepts an optional
+Stage `projectId` to resolve that binding. A worktree launch asks OpenCode for its
+selected strategy and default base. Stage verifies the resulting inventory entry,
+project and directory. Explicit Git refs, branch creation, predecessor bases,
+permission overrides and image delivery currently report an actionable reason.
+
+### Launch and recovery
+
+Stage saves the frozen intent, reserved IDs and an attempt marker before dispatch.
+The three external effects are worktree creation, session creation and prompt admission.
+The adapter performs only the steps needed for the chosen workspace.
+
+| Lost response | Recovery |
+| --- | --- |
+| Worktree creation | Hold the attempt for explicit session linking. OpenCode can suffix the requested name and records the directory before running setup. An inventory entry alone cannot prove success. |
+| Session creation | Read the reserved ID and verify the attempt marker, project, directory and top-level status. A missing or conflicting identity stays unconfirmed. |
+| Prompt admission | Check the pending inbox, then the delivered message by ID, text and marker. Confirmed admission waits for execution evidence. |
+
+The live suite found that duplicate session creation returned the first session,
+even with different arguments. Concurrent submissions of the same message ID produced
+one pending input. After delivery, resubmission returned the original input and woke
+a new execution interval with no additional model call in the tested case. Recovery
+therefore reads the original admission instead of sending the prompt again.
+
+Stage polls active execution, pending permissions and forms, and the session's
+busy and idle times. A new active execution takes precedence over the previous
+outcome. Inconsistent snapshots are retried. Terminal replies use completed assistant
+text from that execution, bounded to 4,000 characters. Available HTTP(S) artifact
+links come from the optional session-scoped artifact inventory. A pasted ID or a
+matching OpenCode web-client session URL supports explicit adoption. Browsers and
+desktop hosts use the configured web-client destination. User acceptance and offline
+handoff use Stage's stored evidence.
+
+### Reproduce the live gate
+
+Run `STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:live`.
+The test starts foreground loopback servers with temporary homes, repositories and
+databases. A scripted local model supplies success, failure and interruptible runs.
+The standalone CLI requires Basic authentication. The suite also tests an existing
+service exposed through a no-auth loopback proxy.
+
+The verified Linux amd64 binary reported `2.3.0`, SHA-256
+`2e0e4656521ca56e5ba16a00d48429958b8105b3fa6466710a4350e68759381f`.
+The source reference was `df46f6931da0c934a59d375ac44525846f21c718`.
+Fault injection covers every launch checkpoint, lost HTTP responses, racing Stage
+retries, failed worktree setup, session identity collisions and server reconnect.
+The suite also checks adoption, input requests, the web-client route and offline
+acceptance. No provider account or production service is required.

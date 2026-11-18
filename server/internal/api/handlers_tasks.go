@@ -517,8 +517,8 @@ func (s *server) threadTask(r *http.Request) (db.Task, error) {
 	if err != nil {
 		return db.Task{}, err
 	}
-	if task.T3ThreadID == nil {
-		return db.Task{}, db.Conflict("task has no thread")
+	if task.Session == nil {
+		return db.Task{}, db.Conflict("task has no execution session")
 	}
 	return task, nil
 }
@@ -533,7 +533,7 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
-		return &db.T3Error{Err: err}
+		return &db.HarnessError{Err: err}
 	}
 	return s.touchAndWrite(w, r, task.ID)
 }

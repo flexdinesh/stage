@@ -2,6 +2,7 @@ package api
 
 import (
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"net/http"
 	"strconv"
 )
@@ -14,6 +15,28 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 	a, err := s.Sync.Adapter(id)
 	if err != nil {
 		return err
+	}
+	scoped, ok := a.(execution.WorkspaceFeatures)
+	if project := r.URL.Query().Get("projectId"); ok && project != "" {
+		projectID, err := strconv.ParseInt(project, 10, 64)
+		if err != nil || projectID < 1 {
+			return db.Invalid("invalid Stage project")
+		}
+		p, err := s.Store.GetProject(r.Context(), projectID)
+		if err != nil {
+			return err
+		}
+		for _, b := range p.Bindings {
+			if b.ConnectionID == id && b.Status == "available" {
+				c, err := scoped.FeaturesForWorkspace(r.Context(), b.ExternalProjectID, b.Workspace)
+				if err != nil {
+					return &db.HarnessError{Err: err}
+				}
+				writeJSON(w, 200, c)
+				return nil
+			}
+		}
+		return db.Conflict("Verify this project's workspace binding before choosing a model or agent.")
 	}
 	c, err := a.Features(r.Context())
 	if err != nil {

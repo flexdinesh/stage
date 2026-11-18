@@ -62,6 +62,13 @@ depends = ["check:go", "check:web", "website:check", "check:fixture", "check:des
 description = "go vet (with and without the smoke tag) + go test"
 run = "cd server && go vet ./... && go vet -tags smoke ./... && go test ./..."
 
+[tasks."opencode:live"]
+description = "Verify the internal adapter against an isolated OpenCode V2 server and local test model"
+run = '''
+: "${STAGE_TEST_OPENCODE:?Set STAGE_TEST_OPENCODE to the absolute path of the tested OpenCode executable}"
+cd server && go test -race -count=1 -v -timeout 3m ./internal/opencode
+'''
+
 [tasks."service:smoke"]
 description = "Real user-service smoke check (Linux systemd --user) with the isolated stage-svctest identity; never the installed service"
 run = "cd server && STAGE_SERVICE_SMOKE=1 go test -tags smoke -count=1 -v -timeout 10m -run '^TestSmoke$' ./internal/service"
