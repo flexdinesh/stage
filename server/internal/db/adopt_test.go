@@ -33,7 +33,7 @@ func TestAdoptThread(t *testing.T) {
 	}
 	if !task.Adopted || task.Prompt != "" || task.Title != "Planner" || task.State != db.StateRunning || task.ProjectID != p.ID ||
 		task.T3ThreadID == nil || *task.T3ThreadID != "planner-1" || task.LaunchAttempt != 1 || task.LaunchedAt == nil ||
-		task.ProviderInstanceID == nil || *task.ProviderInstanceID != "codex" || task.RuntimeMode != "auto" || task.InteractionMode != "plan" ||
+		task.ExecutionConfig == nil || task.ExecutionConfig.Model != t3.ModelKey("codex", "gpt") || task.RuntimeMode != "auto" || task.InteractionMode != "plan" ||
 		!slices.Equal(task.Tags, []string{"plan"}) || task.TreeID != nil {
 		t.Fatalf("adopted task %+v", task)
 	}
@@ -53,8 +53,8 @@ func TestAdoptThread(t *testing.T) {
 	// Title and notes override; a settled session reads settled with timestamps.
 	thread("done-1", func(d *t3.ThreadDetail) { d.Settled, d.Status = true, t3.StatusIdle })
 	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "done-1", Title: ptr(" Review "), InitialNote: ptr("n")})
-	if err != nil || settled.Title != "Review" || settled.State != db.StateSettled ||
-		settled.SettledAt == nil || settled.FinishedAt == nil {
+	if err != nil || settled.Title != "Review" || settled.State != db.StateDone ||
+		settled.SettledAt != nil || settled.FinishedAt == nil {
 		t.Fatalf("settled adopt %+v %v", settled, err)
 	}
 	notes := journal(t, s, ctx, db.JournalOwner{TaskID: &settled.ID}, db.JournalQuery{})

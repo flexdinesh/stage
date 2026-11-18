@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // LastWordCheckedAt is the thread updated_at the last successful last-word
@@ -20,7 +20,7 @@ func (s *Store) LastWordCheckedAt(ctx context.Context, threadID string) (*time.T
 // SetThreadLastWord records a last-word check at thread updated_at checked.
 // r nil (no reply found) advances the marker and keeps the stored reply. A
 // check older than the stored marker is ignored (concurrent sync loops).
-func (s *Store) SetThreadLastWord(ctx context.Context, threadID string, checked time.Time, r *t3.Reply) error {
+func (s *Store) SetThreadLastWord(ctx context.Context, threadID string, checked time.Time, r *execution.Reply) error {
 	if r == nil {
 		_, err := s.pool.Exec(ctx, `
 UPDATE threads SET last_word_checked_at = $2

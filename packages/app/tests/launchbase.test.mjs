@@ -45,9 +45,9 @@ test("predecessor name: the picked need, else the sole need, else a need, else n
   assert.equal(predecessorName(task({ needs: [3, 5], workspace: { type: "root" } })), "a need");
 });
 
-test("a predecessor choice reverts to worktree once the task has no needs", () => {
+test("a predecessor choice remains explicit when its need disappears", () => {
   assert.equal(effectiveChoice("predecessor", "#12"), "predecessor");
-  assert.equal(effectiveChoice("predecessor", null), "worktree");
+  assert.equal(effectiveChoice("predecessor", null), "predecessor");
   assert.equal(effectiveChoice("root", null), "root");
 });
 
@@ -70,8 +70,8 @@ test("form choice maps to and from the workspace", () => {
 });
 
 test("config line names the planned base, then the resolved one", () => {
-  assert.equal(predecessorWorkspaceText(task(), null), "worktree from #12's branch · fallback origin/main");
-  assert.equal(predecessorWorkspaceText(task({ needs: [3, 5] }), null), "worktree from a need's branch · fallback origin/main");
+  assert.equal(predecessorWorkspaceText(task(), null), "worktree from #12's branch · requires available branch");
+  assert.equal(predecessorWorkspaceText(task({ needs: [3, 5] }), null), "worktree from a need's branch · requires available branch");
   assert.equal(predecessorWorkspaceText(task(), base()), "worktree from feat/api (#12)");
   assert.equal(
     predecessorWorkspaceText(task(), base({ sourceTaskId: null, baseRef: "plan/x" })),
@@ -93,9 +93,9 @@ test("chip and pending note", () => {
   assert.equal(predecessorChip(task(), null), "worktree from #12's branch");
   assert.equal(predecessorChip(task(), base()), "worktree from feat/api");
   assert.equal(predecessorChip(task({ workspace: { type: "root" } }), null), null);
-  assert.equal(pendingBaseNote(task()), "+ on launch: worktree from #12's branch (fallback origin/main)");
+  assert.equal(pendingBaseNote(task()), "+ on launch: worktree from #12's branch (requires available branch)");
   assert.equal(pendingBaseNote(task({ state: "running" })), null);
   assert.equal(pendingBaseNote(task({ needs: [] })), null);
-  assert.equal(pendingBaseNote(task({ needs: [3, 5], workspace: { ...stacked, baseTaskId: 5 } })), "+ on launch: worktree from #5's branch (fallback origin/main)");
+  assert.equal(pendingBaseNote(task({ needs: [3, 5], workspace: { ...stacked, baseTaskId: 5 } })), "+ on launch: worktree from #5's branch (requires available branch)");
   assert.equal(pendingBaseNote(task({ workspace: { ...stacked, base: "ref" } })), null);
 });

@@ -15,7 +15,7 @@ func TestAcceptanceMigrationPreservesHistoryAndPolicies(t *testing.T) {
  (2,1,'active again','p','running','2026-11-01T00:00:00.000000Z',2),
  (3,1,'done','p','done',NULL,1)`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(900,'note',1,'keep this','original')`)
-	migrateTo(t, pool, 8)
+	migrateTo(t, pool, 9)
 	s := NewStore(pool)
 	ctx := context.Background()
 	a, err := s.GetTask(ctx, 1)

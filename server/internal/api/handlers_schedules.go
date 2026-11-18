@@ -84,6 +84,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
+		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
 		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
@@ -134,7 +135,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := validateConfigPatch(configPatch{
-		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
+		ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {

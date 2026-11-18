@@ -19,15 +19,16 @@ const (
 // LaunchBase is the worktree base one launch attempt of a task with
 // workspace.base "predecessor" used (docs/api.md "Predecessor base").
 type LaunchBase struct {
-	Attempt         int       `json:"attempt"`
-	BaseRef         string    `json:"baseRef"`
-	StartFromOrigin bool      `json:"startFromOrigin"`
-	Source          string    `json:"source"`
-	SourceTaskID    *int64    `json:"sourceTaskId"`
-	SourceThreadID  *string   `json:"sourceThreadId"`
-	SourceTitle     string    `json:"sourceTitle"`
-	Reason          *string   `json:"reason"` // why it fell back
-	At              time.Time `json:"at"`
+	Session         *SessionRef `json:"session,omitempty"`
+	Attempt         int         `json:"attempt"`
+	BaseRef         string      `json:"baseRef"`
+	StartFromOrigin bool        `json:"startFromOrigin"`
+	Source          string      `json:"source"`
+	SourceTaskID    *int64      `json:"sourceTaskId"`
+	SourceThreadID  *string     `json:"sourceThreadId"`
+	SourceTitle     string      `json:"sourceTitle"`
+	Reason          *string     `json:"reason"` // why it fell back
+	At              time.Time   `json:"at"`
 }
 
 // Detail is the launching task event: `base from #12's branch feat-x` or
@@ -48,14 +49,22 @@ func (b LaunchBase) Detail() string {
 // transaction.
 func (s *Store) RecordLaunchBase(ctx context.Context, taskID int64, b LaunchBase) error {
 	return s.inTx(ctx, func(tx *Tx) error {
+		var sourceID *int64
+		if b.Session != nil {
+			id, err := sessionIdentity(ctx, tx, *b.Session)
+			if err != nil {
+				return err
+			}
+			sourceID = &id
+		}
 		_, err := tx.Exec(ctx, `
-INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, source_session_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (task_id, attempt) DO UPDATE SET
   base_ref = EXCLUDED.base_ref, start_from_origin = EXCLUDED.start_from_origin, source = EXCLUDED.source,
   source_task_id = EXCLUDED.source_task_id, source_thread_id = EXCLUDED.source_thread_id,
-  source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, created_at = `+nowSQL+``,
-			taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceThreadID, b.SourceTitle, b.Reason)
+  source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, source_session_id=excluded.source_session_id, created_at = `+nowSQL+``,
+			taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceThreadID, b.SourceTitle, b.Reason, sourceID)
 		if err != nil {
 			return err
 		}
@@ -70,9 +79,9 @@ ON CONFLICT (task_id, attempt) DO UPDATE SET
 func (s *Store) GetLaunchBase(ctx context.Context, taskID int64, attempt int) (*LaunchBase, error) {
 	var b LaunchBase
 	err := s.pool.QueryRow(ctx, `
-SELECT attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, created_at
+SELECT attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_launch_bases.source_session_id)
 FROM task_launch_bases WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
-		Scan(&b.Attempt, &b.BaseRef, &b.StartFromOrigin, &b.Source, &b.SourceTaskID, &b.SourceThreadID, &b.SourceTitle, &b.Reason, &b.At)
+		Scan(&b.Attempt, &b.BaseRef, &b.StartFromOrigin, &b.Source, &b.SourceTaskID, &b.SourceThreadID, &b.SourceTitle, &b.Reason, &b.At, &b.Session)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

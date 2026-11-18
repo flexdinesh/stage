@@ -14,7 +14,7 @@ func TestIdentityUpgradePreservesHistory(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,source_thread_id,text,request_id) VALUES(901,'note',81,'uncached-source','Keep exact text','keep')`)
 	mustExec(t, pool, `INSERT INTO task_acceptances(id,task_id,provenance,evidence,note) VALUES(61,81,'user','{"threadId":"same","reply":"exact reply"}','Accepted')`)
 	mustExec(t, pool, `UPDATE t3_connection SET token='preserve-token',environment_id='environment',t3_url='http://existing'`)
-	migrateTo(t, pool, 8)
+	migrateTo(t, pool, 9)
 	s := NewStore(pool)
 	ctx := context.Background()
 	p, err := s.GetProject(ctx, 71)
@@ -58,7 +58,7 @@ func TestIdentityUpgradePreservesHistory(t *testing.T) {
 
 func TestSessionsAreConnectionScoped(t *testing.T) {
 	pool := openUnmigrated(t)
-	migrateTo(t, pool, 8)
+	migrateTo(t, pool, 9)
 	s := NewStore(pool)
 	ctx := context.Background()
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)
@@ -85,7 +85,7 @@ func TestSessionsAreConnectionScoped(t *testing.T) {
 
 func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	pool := openUnmigrated(t)
-	migrateTo(t, pool, 8)
+	migrateTo(t, pool, 9)
 	s := NewStore(pool)
 	ctx := context.Background()
 	p, err := s.InsertProject(ctx, Project{Title: "Stage", Bindings: []ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/old"}}})
@@ -128,7 +128,7 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 
 func TestScopedHistoryNeverReadsAnotherConnection(t *testing.T) {
 	pool := openUnmigrated(t)
-	migrateTo(t, pool, 8)
+	migrateTo(t, pool, 9)
 	s := NewStore(pool)
 	ctx := context.Background()
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)

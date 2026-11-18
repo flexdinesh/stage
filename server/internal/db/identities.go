@@ -4,14 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 const T3ConnectionID int64 = 1
 
-type SessionRef struct {
-	ConnectionID      int64  `json:"connectionId"`
-	ExternalSessionID string `json:"externalSessionId"`
-}
+type SessionRef = execution.SessionRef
 type HarnessConnection struct {
 	ID      int64  `json:"id"`
 	Harness string `json:"harness"`
@@ -195,4 +193,11 @@ func (s *Store) HoldScheduled(ctx context.Context, id int64, reason string) erro
 		_, err = tx.Exec(ctx, `INSERT INTO task_events(task_id,from_state,to_state,detail) VALUES($1,'backlog','backlog',$2)`, id, reason+" Start manually after repairing the binding or connection.")
 		return err
 	})
+}
+
+func defaultConnection(id int64) int64 {
+	if id == 0 {
+		return T3ConnectionID
+	}
+	return id
 }

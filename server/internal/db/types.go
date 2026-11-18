@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // TaskState values (docs/api.md TaskState).
@@ -118,30 +118,32 @@ func (w Workspace) MarshalJSON() ([]byte, error) {
 }
 
 type Task struct {
-	ConnectionID            int64            `json:"connectionId"`
-	SessionIdentityID       *int64           `json:"-"`
-	OriginSessionIdentityID *int64           `json:"-"`
-	Session                 *SessionRef      `json:"session"`
-	OriginSession           *SessionRef      `json:"originSession"`
-	AcceptanceID            *int64           `json:"acceptanceId"`
-	AcceptanceRevision      int64            `json:"acceptanceRevision"`
-	CompletedAt             *time.Time       `json:"completedAt"`
-	ID                      int64            `json:"id"`
-	ProjectID               int64            `json:"projectId"`
-	ProjectTitle            string           `json:"projectTitle"`
-	Title                   string           `json:"title"`
-	Prompt                  string           `json:"prompt"`
-	ProviderInstanceID      *string          `json:"providerInstanceId"`
-	Model                   *string          `json:"model"`
-	ModelOptions            []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode             string           `json:"runtimeMode"`
-	InteractionMode         string           `json:"interactionMode"`
-	Workspace               Workspace        `json:"workspace"`
-	Tags                    []string         `json:"tags"`
-	State                   TaskState        `json:"state"`
-	T3ThreadID              *string          `json:"externalSessionId"`
-	TreeID                  *int64           `json:"treeId"` // the task's tree (docs/api.md "Trees")
-	TreeTitle               *string          `json:"treeTitle"`
+	ExecutionConfig         *execution.Config       `json:"executionConfig"`
+	Launch                  *Attempt                `json:"launch,omitempty"`
+	ConnectionID            int64                   `json:"connectionId"`
+	SessionIdentityID       *int64                  `json:"-"`
+	OriginSessionIdentityID *int64                  `json:"-"`
+	Session                 *SessionRef             `json:"session"`
+	OriginSession           *SessionRef             `json:"originSession"`
+	AcceptanceID            *int64                  `json:"acceptanceId"`
+	AcceptanceRevision      int64                   `json:"acceptanceRevision"`
+	CompletedAt             *time.Time              `json:"completedAt"`
+	ID                      int64                   `json:"id"`
+	ProjectID               int64                   `json:"projectId"`
+	ProjectTitle            string                  `json:"projectTitle"`
+	Title                   string                  `json:"title"`
+	Prompt                  string                  `json:"prompt"`
+	ProviderInstanceID      *string                 `json:"providerInstanceId"`
+	Model                   *string                 `json:"model"`
+	ModelOptions            []execution.ModelOption `json:"modelOptions"`
+	RuntimeMode             string                  `json:"runtimeMode"`
+	InteractionMode         string                  `json:"interactionMode"`
+	Workspace               Workspace               `json:"workspace"`
+	Tags                    []string                `json:"tags"`
+	State                   TaskState               `json:"state"`
+	T3ThreadID              *string                 `json:"externalSessionId"`
+	TreeID                  *int64                  `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle               *string                 `json:"treeTitle"`
 	// StartMode is the task's own start mode (nil = inherit the tree's);
 	// EffectiveStartMode applies the tree's (nil outside a tree without one).
 	StartMode          *StartMode `json:"startMode"`
@@ -152,25 +154,25 @@ type Task struct {
 	Dependents []int64    `json:"dependents"` // tasks that need this one, by id
 	// Adopted: the task tracks an existing T3 session (prompt ""); it is never
 	// started, restarted or duplicated by stage.
-	Adopted           bool             `json:"adopted"`
-	ReadyAt           *time.Time       `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
-	StartAt           *time.Time       `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
-	StartTz           *string          `json:"startTz"`    // IANA zone startAt was entered in
-	ScheduleID        *int64           `json:"scheduleId"` // recurring schedule that spawned the task
-	ScheduleTitle     *string          `json:"scheduleTitle"`
-	OriginThreadID    *string          `json:"originThreadId"`    // T3 session that created the task (agent interface)
-	OriginThreadTitle *string          `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
-	Handoff           bool             `json:"handoff"`           // append the needs' handoff at launch (docs/api.md "Handoff")
-	LaunchAttempt     int              `json:"launchAttempt"`
-	LastError         *string          `json:"lastError"`
-	LaunchedAt        *time.Time       `json:"launchedAt"`
-	FinishedAt        *time.Time       `json:"finishedAt"`
-	SettledAt         *time.Time       `json:"settledAt"`
-	RunStartedAt      *time.Time       `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
-	RunEndedAt        *time.Time       `json:"runEndedAt"`
-	LastWordPreview   *string          `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
-	LastWordAt        *time.Time       `json:"lastWordAt"`
-	PullRequests      []t3.PullRequest `json:"-"` // thread's PRs (mirror); [] without a thread
+	Adopted           bool                 `json:"adopted"`
+	ReadyAt           *time.Time           `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
+	StartAt           *time.Time           `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
+	StartTz           *string              `json:"startTz"`    // IANA zone startAt was entered in
+	ScheduleID        *int64               `json:"scheduleId"` // recurring schedule that spawned the task
+	ScheduleTitle     *string              `json:"scheduleTitle"`
+	OriginThreadID    *string              `json:"originThreadId"`    // T3 session that created the task (agent interface)
+	OriginThreadTitle *string              `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
+	Handoff           bool                 `json:"handoff"`           // append the needs' handoff at launch (docs/api.md "Handoff")
+	LaunchAttempt     int                  `json:"launchAttempt"`
+	LastError         *string              `json:"lastError"`
+	LaunchedAt        *time.Time           `json:"launchedAt"`
+	FinishedAt        *time.Time           `json:"finishedAt"`
+	SettledAt         *time.Time           `json:"settledAt"`
+	RunStartedAt      *time.Time           `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
+	RunEndedAt        *time.Time           `json:"runEndedAt"`
+	LastWordPreview   *string              `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
+	LastWordAt        *time.Time           `json:"lastWordAt"`
+	PullRequests      []execution.Artifact `json:"-"` // thread's PRs (mirror); [] without a thread
 	// PendingQuestionCount: the thread's answerable pending questions.
 	PendingQuestionCount int       `json:"-"`
 	CreatedAt            time.Time `json:"createdAt"`
@@ -203,25 +205,25 @@ type TaskEvent struct {
 
 // Thread is a T3 mirror row joined with its app project and task.
 type Thread struct {
-	ConnectionID        int64            `json:"connectionId"`
-	Session             SessionRef       `json:"session"`
-	T3ThreadID          string           `json:"externalSessionId"`
-	T3ProjectID         string           `json:"externalProjectId"`
-	ProjectID           *int64           `json:"projectId"`
-	ProjectTitle        *string          `json:"projectTitle"`
-	Title               string           `json:"title"`
-	Status              string           `json:"status"`
-	State               TaskState        `json:"state"`
-	Archived            bool             `json:"archived"`
-	ActiveRunID         *string          `json:"activeRunId"`
-	LatestRunID         *string          `json:"latestRunId"`
-	RunStartedAt        *time.Time       `json:"runStartedAt"` // elapsed run span (RunSpan)
-	RunEndedAt          *time.Time       `json:"runEndedAt"`
-	RunCount            int              `json:"runCount"` // runs T3 reported (detail reads); 0 until read
-	PullRequests        []t3.PullRequest `json:"-"`
-	Settled             bool             `json:"settled"`
-	SettledAt           *time.Time       `json:"settledAt"`
-	PendingRequestCount int              `json:"pendingRequestCount"`
+	ConnectionID        int64                `json:"connectionId"`
+	Session             SessionRef           `json:"session"`
+	T3ThreadID          string               `json:"externalSessionId"`
+	T3ProjectID         string               `json:"externalProjectId"`
+	ProjectID           *int64               `json:"projectId"`
+	ProjectTitle        *string              `json:"projectTitle"`
+	Title               string               `json:"title"`
+	Status              string               `json:"status"`
+	State               TaskState            `json:"state"`
+	Archived            bool                 `json:"archived"`
+	ActiveRunID         *string              `json:"activeRunId"`
+	LatestRunID         *string              `json:"latestRunId"`
+	RunStartedAt        *time.Time           `json:"runStartedAt"` // elapsed run span (RunSpan)
+	RunEndedAt          *time.Time           `json:"runEndedAt"`
+	RunCount            int                  `json:"runCount"` // runs T3 reported (detail reads); 0 until read
+	PullRequests        []execution.Artifact `json:"-"`
+	Settled             bool                 `json:"settled"`
+	SettledAt           *time.Time           `json:"settledAt"`
+	PendingRequestCount int                  `json:"pendingRequestCount"`
 	// PendingQuestionCount: pending requests stage can answer (user-input
 	// questions); the rest are approvals handled in T3.
 	PendingQuestionCount int        `json:"-"`
@@ -283,9 +285,9 @@ type Snippet struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-func nonNilOptions(o []t3.ModelOption) []t3.ModelOption {
+func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
 	if o == nil {
-		return []t3.ModelOption{}
+		return []execution.ModelOption{}
 	}
 	return o
 }

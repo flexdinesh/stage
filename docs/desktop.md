@@ -272,3 +272,5 @@ Task completion uses the shared app review drawer (full width on phones), with c
 Project planning remains available without T3. The shared project form creates
 Stage metadata offline; Workspace explicitly binds a T3 workspace before launch.
 The bridge integration tests exercise creation and binding against isolated fake T3.
+
+Harness navigation uses `Links.executionDestination`. The desktop host chooses native links for a local Stage connection and web links for a remote connection. Shared product code does not inspect browser location or choose the platform.

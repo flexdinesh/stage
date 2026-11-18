@@ -106,6 +106,7 @@ func TagForKey(key string) string {
 const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),1), n.id, n.event, n.task_id, COALESCE((SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),tk.t3_thread_id,n.t3_thread_id), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
+       WHEN o.session_id IS NOT NULL THEN json_extract(o.observation,'$.state')
        WHEN th.settled THEN 'settled'
        ELSE th.observed_state END AS current_state,
   COALESCE(min(COALESCE(tth.pending_question_count, th.pending_question_count),
@@ -114,7 +115,8 @@ const notificationColumns = `COALESCE((SELECT connection_id FROM session_identit
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
 LEFT JOIN threads tth ON tth.session_id = tk.session_id
-LEFT JOIN threads th ON n.task_id IS NULL AND th.session_id = n.session_id`
+LEFT JOIN threads th ON n.task_id IS NULL AND th.session_id = n.session_id
+LEFT JOIN execution_observations o ON o.session_id=n.session_id`
 
 // InsertNotification stores n and returns its id.
 func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int64, error) {

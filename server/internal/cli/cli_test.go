@@ -28,6 +28,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+ "github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
 var testDB dbtest.DB
@@ -48,10 +49,10 @@ func newHarness(t *testing.T) *harness {
 	store := db.NewStore(pool)
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h.sync = t3sync.New(store, h.fake, log)
+	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
 	h.handler = api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, T3: h.fake, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Setup:t3setup.New(t3setup.Options{Config:config.Config{T3URL:"http://127.0.0.1:3773",T3PublicURL:"http://t3.test"},Store:store,Client:h.fake,Fake:true,Logger:log}), Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)
@@ -558,7 +559,7 @@ func TestBaseFlag(t *testing.T) {
 		t.Fatalf("--base predecessor: %+v", b.Workspace)
 	}
 	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(b.ID))
-	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch (fallback origin/main, branch -)", a.ID)) {
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch (configured ref origin/main, branch -)", a.ID)) {
 		t.Fatalf("show: %s", stdout)
 	}
 	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--base", "ref", "--json")

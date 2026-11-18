@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 const taskSelect = `
@@ -29,7 +29,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   t.archived_at, tr.status, ` + unstartedSQL + `,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id)
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
@@ -48,7 +48,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.ExecutionConfig)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -159,13 +159,12 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 	// minutes after the last change, then whenever the thread mirror (full
 	// sync) shows it active again.
 	rows, err := s.pool.Query(ctx, taskSelect+`
-WHERE t.t3_thread_id IS NOT NULL AND (
+WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
   t.state IN ('launching', 'running', 'needs_input')
   OR (t.state IN ('done','settled') AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
-    OR (NOT th.settled AND (th.pending_request_count > 0
-      OR th.status IN ('preparing', 'queued', 'starting', 'running', 'waiting'))))))
+    OR COALESCE((SELECT json_extract(observation,'$.active') FROM execution_observations WHERE session_id=t.session_id),0)=1)))
 ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)
 }
@@ -187,6 +186,7 @@ func scanTaskEvent(r rowScanner) (TaskEvent, error) {
 
 // NewTask is a validated create input.
 type NewTask struct {
+	ExecutionConfig    *execution.Config
 	ConnectionID       int64
 	OriginSession      *SessionRef
 	ProjectID          int64
@@ -194,7 +194,7 @@ type NewTask struct {
 	Prompt             string
 	ProviderInstanceID *string
 	Model              *string
-	ModelOptions       []t3.ModelOption
+	ModelOptions       []execution.ModelOption
 	RuntimeMode        string
 	InteractionMode    string
 	Workspace          Workspace
@@ -266,11 +266,11 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16,$17,$18) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16,$17,$18,$19) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags),
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID, in.ExecutionConfig,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -333,19 +333,20 @@ func projectExists(ctx context.Context, tx *Tx, id int64) error {
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
 // Nullable fields: providerInstanceId, model, startMode (Null clears).
 type TaskPatch struct {
-	ProjectID          Optional[int64]            `json:"projectId"`
-	Title              Optional[string]           `json:"title"`
-	Prompt             Optional[string]           `json:"prompt"`
-	ProviderInstanceID Optional[string]           `json:"providerInstanceId"`
-	Model              Optional[string]           `json:"model"`
-	ModelOptions       Optional[[]t3.ModelOption] `json:"modelOptions"`
-	RuntimeMode        Optional[string]           `json:"runtimeMode"`
-	InteractionMode    Optional[string]           `json:"interactionMode"`
-	Workspace          Optional[Workspace]        `json:"workspace"`
-	Tags               Optional[[]string]         `json:"tags"`
-	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
-	Handoff            Optional[bool]             `json:"handoff"`       // append the needs' handoff at launch
-	StartMode          Optional[StartMode]        `json:"startMode"`     // null = inherit the tree's
+	ExecutionConfig    Optional[execution.Config]        `json:"executionConfig"`
+	ProjectID          Optional[int64]                   `json:"projectId"`
+	Title              Optional[string]                  `json:"title"`
+	Prompt             Optional[string]                  `json:"prompt"`
+	ProviderInstanceID Optional[string]                  `json:"providerInstanceId"`
+	Model              Optional[string]                  `json:"model"`
+	ModelOptions       Optional[[]execution.ModelOption] `json:"modelOptions"`
+	RuntimeMode        Optional[string]                  `json:"runtimeMode"`
+	InteractionMode    Optional[string]                  `json:"interactionMode"`
+	Workspace          Optional[Workspace]               `json:"workspace"`
+	Tags               Optional[[]string]                `json:"tags"`
+	AttachmentIDs      Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
+	Handoff            Optional[bool]                    `json:"handoff"`       // append the needs' handoff at launch
+	StartMode          Optional[StartMode]               `json:"startMode"`     // null = inherit the tree's
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
 	StartLocal Optional[string]    `json:"startLocal"`
@@ -355,7 +356,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
+	return p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
 		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
@@ -406,6 +407,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		w.arg(id)
 		var sets []string
 		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		if p.ExecutionConfig.Set {
+			set("execution_config", p.ExecutionConfig.Ptr())
+		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {
+			set("execution_config", nil)
+		}
 		if p.ProjectID.Set {
 			if err := projectExists(ctx, tx, p.ProjectID.V); err != nil {
 				return err
@@ -553,7 +559,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 		return err
 	}
 	return s.createTask(ctx, NewTask{
-		ProjectID: src.ProjectID, Title: src.Title, Prompt: src.Prompt,
+		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
 		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: ws,
 		Tags: src.Tags,
@@ -642,6 +648,9 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 			return err
 		}
 		if t.BeginAttempt {
+			if _, err := tx.Exec(ctx, `INSERT INTO execution_attempts(task_id,attempt,phase) VALUES($1,$2,'prepared') ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt); err != nil {
+				return err
+			}
 			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt); err != nil {
 				return err
 			}

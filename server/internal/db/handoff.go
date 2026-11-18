@@ -16,14 +16,15 @@ const (
 // Handoff is what one launch attempt appended to its prompt for one need
 // (docs/api.md "Handoff").
 type Handoff struct {
-	Attempt        int       `json:"attempt"`
-	Status         string    `json:"status"`
-	SourceTaskID   *int64    `json:"sourceTaskId"`
-	SourceThreadID string    `json:"sourceThreadId"`
-	SourceTitle    string    `json:"sourceTitle"`
-	Text           string    `json:"text"`   // "" when skipped
-	Reason         *string   `json:"reason"` // why skipped
-	At             time.Time `json:"at"`
+	Session        *SessionRef `json:"session,omitempty"`
+	Attempt        int         `json:"attempt"`
+	Status         string      `json:"status"`
+	SourceTaskID   *int64      `json:"sourceTaskId"`
+	SourceThreadID string      `json:"sourceThreadId"`
+	SourceTitle    string      `json:"sourceTitle"`
+	Text           string      `json:"text"`   // "" when skipped
+	Reason         *string     `json:"reason"` // why skipped
+	At             time.Time   `json:"at"`
 }
 
 // HandoffSource is a need a launch reads: a task (TaskID set; its current
@@ -57,14 +58,22 @@ func (s *Store) RecordHandoff(ctx context.Context, taskID int64, h Handoff) erro
 		detail = fmt.Sprintf("handoff from %s skipped: %s", sourceLabel(h), reason)
 	}
 	return s.inTx(ctx, func(tx *Tx) error {
+		var sourceID *int64
+		if h.Session != nil {
+			id, err := sessionIdentity(ctx, tx, *h.Session)
+			if err != nil {
+				return err
+			}
+			sourceID = &id
+		}
 		_, err := tx.Exec(ctx, `
-INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_thread_id, source_title, status, text, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_thread_id, source_title, status, text, reason,source_session_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,$9)
 ON CONFLICT (task_id, attempt, source_task_id) DO UPDATE SET
-  source_thread_id = EXCLUDED.source_thread_id,
+  source_thread_id = EXCLUDED.source_thread_id,source_session_id=excluded.source_session_id,
   source_title = EXCLUDED.source_title, status = EXCLUDED.status, text = EXCLUDED.text,
   reason = EXCLUDED.reason, created_at = `+nowSQL+``,
-			taskID, h.Attempt, h.SourceTaskID, h.SourceThreadID, h.SourceTitle, h.Status, h.Text, h.Reason)
+			taskID, h.Attempt, h.SourceTaskID, h.SourceThreadID, h.SourceTitle, h.Status, h.Text, h.Reason, sourceID)
 		if err != nil {
 			return err
 		}
@@ -83,14 +92,14 @@ func sourceLabel(h Handoff) string {
 // none).
 func (s *Store) GetHandoffs(ctx context.Context, taskID int64, attempt int) ([]Handoff, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT attempt, status, source_task_id, source_thread_id, source_title, text, reason, created_at
+SELECT attempt, status, source_task_id, source_thread_id, source_title, text, reason, created_at,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_handoffs.source_session_id)
 FROM task_handoffs WHERE task_id = $1 AND attempt = $2 ORDER BY source_task_id, id`, taskID, attempt)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(r rowScanner) (Handoff, error) {
 		var h Handoff
-		err := r.Scan(&h.Attempt, &h.Status, &h.SourceTaskID, &h.SourceThreadID, &h.SourceTitle, &h.Text, &h.Reason, &h.At)
+		err := r.Scan(&h.Attempt, &h.Status, &h.SourceTaskID, &h.SourceThreadID, &h.SourceTitle, &h.Text, &h.Reason, &h.At, &h.Session)
 		return h, err
 	})
 }

@@ -15,7 +15,7 @@ const TASK_TONES: Record<TaskState, ChipTone> = {
 
 const TASK_LABELS: Record<TaskState, string> = {
   backlog: "backlog",
-  launching: "launching",
+  launching: "Launch unconfirmed",
   running: "running",
   needs_input: "needs input",
   done: "run finished",

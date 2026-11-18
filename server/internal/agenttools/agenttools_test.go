@@ -28,6 +28,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+ "github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
 var testDB dbtest.DB
@@ -48,12 +49,12 @@ func newEnv(t *testing.T) *env {
 	store := db.NewStore(pool)
 	fake := t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.New(store, fake, log)
+	svc := t3sync.New(store, t3.NewAdapter(fake), log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, T3: fake, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Setup:t3setup.New(t3setup.Options{Config:config.Config{T3PublicURL:"http://localhost:3773"},Store:store,Client:fake,Fake:true,Logger:log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

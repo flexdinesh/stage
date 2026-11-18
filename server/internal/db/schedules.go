@@ -10,37 +10,38 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/cronexpr"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Schedule is a recurring task template (docs/api.md "Schedules").
 type Schedule struct {
-	ConnectionID       int64            `json:"connectionId"`
-	OriginSession      *SessionRef      `json:"originSession"`
-	ID                 int64            `json:"id"`
-	ProjectID          int64            `json:"projectId"`
-	ProjectTitle       string           `json:"projectTitle"`
-	Title              string           `json:"title"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId"`
-	Model              *string          `json:"model"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode        string           `json:"runtimeMode"`
-	InteractionMode    string           `json:"interactionMode"`
-	Workspace          Workspace        `json:"workspace"`
-	Tags               []string         `json:"tags"`
-	Notes              string           `json:"notes"`
-	Attachments        []Attachment     `json:"attachments"`
-	Cron               string           `json:"cron"`
-	Tz                 string           `json:"tz"`
-	Paused             bool             `json:"paused"`
-	NextRunAt          *time.Time       `json:"nextRunAt"`
-	LastRunAt          *time.Time       `json:"lastRunAt"`
-	LastTaskID         *int64           `json:"lastTaskId"`
-	LastTaskState      *TaskState       `json:"lastTaskState"`
-	OriginThreadID     *string          `json:"originThreadId"` // T3 session that created the schedule; spawned tasks inherit it
-	CreatedAt          time.Time        `json:"createdAt"`
-	UpdatedAt          time.Time        `json:"updatedAt"`
+	ExecutionConfig    *execution.Config       `json:"executionConfig"`
+	ConnectionID       int64                   `json:"connectionId"`
+	OriginSession      *SessionRef             `json:"originSession"`
+	ID                 int64                   `json:"id"`
+	ProjectID          int64                   `json:"projectId"`
+	ProjectTitle       string                  `json:"projectTitle"`
+	Title              string                  `json:"title"`
+	Prompt             string                  `json:"prompt"`
+	ProviderInstanceID *string                 `json:"providerInstanceId"`
+	Model              *string                 `json:"model"`
+	ModelOptions       []execution.ModelOption `json:"modelOptions"`
+	RuntimeMode        string                  `json:"runtimeMode"`
+	InteractionMode    string                  `json:"interactionMode"`
+	Workspace          Workspace               `json:"workspace"`
+	Tags               []string                `json:"tags"`
+	Notes              string                  `json:"notes"`
+	Attachments        []Attachment            `json:"attachments"`
+	Cron               string                  `json:"cron"`
+	Tz                 string                  `json:"tz"`
+	Paused             bool                    `json:"paused"`
+	NextRunAt          *time.Time              `json:"nextRunAt"`
+	LastRunAt          *time.Time              `json:"lastRunAt"`
+	LastTaskID         *int64                  `json:"lastTaskId"`
+	LastTaskState      *TaskState              `json:"lastTaskState"`
+	OriginThreadID     *string                 `json:"originThreadId"` // T3 session that created the schedule; spawned tasks inherit it
+	CreatedAt          time.Time               `json:"createdAt"`
+	UpdatedAt          time.Time               `json:"updatedAt"`
 }
 
 // Schedule run outcomes.
@@ -71,7 +72,7 @@ SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
   COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id=1)), s.created_at, s.updated_at,
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id)
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config
 FROM schedules s
 JOIN projects p ON p.id = s.project_id`
 
@@ -80,7 +81,7 @@ func scanSchedule(row rowScanner) (Schedule, error) {
 	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
 		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Tags, &s.Notes, &s.Cron, &s.Tz,
 		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.OriginThreadID, &s.CreatedAt, &s.UpdatedAt,
-		&s.Attachments, &s.ConnectionID, &s.OriginSession)
+		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig)
 	if err != nil {
 		return Schedule{}, notFound(err)
 	}
@@ -129,13 +130,15 @@ func (s *Store) ListSchedules(ctx context.Context, f ScheduleFilter) ([]Schedule
 
 // NewSchedule is a validated create input (cron and tz already parse).
 type NewSchedule struct {
+	ConnectionID       int64
+	ExecutionConfig    *execution.Config
 	OriginSession      *SessionRef
 	ProjectID          int64
 	Title              string
 	Prompt             string
 	ProviderInstanceID *string
 	Model              *string
-	ModelOptions       []t3.ModelOption
+	ModelOptions       []execution.ModelOption
 	RuntimeMode        string
 	InteractionMode    string
 	Workspace          Workspace
@@ -190,11 +193,11 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		}
 		err := tx.QueryRow(ctx, `
 INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, tags, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID,
+			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, defaultConnection(in.ConnectionID),
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -213,21 +216,22 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id
 // SchedulePatch is a partial schedule update (JSON body of PATCH
 // /api/schedules/:id).
 type SchedulePatch struct {
-	ProjectID          Optional[int64]            `json:"projectId"`
-	Title              Optional[string]           `json:"title"`
-	Prompt             Optional[string]           `json:"prompt"`
-	ProviderInstanceID Optional[string]           `json:"providerInstanceId"`
-	Model              Optional[string]           `json:"model"`
-	ModelOptions       Optional[[]t3.ModelOption] `json:"modelOptions"`
-	RuntimeMode        Optional[string]           `json:"runtimeMode"`
-	InteractionMode    Optional[string]           `json:"interactionMode"`
-	Workspace          Optional[Workspace]        `json:"workspace"`
-	Tags               Optional[[]string]         `json:"tags"`
-	Notes              Optional[string]           `json:"notes"`
-	AttachmentIDs      Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
-	Cron               Optional[string]           `json:"cron"`
-	Tz                 Optional[string]           `json:"tz"`
-	Paused             Optional[bool]             `json:"paused"`
+	ExecutionConfig    Optional[execution.Config]        `json:"executionConfig"`
+	ProjectID          Optional[int64]                   `json:"projectId"`
+	Title              Optional[string]                  `json:"title"`
+	Prompt             Optional[string]                  `json:"prompt"`
+	ProviderInstanceID Optional[string]                  `json:"providerInstanceId"`
+	Model              Optional[string]                  `json:"model"`
+	ModelOptions       Optional[[]execution.ModelOption] `json:"modelOptions"`
+	RuntimeMode        Optional[string]                  `json:"runtimeMode"`
+	InteractionMode    Optional[string]                  `json:"interactionMode"`
+	Workspace          Optional[Workspace]               `json:"workspace"`
+	Tags               Optional[[]string]                `json:"tags"`
+	Notes              Optional[string]                  `json:"notes"`
+	AttachmentIDs      Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
+	Cron               Optional[string]                  `json:"cron"`
+	Tz                 Optional[string]                  `json:"tz"`
+	Paused             Optional[bool]                    `json:"paused"`
 }
 
 // UpdateSchedule applies a validated patch. Changing cron, tz or paused
@@ -265,6 +269,11 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		w.arg(id)
 		var sets []string
 		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		if p.ExecutionConfig.Set {
+			set("execution_config", p.ExecutionConfig.Ptr())
+		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {
+			set("execution_config", nil)
+		}
 		if p.ProjectID.Set {
 			if err := projectExists(ctx, tx, p.ProjectID.V); err != nil {
 				return err
@@ -427,9 +436,9 @@ func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64
 	var tz, notes string
 	err := tx.QueryRow(ctx, `
 SELECT project_id, title, prompt, provider_instance_id, model, model_options, runtime_mode,
-  interaction_mode, workspace, tags, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id) FROM schedules WHERE id = $1`, id).
+  interaction_mode, workspace, tags, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config FROM schedules WHERE id = $1`, id).
 		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.ProviderInstanceID, &in.Model, &in.ModelOptions,
-			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.ConnectionID, &in.OriginSession)
+			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig)
 	if err != nil {
 		return 0, notFound(err)
 	}

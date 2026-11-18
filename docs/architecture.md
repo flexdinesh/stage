@@ -4,6 +4,8 @@ Stage is one Go server plus one React application that more than one host
 can render: the browser (PWA) and the MyGo desktop app
 ([ADR 0001](adr/0001-desktop-shell.md), [desktop.md](desktop.md)).
 
+Execution contracts and adapter responsibilities: [execution.md](execution.md).
+
 ## Ownership
 
 | Path | Owns | Must not |

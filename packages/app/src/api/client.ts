@@ -49,6 +49,7 @@ import type {
   T3StatusWire,
   Task,
   TaskDetail,
+  LaunchLinkPreview,
   TaskList,
   TaskListQuery,
   Snippet,
@@ -188,6 +189,8 @@ export function createApi(transport: Transport) {
       apiFetch<TaskList>(
         `/tasks${toQuery({ originThreadId: q.originThreadId, project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom, closed: q.closed })}`,
       ),
+    previewLaunchLink: (id: number, link: string) => apiFetch<LaunchLinkPreview>(`/tasks/${id}/launch-link/preview`, { method: "POST", body: { link } }),
+    attachLaunchLink: (id: number, link: string, preview: LaunchLinkPreview) => apiFetch<Task>(`/tasks/${id}/launch-link`, { method: "POST", body: { link, attempt: preview.attempt, revision: preview.revision, environment: preview.environment } }),
     task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
     completionPreview: (id: number) => apiFetch<CompletionPreview>(`/tasks/${id}/completion-preview`),
     completeTask: (id: number, body: AcceptanceRequest) => apiFetch<AcceptanceResult>(`/tasks/${id}/complete`, post(body)),

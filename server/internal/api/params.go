@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 const maxBody = 1 << 20
@@ -184,9 +184,9 @@ func validateWorkspace(w db.Workspace) (db.Workspace, error) {
 	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
 }
 
-func validateOptions(opts []t3.ModelOption) ([]t3.ModelOption, error) {
+func validateOptions(opts []execution.ModelOption) ([]execution.ModelOption, error) {
 	if opts == nil {
-		return []t3.ModelOption{}, nil
+		return []execution.ModelOption{}, nil
 	}
 	for _, o := range opts {
 		if strings.TrimSpace(o.ID) == "" {
@@ -253,5 +253,14 @@ func enumField(name string, o *db.Optional[string], allowed []string) error {
 
 // envID returns the T3 environment id for web links ("" if unknown).
 func (s *server) envID(ctx context.Context) string {
-	return s.T3.Status(ctx).EnvironmentID
+	a, e := s.Sync.Adapter(db.T3ConnectionID)
+	if e != nil {
+		return ""
+	}
+	return a.Health(ctx).Identity
+}
+
+func (s *server) connected(ctx context.Context, id int64) bool {
+	a, e := s.Sync.Adapter(id)
+	return e == nil && a.Health(ctx).Available
 }

@@ -214,7 +214,7 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 		t.Fatalf("c launched in %s, want %s", d.ProjectID, p2.T3ProjectID)
 	}
 	// A root is never auto-launched; a settled member with a dependent is frozen.
-	if got := e.getTask(a.ID); got.State != "settled" {
+	if got := e.getTask(a.ID); got.State != "done" {
 		t.Fatalf("a %s", got.State)
 	}
 }

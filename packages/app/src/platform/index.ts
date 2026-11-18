@@ -31,7 +31,10 @@ export interface Clipboard {
   writeText(text: string): Promise<void>;
 }
 
+export interface ExecutionLinks {native: string | null; web: string | null}
 export interface Links {
+ /** The host chooses an appropriate native or web execution destination. */
+ executionDestination(links: ExecutionLinks): string | null;
   /**
    * The copyable Stage link for an app path (`/tasks/12`, `/sessions/<id>`):
    * the page's own address in a browser, the public URL or a `stage://` deep

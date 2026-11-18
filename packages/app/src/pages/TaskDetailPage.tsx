@@ -1,3 +1,4 @@
+import { LaunchRecovery } from "../components/LaunchRecovery.tsx";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
@@ -235,7 +236,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         </div>
 
         <ErrorText error={actionError} />
-        {task.lastError === null ? null : (
+        <LaunchRecovery task={task} />
+        {task.lastError === null || task.state === "launching" ? null : (
           <Alert tone="bad">
             <span className="font-medium">Last error:</span> {task.lastError}
           </Alert>
@@ -290,7 +292,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   if (task.externalSessionId === null) {
     return (
       <Panel title="Thread">
-        <Muted>{task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
+        <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
       </Panel>
     );
   }

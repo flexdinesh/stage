@@ -148,13 +148,13 @@ func TestPayload(t *testing.T) {
 	ctx := context.Background()
 	task := seedTask(t, store, db.StateNeedsInput)
 	now := time.Now().UTC()
-	if err := store.UpsertThreads(ctx, []t3.Thread{
+	if err := store.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", Status: t3.StatusWaiting, CreatedAt: now},
 		{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", Status: t3.StatusCompleted, CreatedAt: now},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetObservedState(ctx, "ext-1", db.StateNeedsInput); err != nil {
+	if err := store.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", Status: t3.StatusWaiting, UpdatedAt: time.Now().UTC()}, PendingRequestCount: 1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,9 +311,9 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()
 	task := seedTask(t, store, db.StateNeedsInput)
-	if err := store.UpsertThreads(ctx, []t3.Thread{
+	if err := store.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", Status: t3.StatusCompleted, CreatedAt: time.Now().UTC()},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetObservedState(ctx, "ext-1", db.StateDone); err != nil {
@@ -348,9 +348,9 @@ func TestNotifyEventsFilter(t *testing.T) {
 	srv := newPushServer(t)
 	subscribe(t, store, srv.URL+"/push/1")
 	task := seedTask(t, store, db.StateNeedsInput)
-	if err := store.UpsertThreads(ctx, []t3.Thread{
+	if err := store.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", Status: t3.StatusCompleted, CreatedAt: time.Now().UTC()},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	count := func() int {

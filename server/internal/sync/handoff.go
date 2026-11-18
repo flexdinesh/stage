@@ -54,7 +54,7 @@ func (s *Service) prepareHandoff(ctx context.Context, task db.Task) (string, err
 		if source.Evidence.ThreadID != nil {
 			thread = *source.Evidence.ThreadID
 		}
-		h := db.Handoff{Attempt: task.LaunchAttempt, Status: db.HandoffSent, SourceTaskID: &source.TaskID, SourceThreadID: thread, SourceTitle: source.Evidence.Title, Text: block}
+		h := db.Handoff{Session: source.Evidence.Session, Attempt: task.LaunchAttempt, Status: db.HandoffSent, SourceTaskID: &source.TaskID, SourceThreadID: thread, SourceTitle: source.Evidence.Title, Text: block}
 		if err := s.store.RecordHandoff(ctx, task.ID, h); err != nil {
 			return "", err
 		}
@@ -73,8 +73,10 @@ func ComposeAcceptedHandoff(a db.Acceptance, maxChars int) string {
 	if e.TreeID != nil {
 		fmt.Fprintf(&b, "Tree at acceptance: #%d.\n", *e.TreeID)
 	}
-	if e.ThreadID != nil {
-		fmt.Fprintf(&b, "T3 thread: %s %s\n", *e.ThreadID, deref(e.ThreadLink))
+	if e.Session != nil {
+		fmt.Fprintf(&b, "Harness session: %s %s (connection %d)\n", e.Session.ExternalSessionID, deref(e.ThreadLink), e.Session.ConnectionID)
+	} else if e.ThreadID != nil {
+		fmt.Fprintf(&b, "Harness session: %s %s\n", *e.ThreadID, deref(e.ThreadLink))
 	}
 	if e.Branch != nil {
 		fmt.Fprintf(&b, "Branch: %s\n", *e.Branch)

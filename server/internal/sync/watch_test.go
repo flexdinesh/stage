@@ -91,7 +91,7 @@ func TestWatchThreads(t *testing.T) {
 	old(oldIdle)
 	setStatus(oldIdle, t3.StatusCompleted)
 
-	svc := t3sync.New(store, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var got []change
 	svc.OnThreadChange = func(_ context.Context, c t3sync.ThreadChange) {
 		from := ""
@@ -177,7 +177,7 @@ func TestWatchThreads(t *testing.T) {
 	if err := fake.SetThread(ext, func(d *t3.ThreadDetail) { d.Settled = true }); err != nil {
 		t.Fatal(err)
 	}
-	pass(change{ext, "done", db.StateSettled})
+	pass() // Harness settlement does not change Stage execution or acceptance.
 	pass() // settled: no longer watched
 
 	// A thread created before start, first seen now: recorded silently.
@@ -197,10 +197,10 @@ func TestWatchThreads(t *testing.T) {
 	client.afterList = func() { setStatus(racy, t3.StatusCompleted) }
 	pass(change{racy, "", db.StateDone})
 
-	// T3 forgets a watched thread → cancelled, silently.
+	// Missing sessions preserve the last execution state.
 	fake.RemoveThread(fresh)
 	pass()
-	if o := observed(fresh); o != "cancelled" {
+	if o := observed(fresh); o != "needs_input" {
 		t.Fatalf("removed thread observed %q", o)
 	}
 	if o := observed(taskThread); o != "" {

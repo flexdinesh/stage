@@ -25,12 +25,6 @@ const RUNTIME_LABELS: Record<RuntimeMode, string> = {
 
 const allowedModes = (p: CatalogProvider | undefined): readonly RuntimeMode[] => p?.runtimeModes ?? RUNTIME_MODES;
 
-function fitMode(current: RuntimeMode, allowed: readonly RuntimeMode[]): RuntimeMode {
-  if (allowed.includes(current)) return current;
-  if (allowed.includes("full-access")) return "full-access";
-  return allowed[0] ?? current;
-}
-
 export function defaultOptions(m: CatalogModel | undefined): ModelOption[] {
   if (m === undefined) return [];
   return m.options.flatMap((o) => (o.default === null ? [] : [{ id: o.id, value: o.default }]));
@@ -59,7 +53,7 @@ export function ModelFields({
       providerInstanceId: id === "" ? null : id,
       model: first?.id ?? null,
       modelOptions: defaultOptions(first),
-      runtimeMode: fitMode(value.runtimeMode, allowedModes(next)),
+      runtimeMode: value.runtimeMode,
     });
   };
 
@@ -147,6 +141,7 @@ export function ModelFields({
           <Muted>Options (kept): {optionsText(value.modelOptions)}</Muted>
         </div>
       ) : null}
+      {modes.includes(value.runtimeMode) ? null : <p role="status" className="col-span-full text-small text-bad">Selected permission mode is unavailable for this provider. Choose a supported mode before launching.</p>}
       <fieldset disabled={disabled} className="col-span-full min-w-0 disabled:opacity-55">
         <legend className="label-caps mb-1.5">Runtime</legend>
         <Segmented

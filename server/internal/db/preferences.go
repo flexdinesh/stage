@@ -4,17 +4,17 @@ import (
 	"context"
 	"slices"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // ModelDefaults is a new-task model preset (pinned or last used).
 // ProviderInstanceID / Model nil = T3 default; set together.
 type ModelDefaults struct {
-	ProviderInstanceID *string          `json:"providerInstanceId"`
-	Model              *string          `json:"model"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions"`
-	RuntimeMode        string           `json:"runtimeMode"`
-	InteractionMode    string           `json:"interactionMode"`
+	ProviderInstanceID *string                 `json:"providerInstanceId"`
+	Model              *string                 `json:"model"`
+	ModelOptions       []execution.ModelOption `json:"modelOptions"`
+	RuntimeMode        string                  `json:"runtimeMode"`
+	InteractionMode    string                  `json:"interactionMode"`
 }
 
 // Preferences: new-task prefill is Pinned, else LastUsed. NotifyEvents:

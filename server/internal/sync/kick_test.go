@@ -63,7 +63,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestKickRunsFullSyncAndCatalogNow(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	client := &gateT3{Fake: t3.NewFake()}
-	svc := t3sync.New(store, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc.FullSyncEvery, svc.CatalogEvery, svc.PollEvery = time.Hour, time.Hour, time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -89,7 +89,7 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	svc := t3sync.New(store, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r, err := svc.FullSync(t.Context())
 	if err != nil || r.Threads != 0 || r.Projects != 1 || client.pages.Load() != 0 {
 		t.Fatalf("sync=%+v pages=%d err=%v", r, client.pages.Load(), err)

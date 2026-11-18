@@ -28,6 +28,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
 var testDB dbtest.DB
@@ -67,7 +68,7 @@ func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.Launc
 	f.launchMessages = append(f.launchMessages, in.Message)
 	f.mu.Unlock()
 	if f.failLaunch.Load() {
-		return t3.LaunchResult{}, &t3.ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: "t3 exploded"}
+		return t3.LaunchResult{}, &t3.ToolError{Tool: "t3_thread_launch", Code: "invalid_request", Message: "t3 exploded. No thread was created."}
 	}
 	res, err := f.Fake.LaunchThread(ctx, in)
 	if p := f.foreignProject.Swap(nil); err == nil && p != nil {
@@ -159,17 +160,20 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.New(store, client, log)
+	svc := t3sync.New(store, t3.NewAdapter(client), log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)
 	runner.OnReady = push.OnReady
 	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, T3: client, Sync: svc, Push: push, Logger: log,
+		Store:  store, Sync: svc, Push: push, Logger: log,
 	}
 	for _, opt := range opts {
 		opt(&deps)
+	}
+	if deps.Setup == nil {
+		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Store: store, Client: client, Fake: true, Logger: log})
 	}
 	h := api.NewRouter(deps)
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
@@ -427,7 +431,7 @@ func TestTaskLifecycle(t *testing.T) {
 	_ = e.fake.Settle(threadID)
 	e.poll()
 	got = e.getTask(tk.ID)
-	if got.State != "settled" || got.SettledAt == nil {
+	if got.State != "done" || got.SettledAt != nil {
 		t.Fatalf("settled %+v", got)
 	}
 	e.complete(tk.ID)
@@ -435,7 +439,7 @@ func TestTaskLifecycle(t *testing.T) {
 		Tasks []task `json:"tasks"`
 	}
 	e.must("GET", "/api/tasks?state=settled&settledFrom=2000-01-01", nil, 200, &settledList)
-	if len(settledList.Tasks) != 1 || settledList.Tasks[0].ID != tk.ID {
+	if len(settledList.Tasks) != 0 {
 		t.Fatalf("settledFrom past %+v", settledList.Tasks)
 	}
 	e.must("GET", "/api/tasks?state=settled&settledFrom=2999-01-01", nil, 200, &settledList)
@@ -447,14 +451,14 @@ func TestTaskLifecycle(t *testing.T) {
 	for _, ev := range got.Events {
 		states = append(states, ev.ToState)
 	}
-	want := []string{"backlog", "launching", "running", "needs_input", "done", "settled"}
+	want := []string{"backlog", "launching", "running", "needs_input", "done"}
 	if !slices.Equal(states, want) {
 		t.Fatalf("events %v, want %v", states, want)
 	}
-	if got.Events[len(got.Events)-1].Detail != "thread settled" {
+	if got.Events[len(got.Events)-1].Detail != "execution observed done" {
 		t.Fatalf("detail %q", got.Events[len(got.Events)-1].Detail)
 	}
-	if got.Thread == nil || got.Thread.Source != "app" || !got.Thread.Settled || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
+	if got.Thread == nil || got.Thread.Source != "app" || got.Thread.Settled || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
 		t.Fatalf("thread %+v", got.Thread)
 	}
 	if got.Thread.T3DeepLink == nil || *got.Thread.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
@@ -565,12 +569,12 @@ func TestLaunchFailure(t *testing.T) {
 	e.t3.failLaunch.Store(true)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 502, nil)
 	got := e.getTask(tk.ID)
-	if got.State != "failed" || got.LastError == nil || *got.LastError != "t3 t3_thread_launch: invalid_request: t3 exploded" || got.LaunchAttempt != 1 {
+	if got.State != "backlog" || got.LastError == nil || !strings.Contains(*got.LastError, "No thread was created") || got.LaunchAttempt != 1 {
 		t.Fatalf("after failed launch %+v", got)
 	}
 	// Save & start: still created (201) but failed.
 	created := e.task(p.ID, "B", map[string]any{"start": true})
-	if created.State != "failed" || created.LastError == nil {
+	if created.State != "backlog" || created.LastError == nil {
 		t.Fatalf("save & start failure %+v", created)
 	}
 	// Retry from failed works and clears lastError.
@@ -609,7 +613,7 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	e.t3.lostLaunches.Store(2)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 502, nil)
 	failed := e.getTask(b.ID)
-	if failed.State != "failed" || failed.LastError == nil || failed.LaunchAttempt != 1 || failed.T3ThreadID != nil {
+	if failed.State != "launching" || failed.LastError == nil || failed.LaunchAttempt != 1 || failed.T3ThreadID != nil {
 		t.Fatalf("after two lost responses %+v", failed)
 	}
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &started)
@@ -700,15 +704,13 @@ func TestLaunchClientRequestIDCollision(t *testing.T) {
 	e.t3.foreignProject.Store(&other)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 502, nil)
 	got := e.getTask(a.ID)
-	if got.State != "failed" || got.T3ThreadID != nil || got.LastError == nil || !strings.Contains(*got.LastError, "collision") {
+	if got.State != "launching" || got.T3ThreadID != nil || got.LastError == nil || !strings.Contains(*got.LastError, "conflicting") {
 		t.Fatalf("collision adopted %+v", got)
 	}
-	// The next start is a new attempt with a fresh clientRequestId.
-	var started task
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
-	ids := e.t3.launchRequestIDs()
-	if started.State != "running" || started.LaunchAttempt != 2 || ids[0] == ids[1] {
-		t.Fatalf("after collision %+v ids %v", started, ids)
+	// A conflicting reply never authorizes a fresh attempt.
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 502, nil)
+	if ids := e.t3.launchRequestIDs(); len(ids) != 1 {
+		t.Fatalf("conflicting launch replayed: %v", ids)
 	}
 }
 
@@ -720,7 +722,8 @@ func TestRecoverLaunching(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.sync.RecoverLaunching(context.Background())
-	if got := e.getTask(a.ID); got.State != "failed" || got.LastError == nil {
+	e.poll()
+	if got := e.getTask(a.ID); got.State != "backlog" || got.LastError == nil {
 		t.Fatalf("after recover %+v", got)
 	}
 	// The killed launch may have reached T3: the next start reuses its
@@ -728,7 +731,7 @@ func TestRecoverLaunching(t *testing.T) {
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
 	ids := e.t3.launchRequestIDs()
-	if started.State != "running" || started.LaunchAttempt != 1 || len(ids) != 1 || !validRequestID(a.ID, ids[0]) {
+	if started.State != "running" || started.LaunchAttempt != 2 || len(ids) != 1 || !validRequestID(a.ID, ids[0]) {
 		t.Fatalf("restart after recover %+v ids %v", started, ids)
 	}
 	var reqID string
@@ -867,7 +870,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	e.poll()
 	e.complete(b.ID)
 	e.reconcile()
-	if got := e.getTask(b.ID); got.State != "settled" {
+	if got := e.getTask(b.ID); got.State != "done" {
 		t.Fatalf("need %s", got.State)
 	}
 	if got := e.getTask(c.ID); got.State != "running" {
@@ -1285,7 +1288,7 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	if err := e.store.UpsertThreads(ctx, []t3.Thread{
+	if err := e.store.UpsertThreads(ctx, t3.Observations([]t3.Thread{
 		{ThreadID: "ext-wait", ProjectID: p.T3ProjectID, Title: "external", Status: t3.StatusWaiting, CreatedAt: now},
 		{ThreadID: "ext-sub", ProjectID: p.T3ProjectID, Title: "sub", Status: t3.StatusWaiting, CreatedAt: now,
 			ParentThreadID: "ext-wait", RelationshipToParent: "subagent"},
@@ -1293,13 +1296,22 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 			ParentThreadID: "ext-wait", RelationshipToParent: "fork"},
 		{ThreadID: "ext-settled", ProjectID: p.T3ProjectID, Title: "settled", Status: t3.StatusWaiting, Settled: true, CreatedAt: now},
 		{ThreadID: "ext-running", ProjectID: p.T3ProjectID, Title: "running", Status: t3.StatusRunning, CreatedAt: now},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	for id, st := range map[string]db.TaskState{
 		"ext-wait": db.StateNeedsInput, "ext-sub": db.StateNeedsInput, "ext-fork": db.StateNeedsInput, "ext-settled": db.StateNeedsInput,
 		"ext-running": db.StateRunning, *started.T3ThreadID: db.StateNeedsInput,
 	} {
+		o, err := e.store.Observation(ctx, db.SessionRef{ConnectionID: 1, ExternalSessionID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.State = string(st)
+		o.Active = st == db.StateNeedsInput || st == db.StateRunning
+		if err = e.store.PutObservation(ctx, o); err != nil {
+			t.Fatal(err)
+		}
 		if err := e.store.SetObservedState(ctx, id, st); err != nil {
 			t.Fatal(err)
 		}
@@ -1309,8 +1321,8 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		NeedsInput int `json:"needsInput"`
 	}
 	e.must("GET", "/api/badge", nil, 200, &badge)
-	if badge.NeedsInput != 3 {
-		t.Fatalf("badge %d, want 3 (task + external thread + fork)", badge.NeedsInput)
+	if badge.NeedsInput != 4 {
+		t.Fatalf("badge %d, want 4 (settlement does not hide observed activity)", badge.NeedsInput)
 	}
 
 }

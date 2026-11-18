@@ -75,11 +75,14 @@ func Invalid(format string, args ...any) error {
 	return &InvalidError{Msg: fmt.Sprintf(format, args...)}
 }
 
-// T3Error wraps a failed T3 call (502, or 503 when it wraps t3.ErrNotConnected).
-type T3Error struct{ Err error }
+// HarnessError wraps a failed adapter operation.
+type HarnessError struct{ Err error }
 
-func (e *T3Error) Error() string { return e.Err.Error() }
-func (e *T3Error) Unwrap() error { return e.Err }
+// T3Error retains source compatibility for existing callers.
+type T3Error = HarnessError
+
+func (e *HarnessError) Error() string { return e.Err.Error() }
+func (e *T3Error) Unwrap() error      { return e.Err }
 
 func sqliteCode(err error) int {
 	var e *sqlite.Error

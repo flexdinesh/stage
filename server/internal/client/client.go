@@ -22,9 +22,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/listen"
-	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // DefaultURL is the server address when STAGE_URL is unset.
@@ -250,9 +250,9 @@ type ScheduleDetail struct {
 
 // CatalogOption is a model option and its values.
 type CatalogOption struct {
-	ID      string           `json:"id"`
-	Values  []t3.OptionValue `json:"values"`
-	Default *t3.OptionValue  `json:"default"`
+	ID      string                  `json:"id"`
+	Values  []execution.OptionValue `json:"values"`
+	Default *execution.OptionValue  `json:"default"`
 }
 
 // CatalogModel is a provider model.
@@ -279,47 +279,47 @@ type Catalog struct {
 
 // CreateTask is the POST /api/tasks body (nil = omitted).
 type CreateTask struct {
-	ProjectID          int64            `json:"projectId"`
-	Title              string           `json:"title"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId,omitempty"`
-	Model              *string          `json:"model,omitempty"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions,omitempty"`
-	RuntimeMode        *string          `json:"runtimeMode,omitempty"`
-	InteractionMode    *string          `json:"interactionMode,omitempty"`
-	Workspace          *db.Workspace    `json:"workspace,omitempty"`
-	Tags               []string         `json:"tags,omitempty"`
-	InitialNote        *string          `json:"initialNote,omitempty"`
-	TreeID             *int64           `json:"treeId,omitempty"`
-	Needs              []int64          `json:"needs,omitempty"`
-	NeedsSessionID     *string          `json:"needsSessionId,omitempty"`
-	StartMode          *db.StartMode    `json:"startMode,omitempty"`
-	Handoff            *bool            `json:"handoff,omitempty"`
-	OriginThreadID     *string          `json:"originThreadId,omitempty"`
-	AttachmentIDs      []int64          `json:"attachmentIds,omitempty"`
-	StartLocal         *string          `json:"startLocal,omitempty"`
-	StartTz            *string          `json:"startTz,omitempty"`
-	Start              bool             `json:"start,omitempty"`
+	ProjectID          int64                   `json:"projectId"`
+	Title              string                  `json:"title"`
+	Prompt             string                  `json:"prompt"`
+	ProviderInstanceID *string                 `json:"providerInstanceId,omitempty"`
+	Model              *string                 `json:"model,omitempty"`
+	ModelOptions       []execution.ModelOption `json:"modelOptions,omitempty"`
+	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
+	InteractionMode    *string                 `json:"interactionMode,omitempty"`
+	Workspace          *db.Workspace           `json:"workspace,omitempty"`
+	Tags               []string                `json:"tags,omitempty"`
+	InitialNote        *string                 `json:"initialNote,omitempty"`
+	TreeID             *int64                  `json:"treeId,omitempty"`
+	Needs              []int64                 `json:"needs,omitempty"`
+	NeedsSessionID     *string                 `json:"needsSessionId,omitempty"`
+	StartMode          *db.StartMode           `json:"startMode,omitempty"`
+	Handoff            *bool                   `json:"handoff,omitempty"`
+	OriginThreadID     *string                 `json:"originThreadId,omitempty"`
+	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
+	StartLocal         *string                 `json:"startLocal,omitempty"`
+	StartTz            *string                 `json:"startTz,omitempty"`
+	Start              bool                    `json:"start,omitempty"`
 }
 
 // CreateSchedule is the POST /api/schedules body.
 type CreateSchedule struct {
-	ProjectID          int64            `json:"projectId"`
-	Title              string           `json:"title"`
-	Prompt             string           `json:"prompt"`
-	ProviderInstanceID *string          `json:"providerInstanceId,omitempty"`
-	Model              *string          `json:"model,omitempty"`
-	ModelOptions       []t3.ModelOption `json:"modelOptions,omitempty"`
-	RuntimeMode        *string          `json:"runtimeMode,omitempty"`
-	InteractionMode    *string          `json:"interactionMode,omitempty"`
-	Workspace          *db.Workspace    `json:"workspace,omitempty"`
-	Tags               []string         `json:"tags,omitempty"`
-	Notes              *string          `json:"notes,omitempty"`
-	OriginThreadID     *string          `json:"originThreadId,omitempty"`
-	AttachmentIDs      []int64          `json:"attachmentIds,omitempty"`
-	Cron               string           `json:"cron"`
-	Tz                 string           `json:"tz"`
-	Paused             bool             `json:"paused,omitempty"`
+	ProjectID          int64                   `json:"projectId"`
+	Title              string                  `json:"title"`
+	Prompt             string                  `json:"prompt"`
+	ProviderInstanceID *string                 `json:"providerInstanceId,omitempty"`
+	Model              *string                 `json:"model,omitempty"`
+	ModelOptions       []execution.ModelOption `json:"modelOptions,omitempty"`
+	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
+	InteractionMode    *string                 `json:"interactionMode,omitempty"`
+	Workspace          *db.Workspace           `json:"workspace,omitempty"`
+	Tags               []string                `json:"tags,omitempty"`
+	Notes              *string                 `json:"notes,omitempty"`
+	OriginThreadID     *string                 `json:"originThreadId,omitempty"`
+	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
+	Cron               string                  `json:"cron"`
+	Tz                 string                  `json:"tz"`
+	Paused             bool                    `json:"paused,omitempty"`
 }
 
 // Patch is a partial update body: absent keys are unchanged, nil values

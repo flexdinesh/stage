@@ -16,7 +16,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Ops runs agent operations against the REST API.
@@ -114,7 +114,7 @@ type ConfigArgs struct {
 	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name (with baseRef); omitted = T3 picks"`
-	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); baseRef is the fallback (tasks only)"`
+	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only)"`
 	Tags            []string          `json:"tags,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
@@ -123,7 +123,7 @@ type ConfigArgs struct {
 type resolvedConfig struct {
 	project         db.Project
 	provider, model *string
-	options         []t3.ModelOption
+	options         []execution.ModelOption
 	runtimeMode     *string
 	interactionMode *string
 	workspace       *db.Workspace
@@ -138,7 +138,7 @@ func strPtr(s string) *string {
 	return &s
 }
 
-func modelOptions(effort string, opts map[string]string) []t3.ModelOption {
+func modelOptions(effort string, opts map[string]string) []execution.ModelOption {
 	m := map[string]string{}
 	for k, v := range opts {
 		m[k] = v
@@ -151,16 +151,16 @@ func modelOptions(effort string, opts map[string]string) []t3.ModelOption {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	out := []t3.ModelOption{}
+	out := []execution.ModelOption{}
 	for _, k := range keys {
 		v := strings.TrimSpace(m[k])
 		switch v {
 		case "true":
-			out = append(out, t3.ModelOption{ID: k, Value: t3.BoolValue(true)})
+			out = append(out, execution.ModelOption{ID: k, Value: execution.BoolValue(true)})
 		case "false":
-			out = append(out, t3.ModelOption{ID: k, Value: t3.BoolValue(false)})
+			out = append(out, execution.ModelOption{ID: k, Value: execution.BoolValue(false)})
 		default:
-			out = append(out, t3.ModelOption{ID: k, Value: t3.StringValue(v)})
+			out = append(out, execution.ModelOption{ID: k, Value: execution.StringValue(v)})
 		}
 	}
 	return out
@@ -500,7 +500,7 @@ type UpdateArgs struct {
 	InteractionMode *string           `json:"interactionMode,omitempty"`
 	BaseRef         *string           `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
 	Branch          *string           `json:"branch,omitempty"`
-	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; baseRef is the fallback); without baseRef keeps the current worktree"`
+	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; unavailable predecessors block launch; choose base=ref explicitly to use baseRef); without baseRef keeps the current worktree"`
 	Tags            []string          `json:"tags,omitempty" jsonschema:"replaces tags"`
 }
 

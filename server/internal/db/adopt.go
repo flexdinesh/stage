@@ -11,13 +11,7 @@ import (
 // adoptStateSQL is an adopted session's initial task state from its mirror
 // row th: an SQL copy of sync.MapThreadState with current = done (an idle
 // session without runs reads done). Migration 0003 inlines the same CASE.
-const adoptStateSQL = `CASE WHEN th.settled THEN 'settled'
- WHEN th.pending_request_count > 0 THEN 'needs_input'
- WHEN COALESCE(NULLIF(th.status, 'idle'), th.latest_run_status) IN ('preparing', 'queued', 'starting', 'running', 'waiting') THEN 'running'
- WHEN COALESCE(NULLIF(th.status, 'idle'), th.latest_run_status) = 'failed' THEN 'failed'
- WHEN COALESCE(NULLIF(th.status, 'idle'), th.latest_run_status) = 'interrupted' THEN 'interrupted'
- WHEN COALESCE(NULLIF(th.status, 'idle'), th.latest_run_status) IN ('cancelled', 'rolled_back') THEN 'cancelled'
- ELSE 'done' END`
+const adoptStateSQL = `CASE WHEN th.execution_state='idle' THEN 'done' ELSE COALESCE(th.execution_state,'done') END`
 
 // AdoptInput adopts a T3 session as a task ("Track as task").
 type AdoptInput struct {
@@ -95,18 +89,18 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	case !errors.Is(err, sql.ErrNoRows):
 		return 0, false, err
 	}
-	var parent *string
+	var child bool
 	var archived bool
 	var project *int64
 	err = tx.QueryRow(ctx, `
-SELECT th.parent_thread_id, th.archived, p.id FROM threads th
+SELECT COALESCE(th.relationship,'')='subagent', th.archived, p.id FROM threads th
 LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1)) WHERE th.t3_thread_id = $1`, in.ThreadID).
-		Scan(&parent, &archived, &project)
+		Scan(&child, &archived, &project)
 	if err != nil {
 		return 0, false, fmt.Errorf("session %s: %w", in.ThreadID, notFound(err))
 	}
 	switch {
-	case parent != nil:
+	case child:
 		return 0, false, Conflict("session %s is a subagent: only a top-level session can be adopted", in.ThreadID)
 	case archived:
 		return 0, false, Conflict("session %s is archived", in.ThreadID)
@@ -135,6 +129,9 @@ SELECT $2, COALESCE($3, NULLIF(trim(th.title), ''), 'Session ' || substr(th.t3_t
 FROM (SELECT th.*, `+adoptStateSQL+` AS st FROM threads th WHERE th.t3_thread_id = $1) th
 RETURNING id, state`, in.ThreadID, *project, title, nonNilStrings(in.Tags)).Scan(&id, &state)
 	if err != nil {
+		return 0, false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE tasks SET execution_config=(SELECT json_extract(observation,'$.config') FROM execution_observations WHERE session_id=tasks.session_id) WHERE id=$1`, id); err != nil {
 		return 0, false, err
 	}
 	if in.TreeID != nil {

@@ -5,8 +5,7 @@ import (
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/opening"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Only an adopted task's opening prompt can be read or expanded. There is
@@ -20,20 +19,28 @@ func (s *server) getOpeningPrompt(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if !task.Adopted || task.T3ThreadID == nil {
+	if !task.Adopted || task.Session == nil {
 		return db.Invalid("opening prompt requires an adopted task")
 	}
-	reader := opening.Reader{T3: s.T3}
-	item, err := reader.Opening(r.Context(), *task.T3ThreadID)
-	if err == nil && item != nil && r.URL.Query().Get("full") == "true" && item.Truncated {
-		item.Text, item.Truncated, err = reader.FullText(r.Context(), *task.T3ThreadID, item.ItemID)
+	adapter, err := s.Sync.Adapter(task.ConnectionID)
+	if err != nil {
+		return err
 	}
-	if errors.Is(err, t3.ErrNotFound) {
+	item, err := adapter.Opening(r.Context(), *task.Session, r.URL.Query().Get("full") == "true")
+	if errors.Is(err, execution.ErrNotFound) {
 		return db.ErrNotFound
 	}
 	if err != nil {
-		return &db.T3Error{Err: err}
+		return &db.HarnessError{Err: err}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	var result any
+	if item != nil {
+		result = struct {
+			*execution.Reply
+			Kind      string `json:"kind"`
+			Inherited bool   `json:"inherited"`
+		}{item, "user", false}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": result})
 	return nil
 }

@@ -10,32 +10,32 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // AcceptedEvidence is copied once. No source-harness read is needed to use it.
 type AcceptedEvidence struct {
-	Session             *SessionRef      `json:"session"`
-	TaskID              int64            `json:"taskId"`
-	Title               string           `json:"title"`
-	TreeID              *int64           `json:"treeId"`
-	TreeTitle           *string          `json:"treeTitle"`
-	ProjectID           int64            `json:"projectId"`
-	ThreadID            *string          `json:"threadId"`
-	ThreadLink          *string          `json:"threadLink"`
-	Branch              *string          `json:"branch"`
-	WorktreePath        *string          `json:"worktreePath"`
-	ExecutionState      TaskState        `json:"executionState"`
-	RunID               *string          `json:"runId"`
-	ReplyRunID          *string          `json:"replyRunId"`
-	ReplyItemID         *string          `json:"replyItemId"`
-	Reply               *string          `json:"reply"`
-	ReplyTruncated      bool             `json:"replyTruncated"`
-	ReplyAt             *time.Time       `json:"replyAt"`
-	ObservedAt          *time.Time       `json:"observedAt"`
-	HistoricalSettledAt *time.Time       `json:"historicalSettledAt"`
-	Artifacts           []t3.PullRequest `json:"artifacts"`
-	JournalThroughID    int64            `json:"journalThroughId"`
+	Session             *SessionRef          `json:"session"`
+	TaskID              int64                `json:"taskId"`
+	Title               string               `json:"title"`
+	TreeID              *int64               `json:"treeId"`
+	TreeTitle           *string              `json:"treeTitle"`
+	ProjectID           int64                `json:"projectId"`
+	ThreadID            *string              `json:"threadId"`
+	ThreadLink          *string              `json:"threadLink"`
+	Branch              *string              `json:"branch"`
+	WorktreePath        *string              `json:"worktreePath"`
+	ExecutionState      TaskState            `json:"executionState"`
+	RunID               *string              `json:"runId"`
+	ReplyRunID          *string              `json:"replyRunId"`
+	ReplyItemID         *string              `json:"replyItemId"`
+	Reply               *string              `json:"reply"`
+	ReplyTruncated      bool                 `json:"replyTruncated"`
+	ReplyAt             *time.Time           `json:"replyAt"`
+	ObservedAt          *time.Time           `json:"observedAt"`
+	HistoricalSettledAt *time.Time           `json:"historicalSettledAt"`
+	Artifacts           []execution.Artifact `json:"artifacts"`
+	JournalThroughID    int64                `json:"journalThroughId"`
 }
 
 type Acceptance struct {
@@ -92,16 +92,16 @@ func completionPreview(ctx context.Context, tx *Tx, id int64) (CompletionPreview
 	e.Session = task.Session
 	e.TaskID, e.Title, e.TreeID, e.TreeTitle, e.ProjectID = id, task.Title, task.TreeID, task.TreeTitle, task.ProjectID
 	e.ThreadID, e.ThreadLink, e.ExecutionState = task.T3ThreadID, task.ThreadLink, task.State
-	e.Artifacts = []t3.PullRequest{}
+	e.Artifacts = []execution.Artifact{}
 	var reuse bool
 	if err = tx.QueryRow(ctx, `SELECT launch_reuse FROM tasks WHERE id=$1`, id).Scan(&reuse); err != nil {
 		return p, err
 	}
 	if task.State.Active() {
-		p.BlockedReason = "Stop execution in T3 before completing this task."
+		p.BlockedReason = "Stop execution in its harness before completing this task."
 	}
 	if reuse {
-		p.BlockedReason = "Launch outcome is unknown. Retry the existing launch to reconcile it before completing."
+		p.BlockedReason = "Launch unconfirmed. Wait for reconciliation or link the existing session before completing."
 	}
 	if task.AcceptanceID != nil {
 		p.BlockedReason = "This task is already completed. Reopen it to accept another result."
@@ -110,12 +110,44 @@ func completionPreview(ctx context.Context, tx *Tx, id int64) (CompletionPreview
 		var status string
 		var pending int
 		var active *string
-		err = tx.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_item_id,last_word_text,last_word_truncated,last_word_at,updated_at,pull_requests,status,pending_request_count,active_run_id FROM threads WHERE session_id=$1`, task.SessionIdentityID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.ReplyItemID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Artifacts, &status, &pending, &active)
+		err = tx.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_item_id,last_word_text,last_word_truncated,last_word_at,updated_at,pull_requests,COALESCE(execution_state,'done'),pending_request_count,active_run_id FROM threads WHERE session_id=$1`, task.SessionIdentityID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.ReplyItemID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Artifacts, &status, &pending, &active)
 		if err != nil && !errors.Is(notFound(err), ErrNotFound) {
 			return p, err
 		}
-		if pending > 0 || active != nil && *active != "" || status == "running" || status == "preparing" || status == "queued" || status == "starting" || status == "waiting" {
-			p.BlockedReason = "Stop execution in T3 before completing this task."
+		if pending > 0 || active != nil && *active != "" || status == "running" || status == "needs_input" {
+			p.BlockedReason = "Stop execution in its harness before completing this task."
+		}
+	}
+	if task.Session != nil {
+		var observed execution.Observation
+		err = tx.QueryRow(ctx, "SELECT observation FROM execution_observations WHERE session_id=$1", task.SessionIdentityID).Scan(&observed)
+		if err != nil && !errors.Is(notFound(err), ErrNotFound) {
+			return p, err
+		}
+		if err == nil {
+			e.Branch = nullIfEmpty(observed.Branch)
+			e.WorktreePath = nullIfEmpty(observed.Directory)
+			e.RunID = nullIfEmpty(observed.ExecutionID)
+			e.ObservedAt = &observed.UpdatedAt
+			if observed.Links.App != "" {
+				e.ThreadLink = &observed.Links.App
+			} else if observed.Links.Web != "" {
+				e.ThreadLink = &observed.Links.Web
+			}
+			if len(observed.Artifacts) > 0 {
+				e.Artifacts = observed.Artifacts
+			}
+			if observed.Reply != nil {
+				r := observed.Reply
+				e.Reply = &r.Text
+				e.ReplyRunID = nullIfEmpty(r.RunID)
+				e.ReplyItemID = nullIfEmpty(r.ItemID)
+				e.ReplyTruncated = r.Truncated
+				e.ReplyAt = &r.UpdatedAt
+			}
+			if observed.Active {
+				p.BlockedReason = "Stop execution in its harness before completing this task."
+			}
 		}
 	}
 	if e.Reply != nil {

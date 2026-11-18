@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/t3"
 	"net/http"
 	"strings"
 )
@@ -42,9 +41,13 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error {
-	ps, err := s.T3.ListProjects(r.Context())
+	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
 	if err != nil {
-		return &db.T3Error{Err: err}
+		return err
+	}
+	ps, err := adapter.Workspaces(r.Context())
+	if err != nil {
+		return &db.HarnessError{Err: err}
 	}
 	if _, err = s.Store.UpsertT3Projects(r.Context(), ps); err != nil {
 		return err
@@ -72,9 +75,13 @@ func (s *server) bindProject(w http.ResponseWriter, r *http.Request) error {
 	if in.ConnectionID != db.T3ConnectionID {
 		return db.Invalid("this connection is not available; select T3")
 	}
-	ps, err := s.T3.ListProjects(r.Context())
+	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
 	if err != nil {
-		return &db.T3Error{Err: err}
+		return err
+	}
+	ps, err := adapter.Workspaces(r.Context())
+	if err != nil {
+		return &db.HarnessError{Err: err}
 	}
 	valid := false
 	for _, p := range ps {
@@ -120,9 +127,13 @@ func (s *server) registerWorkspace(w http.ResponseWriter, r *http.Request) error
 	if in.Title == "" || in.Workspace == "" {
 		return db.Invalid("title and an existing directory are required")
 	}
-	p, err := s.T3.CreateProject(r.Context(), t3.CreateProjectInput{Title: in.Title, WorkspaceRoot: in.Workspace})
+	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
 	if err != nil {
-		return &db.T3Error{Err: err}
+		return err
+	}
+	p, err := adapter.RegisterWorkspace(r.Context(), in.Title, in.Workspace)
+	if err != nil {
+		return &db.HarnessError{Err: err}
 	}
 	writeJSON(w, http.StatusCreated, db.ExternalProject{ConnectionID: db.T3ConnectionID, ExternalID: p.ID, Title: p.Title, Workspace: p.WorkspaceRoot})
 	return nil

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -47,7 +46,10 @@ func TestAdoptStateMatchesMapThreadState(t *testing.T) {
 					if err != nil || !created {
 						t.Fatalf("adopt %s: %v", id, err)
 					}
-					want := t3sync.MapThreadState(db.StateDone, status, settled, pending, run)
+					want := db.TaskState(d.Observation().State)
+					if want == "idle" {
+						want = db.StateDone
+					}
 					if task.State != want {
 						t.Fatalf("status=%s latest=%q settled=%v pending=%d: adopted %s, MapThreadState %s", status, run, settled, pending, task.State, want)
 					}

@@ -8,6 +8,7 @@ import type { DesktopNative } from "./native.ts";
  */
 export function desktopLinks(native: DesktopNative, state: () => HostState): Links {
   return {
+    executionDestination: (links) => state().target.kind === "local" ? links.native ?? links.web : links.web,
     stageLink(path) {
       const s = state();
       const publicUrl = s.server?.publicUrl ?? null;

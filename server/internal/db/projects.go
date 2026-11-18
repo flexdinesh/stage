@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"strings"
 )
 
@@ -83,10 +83,13 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 
 // UpsertT3Projects refreshes discovery, never imports or edits Stage metadata.
 // The caller supplies a complete successful list; failures never mark missing.
-func (s *Store) UpsertT3Projects(ctx context.Context, ps []t3.Project) (int, error) {
+func (s *Store) UpsertT3Projects(ctx context.Context, ps []execution.WorkspaceInfo) (int, error) {
+	return s.RefreshWorkspaces(ctx, 1, ps)
+}
+func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo) (int, error) {
 	n := 0
 	err := s.inTx(ctx, func(tx *Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE external_projects SET available=0 WHERE connection_id=1`); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE external_projects SET available=0 WHERE connection_id=$1`, connectionID); err != nil {
 			return err
 		}
 		for _, p := range ps {
@@ -97,16 +100,16 @@ func (s *Store) UpsertT3Projects(ctx context.Context, ps []t3.Project) (int, err
 			if live {
 				n++
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available) VALUES(1,$1,$2,$3,$4)
- ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available`, p.ID, p.Title, p.WorkspaceRoot, live); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available) VALUES($5,$1,$2,$3,$4)
+ ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available`, p.ID, p.Title, p.WorkspaceRoot, live, connectionID); err != nil {
 				return err
 			}
 		}
 		_, err := tx.Exec(ctx, `UPDATE project_bindings SET
- status=CASE WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=1 AND e.external_id=project_bindings.external_project_id AND e.workspace=project_bindings.workspace AND e.available=1) THEN 'available'
- WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=1 AND e.external_id=project_bindings.external_project_id AND e.available=1) THEN 'changed' ELSE 'missing' END,
- observed_workspace=(SELECT workspace FROM external_projects e WHERE e.connection_id=1 AND e.external_id=project_bindings.external_project_id AND e.available=1 LIMIT 1)
- WHERE connection_id=1 AND active=1`)
+ status=CASE WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.workspace=project_bindings.workspace AND e.available=1) THEN 'available'
+ WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.available=1) THEN 'changed' ELSE 'missing' END,
+ observed_workspace=(SELECT workspace FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.available=1 LIMIT 1)
+ WHERE connection_id=$1 AND active=1`, connectionID)
 		return err
 	})
 	return n, err

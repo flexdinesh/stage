@@ -30,7 +30,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 | Name | Values |
 |---|---|
-| TaskState | `backlog` `launching` `running` `needs_input` `done` `settled` `failed` `interrupted` `cancelled` (`done`: the run finished, not yet settled in T3; T3 calls this `completed`) |
+| TaskState | `backlog` `launching` `running` `needs_input` `done` `settled` `failed` `interrupted` `cancelled` (`done`: observed execution finished; `settled` remains historical) |
 | ThreadStatus (T3) | `idle` `preparing` `queued` `starting` `running` `waiting` `completed` `interrupted` `failed` `cancelled` `rolled_back` |
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
 | InteractionMode | `default` `plan` (default `default`) |
@@ -55,7 +55,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 `Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}` (remote = `origin` or `upstream`; `feature/x` is treated as local).
 
-`base` (worktree only, always emitted; `ref` when omitted on input): `ref` starts from `baseRef`; `predecessor` starts the worktree from a need's branch, with `baseRef` as the fallback (see "Predecessor base"). `baseTaskId` (worktree only, always emitted, null unless `base` is `predecessor`): the need whose branch it starts from; null = the sole need. Invalid values, `predecessor` with `root`, `predecessor` on a schedule and `baseTaskId` without `predecessor` are 400. A needs change or splice clears a `baseTaskId` that is no longer a need.
+`base` (worktree only, always emitted; `ref` when omitted on input): `ref` starts from `baseRef`; `predecessor` starts the worktree from a need's branch, with `baseRef` retained for an explicit ref choice (see "Predecessor base"). `baseTaskId` (worktree only, always emitted, null unless `base` is `predecessor`): the need whose branch it starts from; null = the sole need. Invalid values, `predecessor` with `root`, `predecessor` on a schedule and `baseTaskId` without `predecessor` are 400. A needs change or splice clears a `baseTaskId` that is no longer a need.
 
 ## Health
 
@@ -129,7 +129,7 @@ Pair with no code: runs `t3 auth pairing create --json --label "<client name> mc
 Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is bound and the new URL does not serve that environment (`This stage server is bound to T3 '<label>'. Run another stage server for a different T3.`), or cannot be checked because nothing answers there. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
 
 ### `POST /api/sync`
-Refresh all T3 projects and task-owned sessions now. New projects import automatically; project title, root and archive state follow T3. External active-session discovery belongs to the notification watcher. No historical thread sweep. Synchronous.
+Refresh external workspace discovery and task-owned sessions. Stage project titles/archive remain Stage-owned; binding changes require confirmation. External active-session discovery belongs to the notification watcher. No historical thread sweep. Synchronous.
 200 `SyncResult`:
 ```json
 { "projects": 12, "threads": 776, "finishedAt": "2026-11-08T10:00:00Z" }
@@ -349,7 +349,7 @@ Body `CreateTaskRequest`:
   "start": false                 // optional: true = Save & start (not with needs or needsSessionId)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSessionId` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSessionId` not adoptable. Start errors after save: task is still created; it lands in `failed` with `lastError`.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSessionId` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSessionId` not adoptable. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
@@ -370,10 +370,36 @@ Only a task that never started and has no recorded work (`deletable`). 204. 409 
 Archive (sets `archivedAt`) or unarchive a standalone task. Archive 409 when the task is in a tree (`archive the tree, or remove it from the tree first`) or is `launching|running|needs_input` (`#N is running: stop it first`). Unarchive of a task that is not archived is a no-op. 200 `Task`. 404.
 
 ### `POST /api/tasks/:id/start`
-Launch in T3 (`t3_thread_launch`, `clientRequestId = "task-<id>-<uuid>"`, new attempt, new `clientRequestId` and new thread each start). T3 dedupes launches by `clientRequestId` across clients; the random part keeps other databases (dev, tests, restored backups) on the same T3 from colliding. A launch answered with a thread in another project than the task's is a collision: the task moves to `failed` without adopting the thread. Allowed from `backlog|failed|interrupted|cancelled`; else 409 (always 409 for an adopted task). Every need must have current Stage acceptance at the atomic launch claim; otherwise 409 names the missing prerequisites. Start early is unavailable through every entry point. Each start clears `externalSessionId`, `lastError`, `finishedAt`, `settledAt`; the previous thread stays in history (as `source: "t3"`).
-A transport failure (timeout, network, dropped session; not a T3 tool error) is retried once with the same `clientRequestId`. If that also fails the task moves to `failed` and the next start reuses the attempt (same `launchAttempt` and `clientRequestId`), so T3 returns the thread if the lost launch did create one. The same applies to a task left in `launching` by a server restart (failed at startup with `launch interrupted by server restart`). On shutdown the server waits up to 100s for in-flight launches (compose `stop_grace_period: 2m`).
-Images: before each launch every task image is uploaded to T3 afresh (`t3_attachment_prepare_upload`, then the bytes POSTed to the signed `relativeUrl` on `T3_URL`) and passed as `attachments` to `t3_thread_launch`. A failed upload or launch fails the start (`lastError`) and discards that start's uploads (best effort).
-200 `Task` (state `launching` or later). 502 / 503 (task moves to `failed` with `lastError` on T3 error).
+Launch through the task's adapter. Fresh attempts are allowed from backlog,
+failed, interrupted or cancelled. Every prerequisite needs user acceptance in
+Stage at the atomic claim. Adopted tasks cannot launch.
+
+The attempt freezes destination, accepted inputs, prompt, journal context,
+configuration, images and workspace before dispatch. An uncertain outcome stays
+`launching` (UI: Launch unconfirmed). Automatic reconciliation and repeated Start
+use the same attempt, including after restart. Legacy attempts without safe
+identity require explicit linking. A certified rejection before execution
+returns to backlog for repair. See [execution.md](execution.md).
+
+200 Task on confirmation; 409 preflight/repair required; 502/503 unconfirmed
+adapter error. Additive `launch` metadata: attempt, revision, phase, reason,
+retryAt. Internal checkpoints and frozen prompts are not exposed.
+
+### `POST /api/tasks/:id/launch-link/preview`
+Body `{link}`: T3 session URL. Returns `{attempt,revision,environment,observation}`.
+Verifies the original connection/workspace, top-level status and ownership.
+Does not launch or attach.
+
+### `POST /api/tasks/:id/launch-link`
+Body `{link,attempt,revision,environment}` from the preview. Revalidates and
+attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
+
+### `GET /api/connections/:connectionId/capabilities`
+Stage-owned operation availability/reasons, models/options, permissions,
+interaction modes and workspace kinds. Task/schedule `executionConfig` is
+`{model,options,permission,mode}`; model IDs are opaque catalog keys.
+Legacy T3 request fields remain supported through translation. Create requests
+cannot combine neutral config with legacy model/permission fields.
 
 ### `POST /api/tasks/:id/stop`
 `t3_thread_interrupt` (stop). State updates via poller. 409 when task has no thread.
@@ -723,32 +749,15 @@ Live: every new inbox row, read (`POST /api/notifications/read`), prune and task
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done"), `failed` ("Failed") or `settled` ("Settled") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
 - Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
-- External threads: non-subagent threads not owned by a task. Every 5s (when T3 is connected) the watcher reads (`t3_thread_read`) every unsettled root thread with status `preparing|queued|starting|running|waiting`, plus every watched thread whose `observedState` is `running|needs_input|done` (done until settled), and stores the mapped state (State mapping rules) as `observedState`. A change into `needs_input|done|failed|settled` notifies with the same titles; `url` = `/?inbox`. The first pass after startup records states silently; afterwards a thread seen for the first time notifies only when created after startup. A thread T3 no longer knows becomes `cancelled` silently. Task-owned active sessions also refresh their mirror, even if legacy task state is frozen.
-- External threads needing input (badge, `GET /api/threads?needsInput=1`): `observedState = needs_input`, not settled, not subagent, not owned by a task.
-- External running threads (Dashboard Running group, `GET /api/threads?running=1`): `observedState = running`, not settled, not subagent, not owned by a task.
-- External settled threads (Dashboard Settled group, `GET /api/threads?settledFrom=<iso>`): normalized state `settled`, `settledAt >= settledFrom`, not subagent, not owned by a task; forks and archived threads included.
+- External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input|done|failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; settlement does not complete execution or release dependencies.
+- Needs-input counts combine tasks with unowned, non-child normalized session observations. Historical notification entries and links remain available.
 
-## State mapping (thread → task), pure function
+## State mapping
 
-Input: T3 thread detail (`status`, `settled`, `pendingRequestCount`) and the latest run status (`recentRuns[0].status`, may be absent). First matching rule wins:
-
-| # | Condition | Task state |
-|---|---|---|
-| 1 | `settled == true` with no active run or pending requests | `settled` |
-| 2 | `pendingRequestCount > 0` | `needs_input` |
-| 3 | `status in (preparing, queued, starting, running, waiting)` | `running` |
-| 4 | `status == completed` | `done` |
-| 5 | `status == failed` | `failed` |
-| 6 | `status == interrupted` | `interrupted` |
-| 7 | `status in (cancelled, rolled_back)` | `cancelled` |
-| 8 | `status == idle` and latest run status present | apply rules 3-7 to the latest run status |
-| 9 | otherwise (idle, no runs) | unchanged (keep current state) |
-
-T3 `waiting` is the checkpoint gap after a provider turn ends (T3 shows it as "Working"), not a wait on the user; a pending approval or question keeps the thread `running` with `pendingRequestCount > 0`. T3's UI "Waiting" (blocked on a child thread, or awaited background work such as a PR watch after the turn ended) is not exposed over MCP: those threads report `running` or `completed` and map to `running` or `done`.
-
-Applied to tasks with a thread outside `backlog`, including accepted tasks. Later execution activity changes the observed state and notifications but never changes user acceptance, snapshots or tree closure.
-
-Polling scope (every 5s): `launching|running|needs_input`, `done|settled` updated in the last hour (older ones at most every 60s), plus recently updated `failed|interrupted|cancelled` or those whose mirrored thread becomes active. Missing T3 threads become execution `failed`; acceptance remains intact. Restarted in-flight launches retain their attempt identity and accepted input pins.
+The adapter maps harness state to Stage observations. Active execution and pending
+input take precedence over historical settlement. Completed execution maps to done;
+unknown or missing replies preserve the last known state. Connection health is
+separate. Polling and recovery never change acceptance. See [execution.md](execution.md).
 
 ## User acceptance (API v4)
 
@@ -814,13 +823,14 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 
 ## Predecessor base
 
-A task with `workspace.base` `predecessor` (opt-in per task, default `ref`) starts its T3 worktree from a need's branch, so stacked work builds on unmerged changes. The need is `workspace.baseTaskId` when it is a need, else the sole need. Resolved at launch (release runner, Start, restart), using the pinned accepted source and a separate live `t3_thread_read` for workspace suitability:
+A task's predecessor worktree uses its selected need's branch, or the sole need.
+The source must belong to the same harness and Stage project and provide an
+available branch. Ambiguous, offline, root, merged or deleted predecessors block
+launch. Edit `workspace.base` to `ref` explicitly before using `baseRef`.
 
-- Uses the need's local branch: `{type:"worktree", baseRef: <branch>, startFromOrigin: false, branch: <the task's branch, else T3 picks>}`. Worktrees share refs, so the need's worktree branch resolves in the project repo, unpushed commits included.
-- Falls back to the task's own `baseRef` (same `startFromOrigin` rule as `Workspace`) when, in order: the task has no needs; it has several needs and no `baseTaskId` among them; the chosen need has not finished or has no thread; the read fails; the need ran in another T3 project; it ran at project root (no worktree); it has no branch; it has pull requests and all are `merged` (its work is already on the default branch).
-- T3 rejects a base ref that does not resolve before creating a thread (`invalid_request`, `Base ref "<branch>" does not resolve…`; e.g. the branch was deleted). stage then relaunches once from the fallback with the same clientRequestId and records reason `branch <x> not found in project`.
-- The launch is never blocked by the base. Each attempt records `LaunchBase` in `task_launch_bases` plus a `launching` task event: `base from #12's branch feat/api` or `base fallback origin/main: <reason>`. An attempt that reuses its clientRequestId resends the stored base.
-- The task's own branch name is unchanged (`workspace.branch`, else T3 picks). A branch equal to the need's fails in T3 (already checked out).
+The resolved branch is frozen per attempt in `task_launch_bases`.
+A certified T3 base rejection returns to backlog for repair. No fallback launch
+is sent. Historical fallback records remain readable.
 
 `LaunchBase`:
 ```jsonc
@@ -861,9 +871,9 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
 - Close work: `archive_task {id, archived?}` (default archives; CLI `task archive ID [--undo]`), `list_tasks {closed?}` (`true|all`; CLI `task ls --closed true|all`; rows carry `treeStatus` and `archived`), `delete_task` only for a task that never started and has no recorded work. See "Done, archive and delete".
 - `adopt_session {threadId?, title?, initialNote?, tags?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [THREAD_ID] [--title --initial-note --tag --tree]`).
-- `start_task` on a blocked task starts it early (needs kept).
+- `start_task` on a blocked task fails until the user completes its needs in Stage.
 - `create_task` and `update_task` take optional `handoff` (CLI `task add --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoffs`; `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records, plus `tree` and `readiness` lines.
-- `create_task`, `create_schedule`, `update_task` and `update_schedule` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (the fallback); on `update_task` without `baseRef` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (fallback origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
+- `create_task`, `create_schedule`, `update_task` and `update_schedule` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (retained for an explicit ref choice); on `update_task` without `baseRef` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.
 
