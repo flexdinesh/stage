@@ -107,3 +107,5 @@ Not part of the contract: plain DOM and layout (`document` visibility,
   `web/index.html` and `desktop/app/ui/public/theme.js`; keep both in step with `app/src/lib/theme.ts`.
 
 T3 synchronization refreshes projects and tracked task sessions, with active external discovery for notifications. The `workevent` package owns shared task/session transition events; the T3 watcher produces them and `notify` delivers them. No historical transcript sweep, question enrichment or automatic PR tracking. Raw retired database columns are preserved for historical records.
+
+Stage owns task acceptance separately from observed execution. SQLite stores immutable accepted evidence and idempotent acceptance requests; a launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [API v4 acceptance](api.md#user-acceptance-api-v4).

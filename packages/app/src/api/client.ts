@@ -1,4 +1,7 @@
 import type {
+  CompletionPreview,
+  AcceptanceRequest,
+  AcceptanceResult,
   AppendNoteInput,
   JournalEntry,
   JournalOwner,
@@ -180,6 +183,9 @@ export function createApi(transport: Transport) {
         `/tasks${toQuery({ originThreadId: q.originThreadId, project: q.project, state: q.state, tag: q.tag, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom, closed: q.closed })}`,
       ),
     task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
+    completionPreview: (id: number) => apiFetch<CompletionPreview>(`/tasks/${id}/completion-preview`),
+    completeTask: (id: number, body: AcceptanceRequest) => apiFetch<AcceptanceResult>(`/tasks/${id}/complete`, post(body)),
+    reopenTask: (id: number, body: AcceptanceRequest) => apiFetch<AcceptanceResult>(`/tasks/${id}/reopen`, post(body)),
     journal: (owner: JournalOwner, q: JournalQuery = {}) =>
       apiFetch<JournalPage>(`${journalPath(owner)}${toQuery({ ...q })}`),
     journalEntry: (id: number) => apiFetch<JournalEntry>(`/journal/${id}`),

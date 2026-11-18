@@ -151,7 +151,7 @@ type TreeStartChoice = "inherit" | TreeStartMode;
 function treeStartOptions(inherited: TreeStartMode | null): { value: TreeStartChoice; label: string }[] {
   return [
     { value: "inherit", label: inherited === null ? "Inherit from tree" : `Inherit (tree: ${inherited})` },
-    { value: "auto", label: "Auto: starts when its needs settle" },
+    { value: "auto", label: "Auto: starts when its needs are completed" },
     { value: "manual", label: "Manual: reads ready, you start it" },
   ];
 }
@@ -425,7 +425,7 @@ function TaskFormDrawer({
             ) : (
               <>
                 , needing <span className="font-mono tabular">{defaultTree.needs.map((id) => `#${id}`).join(" ")}</span>. It waits
-                in backlog until {defaultTree.needs.length === 1 ? "it settles" : "they settle"}.
+                in backlog until {defaultTree.needs.length === 1 ? "it is completed" : "they are completed"}.
               </>
             )}
           </Alert>

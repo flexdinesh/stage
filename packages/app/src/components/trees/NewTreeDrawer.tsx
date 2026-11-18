@@ -30,7 +30,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
   const invalidate = useInvalidateWork();
   const [title, setTitle] = useState(tasks[0]?.title ?? "");
   const [shape, setShape] = useState<TreeShape>("parallel");
-  const [mode, setMode] = useState<StartMode>("auto");
+  const [mode, setMode] = useState<StartMode>("manual");
   const [order, setOrder] = useState<readonly Task[]>(tasks);
 
   const create = useMutation({
@@ -105,7 +105,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
           <span className="label-caps">Start mode</span>
           <Segmented label="Start mode" options={MODES} value={mode} onChange={setMode} />
           <p className="font-mono text-meta text-muted">
-            {mode === "auto" ? "A task starts on its own once every need settles. Roots wait for you." : "A task reads ready when its needs settle; you start it."}
+            {mode === "auto" ? "A task starts on its own once every need is completed. Roots wait for you." : "A task reads ready when its needs are completed; you start it."}
           </p>
         </div>
         <ErrorText error={create.error} />

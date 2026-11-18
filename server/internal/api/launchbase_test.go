@@ -75,12 +75,12 @@ func TestPredecessorBaseStacksOnBranch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/stack")
 	a := e.task(p.ID, "Build API", map[string]any{"start": true})
-	b := e.task(p.ID, "Use API", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
+	b := e.task(p.ID, "Use API", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
 	if got := e.baseTask(b.ID); got.Workspace.Base != "predecessor" || got.Workspace.BaseRef != "origin/main" || got.CurrentLaunchBase != nil {
 		t.Fatalf("saved workspace %+v", got)
 	}
 	e.inWorktree(*a.T3ThreadID, "feat/api")
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 
 	got := e.baseTask(b.ID)
 	lb := got.CurrentLaunchBase
@@ -103,9 +103,9 @@ func TestPredecessorBaseKeepsDependentBranch(t *testing.T) {
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	ws := predecessorWS()
 	ws["branch"] = "feat/next"
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": ws})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": ws})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	if got := e.lastWorkspace(); got.BaseRef != "feat/a" || got.Branch != "feat/next" {
 		t.Fatalf("dependent branch must stay its own: %+v", got)
 	}
@@ -118,10 +118,10 @@ func TestPredecessorBaseFromAdoptedSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/base-session")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	b := e.task(p.ID, "b", map[string]any{"needsSessionId": s, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSessionId": s, "workspace": predecessorWS()})
 	planner := b.Needs[0]
 	e.inWorktree(s, "plan/x")
-	e.settle(s)
+	e.acceptThread(s)
 	got := e.baseTask(b.ID)
 	if lb := got.CurrentLaunchBase; lb == nil || lb.Source != "predecessor" || lb.BaseRef != "plan/x" ||
 		lb.SourceTaskID == nil || *lb.SourceTaskID != planner || lb.SourceTitle != "Planner" {
@@ -140,14 +140,14 @@ func TestPredecessorBasePicksBaseTaskID(t *testing.T) {
 	b := e.task(p.ID, "b", map[string]any{"start": true})
 	ws := predecessorWS()
 	ws["baseTaskId"] = b.ID
-	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}, "workspace": ws, "handoff": false})
+	c := e.task(p.ID, "c", map[string]any{"startMode": "auto", "needs": []int64{a.ID, b.ID}, "workspace": ws, "handoff": false})
 	if got := e.baseTask(c.ID); got.Workspace.BaseTask == nil || *got.Workspace.BaseTask != b.ID {
 		t.Fatalf("saved baseTaskId %+v", got.Workspace)
 	}
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	e.inWorktree(*b.T3ThreadID, "feat/b")
-	e.settle(*a.T3ThreadID)
-	e.settle(*b.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
+	e.acceptThread(*b.T3ThreadID)
 	got := e.baseTask(c.ID)
 	if lb := got.CurrentLaunchBase; got.State != "running" || lb == nil || lb.Source != "predecessor" || lb.BaseRef != "feat/b" ||
 		lb.SourceTaskID == nil || *lb.SourceTaskID != b.ID {
@@ -163,11 +163,11 @@ func TestPredecessorBaseAmbiguousNeedsFallBack(t *testing.T) {
 	p := e.project("/w/ambiguous")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"start": true})
-	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}, "workspace": predecessorWS(), "handoff": false})
+	c := e.task(p.ID, "c", map[string]any{"startMode": "auto", "needs": []int64{a.ID, b.ID}, "workspace": predecessorWS(), "handoff": false})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	e.inWorktree(*b.T3ThreadID, "feat/b")
-	e.settle(*a.T3ThreadID)
-	e.settle(*b.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
+	e.acceptThread(*b.T3ThreadID)
 	assertFallback(t, e.baseTask(c.ID), e.lastWorkspace(), "the task has 2 needs and no workspace.baseTaskId")
 }
 
@@ -198,10 +198,11 @@ func TestPredecessorBaseFallbacks(t *testing.T) {
 			e := newEnv(t)
 			p := e.project("/w/fb")
 			a := e.task(p.ID, "a", map[string]any{"start": true})
-			b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
+			b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS(), "handoff": false})
 			_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
 			_ = e.fake.Settle(*a.T3ThreadID)
 			e.poll()
+			e.complete(a.ID)
 			c.setup(e, *a.T3ThreadID)
 			_ = e.runner.Reconcile(t.Context())
 			assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), c.reason)
@@ -216,12 +217,12 @@ func TestPredecessorBaseMixedPRsStillStacks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/mixed")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
 	_ = e.fake.SetThread(*a.T3ThreadID, func(d *t3.ThreadDetail) {
 		d.PullRequests = []t3.PullRequest{{Number: 1, State: "merged"}, {Number: 2, State: "open"}}
 	})
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	if lb := e.baseTask(b.ID).CurrentLaunchBase; lb == nil || lb.Source != "predecessor" || lb.BaseRef != "feat/a" {
 		t.Fatalf("an open PR keeps the stack: %+v", lb)
 	}
@@ -232,9 +233,9 @@ func TestPredecessorBaseOtherProjectFallsBack(t *testing.T) {
 	p := e.project("/w/here")
 	other := e.project("/w/there")
 	a := e.task(other.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/there")
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	assertFallback(t, e.baseTask(b.ID), e.lastWorkspace(), "ran in another project")
 }
 
@@ -242,11 +243,11 @@ func TestPredecessorBaseRejectedBranchRetriesFallback(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/deleted")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/gone")
 	e.fake.MissRef("feat/gone")
 	before := len(e.t3.launchRequestIDs())
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	got := e.baseTask(b.ID)
 	assertFallback(t, got, e.lastWorkspace(), "branch feat/gone not found in project")
 	ids := e.t3.launchRequestIDs()[before:]
@@ -265,10 +266,10 @@ func TestPredecessorBaseReusedForSameAttempt(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/base-reuse")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": predecessorWS()})
 	e.inWorktree(*a.T3ThreadID, "feat/one")
 	e.t3.lostLaunches.Store(2)
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	first := e.baseTask(b.ID)
 	if first.State != "failed" || first.CurrentLaunchBase == nil || first.CurrentLaunchBase.BaseRef != "feat/one" {
 		t.Fatalf("lost launch %+v", first)
@@ -292,9 +293,9 @@ func TestRefBaseRecordsNothing(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/ref")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "workspace": map[string]any{"type": "worktree", "baseRef": "origin/main"}})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "workspace": map[string]any{"type": "worktree", "baseRef": "origin/main"}})
 	e.inWorktree(*a.T3ThreadID, "feat/a")
-	e.settle(*a.T3ThreadID)
+	e.acceptThread(*a.T3ThreadID)
 	got := e.baseTask(b.ID)
 	if got.Workspace.Base != "ref" || got.CurrentLaunchBase != nil || e.lastWorkspace().BaseRef != "origin/main" {
 		t.Fatalf("ref base unchanged: %+v", got)

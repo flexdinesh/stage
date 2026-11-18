@@ -91,15 +91,15 @@ export function bandState(members: readonly Member[]): BandState {
     (m) => m.state === "launching" || m.state === "running" || m.state === "needs_input" || (m.state === "backlog" && m.readiness === "ready"),
   );
   if (live) return "now";
-  if (members.length > 0 && members.every((m) => m.state === "settled")) return "done";
+  if (members.length > 0 && members.every((m) => m.acceptanceId !== null)) return "done";
   return "waits";
 }
 
 /** A need edge: met once the need settles, failed while it failed (dependents stay blocked), else waiting. */
 export type EdgeState = "met" | "waiting" | "failed";
 
-export function edgeState(need: Pick<Task, "state">): EdgeState {
-  if (need.state === "settled") return "met";
+export function edgeState(need: Pick<Task, "state" | "acceptanceId">): EdgeState {
+  if (need.acceptanceId !== null) return "met";
   if (need.state === "failed" || need.state === "interrupted" || need.state === "cancelled") return "failed";
   return "waiting";
 }
@@ -164,7 +164,7 @@ export function graphLayout<T extends Node>(nodes: readonly T[], size: GraphSize
 // ---- Roll-up ----
 
 /** What a member needs to roll up. */
-type Member = Pick<Task, "state" | "readiness">;
+type Member = Pick<Task, "state" | "readiness" | "acceptanceId">;
 
 /** Member counts by state; blocked and ready split backlog (same shape the server returns on tree lists). */
 export function countMembers(members: readonly Member[]): TreeCounts {
@@ -183,7 +183,9 @@ export function countMembers(members: readonly Member[]): TreeCounts {
     cancelled: 0,
   };
   for (const m of members) {
-    if (m.state === "needs_input") c.needsInput++;
+    if (m.acceptanceId !== null) c.settled++;
+    else if (m.state === "settled") c.done++;
+    else if (m.state === "needs_input") c.needsInput++;
     else c[m.state]++;
     if (m.state === "backlog" && m.readiness === "blocked") c.blocked++;
     if (m.state === "backlog" && m.readiness === "ready") c.ready++;
@@ -222,7 +224,7 @@ export function treeRollup(counts: TreeCounts): Rollup {
   const running = counts.running + counts.launching;
   const waiting = counts.backlog - counts.ready;
   const all: Segment[] = [
-    { key: "settled", label: "settled", tone: "ok", count: counts.settled, hollow: false },
+    { key: "settled", label: "completed", tone: "ok", count: counts.settled, hollow: false },
     { key: "done", label: "done", tone: "done", count: counts.done, hollow: false },
     { key: "running", label: "running", tone: "run", count: running, hollow: false },
     { key: "needs_input", label: "needs input", tone: "need", count: counts.needsInput, hollow: false },
@@ -255,7 +257,7 @@ export function rollupLabel(r: Rollup): string {
   return `${n} task${n === 1 ? "" : "s"}${parts.length === 0 ? "" : `: ${parts.join(", ")}`}`;
 }
 
-/** Short mono status for the next action: "1 needs input", "2 ready", "2 to settle in T3", "all settled". */
+/** Short mono status for the next action: "1 needs input", "2 ready", "2 to complete", "all completed". */
 export function nextActionText(next: NextAction): string {
   switch (next.kind) {
     case "answer":
@@ -265,13 +267,13 @@ export function nextActionText(next: NextAction): string {
     case "retry":
       return `${next.count} failed`;
     case "settle":
-      return `${next.count} to settle in T3`;
+      return `${next.count} to complete`;
     case "running":
       return `${next.count} running`;
     case "waiting":
       return "waiting on needs";
     case "done":
-      return "all settled";
+      return "all completed";
   }
 }
 
@@ -312,7 +314,7 @@ export function baseCandidates(task: Pick<Task, "needs" | "projectId">, tree: Pi
 /** A member's node label: ready / blocked for backlog members with readiness, else its task state. */
 export type NodeState = Task["state"] | "ready" | "blocked";
 
-export function nodeState(t: Pick<Task, "state" | "readiness">): NodeState {
+export function nodeState(t: Pick<Task, "state" | "readiness" | "acceptanceId">): NodeState {
   if (t.state === "backlog" && t.readiness !== null) return t.readiness;
   return t.state;
 }
@@ -362,7 +364,7 @@ export function inState(t: Timed, now: number = Date.now()): { text: string; at:
 }
 
 /** Every member settled. */
-export const treeSettled = (tasks: readonly Pick<Task, "state">[]) => tasks.length > 0 && tasks.every((t) => t.state === "settled");
+export const treeSettled = (tasks: readonly Pick<Task, "state" | "acceptanceId">[]) => tasks.length > 0 && tasks.every((t) => t.acceptanceId !== null);
 
 /** Marked done or archived: nothing starts, structure is read-only, members leave the Dashboard. */
 export const treeClosed = (tree: Pick<Tree, "status">) => tree.status !== "open";

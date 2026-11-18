@@ -68,9 +68,9 @@ func TestTreesLifecycle(t *testing.T) {
 	e.must("POST", "/api/trees", map[string]any{"title": " T ", "tasks": []any{
 		map[string]any{"taskId": a.ID},
 		map[string]any{"taskId": b.ID, "needs": []int64{a.ID}},
-		map[string]any{"taskId": c.ID, "needs": []int64{a.ID, b.ID}},
+		map[string]any{"taskId": c.ID, "needs": []int64{a.ID, b.ID}, "startMode": "auto"},
 	}}, 201, &tr)
-	if tr.Title != "T" || tr.StartMode != "auto" || len(tr.Tasks) != 3 || len(tr.Edges) != 3 ||
+	if tr.Title != "T" || tr.StartMode != "manual" || len(tr.Tasks) != 3 || len(tr.Edges) != 3 ||
 		fmt.Sprint(tr.Levels) != fmt.Sprint([][]int64{{a.ID}, {b.ID}, {c.ID}}) {
 		t.Fatalf("tree %+v", tr)
 	}
@@ -183,7 +183,7 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 	p2 := e.project("/w/two")
 	a := e.task(p1.ID, "a", map[string]any{"start": true})
 	b := e.task(p1.ID, "b", map[string]any{"start": true})
-	c := e.task(p2.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}})
+	c := e.task(p2.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}, "startMode": "auto"})
 	if c.State != "backlog" || readinessOf(c) != "blocked" || c.TreeID == nil {
 		t.Fatalf("c %+v", c)
 	}
@@ -195,6 +195,7 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 	_ = e.fake.Settle(*a.T3ThreadID)
 	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted) // done, not settled
 	e.poll()
+	e.complete(a.ID)
 	e.reconcile()
 	if got := e.getTask(c.ID); got.State != "backlog" || readinessOf(got) != "blocked" {
 		t.Fatalf("one need unsettled must hold: %+v", got)
@@ -202,6 +203,7 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 
 	_ = e.fake.Settle(*b.T3ThreadID)
 	e.poll()
+	e.complete(b.ID)
 	e.reconcile()
 	got := e.getTask(c.ID)
 	if got.State != "running" || got.T3ThreadID == nil || !slices.Equal(got.Needs, []int64{a.ID, b.ID}) || got.Readiness != nil {
@@ -242,6 +244,7 @@ func TestManualReadyNotifiesOnceAndStartTree(t *testing.T) {
 	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
 	_ = e.fake.Settle(*a.T3ThreadID)
 	e.poll()
+	e.complete(a.ID)
 	e.reconcile()
 	e.reconcile()
 	mu.Lock()
@@ -252,7 +255,7 @@ func TestManualReadyNotifiesOnceAndStartTree(t *testing.T) {
 	}
 	for _, id := range []int64{b.ID, c.ID} {
 		got := e.getTask(id)
-		if got.State != "backlog" || readinessOf(got) != "ready" || hasEvent(got, "ready: needs settled") != 1 {
+		if got.State != "backlog" || readinessOf(got) != "ready" || hasEvent(got, "ready: needs completed") != 1 {
 			t.Fatalf("manual task %d: %+v", id, got)
 		}
 	}
@@ -291,22 +294,17 @@ func TestFailedNeedKeepsDependentBlocked(t *testing.T) {
 	}
 }
 
-func TestStartEarlyKeepsNeeds(t *testing.T) {
+func TestStartEarlyRejected(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/early")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", nil)
 	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID, b.ID}})
-	var got task
-	e.must("POST", taskPath(c.ID, "/start"), nil, 200, &got)
-	if got.State != "running" || !slices.Equal(got.Needs, []int64{a.ID, b.ID}) {
-		t.Fatalf("start early %+v", got)
+	e.must("POST", taskPath(c.ID, "/start"), nil, 409, nil)
+	got := e.getTask(c.ID)
+	if got.State != "backlog" || got.LaunchAttempt != 0 || !slices.Equal(got.Needs, []int64{a.ID, b.ID}) {
+		t.Fatalf("blocked start changed task: %+v", got)
 	}
-	if got = e.getTask(c.ID); hasEvent(got, fmt.Sprintf("launch requested before #%d, #%d settled", a.ID, b.ID)) != 1 {
-		t.Fatalf("events %+v", got.Events)
-	}
-	// Needs are frozen once it left backlog.
-	e.must("PUT", taskPath(c.ID, "/needs"), map[string]any{"needs": []int64{a.ID}}, 409, nil)
 }
 
 func TestCreateWithNeedsResolvesTree(t *testing.T) {
@@ -317,14 +315,14 @@ func TestCreateWithNeedsResolvesTree(t *testing.T) {
 
 	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID}})
 	ta := e.getTask(c.ID).Tree
-	if ta == nil || ta.Title != "a" || ta.StartMode != "auto" || len(ta.Tasks) != 2 {
+	if ta == nil || ta.Title != "a" || ta.StartMode != "manual" || len(ta.Tasks) != 2 {
 		t.Fatalf("new tree after the first need %+v", ta)
 	}
 	d := e.task(p.ID, "d", map[string]any{"needs": []int64{b.ID}})
 	if d.TreeID == nil || *d.TreeID == ta.ID {
 		t.Fatalf("second tree %+v", d)
 	}
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{a.ID, b.ID}}, 409, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{a.ID, b.ID}, "startMode": "auto"}, 409, nil)
 	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "treeId": ta.ID, "needs": []int64{b.ID}}, 409, nil)
 	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "treeId": 99999}, 404, nil)
 	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{99999}}, 404, nil)

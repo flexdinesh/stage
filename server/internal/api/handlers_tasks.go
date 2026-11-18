@@ -108,7 +108,7 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 	}
 	hasNeeds := len(in.Needs) > 0 || in.NeedsThreadID != nil
 	if req.Start && hasNeeds {
-		return in, db.Invalid("a task with needs cannot also start now (it starts when its needs settle)")
+		return in, db.Invalid("a task with needs cannot also start now (complete its needs in Stage before starting)")
 	}
 	if err := attachmentIDs(req.AttachmentIDs); err != nil {
 		return in, err
@@ -243,6 +243,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	env := s.envID(ctx)
 	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, CurrentHandoffs: []db.Handoff{}}
+	if out.Acceptances, err = s.Store.Acceptances(ctx, id); err != nil {
+		return err
+	}
 	if task.TreeID != nil {
 		tree, err := s.Store.GetTree(ctx, *task.TreeID)
 		if err != nil {

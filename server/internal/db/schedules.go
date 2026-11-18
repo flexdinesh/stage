@@ -469,7 +469,7 @@ type DueTask struct {
 func (s *Store) DueOneShots(ctx context.Context, now time.Time) ([]DueTask, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT t.id, t.start_at FROM tasks t LEFT JOIN task_trees tr ON tr.id = t.tree_id
-WHERE t.state = 'backlog' AND t.start_at <= $1 AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now)
+WHERE t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at <= $1 AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +528,7 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 			var prevState TaskState
 			err = tx.QueryRow(ctx, `
 SELECT id, state FROM tasks WHERE schedule_id = $1
-  AND (state IN ('launching', 'running', 'needs_input') OR (state = 'backlog' AND start_at IS NOT NULL))
+  AND (state IN ('launching', 'running', 'needs_input') OR (state = 'backlog' AND acceptance_id IS NULL AND start_at IS NOT NULL))
 ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
 			switch {
 			case err == nil:

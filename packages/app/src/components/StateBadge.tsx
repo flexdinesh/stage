@@ -18,8 +18,8 @@ const TASK_LABELS: Record<TaskState, string> = {
   launching: "launching",
   running: "running",
   needs_input: "needs input",
-  done: "done",
-  settled: "settled",
+  done: "run finished",
+  settled: "settled in T3",
   failed: "failed",
   interrupted: "interrupted",
   cancelled: "cancelled",
@@ -42,7 +42,7 @@ const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
 export const taskStateLabel = (s: TaskState) => TASK_LABELS[s];
 export const taskStateTone = (s: TaskState) => TASK_TONES[s];
 
-/** Notification event copy: task states, plus "ready" (a manual tree task whose needs settled; idle tone). */
+/** Notification event copy: task states, plus "ready" (a manual tree task whose needs are completed; idle tone). */
 export const notificationEventLabel = (e: NotificationEvent) => (e === "ready" ? "ready" : TASK_LABELS[e]);
 export const notificationEventTone = (e: NotificationEvent): ChipTone => (e === "ready" ? "idle" : TASK_TONES[e]);
 

@@ -32,6 +32,7 @@ type threadJSON struct {
 }
 
 type taskDetailJSON struct {
+	Acceptances []db.Acceptance `json:"acceptances"`
 	taskJSON
 	Events []db.TaskEvent `json:"events"`
 	Thread *threadJSON    `json:"thread"`

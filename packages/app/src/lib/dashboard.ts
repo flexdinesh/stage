@@ -13,7 +13,7 @@ export interface TreeSplit {
 }
 
 /** A member that also breaks out of its tree row: it waits on the user (needs input) or on a start (ready). */
-export const breaksOut = (t: Pick<Task, "state" | "readiness">) => t.state === "needs_input" || t.readiness === "ready";
+export const breaksOut = (t: Pick<Task, "state" | "readiness" | "acceptanceId">) => t.state === "needs_input" || (t.acceptanceId !== null && (t.state === "running" || t.state === "launching")) || t.readiness === "ready";
 
 /**
  * Splits Dashboard tasks against the listed trees. A member of a listed tree rolls up into that tree's row unless it
@@ -34,7 +34,7 @@ export function splitTreeMembers(tasks: readonly Task[], trees: readonly TreeSum
     const rolls =
       tree !== null &&
       !breaksOut(t) &&
-      (t.state === "settled" ? settledIds.has(tree) : activeIds.has(tree) || settledIds.has(tree));
+      (t.acceptanceId !== null ? settledIds.has(tree) : activeIds.has(tree) || settledIds.has(tree));
     (rolls ? rolledUp : rows).push(t);
   }
   return { active, settled, rows, rolledUp };

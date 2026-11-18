@@ -102,10 +102,10 @@ func TestTreeDoneArchiveAndReopenOnActivity(t *testing.T) {
 	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusRunning)
 	e.poll()
 	e.must("GET", treePath(tree), nil, 200, &tr)
-	if tr.Status != "open" || tr.ClosedAt != nil {
-		t.Fatalf("activity did not reopen %+v", tr)
+	if tr.Status != "archived" || tr.ClosedAt == nil {
+		t.Fatalf("activity reopened closed tree %+v", tr)
 	}
-	if got := e.getTask(a.ID); hasEvent(got, "tree reopened: became running") != 1 {
+	if got := e.getTask(a.ID); hasEvent(got, "tree reopened: became running") != 0 {
 		t.Fatalf("reopen event %+v", got.Events)
 	}
 }

@@ -20,7 +20,7 @@ const TITLES: Record<TreeView, string> = {
 
 const EMPTY: Record<TreeView, string> = {
   active: "No active trees. A tree forms when a task needs another (agents build them with create_tree). Done and archived trees have their own views.",
-  done: "No done trees. A tree is done once every task settles, or when you mark it done from its More menu.",
+  done: "No done trees. A tree is done once every task is completed, or when you mark it done from its More menu.",
   archived: "No archived trees. Archive a tree from its More menu to keep it out of the way without deleting it.",
   all: "No trees yet. A tree forms when a task needs another; agents build them with create_tree.",
 };

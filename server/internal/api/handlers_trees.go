@@ -53,7 +53,7 @@ func (s *server) createTree(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &req); err != nil {
 		return err
 	}
-	in := db.NewTree{Title: strings.TrimSpace(req.Title), StartMode: db.StartAuto, Tasks: req.Tasks}
+	in := db.NewTree{Title: strings.TrimSpace(req.Title), StartMode: db.StartManual, Tasks: req.Tasks}
 	if in.Title == "" {
 		return db.Invalid("title is required")
 	}

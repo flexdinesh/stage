@@ -25,7 +25,7 @@ import {
   wouldCycle,
 } from "../src/lib/trees.ts";
 
-const node = (id, needs = [], extra = {}) => ({ id, needs, ...extra });
+const node = (id, needs = [], extra = {}) => ({ id, needs, acceptanceId: null, ...extra });
 
 // Diamond: A(1), B(2) -> C(3); A -> D(4); C, D -> E(5).
 const diamond = [node(1), node(2), node(3, [1, 2]), node(4, [1]), node(5, [3, 4])];
@@ -113,7 +113,7 @@ test("graph layout of an empty tree is empty", () => {
   assert.deepEqual(graphLayout([], size), { width: 0, height: 0, levels: [], nodes: [], edges: [] });
 });
 
-const bandMember = (state, readiness = null) => ({ state, readiness });
+const bandMember = (state, readiness = null) => ({ state, readiness, acceptanceId: state === "settled" ? 1 : null });
 
 test("band state: live or ready work is now, all settled is done, else waits", () => {
   assert.equal(bandState([bandMember("settled"), bandMember("running")]), "now");
@@ -128,12 +128,12 @@ test("band state: live or ready work is now, all settled is done, else waits", (
 });
 
 test("edge state follows the need: settled met, failed kinds failed, else waiting", () => {
-  assert.equal(edgeState({ state: "settled" }), "met");
-  for (const s of ["failed", "interrupted", "cancelled"]) assert.equal(edgeState({ state: s }), "failed");
-  for (const s of ["backlog", "launching", "running", "needs_input", "done"]) assert.equal(edgeState({ state: s }), "waiting");
+  assert.equal(edgeState({ state: "settled", acceptanceId: 1 }), "met");
+  for (const s of ["failed", "interrupted", "cancelled"]) assert.equal(edgeState({ state: s, acceptanceId: null }), "failed");
+  for (const s of ["backlog", "launching", "running", "needs_input", "done"]) assert.equal(edgeState({ state: s, acceptanceId: null }), "waiting");
 });
 
-const member = (state, readiness = null) => ({ state, readiness });
+const member = (state, readiness = null) => ({ state, readiness, acceptanceId: state === "settled" ? 1 : null });
 
 test("counts split backlog into blocked and ready", () => {
   const c = countMembers([
@@ -182,14 +182,14 @@ test("segments order finished work first and drop empty states", () => {
       ["waiting", 1, true],
     ],
   );
-  assert.equal(rollupLabel(r), "5 tasks: 2 settled, 1 running, 1 ready, 1 blocked");
+  assert.equal(rollupLabel(r), "5 tasks: 2 completed, 1 running, 1 ready, 1 blocked");
 });
 
 test("next action text", () => {
   assert.equal(nextActionText({ kind: "answer", count: 1 }), "1 needs input");
   assert.equal(nextActionText({ kind: "answer", count: 2 }), "2 need input");
-  assert.equal(nextActionText({ kind: "settle", count: 2 }), "2 to settle in T3");
-  assert.equal(nextActionText({ kind: "done", count: 3 }), "all settled");
+  assert.equal(nextActionText({ kind: "settle", count: 2 }), "2 to complete");
+  assert.equal(nextActionText({ kind: "done", count: 3 }), "all completed");
 });
 
 test("tree meta reads the same for a list row and a detail", () => {
@@ -296,19 +296,19 @@ test("time in state reads per state from when it was entered", () => {
   assert.equal(t({ state: "failed", stateSince: nov(16, 12, 0) }).text, "failed 3h ago");
   assert.equal(t({ state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }).text, "ready 3h");
   // Blocked or plain backlog counts from creation when there is no later backlog event.
-  assert.deepEqual(t({ state: "backlog", readiness: "blocked" }), { text: "queued 2d", at: nov(14, 9, 12) });
+  assert.deepEqual(t({ state: "backlog", readiness: "blocked", acceptanceId: null }), { text: "queued 2d", at: nov(14, 9, 12) });
 });
 
 test("closed trees: chip text, blocker and task label", () => {
   const left = countMembers([
-    { state: "settled", readiness: null },
-    { state: "cancelled", readiness: null },
-    { state: "backlog", readiness: "blocked" },
-    { state: "backlog", readiness: "blocked" },
+    { state: "settled", readiness: null, acceptanceId: 1 },
+    { state: "cancelled", readiness: null, acceptanceId: null },
+    { state: "backlog", readiness: "blocked", acceptanceId: null },
+    { state: "backlog", readiness: "blocked", acceptanceId: null },
   ]);
   assert.equal(closedLabel({ status: "open" }, left), null);
   assert.equal(closedLabel({ status: "done" }, left), "done · 2 not run · 1 cancelled");
-  assert.equal(closedLabel({ status: "done" }, countMembers([{ state: "settled", readiness: null }])), "done");
+  assert.equal(closedLabel({ status: "done" }, countMembers([{ state: "settled", readiness: null, acceptanceId: 1 }])), "done");
   assert.equal(closedLabel({ status: "archived" }, left), "archived");
   assert.equal(treeClosed({ status: "open" }), false);
   assert.equal(treeClosed({ status: "done" }), true);

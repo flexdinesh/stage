@@ -6,10 +6,10 @@ import './run-order.css'
 
 // Needs, told as stage does it: #13's Tree panel adds #12 as a need (picker,
 // then Add). The rows pick up "needs #12" / "then #13" and the levels join.
-// #12 finishes and settles in T3 on its own; #13 launches by itself, and its
+// The user accepts #12 in Stage; explicitly automatic #13 launches, and its
 // handoff (final reply, PR, branch) is the payoff.
 
-type A = 'running' | 'done' | 'settled'
+type A = 'running' | 'done' | 'completed'
 type B = 'backlog' | 'launching' | 'running'
 type S = {
   open: boolean
@@ -23,10 +23,10 @@ type S = {
 }
 
 const START: S = { open: false, picked: false, linked: false, a: 'running', b: 'backlog', armed: false, handoff: false, hidden: false }
-const POSTER: S = { open: false, picked: true, linked: true, a: 'settled', b: 'running', armed: true, handoff: true, hidden: false }
+const POSTER: S = { open: false, picked: true, linked: true, a: 'completed', b: 'running', armed: true, handoff: true, hidden: false }
 
 type Tone = 'run' | 'done' | 'ok' | 'idle'
-const TONE: Record<A | B, Tone> = { running: 'run', launching: 'run', done: 'done', settled: 'ok', backlog: 'idle' }
+const TONE: Record<A | B, Tone> = { running: 'run', launching: 'run', done: 'done', completed: 'ok', backlog: 'idle' }
 
 const script = async (a: Act<S>) => {
   await a.wait(900)
@@ -47,11 +47,12 @@ const script = async (a: Act<S>) => {
   await a.wait(200)
   await a.move('rest-2')
   await a.wait(2300)
-  // T3 settles #12; nothing here touches it
-  a.mark('settle')
+  // Execution finishes; Stage waits for the user to accept the result.
+  a.mark('complete')
   a.put({ a: 'done' })
   await a.wait(1500)
-  a.put({ a: 'settled' })
+  await a.click('complete')
+  a.put({ a: 'completed' })
   await a.wait(1100)
   // #13 was waiting on exactly that: it launches with the handoff
   a.mark('start')
@@ -116,9 +117,9 @@ export function Demo() {
       {(s, rect, layout) => {
         const compact = layout === 'compact'
         const waiting = s.linked && s.b === 'backlog'
-        const aTime = s.a === 'settled' ? 'settled just now' : '18m ago'
+        const aTime = s.a === 'completed' ? 'completed just now' : '18m ago'
         const bTime = s.b === 'backlog' ? '2h ago' : 'just now'
-        const aHint = s.b === 'backlog' ? `${s.a} · starts when it settles` : s.a
+        const aHint = s.b === 'backlog' ? `${s.a} · needs user completion` : s.a
         const row13 = rect('row-13')
         const satTop = row13.height > 0 ? row13.y + row13.height : undefined
         const page = (
@@ -144,7 +145,7 @@ export function Demo() {
                       {compact ? <LinkHint label="then #13" show={s.linked} /> : null}
                     </span>
                   </span>
-                  {compact ? null : <LinkChip label="then #13" show={s.linked} />}
+                  {s.a === 'done' ? <span className="ro-select" data-target="complete">Complete #12</span> : compact ? null : <LinkChip label="then #13" show={s.linked} />}
                 </div>
                 <div className="ro-row" data-target="row-13">
                   <span className="ro-row__state">
@@ -189,7 +190,7 @@ export function Demo() {
                 <IconChainLink />
                 <span className="ro-label ro-label--ink">Tree</span>
                 <span className="ro-panel__meta">
-                  <Roll variant="fade">{s.linked ? '2 tasks · 2 levels' : '#13'}</Roll>
+                  <Roll variant="fade">{s.linked ? '2 tasks · auto' : '#13'}</Roll>
                 </span>
               </div>
               <div className="ro-sat__body">

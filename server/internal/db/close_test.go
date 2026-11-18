@@ -155,6 +155,10 @@ func TestClosedTreeReleasesNothing(t *testing.T) {
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
 	launch(t, s, ctx, a.ID, "th-a", db.StateSettled)
+	acceptTask(t, s, ctx, a.ID)
+	if _, err := s.UpdateTree(ctx, *b.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartAuto}}); err != nil {
+		t.Fatal(err)
+	}
 	if ids, err := s.LaunchableTasks(ctx); err != nil || !slices.Equal(ids, []int64{b.ID}) {
 		t.Fatalf("launchable while open %v %v", ids, err)
 	}
@@ -198,10 +202,10 @@ func TestActivityReopensTreeAndUnarchivesTask(t *testing.T) {
 	}
 	setState(t, s, ctx, a.ID, db.StateRunning)
 	tree, err := s.GetTree(ctx, *b.TreeID)
-	if err != nil || tree.Status != db.TreeOpen || tree.ClosedAt != nil {
-		t.Fatalf("activity did not reopen %+v %v", tree.Tree, err)
+	if err != nil || tree.Status != db.TreeDone || tree.ClosedAt == nil {
+		t.Fatalf("activity reopened closed tree %+v %v", tree.Tree, err)
 	}
-	if ev := lastEvent(t, s, ctx, a.ID); ev != "tree reopened: became running" {
+	if ev := lastEvent(t, s, ctx, a.ID); ev == "tree reopened: became running" {
 		t.Fatalf("event %q", ev)
 	}
 

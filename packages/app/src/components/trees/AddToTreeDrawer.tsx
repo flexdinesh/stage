@@ -25,7 +25,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const list = trees.data?.trees ?? [];
   const [picked, setPicked] = useState<TreeChoice>("new");
   const [title, setTitle] = useState(task.title);
-  const [mode, setMode] = useState<StartMode>("auto");
+  const [mode, setMode] = useState<StartMode>("manual");
 
   const add = useMutation({
     mutationFn: async (choice: TreeChoice) => {
@@ -87,7 +87,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
               <span className="label-caps">Start mode</span>
               <Segmented label="Start mode" options={MODE_OPTIONS} value={mode} onChange={setMode} />
               <p className="font-mono text-meta text-muted">
-                {mode === "auto" ? "A task starts on its own once every need settles." : "A task reads ready when its needs settle; you start it."}
+                {mode === "auto" ? "A task starts on its own once every need is completed." : "A task reads ready when its needs are completed; you start it."}
               </p>
             </div>
           </>

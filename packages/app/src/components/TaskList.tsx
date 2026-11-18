@@ -93,8 +93,8 @@ function SettledMeta({
   const ran = duration(runStartedAt, runEndedAt);
   return (
     <>
-      <span title={`Settled ${dateTime(settledAt)}`} className="tabular">
-        settled {relativeTime(settledAt)}
+      <span title={`Completed ${dateTime(settledAt)}`} className="tabular">
+        completed {relativeTime(settledAt)}
       </span>
       {ran === null ? null : (
         <span title={`Ran ${dateTime(runStartedAt)} to ${dateTime(runEndedAt)}`} className="tabular">
@@ -231,8 +231,8 @@ export function TaskRow({
             </Link>
           )}
           <span>{modelText(task.model, task.modelOptions)}</span>
-          {task.state === "settled" && task.settledAt !== null ? (
-            <SettledMeta settledAt={task.settledAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
+          {task.completedAt !== null ? (
+            <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (
             <span title={dateTime(since)} className="tabular">
               {relativeTime(since)}

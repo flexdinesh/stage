@@ -45,26 +45,26 @@ T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read
 
 ## Trees
 
-Trees are the only way to express dependencies. A tree is a DAG of tasks; a task's needs are tasks in the same tree that must settle before it starts. A failed need keeps its dependents blocked.
+Trees are the only way to express dependencies. A tree is a DAG of tasks; a task's needs are tasks in the same tree that must be completed by the user in Stage before it starts. Execution outcomes alone keep dependents blocked until user completion.
 
 - `--needs 3,5` / `needs` on `task add` / `create_task` makes the task wait for those tasks (it joins their tree, or starts one). `--tree ID` / `treeId` joins a tree.
 - `stage tree new --title T 3 5:3 7:3,5` / `create_tree` builds a tree from existing tasks (`ID:NEED,NEED`). `tree add`, `tree rm`, `task needs` / `add_to_tree`, `remove_from_tree`, `set_needs` edit it; `tree show` / `get_tree` shows levels, states, needs and readiness.
-- **Start mode**: tasks inherit their tree's mode by default. Set shared policy on the tree (`tree new|edit --start-mode auto|manual`, `update_tree`): auto launches members once their needs settle; manual marks them ready and notifies, and `tree start` / `start_tree` starts every ready member. `--start-mode auto|manual` on a task is a per-task exception; `inherit` clears it.
-- `task start` / `start_task` on a blocked task starts it early and keeps its needs.
+- **Start mode**: tasks inherit their tree's mode by default. Set shared policy on the tree (`tree new|edit --start-mode auto|manual`, `update_tree`): auto launches members once their needs are completed in Stage; manual marks them ready and notifies, and `tree start` / `start_tree` starts every ready member. `--start-mode auto|manual` on a task is a per-task exception; `inherit` clears it.
+- `task start` / `start_task` on a blocked task returns a conflict naming the prerequisites that need user completion.
 - **Close work**: `tree done|archive ID` / `update_tree status` (`--undo` reopens); `task archive ID` / `archive_task` for a standalone task. Neither works while a task is launching, running or needs input. `task rm` / `delete_task` and `tree rm-tree` / `delete_tree` only delete work that never started and has no recorded work.
 
 ## Run after me
 
-`--after-me` / `afterMe` adopts the calling session as a task (stage never starts it) and makes it the new task's first need, so the task starts when the session is settled in T3. It errors without a calling session.
+`--after-me` / `afterMe` adopts the calling session as a task (stage never starts it) and makes it the new task's first need, so the task starts after the user completes the adopted task in Stage. It errors without a calling session.
 
 `stage sessions adopt [THREAD_ID]` / `adopt_session` does the adoption alone (default: the calling session), so a session can be a tree node.
 
 ## Handoff
 
-When a task with needs starts, its launch prompt gets one block per finished need: final reply, PRs, branch/worktree and thread id. Default on.
+When a task with needs starts, its launch prompt gets one block per accepted need: saved reply excerpt, available links, branch/worktree, thread and task/journal references. Default on.
 
 - Turn off with `--handoff=false` on `task add` (`task edit --handoff=true|false`), or `handoff: false` on `create_task` / `update_task`. Omitted keeps the task's value.
-- The reply cap per need is `min(4000, max(1000, 8000 / needs))` chars, with a pointer to `t3_thread_read` when truncated. A failed read skips that need and logs why; the launch still goes ahead.
+- The reply cap per need is `min(4000, max(1000, 8000 / needs))` Unicode characters. Handoff uses the saved accepted snapshot in Stage, without a live source-harness read. Missing replies remain missing; storage errors block launch.
 - `get_task` returns `handoff` and `currentHandoffs` (one per need). `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records.
 
 ## Predecessor base
@@ -115,12 +115,12 @@ A prompt can point at other work with a stage link (`[stage task #12: Fix login]
 
 ```sh
 stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog
-stage task add --title "Deploy" --prompt-file deploy.md --after-me             # runs when this session settles
+stage task add --title "Deploy" --prompt-file deploy.md --after-me             # eligible after user completion of this session's task
 echo "..." | stage task add --title "Refactor" --prompt - --base-ref origin/main --start
 stage task ls --state backlog --json
 stage task wait 42 --until done,settled --timeout 30m                          # exit 3 on timeout
 stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
-stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once 42 settles
+stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
 stage sessions show "$T3CODE_THREAD_ID"                                         # this session's batch
@@ -128,3 +128,5 @@ stage show "http://127.0.0.1:7380/tasks/12"                                     
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
 stage sessions search "token refresh" --project stage                          # titles, then message text via T3
 ```
+
+User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.

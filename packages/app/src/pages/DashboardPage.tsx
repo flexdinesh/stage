@@ -72,12 +72,12 @@ const GROUPS: Group[] = [
   },
   {
     key: "done",
-    title: "Done · awaiting settle in T3",
-    stat: "Awaiting settle",
-    short: "settle",
+    title: "Run finished · awaiting completion",
+    stat: "Review",
+    short: "review",
     tone: "done",
-    states: ["done"],
-    empty: "Nothing to settle. Finished tasks wait here until settled in T3.",
+    states: ["done", "settled"],
+    empty: "Finished runs wait here until you complete their tasks.",
   },
   {
     key: "failed",
@@ -97,7 +97,7 @@ const GROUPS: Group[] = [
     tone: "idle",
     states: ["backlog"],
     filter: (t) => t.readiness === "ready",
-    empty: "Nothing ready. Tree tasks whose needs settled in manual mode, and tree roots, wait here for Start.",
+    empty: "Nothing ready. Tree tasks whose needs are completed in manual mode, and tree roots, wait here for Start.",
     hideEmpty: true,
   },
   {
@@ -124,18 +124,18 @@ const GROUPS: Group[] = [
   },
   {
     key: "settled",
-    title: "Settled · last 7 days",
-    stat: "Settled",
+    title: "Completed · last 7 days",
+    stat: "Completed",
     short: "settled",
     tone: "ok",
     states: ["settled"],
-    empty: "Nothing settled in the last 7 days.",
+    empty: "Nothing completed in the last 7 days.",
     collapsible: true,
   },
 ];
 
 // Settled tasks come from their own windowed query (SETTLED_DAYS); the rest are current totals.
-const LIVE_STATES = GROUPS.flatMap((g) => g.states).filter((s) => s !== "settled");
+const LIVE_STATES = GROUPS.flatMap((g) => g.states);
 const SETTLED_DAYS = 7;
 
 /** Start of the settled window, floored to the hour so the query key stays stable between renders. */
@@ -298,15 +298,15 @@ function Dashboard() {
   const projectQuery = project === "" ? {} : { project: Number(project) };
   const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
   const [since] = useState(settledSince);
-  const settled = useTasks({ state: ["settled"], settledFrom: since, ...projectQuery });
+  const settled = useTasks({ settledFrom: since, ...projectQuery });
   const [settledOpen, setSettledOpen] = useState(false);
-  const all = [...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])];
+  const all = [...new Map([...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])].map((t) => [t.id, t])).values()];
   // Active trees, plus trees completed inside the settled window; members roll up into their tree's row.
   const trees = useTrees({ settledFrom: since, ...projectQuery });
   const split = splitTreeMembers(all, trees.data?.trees ?? []);
   const dueSchedules = useSchedules({ dueWithin: "24h", ...projectQuery });
   const due = dueSchedules.data?.schedules ?? [];
-  const inGroup = (g: Group) => (t: Task) => g.states.includes(t.state) && (g.filter?.(t) ?? true);
+  const inGroup = (g: Group) => (t: Task) => g.key === "settled" ? t.completedAt !== null && t.completedAt >= since : (g.key === "needs" || g.key === "running" || t.acceptanceId === null) && g.states.includes(t.state) && (g.filter?.(t) ?? true);
   // Stat counts include tree members; rows leave out members rolled up into a tree row.
   const byGroup = (g: Group) => all.filter(inGroup(g));
   const rowsOf = (g: Group) => split.rows.filter(inGroup(g));

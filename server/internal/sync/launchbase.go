@@ -35,12 +35,18 @@ func (s *Service) depSourcesOf(task db.Task) *depSources {
 }
 
 // sources are the task's needs in settled or done with a thread, by id
-// (db.HandoffSources); nil without needs.
+// (immutable acceptance pins); nil without needs.
 func (d *depSources) sources(ctx context.Context) ([]db.HandoffSource, error) {
 	if !d.srcDone {
 		d.srcDone = true
 		if len(d.task.Needs) > 0 {
-			d.srcs, d.srcErr = d.s.store.HandoffSources(ctx, d.task.ID)
+			var accepted []db.Acceptance
+			accepted, d.srcErr = d.s.store.AcceptedLaunchInputs(ctx, d.task.ID, d.task.LaunchAttempt)
+			for _, a := range accepted {
+				if a.Evidence.ThreadID != nil {
+					d.srcs = append(d.srcs, db.HandoffSource{TaskID: &a.TaskID, ThreadID: *a.Evidence.ThreadID, Title: a.Evidence.Title, SettledAt: &a.AcceptedAt})
+				}
+			}
 		}
 	}
 	return d.srcs, d.srcErr

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
@@ -14,8 +14,9 @@ import { useT3Destination } from "../../lib/hostState.ts";
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
 /** Ready / blocked for backlog members with readiness, else the task state chip. */
-export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness">; className?: string | undefined }) {
+export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness" | "acceptanceId">; className?: string | undefined }) {
   const s = nodeState(task);
+  if (task.acceptanceId !== null) return <span className="inline-flex flex-wrap gap-1"><Chip tone="ok" dot>completed</Chip>{task.state !== "backlog" ? <TaskStateBadge state={task.state} /> : null}</span>;
   if (s === "ready" || s === "blocked")
     return (
       <Chip tone="idle" dot className={className}>
@@ -25,9 +26,9 @@ export function NodeChip({ task, className }: { task: Pick<Task, "state" | "read
   return <TaskStateBadge state={s} className={className} />;
 }
 
-/** Needs that keep a task blocked (not settled yet), and those among them that failed. */
+/** Needs that keep a task blocked (not accepted yet), and those among them that failed. */
 export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number, Task>): { pending: number[]; failed: number[] } {
-  const pending = task.needs.filter((id) => byId.get(id)?.state !== "settled");
+  const pending = task.needs.filter((id) => byId.get(id)?.acceptanceId == null);
   const failed = pending.filter((id) => {
     const s = byId.get(id)?.state;
     return s === "failed" || s === "interrupted" || s === "cancelled";
@@ -37,14 +38,13 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
 
 /**
  * The node's one action: Open in T3 while it needs input > Start (ready; a blocked
- * task arms "Start before #N settles" first) > Retry (failed) > Open in T3. A done or archived tree offers no Start or
+ * task cannot start) > Retry (failed) > Open in T3. A done or archived tree offers no Start or
  * Retry.
  */
-export function NodeAction({ task, pending, className }: { task: Task; pending: readonly number[]; className?: string }) {
+export function NodeAction({ task, className }: { task: Task; pending: readonly number[]; className?: string }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
-  const [armed, setArmed] = useState(false);
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
@@ -57,21 +57,6 @@ export function NodeAction({ task, pending, className }: { task: Task; pending: 
           Open in T3
         </AppButton>
       );
-  } else if (startable && task.readiness === "blocked") {
-    const verb = `settle${pending.length === 1 ? "s" : ""}`;
-    action = (
-      <Button
-        small
-        variant={armed ? "primary" : "secondary"}
-        busy={start.isPending}
-        title={`Starts it now, before ${ids(pending)} ${verb}; its needs are kept`}
-        onClick={() => (armed ? start.mutate() : setArmed(true))}
-        onBlur={() => setArmed(false)}
-        className={cls}
-      >
-        {armed ? `Start before ${ids(pending)} ${verb}` : "Start"}
-      </Button>
-    );
   } else if (startable) {
     action = (
       <Button small variant={task.state === "backlog" ? "primary" : "secondary"} busy={start.isPending} onClick={() => start.mutate()} className={cls}>
