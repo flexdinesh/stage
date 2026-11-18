@@ -69,9 +69,14 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
-	if req.TreeID != nil || req.Needs != nil || req.NeedsSessionID != nil || req.StartMode != nil ||
+	if req.TreeID != nil || req.Needs != nil || req.NeedsSessionID != nil || req.NeedsSession != nil || req.StartMode != nil ||
 		req.Start || req.StartLocal != nil || req.StartTz != nil {
 		return db.Invalid("treeId, needs, needsSessionId, startMode, start, startLocal and startTz are not schedule fields")
+	}
+	if req.ConnectionID != nil {
+		if _, err := s.Sync.Adapter(*req.ConnectionID); err != nil {
+			return err
+		}
 	}
 	in, err := req.validate()
 	if err != nil {

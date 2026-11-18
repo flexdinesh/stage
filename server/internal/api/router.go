@@ -129,6 +129,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
+	h("GET /api/connections/{connectionId}/sessions/{id}/context", s.sessionContext)
 	h("GET /api/connections/{connectionId}/sessions/{id}", s.getThread)
 	h("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptThread)
 

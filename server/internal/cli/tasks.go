@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -35,12 +36,34 @@ func csv(s string) []string {
 // configFlags are the task configuration flags (task add/edit, schedule
 // add/edit).
 type configFlags struct {
+	connection                                                  int64
+	executionConfig                                             *agenttools.ConfigInput
 	project, title, prompt, promptFile, provider, model, effort string
 	runtime, mode, baseRef, branch, base                        string
 	options, tags, images                                       list
 }
 
+func (f *configFlags) createFlags(c *cmd) {
+	c.fs.Int64Var(&f.connection, "connection", 0, "execution destination connection ID")
+}
+
+func (f *configFlags) configInputFlag(c *cmd) {
+	c.fs.Func("execution-config", "harness configuration as JSON", func(raw string) error {
+		var cfg agenttools.ConfigInput
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&cfg); err != nil {
+			return err
+		}
+		if !json.Valid([]byte(raw)) || strings.TrimSpace(raw) == "null" {
+			return fmt.Errorf("expected one configuration object")
+		}
+		f.executionConfig = &cfg
+		return nil
+	})
+}
 func (f *configFlags) register(c *cmd) {
+	f.configInputFlag(c)
 	c.fs.StringVar(&f.project, "project", "", "project id or title")
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
@@ -101,7 +124,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 		return agenttools.ConfigArgs{}, err
 	}
 	return agenttools.ConfigArgs{
-		Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
+		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
 		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
 		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, ImagePaths: f.images,
 	}, nil
@@ -135,7 +158,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
 		Provider: strFlag(c, "provider", f.provider), Model: strFlag(c, "model", f.model),
 		Effort: strFlag(c, "effort", f.effort), Options: opts, RuntimeMode: strFlag(c, "runtime", f.runtime),
 		InteractionMode: strFlag(c, "mode", f.mode), BaseRef: strFlag(c, "base-ref", f.baseRef),
@@ -221,6 +244,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		return runNotes(ctx, env, "task", rest)
 	case "ls", "list":
 		var a agenttools.ListTasksArgs
+		origin := c.sessionFlags("origin")
 		c.fs.StringVar(&a.OriginThreadID, "origin-thread", "", "creator session id")
 		var states string
 		c.fs.StringVar(&a.Project, "project", "", "project")
@@ -230,6 +254,11 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		c.fs.StringVar(&a.Closed, "closed", "", "false|true|all (default false: open tasks only)")
 		c.fs.IntVar(&a.Limit, "limit", 50, "max rows")
 		if err := c.parse(rest); err != nil {
+			return err
+		}
+		var err error
+		a.OriginSession, err = origin()
+		if err != nil {
 			return err
 		}
 		a.States = csv(states)
@@ -252,7 +281,9 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		}
 		return c.out(res, func(w io.Writer) { printTaskDetail(w, res) })
 	case "add", "create", "new":
+		caller := c.sessionFlags("caller")
 		var f configFlags
+		f.createFlags(c)
 		var wf waitFlags
 		var initialNote string
 		var start bool
@@ -271,7 +302,12 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
+		ref, err := caller()
+		if err != nil {
+			return err
+		}
 		res, err := o().CreateTask(ctx, agenttools.CreateTaskArgs{
+			CallerArgs: agenttools.CallerArgs{CallerSession: ref},
 			ConfigArgs: cfg, Start: start, InitialNote: initialNote,
 			WaitArgs: agenttools.WaitArgs{
 				TreeID: int64Flag(c, "tree", wf.tree), Needs: needs, AfterMe: wf.afterMe,
@@ -454,7 +490,9 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 		}
 		return c.out(res, func(w io.Writer) { printScheduleDetail(w, res) })
 	case "add", "create", "new":
+		caller := c.sessionFlags("caller")
 		var f configFlags
+		f.createFlags(c)
 		var a agenttools.CreateScheduleArgs
 		f.register(c)
 		c.fs.StringVar(&a.Notes, "notes", "", "note template for spawned tasks")
@@ -465,6 +503,10 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		cfg, err := f.create(c)
+		if err != nil {
+			return err
+		}
+		a.CallerSession, err = caller()
 		if err != nil {
 			return err
 		}
@@ -563,6 +605,11 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 	switch v {
 	case "adopt", "track":
 		var a agenttools.AdoptSessionArgs
+		caller := c.sessionFlags("caller")
+		target := c.sessionFlags("target")
+		var projectID int64
+		c.fs.Int64Var(&projectID, "project", 0, "bind to this Stage project ID")
+		c.fs.StringVar(&a.NewProjectTitle, "new-project", "", "bind to a new project")
 		var tags list
 		var tree int64
 		c.fs.StringVar(&a.Title, "title", "", "task title (default: the session title)")
@@ -579,6 +626,16 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 		default:
 			return usagef("sessions adopt: want at most one thread id (default: your session)")
 		}
+		var err error
+		a.CallerSession, err = caller()
+		if err != nil {
+			return err
+		}
+		a.Session, err = target()
+		if err != nil {
+			return err
+		}
+		a.ProjectID = int64Flag(c, "project", projectID)
 		a.Tags, a.TreeID = tags, int64Flag(c, "tree", tree)
 		res, err := c.ops().AdoptSession(ctx, a)
 		if err != nil {

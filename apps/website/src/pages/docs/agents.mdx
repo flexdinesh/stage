@@ -1,12 +1,12 @@
 ---
 title: Agents
-description: Let agents running in T3 queue and manage stage tasks, trees and journals through the stage CLI, a stdio MCP server or the HTTP MCP endpoint.
+description: Give harness sessions access to Stage tasks, trees and journals through the stage CLI, a stdio MCP server or the HTTP MCP endpoint.
 showAskAi: false
 ---
 
 # Agents
 
-Agents (Claude Code, Codex, ...) running in T3 can queue and manage stage tasks and trees, and read and write journals. Three front ends share one set of operations over the server's REST API. No gating: agents get the same access as the web UI.
+Agents can create work, read accepted results and contribute journal notes through the CLI, stdio MCP or HTTP MCP. Only the user can complete a task in Stage.
 
 ## Front ends
 
@@ -35,13 +35,29 @@ stage setup instructions     # idempotent usage block in ~/.claude/CLAUDE.md and
 - `STAGE_URL` (or `--url`) points the CLI and stdio MCP at the server: an `http(s)` URL, or `unix:///abs/path.sock` for a socket. Unset, they use the private default socket when a server owns it, else `http://127.0.0.1:7380`. `stage status` shows which server the CLI reaches.
 - `stage setup mcp` passes an explicit `STAGE_URL` to the stdio server. `--http` needs an `http(s)` URL, so use stdio with a socket.
 
+### OpenCode V2
+
+With an OpenCode connection configured in Stage, register Stage using OpenCode’s native MCP command. Choose one transport.
+
+```sh
+opencode mcp add stage -- stage mcp
+# Or use a Stage HTTP listener reachable from OpenCode
+opencode mcp add stage --url http://127.0.0.1:7380/mcp
+opencode mcp list
+```
+
+Invoke `get_context` from a conversation. Check the session, project and owning task. An external session can legitimately have no Stage task. OpenCode attaches the session ID to individual calls, including calls over shared connections. [OpenCode MCP context](https://opencode.ai/docs/mcp-servers/#context)
+
 ## Caller context
 
-T3 sets `T3CODE_THREAD_ID` in every provider process. The CLI and stdio MCP read it and the cwd; HTTP MCP tools take `callerThreadId` / `cwd` arguments instead (required for context over HTTP). `stage context` / `get_context` shows the session, cwd, resolved project, owning task and current tree.
+The T3 CLI reads `T3CODE_THREAD_ID`. A shared MCP process uses per-call identity. For T3 over HTTP or shared stdio, pass `callerThreadId` from the current session. When migrating a stdio registration dedicated to exactly one T3 session, rerun `stage setup mcp --t3-session-env` or change its command to `stage mcp --t3-session-env` to retain environment attribution.
 
-- **Project**: explicit `--project` (id or unambiguous exact title) > the calling session's explicitly bound project. Cwd is context only; directory strings across machines do not establish identity.
-- **Model**: explicit (provider inferred from the model via the catalog) > pinned default > last used > T3 default, like the New task form.
-- **Provenance**: tasks and schedules record the creating session (`originThreadId`; spawned schedule tasks inherit it), shown as "Created by" on task detail and "by agent" on task rows.
+Intermediaries can pass `callerSession` with `connectionId` and `externalSessionId`. The CLI equivalent is `--caller-connection ID --caller-session ID`. A conflicting OpenCode claim returns an error. Without session context, supply a project or journal owner explicitly. Stage leaves the author session empty.
+
+- `stage context --json` shows the current owner and tree. The owner remains available offline. An unowned session resolves through its verified project binding. Supply `--project` to select another Stage project.
+- `stage projects ls --json` lists bindings and connections. Use `--connection ID` or MCP `connectionId` to select a destination. A sole binding supplies the default. With both harnesses bound, choose one explicitly. Identifiable legacy T3 callers retain their T3 default.
+- `stage models ls --connection ID --json` lists harness capabilities. For task or schedule configuration, pass the advertised values in `--execution-config JSON` or MCP `executionConfig`. Existing T3 provider and model flags remain available.
+- Tasks and schedules record the creator in `originSession`. Schedule-created tasks inherit the same origin. The creator can use a different harness from the one selected for execution.
 
 ## Trees
 
@@ -57,7 +73,7 @@ Trees are the only way to express dependencies. A tree is a DAG of tasks; a task
 
 `--after-me` / `afterMe` adopts the calling session as a task (stage never starts it) and makes it the new task's first need, so the task starts after the user completes the adopted task in Stage. It errors without a calling session.
 
-`stage sessions adopt [THREAD_ID]` / `adopt_session` does the adoption alone (default: the calling session), so a session can be a tree node.
+Use `adopt_session` to track your own session, or pass `session` to select a target. The CLI accepts `stage sessions adopt --target-connection ID --target-session ID`. For an unbound workspace, choose an existing Stage project with `--project ID` or create one with `--new-project TITLE`. An initial note records the caller who wrote it.
 
 ## Handoff
 
@@ -88,11 +104,11 @@ Every task and tree has an append-only journal ([Journals](/docs/features#journa
 
 ## References
 
-A prompt can point at other work with a stage link (`[stage task #12: Fix login](http://host:7380/tasks/12)`, `.../sessions/<id>`, any host), a T3 thread link, `#12` or a thread id. `read_ref` / `stage show REF` returns the task and/or session (task prompt, state, handoff, latest reply and explicit session metadata); `t3_thread_read` on the returned session id reads the full conversation. `stage setup instructions` tells agents to do this; rerun it to add the rule to an existing block.
+Use `read_ref` or `stage show REF` for Stage task links, historical T3 links and scoped session paths such as `/connections/2/sessions/EXTERNAL_ID`. For an opaque ID, pass `session` to MCP or `--target-connection ID --target-session ID` to the CLI. Task references include Stage’s saved results and available links. Open the native harness to continue the conversation.
 
 ## Session batch
 
-`list_tasks {originThreadId}` (CLI `stage task ls --origin-thread ID`) lists a creator session's tasks. `get_task` returns the grouped `batch`. Task detail opens a Batch drawer with selection, editing, and Parallel or Chain tree creation.
+`list_tasks {originSession}` (CLI `stage task ls --origin-connection ID --origin-session ID`) lists a creator session's tasks. `get_task` returns the grouped `batch`. Task detail opens a Batch drawer with selection, editing, and Parallel or Chain tree creation.
 
 ## MCP tools
 
@@ -123,10 +139,9 @@ stage tree new --title "Auth" 41 43:41 42:43                                   #
 stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
-stage sessions show "$T3CODE_THREAD_ID"                                         # this session's batch
+stage task ls --origin-thread "$T3CODE_THREAD_ID"                              # tasks created by this T3 session
 stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
-stage sessions search "token refresh" --project stage                          # titles, then message text via T3
 ```
 
 User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.

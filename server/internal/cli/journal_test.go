@@ -26,7 +26,7 @@ func TestJournalCommands(t *testing.T) {
 				t.Error(err)
 			}
 			if in.RequestID == "" || in.Text != "high signal\ncontext" || in.Category != "finding" ||
-				in.SourceThreadID == nil || *in.SourceThreadID != "caller" {
+				in.SourceSession == nil || *in.SourceSession != (db.SessionRef{ConnectionID: 1, ExternalSessionID: "caller"}) {
 				t.Errorf("note body %+v", in)
 			}
 			if r.URL.Path == "/api/trees/2/journal" && (in.SourceTaskID == nil || *in.SourceTaskID != 1) {

@@ -45,11 +45,7 @@ plugin registration or service installation framework.
   `Links.executionDestination`. Product code does not inspect browser location
   or dispatch native URLs directly.
 
-Task 5 can make MCP and CLI context harness-neutral using scoped observations,
-capabilities and configuration without reading T3 transport types. Task 6 can
-implement the OpenCode adapter against these contracts. Neither task should add global conversation
-browsing, transcripts, follow-ups, question answering or detailed run panels.
-OpenCode remains storage-only in this change.
+Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. Task 6 supplies the live OpenCode adapter. Task 245 verifies the agent interface with isolated adapters. See [agent interface](api.md#agent-interface) for inputs and compatibility.
 
 ## Durable launch lifecycle
 

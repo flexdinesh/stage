@@ -36,12 +36,16 @@ func runSetup(env Env, args []string) error {
 // Claude Code (user scope) and Codex. Default: both.
 func setupMCP(env Env, args []string) error {
 	c := newCmd(env, "setup mcp")
-	var claude, codex, http bool
+	var claude, codex, http, dedicated bool
 	c.fs.BoolVar(&claude, "claude", false, "Claude Code")
 	c.fs.BoolVar(&codex, "codex", false, "Codex")
+	c.fs.BoolVar(&dedicated, "t3-session-env", false, "register dedicated T3 stdio with caller environment enabled")
 	c.fs.BoolVar(&http, "http", false, "register the server's HTTP /mcp endpoint instead of stdio")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if dedicated && http {
+		return usagef("--t3-session-env requires dedicated stdio")
 	}
 	if !claude && !codex {
 		claude, codex = true, true
@@ -69,6 +73,10 @@ func setupMCP(env Env, args []string) error {
 	}
 	endpoint := strings.TrimRight(base, "/") + "/mcp"
 
+	stdio := []string{env.Executable, "mcp"}
+	if dedicated {
+		stdio = append(stdio, "--t3-session-env")
+	}
 	var errs []error
 	if claude {
 		_ = env.Exec("claude", "mcp", "remove", "--scope", "user", mcpName) // re-register
@@ -79,7 +87,8 @@ func setupMCP(env Env, args []string) error {
 			for _, e := range urlEnv {
 				args = append(args, "-e", e)
 			}
-			args = append(args, mcpName, "--", env.Executable, "mcp")
+			args = append(args, mcpName, "--")
+			args = append(args, stdio...)
 		}
 		errs = append(errs, register(env, "claude", args))
 	}
@@ -92,7 +101,8 @@ func setupMCP(env Env, args []string) error {
 			for _, e := range urlEnv {
 				args = append(args, "--env", e)
 			}
-			args = append(args, "--", env.Executable, "mcp")
+			args = append(args, "--")
+			args = append(args, stdio...)
 		}
 		errs = append(errs, register(env, "codex", args))
 	}

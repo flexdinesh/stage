@@ -1,6 +1,4 @@
-// Package agentctx resolves the calling agent's context: its T3 session
-// (T3CODE_THREAD_ID, set by T3 in every provider process) and working
-// directory, and from those the stage project it works in.
+// Package agentctx resolves per-call session identity and Stage project ownership.
 package agentctx
 
 import (
@@ -20,11 +18,12 @@ const ThreadEnv = "T3CODE_THREAD_ID"
 
 // Caller is the calling agent's context; empty fields are unknown.
 type Caller struct {
-	ThreadID string `json:"threadId"`
-	Cwd      string `json:"cwd"`
+	Session  *db.SessionRef `json:"session"`
+	ThreadID string         `json:"threadId"`
+	Cwd      string         `json:"cwd"`
 }
 
-// FromEnv reads the caller from the process environment (CLI, stdio MCP).
+// FromEnv reads process-local context for the CLI or explicitly dedicated T3 stdio.
 func FromEnv() Caller {
 	c := Caller{ThreadID: strings.TrimSpace(os.Getenv(ThreadEnv))}
 	if wd, err := os.Getwd(); err == nil {
@@ -33,25 +32,35 @@ func FromEnv() Caller {
 	return c
 }
 
-// Merge returns c with non-empty override fields applied (tool arguments win
-// over the environment).
-func (c Caller) Merge(threadID, cwd string) Caller {
-	if s := strings.TrimSpace(threadID); s != "" {
-		c.ThreadID = s
+// Resolve combines an explicit caller with a per-call transport claim.
+func (c Caller) Resolve(explicit *db.SessionRef, legacy, cwd string, meta *db.SessionRef) (Caller, error) {
+	legacy = strings.TrimSpace(legacy)
+	if legacy != "" && explicit != nil {
+		return Caller{}, errors.New("pass callerSession or callerThreadId")
+	}
+	if legacy != "" {
+		explicit = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: legacy}
+	}
+	if explicit != nil && (explicit.ConnectionID <= 0 || strings.TrimSpace(explicit.ExternalSessionID) == "") {
+		return Caller{}, errors.New("callerSession requires connectionId and externalSessionId")
+	}
+	if meta != nil && explicit != nil && *meta != *explicit {
+		return Caller{}, errors.New("callerSession conflicts with OpenCode request metadata; remove the conflicting caller argument")
+	}
+	switch {
+	case meta != nil:
+		c.Session = meta
+		c.ThreadID = ""
+	case explicit != nil:
+		c.Session = explicit
+		c.ThreadID = legacy
+	case c.Session == nil && c.ThreadID != "":
+		c.Session = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: c.ThreadID}
 	}
 	if s := strings.TrimSpace(cwd); s != "" {
 		c.Cwd = s
 	}
-	return c
-}
-
-// ThreadPtr is ThreadID or nil when unknown.
-func (c Caller) ThreadPtr() *string {
-	if c.ThreadID == "" {
-		return nil
-	}
-	id := c.ThreadID
-	return &id
+	return c, nil
 }
 
 // ErrNoProject: no project could be resolved.
@@ -61,30 +70,26 @@ var ErrNoProject = errors.New("no project")
 // case-insensitive, unambiguous) > the caller session's project. Paths are
 // not evidence of shared filesystem identity. Source: explicit | session.
 func ResolveProject(ctx context.Context, c *client.Client, caller Caller, explicit string) (db.Project, string, error) {
-	projects, err := c.Projects(ctx)
-	if err != nil {
-		return db.Project{}, "", err
-	}
 	if s := strings.TrimSpace(explicit); s != "" {
+		projects, err := c.Projects(ctx)
+		if err != nil {
+			return db.Project{}, "", err
+		}
 		if p, ok := matchProject(projects, s); ok {
 			return p, "explicit", nil
 		}
 		return db.Project{}, "", fmt.Errorf("%w %q; projects: %s", ErrNoProject, s, projectNames(projects))
 	}
-	if caller.ThreadID != "" {
-		d, err := c.Thread(ctx, caller.ThreadID)
-		switch {
-		case err == nil && d.Thread.ProjectID != nil:
-			for _, p := range projects {
-				if p.ID == *d.Thread.ProjectID {
-					return p, "session", nil
-				}
-			}
-		case err != nil && !client.IsStatus(err, 404) && !client.IsStatus(err, 503) && !client.IsStatus(err, 502):
-			return db.Project{}, "", err
+	if caller.Session != nil {
+		d, err := c.SessionContext(ctx, *caller.Session)
+		if err != nil {
+			return db.Project{}, "", fmt.Errorf("resolve caller project or pass project explicitly: %w", err)
+		}
+		if d.Project != nil {
+			return *d.Project, "session", nil
 		}
 	}
-	return db.Project{}, "", fmt.Errorf("%w for this session or directory; pass a project (id or title): %s", ErrNoProject, projectNames(projects))
+	return db.Project{}, "", fmt.Errorf("%w for this caller; pass project (id or unambiguous title)", ErrNoProject)
 }
 
 func matchProject(projects []db.Project, s string) (db.Project, bool) {

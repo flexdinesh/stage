@@ -28,7 +28,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
- "github.com/flexdinesh/stage/server/internal/t3setup"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
 var testDB dbtest.DB
@@ -52,7 +52,7 @@ func newHarness(t *testing.T) *harness {
 	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
 	h.handler = api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, Setup:t3setup.New(t3setup.Options{Config:config.Config{T3URL:"http://127.0.0.1:3773",T3PublicURL:"http://t3.test"},Store:store,Client:h.fake,Fake:true,Logger:log}), Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log}), Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)
@@ -448,6 +448,14 @@ func TestSetupMCP(t *testing.T) {
 	}
 	if got := fmt.Sprint(h.execs); got != "[[claude mcp remove --scope user stage] [claude mcp add --scope user --transport http stage http://localhost:7380/mcp]]" {
 		t.Fatalf("http execs %s", got)
+	}
+	h.execs = nil
+	if code, _, stderr := h.run("", "setup", "mcp", "--claude", "--t3-session-env"); code != 0 || !strings.Contains(fmt.Sprint(h.execs), "stage mcp --t3-session-env]") {
+		t.Fatalf("dedicated stdio: %s %v", stderr, h.execs)
+	}
+	h.execs = nil
+	if code, _, _ := h.run("", "setup", "mcp", "--http", "--t3-session-env"); code != 2 || len(h.execs) != 0 {
+		t.Fatalf("invalid HTTP registration: %d %v", code, h.execs)
 	}
 	// A unix socket URL passes through unchanged to the stdio server; agents
 	// cannot reach HTTP MCP over a socket.

@@ -215,11 +215,14 @@ func (o *Ops) SetNeeds(ctx context.Context, a SetNeedsArgs) (client.Task, error)
 
 // AdoptSessionArgs is adopt_session.
 type AdoptSessionArgs struct {
-	ThreadID    string   `json:"threadId,omitempty" jsonschema:"T3 thread id of a top-level session; default: your own session"`
-	Title       string   `json:"title,omitempty" jsonschema:"task title; default: the session title"`
-	InitialNote string   `json:"initialNote,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	TreeID      *int64   `json:"treeId,omitempty" jsonschema:"also put the task in this tree (no needs)"`
+	Session         *db.SessionRef `json:"session,omitempty" jsonschema:"target session on its connection; omitted uses caller"`
+	ProjectID       *int64         `json:"projectId,omitempty"`
+	NewProjectTitle string         `json:"newProjectTitle,omitempty"`
+	ThreadID        string         `json:"threadId,omitempty" jsonschema:"T3 thread id of a top-level session; default: your own session"`
+	Title           string         `json:"title,omitempty" jsonschema:"task title; default: the session title"`
+	InitialNote     string         `json:"initialNote,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	TreeID          *int64         `json:"treeId,omitempty" jsonschema:"also put the task in this tree (no needs)"`
 	CallerArgs
 }
 
@@ -233,15 +236,28 @@ type AdoptOut struct {
 // AdoptSession tracks a session as a task ("Track as task") so it can be a
 // tree node. stage never starts it; follow-ups and stop work.
 func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, error) {
-	id := strings.TrimSpace(a.ThreadID)
-	if id == "" {
-		id = o.caller(a.CallerArgs).ThreadID
+	c, err := o.caller(ctx, a.CallerArgs)
+	if err != nil {
+		return AdoptOut{}, err
 	}
-	if id == "" {
-		return AdoptOut{}, errors.New("threadId is required outside a T3 session (T3CODE_THREAD_ID) or pass callerThreadId")
+	ref := a.Session
+	if id := strings.TrimSpace(a.ThreadID); id != "" {
+		if ref != nil {
+			return AdoptOut{}, errors.New("choose session or legacy threadId")
+		}
+		ref = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: id}
 	}
-	t, created, err := o.Client.AdoptThread(ctx, id, client.AdoptSession{
-		Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), Tags: a.Tags, TreeID: a.TreeID,
+	if ref == nil {
+		ref = c.Session
+	}
+	if ref != nil && (ref.ConnectionID <= 0 || strings.TrimSpace(ref.ExternalSessionID) == "") {
+		return AdoptOut{}, errors.New("target session requires connectionId and externalSessionId")
+	}
+	if ref == nil {
+		return AdoptOut{}, errors.New("session or threadId is required outside a harness session; pass the target session")
+	}
+	t, created, err := o.Client.AdoptScoped(ctx, *ref, client.AdoptSession{
+		CallerSession: c.Session, ProjectID: a.ProjectID, NewProjectTitle: a.NewProjectTitle, Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), Tags: a.Tags, TreeID: a.TreeID,
 	})
 	return AdoptOut{Task: t, Created: created}, err
 }

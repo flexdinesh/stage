@@ -25,9 +25,10 @@ const (
 // Ref is a parsed reference: TaskID for a task, ThreadID (T3 thread id) for
 // a session.
 type Ref struct {
-	Kind     Kind
-	TaskID   int64
-	ThreadID string
+	ConnectionID int64
+	Kind         Kind
+	TaskID       int64
+	ThreadID     string
 }
 
 // ErrInvalid: the input names no task or session.
@@ -117,6 +118,13 @@ func stagePath(u *url.URL) (Ref, bool) {
 		r, err := taskRef(id)
 		return r, err == nil
 	case "sessions":
+		if len(segs) >= 4 && segs[len(segs)-4] == "connections" {
+			c, err := strconv.ParseInt(segs[len(segs)-3], 10, 64)
+			if err != nil || c <= 0 {
+				return Ref{}, false
+			}
+			return Ref{Kind: KindSession, ConnectionID: c, ThreadID: id}, true
+		}
 		return Ref{Kind: KindSession, ThreadID: id}, true
 	}
 	return Ref{}, false

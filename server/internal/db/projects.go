@@ -37,6 +37,14 @@ func (s *Store) ListProjects(ctx context.Context, archived string) ([]Project, e
 	}
 	return collectRows(rows, scanProject)
 }
+
+// BoundProject resolves the verified workspace in a single connection.
+func (s *Store) BoundProject(ctx context.Context, b ProjectBinding) (Project, error) {
+	return scanProject(s.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE id=(
+		SELECT project_id FROM project_bindings WHERE connection_id=$1 AND external_project_id=$2
+		AND workspace=$3 AND active=1 AND status='available')`, b.ConnectionID, b.ExternalProjectID, b.Workspace))
+}
+
 func (s *Store) GetProject(ctx context.Context, id int64) (Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE id=$1`, id))
 }

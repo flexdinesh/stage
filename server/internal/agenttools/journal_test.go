@@ -35,11 +35,11 @@ func TestJournalMCPInputs(t *testing.T) {
 				t.Error(err)
 			}
 			if r.URL.Path != "/api/trees/2/journal" || in.RequestID != "key" || in.Text != "decision" ||
-				in.SourceThreadID == nil || *in.SourceThreadID != "override" || in.SourceTaskID == nil || *in.SourceTaskID != 3 {
+				in.SourceSession == nil || *in.SourceSession != (db.SessionRef{ConnectionID: 1, ExternalSessionID: "override"}) || in.SourceTaskID == nil || *in.SourceTaskID != 3 {
 				t.Errorf("append %s %+v", r.URL, in)
 			}
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(db.JournalEntry{ID: 9, Text: in.Text, SourceThreadID: in.SourceThreadID})
+			_ = json.NewEncoder(w).Encode(db.JournalEntry{ID: 9, Text: in.Text, SourceSession: in.SourceSession})
 		}
 	}))
 	defer srv.Close()
@@ -75,7 +75,7 @@ func TestJournalMCPInputs(t *testing.T) {
 	mustCall(t, cs, "append_note", map[string]any{
 		"treeId": 2, "text": "decision", "requestId": "key", "sourceTaskId": 3, "callerThreadId": "override",
 	}, &entry)
-	if entry.ID != 9 || entry.SourceThreadID == nil || *entry.SourceThreadID != "override" {
+	if entry.ID != 9 || entry.SourceSession == nil || entry.SourceSession.ExternalSessionID != "override" {
 		t.Fatalf("entry %+v", entry)
 	}
 	mustCall(t, cs, "get_journal_entry", map[string]any{"id": 9}, &entry)

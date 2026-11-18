@@ -2,11 +2,11 @@ package api
 
 import (
 	"context"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"strconv"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -34,7 +34,9 @@ type threadJSON struct {
 }
 
 type taskDetailJSON struct {
-	Acceptances []db.Acceptance `json:"acceptances"`
+	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
+	Links       execution.Links  `json:"links"`
+	Acceptances []db.Acceptance  `json:"acceptances"`
 	taskJSON
 	Events []db.TaskEvent `json:"events"`
 	Thread *threadJSON    `json:"thread"`
