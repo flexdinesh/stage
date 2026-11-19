@@ -70,7 +70,7 @@ func TestTreesLifecycle(t *testing.T) {
 		map[string]any{"taskId": b.ID, "needs": []int64{a.ID}},
 		map[string]any{"taskId": c.ID, "needs": []int64{a.ID, b.ID}, "startMode": "auto"},
 	}}, 201, &tr)
-	if tr.Title != "T" || tr.StartMode != "manual" || len(tr.Tasks) != 3 || len(tr.Edges) != 3 ||
+	if tr.Title != "T" || tr.StartMode != "auto" || len(tr.Tasks) != 3 || len(tr.Edges) != 3 ||
 		fmt.Sprint(tr.Levels) != fmt.Sprint([][]int64{{a.ID}, {b.ID}, {c.ID}}) {
 		t.Fatalf("tree %+v", tr)
 	}
@@ -315,7 +315,7 @@ func TestCreateWithNeedsResolvesTree(t *testing.T) {
 
 	c := e.task(p.ID, "c", map[string]any{"needs": []int64{a.ID}})
 	ta := e.getTask(c.ID).Tree
-	if ta == nil || ta.Title != "a" || ta.StartMode != "manual" || len(ta.Tasks) != 2 {
+	if ta == nil || ta.Title != "a" || ta.StartMode != "auto" || len(ta.Tasks) != 2 {
 		t.Fatalf("new tree after the first need %+v", ta)
 	}
 	d := e.task(p.ID, "d", map[string]any{"needs": []int64{b.ID}})

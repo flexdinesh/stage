@@ -78,6 +78,9 @@ func TestSettlementNeverAcceptsNewWork(t *testing.T) {
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "source", nil)
 	b := mustTask(t, s, ctx, p.ID, "dependent", []int64{a.ID})
+	if _, err := s.UpdateTree(ctx, *b.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, state := range []db.TaskState{db.StateDone, db.StateSettled, db.StateInterrupted, db.StateFailed, db.StateCancelled} {
 		setState(t, s, ctx, a.ID, state)
 		if got := getTask(t, s, ctx, b.ID); readiness(got) != "blocked" {

@@ -357,6 +357,41 @@ func readiness(t client.Task) string {
 	return string(*t.Readiness)
 }
 
+func TestTreeDefaultsToAutoAndTasksInherit(t *testing.T) {
+	e := newEnv(t)
+	e.project("/w/default-auto")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/default-auto"}})
+	var a, b client.Task
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "a"}, &a)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "b"}, &b)
+	var tree client.TreeDetail
+	mustCall(t, cs, "create_tree", map[string]any{
+		"title": "Defaults", "tasks": []map[string]any{{"id": a.ID}, {"id": b.ID, "needs": []int64{a.ID}}},
+	}, &tree)
+	if tree.StartMode != db.StartAuto {
+		t.Fatalf("create_tree without startMode: %+v", tree.StartMode)
+	}
+	for _, m := range tree.Tasks {
+		if m.StartMode != nil || m.EffectiveStartMode == nil || *m.EffectiveStartMode != db.StartAuto {
+			t.Fatalf("member must inherit auto: %+v", m)
+		}
+	}
+	var c client.Task
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "c", "prompt": "c", "needs": []int64{b.ID}}, &c)
+	if c.StartMode != nil || c.EffectiveStartMode == nil || *c.EffectiveStartMode != db.StartAuto {
+		t.Fatalf("create_task with needs must inherit auto: %+v", c)
+	}
+	var d, x client.Task
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "d", "prompt": "d"}, &d)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "x", "needs": []int64{d.ID}}, &x)
+	if x.TreeID == nil || x.StartMode != nil || x.EffectiveStartMode == nil || *x.EffectiveStartMode != db.StartAuto {
+		t.Fatalf("implicit tree from needs must be auto and inherited: %+v", x)
+	}
+	if strings.Contains(agenttools.Guide, "default to manual") {
+		t.Fatal("guide must not steer agents to manual")
+	}
+}
+
 func TestTreeStartModeDefaultsToInherit(t *testing.T) {
 	e := newEnv(t)
 	e.project("/w/inherit")

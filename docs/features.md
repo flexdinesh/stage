@@ -29,6 +29,6 @@ Detailed behavior of each stage feature. User guide: [stage.hoplabs.dev/docs/fea
 
 Pre-existing external T3 sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row.
 
-User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.
+User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to auto and tasks inherit; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.
 
 Unconfirmed launches reconcile automatically without creating a new attempt. For older launches without safe identity, use **Link existing session** on task detail: paste a T3 link, preview, then attach. Attachment launches no work.

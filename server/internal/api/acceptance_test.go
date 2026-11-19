@@ -121,6 +121,7 @@ func TestManualReadinessReopenAndMissingEvidence(t *testing.T) {
 	p := e.project("/w/manual")
 	a := e.task(p.ID, "no execution", nil)
 	b := e.task(p.ID, "dependent", map[string]any{"needs": []int64{a.ID}})
+	e.must("PATCH", treePath(*b.TreeID), map[string]any{"startMode": "manual"}, 200, nil)
 	e.complete(a.ID)
 	_ = e.runner.Reconcile(ctx)
 	if got := e.getTask(b.ID); readinessOf(got) != "ready" || got.LaunchAttempt != 0 {
