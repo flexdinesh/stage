@@ -104,7 +104,8 @@ func (h *harness) project(root string) db.Project {
 	if _, err := h.sync.FullSync(ctx); err != nil {
 		h.t.Fatal(err)
 	}
-	p, err := db.NewStore(testDB.Pool).InsertProject(ctx, db.Project{Title: tp.Title, Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: tp.ID, Workspace: root}}})
+	// The sync pass imports the T3 project.
+	p, err := db.NewStore(testDB.Pool).BoundProject(ctx, db.ProjectBinding{ConnectionID: 1, ExternalProjectID: tp.ID, Workspace: root})
 	if err != nil {
 		h.t.Fatal(err)
 	}

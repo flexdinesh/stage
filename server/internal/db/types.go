@@ -67,6 +67,21 @@ type Project struct {
 	UpdatedAt  time.Time        `json:"updatedAt"`
 	// LastActivityAt: latest thread update/settle or task update; nil when none.
 	LastActivityAt *time.Time `json:"lastActivityAt"`
+	// Origin is "discovered" for a project discovery imported, else nil.
+	Origin     *string    `json:"origin"`
+	ImportedAt *time.Time `json:"importedAt"`
+	// Repos: distinct normalized origin remotes of the active bindings'
+	// workspaces. Search metadata only; titles and paths stay authoritative.
+	Repos []string `json:"repos"`
+}
+
+// ImportSummary counts the projects one connection's discovery created in
+// the recent window (ImportNoticeWindow), with the latest import time.
+type ImportSummary struct {
+	ConnectionID int64     `json:"connectionId"`
+	Harness      string    `json:"harness"`
+	Count        int       `json:"count"`
+	At           time.Time `json:"at"`
 }
 
 // Workspace bases: ref (the worktree starts from BaseRef) or predecessor

@@ -44,6 +44,15 @@ type WorkspaceInfo struct {
 	DeletedAt     *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// Importable: the harness treats it as a deliberate project, so
+	// discovery may import it as a Stage project (docs/architecture.md).
+	Importable bool `json:"-"`
+	// ActiveAt: last harness activity, when reported; picks among IDs
+	// sharing one workspace.
+	ActiveAt *time.Time `json:"-"`
+	// Repo: normalized origin remote (host/owner/name), "" when unknown.
+	// Search metadata only; never an identity.
+	Repo string `json:"-"`
 }
 type ModelOption struct {
 	ID    string      `json:"id"`

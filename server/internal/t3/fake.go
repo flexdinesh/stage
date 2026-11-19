@@ -194,7 +194,12 @@ func (f *Fake) Unpair(context.Context) error {
 func (f *Fake) ListProjects(context.Context) ([]Project, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.projects), nil
+	out := slices.Clone(f.projects)
+	// As the wire decoding does: a live project is importable.
+	for i := range out {
+		out[i].Importable = out[i].ArchivedAt == nil && out[i].DeletedAt == nil
+	}
+	return out, nil
 }
 
 func (f *Fake) CreateProject(_ context.Context, in CreateProjectInput) (Project, error) {

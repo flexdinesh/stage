@@ -188,11 +188,10 @@ func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	adapter, err := s.Sync.Adapter(id)
-	if err != nil {
+	if _, err = s.Sync.Adapter(id); err != nil {
 		return err
 	}
-	ps, err := adapter.Workspaces(r.Context())
+	ps, err := s.Sync.Inventory(r.Context(), id)
 	if err != nil {
 		return &db.HarnessError{Err: err}
 	}

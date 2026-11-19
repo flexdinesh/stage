@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { matchProjects } from "../src/lib/projects.ts";
+import { importNotice, matchProjects, projectDetail, projectsForConnection, repoLabel } from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 test("project edits and bindings send JSON objects through the shared transport", async () => {
@@ -17,9 +17,9 @@ test("project edits and bindings send JSON objects through the shared transport"
   ]);
 });
 
-const project = (id, title, workspaceRoot, lastActivityAt) => ({
-  id, title, bindings: [{connectionId: 1, externalProjectId: `t3-${id}`, workspace: workspaceRoot}], archivedAt: null,
-  createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt,
+const project = (id, title, workspaceRoot, lastActivityAt, repos = []) => ({
+  id, title, bindings: [{connectionId: 1, externalProjectId: `t3-${id}`, workspace: workspaceRoot, connectionActive: true}], archivedAt: null,
+  createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt, origin: null, importedAt: null, repos,
 });
 
 const stage = project(1, "stage", "/home/user/workspace/stage", "2026-11-09T10:00:00Z");
@@ -66,4 +66,52 @@ test("does not reorder the input array", () => {
   const input = [...all];
   matchProjects(input, "");
   assert.deepEqual(input, all);
+});
+
+const site = project(6, "site", "/home/user/workspace/blog", null, ["github.com/flex/dineshpandiyan.com"]);
+const lab = project(7, "lab", "/home/user/lab", null, ["gitlab.com/team/infra"]);
+
+test("subtext is path, then repo; GitHub's host is implied", () => {
+  assert.equal(projectDetail(site), "/home/user/workspace/blog · flex/dineshpandiyan.com");
+  assert.equal(projectDetail(lab), "/home/user/lab · gitlab.com/team/infra");
+  assert.equal(projectDetail(stage), "/home/user/workspace/stage");
+  assert.equal(repoLabel("github.com/o/r"), "o/r");
+});
+
+test("matches repo metadata after title and path, highlighting it in the subtext", () => {
+  const [m, ...rest] = matchProjects([...all, site, lab], "pandiyan");
+  assert.equal(rest.length, 0);
+  assert.equal(m.project.id, 6);
+  assert.equal(m.repo, true);
+  const detail = projectDetail(site);
+  assert.equal(detail.slice(m.path.start, m.path.end), "pandiyan");
+  // Non-GitHub hosts stay searchable.
+  assert.deepEqual(ids(matchProjects([site, lab], "gitlab")), [7]);
+  // A title match ranks before a repo-only match.
+  const flexTitle = project(8, "flex tools", "/x", null);
+  assert.deepEqual(ids(matchProjects([site, flexTitle], "flex")), [8, 6]);
+});
+
+test("a chosen harness narrows the picker to its projects and unbound ones", () => {
+  const openCode = {...project(9, "oc", "/w/oc", null), bindings: [{connectionId: 2, workspace: "/w/oc", connectionActive: true}]};
+  const unbound = {...project(10, "plan", "/w/plan", null), bindings: []};
+  const retiredOnly = {...project(11, "old", "/w/old", null), bindings: [{connectionId: 3, workspace: "/w/old", connectionActive: false}]};
+  const list = [stage, openCode, unbound, retiredOnly];
+  assert.deepEqual(projectsForConnection(list, 0, "").map((p) => p.id), [1, 9, 10, 11]);
+  assert.deepEqual(projectsForConnection(list, 2, "").map((p) => p.id), [9, 10, 11]);
+  // The current selection stays listed.
+  assert.deepEqual(projectsForConnection(list, 2, "1").map((p) => p.id), [1, 9, 10, 11]);
+});
+
+test("import notice names harnesses and the latest import", () => {
+  const now = Date.parse("2026-11-19T12:00:00Z");
+  assert.equal(importNotice([], now), null);
+  assert.equal(importNotice([{connectionId: 2, harness: "opencode", count: 12, at: "2026-11-19T10:00:00Z"}], now), "12 imported from OpenCode 2h ago");
+  assert.equal(
+    importNotice([
+      {connectionId: 2, harness: "opencode", count: 12, at: "2026-11-19T10:00:00Z"},
+      {connectionId: 1, harness: "t3", count: 3, at: "2026-11-18T10:00:00Z"},
+    ], now),
+    "12 imported from OpenCode, 3 from T3 2h ago",
+  );
 });

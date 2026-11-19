@@ -13,12 +13,16 @@ const projectCols = `id,title,archived_at,created_at,updated_at,
  UNION ALL SELECT max(created_at) FROM journal_entries WHERE task_id IN (SELECT id FROM tasks WHERE project_id=projects.id)
  OR tree_id IN (SELECT tree_id FROM tasks WHERE project_id=projects.id))),
  COALESCE((SELECT json_group_array(json_object('id',b.id,'projectId',b.project_id,'connectionId',b.connection_id,'harness',c.harness,
- 'externalProjectId',b.external_project_id,'workspace',b.workspace,'revision',b.revision,'status',b.status,'observedWorkspace',b.observed_workspace,'connectionActive',json(CASE WHEN c.active=1 THEN 'true' ELSE 'false' END),'connectionLabel',c.label))
- FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id WHERE b.project_id=projects.id AND b.active=1),'[]')`
+ 'externalProjectId',b.external_project_id,'workspace',b.workspace,'revision',b.revision,'status',b.status,'observedWorkspace',b.observed_workspace,'connectionActive',json(CASE WHEN c.active=1 THEN 'true' ELSE 'false' END),'connectionLabel',c.label,'origin',b.origin))
+ FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id WHERE b.project_id=projects.id AND b.active=1),'[]'),
+ origin,imported_at,
+ COALESCE((SELECT json_group_array(repo) FROM (SELECT DISTINCT e.repo FROM project_bindings b JOIN external_projects e
+ ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
+ WHERE b.project_id=projects.id AND b.active=1 AND e.repo<>'' ORDER BY e.repo)),'[]')`
 
 func scanProject(row rowScanner) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings)
+	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings, &p.Origin, &p.ImportedAt, &p.Repos)
 	return p, notFound(err)
 }
 func (s *Store) ListProjects(ctx context.Context, archived string) ([]Project, error) {
@@ -82,7 +86,9 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 	if title == "" {
 		return Project{}, Invalid("title is required")
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE projects SET title=$2,archived_at=CASE WHEN $3 THEN COALESCE(archived_at,stage_now()) ELSE NULL END,updated_at=stage_now() WHERE id=$1`, id, title, archived)
+	// A user archive or unarchive owns the archive state from then on.
+	_, err := s.pool.Exec(ctx, `UPDATE projects SET title=$2,archived_at=CASE WHEN $3 THEN COALESCE(archived_at,stage_now()) ELSE NULL END,
+ archive_owner=CASE WHEN (archived_at IS NOT NULL)<>$3 THEN 'user' ELSE archive_owner END,updated_at=stage_now() WHERE id=$1`, id, title, archived)
 	if err != nil {
 		return Project{}, err
 	}
@@ -108,8 +114,10 @@ func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []
 			if live {
 				n++
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available) VALUES($5,$1,$2,$3,$4)
- ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available`, p.ID, p.Title, p.WorkspaceRoot, live, connectionID); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,importable,archived,active_at,repo) VALUES($5,$1,$2,$3,$4,$6,$7,$8,$9)
+ ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available,
+ importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,repo=excluded.repo`,
+				p.ID, p.Title, p.WorkspaceRoot, live, connectionID, p.Importable, p.ArchivedAt != nil, p.ActiveAt, p.Repo); err != nil {
 				return err
 			}
 		}

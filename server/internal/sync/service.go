@@ -254,7 +254,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	inventory, err := a.Workspaces(ctx)
+	inventory, err := s.inventory(ctx, id, a)
 	if err != nil {
 		return Result{}, err
 	}
@@ -266,11 +266,18 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 	if s.store.IsT3(id) {
 		s.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
 	}
+	var errs []error
+	// Import only after a complete, successful inventory refresh. A failed
+	// import never blocks session polling.
+	if imported, err := s.store.ImportWorkspaces(ctx, id); err != nil {
+		errs = append(errs, err)
+	} else if imported != (db.ImportResult{}) {
+		s.log.Info("project import", "connection", id, "created", imported.Created, "bound", imported.Bound, "archived", imported.Archived, "unarchived", imported.Unarchived)
+	}
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
 	if err != nil {
-		return r, err
+		return r, errors.Join(append(errs, err)...)
 	}
-	var errs []error
 	for _, t := range tasks {
 		if t.ConnectionID != id || t.Session == nil {
 			continue
@@ -440,7 +447,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 			return t, db.Conflict("Predecessor base unavailable: %s", op.Reason)
 		}
 	}
-	ps, e := a.Workspaces(ctx)
+	ps, e := s.inventory(ctx, t.ConnectionID, a)
 	if e != nil {
 		return t, &db.ConflictError{Code: "connection_unavailable", Msg: "Cannot verify the workspace. Check its connection in Settings."}
 	}

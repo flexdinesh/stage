@@ -136,7 +136,7 @@ Body `{ "url": string | null }` (`null` = back to the default). The URL must be 
 ### `POST /api/sync`
 
 A mixed-harness sync refreshes connections independently. A partial success includes `unavailableConnections` with the IDs that could not finish. With only OpenCode configured, the T3 default endpoint is skipped.
-Refresh external workspace discovery and task-owned sessions. Stage project titles/archive remain Stage-owned; binding changes require confirmation. External active-session discovery belongs to the notification watcher. No historical thread sweep. Synchronous.
+Refresh external workspace discovery and task-owned sessions, then import deliberate harness projects (see Projects). Stage project titles remain Stage-owned; changed paths on existing bindings require confirmation. External active-session discovery belongs to the notification watcher. No historical thread sweep. Synchronous.
 200 `SyncResult`:
 ```json
 { "projects": 12, "threads": 776, "finishedAt": "2026-11-08T10:00:00Z" }
@@ -171,16 +171,25 @@ Cached `orchestrator_capabilities` (refreshed every 10 min). Only providers with
 ## Projects
 
 Stage owns project IDs, titles and archive state. Creating a project needs no
-harness. Discovery never imports, renames, archives or deletes Stage projects.
-Existing T3 projects keep their Stage IDs and migrate to explicit bindings.
+harness. Discovery never renames or deletes Stage projects. The sync pass imports
+deliberate harness projects: a matching workspace path binds to the existing
+project, a new path creates one, and a discovered project with no tasks follows
+its harness archive until a user archives or unarchives it
+([architecture.md](architecture.md#project-import)). Existing T3 projects keep
+their Stage IDs and migrate to explicit bindings.
 
-`Project`: `{id, title, bindings, archivedAt, createdAt, updatedAt, lastActivityAt}`.
+`Project`: `{id, title, bindings, archivedAt, createdAt, updatedAt, lastActivityAt, origin, importedAt, repos}`.
 `bindings` contains active `{id, projectId, connectionId, harness,
-externalProjectId, workspace, revision, status, observedWorkspace}` records.
-Status is `available`, `missing` or `changed`. Paths belong to bindings, never
-to Stage identity. Activity includes tracked sessions, tasks and journals.
+externalProjectId, workspace, revision, status, observedWorkspace, origin}` records.
+Status is `available`, `missing` or `changed`. Binding `origin` is `manual`,
+`imported` (discovery created the project for it) or `path` (discovery bound it
+to the project at that path). Project `origin` is `discovered` or null;
+`importedAt` is when discovery created it. `repos` lists the distinct
+normalized origin remotes (`host/owner/name`) of its bound workspaces, search
+metadata only. Paths belong to bindings, never to Stage identity. Activity
+includes tracked sessions, tasks and journals.
 
-- `GET /api/projects?archived=false|true|all`: `{projects: Project[]}`.
+- `GET /api/projects?archived=false|true|all`: `{projects: Project[], imports: [{connectionId, harness, count, at}]}`. `imports` counts, per connection, the projects discovery created in the last 7 days, newest first.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
@@ -189,13 +198,16 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
 - `DELETE /api/connections/:connectionId`: forget a retired connection. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its discovered projects and shared paths are dropped. 204. 404 unknown or already forgotten. 409 the connection is active.
 - Retired connections: binding a project, creating or moving a task or schedule to a retired connection returns 409 `code: "connection_retired"`. Tasks carry `harness`, `connectionActive` and `connectionLabel`; project bindings carry `connectionActive` and `connectionLabel`. A task on a retired T3 connection has null T3 links.
 - `GET /api/connections/:connectionId/projects` (also `/api/connections/t3/projects`): live discovery, returns
-  `{projects: [{connectionId, externalId, title, workspace, projectId}]}`.
-  `projectId` is the current explicit owner, or null.
+  `{projects: [{connectionId, externalId, title, workspace, projectId, repo}]}`.
+  `projectId` is the current explicit owner, or null. `repo` is the normalized
+  origin remote, `""` when unknown.
 - `PUT /api/projects/:id/binding`: `{connectionId, externalProjectId, workspace}`.
   Revalidates the exact external project and path on the selected harness before binding. One active
   binding per project/connection; one Stage owner per external workspace.
   Rebinding retires the previous revision. Conflicts return 409.
-- `DELETE /api/projects/:id/binding`: unbind T3, retaining history.
+- `DELETE /api/projects/:id/binding`: unbind T3, retaining history. Unbinding
+  (either route) declines the workspace: discovery never binds it again until a
+  manual bind. Rebinding a project away from a workspace declines it too.
 - `POST /api/connections/t3/projects`: `{title, workspace}` explicitly registers
   an existing directory in T3. No directory creation, cloning or provisioning.
   After an uncertain response, refresh discovery before registering again.

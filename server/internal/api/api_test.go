@@ -780,13 +780,25 @@ func TestRecoverLaunching(t *testing.T) {
 func TestProjects(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/app")
-	ext := e.fake.AddProject("Unimported", "/w/elsewhere")
+	ext := e.fake.AddProject("Discovered", "/w/elsewhere")
 	if _, err := e.sync.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	// Sync imports the unbound live T3 project; the bound one is untouched.
 	ps, err := e.store.ListProjects(context.Background(), "all")
-	if err != nil || len(ps) != 1 {
-		t.Fatalf("implicit import: %+v %v", ps, err)
+	if err != nil || len(ps) != 2 {
+		t.Fatalf("import: %+v %v", ps, err)
+	}
+	imported, err := e.store.BoundProject(context.Background(), db.ProjectBinding{ConnectionID: 1, ExternalProjectID: ext.ID, Workspace: ext.WorkspaceRoot})
+	if err != nil || imported.Title != "Discovered" || imported.Origin == nil || imported.Bindings[0].Origin != db.BindingImported {
+		t.Fatalf("imported %+v %v", imported, err)
+	}
+	var listed struct {
+		Imports []db.ImportSummary `json:"imports"`
+	}
+	e.must("GET", "/api/projects", nil, 200, &listed)
+	if len(listed.Imports) != 1 || listed.Imports[0].Count != 1 || listed.Imports[0].Harness != "t3" {
+		t.Fatalf("imports %+v", listed.Imports)
 	}
 	at := time.Now()
 	if err := e.fake.SetProject(p.T3ProjectID, func(x *t3.Project) { x.Title = "External rename"; x.ArchivedAt = &at; x.WorkspaceRoot = "/moved" }); err != nil {
@@ -810,6 +822,10 @@ func TestProjects(t *testing.T) {
 	got, _ = e.store.GetProject(context.Background(), p.ID)
 	if got.Title != "Stage title" || got.ArchivedAt == nil {
 		t.Fatalf("Stage metadata lost: %+v", got)
+	}
+	// The discovered project follows its deleted T3 project into archive.
+	if got, _ = e.store.GetProject(context.Background(), imported.ID); got.ArchivedAt == nil {
+		t.Fatalf("discovered project not archived: %+v", got)
 	}
 	e.must("POST", "/api/projects", map[string]any{"title": ""}, 400, nil)
 	e.must("GET", "/api/projects?archived=maybe", nil, 400, nil)
@@ -954,12 +970,13 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 		Projects []project `json:"projects"`
 	}
 	e.must("GET", "/api/projects", nil, 200, &projects)
-	if len(projects.Projects) != 1 {
-		t.Fatalf("sync imported projects: %+v", projects.Projects)
+	if len(projects.Projects) != 2 {
+		t.Fatalf("sync import: %+v", projects.Projects)
 	}
-	var extProject project
-	e.must("POST", "/api/projects", map[string]any{"title": ext.Title}, 201, &extProject)
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", extProject.ID), map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": ext.WorkspaceRoot}, 200, nil)
+	// Sync imported and bound the T3 project.
+	if _, err := e.store.BoundProject(ctx, db.ProjectBinding{ConnectionID: 1, ExternalProjectID: ext.ID, Workspace: ext.WorkspaceRoot}); err != nil {
+		t.Fatal(err)
+	}
 
 }
 

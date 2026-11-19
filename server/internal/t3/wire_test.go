@@ -290,6 +290,21 @@ func TestDecodeFallsBackToTextContent(t *testing.T) {
 	}
 }
 
+func TestProjectImportabilityAndRepo(t *testing.T) {
+	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"projects":[
+ {"id":"live","title":"L","workspaceRoot":"/w/l","repositoryIdentity":{"origin":{"remoteUrl":"https://tok@GitHub.com/o/r.git"}}},
+ {"id":"archived","title":"A","workspaceRoot":"/w/a","archivedAt":"2026-01-01T00:00:00Z"},
+ {"id":"deleted","title":"D","workspaceRoot":"/w/d","deletedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null}`}}}
+	var w wireProjectList
+	if err := decodeToolResult("t3_project_list", res, &w); err != nil {
+		t.Fatal(err)
+	}
+	live, archived, deleted := w.Projects[0].toProject(), w.Projects[1].toProject(), w.Projects[2].toProject()
+	if !live.Importable || live.Repo != "github.com/o/r" || archived.Importable || deleted.Importable || archived.Repo != "" {
+		t.Fatalf("projects %+v %+v %+v", live, archived, deleted)
+	}
+}
+
 func TestDecodeCapabilities(t *testing.T) {
 	var w wireCapabilities
 	if err := decodeToolResult("orchestrator_capabilities", structuredResult(t, capabilitiesJSON), &w); err != nil {

@@ -222,7 +222,11 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"projects": ps})
+	imports, err := s.Store.ImportSummaries(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": ps, "imports": imports})
 	return nil
 }
 
