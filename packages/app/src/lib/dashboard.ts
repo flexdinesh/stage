@@ -76,3 +76,51 @@ export const awaitingReview = (t: Pick<Task, "id" | "state" | "acceptanceId">, l
 /** Completed in the window, unless still lingering in Awaiting review. */
 export const completedSince = (t: Pick<Task, "id" | "completedAt">, since: string, lingering: ReadonlySet<number>) =>
   !lingering.has(t.id) && t.completedAt !== null && t.completedAt >= since;
+
+/** Per-device Dashboard group disclosure, kept in preference storage. */
+export interface GroupFold {
+  /** Groups the user collapsed, by key. */
+  collapsed: string[];
+  /** Needs-input episodes (`needsEpisode`) listed when Needs input was collapsed; any other one reopens it. */
+  seen: string[];
+}
+
+/** Only Completed starts collapsed. */
+export const DEFAULT_FOLD: GroupFold = { collapsed: ["settled"], seen: [] };
+
+/** One needs-input episode: re-entering needs input (a new question) is a new episode. */
+export const needsEpisode = (t: Pick<Task, "id" | "stateSince">) => `${t.id}:${t.stateSince ?? ""}`;
+
+const strings = (v: unknown): string[] | null =>
+  Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : null;
+
+/** Reads a stored fold; missing or malformed storage reads as the default. */
+export function parseFold(raw: string | null): GroupFold {
+  if (raw === null) return DEFAULT_FOLD;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return DEFAULT_FOLD;
+  }
+  if (typeof v !== "object" || v === null) return DEFAULT_FOLD;
+  const collapsed = strings("collapsed" in v ? v.collapsed : null);
+  if (collapsed === null) return DEFAULT_FOLD;
+  return { collapsed, seen: strings("seen" in v ? v.seen : null) ?? [] };
+}
+
+/**
+ * Whether a group renders collapsed. With `episodes` (Needs input's listed episodes), a collapsed group reopens while
+ * it lists an episode not seen when it was collapsed.
+ */
+export const isFolded = (fold: GroupFold, key: string, episodes?: readonly string[]) =>
+  fold.collapsed.includes(key) && (episodes?.every((e) => fold.seen.includes(e)) ?? true);
+
+/** Flips a group as rendered. Collapsing with `episodes` records them as seen. */
+export function toggleFold(fold: GroupFold, key: string, episodes?: readonly string[]): GroupFold {
+  if (isFolded(fold, key, episodes)) return { ...fold, collapsed: fold.collapsed.filter((k) => k !== key) };
+  return {
+    collapsed: fold.collapsed.includes(key) ? fold.collapsed : [...fold.collapsed, key],
+    seen: episodes === undefined ? fold.seen : [...episodes],
+  };
+}

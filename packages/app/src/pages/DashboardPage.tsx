@@ -19,10 +19,11 @@ import { SettledRows, TaskRow, TaskRows } from "../components/TaskList.tsx";
 import { TreeRow } from "../components/trees/TreeRow.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
-import { awaitingReview, completedSince, splitTreeMembers } from "../lib/dashboard.ts";
+import { awaitingReview, completedSince, isFolded, needsEpisode, parseFold, splitTreeMembers, toggleFold } from "../lib/dashboard.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
+import { usePlatform } from "../platform/context.tsx";
 
 type GroupKey = "needs" | "trees" | "running" | "done" | "failed" | "ready" | "backlog" | "scheduled" | "settled";
 
@@ -39,8 +40,6 @@ interface Group {
   /** Not a stat strip cell (no `?state=` filter). */
   noStat?: boolean;
   hideEmpty?: boolean;
-  /** Rendered collapsed until opened (or filtered to). */
-  collapsible?: boolean;
 }
 
 const GROUPS: Group[] = [
@@ -133,7 +132,6 @@ const GROUPS: Group[] = [
     tone: "ok",
     states: ["settled"],
     empty: "Nothing completed in the last 7 days.",
-    collapsible: true,
   },
 ];
 
@@ -149,6 +147,8 @@ function settledSince(): string {
 }
 const ACTIVE_STATES: readonly TaskState[] = ["launching", "running", "needs_input"];
 const STAT_GROUPS = GROUPS.filter((g) => g.noStat !== true);
+/** Per-device collapsed groups (`GroupFold`). */
+const FOLD_KEY = "stage-dashboard-groups";
 
 /** Scheduled group: timed backlog tasks and due schedules interleaved, soonest first. */
 type ScheduledItem = { kind: "task"; task: Task; at: number } | { kind: "schedule"; schedule: Schedule; at: number };
@@ -301,7 +301,8 @@ function Dashboard() {
   const tasks = useTasks({ state: LIVE_STATES, ...projectQuery });
   const [since] = useState(settledSince);
   const settled = useTasks({ settledFrom: since, ...projectQuery });
-  const [settledOpen, setSettledOpen] = useState(false);
+  const { storage } = usePlatform();
+  const [fold, setFold] = useState(() => parseFold(storage.get(FOLD_KEY)));
   const all = [...new Map([...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])].map((t) => [t.id, t])).values()];
   // Active trees, plus trees completed inside the settled window; members roll up into their tree's row.
   const trees = useTrees({ settledFrom: since, ...projectQuery });
@@ -404,7 +405,16 @@ function Dashboard() {
             const g = block;
             const list = rowsOf(g);
             const hidden = inTrees(g);
-            const collapsed = g.collapsible === true && selected !== g.key && !settledOpen;
+            // Needs input reopens on its own when a task starts needing input after it was collapsed.
+            const episodes = g.key === "needs" ? list.map(needsEpisode) : undefined;
+            // Filtering to a group always shows its rows.
+            const foldable = selected !== g.key;
+            const collapsed = foldable && isFolded(fold, g.key, episodes);
+            const toggle = () => {
+              const next = toggleFold(fold, g.key, episodes);
+              setFold(next);
+              storage.set(FOLD_KEY, JSON.stringify(next));
+            };
             // self-baseline: flex baseline comes from the text, not the square/chevron (no baseline → bottom edge),
             // so Panel's cap-trimmed h2 centers the caps.
             const label = (
@@ -419,14 +429,15 @@ function Dashboard() {
                 flush
                 collapsed={collapsed}
                 title={
-                  g.collapsible === true && selected !== g.key ? (
+                  foldable ? (
                     <button
                       type="button"
                       aria-expanded={!collapsed}
-                      onClick={() => setSettledOpen((v) => !v)}
-                      className="label-caps inline-flex items-center gap-1.5 text-fg"
+                      onClick={toggle}
+                      // The whole header bar toggles (actions stay above it).
+                      className="group/fold label-caps inline-flex items-center gap-1.5 text-fg after:absolute after:inset-0"
                     >
-                      <span aria-hidden className={cx("inline-flex transition-transform duration-150", collapsed && "-rotate-90")}>
+                      <span aria-hidden className={cx("inline-flex text-muted transition-[color,transform] duration-150 group-hover/fold:text-fg", collapsed && "-rotate-90")}>
                         <IconChevronDown size={12} />
                       </span>
                       {label}
@@ -441,8 +452,8 @@ function Dashboard() {
                     {hidden === 0 ? null : ` · ${hidden} in trees`}
                   </span>
                 }
-                {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
-                {...(g.key === "done" ? { actions: <CompleteAllActions state={completeAll} /> } : {})}
+                {...(collapsed ? {} : g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
+                {...(collapsed ? {} : g.key === "done" ? { actions: <CompleteAllActions state={completeAll} /> } : {})}
               >
                 {g.key === "settled" ? (
                   <SettledRows items={mergeSettled(list, split.settled)} emptyText={g.empty} />

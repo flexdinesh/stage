@@ -370,10 +370,10 @@ export function Panel({
   return (
     <section className={cx("min-w-0 border border-line bg-surface", fill && "flex flex-col", className)}>
       {hasHeader ? (
-        <div className={cx("flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", !collapsed && "border-b border-line")}>
+        <div className={cx("relative flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", !collapsed && "border-b border-line")}>
           {title === undefined ? null : <h2 className="label-caps text-fg [text-box:trim-both_cap_alphabetic]">{title}</h2>}
           {meta === undefined ? null : <span className="block font-mono text-meta-sm text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
-          {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
+          {actions === undefined ? null : <div className="relative ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
       ) : null}
       {collapsed ? null : <div className={cx(!flush && "p-3", fill && "flex flex-1 flex-col")}>{children}</div>}
