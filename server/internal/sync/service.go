@@ -41,6 +41,7 @@ type Service struct {
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	OnAccepted                                                                   func() // a completion was inferred (tree release may follow)
 	PublicURL                                                                    string // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                                          string // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	progress                                                                     atomic.Pointer[Progress]
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
@@ -511,7 +512,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
-	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, features.SessionEnvironment, s.PublicURL))
+	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, features.SessionEnvironment, s.PublicURL, s.CLI))
 	if e != nil {
 		return t, e
 	}

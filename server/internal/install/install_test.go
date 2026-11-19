@@ -284,10 +284,16 @@ func TestCollisionRefusedWithoutWrites(t *testing.T) {
 	if b, _ := os.ReadFile(link); string(b) != "#!/bin/sh\n" {
 		t.Fatal("unrelated file overwritten")
 	}
+	if got := CLIName(e.home, "stage"); got != "stage" {
+		t.Fatalf("CLIName without a record = %q, want the identity", got)
+	}
 	// Another name works.
 	mustOK(t, e.install("1.0.0", makeRelease(t, rel{identity: "stage", version: "1.0.0"}), Options{Mode: ModeHeadless, CLIName: "stage-cli"}))
 	if e.record().Link != filepath.Join(e.home, ".local", "bin", "stage-cli") {
 		t.Fatal("cli name not used")
+	}
+	if got := CLIName(e.home, "stage"); got != "stage-cli" {
+		t.Fatalf("CLIName = %q, want the recorded stage-cli", got)
 	}
 }
 

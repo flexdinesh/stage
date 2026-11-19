@@ -391,7 +391,7 @@ func TestTreeDefaultsToAutoAndTasksInherit(t *testing.T) {
 	if x.TreeID == nil || x.StartMode != nil || x.EffectiveStartMode == nil || *x.EffectiveStartMode != db.StartAuto {
 		t.Fatalf("implicit tree from needs must be auto and inherited: %+v", x)
 	}
-	if strings.Contains(agenttools.Guide, "default to manual") {
+	if strings.Contains(agenttools.Guide("stage"), "default to manual") {
 		t.Fatal("guide must not steer agents to manual")
 	}
 }
@@ -997,8 +997,20 @@ func TestGuideNamesEveryInterface(t *testing.T) {
 		"CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session.",
 		"HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption",
 	} {
-		if !strings.Contains(agenttools.Guide, w) {
+		if !strings.Contains(agenttools.Guide("stage"), w) {
 			t.Errorf("guide missing %q", w)
 		}
+	}
+}
+
+func TestGuideNamesInstalledCLI(t *testing.T) {
+	g := agenttools.Guide("stage-dev")
+	for _, w := range []string{"the stage-dev CLI,", "stage-dev mcp --t3-session-env", "through stage-dev task, tree,", "Run stage-dev help"} {
+		if !strings.Contains(g, w) {
+			t.Errorf("guide missing %q", w)
+		}
+	}
+	if strings.Contains(g, "{cli}") || strings.Contains(g, " stage ") {
+		t.Errorf("guide still names the default CLI:\n%s", g)
 	}
 }

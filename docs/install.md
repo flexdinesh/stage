@@ -73,6 +73,12 @@ from `mise run install-cli`, MyGo's `stage-desktop-install.sh` install, a
 hand-edited entry) stops the install (exit 7) with the fix: remove it, or
 pick another `--cli-name`.
 
+Agent instructions (the launch `<stage-journal>` block, MCP server
+instructions, `stage guide`, `stage setup instructions`) name the CLI by the
+recorded CLI name, else the identity, so agents run the CLI on `PATH`. The
+server reads it at start; an install restarts the service, picking up a new
+`--cli-name`.
+
 ## Update
 
 ```sh

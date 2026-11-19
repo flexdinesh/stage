@@ -17,6 +17,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/install"
@@ -47,6 +48,9 @@ type Env struct {
 	// Releases is where `stage update` finds releases; nil is GitHub.
 	Releases install.Source
 }
+
+// cliName is this identity's installed CLI name, which agent guidance names.
+func (e Env) cliName() string { return install.CLIName(e.Home, buildinfo.Identity) }
 
 // OSEnv is the real process environment.
 func OSEnv() Env {
@@ -266,7 +270,7 @@ func (c *cmd) set(name string) bool {
 
 func (c *cmd) ops() *agenttools.Ops {
 	u := client.Resolve(c.url, c.env.Getenv).URL
-	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, LocalFiles: true}
+	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, LocalFiles: true, CLI: c.env.cliName()}
 }
 
 // out prints v as JSON (--json) or with human.
@@ -291,7 +295,7 @@ func run(ctx context.Context, args []string, env Env) error {
 		fmt.Fprint(env.Stdout, usage)
 		return nil
 	case "guide":
-		fmt.Fprintln(env.Stdout, agenttools.Guide)
+		fmt.Fprintln(env.Stdout, agenttools.Guide(env.cliName()))
 		return nil
 	case "context":
 		return runContext(ctx, env, sub)

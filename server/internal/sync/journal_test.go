@@ -34,7 +34,7 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := journalInstructions(tc.task, "T3CODE_THREAD_ID", tc.publicURL)
+			got := journalInstructions(tc.task, "T3CODE_THREAD_ID", tc.publicURL, "")
 			for _, w := range append(both, tc.want...) {
 				if !strings.Contains(got, w) {
 					t.Errorf("missing %q in:\n%s", w, got)
@@ -49,5 +49,16 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 				t.Error("em dash in journal instructions")
 			}
 		})
+	}
+}
+
+func TestJournalInstructionsNameInstalledCLI(t *testing.T) {
+	got := journalInstructions(db.Task{ID: 1, ConnectionID: 1, Harness: db.HarnessOpenCode}, "", "", "stage-dev")
+	want := "the stage-dev CLI (stage-dev context, stage-dev task show, stage-dev task|tree notes), or the Stage server's HTTP API."
+	if !strings.Contains(got, want) {
+		t.Errorf("missing %q in:\n%s", want, got)
+	}
+	if strings.Contains(got, "%!") {
+		t.Errorf("format error in:\n%s", got)
 	}
 }

@@ -172,3 +172,13 @@ func within(p, dir string) bool {
 	p, dir = filepath.Clean(p), filepath.Clean(dir)
 	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
 }
+
+// CLIName is the name identity's CLI is installed under on PATH (the
+// install record's cliName, which --cli-name sets), else the identity:
+// agent instructions name it so agents run the CLI that exists.
+func CLIName(home, identity string) string {
+	if rec, err := readRecord(filepath.Join(RootFor(Platform{Home: home}, identity), "install.json")); err == nil && rec != nil && rec.CLIName != "" {
+		return rec.CLIName
+	}
+	return identity
+}

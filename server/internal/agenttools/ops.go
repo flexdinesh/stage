@@ -30,6 +30,15 @@ type Ops struct {
 	LocalFiles bool
 	// PollEvery is wait_task's poll interval (default 3s).
 	PollEvery time.Duration
+	// CLI is the installed CLI's name the guidance names (default "stage").
+	CLI string
+}
+
+func (o *Ops) cli() string {
+	if o.CLI == "" {
+		return "stage"
+	}
+	return o.CLI
 }
 
 // CallerArgs override the environment's caller.
