@@ -237,6 +237,13 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 			if current == nil {
 				return Conflict("Task is already open. Refresh its acceptance.")
 			}
+			// A session still closed in its harness must not re-complete this execution.
+			if _, err = tx.Exec(ctx, `INSERT INTO completion_inferences(task_id,execution_id,signal)
+ SELECT t.id,json_extract(o.observation,'$.executionId'),'reopened' FROM tasks t JOIN execution_observations o ON o.session_id=t.session_id
+ WHERE t.id=$1 AND COALESCE(json_extract(o.observation,'$.executionId'),'')<>''
+ ON CONFLICT(task_id,execution_id) DO UPDATE SET signal='reopened',at=stage_now()`, id); err != nil {
+				return err
+			}
 		} else {
 			if p.BlockedReason != "" {
 				return Conflict("%s", p.BlockedReason)
@@ -258,22 +265,79 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 			}
 		}
 		result.Revision = p.Revision + 1
-		if _, err = tx.Exec(ctx, `UPDATE tasks SET acceptance_id=$2,acceptance_revision=$3,recorded_work=1,updated_at=stage_now() WHERE id=$1`, id, result.AcceptanceID, result.Revision); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `UPDATE task_trees SET recorded_work=1 WHERE id=(SELECT tree_id FROM tasks WHERE id=$1)`, id); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text) SELECT 'event',id,tree_id,$2,$3 FROM tasks WHERE id=$1`, id, event, detail); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `UPDATE tasks SET ready_at=NULL WHERE id IN (SELECT task_id FROM task_needs WHERE need_id=$1) AND state='backlog'`, id); err != nil {
+		if err = recordAcceptance(ctx, tx, id, result.Revision, result.AcceptanceID, event, detail); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO acceptance_requests(task_id,request_id,input,result) VALUES($1,$2,$3,$4)`, id, in.RequestID, string(raw), result)
 		return err
 	})
 	return result, err
+}
+
+// recordAcceptance sets (or, with a nil acceptance, clears) the task's current
+// acceptance at revision, journals it and refreshes dependents' readiness.
+func recordAcceptance(ctx context.Context, tx *Tx, id, revision int64, acceptanceID *int64, event, detail string) error {
+	if _, err := tx.Exec(ctx, `UPDATE tasks SET acceptance_id=$2,acceptance_revision=$3,recorded_work=1,updated_at=stage_now() WHERE id=$1`, id, acceptanceID, revision); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE task_trees SET recorded_work=1 WHERE id=(SELECT tree_id FROM tasks WHERE id=$1)`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text) SELECT 'event',id,tree_id,$2,$3 FROM tasks WHERE id=$1`, id, event, detail); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE tasks SET ready_at=NULL WHERE id IN (SELECT task_id FROM task_needs WHERE need_id=$1) AND state='backlog'`, id)
+	return err
+}
+
+// InferCompletion completes a done task whose session was closed in its
+// harness (T3 settle, OpenCode archive), when the task's connection allows
+// it. It decides once per execution: an earlier inference or a user reopen
+// for o.ExecutionID suppresses it. Reports whether it completed the task.
+func (s *Store) InferCompletion(ctx context.Context, id int64, o execution.Observation) (bool, error) {
+	if o.Closed == nil || o.Active || o.ExecutionID == "" {
+		return false, nil
+	}
+	var provenance, detail string
+	switch o.Closed.Signal {
+	case execution.ClosedSettled:
+		provenance, detail = "harness_settled", "Completed from T3 settle; accepted evidence saved in Stage."
+	case execution.ClosedArchived:
+		provenance, detail = "harness_archived", "Completed from OpenCode archive; accepted evidence saved in Stage."
+	default:
+		return false, nil
+	}
+	inferred := false
+	err := s.inTx(ctx, func(tx *Tx) error {
+		var eligible bool
+		err := tx.QueryRow(ctx, `SELECT t.state='done' AND t.acceptance_id IS NULL AND c.auto_complete=1
+ AND NOT EXISTS(SELECT 1 FROM completion_inferences WHERE task_id=t.id AND execution_id=$4)
+ FROM tasks t JOIN harness_connections c ON c.id=t.connection_id JOIN session_identities si ON si.id=t.session_id
+ WHERE t.id=$1 AND si.connection_id=$2 AND si.external_id=$3`, id, o.Session.ConnectionID, o.Session.ExternalSessionID, o.ExecutionID).Scan(&eligible)
+		if errors.Is(notFound(err), ErrNotFound) {
+			return nil
+		}
+		if err != nil || !eligible {
+			return err
+		}
+		p, err := completionPreview(ctx, tx, id)
+		if err != nil || p.BlockedReason != "" {
+			return err
+		}
+		var acceptanceID int64
+		if err = tx.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES($1,$2,$3,'') RETURNING id`, id, provenance, p.Evidence).Scan(&acceptanceID); err != nil {
+			return err
+		}
+		if err = recordAcceptance(ctx, tx, id, p.Revision+1, &acceptanceID, "task_completed", detail); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO completion_inferences(task_id,execution_id,signal,acceptance_id) VALUES($1,$2,$3,$4)`, id, o.ExecutionID, o.Closed.Signal, acceptanceID); err != nil {
+			return err
+		}
+		inferred = true
+		return nil
+	})
+	return inferred, err
 }
 
 func (s *Store) AcceptedLaunchInputs(ctx context.Context, id int64, attempt int) ([]Acceptance, error) {

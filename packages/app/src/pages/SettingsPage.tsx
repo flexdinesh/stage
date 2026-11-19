@@ -8,6 +8,7 @@ import {
   type Preferences,
   type T3Status,
 } from "../api/types.ts";
+import { AutoCompleteToggle } from "../components/Completion.tsx";
 import { DesktopAppCard } from "../components/Host.tsx";
 import { SharedPaths } from "../components/SharedPaths.tsx";
 import { OpenCodeSetup } from "../components/OpenCodeSetup.tsx";
@@ -51,6 +52,7 @@ function StatusCard({ status }: { status: T3Status }) {
             {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
           </Detail>
         </Details>
+        <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
         <DisconnectT3 status={status} />
       </div>
     </Panel>

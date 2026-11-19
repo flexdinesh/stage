@@ -157,6 +157,10 @@ const publicURL = "http://localhost:3773"
 func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
+	// Tests complete tasks explicitly; inference tests turn auto-complete on.
+	if _, err := store.SetAutoComplete(context.Background(), db.T3ConnectionID, false); err != nil {
+		t.Fatal(err)
+	}
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -458,7 +462,7 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.Events[len(got.Events)-1].Detail != "execution observed done" {
 		t.Fatalf("detail %q", got.Events[len(got.Events)-1].Detail)
 	}
-	if got.Thread == nil || got.Thread.Source != "app" || got.Thread.Settled || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
+	if got.Thread == nil || got.Thread.Source != "app" || !got.Thread.Settled || got.Thread.SettledAt == nil || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
 		t.Fatalf("thread %+v", got.Thread)
 	}
 	if got.Thread.T3DeepLink == nil || *got.Thread.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {

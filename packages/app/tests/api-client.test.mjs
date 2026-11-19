@@ -91,3 +91,16 @@ test("launch repair sends structured preview and revision-guarded attach request
    { path: "/tasks/4/launch-link", body: { link, attempt: 2, revision: 9, environment: "env" } },
  ]);
 });
+
+test("setAutoComplete PUTs the flag to the connection and returns it", async () => {
+  let seen;
+  const connection = { id: 2, configured: true, harness: "opencode", autoComplete: true };
+  const { api } = fakeApi(async (path, init) => {
+    seen = { path, init };
+    return Response.json({ connection });
+  });
+  assert.deepEqual(await api.setAutoComplete(2, true), { connection });
+  assert.equal(seen.path, "/connections/2/auto-complete");
+  assert.equal(seen.init.method, "PUT");
+  assert.deepEqual(JSON.parse(seen.init.body), { autoComplete: true });
+});

@@ -169,6 +169,7 @@ export function createApi(transport: Transport) {
   return {
     health: () => apiFetch<Health>("/health"),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
+    setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
     openCodeStatus: () => apiFetch<OpenCodeStatus>("/opencode/status"),
     saveOpenCode: (body: Partial<Record<"endpoint" | "browserEndpoint" | "webClient" | "username" | "password", string>>) => apiSend("/opencode/settings", put(body)),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),

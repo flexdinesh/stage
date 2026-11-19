@@ -251,7 +251,7 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
 export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string }
-export interface HarnessConnection {id: number; configured: boolean; harness: "t3" | "opencode"}
+export interface HarnessConnection {id: number; configured: boolean; harness: "t3" | "opencode"; /** Complete tasks when a successful run is settled (T3) or archived (OpenCode) there. */ autoComplete: boolean}
 export interface OpenCodeStatus {
   connectionId: number;
   endpoint: string;
@@ -306,6 +306,8 @@ export interface Task {
   acceptanceId: number | null;
   acceptanceRevision: number;
   completedAt: string | null;
+  /** Provenance of the current acceptance; null while open. */
+  completionProvenance: Acceptance["provenance"] | null;
   artifactLinks: { label: string; url: string }[];
   id: number;
   projectId: number;
@@ -434,7 +436,7 @@ export interface Acceptance {
   taskId: number;
   acceptedAt: string;
   capturedAt: string;
-  provenance: "user" | "historical_settlement";
+  provenance: "user" | "historical_settlement" | "harness_settled" | "harness_archived";
   evidence: AcceptedEvidence;
   note: string;
 }

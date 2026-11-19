@@ -185,6 +185,9 @@ func (d ThreadDetail) Observation() execution.Observation {
 	if d.ParentThreadID != "" {
 		o.Parent = &execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ParentThreadID}
 	}
+	if d.Settled {
+		o.Closed = &execution.Closure{Signal: execution.ClosedSettled}
+	}
 	if len(d.RecentRuns) > 0 {
 		o.EndedAt = d.RecentRuns[0].CompletedAt
 		old := d.RecentRuns[len(d.RecentRuns)-1]

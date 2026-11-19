@@ -23,7 +23,9 @@ plugin registration or service installation framework.
   available artifact links. States are running, needs_input, done, failed,
   interrupted, cancelled or idle. Idle does not overwrite a known task state.
   Unknown/malformed snapshots and missing/offline sessions never imply execution
-  failure or completion. Connection health is independent.
+  failure or completion. Connection health is independent. `closed`
+  (`{signal}`, omitted when open) reports a closure in the harness: `settled`
+  (T3) or `archived` (OpenCode). It says nothing about success.
 - `Launch` receives an immutable intent plus versioned adapter JSON checkpoints.
   It must call the durable save callback before each external effect, stop if
   saving fails, and reconcile the same operation on replay. Checkpoints contain
@@ -40,7 +42,11 @@ plugin registration or service installation framework.
   no Stage acceptance.
 - Schedules, manual starts and automatic tree starts share the coordinator.
   Completion snapshots and handoff read Stage storage. A source harness can be
-  offline. Only user completion in Stage releases dependencies.
+  offline. Only acceptance releases dependencies: user completion, or
+  completion Stage infers from a closure of a done session after polling it
+  (once per execution, per-connection `autoComplete`; see
+  [inferred completion](api.md#user-acceptance-api-v4)). Unaccepted done tasks
+  stay in the throttled stale poll so a late closure is seen.
 - Hosts choose native versus web destinations through
   `Links.executionDestination`. Product code does not inspect browser location
   or dispatch native URLs directly.
@@ -78,7 +84,8 @@ Existing T3 request fields and routes remain. `executionConfig` is an additive
 task/schedule field; do not combine it with legacy model/permission fields in a
 create or update request. Existing responses and historical settlement/run/PR records
 remain readable. Newly observed execution uses Stage states; T3 settlement
-does not accept a task or hide active work.
+never hides active work and accepts a task only through inferred completion.
+The T3 thread mirror's `settled` follows the observation.
 
 Contract tests use a second fake harness with document IDs, a non-T3 model,
 two-step creation, optional capabilities, lost replies, restart, offline reads,

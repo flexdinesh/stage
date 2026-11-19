@@ -35,6 +35,20 @@ func TestAdapterNormalizesExecutionWithoutSettlementAuthority(t *testing.T) {
 		t.Fatal("unknown status accepted")
 	}
 }
+func TestSettledThreadReportsClosure(t *testing.T) {
+	d := ThreadDetail{Thread: Thread{ThreadID: "thread", ProjectID: "project", Status: StatusCompleted}}
+	if o := d.Observation(); o.Closed != nil {
+		t.Fatalf("unsettled closed: %+v", o.Closed)
+	}
+	d.Settled = true
+	if o := d.Observation(); o.Closed == nil || o.Closed.Signal != execution.ClosedSettled || o.State != "done" {
+		t.Fatalf("settled: %+v", o)
+	}
+	d.Status = StatusFailed
+	if o := d.Observation(); o.Closed == nil || o.State != "failed" {
+		t.Fatalf("settled failure: %+v", o)
+	}
+}
 func TestLaunchIdentityUsesAuthenticationSession(t *testing.T) {
 	token := func(sid string) string {
 		raw, _ := json.Marshal(map[string]string{"kind": "session", "sid": sid})

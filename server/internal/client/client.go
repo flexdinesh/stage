@@ -817,6 +817,15 @@ func (c *Client) Connections(ctx context.Context) ([]db.HarnessConnection, error
 	err := c.do(ctx, http.MethodGet, "/api/connections", nil, &out)
 	return out.Connections, err
 }
+
+// SetAutoComplete is PUT /api/connections/{id}/auto-complete.
+func (c *Client) SetAutoComplete(ctx context.Context, id int64, on bool) (db.HarnessConnection, error) {
+	var out struct {
+		Connection db.HarnessConnection `json:"connection"`
+	}
+	err := c.do(ctx, http.MethodPut, fmt.Sprintf("/api/connections/%d/auto-complete", id), map[string]bool{"autoComplete": on}, &out)
+	return out.Connection, err
+}
 func (c *Client) Capabilities(ctx context.Context, id int64) (execution.Capabilities, error) {
 	return c.ProjectCapabilities(ctx, id, 0)
 }

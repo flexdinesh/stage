@@ -1,8 +1,8 @@
-import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
-import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { HarnessConnection, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -29,6 +29,33 @@ export const keys = {
 export function useConnections() {
   const api = useApi();
   return useQuery({queryKey:keys.connections, queryFn: api.connections});
+}
+
+type Connections = { connections: HarnessConnection[] };
+
+/** Toggles a connection's auto-complete; optimistic, reverted on failure. */
+export function useSetAutoComplete() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const patch = (id: number, change: (c: HarnessConnection) => HarnessConnection) =>
+    qc.setQueryData<Connections>(keys.connections, (prev) =>
+      prev === undefined ? prev : { connections: prev.connections.map((c) => (c.id === id ? change(c) : c)) },
+    );
+  return useMutation({
+    mutationFn: ({ id, on }: { id: number; on: boolean }) => api.setAutoComplete(id, on),
+    onMutate: async ({ id, on }) => {
+      await qc.cancelQueries({ queryKey: keys.connections });
+      const previous = qc.getQueryData<Connections>(keys.connections);
+      patch(id, (c) => ({ ...c, autoComplete: on }));
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous !== undefined) qc.setQueryData(keys.connections, ctx.previous);
+    },
+    onSuccess: ({ connection }) => {
+      patch(connection.id, () => connection);
+    },
+  });
 }
 
 export function useOpenCodeStatus() {

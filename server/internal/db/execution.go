@@ -52,17 +52,24 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if o.Active {
 			active = o.ExecutionID
 		}
+		// settled_at keeps the first observed settle; T3's own settledAt is not carried.
+		settled := o.Closed != nil && o.Closed.Signal == execution.ClosedSettled
+		var settledAt *time.Time
+		if settled {
+			settledAt = &o.UpdatedAt
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,execution_state,archived,link,created_at,updated_at,synced_at,
-   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id)
-   VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at)
+   VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
    ON CONFLICT(t3_thread_id) DO UPDATE SET title=excluded.title,status=excluded.status,execution_state=excluded.execution_state,
    parent_thread_id=excluded.parent_thread_id,relationship=excluded.relationship,
    archived=excluded.archived,link=COALESCE(excluded.link,threads.link),updated_at=excluded.updated_at,synced_at=stage_now(),
    branch=excluded.branch,worktree_path=excluded.worktree_path,pending_request_count=excluded.pending_request_count,
-   active_run_id=excluded.active_run_id,latest_run_id=excluded.latest_run_id,run_started_at=excluded.run_started_at,run_ended_at=excluded.run_ended_at
+   active_run_id=excluded.active_run_id,latest_run_id=excluded.latest_run_id,run_started_at=excluded.run_started_at,run_ended_at=excluded.run_ended_at,
+   settled=excluded.settled,settled_at=CASE WHEN excluded.settled THEN COALESCE(threads.settled_at,excluded.settled_at) END
    WHERE excluded.updated_at>=threads.updated_at`, o.Session.ExternalSessionID, o.Project, o.Title, o.State, o.Archived, nullIfEmpty(o.Links.App),
 			o.CreatedAt, o.UpdatedAt, nullIfEmpty(o.Branch), nullIfEmpty(o.Directory), pending, nullIfEmpty(active), nullIfEmpty(o.ExecutionID), o.StartedAt, o.EndedAt,
-			externalParent(o), childMarker(o.Child), id)
+			externalParent(o), childMarker(o.Child), id, settled, settledAt)
 		if err != nil {
 			return err
 		}

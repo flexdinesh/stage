@@ -11,7 +11,9 @@ import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
 import { CompletionButton } from "./Completion.tsx";
+import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickComplete.tsx";
 import { LastWordLine } from "./LastWord.tsx";
+import { autoCompletedMeta } from "../lib/completion.ts";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -195,8 +197,15 @@ export function TaskRow({
   const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
   const appLink = useSessionDestination()(task);
-  const review = task.acceptanceId === null && (task.state === "done" || task.state === "settled");
-  const hasActions = review || showStart || appLink !== null || extra !== undefined;
+  // Completed here a moment ago: the row stays in place with a completed chip and Undo (Dashboard linger).
+  const justCompleted = useCompletionLinger().lingering.has(task.id);
+  const autoMeta = autoCompletedMeta(task.completionProvenance);
+  const review = !justCompleted && task.acceptanceId === null && (task.state === "done" || task.state === "settled");
+  const quick = useQuickComplete(task);
+  const undo = useUndoComplete(task);
+  const confirming = review ? quick.confirm : null;
+  const rowError = review ? quick.error : justCompleted ? undo.error : null;
+  const hasActions = justCompleted || review || showStart || appLink !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -234,7 +243,10 @@ export function TaskRow({
           )}
           <span>{harnessName(task.connectionId)} · {task.connectionId === 1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
           {task.completedAt !== null ? (
-            <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
+            <>
+              <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
+              {autoMeta === null ? null : <span>{autoMeta}</span>}
+            </>
           ) : (
             <span title={dateTime(since)} className="tabular">
               {relativeTime(since)}
@@ -271,13 +283,37 @@ export function TaskRow({
       </div>
 
       <div className={cx("order-4 col-span-2 flex-wrap items-center gap-1.5 md:col-span-1 md:flex md:justify-end", hasActions ? "flex" : "hidden")}>
-        {review ? <CompletionButton task={task} review /> : null}
+        {justCompleted ? (
+          <>
+            <Chip tone="ok">completed</Chip>
+            <Button small variant="ghost" busy={undo.isPending} onClick={() => undo.mutate()}>
+              Undo
+            </Button>
+          </>
+        ) : confirming !== null ? (
+          <>
+            <span className="font-mono text-meta text-muted tabular">{confirming.starts}</span>
+            <Button small variant="primary" busy={quick.busy} onClick={confirming.submit}>
+              Complete
+            </Button>
+            <Button small variant="ghost" disabled={quick.busy} onClick={confirming.cancel}>
+              Cancel
+            </Button>
+          </>
+        ) : review ? (
+          <>
+            <Button small variant="primary" busy={quick.busy} onClick={quick.start}>
+              Complete
+            </Button>
+            <CompletionButton task={task} review />
+          </>
+        ) : null}
         {showStart ? (
           <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
             {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
           </Button>
         ) : null}
-        {appLink === null ? null : (
+        {appLink === null || justCompleted || confirming !== null ? null : (
           <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
             Open in {harnessName(task.connectionId)}
           </AppButton>
@@ -294,6 +330,11 @@ export function TaskRow({
       {start.error === null ? null : (
         <div className={cx("order-6 col-span-2", underTitle)}>
           <ErrorText error={start.error} />
+        </div>
+      )}
+      {rowError === null ? null : (
+        <div className={cx("order-6 col-span-2", underTitle)}>
+          <ErrorText error={rowError} />
         </div>
       )}
     </div>

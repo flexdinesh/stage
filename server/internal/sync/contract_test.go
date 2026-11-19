@@ -19,6 +19,7 @@ type documentHarness struct {
 	created, started                        int
 	document                                string
 	phase                                   string
+	closed                                  string // closure signal, "" for none
 	input                                   execution.Intent
 }
 
@@ -55,6 +56,9 @@ func (f *documentHarness) Observe(_ context.Context, ref execution.SessionRef) (
 	o := execution.Observation{Session: ref, Project: "collection-z", Title: "Document", State: state, Active: state == "running", CreatedAt: now, UpdatedAt: now, ExecutionID: "worker:99", Config: f.input.Config, Links: execution.Links{Web: "https://documents.invalid/view/" + ref.ExternalSessionID}}
 	if state == "done" {
 		o.Reply = &execution.Reply{Text: "Saved result", ItemID: "paragraph:3", RunID: "worker:99", UpdatedAt: now}
+	}
+	if f.closed != "" {
+		o.Closed = &execution.Closure{Signal: f.closed}
 	}
 	return o, nil
 }
@@ -187,6 +191,35 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 	evidence, err := store.Acceptances(ctx, task.ID)
 	if err != nil || evidence[0].Evidence.Session.ConnectionID != 2 || *evidence[0].Evidence.Reply != "Saved result" {
 		t.Fatal("offline evidence lost", err)
+	}
+}
+func TestContractArchivedSessionInfersCompletion(t *testing.T) {
+	store, fake, svc, task := contractSetup(t)
+	ctx := t.Context()
+	released := 0
+	svc.OnAccepted = func() { released++ }
+	got, err := svc.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.closed = execution.ClosedArchived
+	if err = svc.PollTask(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if evidence, _ := store.Acceptances(ctx, task.ID); len(evidence) != 0 || released != 0 {
+		t.Fatal("running archived session completed")
+	}
+	got, _ = store.GetTask(ctx, task.ID)
+	fake.phase = "published"
+	for range 2 {
+		if err = svc.PollTask(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = store.GetTask(ctx, task.ID)
+	}
+	evidence, err := store.Acceptances(ctx, task.ID)
+	if err != nil || len(evidence) != 1 || evidence[0].Provenance != "harness_archived" || *evidence[0].Evidence.Reply != "Saved result" || released != 1 || got.AcceptanceID == nil {
+		t.Fatalf("archive inference %+v %v released %d", evidence, err, released)
 	}
 }
 func TestContractOptionalCapabilitiesAndOfflineDoNotClaim(t *testing.T) {

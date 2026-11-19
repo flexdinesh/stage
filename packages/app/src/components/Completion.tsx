@@ -1,14 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useId, useRef, useState } from "react";
 import { Link } from "react-router";
-import type { Acceptance, AcceptanceRequest, AcceptedEvidence, Task } from "../api/types.ts";
-import { useInvalidateWork } from "../api/queries.ts";
+import type { Acceptance, AcceptanceRequest, AcceptedEvidence, HarnessConnection, Task } from "../api/types.ts";
+import { useConnections, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
+import { provenanceText } from "../lib/completion.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { MAX_NOTE_BYTES, noteBytes, noteRequest } from "../lib/journal.ts";
 import { isActive } from "../lib/tasks.ts";
 import { taskStateLabel } from "./StateBadge.tsx";
-import { Alert, Button, Drawer, ErrorText, Field, Panel, QueryState, Textarea } from "./ui.tsx";
+import { Alert, Button, Checkbox, Drawer, ErrorText, Field, Panel, QueryState, Textarea, cx } from "./ui.tsx";
 
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 
@@ -36,7 +37,7 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
 export function AcceptedResult({ acceptance, current }: { acceptance: Acceptance; current: boolean }) {
   return <Panel title={current ? "Accepted result" : "Previous accepted result"} meta={`#${acceptance.id} · ${relativeTime(acceptance.acceptedAt)}`}>
     <div className="flex flex-col gap-3">
-      <p className="text-small text-muted">{acceptance.provenance === "historical_settlement" ? "Migrated from historical T3 settlement. Evidence reflects the local cache at migration." : "Completed by you in Stage. This result stays unchanged when execution continues."}</p>
+      <p className="text-small text-muted">{provenanceText(acceptance.provenance)}</p>
       {acceptance.note === "" ? null : <section><h3 className="label-caps mb-2">Acceptance note</h3><p className="whitespace-pre-wrap break-words text-small">{acceptance.note}</p></section>}
       <Evidence evidence={acceptance.evidence} />
     </div>
@@ -47,7 +48,7 @@ export function CompletionButton({ task, review = false }: { task: Task; review?
   const [open, setOpen] = useState(false);
   const completed = task.acceptanceId !== null;
   return <>
-    <Button small={review} variant={completed || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Reopen task" : review ? "Review" : "Complete task"}</Button>
+    <Button small={review} variant={completed || review || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Reopen task" : review ? "Review" : "Complete task"}</Button>
     {open ? <CompletionDrawer task={task} reopen={completed} onClose={() => setOpen(false)} /> : null}
   </>;
 }
@@ -92,4 +93,28 @@ function CompletionDrawer({ task, reopen, onClose }: { task: Task; reopen: boole
       <Button variant="secondary" busy={preview.isFetching} disabled={change.isPending} onClick={() => { change.reset(); void preview.refetch(); }}>Refresh evidence</Button>
     </div>
   </Drawer>;
+}
+
+const AUTO_COMPLETE_LABEL: Record<HarnessConnection["harness"], string> = {
+  t3: "Complete tasks when settled in T3",
+  opencode: "Complete tasks when archived in OpenCode",
+};
+
+/** Settings connection card toggle for the harness's auto-complete; saves at once. Hidden until the connection loads. */
+export function AutoCompleteToggle({ harness, className }: { harness: HarnessConnection["harness"]; className?: string }) {
+  const connections = useConnections();
+  const save = useSetAutoComplete();
+  const hintId = useId();
+  const connection = connections.data?.connections.find((c) => c.harness === harness);
+  if (connection === undefined) return null;
+  return (
+    <div className={cx("flex min-w-0 flex-col gap-0.5", className)} aria-busy={save.isPending}>
+      <label className="-mx-1.5 flex min-h-11 cursor-pointer items-center gap-3 px-1.5 transition-colors duration-150 hover:bg-panel md:min-h-8">
+        <Checkbox checked={connection.autoComplete} aria-describedby={hintId} onChange={(e) => save.mutate({ id: connection.id, on: e.target.checked })} />
+        <span className="text-small text-fg">{AUTO_COMPLETE_LABEL[harness]}</span>
+      </label>
+      <p id={hintId} className="font-mono text-meta text-muted">Only successful runs. Reopen undoes it.</p>
+      <ErrorText error={save.error} />
+    </div>
+  );
 }

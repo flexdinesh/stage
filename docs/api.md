@@ -182,7 +182,8 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/connections`: `{connections: [{id, harness, configured}]}`. T3 uses connection 1. Select the returned OpenCode ID. Both can be planned before setup.
+- `GET /api/connections`: `{connections: [{id, harness, configured, autoComplete}]}`. T3 uses connection 1. Select the returned OpenCode ID. Both can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion").
+- `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `GET /api/connections/:connectionId/projects` (also `/api/connections/t3/projects`): live discovery, returns
   `{projects: [{connectionId, externalId, title, workspace, projectId}]}`.
   `projectId` is the current explicit owner, or null.
@@ -282,7 +283,7 @@ attempt is consumed.
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
-  "acceptanceId": null, "acceptanceRevision": 0, "completedAt": null,
+  "acceptanceId": null, "acceptanceRevision": 0, "completedAt": null, "completionProvenance": null,
   "runStartedAt": null,
   "runEndedAt": null,
   "lastWordPreview": null,
@@ -416,7 +417,7 @@ poller. A task without an execution session returns 409.
 Stop bumps `updatedAt` and re-arms polling of a `failed|interrupted` task for
 10 minutes. It then polls the session once. An adopted session waiting in
 Backlog can advance when execution begins in its harness. Execution observations
-never alter acceptance.
+alter acceptance only through inferred completion.
 200 `Task`. 502 / 503.
 
 ### `POST /api/tasks/:id/duplicate`
@@ -761,7 +762,7 @@ Live: every new inbox row, read (`POST /api/notifications/read`), prune and task
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done"), `failed` ("Failed") or `settled` ("Settled") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
 - Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
-- External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input|done|failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; settlement does not complete execution or release dependencies.
+- External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input|done|failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; settling or archiving an unowned session completes nothing and releases no dependencies. A task's own session follows "Inferred completion".
 - Needs-input counts combine tasks with unowned, non-child normalized session observations. Historical notification entries and links remain available.
 
 ## State mapping
@@ -769,11 +770,11 @@ Live: every new inbox row, read (`POST /api/notifications/read`), prune and task
 The adapter maps harness state to Stage observations. Active execution and pending
 input take precedence over historical settlement. Completed execution maps to done;
 unknown or missing replies preserve the last known state. Connection health is
-separate. Polling and recovery never change acceptance. See [execution.md](execution.md).
+separate. Polling and recovery change acceptance only through inferred completion. See [execution.md](execution.md).
 
 ## User acceptance (API v4)
 
-Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable), `acceptanceRevision` and `completedAt` (nullable) describe Stage acceptance. Task detail adds `acceptances`, newest first. Legacy tree `counts.settled` counts currently accepted members, and tree `settledAt` is their latest acceptance when all members are accepted. Unaccepted execution `done|settled` contributes to `counts.done`.
+Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable), `acceptanceRevision`, `completedAt` (nullable) and `completionProvenance` (the current acceptance's provenance, nullable) describe Stage acceptance. Task detail adds `acceptances`, newest first. Legacy tree `counts.settled` counts currently accepted members, and tree `settledAt` is their latest acceptance when all members are accepted. Unaccepted execution `done|settled` contributes to `counts.done`.
 
 - `GET /api/tasks/:id/completion-preview`: `revision`, `evidenceVersion`, `evidence`, `blockedReason`, `dependents`. Reads Stage's local cache only. Dependents identify claimed work and effective start mode.
 - `POST /api/tasks/:id/complete`: `{requestId, revision, evidenceVersion, note?}`. Rejects active `launching|running|needs_input`, mirrored active runs/pending requests, and uncertain launch outcomes. Any known stopped state or unstarted task may be accepted, including interrupted/cancelled/failed work. The optional note is UTF-8, at most 16 KiB.
@@ -781,8 +782,11 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 - Both writes return `{revision, acceptanceId}`. Exact request replay returns its original result without applying it again, even after a later reopen. Reusing a request ID with changed content, stale revision or changed evidence yields 409; refresh and review before a new submission.
 - Acceptance records contain `id, taskId, acceptedAt, capturedAt, provenance, evidence, note`. Evidence captures task/title/project/tree, execution/thread/branch/worktree references, bounded cached reply with run/item IDs, timestamps, truncation, available artifact links, and the latest journal entry ID at capture. Cache observation time, earlier/unverified run and missing reply are explicit. No live read is required to review, accept or use handoff.
 - Confirmation and launch claims serialize in SQLite. Reopen before claim blocks it; claim before reopen continues with pinned inputs. Completing again cannot launch an existing attempt twice. Manual trees become ready; automatic trees retain automatic release. Closed trees stay closed.
+- `provenance`: `user` (complete action), `historical_settlement` (migration), `harness_settled` (T3 settle) or `harness_archived` (OpenCode archive).
+- Inferred completion: when a poll observes a task's session closed in its harness (T3 settled, OpenCode archived; observation `closed.signal`), Stage completes the task in one transaction only if its state is `done`, it has no current acceptance, the session is not active, the observation has an execution ID, the task's connection has `autoComplete`, the completion preview has no `blockedReason`, and no earlier decision exists for that execution. It records the preview's evidence with an empty note, `acceptedAt` = now (never T3's settle time), the same task/tree/journal/readiness updates as user completion (journal `task_completed`: `Completed from T3 settle; accepted evidence saved in Stage.` or `Completed from OpenCode archive; accepted evidence saved in Stage.`), then triggers the release runner. Failed, interrupted or cancelled execution never infers. Reopen records a decision for the session's current execution, so a still-closed session does not complete it again; a new execution can.
+- Polling: unaccepted `done|settled` tasks stay in the throttled stale poll (at most once a minute) so a later closure is seen; accepted ones are polled only for an hour after their last update.
 - Migration accepts only tasks currently `settled`, with `historical_settlement` provenance and cache-only evidence. A previous settlement timestamp on running work does not qualify. Existing IDs, notes, histories, execution links, policies and overrides survive.
-- Completion/reopening are user-facing REST actions. There is no CLI/MCP completion or reopen tool. Agents report outcomes using notes; ordinary task updates cannot set acceptance.
+- Completion/reopening are user-facing REST actions; inferred completion is the only server-side path. There is no CLI/MCP completion or reopen tool. Agents report outcomes using notes; ordinary task updates cannot set acceptance.
 
 ## Tree rules
 
@@ -790,9 +794,9 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 - Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `auto` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
 - Tasks inherit the tree's start mode by default (`startMode` omitted or null; CLI/MCP also accept `inherit`). Set shared policy on the tree, and explicit task `auto` or `manual` only for an exception. Tree mode changes preserve explicit overrides; clear a task's override to make it inherit again.
 - `start: true` or a start time with needs is 400. A non-backlog task may join a tree only without needs.
-- A need is passed only when `acceptanceId` is non-null. Execution success, stopping, settlement, archive and PR merge never release new work. Complete the need in Stage or edit dependencies.
+- A need is passed only when `acceptanceId` is non-null. Execution success, stopping, failure and PR merge never release new work; settlement or archive does only through inferred completion. Complete the need in Stage or edit dependencies.
 - `readiness` (backlog members only, else null): `blocked` while a need lacks user acceptance; `ready` when every need has user acceptance, there is no start time, and the task is manual or has no needs. Roots read `ready` (auto never launches them; the user starts them, or Start ready).
-- Release runner (on user completion/reopening, every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all have user acceptance (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs completed` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
+- Release runner (on user or inferred completion/reopening, every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all have user acceptance (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs completed` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
 - Splice (remove from tree, delete, move to another tree): each dependent drops the task and takes over its needs (A→X→B becomes A→B, deduplicated); the task loses its needs and leaves the tree; stale `workspace.baseTaskId` values are cleared; an emptied tree is archived. Splicing an unfinished middle task can make dependents ready at once.
 - Moving between trees = remove + add (no merge). `POST /api/trees/:id/dissolve` dissolves a tree.
 - Launch claims atomically check dependencies, tree status and effective policy, then pin acceptance IDs. Reopen blocks future claims; already claimed attempts continue with their original snapshots. Unknown launch outcomes reconcile with the same attempt, request ID and pins. A fresh retry checks current acceptance again.
@@ -813,7 +817,7 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 - `adopted: true`, `prompt: ""`, title from the request, else the session title, else `Session <id8>`; model, runtime and interaction mode copied from the session; state from the session (State mapping, idle reads `done`); `launchAttempt` 1. Task event `adopted session`.
 - stage never starts, restarts or duplicates it (409); stop works; sync keeps its state.
 - A session a task already owns returns that task (200; `needsSessionId` uses it as the need). Unknown session 404; a subagent, an archived session, or one whose project is not in stage 409.
-- With `treeId` the task joins that tree (no needs). Adoption never accepts the task, including an already settled session.
+- With `treeId` the task joins that tree (no needs). Adoption never accepts the task, including an already settled session; a later poll may (connection auto-complete).
 
 ## Handoff
 
