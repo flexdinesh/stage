@@ -40,6 +40,7 @@ type Service struct {
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	OnAccepted                                                                   func() // a completion was inferred (tree release may follow)
+	PublicURL                                                                    string // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	progress                                                                     atomic.Pointer[Progress]
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
@@ -73,9 +74,15 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 	}
 	return a, nil
 }
+
+// SetAdapter installs a connection's adapter; nil uninstalls it.
 func (s *Service) SetAdapter(id int64, a execution.Adapter) {
 	s.adapterMu.Lock()
-	s.adapters[id] = a
+	if a == nil {
+		delete(s.adapters, id)
+	} else {
+		s.adapters[id] = a
+	}
 	s.adapterMu.Unlock()
 	s.Kick()
 }
@@ -88,7 +95,11 @@ func (s *Service) SwapAdapter(old, next int64, a execution.Adapter) {
 		delete(s.adapters, old)
 		s.watchSeeded.Delete(old)
 	}
-	s.adapters[next] = a
+	if a == nil {
+		delete(s.adapters, next) // disconnected
+	} else {
+		s.adapters[next] = a
+	}
 	s.adapterMu.Unlock()
 	s.Kick()
 }
@@ -131,7 +142,9 @@ func (s *Service) Run(ctx context.Context) {
 		timer := time.NewTicker(every)
 		defer timer.Stop()
 		for {
-			if err := fn(ctx); err != nil && ctx.Err() == nil {
+			// An uninstalled (disconnected) connection's workers idle quietly.
+			var unavailable *db.ConflictError
+			if err := fn(ctx); err != nil && ctx.Err() == nil && !(errors.As(err, &unavailable) && unavailable.Code == "connection_unavailable") {
 				s.log.Warn("execution sync", "err", err)
 			}
 			select {
@@ -498,7 +511,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
-	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, features.SessionEnvironment))
+	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, features.SessionEnvironment, s.PublicURL))
 	if e != nil {
 		return t, e
 	}

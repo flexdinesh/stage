@@ -191,7 +191,8 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.T3ID()), logger)
-	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter)
+	syncSvc.PublicURL = cfg.PublicURL
+	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter, logger)
 	if err != nil {
 		return err
 	}

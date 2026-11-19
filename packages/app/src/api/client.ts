@@ -1,5 +1,5 @@
 import type {
-  OpenCodeStatus, HarnessConnection, Capabilities, ExecutionLinks, TaskState,
+  OpenCodeStatus, OpenCodeStatusWire, HarnessConnection, Capabilities, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -134,6 +134,15 @@ export function normalizeT3Status(w: T3StatusWire, now = Date.now()): T3Status {
   };
 }
 
+/** Fills the pairing fields an older server does not send: Basic credentials when it has them, and no local service. */
+export function normalizeOpenCodeStatus(w: OpenCodeStatusWire): OpenCodeStatus {
+  return {
+    ...w,
+    auth: w.auth ?? (w.hasCredentials ? "basic" : "none"),
+    local: w.local ?? { available: false, url: "", version: "", reason: "environment" },
+  };
+}
+
 /** Typed Stage API client over a host transport (trusted contract: docs/api.md). */
 export type Api = ReturnType<typeof createApi>;
 
@@ -170,11 +179,17 @@ export function createApi(transport: Transport) {
     health: () => apiFetch<Health>("/health"),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
-    openCodeStatus: () => apiFetch<OpenCodeStatus>("/opencode/status"),
+    openCodeStatus: () => apiFetch<OpenCodeStatusWire>("/opencode/status").then(normalizeOpenCodeStatus),
     /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
-    /** 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
+    /** 409 `opencode_auth_required` when the service demands a password; 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
     saveOpenCode: (body: OpenCodeSettings) => apiSend("/opencode/settings", put(body)),
+    /** Connects the OpenCode service on the server's machine with its own password (409 `opencode_local_unavailable`, or instance_changed / instance_returned as for saveOpenCode). */
+    connectLocalOpenCode: (newInstance = false) => apiSend("/opencode/connect-local", post(newInstance ? { newInstance: true } : undefined)),
+    /** Redeems a link from `opencode pair` (400 when invalid, 409 `opencode_pairing_expired`, or instance_changed / instance_returned: resend the same link with newInstance). */
+    pairOpenCode: (link: string, newInstance = false) => apiSend("/opencode/pair", post(newInstance ? { link, newInstance: true } : { link })),
+    /** Forgets the OpenCode connection; tasks and history stay (409 when environment-managed). */
+    disconnectOpenCode: () => apiSend("/opencode/settings", del),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     t3Status: () => apiFetch<T3StatusWire>("/t3/status").then((w) => normalizeT3Status(w)),
     pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),

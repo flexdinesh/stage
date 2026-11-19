@@ -26,6 +26,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
@@ -50,9 +51,14 @@ func newHarness(t *testing.T) *harness {
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
+	openCode, err := opencodesetup.New(t.Context(), store, config.OpenCodeSettings{}, h.sync.SwapAdapter, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h.handler = api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
 		Store:  store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log}), Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		OpenCode: openCode,
 	})
 	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)

@@ -10,7 +10,7 @@ Stage manages tasks, schedules, dependency trees and journals across T3 Code and
 
 ## Connect a harness
 
-Open Settings to pair T3 or connect an existing OpenCode 2.3.0 service. For OpenCode, enter the service address reachable from Stage. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
+Open Settings to pair T3 or connect an existing OpenCode 2.3.0 service. For OpenCode on the Stage server's machine, click **Connect** (or run `stage opencode connect`); Stage signs in with the service's own password. For another machine, run `opencode pair` there and paste one link (or `stage opencode pair LINK`); Stage renews that session automatically. **Advanced** takes a plain service address. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
 
 Create a Stage project and bind its workspace on each harness you use. Select the destination on each new task when a project has both bindings. Planning and accepted-result handoff work with a disconnected predecessor.
 

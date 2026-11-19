@@ -23,15 +23,18 @@ func (s *Store) EnsureOpenCode(ctx context.Context) (int64, error) {
 func (s *Store) OpenCodeSettings(ctx context.Context) (config.OpenCodeSettings, string, error) {
 	var c config.OpenCodeSettings
 	var verified string
-	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,
- COALESCE((SELECT identity FROM harness_connections WHERE harness='opencode' AND active=1),'') FROM opencode_settings WHERE id=1`).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &verified)
+	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at,
+ COALESCE((SELECT identity FROM harness_connections WHERE harness='opencode' AND active=1),'') FROM opencode_settings WHERE id=1`).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &c.Auth, &c.TokenIssuedAt, &verified)
 	return c, verified, err
 }
 
 // SaveOpenCodeSettings saves the active connection's settings. Its identity
 // changes only through SwitchInstance or SetConnectionIdentity.
 func (s *Store) SaveOpenCodeSettings(ctx context.Context, c config.OpenCodeSettings) error {
-	_, err := s.pool.Exec(ctx, `UPDATE opencode_settings SET endpoint=$1,browser_endpoint=$2,web_client=$3,username=$4,password=$5 WHERE id=1`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password)
+	if c.Auth == "" {
+		c.Auth = config.OpenCodeAuthNone
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE opencode_settings SET endpoint=$1,browser_endpoint=$2,web_client=$3,username=$4,password=$5,auth=$6,token_issued_at=$7 WHERE id=1`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, c.Auth, c.TokenIssuedAt)
 	return err
 }
 

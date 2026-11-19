@@ -43,6 +43,9 @@ type Deps struct {
 		ID() int64
 		Status(context.Context) config.OpenCodeStatus
 		Save(context.Context, config.OpenCodeEdit) error
+		ConnectLocal(ctx context.Context, newInstance bool) error
+		Pair(ctx context.Context, link string, newInstance bool) error
+		Disconnect(context.Context) error
 	}
 }
 
@@ -78,6 +81,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/t3/url", s.t3SetURL)
 	h("GET /api/opencode/status", s.openCodeStatus)
 	h("PUT /api/opencode/settings", s.openCodeSettings)
+	h("DELETE /api/opencode/settings", s.openCodeDisconnect)
+	h("POST /api/opencode/connect-local", s.openCodeConnectLocal)
+	h("POST /api/opencode/pair", s.openCodePair)
 	h("POST /api/sync", s.runSync)
 	h("GET /api/catalog", s.catalog)
 

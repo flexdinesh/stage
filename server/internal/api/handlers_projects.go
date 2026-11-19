@@ -32,6 +32,50 @@ func (s *server) openCodeSettings(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
+func (s *server) openCodeConnectLocal(w http.ResponseWriter, r *http.Request) error {
+	if s.OpenCode == nil {
+		return db.Conflict("OpenCode setup is unavailable on this server.")
+	}
+	var in struct {
+		NewInstance bool `json:"newInstance"`
+	}
+	if err := decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if err := s.OpenCode.ConnectLocal(r.Context(), in.NewInstance); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+func (s *server) openCodePair(w http.ResponseWriter, r *http.Request) error {
+	if s.OpenCode == nil {
+		return db.Conflict("OpenCode setup is unavailable on this server.")
+	}
+	var in struct {
+		Link        string `json:"link"`
+		NewInstance bool   `json:"newInstance"`
+	}
+	if err := decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if err := s.OpenCode.Pair(r.Context(), in.Link, in.NewInstance); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+func (s *server) openCodeDisconnect(w http.ResponseWriter, r *http.Request) error {
+	if s.OpenCode == nil {
+		return db.Conflict("OpenCode setup is unavailable on this server.")
+	}
+	if err := s.OpenCode.Disconnect(r.Context()); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (s *server) plannedConnection(id int64) error {
 	if s.OpenCode != nil && s.OpenCode.ID() == id {
 		return nil

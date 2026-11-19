@@ -285,6 +285,7 @@ export function DashboardPage() {
     <>
       {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}
       {openCode.data?.state === "unavailable" ? <p className="mb-3 text-small">OpenCode is unavailable. <Link className="underline" to="/settings">Check connection</Link></p> : null}
+      {openCode.data?.state === "rejected" ? <p className="mb-3 text-small">OpenCode no longer accepts Stage's sign-in. <Link className="underline" to="/settings">Reconnect</Link></p> : null}
       <CompletionLinger>
         <Dashboard />
       </CompletionLinger>

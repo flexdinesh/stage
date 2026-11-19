@@ -115,6 +115,12 @@ Usage:
                                       machine, or a code from "t3 pair" on the T3 host
   stage t3 disconnect                 forget the server's T3 token and environment binding (tasks stay)
   stage t3 url [URL | --reset]        show or set the server's T3 URL (--reset: default; T3_URL wins)
+  stage opencode [status]             the server's OpenCode: address, auth, state, the local service
+  stage opencode connect              connect the OpenCode service on the server's machine
+  stage opencode pair LINK            connect a remote OpenCode with a link from "opencode pair" on its
+                                      host; the session token renews automatically
+                                      (connect/pair --new-instance: confirm a different service)
+  stage opencode disconnect           forget the server's OpenCode address and credentials (tasks stay)
   stage version [--json]              this binary: version, identity, commit, API version, schema,
                                       and its installation (mode, location) when installed
   stage update [--check] [--version X] [--from DIR]
@@ -293,6 +299,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runStatus(ctx, env, sub)
 	case "t3":
 		return runT3(ctx, env, sub)
+	case "opencode":
+		return runOpenCode(ctx, env, sub)
 	case "version":
 		return runVersion(env, sub)
 	case "service":

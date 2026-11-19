@@ -21,6 +21,9 @@ import (
 type service struct {
 	projects []map[string]any
 	sessions map[string]map[string]any
+	// codes are unused pairing codes; redeems counts /auth/connect calls.
+	codes   map[string]bool
+	redeems int
 }
 
 func project(id, canonical string) map[string]any {
@@ -73,6 +76,16 @@ func (s *service) start(t *testing.T) string {
 			write(spec())
 		case p == "/api/project":
 			write(s.projects)
+		case strings.HasPrefix(p, "/auth/connect/"):
+			s.redeems++
+			code := strings.TrimPrefix(p, "/auth/connect/")
+			if !s.codes[code] {
+				w.WriteHeader(http.StatusUnauthorized)
+				write(map[string]string{"message": "Pairing link expired or already used"})
+				return
+			}
+			delete(s.codes, code)
+			write(map[string]string{"token": "tok-" + code})
 		case p == "/api/session/active":
 			active := map[string]any{}
 			for id := range s.sessions {
@@ -137,7 +150,7 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, store, config.OpenCodeSettings{}, in.install)
+	s, err := New(ctx, store, config.OpenCodeSettings{}, in.install, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,5 +211,48 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	}
 	if p, _ := store.GetProject(ctx, projectID); !p.Bindings[0].ConnectionActive {
 		t.Fatal(fmt.Sprintf("revived binding inactive %+v", p.Bindings))
+	}
+}
+
+// A pairing link works once: when its service needs confirming as new, the
+// confirming retry reuses the token Stage already redeemed.
+func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
+	ctx := context.Background()
+	var temp dbtest.DB
+	store := db.NewStore(temp.Reset(t))
+	original := &service{projects: []map[string]any{project("proj", "/repo")}, sessions: map[string]map[string]any{"ses_a": runningSession("ses_a", "proj", "/repo", 1000)}}
+	addrA := original.start(t)
+	other := &service{projects: []map[string]any{project("proj", "/repo")}, sessions: map[string]map[string]any{}, codes: map[string]bool{"once": true}}
+	addrB := other.start(t)
+
+	var in installs
+	s, err := New(ctx, store, config.OpenCodeSettings{}, in.install, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := s.ID()
+	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA}); err != nil {
+		t.Fatal(err)
+	}
+	record(t, store, s, addrA)
+
+	link := addrB + "/auth/connect/once"
+	var conflict *db.ConflictError
+	if err := s.Pair(ctx, link, false); !errors.As(err, &conflict) || conflict.Code != "instance_changed" || s.ID() != first {
+		t.Fatalf("unconfirmed pair: %v id %d", err, s.ID())
+	}
+	if err := s.Pair(ctx, link, true); err != nil {
+		t.Fatalf("confirmed pair: %v", err)
+	}
+	if other.redeems != 1 {
+		t.Fatalf("link redeemed %d times", other.redeems)
+	}
+	saved, _, err := store.OpenCodeSettings(ctx)
+	if err != nil || s.ID() == first || saved.Auth != config.OpenCodeAuthPaired || saved.Password != "tok-once" || saved.Endpoint != addrB {
+		t.Fatalf("paired %+v id %d %v", saved, s.ID(), err)
+	}
+	// Spent: the same link now needs a fresh one.
+	if err := s.Pair(ctx, link, true); !errors.As(err, &conflict) || conflict.Code != CodePairingExpired {
+		t.Fatalf("reused link: %v", err)
 	}
 }

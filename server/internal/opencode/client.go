@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -28,16 +29,40 @@ type Adapter struct {
 	http                                               *http.Client
 	contractMu                                         sync.Mutex
 	verified                                           serverInfo
+	onHealth                                           func()
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
 var _ execution.WorkspaceFeatures = (*Adapter)(nil)
 var _ execution.LinkResolver = (*Adapter)(nil)
 
-func serviceURL(s string) (string, error) {
+// invisible reports a character a pasted address can carry unseen: control,
+// format (zero-width, BOM, direction marks) or any space but a plain one.
+func invisible(field, s string) error {
+	for _, r := range s {
+		if r != ' ' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zs, unicode.Zl, unicode.Zp)) {
+			return fmt.Errorf("%s contains an invisible character (U+%04X); retype it", field, r)
+		}
+	}
+	return nil
+}
+
+// serviceURL validates the field's address. Errors name the field and
+// never echo the value, which may carry credentials.
+func serviceURL(field, s string) (string, error) {
+	if e := invisible(field, s); e != nil {
+		return "", e
+	}
 	u, e := url.Parse(s)
-	if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", errors.New("configure an HTTP(S) URL without credentials, query or fragment")
+	switch {
+	case e != nil || (u.Scheme != "https" && u.Scheme != "http"):
+		return "", fmt.Errorf("%s must be an http:// or https:// URL", field)
+	case u.Host == "":
+		return "", fmt.Errorf("%s needs a host, like http://127.0.0.1:49374", field)
+	case u.User != nil:
+		return "", fmt.Errorf("%s must not include credentials; use the username and password fields", field)
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "", fmt.Errorf("%s must not include a query or fragment", field)
 	}
 	return strings.TrimRight(u.String(), "/"), nil
 }
@@ -48,21 +73,21 @@ func New(connection int64, cfg Settings) (*Adapter, error) {
 	if connection <= 0 {
 		return nil, errors.New("configure a scoped OpenCode connection")
 	}
-	ep, e := serviceURL(cfg.Endpoint)
+	ep, e := serviceURL("Service URL", cfg.Endpoint)
 	if e != nil {
 		return nil, e
 	}
 	if cfg.BrowserEndpoint == "" {
 		cfg.BrowserEndpoint = ep
 	}
-	public, e := serviceURL(cfg.BrowserEndpoint)
+	public, e := serviceURL("Browser service URL", cfg.BrowserEndpoint)
 	if e != nil {
 		return nil, e
 	}
 	if cfg.WebClient == "" {
 		cfg.WebClient = public
 	}
-	site, e := serviceURL(cfg.WebClient)
+	site, e := serviceURL("Web client URL", cfg.WebClient)
 	if e != nil {
 		return nil, e
 	}
@@ -72,12 +97,22 @@ func New(connection int64, cfg Settings) (*Adapter, error) {
 	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
+// OnHealth registers fn to run at the start of every health check (the
+// sync watch checks each installed adapter every few seconds). Set it
+// before the adapter is shared; fn must not block.
+func (a *Adapter) OnHealth(fn func()) { a.onHealth = fn }
+
+const rejectedReason = "OpenCode refused access. Check the configured credentials."
+
+// Rejected reports a health check that OpenCode answered with 401 or 403.
+func Rejected(h execution.Health) bool { return !h.Available && h.Reason == rejectedReason }
+
 type responseError struct{ code int }
 
 func (e responseError) Error() string {
 	switch e.code {
 	case 401, 403:
-		return "OpenCode refused access. Check the configured credentials."
+		return rejectedReason
 	case 404:
 		return "OpenCode resource is unavailable."
 	default:
@@ -220,6 +255,9 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 	return info, nil
 }
 func (a *Adapter) Health(ctx context.Context) execution.Health {
+	if a.onHealth != nil {
+		a.onHealth()
+	}
 	h := execution.Health{CheckedAt: time.Now().UTC(), Identity: a.endpoint}
 	if info, e := a.check(ctx); e != nil {
 		h.Reason = e.Error()

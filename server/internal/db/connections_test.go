@@ -32,7 +32,7 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,1,'thread'),(6,2,'ses_x')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,session_id,connection_id,launch_attempt) VALUES(1,1,'t3','p','running',5,1,1),(2,1,'oc','p','running',6,2,1)`)
 	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES(2,'/srv','/home')`)
-	migrateTo(t, pool, 12)
+	migrateTo(t, pool, 13) // 12 plus OpenCode auth, which OpenCodeSettings reads
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}
