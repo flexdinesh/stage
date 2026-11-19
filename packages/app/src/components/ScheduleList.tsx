@@ -4,10 +4,10 @@ import { useApi } from "../platform/context.tsx";
 import { useInvalidateWork } from "../api/queries.ts";
 import type { Schedule } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { cronSummary, wallTime } from "../lib/schedules.ts";
+import { cronSummary, lastRun, wallTime } from "../lib/schedules.ts";
 import { IconRepeat } from "./icons.tsx";
-import { TaskStateBadge } from "./StateBadge.tsx";
-import { Button, Chip, ErrorText, cx } from "./ui.tsx";
+import { TaskStateBadge, taskStateTone } from "./StateBadge.tsx";
+import { Button, Chip, ErrorText, cx, toneClass } from "./ui.tsx";
 
 /** "paused" (idle) or a plain "repeat" chip: a schedule has no state of its own, its runs do. */
 export function ScheduleChip({ paused }: { paused: boolean }) {
@@ -57,7 +57,7 @@ export function ScheduleRows({
   );
 }
 
-/** Same grid as TaskRow: chip column, optional project column, title + mono meta, last-run chip, actions. */
+/** Same grid as TaskRow: chip column, optional project column, title + mono meta, last-run chip (failed or blocking runs only), actions. */
 export function ScheduleRow({
   schedule: s,
   showProject = false,
@@ -73,6 +73,10 @@ export function ScheduleRow({
   const pause = useMutation({ mutationFn: () => api.updateSchedule(s.id, { paused: !s.paused }), onSettled: invalidate });
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
   const error = run.error ?? pause.error;
+  // Healthy last runs read as plain meta; failed or fire-blocking ones get the chip (lastRun).
+  const view = s.lastTaskId === null || s.lastTaskState === null ? null : lastRun(s.lastTaskId, s.lastTaskState);
+  const flag = view?.kind === "flag" && s.lastTaskState !== null ? { state: s.lastTaskState, skip: view.skip } : null;
+  const quietWord = view?.kind === "quiet" ? view.word : null;
 
   return (
     <div
@@ -118,24 +122,32 @@ export function ScheduleRow({
           <span>{cronSummary(s.cron)}</span>
           <span>{s.tz}</span>
           <NextRun schedule={s} />
-          {s.lastTaskId === null ? null : (
-            <Link to={`/tasks/${s.lastTaskId}`} className="tabular hover:text-fg hover:underline md:hidden">
+          {flag !== null && flag.skip !== null && !s.paused ? (
+            <span className={cx(toneClass(taskStateTone(flag.state)), "text-[var(--cf)]")}>{flag.skip}</span>
+          ) : null}
+          {s.lastTaskId === null ? null : flag === null ? (
+            <Link to={`/tasks/${s.lastTaskId}`} title={`Last run: task #${s.lastTaskId}`} className="tabular hover:text-fg hover:underline">
               last #{s.lastTaskId}
-              {s.lastTaskState === null ? null : ` ${s.lastTaskState.replace("_", " ")}`}
+              {quietWord === null ? null : ` ${quietWord}`}
+            </Link>
+          ) : (
+            <Link to={`/tasks/${s.lastTaskId}`} className="tabular hover:text-fg hover:underline md:hidden">
+              last #{s.lastTaskId}{" "}
+              <span className={cx(toneClass(taskStateTone(flag.state)), "text-[var(--cf)]")}>{flag.state.replace("_", " ")}</span>
             </Link>
           )}
         </div>
       </div>
 
       <div className="hidden md:order-3 md:block">
-        {s.lastTaskId === null || s.lastTaskState === null ? null : (
+        {s.lastTaskId === null || flag === null ? null : (
           <Link
             to={`/tasks/${s.lastTaskId}`}
             title={`Last run: task #${s.lastTaskId}`}
             className="inline-flex items-center gap-1.5 font-mono text-meta text-muted tabular hover:text-fg"
           >
-            #{s.lastTaskId}
-            <TaskStateBadge state={s.lastTaskState} />
+            last #{s.lastTaskId}
+            <TaskStateBadge state={flag.state} />
           </Link>
         )}
       </div>

@@ -4,6 +4,7 @@ import {
   DEFAULT_REPEAT,
   buildCron,
   cronSummary,
+  lastRun,
   defaultStartLocal,
   localToInstant,
   parseCron,
@@ -81,4 +82,16 @@ test("until formats remaining time", () => {
   assert.equal(until(-5, now), "now");
   assert.equal(until((9 * 60 + 12) * 60_000, now), "9h 12m");
   assert.equal(until((3 * 24 + 4) * 3_600_000, now), "3d 4h");
+});
+
+test("lastRun flags only failed or fire-blocking runs", () => {
+  assert.deepEqual(lastRun(131, "done"), { kind: "quiet", word: "finished" });
+  assert.deepEqual(lastRun(7, "settled"), { kind: "quiet", word: "settled" });
+  assert.deepEqual(lastRun(7, "cancelled"), { kind: "quiet", word: "cancelled" });
+  assert.deepEqual(lastRun(7, "backlog"), { kind: "quiet", word: "pending" });
+  assert.deepEqual(lastRun(208, "running"), { kind: "flag", skip: "skips while #208 runs" });
+  assert.deepEqual(lastRun(208, "launching"), { kind: "flag", skip: "skips while #208 runs" });
+  assert.deepEqual(lastRun(214, "needs_input"), { kind: "flag", skip: "skips until #214 is answered" });
+  assert.deepEqual(lastRun(190, "failed"), { kind: "flag", skip: null });
+  assert.deepEqual(lastRun(190, "interrupted"), { kind: "flag", skip: null });
 });

@@ -1,6 +1,8 @@
 // Repeat presets <-> 5-field cron, summaries, and wall-time helpers for IANA zones.
 // Pure: no React, no fetch (tests/schedules.test.mjs).
 
+import type { TaskState } from "../api/types.ts";
+
 export const REPEAT_PRESETS = ["hourly", "daily", "weekdays", "weekly", "cron"] as const;
 export type RepeatPreset = (typeof REPEAT_PRESETS)[number];
 
@@ -214,4 +216,33 @@ export function until(ms: number, now: number = Date.now()): string {
   if (h < 24) return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`;
   const d = Math.floor(h / 24);
   return h % 24 === 0 ? `${d}d` : `${d}d ${h % 24}h`;
+}
+
+/**
+ * How a schedule row shows its last spawned task. "quiet": a healthy or
+ * finished run, plain meta text. "flag": a state chip, because the run failed
+ * or keeps the next fire from spawning (`skip`, mirroring the server's skip
+ * rule for launching/running/needs input; backlog is not claimed since only a
+ * held or timed backlog task blocks).
+ */
+export type LastRun = { kind: "quiet"; word: string } | { kind: "flag"; skip: string | null };
+
+export function lastRun(taskId: number, state: TaskState): LastRun {
+  switch (state) {
+    case "launching":
+    case "running":
+      return { kind: "flag", skip: `skips while #${taskId} runs` };
+    case "needs_input":
+      return { kind: "flag", skip: `skips until #${taskId} is answered` };
+    case "failed":
+    case "interrupted":
+      return { kind: "flag", skip: null };
+    case "done":
+      return { kind: "quiet", word: "finished" };
+    case "backlog":
+      return { kind: "quiet", word: "pending" };
+    case "settled":
+    case "cancelled":
+      return { kind: "quiet", word: state };
+  }
 }
