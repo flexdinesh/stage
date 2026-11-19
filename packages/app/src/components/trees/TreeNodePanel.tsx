@@ -23,7 +23,7 @@ const MODE_OPTIONS: { value: ModeChoice; label: string }[] = [
 
 function Section({ label, meta, children }: { label: string; meta?: ReactNode; children: ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2 border-b border-line px-3 py-3">
+    <section className="flex min-w-0 flex-col gap-2 border-b border-line px-3 py-3 last:border-b-0">
       <h3 className="label-caps">
         {label}
         {meta === undefined ? null : <span className="ml-1.5 tracking-normal tabular">· {meta}</span>}
@@ -66,7 +66,7 @@ function baseValue(w: Workspace, candidates: readonly Task[]): string {
 }
 
 /**
- * lg+ side column for the selected node: the task, then its tree controls with Open task. Edits apply at once.
+ * lg+ side column for the selected node: the task with Complete and Open task, then its tree controls. Edits apply at once.
  */
 export function TreeNodePanel({
   tree,
@@ -97,26 +97,21 @@ export function TreeNodePanel({
           {task.title}
         </Link>
         <p className="font-mono text-meta text-muted">{task.projectTitle}</p>
-      </div>
-      <div className="px-3 pb-3"><CompletionButton task={task} /></div>
-      <TreeNodeEditor
-        tree={tree}
-        task={task}
-        onSelect={onSelect}
-        onRemoved={onClose}
-        lead={
-          <Link to={`/tasks/${task.id}`} className={buttonClass("secondary", true)}>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <CompletionButton task={task} />
+          <Link to={`/tasks/${task.id}`} className={buttonClass("secondary")}>
             Open task
           </Link>
-        }
-      />
+        </div>
+      </div>
+      <TreeNodeEditor tree={tree} task={task} onSelect={onSelect} onRemoved={onClose} />
     </Panel>
   );
 }
 
 /**
  * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
- * dependents, start mode, worktree base, handoff, then `lead` and Remove from tree. Edits apply at once; needs, mode,
+ * dependents, start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
  * base and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
  * (`onSelect`) or open the task.
  */
@@ -125,13 +120,11 @@ export function TreeNodeEditor({
   task,
   onSelect,
   onRemoved,
-  lead,
 }: {
   tree: TreeDetail;
   task: Task;
   onSelect?: (id: number) => void;
   onRemoved?: () => void;
-  lead?: ReactNode;
 }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
@@ -289,31 +282,34 @@ export function TreeNodeEditor({
         </div>
       )}
 
-      <div className="flex flex-col gap-2 px-3 py-3">
-        <ErrorText error={error} />
-        <div className="flex flex-wrap items-center gap-2">
-          {lead}
-          {closed ? null : confirmRemove ? (
-            <>
-              <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()} className="ml-auto">
-                Confirm remove
-              </Button>
-              <Button variant="ghost" small onClick={() => setConfirmRemove(false)}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button variant="danger" small onClick={() => setConfirmRemove(true)} className="ml-auto">
-              Remove from tree
-            </Button>
+      {closed && error === null ? null : (
+        <div className="flex flex-col gap-2 px-3 py-3">
+          <ErrorText error={error} />
+          {closed ? null : (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {confirmRemove ? (
+                <>
+                  <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()}>
+                    Confirm remove
+                  </Button>
+                  <Button variant="ghost" small onClick={() => setConfirmRemove(false)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button variant="danger" small onClick={() => setConfirmRemove(true)}>
+                  Remove from tree
+                </Button>
+              )}
+            </div>
           )}
+          {confirmRemove ? (
+            <p className="font-mono text-meta text-muted">
+              {dependents.length === 0 ? "The task stays, outside the tree." : "The task stays; its dependents take over its needs."}
+            </p>
+          ) : null}
         </div>
-        {confirmRemove ? (
-          <p className="font-mono text-meta text-muted">
-            {dependents.length === 0 ? "The task stays, outside the tree." : "The task stays; its dependents take over its needs."}
-          </p>
-        ) : null}
-      </div>
+      )}
     </>
   );
 }
