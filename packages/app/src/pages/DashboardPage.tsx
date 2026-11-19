@@ -1,4 +1,4 @@
-import { harnessName } from "../lib/tasks.ts";
+import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { Link, useSearchParams } from "react-router";
@@ -7,7 +7,7 @@ import {
   useSchedules,
   useT3Status,
   useOpenCodeStatus,
-  useConnections,
+  useHarnesses,
   useTasks,
   useTrees,
 } from "../api/queries.ts";
@@ -184,7 +184,7 @@ function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   if (href === null || !tasks[0]) return null;
   return (
     <AppButton href={href} small variant="ghost">
-      Open in {harnessName(tasks[0].connectionId)}
+      Open in {HARNESS_NAME[tasks[0].harness]}
     </AppButton>
   );
 }
@@ -278,9 +278,9 @@ function StatStrip({
 export function DashboardPage() {
   const t3 = useT3Status();
   const openCode = useOpenCodeStatus();
-  const connections = useConnections();
+  const harnesses = useHarnesses();
   // The server's view (a token, or a saved/env T3 URL), as the top-bar control uses: a disconnected T3 stays quiet.
-  const t3Configured = connections.data?.connections.some((c) => c.id === 1 && c.configured) ?? false;
+  const t3Configured = harnesses.activeConnection("t3")?.configured ?? false;
   return (
     <>
       {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}

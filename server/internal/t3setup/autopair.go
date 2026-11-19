@@ -118,29 +118,29 @@ func PairingArgs(clientName string) []string {
 // AutoPair mints a pairing code with the local t3 CLI and redeems it (see
 // Pair). 409 when auto-pair is unavailable; 502 when T3 is not answering
 // (nothing is minted) or the CLI or the pairing fails.
-func (s *Service) AutoPair(ctx context.Context) error {
+func (s *Service) AutoPair(ctx context.Context) (Paired, error) {
 	ap := s.autoPair()
 	if !ap.Available {
-		return db.Conflict("%s", unavailableMessage(ap.Reason, s.Endpoint().URL))
+		return Paired{}, db.Conflict("%s", unavailableMessage(ap.Reason, s.Endpoint().URL))
 	}
 	// A code minted for a T3 that is not answering could not be redeemed.
 	if p := s.o.Client.Probe(ctx); !p.Reachable {
-		return pairErr("no T3 server answered at %s (%s); start it and try again", s.Endpoint().URL, orNoAnswer(p.Err))
+		return Paired{}, pairErr("no T3 server answered at %s (%s); start it and try again", s.Endpoint().URL, orNoAnswer(p.Err))
 	}
 	rctx, cancel := context.WithTimeout(ctx, AutoPairTimeout)
 	out, err := s.o.Run(rctx, ap.Bin, PairingArgs(s.o.Config.T3ClientName))
 	cancel()
 	if err != nil {
-		return pairErr("t3 auth pairing create failed: %v", err)
+		return Paired{}, pairErr("t3 auth pairing create failed: %v", err)
 	}
 	var res struct {
 		Credential string `json:"credential"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(out), &res); err != nil {
-		return pairErr("t3 auth pairing create: unexpected output: %s", truncate(strings.TrimSpace(string(out)), 200))
+		return Paired{}, pairErr("t3 auth pairing create: unexpected output: %s", truncate(strings.TrimSpace(string(out)), 200))
 	}
 	if res.Credential == "" {
-		return pairErr("t3 auth pairing create returned no credential")
+		return Paired{}, pairErr("t3 auth pairing create returned no credential")
 	}
 	return s.Pair(ctx, res.Credential)
 }

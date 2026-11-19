@@ -118,9 +118,14 @@ func (w Workspace) MarshalJSON() ([]byte, error) {
 }
 
 type Task struct {
-	ExecutionConfig         *execution.Config       `json:"executionConfig"`
-	Launch                  *Attempt                `json:"launch,omitempty"`
-	ConnectionID            int64                   `json:"connectionId"`
+	ExecutionConfig *execution.Config `json:"executionConfig"`
+	Launch          *Attempt          `json:"launch,omitempty"`
+	ConnectionID    int64             `json:"connectionId"`
+	// Harness of the connection; ConnectionActive is false once its
+	// instance was replaced (ConnectionLabel names that instance).
+	Harness                 string                  `json:"harness"`
+	ConnectionActive        bool                    `json:"connectionActive"`
+	ConnectionLabel         string                  `json:"connectionLabel"`
 	SessionIdentityID       *int64                  `json:"-"`
 	OriginSessionIdentityID *int64                  `json:"-"`
 	Session                 *SessionRef             `json:"session"`

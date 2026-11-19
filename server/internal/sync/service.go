@@ -52,7 +52,7 @@ type Service struct {
 }
 
 func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service {
-	return NewWithAdapters(store, map[int64]execution.Adapter{1: adapter}, log)
+	return NewWithAdapters(store, map[int64]execution.Adapter{store.T3ID(): adapter}, log)
 }
 func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
 	if log == nil {
@@ -65,6 +65,10 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 	defer s.adapterMu.RUnlock()
 	a := s.adapters[id]
 	if a == nil {
+		// A replaced instance keeps its history but is never reached again.
+		if s.store.Harness(id) != "" && !s.store.ConnectionActive(id) {
+			return nil, db.ConnectionRetired()
+		}
 		return nil, &db.ConflictError{Code: "connection_unavailable", Msg: "This harness is unavailable. Select a supported connection."}
 	}
 	return a, nil
@@ -72,6 +76,19 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 func (s *Service) SetAdapter(id int64, a execution.Adapter) {
 	s.adapterMu.Lock()
 	s.adapters[id] = a
+	s.adapterMu.Unlock()
+	s.Kick()
+}
+
+// SwapAdapter moves a harness to a new connection after its instance
+// changed: old is no longer polled, watched or launched on.
+func (s *Service) SwapAdapter(old, next int64, a execution.Adapter) {
+	s.adapterMu.Lock()
+	if old != next {
+		delete(s.adapters, old)
+		s.watchSeeded.Delete(old)
+	}
+	s.adapters[next] = a
 	s.adapterMu.Unlock()
 	s.Kick()
 }
@@ -212,7 +229,7 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 
 func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) {
 	now := time.Now().UTC()
-	if id == db.T3ConnectionID {
+	if s.store.IsT3(id) {
 		if !s.syncing.CompareAndSwap(false, true) {
 			return Result{}, ErrSyncRunning
 		}
@@ -232,7 +249,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		return Result{}, err
 	}
 	r := Result{Projects: n}
-	if id == db.T3ConnectionID {
+	if s.store.IsT3(id) {
 		s.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
 	}
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
@@ -251,7 +268,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		}
 	}
 	r.FinishedAt = time.Now().UTC()
-	if id == db.T3ConnectionID && len(errs) == 0 {
+	if s.store.IsT3(id) && len(errs) == 0 {
 		errs = append(errs, s.store.SetLastFullSync(ctx, r.FinishedAt))
 	}
 	return r, errors.Join(errs...)

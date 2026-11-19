@@ -14,6 +14,9 @@ type OpenCodeEdit struct {
 	WebClient       *string `json:"webClient"`
 	Username        *string `json:"username"`
 	Password        *string `json:"password"`
+	// NewInstance confirms connecting a different OpenCode service: the
+	// current connection retires and keeps its tasks and bindings.
+	NewInstance bool `json:"newInstance"`
 }
 
 type OpenCodeStatus struct {

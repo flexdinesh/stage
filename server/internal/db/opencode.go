@@ -7,21 +7,31 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
+// EnsureOpenCode is the active OpenCode connection, created on first use.
 func (s *Store) EnsureOpenCode(ctx context.Context) (int64, error) {
 	var id int64
-	err := s.pool.QueryRow(ctx, `INSERT INTO harness_connections(harness) VALUES('opencode') ON CONFLICT(harness) DO UPDATE SET harness=excluded.harness RETURNING id`).Scan(&id)
+	if _, err := s.pool.Exec(ctx, `INSERT INTO harness_connections(harness) SELECT 'opencode' WHERE NOT EXISTS(SELECT 1 FROM harness_connections WHERE harness='opencode' AND active=1)`); err != nil {
+		return 0, err
+	}
+	s.dropConnections()
+	err := s.pool.QueryRow(ctx, `SELECT id FROM harness_connections WHERE harness='opencode' AND active=1`).Scan(&id)
 	return id, err
 }
 
+// OpenCodeSettings are the settings of the active OpenCode connection and
+// the address its service was verified at ("" before the first).
 func (s *Store) OpenCodeSettings(ctx context.Context) (config.OpenCodeSettings, string, error) {
 	var c config.OpenCodeSettings
 	var verified string
-	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,verified_endpoint FROM opencode_settings WHERE id=1`).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &verified)
+	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,
+ COALESCE((SELECT identity FROM harness_connections WHERE harness='opencode' AND active=1),'') FROM opencode_settings WHERE id=1`).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &verified)
 	return c, verified, err
 }
 
-func (s *Store) SaveOpenCodeSettings(ctx context.Context, c config.OpenCodeSettings, verified string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE opencode_settings SET endpoint=$1,browser_endpoint=$2,web_client=$3,username=$4,password=$5,verified_endpoint=$6 WHERE id=1`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, verified)
+// SaveOpenCodeSettings saves the active connection's settings. Its identity
+// changes only through SwitchInstance or SetConnectionIdentity.
+func (s *Store) SaveOpenCodeSettings(ctx context.Context, c config.OpenCodeSettings) error {
+	_, err := s.pool.Exec(ctx, `UPDATE opencode_settings SET endpoint=$1,browser_endpoint=$2,web_client=$3,username=$4,password=$5 WHERE id=1`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password)
 	return err
 }
 

@@ -48,7 +48,18 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
 	if in.ThreadID != "" {
-		ref = SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: in.ThreadID}
+		t3, err := activeT3(ctx, tx)
+		if err != nil {
+			return 0, false, err
+		}
+		ref = SessionRef{ConnectionID: t3, ExternalSessionID: in.ThreadID}
+	}
+	if err := connectionInUse(ctx, tx, ref.ConnectionID); err != nil {
+		return 0, false, err
+	}
+	isT3, err := harnessIs(ctx, tx, ref.ConnectionID, HarnessT3)
+	if err != nil {
+		return 0, false, err
 	}
 	sid, err := sessionIdentity(ctx, tx, ref)
 	if err != nil {
@@ -87,7 +98,7 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	state := TaskState(o.State)
 	if state == "idle" {
 		state = StateDone
-		if ref.ConnectionID != T3ConnectionID && o.StartedAt == nil && o.EndedAt == nil {
+		if !isT3 && o.StartedAt == nil && o.EndedAt == nil {
 			state = StateBacklog
 		}
 	}
@@ -104,7 +115,7 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	}
 	var legacyID *string
 	permission, mode := "full-access", "default"
-	if ref.ConnectionID == T3ConnectionID {
+	if isT3 {
 		legacyID = &ref.ExternalSessionID
 		if slices.Contains(RuntimeModes, o.Config.Permission) {
 			permission = o.Config.Permission

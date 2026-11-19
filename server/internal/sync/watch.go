@@ -37,8 +37,8 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		return e
 	}
 	refs = append(refs, stored...)
-	if connection == 1 {
-		ids, e := s.store.WatchedThreadIDs(ctx)
+	if s.store.IsT3(connection) {
+		ids, e := s.store.WatchedThreadIDs(ctx, connection)
 		if e != nil {
 			return e
 		}
@@ -67,7 +67,7 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		if _, err := s.store.TaskBySession(ctx, ref); err == nil {
 			continue
 		}
-		if connection == 1 {
+		if s.store.IsT3(connection) {
 			_ = s.store.SetObservedState(ctx, ref.ExternalSessionID, db.TaskState(o.State))
 		}
 		if !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {

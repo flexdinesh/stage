@@ -102,25 +102,33 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	if err != nil {
 		return err
 	}
-	switch len(project.Bindings) {
+	// Bindings on replaced connections take no new work.
+	var bindings []db.ProjectBinding
+	for _, b := range project.Bindings {
+		if b.ConnectionActive {
+			bindings = append(bindings, b)
+		}
+	}
+	switch len(bindings) {
 	case 0:
 		// Preserve legacy unbound T3 planning. New clients send an explicit destination.
 		return nil
 	case 1:
-		req.ConnectionID = &project.Bindings[0].ConnectionID
+		req.ConnectionID = &bindings[0].ConnectionID
 		return s.plannedConnection(*req.ConnectionID)
 	default:
 		return db.Invalid("This project has multiple harness bindings. Choose a connectionId.")
 	}
 }
 
-func (req createTaskReq) validate() (db.NewTask, error) {
-	in, err := req.taskConfigReq.validate()
+func (req createTaskReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
+	in, err := req.taskConfigReq.validate(isT3)
 	in.InitialNote = req.InitialNote
 	return in, err
 }
 
-func (req taskConfigReq) validate() (db.NewTask, error) {
+// isT3 reports whether a connection is a T3 instance (db.Store.IsT3).
+func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
 	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
 		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
 	}
@@ -153,13 +161,13 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 		}
 		in.ConnectionID = *req.ConnectionID
 	}
-	if in.ConnectionID > 0 && in.ConnectionID != db.T3ConnectionID && (req.Model != nil || req.ProviderInstanceID != nil || req.RuntimeMode != nil || req.InteractionMode != nil || req.ModelOptions != nil) {
+	if in.ConnectionID > 0 && !isT3(in.ConnectionID) && (req.Model != nil || req.ProviderInstanceID != nil || req.RuntimeMode != nil || req.InteractionMode != nil || req.ModelOptions != nil) {
 		return db.NewTask{}, db.Invalid("use executionConfig with this destination connection")
 	}
-	if in.ConnectionID > 0 && in.ConnectionID != db.T3ConnectionID && len(req.AttachmentIDs) > 0 {
+	if in.ConnectionID > 0 && !isT3(in.ConnectionID) && len(req.AttachmentIDs) > 0 {
 		return in, db.Invalid("OpenCode does not support image attachments. Remove them or select T3.")
 	}
-	if in.ConnectionID > 0 && in.ConnectionID != db.T3ConnectionID && in.ExecutionConfig == nil {
+	if in.ConnectionID > 0 && !isT3(in.ConnectionID) && in.ExecutionConfig == nil {
 		in.ExecutionConfig = &execution.Config{}
 	}
 	if in.StartMode != nil && !in.StartMode.Valid() {
@@ -202,7 +210,7 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 		in.InteractionMode = *req.InteractionMode
 	}
 	if req.Workspace != nil {
-		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID); err != nil {
+		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID, isT3); err != nil {
 			return in, err
 		}
 	}
@@ -256,7 +264,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate()
+	in, err := req.validate(s.Store.IsT3)
 	if err != nil {
 		return err
 	}
@@ -264,7 +272,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if in.NeedsThreadID != nil {
-		in.NeedsSession = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: *in.NeedsThreadID}
+		in.NeedsSession = &db.SessionRef{ConnectionID: s.Store.T3ID(), ExternalSessionID: *in.NeedsThreadID}
 		in.NeedsThreadID = nil
 	}
 	if in.NeedsSession != nil {
@@ -278,7 +286,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	if task.ConnectionID == db.T3ConnectionID {
+	if task.Harness == db.HarnessT3 {
 		defaults := t3Defaults(task.ExecutionConfig, task.ProviderInstanceID, task.Model, task.ModelOptions, task.RuntimeMode, task.InteractionMode)
 		if err := s.Store.SetLastUsed(r.Context(), defaults); err != nil {
 			s.log.Warn("record last-used model", "task", task.ID, "err", err)
@@ -320,7 +328,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
 			out.FinalReply = obs.Reply
-			if task.ConnectionID != db.T3ConnectionID {
+			if task.Harness != db.HarnessT3 {
 				for _, link := range obs.Artifacts {
 					if link.URL != "" {
 						out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: link.Repository, URL: link.URL})
@@ -358,7 +366,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		shaped := s.createdTasks(env, batch)
 		out.Batch = &shaped
 	}
-	if task.ConnectionID == db.T3ConnectionID && task.T3ThreadID != nil {
+	if task.ConnectionID == s.Store.T3ID() && task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		if err == nil {
 			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
@@ -396,7 +404,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if connection != db.T3ConnectionID && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
+	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
 		return db.Invalid("Choose harness-specific configuration and remove unsupported attachments.")
 	}
 	projectID := current.ProjectID
@@ -412,7 +420,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
-	}); err != nil {
+	}, s.Store.IsT3); err != nil {
 		return err
 	}
 	if p.StartMode.Set && !p.StartMode.Null && !p.StartMode.V.Valid() {
@@ -464,7 +472,7 @@ type configPatch struct {
 }
 
 // validateConfigPatch validates and normalizes the shared config fields.
-func validateConfigPatch(c configPatch) error {
+func validateConfigPatch(c configPatch, isT3 func(int64) bool) error {
 	var err error
 	if c.ExecutionConfig != nil && c.ExecutionConfig.Set && (c.ProviderInstanceID.Set || c.Model.Set || c.ModelOptions.Set || c.RuntimeMode.Set || c.InteractionMode.Set) {
 		return db.Invalid("executionConfig cannot be combined with legacy T3 configuration fields")
@@ -496,7 +504,7 @@ func validateConfigPatch(c configPatch) error {
 		if c.Workspace.Null {
 			return db.Invalid("workspace must not be null")
 		}
-		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID); err != nil {
+		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID, isT3); err != nil {
 			return err
 		}
 	}

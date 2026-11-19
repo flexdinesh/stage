@@ -117,7 +117,7 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	connection, err := connectionPath(r)
+	connection, err := s.connectionPath(r)
 	if err != nil {
 		return err
 	}

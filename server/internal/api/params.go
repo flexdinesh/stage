@@ -151,11 +151,12 @@ func taskStateStrings() []string {
 }
 
 func validateWorkspace(w db.Workspace) (db.Workspace, error) {
-	return validateWorkspaceFor(w, db.T3ConnectionID)
+	// No destination: validated as T3 (the most permissive).
+	return validateWorkspaceFor(w, 0, func(int64) bool { return true })
 }
 
-func validateWorkspaceFor(w db.Workspace, connection int64) (db.Workspace, error) {
-	if connection > 0 && connection != db.T3ConnectionID {
+func validateWorkspaceFor(w db.Workspace, connection int64, isT3 func(int64) bool) (db.Workspace, error) {
+	if connection > 0 && !isT3(connection) {
 		if w.Base != "" || w.BaseRef != "" || w.Branch != nil || w.BaseTaskID != nil {
 			return w, db.Invalid("OpenCode manages the worktree base and branch. Choose root or worktree without a ref, branch or predecessor.")
 		}

@@ -31,7 +31,7 @@ stage t3 pair                  # auto-pair through the t3 CLI on the server's ma
 stage t3 pair --code CODE      # redeem a code from `t3 pair` on the T3 host
 ```
 
-Pairing starts a full sync. The first pairing binds the server to that T3 environment: to use another T3, run another stage server with its own data dir.
+Pairing starts a full sync. To switch to another T3, Disconnect in Settings, change the T3 URL and pair the other T3. Tasks from the first T3 stay in stage as read-only history and nothing is bound to the new T3 until you rebind each project. Pairing the first T3 again restores its tasks and bindings. Settings lists previous T3s under Previous connections; Forget lets one go and keeps its history.
 
 ## Admin token
 

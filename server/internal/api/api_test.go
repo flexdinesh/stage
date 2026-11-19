@@ -158,7 +158,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// Tests complete tasks explicitly; inference tests turn auto-complete on.
-	if _, err := store.SetAutoComplete(context.Background(), db.T3ConnectionID, false); err != nil {
+	if _, err := store.SetAutoComplete(context.Background(), store.T3ID(), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()

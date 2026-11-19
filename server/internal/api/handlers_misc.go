@@ -58,12 +58,13 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
-	if r.PathValue("connectionId") != "1" {
+	t3 := s.Store.T3ID()
+	if r.PathValue("connectionId") != strconv.FormatInt(t3, 10) {
 		return s.sessionContext(w, r)
 	}
 
 	id := r.PathValue("id")
-	if s.connected(r.Context(), db.T3ConnectionID) {
+	if s.connected(r.Context(), t3) {
 		if err := s.Sync.RefreshSession(r.Context(), id); err != nil {
 			return err
 		}

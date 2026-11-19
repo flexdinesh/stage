@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { invalidateWork, keys, usePreferences, useT3Status } from "../api/queries.ts";
+import { invalidateWork, keys, useHarnesses, usePreferences, useT3Status } from "../api/queries.ts";
 import {
   type ModelDefaults,
   type NotificationEvent,
@@ -12,6 +12,7 @@ import { AutoCompleteToggle } from "../components/Completion.tsx";
 import { DesktopAppCard } from "../components/Host.tsx";
 import { SharedPaths } from "../components/SharedPaths.tsx";
 import { OpenCodeSetup } from "../components/OpenCodeSetup.tsx";
+import { PreviousConnections } from "../components/PreviousConnections.tsx";
 import { ServersCard } from "../components/Servers.tsx";
 import { DisconnectT3, PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
 import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
@@ -21,7 +22,6 @@ import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButt
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
-import { harnessName } from "../lib/tasks.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
 const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
@@ -54,6 +54,7 @@ function StatusCard({ status }: { status: T3Status }) {
         </Details>
         <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
         <DisconnectT3 status={status} />
+        <PreviousConnections harness="t3" className="border-t border-line pt-3" />
       </div>
     </Panel>
   );
@@ -76,6 +77,7 @@ function PairCard({ status }: { status: T3Status }) {
 
 function SyncCard() {
   const api = useApi();
+  const harnesses = useHarnesses();
   const qc = useQueryClient();
   const sync = useMutation({
     mutationFn: api.sync,
@@ -101,7 +103,7 @@ function SyncCard() {
             Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
             <span className="tabular font-mono">{sync.data.threads}</span> sessions at{" "}
             <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
-            {sync.data.unavailableConnections?.map(id => <p key={id}>{harnessName(id)} could not finish syncing. Check its connection above.</p>)}
+            {sync.data.unavailableConnections?.map(id => <p key={id}>{harnesses.name(id)} could not finish syncing. Check its connection above.</p>)}
           </Alert>
         )}
         <ErrorText error={sync.error} />

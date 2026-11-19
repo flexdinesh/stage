@@ -17,8 +17,13 @@ import (
 func TestJournalMCPInputs(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
 		w.Header().Set("Content-Type", "application/json")
+		// The legacy T3 caller thread belongs to the active T3 connection.
+		if r.URL.Path == "/api/connections" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"connections": []db.HarnessConnection{{ID: 1, Harness: db.HarnessT3, Active: true}}})
+			return
+		}
+		requests++
 		switch r.Method {
 		case "GET":
 			if r.URL.Path == "/api/journal/9" {

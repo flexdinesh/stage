@@ -25,9 +25,12 @@ type Launcher interface {
 // Reconciles are serialized.
 type Runner struct {
 	ConnectionID int64 // zero reconciles every connection
-	store        *db.Store
-	launcher     Launcher
-	log          *slog.Logger
+	// Harness, when set, reconciles that harness's active connection (it
+	// changes when the instance is replaced) and wins over ConnectionID.
+	Harness  string
+	store    *db.Store
+	launcher Launcher
+	log      *slog.Logger
 
 	// Every is the reconcile interval (catches changes missed while down).
 	Every time.Duration
@@ -90,7 +93,7 @@ func (r *Runner) Run(ctx context.Context) {
 func (r *Runner) Reconcile(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	ids, err := r.store.LaunchableForConnection(ctx, r.ConnectionID)
+	ids, err := r.store.LaunchableForConnection(ctx, r.connection())
 	if err != nil {
 		return err
 	}
@@ -120,4 +123,15 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// connection is the connection this runner reconciles (0: all).
+func (r *Runner) connection() int64 {
+	if r.Harness != "" {
+		if id := r.store.ActiveID(r.Harness); id != 0 {
+			return id
+		}
+		return -1 // no connection yet: nothing to reconcile
+	}
+	return r.ConnectionID
 }

@@ -150,7 +150,7 @@ func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error
 	out := make([]notificationJSON, len(rows))
 	for i, n := range rows {
 		out[i] = notificationJSON{Notification: n, Links: s.sessionLinks(r.Context(), n.ConnectionID, n.T3ThreadID)}
-		if n.ConnectionID == db.T3ConnectionID {
+		if n.ConnectionID == s.Store.T3ID() {
 			out[i].T3DeepLink = deepLink(env, n.T3ThreadID)
 			out[i].T3WebURL = s.webURL(env, n.T3ThreadID)
 		}
@@ -225,7 +225,7 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	out := make([]notificationGroupJSON, len(rows))
 	for i, g := range rows {
 		out[i] = notificationGroupJSON{NotificationGroup: g, Links: s.sessionLinks(r.Context(), g.ConnectionID, g.T3ThreadID)}
-		if g.ConnectionID == db.T3ConnectionID {
+		if g.ConnectionID == s.Store.T3ID() {
 			out[i].T3DeepLink = deepLink(env, g.T3ThreadID)
 			out[i].T3WebURL = s.webURL(env, g.T3ThreadID)
 		}
@@ -237,7 +237,7 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	silent := make([]waitingSessionJSON, len(waiting))
 	for i, row := range waiting {
 		silent[i] = waitingSessionJSON{WaitingSession: row, Links: s.sessionLinks(r.Context(), row.ConnectionID, &row.ThreadID)}
-		if row.ConnectionID == db.T3ConnectionID {
+		if row.ConnectionID == s.Store.T3ID() {
 			silent[i].T3DeepLink = deepLink(env, &row.ThreadID)
 			silent[i].T3WebURL = s.webURL(env, &row.ThreadID)
 		}

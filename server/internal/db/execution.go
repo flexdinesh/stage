@@ -29,7 +29,7 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if previous.UpdatedAt.After(o.UpdatedAt) {
 			return nil
 		}
-		if o.Reply == nil && (o.Session.ConnectionID == T3ConnectionID || o.ExecutionID == previous.ExecutionID) {
+		if o.Reply == nil && (s.IsT3(o.Session.ConnectionID) || o.ExecutionID == previous.ExecutionID) {
 			o.Reply = previous.Reply
 		}
 		raw, err := json.Marshal(o)
@@ -41,7 +41,7 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if err != nil {
 			return err
 		}
-		if o.Session.ConnectionID != T3ConnectionID {
+		if !s.IsT3(o.Session.ConnectionID) {
 			return nil
 		}
 		pending := 0
@@ -165,7 +165,7 @@ func (s *Store) RecoverAttempts(ctx context.Context) error {
 // and automatic reconciliation use the same revision guard and ownership check.
 func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observation, manual bool) error {
 	if o.State == "idle" {
-		if o.Session.ConnectionID != T3ConnectionID {
+		if !s.IsT3(o.Session.ConnectionID) {
 			return Conflict("Wait for the harness to report execution before linking this launch.")
 		}
 		o.State = "done"
@@ -205,7 +205,7 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observ
 			return Conflict("launch already changed; reload the preview")
 		}
 		var legacyID *string
-		if connection == T3ConnectionID {
+		if s.IsT3(connection) {
 			legacyID = &o.Session.ExternalSessionID
 		}
 		res, err = tx.Exec(ctx, `UPDATE tasks SET state=$3,t3_thread_id=$4,session_id=$5,launch_reuse=0,last_error=NULL,launched_at=COALESCE(launched_at,stage_now()),finished_at=CASE WHEN $3 IN ('done','failed','interrupted','cancelled') THEN COALESCE($6,stage_now()) ELSE NULL END,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, o.State, legacyID, sid, o.EndedAt)

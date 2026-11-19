@@ -245,7 +245,11 @@ func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, e
 		if ref != nil {
 			return AdoptOut{}, errors.New("choose session or legacy threadId")
 		}
-		ref = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: id}
+		t3, err := o.t3Lookup(ctx)()
+		if err != nil {
+			return AdoptOut{}, err
+		}
+		ref = &db.SessionRef{ConnectionID: t3, ExternalSessionID: id}
 	}
 	if ref == nil {
 		ref = c.Session

@@ -220,8 +220,8 @@ func PayloadFor(n db.Notification, badge int) Payload {
 }
 
 // notificationFrom is the row rec will be stored as (no id or timestamps).
-func notificationFrom(rec db.NewNotification) db.Notification {
-	n := db.Notification{ConnectionID: db.T3ConnectionID, Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
+func notificationFrom(rec db.NewNotification, t3 int64) db.Notification {
+	n := db.Notification{ConnectionID: t3, Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
 		Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
 	if rec.Session != nil {
 		n.ConnectionID = rec.Session.ConnectionID
@@ -257,7 +257,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	case e.thread != nil:
 		c := e.thread
 		title, project := c.Title, c.ProjectID
-		if c.Session == nil || c.Session.ConnectionID == db.T3ConnectionID {
+		if c.Session == nil || n.store.IsT3(c.Session.ConnectionID) {
 			if th, err := n.store.GetThread(ctx, c.ThreadID); err == nil {
 				title = th.Title
 				if th.ProjectTitle != nil {
@@ -277,7 +277,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	if err != nil {
 		return Payload{}, rec, err
 	}
-	return PayloadFor(notificationFrom(rec), badge), rec, nil
+	return PayloadFor(notificationFrom(rec, n.store.T3ID()), badge), rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

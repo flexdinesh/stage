@@ -488,6 +488,48 @@ confirmation; never preselect by title or path. Register existing directory is a
 separate action. Missing/changed bindings show a concrete repair action.
 The task form offers Save to backlog when launch needs a binding.
 
+The Workspace panel has one section per active connection ("T3 workspace",
+"OpenCode workspace"). A binding left on a replaced connection is a muted mono
+line, "Previously /w/app on replaced T3 'box a'"; it never asks for repair. When
+the project is unbound on the active connection and that connection serves the
+replaced binding's exact path, a primary "Bind /w/app" (path truncated, full in
+`title`) binds it in one click, with "Bind workspace" kept beside it as secondary.
+In the Bind drawer that row carries the mono Slate hint "Same path as the
+replaced binding"; it is marked, never preselected.
+
+### Replaced connections
+A connection is one harness instance. When another T3 or OpenCode replaces it,
+its tasks keep their last state and read as history:
+- **`replaced` chip:** a plain idle-tone chip after the harness name (task rows,
+  task detail, tree nodes beside the project), `title` "Ran on T3 'box a', which
+  was replaced. Read-only."
+- **Task detail:** a plain Alert, "Ran on T3 'box a', which was replaced. Its
+  history and result stay here; Stage no longer follows it." Start, Retry and Stop
+  stay visible but disabled, with "Its T3 connection was replaced. Duplicate it to
+  run again." on hover; Complete, Cancel, Archive and Duplicate still work. No
+  Open in T3 / OpenCode link anywhere for such a task.
+- **Task form:** pickers list active connections only; a task on a replaced one
+  shows a disabled "T3 (replaced)" option so its value still reads.
+- **Pairing another T3** (Settings or Dashboard pairing controls): a plain Alert
+  where the user paired, "Paired. T3 'box a' was replaced; its 4 tasks stay
+  read-only. Bind projects to continue."
+- **OpenCode address to another service:** Test and save answers with an inline
+  bad Alert under the form, "http://new:4096 is a different OpenCode service.
+  Connect it as a new service? http://oc:4096 becomes read-only: its 3 tasks keep
+  their last state and its project bindings need rebinding.", with primary
+  "Connect as new service" and ghost Cancel (focused). A replaced service coming
+  back reads "… is the OpenCode service Stage used before. Connect it again? Its
+  tasks and project bindings come back, and … becomes read-only." with "Connect
+  again". Editing an address drops the confirm.
+- **Settings `PREVIOUS`:** under each connection card (after the auto-complete
+  row, behind a hairline), a Label "Previous" and ruled rows: the label in mono
+  Ink Text (address or T3 label), a mono Slate line "replaced 3d ago · 4 tasks ·
+  1 binding", and a small danger Forget right. Forget confirms inline: a bad Alert
+  "Forget box a? Its tasks keep their history and stay read-only. Its project
+  bindings stop asking for repair, and pairing this instance again starts a new
+  connection." with Forget (danger) and Cancel (ghost, focused). Hidden when none.
+No new components, tokens or colors.
+
 ### Notifications drawer
 Right drawer (full-screen sheet on phone), one row per task or external thread across the last 30 days. Current needs-input groups lead in their own ruled panel; other groups sit under Recent · Today / Recent · Yesterday / Earlier (Label on Bench Gray), newest notification first. Titles lead with the current-state chip right, a mono project/latest-notification time line below, then an updates disclosure and Open in app. Current needs input alone earns the yellow edge and primary Open in T3 action. Chips reuse the shared task-state colours: yellow needs input, sky running/launching, teal done, green settled, red failed/interrupted, gray inactive. Unknown current state reads unavailable; a changed or unavailable state labels its historical event separately as Last notification. A `ready` notification (a manual tree task whose needs settled; idle tone) whose task is still in backlog reads as a `ready` chip (not "backlog", and no "Last notification" line) and gets a primary small Start (starts the task; errors show as a red mono line).
 
@@ -521,7 +563,7 @@ The desktop app renders the same UI; its differences are restrained and live in 
 - **Settings "Desktop app" panel**: the Checkbox row "Open Stage at login" (mono hint "starts hidden, with the server"; this machine's server only), Details rows (App, Server naming the active server, its version and, for this machine, "per-user service" or "started from a terminal", Socket or a remote's URL, Identity) and a "Copy diagnostics" button. The Notifications panel's `THIS DEVICE` controls native notifications (see Settings notifications).
 - **OS notifications and badge**: the resident app shows the checked events as system notifications while Stage is not in front (toasts when it is) and keeps the needs-input count on the Dock or launcher icon; the page draws neither. With more than one server saved, a notification's title starts with the server's name and a click switches to that server first; the badge sums every server.
 - **Servers** (only when the platform has `host.servers`; `components/Servers.tsx`, logic in `lib/host.ts`): a 6px square marker carries only the active server's state (Settled Green connected, Running Sky connecting or reconnecting, Fault Red unreachable, incompatible or failed); every other server is Idle Gray, since its state is unknown until it is active. A server's needs-input count is the yellow part: a need chip.
-  - **Settings T3 connection Disconnect**: while a token is stored, a hairline footer under the Details rows holds a small Disconnect (danger, right). Disconnect confirms inline: a bad Alert "Disconnect from tmmacbox? Stage forgets its token and stops syncing; you can then pair this or another T3. Tasks and journals stay; running T3 tasks continue untracked until you pair again. The token stays valid in T3 until Dec 17." with Disconnect (danger) and Cancel (ghost, focused) under the copy so it wraps on a phone. With `T3_ADMIN_TOKEN` set, Disconnect sits disabled after a mono Slate "renewed by T3_ADMIN_TOKEN". The state change in place is the feedback: the chip turns `unpaired`, the footer leaves, Pair offers pairing, and the Dashboard and top bar treat T3 as not configured.
+  - **Settings T3 connection Disconnect**: while a token is stored, a hairline footer under the Details rows holds a small Disconnect (danger, right). Disconnect confirms inline: a bad Alert "Disconnect from tmmacbox? Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only. The token stays valid in T3 until Dec 17." with Disconnect (danger) and Cancel (ghost, focused) under the copy so it wraps on a phone. With `T3_ADMIN_TOKEN` set, Disconnect sits disabled after a mono Slate "renewed by T3_ADMIN_TOKEN". The state change in place is the feedback: the chip turns `unpaired`, the footer leaves, Pair offers pairing, and the Dashboard and top bar treat T3 as not configured.
   - **Settings `SERVERS` Panel** (left column, under T3 connection; meta `3 saved`, small "Add server" in the header): ruled rows of the marker, the name in Geist 500, a plain `active` chip, a need `dot` chip `3 need input`, and a mono Slate line `this machine · <socket>` (the socket while it is active) or the URL, plus ` · unreachable` (red) or another state note on the active row. Actions right (wrapping under the name on phone): Switch (secondary, not on the active row), Edit (ghost) and Remove (danger), remotes only. Remove confirms inline: a bad Alert "Remove Studio? Stage switches to this machine first. Its notifications stop on this device; the server keeps its data." with Remove and Cancel. A mono Slate footer: "One server at a time. Remotes: trusted network, no sign-in."
   - **Add / Edit drawer** (right drawer, "Add server" or "Edit Studio"): a muted intro naming the trusted network and `stage serve --listen 0.0.0.0:7380` (inline mono), Name, URL (mono input, hint `http(s)://host[:port], no path`), a secondary "Test connection", then a flush `CONNECTION` Panel (meta: the tested URL or `not tested`) with the shared step rows `reachable` (`answers` / `no answer`), `api` (`v2`, or `refused` / `not a Stage server` / another version in red) and `identity` (`stage · 1.4.0`); the reachable step spins while testing. A failed test adds a bad Alert (the hint, the error as a mono line) and, for a refused hostname, the remedy box `STAGE_ALLOWED_ORIGINS=<url>` with Copy. Editing the URL drops the result. Footer: primary "Save server" (Save when editing), Cancel and a mono Slate "saves without switching"; saving never requires a test, and the host's refusals (duplicate name or URL, bad URL) show as a red Alert.
   - **Top-bar server menu** (only with more than one server saved): a secondary mono button (marker, the active server's name truncated at 11rem, chevron) before search on laptop; on phone between the bell and search, at most 7.5rem and without the chevron (on the narrowest phones only the marker and a letter fit). It discloses a flat panel (Strong Hairline, Paper, no shadow), 320px right-aligned 4px under it on laptop and full width under the bar on phone: a Bench Gray `SERVERS` header with the count, the ruled server rows (marker, name at 13px Geist 500, the mono where line and a non-connected state note, the need count chip, a check on the active one) and a "Manage servers" row to Settings. `aria-expanded`; Esc closes and returns focus to the button; a click or focus outside closes it.

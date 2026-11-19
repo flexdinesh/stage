@@ -14,7 +14,7 @@ func journalInstructions(task db.Task, sessionEnvironment string) string {
 		tree = fmt.Sprint(*task.TreeID)
 	}
 	source := "Direct OpenCode MCP supplies the invoking session per request. For CLI or an intermediary, pass the actual caller session explicitly."
-	if task.ConnectionID == db.T3ConnectionID {
+	if task.Harness == db.HarnessT3 {
 		source = "T3 CLI uses " + sessionEnvironment + ". For HTTP or shared stdio, pass callerThreadId from T3CODE_THREAD_ID. Dedicated T3 stdio can opt into --t3-session-env."
 	}
 	return fmt.Sprintf(`<stage-journal>

@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Service) RefreshSession(ctx context.Context, id string) error {
-	return s.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 1, ExternalSessionID: id})
+	return s.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: s.store.T3ID(), ExternalSessionID: id})
 }
 func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.SessionRef) error {
 	a, e := s.Adapter(ref.ConnectionID)

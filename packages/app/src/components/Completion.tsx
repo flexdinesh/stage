@@ -105,7 +105,7 @@ export function AutoCompleteToggle({ harness, className }: { harness: HarnessCon
   const connections = useConnections();
   const save = useSetAutoComplete();
   const hintId = useId();
-  const connection = connections.data?.connections.find((c) => c.harness === harness);
+  const connection = connections.data?.connections.find((c) => c.harness === harness && c.active);
   if (connection === undefined) return null;
   return (
     <div className={cx("flex min-w-0 flex-col gap-0.5", className)} aria-busy={save.isPending}>

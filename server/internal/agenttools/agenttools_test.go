@@ -51,7 +51,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// These tests complete settled tasks explicitly.
-	if _, err := store.SetAutoComplete(t.Context(), db.T3ConnectionID, false); err != nil {
+	if _, err := store.SetAutoComplete(t.Context(), store.T3ID(), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()

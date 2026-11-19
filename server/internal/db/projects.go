@@ -13,7 +13,7 @@ const projectCols = `id,title,archived_at,created_at,updated_at,
  UNION ALL SELECT max(created_at) FROM journal_entries WHERE task_id IN (SELECT id FROM tasks WHERE project_id=projects.id)
  OR tree_id IN (SELECT tree_id FROM tasks WHERE project_id=projects.id))),
  COALESCE((SELECT json_group_array(json_object('id',b.id,'projectId',b.project_id,'connectionId',b.connection_id,'harness',c.harness,
- 'externalProjectId',b.external_project_id,'workspace',b.workspace,'revision',b.revision,'status',b.status,'observedWorkspace',b.observed_workspace))
+ 'externalProjectId',b.external_project_id,'workspace',b.workspace,'revision',b.revision,'status',b.status,'observedWorkspace',b.observed_workspace,'connectionActive',json(CASE WHEN c.active=1 THEN 'true' ELSE 'false' END),'connectionLabel',c.label))
  FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id WHERE b.project_id=projects.id AND b.active=1),'[]')`
 
 func scanProject(row rowScanner) (Project, error) {
@@ -92,7 +92,7 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 // UpsertT3Projects refreshes discovery, never imports or edits Stage metadata.
 // The caller supplies a complete successful list; failures never mark missing.
 func (s *Store) UpsertT3Projects(ctx context.Context, ps []execution.WorkspaceInfo) (int, error) {
-	return s.RefreshWorkspaces(ctx, 1, ps)
+	return s.RefreshWorkspaces(ctx, s.T3ID(), ps)
 }
 func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo) (int, error) {
 	n := 0

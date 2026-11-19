@@ -21,7 +21,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, coalesce(th.last_word_preview, substr(json_extract(obs.observation,'$.reply.text'),1,200)), coalesce(th.last_word_at,json_extract(obs.observation,'$.reply.updatedAt')),
   COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
   t.start_at, t.start_tz, t.schedule_id, sc.title,
-  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id=1),t.origin_thread_id), oth.title, t.handoff,
+  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `),t.origin_thread_id), oth.title, t.handoff,
   COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
@@ -29,9 +29,11 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   t.archived_at, tr.status, ` + unstartedSQL + `,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
+ hc.harness,hc.active,hc.label
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
+JOIN harness_connections hc ON hc.id = t.connection_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
 LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
 LEFT JOIN threads th ON th.session_id = t.session_id
@@ -49,7 +51,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -117,7 +119,7 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
 	}
 	if f.OriginThreadID != "" {
-		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=1 AND external_id=" + w.arg(f.OriginThreadID) + ")")
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + activeT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
 	}
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
@@ -259,7 +261,14 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	}
 	var originID *int64
 	if in.ConnectionID == 0 {
-		in.ConnectionID = T3ConnectionID
+		t3, err := activeT3(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+		in.ConnectionID = t3
+	}
+	if err := connectionInUse(ctx, tx, in.ConnectionID); err != nil {
+		return 0, err
 	}
 	if in.OriginSession != nil {
 		if in.OriginThreadID != nil {
@@ -432,7 +441,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			if p.ConnectionID.V != connection && p.ConnectionID.V != T3ConnectionID {
+			toT3, err := harnessIs(ctx, tx, p.ConnectionID.V, HarnessT3)
+			if err != nil {
+				return err
+			}
+			if p.ConnectionID.V != connection && !toT3 {
 				var hasImages bool
 				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE task_id=$1)`, id).Scan(&hasImages); err != nil {
 					return err

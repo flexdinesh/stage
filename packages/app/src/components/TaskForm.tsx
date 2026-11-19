@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useConnections, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useHarnesses, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import {
   type ExecutionConfig,
   type CreateScheduleRequest,
@@ -42,7 +42,7 @@ import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
-import { harnessName } from "../lib/tasks.ts";
+import { HARNESS_NAME } from "../lib/harnesses.ts";
 import type { ModelConfig } from "./ModelFields.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
@@ -272,12 +272,14 @@ function TaskFormDrawer({
   const projects = useProjects();
   const invalidate = useInvalidateWork();
   const selectedProject = projects.data?.projects.find((project) => String(project.id) === s.projectId);
-  const connections = useConnections();
+  const harnesses = useHarnesses();
   const existing = task ?? schedule;
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
-  const bindings = selectedProject?.bindings ?? [];
+  // Bindings on replaced connections are history: they never pick the destination.
+  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
   const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
-  const openCode = connection > 0 && connection !== 1;
+  const isT3 = harnesses.harness(connection) === "t3";
+  const openCode = harnesses.harness(connection) === "opencode";
   const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
   const caps = useQuery({
     queryKey: ["capabilities", connection, s.projectId, bound],
@@ -285,8 +287,8 @@ function TaskFormDrawer({
     queryFn: () => api.capabilities(connection, Number(s.projectId)),
     retry: false,
   });
-  const acceptsImages = caps.data?.operations.images?.available ?? connection === 1;
-  const supportsPredecessor = caps.data?.operations.predecessorBase?.available ?? connection === 1;
+  const acceptsImages = caps.data?.operations.images?.available ?? isT3;
+  const supportsPredecessor = caps.data?.operations.predecessorBase?.available ?? isT3;
   const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
   const legacy: ExecutionConfig = {
     model: s.config.providerInstanceId && s.config.model ? JSON.stringify([s.config.providerInstanceId, s.config.model]) : "",
@@ -294,8 +296,8 @@ function TaskFormDrawer({
     permission: s.config.runtimeMode,
     mode: s.interactionMode,
   };
-  const originalConfig = existing?.executionConfig ?? (!existing && connection === 1 ? prefill?.defaults.executionConfig : undefined);
-  const hasLegacyConfig = existing ? existing.connectionId === 1 : connection === 1 && prefill !== null;
+  const originalConfig = existing?.executionConfig ?? (!existing && isT3 ? prefill?.defaults.executionConfig : undefined);
+  const hasLegacyConfig = existing ? harnesses.harness(existing.connectionId) === "t3" : isT3 && prefill !== null;
   const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : hasLegacyConfig ? legacy : harnessDefaults;
   // New-task prefill carries model and options only; mode and permission start at the harness default.
   const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
@@ -497,10 +499,12 @@ function TaskFormDrawer({
             )}
           </Field>
           <Field label="Harness">{id=><Select id={id} disabled={!full} value={connection || ""} onChange={e=>chooseHarness(Number(e.target.value))}>
-            <option value="">Choose a harness</option>{connections.data?.connections.map(c=><option key={c.id} value={c.id}>{harnessName(c.id)}</option>)}
+            <option value="">Choose a harness</option>
+            {harnesses.activeList.map(c=><option key={c.id} value={c.id}>{HARNESS_NAME[c.harness]}</option>)}
+            {connection > 0 && harnesses.retired(connection) ? <option value={connection} disabled>{harnesses.name(connection)} (replaced)</option> : null}
           </Select>}</Field>
         </div>
-        <ErrorText error={connections.error}/>
+        <ErrorText error={harnesses.error}/>
         {selectedProject === undefined || !connection || bound ? null : <Alert>
           Planning is available. Bind or confirm a workspace before launching.
           <div className="mt-2 flex flex-wrap gap-3">
@@ -562,7 +566,7 @@ function TaskFormDrawer({
             </>
           ) : null}
         </fieldset>
-        {prefill === null || connection !== 1 || draftConfig ? null : (
+        {prefill === null || !isT3 || draftConfig ? null : (
           <p className="-mt-1.5 font-mono text-meta-sm text-muted">
             {prefill.source === "pinned"
               ? "model and mode prefilled from your pinned default (Settings)"

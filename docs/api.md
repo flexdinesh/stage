@@ -91,6 +91,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   "connected": true,
   "state": "connected",
   "t3Url": "http://127.0.0.1:3773",
+  "connectionId": 1,
   "publicUrl": "http://t3.example.com:3773",
   "t3UrlSource": "default",
   "environmentId": "env_123",
@@ -115,21 +116,22 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - `reachable`, `checkedAt`, `probeError`, `t3`: the last unauthenticated probe of `{t3Url}/.well-known/t3/environment` (`probeError` is a short reason such as `connection refused`, `timed out`, `not a T3 server (HTTP 404)`). Probes are cached 10s, success or failure, and concurrent refreshes share one request. This endpoint refreshes a stale probe (waiting at most 3s); `/api/health` never probes.
 - `autoPair`: whether `POST /api/t3/pair/auto` can work. `reason` when not: `not_local` (`t3Url` is not loopback: `localhost`, `127.0.0.0/8`, `::1`), `cli_not_found` (no `t3` CLI: `T3_BIN`, then `PATH`, `~/.local/bin`, `~/.bun/bin`, `~/.local/share/pnpm`, `~/.npm-global/bin`, `~/.volta/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), `fake` (`T3_FAKE=1`).
 - `sync`: the running full sync (`projects` and `threads` mirrored so far); all zero when none runs.
+- `connectionId`: the active T3 connection (0 when none). It changes when another T3 replaces it.
 
-Binding: a Stage server serves one T3 backend. The first successful pairing binds it to that T3 environment (a server paired before binding existed is bound the first time it reads a valid token and the T3 identity). The T3 URL may then change only to an address serving the same environment.
+Instances: each T3 environment is its own harness connection (`GET /api/connections`); one T3 connection is active at a time. The first successful pairing stamps the active connection with that environment (a server paired before identities existed is stamped the first time it reads a valid token and the T3 identity). While paired, the T3 URL may change only to an address serving the same environment. Pairing a different environment replaces the connection: the old one retires with its tasks, sessions, bindings and mirror (history only: never polled, linked or launched on again), a new connection becomes active, and unlaunched backlog tasks and schedules move to it. Nothing is bound on the new connection until the user rebinds. Pairing a retired connection's environment again revives it (its bindings and tasks come back). A connection that never held anything is restamped in place instead.
 
 ### `POST /api/t3/pair`
 Paste fallback: exchange a pairing code from `t3 pair` for a token.
-Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 409 the T3 now at `t3Url` is not the bound environment. 502 pairing failed. A success binds the server on the first pairing (or the first after a disconnect) and starts a full sync and a catalog refresh in the background (watch `sync`).
+Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`, plus `replaced` (the retired connection, as in `GET /api/connections`) when this pairing reached another environment and replaced the active connection. 400 empty code. 502 pairing failed. A success starts a full sync and a catalog refresh in the background (watch `sync`).
 
 ### `POST /api/t3/pair/auto`
-Pair with no code: runs `t3 auth pairing create --json --label "<client name> mcp" --ttl 5m --scope ...` (the full-access scopes) with the `t3` CLI on the server's machine (15s limit) and redeems the code like `POST /api/t3/pair`. No body. 200 `T3Status`. 409 auto-pair unavailable (`autoPair.reason`, named in `error`) or the T3 is not the bound environment. 502 T3 is not answering at `t3Url` (checked first, so nothing is minted), or the CLI or the pairing failed (its error in `error`; a T3 with a custom `T3CODE_HOME` can make the CLI mint for another instance: pair with a code instead).
+Pair with no code: runs `t3 auth pairing create --json --label "<client name> mcp" --ttl 5m --scope ...` (the full-access scopes) with the `t3` CLI on the server's machine (15s limit) and redeems the code like `POST /api/t3/pair`. No body. 200 `T3Status` (with `replaced` like `POST /api/t3/pair`). 409 auto-pair unavailable (`autoPair.reason`, named in `error`). 502 T3 is not answering at `t3Url` (checked first, so nothing is minted), or the CLI or the pairing failed (its error in `error`; a T3 with a custom `T3CODE_HOME` can make the CLI mint for another instance: pair with a code instead).
 
 ### `DELETE /api/t3/pair`
-Disconnect: forget the stored token and the environment binding, so this or another T3 can be paired next. Tasks, projects, journals and mirrored data stay; nothing is sent to T3, so the token stays valid there until it expires. Active T3 tasks keep running in T3, untracked until a pairing. No body. 200 `T3Status` (`unpaired`). Idempotent. 409 `T3_ADMIN_TOKEN` is set (it would mint a new token at once).
+Disconnect: forget the stored token. The connection keeps its environment: pairing the same T3 resumes it, pairing another replaces it (see Instances). Tasks, projects, journals and mirrored data stay; nothing is sent to T3, so the token stays valid there until it expires. Active T3 tasks keep running in T3, untracked until a pairing. No body. 200 `T3Status` (`unpaired`). Idempotent. 409 `T3_ADMIN_TOKEN` is set (it would mint a new token at once).
 
 ### `PUT /api/t3/url`
-Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is bound and the new URL does not serve that environment (`This stage server is bound to T3 '<label>'. Run another stage server for a different T3.`), or cannot be checked because nothing answers there. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
+Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is paired and the new URL does not serve that environment (`This stage server is paired with T3 '<label>'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only.`), or cannot be checked because nothing answers there. Unpaired, any URL is accepted. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
 
 ### `POST /api/sync`
 
@@ -182,8 +184,10 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/connections`: `{connections: [{id, harness, configured, autoComplete}]}`. T3 uses connection 1. Select the returned OpenCode ID. Both can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion").
+- `GET /api/connections`: `{connections: [{id, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
+- `DELETE /api/connections/:connectionId`: forget a retired connection. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its discovered projects and shared paths are dropped. 204. 404 unknown or already forgotten. 409 the connection is active.
+- Retired connections: binding a project, creating or moving a task or schedule to a retired connection returns 409 `code: "connection_retired"`. Tasks carry `harness`, `connectionActive` and `connectionLabel`; project bindings carry `connectionActive` and `connectionLabel`. A task on a retired T3 connection has null T3 links.
 - `GET /api/connections/:connectionId/projects` (also `/api/connections/t3/projects`): live discovery, returns
   `{projects: [{connectionId, externalId, title, workspace, projectId}]}`.
   `projectId` is the current explicit owner, or null.
@@ -198,7 +202,7 @@ to Stage identity. Activity includes tracked sessions, tasks and journals.
 
 Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject can bind. A Git remote match requires confirmation. DELETE the scoped binding to unbind.
 
-`GET /api/opencode/status` reports connectionId, state, diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials and environmentFields. `PUT /api/opencode/settings` accepts changed endpoint, browserEndpoint, webClient, username and password. A successful test and save returns 204. Credentials are write-only. Replacing an address already in use requires matching stored identity evidence.
+`GET /api/opencode/status` reports connectionId, state, diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials and environmentFields. `PUT /api/opencode/settings` accepts changed endpoint, browserEndpoint, webClient, username, password and `newInstance`. A successful test and save returns 204. Credentials are write-only. An address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service with the same repository at the same path is never bound silently. `connectionId` in the status changes with it.
 
 Request `/api/connections/:connectionId/capabilities?projectId=ID` for workspace-specific options. A REST create with one binding can omit connectionId. Multiple bindings require an explicit connectionId. Legacy unbound requests retain the T3 planning default. Task and schedule edits can change the destination with an explicit connectionId, executionConfig and workspace before launch. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply and links.web, links.native or links.service when available.
 
@@ -218,7 +222,7 @@ and `originSession`, journal entries `sourceSession`, accepted evidence `session
 and resolved references `session`. A raw ID is never globally unique.
 
 Legacy `originThreadId`, `sourceThreadId`, `callerThreadId` and bare historical
-session references explicitly mean T3 connection 1. New task requests may use
+session references explicitly mean the active T3 connection. New task requests may use
 `originSession`; journal notes may use `sourceSession`, mutually exclusive with
 their legacy alias. T3 cache tables and historical links remain intact. Migration
 does not rewrite accepted snapshot JSON or journal text.

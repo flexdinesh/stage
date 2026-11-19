@@ -171,13 +171,16 @@ export function createApi(transport: Transport) {
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
     openCodeStatus: () => apiFetch<OpenCodeStatus>("/opencode/status"),
-    saveOpenCode: (body: Partial<Record<"endpoint" | "browserEndpoint" | "webClient" | "username" | "password", string>>) => apiSend("/opencode/settings", put(body)),
+    /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
+    forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
+    /** 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
+    saveOpenCode: (body: OpenCodeSettings) => apiSend("/opencode/settings", put(body)),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     t3Status: () => apiFetch<T3StatusWire>("/t3/status").then((w) => normalizeT3Status(w)),
     pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),
     /** Pairs through the t3 CLI on the server's machine (409 when unavailable, 502 when it fails). */
     autoPair: () => apiFetch<T3StatusWire>("/t3/pair/auto", post()).then((w) => normalizeT3Status(w)),
-    /** Forgets the T3 token and environment binding (409 while T3_ADMIN_TOKEN renews it). */
+    /** Forgets the T3 token; the environment binding stays (409 while T3_ADMIN_TOKEN renews it). */
     disconnectT3: () => apiFetch<T3StatusWire>("/t3/pair", del).then((w) => normalizeT3Status(w)),
     /** 409 when T3_URL locks it or the URL is another T3; 400 when invalid. */
     setT3Url: (body: SetT3UrlRequest) => apiFetch<T3StatusWire>("/t3/url", put(body)).then((w) => normalizeT3Status(w)),
@@ -191,9 +194,9 @@ export function createApi(transport: Transport) {
     matchWorkspace: (project: number, connection: number) => apiFetch<{bound: Project | null; projects: ExternalProject[]; suggestions: Record<string,string>}>(`/projects/${project}/bindings/${connection}/match`, post()),
     sharedPaths: () => apiFetch<{paths:{connectionId:number;harnessRoot:string;stageRoot:string}[]}>("/shared-paths"),
     setSharedPath: (connectionId:number,harnessRoot:string,stageRoot:string) => apiFetch("/shared-paths",put({connectionId,harnessRoot,stageRoot})),
-    externalProjects: (connectionId = 1) => apiFetch<{projects: ExternalProject[]}>(`/connections/${connectionId}/projects`),
+    externalProjects: (connectionId: number) => apiFetch<{projects: ExternalProject[]}>(`/connections/${connectionId}/projects`),
     bindProject: (id: number, project: ExternalProject) => apiFetch<Project>(`/projects/${id}/binding`, put({connectionId: project.connectionId, externalProjectId: project.externalId, workspace: project.workspace})),
-    unbindProject: (id: number, connectionId = 1) => apiFetch<Project>(`/projects/${id}/bindings/${connectionId}`, {method: "DELETE"}),
+    unbindProject: (id: number, connectionId: number) => apiFetch<Project>(`/projects/${id}/bindings/${connectionId}`, {method: "DELETE"}),
     registerWorkspace: (body: {title: string; workspace: string}) => apiFetch<ExternalProject>("/connections/t3/projects", post(body)),
 
     tasks: (q: TaskListQuery = {}) =>
@@ -256,7 +259,7 @@ export function createApi(transport: Transport) {
     },
     deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
 
-    thread: (id: string) => apiFetch<ThreadDetail>(`/connections/1/sessions/${encodeURIComponent(id)}`),
+    thread: (connectionId: number, id: string) => apiFetch<ThreadDetail>(`/connections/${connectionId}/sessions/${encodeURIComponent(id)}`),
     /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
     sessionContext: (ref: SessionRef) => apiFetch<SessionPreview>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/context`),
     adoptSession: (ref: SessionRef, body: AdoptSessionRequest = {}) =>
@@ -293,6 +296,11 @@ export function createApi(transport: Transport) {
     attachmentUrl: (id: number) => transport.assetUrl(`/attachments/${id}`),
   };
 }
+
+export type OpenCodeSettings = Partial<Record<"endpoint" | "browserEndpoint" | "webClient" | "username" | "password", string>> & {
+  /** Connect a different OpenCode service as a new connection, retiring the current one. */
+  newInstance?: boolean;
+};
 
 export type ArchivedFilter = "true" | "false" | "all";
 

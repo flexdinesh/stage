@@ -6,7 +6,9 @@ import { useInvalidateWork } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
 import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
-import { harnessName, canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
+import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
+import { HARNESS_NAME } from "../lib/harnesses.ts";
+import { HarnessName } from "./HarnessName.tsx";
 import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
@@ -241,7 +243,7 @@ export function TaskRow({
               {task.projectTitle}
             </Link>
           )}
-          <span>{harnessName(task.connectionId)} · {task.connectionId === 1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
+          <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {task.harness === "t3" ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
           {task.completedAt !== null ? (
             <>
               <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
@@ -315,7 +317,7 @@ export function TaskRow({
         ) : null}
         {appLink === null || justCompleted || confirming !== null ? null : (
           <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
-            Open in {harnessName(task.connectionId)}
+            Open in {HARNESS_NAME[task.harness]}
           </AppButton>
         )}
         {extra}

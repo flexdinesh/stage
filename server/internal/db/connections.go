@@ -1,0 +1,307 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+)
+
+// Harness names.
+const (
+	HarnessT3       = "t3"
+	HarnessOpenCode = "opencode"
+)
+
+// SQL for the active T3 connection id, and for every T3 connection id.
+const (
+	activeT3SQL      = `(SELECT id FROM harness_connections WHERE harness='t3' AND active=1)`
+	t3ConnectionsSQL = `(SELECT id FROM harness_connections WHERE harness='t3')`
+)
+
+type connectionRow struct {
+	id      int64
+	harness string
+	active  bool
+}
+
+type connectionSnapshot struct{ rows []connectionRow }
+
+func (s *Store) snapshot() connectionSnapshot {
+	if c := s.conns.Load(); c != nil {
+		return *c
+	}
+	rows, err := s.pool.Query(context.Background(), `SELECT id,harness,active FROM harness_connections ORDER BY id`)
+	if err != nil {
+		return connectionSnapshot{}
+	}
+	list, err := collectRows(rows, func(r rowScanner) (connectionRow, error) {
+		var c connectionRow
+		err := r.Scan(&c.id, &c.harness, &c.active)
+		return c, err
+	})
+	if err != nil {
+		return connectionSnapshot{}
+	}
+	snap := connectionSnapshot{rows: list}
+	s.conns.Store(&snap)
+	return snap
+}
+
+// dropConnections forgets the cached connections after a write.
+func (s *Store) dropConnections() { s.conns.Store(nil) }
+
+// ActiveID is the active connection of a harness (0 when none).
+func (s *Store) ActiveID(harness string) int64 {
+	for _, c := range s.snapshot().rows {
+		if c.harness == harness && c.active {
+			return c.id
+		}
+	}
+	return 0
+}
+
+// T3ID is the active T3 connection: the default for legacy thread ids and
+// requests that name no connection.
+func (s *Store) T3ID() int64 { return s.ActiveID(HarnessT3) }
+
+// Harness of a connection ("" when unknown).
+func (s *Store) Harness(id int64) string {
+	for _, c := range s.snapshot().rows {
+		if c.id == id {
+			return c.harness
+		}
+	}
+	return ""
+}
+
+// IsT3 reports whether a connection (active or retired) is a T3 instance.
+func (s *Store) IsT3(id int64) bool { return s.Harness(id) == HarnessT3 }
+
+// ConnectionActive reports whether a connection is its harness's active one.
+func (s *Store) ConnectionActive(id int64) bool {
+	for _, c := range s.snapshot().rows {
+		if c.id == id {
+			return c.active
+		}
+	}
+	return false
+}
+
+// Switch is the outcome of SwitchInstance.
+type Switch struct {
+	// Old and New are the previous and current active connection.
+	Old, New int64
+	// Changed: New replaced Old (Old retired, or deleted when it held nothing).
+	Changed bool
+	// Revived: New is a retired connection made active again.
+	Revived bool
+}
+
+type activeConnection struct {
+	id           int64
+	identity     string
+	autoComplete bool
+}
+
+// SwitchInstance makes the instance with identity the active connection of
+// harness. The same identity keeps the connection. A connection with no
+// identity yet, or holding no relations, is restamped in place. Otherwise
+// the active connection retires and keeps its relations, and the instance
+// gets a retired T3 connection with that identity back (or revive, a retired
+// connection the caller matched), else a new connection. Unlaunched backlog
+// tasks and schedules follow the active connection; they launch only after
+// the user binds the project there.
+func (s *Store) SwitchInstance(ctx context.Context, harness, identity, label string, revive int64) (Switch, error) {
+	if identity == "" && revive == 0 {
+		return Switch{}, Invalid("an instance identity is required")
+	}
+	if label == "" {
+		label = identity
+	}
+	var out Switch
+	err := s.inTx(ctx, func(tx *Tx) error {
+		var cur activeConnection
+		err := tx.QueryRow(ctx, `SELECT id,identity,auto_complete FROM harness_connections WHERE harness=$1 AND active=1`, harness).Scan(&cur.id, &cur.identity, &cur.autoComplete)
+		if errors.Is(err, sql.ErrNoRows) {
+			return tx.QueryRow(ctx, `INSERT INTO harness_connections(harness,identity,label) VALUES($1,$2,$3) RETURNING id`, harness, identity, label).Scan(&out.New)
+		}
+		if err != nil {
+			return err
+		}
+		out.Old, out.New = cur.id, cur.id
+		target := revive
+		if target != 0 {
+			var ok bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2 AND active=0 AND forgotten_at IS NULL)`, target, harness).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return Conflict("That %s connection can no longer be restored.", harness)
+			}
+		} else {
+			if cur.identity == identity {
+				_, err := tx.Exec(ctx, `UPDATE harness_connections SET label=$2 WHERE id=$1`, cur.id, label)
+				return err
+			}
+			if harness == HarnessT3 {
+				err := tx.QueryRow(ctx, `SELECT id FROM harness_connections WHERE harness='t3' AND active=0 AND identity=$1`, identity).Scan(&target)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+			}
+		}
+		related, err := hasRelations(ctx, tx, cur.id)
+		if err != nil {
+			return err
+		}
+		if target == 0 && (cur.identity == "" || !related) {
+			if cur.identity != "" {
+				if _, err := tx.Exec(ctx, `DELETE FROM external_projects WHERE connection_id=$1`, cur.id); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(ctx, `UPDATE harness_connections SET identity=$2,label=$3 WHERE id=$1`, cur.id, identity, label)
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=0,retired_at=stage_now() WHERE id=$1`, cur.id); err != nil {
+			return err
+		}
+		if target != 0 {
+			if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=1,retired_at=NULL,label=CASE WHEN $2<>'' THEN $2 ELSE label END,identity=CASE WHEN $3<>'' THEN $3 ELSE identity END WHERE id=$1`, target, label, identity); err != nil {
+				return err
+			}
+			out.New, out.Revived = target, true
+		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(harness,identity,label,auto_complete) VALUES($1,$2,$3,$4) RETURNING id`, harness, identity, label, cur.autoComplete).Scan(&out.New); err != nil {
+			return err
+		}
+		out.Changed = true
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`, cur.id, out.New); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE schedules SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1`, cur.id, out.New); err != nil {
+			return err
+		}
+		if !related {
+			return deleteConnection(ctx, tx, cur.id)
+		}
+		return nil
+	})
+	s.dropConnections()
+	return out, err
+}
+
+// hasRelations: bindings, sessions or launched tasks tie a connection to its
+// instance. Unlaunched backlog tasks and schedules do not; they follow.
+func hasRelations(ctx context.Context, tx *Tx, id int64) (bool, error) {
+	var related bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_bindings WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1 AND NOT (state='backlog' AND session_id IS NULL))`, id).Scan(&related)
+	return related, err
+}
+
+func deleteConnection(ctx context.Context, tx *Tx, id int64) error {
+	for _, q := range []string{
+		`DELETE FROM external_projects WHERE connection_id=$1`,
+		`DELETE FROM shared_paths WHERE connection_id=$1`,
+		`DELETE FROM harness_connections WHERE id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetConnectionIdentity records a new address of the same instance (an
+// OpenCode service that proved continuity).
+func (s *Store) SetConnectionIdentity(ctx context.Context, id int64, identity, label string) error {
+	if label == "" {
+		label = identity
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE harness_connections SET identity=$2,label=$3 WHERE id=$1`, id, identity, label)
+	s.dropConnections()
+	return err
+}
+
+// RetiredConnections lists the retired, not forgotten connections of a
+// harness, newest first.
+func (s *Store) RetiredConnections(ctx context.Context, harness string) ([]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM harness_connections WHERE harness=$1 AND active=0 AND forgotten_at IS NULL ORDER BY retired_at DESC,id DESC`, harness)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, func(r rowScanner) (int64, error) {
+		var id int64
+		err := r.Scan(&id)
+		return id, err
+	})
+}
+
+// ForgetConnection lets go of a retired connection. Its history stays: tasks
+// keep it and its label. It can no longer be restored, its project bindings
+// no longer ask for repair, and its discovery and shared paths are dropped.
+// A connection nothing references is deleted outright.
+func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
+	err := s.inTx(ctx, func(tx *Tx) error {
+		var active bool
+		var forgotten *string
+		err := tx.QueryRow(ctx, `SELECT active,forgotten_at FROM harness_connections WHERE id=$1`, id).Scan(&active, &forgotten)
+		if errors.Is(err, sql.ErrNoRows) || forgotten != nil {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if active {
+			return Conflict("This connection is in use. Only a replaced connection can be forgotten.")
+		}
+		var referenced bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)`, id).Scan(&referenced); err != nil {
+			return err
+		}
+		if !referenced {
+			if _, err := tx.Exec(ctx, `DELETE FROM project_bindings WHERE connection_id=$1`, id); err != nil {
+				return err
+			}
+			return deleteConnection(ctx, tx, id)
+		}
+		for _, q := range []string{
+			`UPDATE harness_connections SET identity='',forgotten_at=stage_now() WHERE id=$1`,
+			`UPDATE project_bindings SET active=0 WHERE connection_id=$1`,
+			`DELETE FROM external_projects WHERE connection_id=$1`,
+			`DELETE FROM shared_paths WHERE connection_id=$1`,
+		} {
+			if _, err := tx.Exec(ctx, q, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	s.dropConnections()
+	return err
+}
+
+// legacyT3ConnectionID owns rows written before connections existed.
+const legacyT3ConnectionID int64 = 1
+
+// activeT3 is the active T3 connection inside a transaction.
+func activeT3(ctx context.Context, tx *Tx) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, `SELECT COALESCE(`+activeT3SQL+`,0)`).Scan(&id)
+	if err == nil && id == 0 {
+		err = Invalid("no T3 connection; pair T3 in Settings")
+	}
+	return id, err
+}
+
+// harnessIs reports whether a connection belongs to harness.
+func harnessIs(ctx context.Context, tx *Tx, id int64, harness string) (bool, error) {
+	var ok bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2)`, id, harness).Scan(&ok)
+	return ok, err
+}

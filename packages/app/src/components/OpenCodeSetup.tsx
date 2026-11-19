@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { OpenCodeStatus } from "../api/types.ts";
-import { useOpenCodeStatus } from "../api/queries.ts";
+import { useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
+import { isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
+import { PreviousConnections } from "./PreviousConnections.tsx";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { dateTime } from "../lib/format.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
-import { Button, Chip, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
 
 export function OpenCodeSetup() {
   const status = useOpenCodeStatus();
@@ -53,6 +55,7 @@ export function OpenCodeSetup() {
           </Button>
         </div>
         <AutoCompleteToggle harness="opencode" className="mt-1 w-full border-t border-line pt-2" />
+        <PreviousConnections harness="opencode" className="mt-1 w-full border-t border-line pt-3" />
       </div>
       {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
     </Panel>
@@ -93,19 +96,29 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const locked = (key: string) => info.environmentFields.includes(key);
+  const current = useHarnesses().activeConnection("opencode");
+  // Which confirm (a replaced service returning, or a different one): kept while its resend runs, so the copy does not flip.
+  const [returned, setReturned] = useState(false);
+  // A different service answers 409 instance_changed (a replaced one instance_returned): the same body is resent with newInstance once confirmed.
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (newInstance: boolean) =>
       api.saveOpenCode({
         ...(!locked("endpoint") ? { endpoint: urls.endpoint } : {}),
         ...(!locked("browserEndpoint") ? { browserEndpoint: urls.browserEndpoint } : {}),
         ...(!locked("webClient") ? { webClient: urls.webClient } : {}),
         ...(replace ? { username, password } : {}),
+        ...(newInstance ? { newInstance: true } : {}),
       }),
     onSuccess: async () => {
       await qc.invalidateQueries();
       close();
     },
+    onError: (err) => {
+      if (isInstanceChanged(err)) setReturned(isInstanceReturned(err));
+    },
   });
+  // The confirm stays up while its resend runs; editing the form drops it.
+  const changed = isInstanceChanged(save.error) || (save.isPending && save.variables === true);
   function address(key: keyof typeof urls, label: string, hint: string) {
     return (
       <Field label={label} hint={locked(key) ? "Managed by the Stage server environment." : hint}>
@@ -115,7 +128,10 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
             type="url"
             value={urls[key]}
             disabled={locked(key)}
-            onChange={(e) => setUrls({ ...urls, [key]: e.target.value })}
+            onChange={(e) => {
+              setUrls({ ...urls, [key]: e.target.value });
+              if (isInstanceChanged(save.error)) save.reset();
+            }}
           />
         )}
       </Field>
@@ -130,9 +146,9 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
           <Button onClick={close}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!urls.endpoint.trim()}
-            busy={save.isPending}
-            onClick={() => save.mutate()}
+            busy={save.isPending && save.variables === false}
+            disabled={!urls.endpoint.trim() || changed || save.isPending}
+            onClick={() => save.mutate(false)}
           >
             Test and save
           </Button>
@@ -199,7 +215,21 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
             ) : null}
           </div>
         )}
-        <ErrorText error={save.error} />
+        {changed ? (
+          <Alert tone="bad">
+            <p>{returned ? returnedServicePrompt(urls.endpoint.trim(), current) : newServicePrompt(urls.endpoint.trim(), current)}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button small variant="primary" busy={save.isPending} onClick={() => save.mutate(true)}>
+                {returned ? "Connect again" : "Connect as new service"}
+              </Button>
+              <Button small variant="ghost" autoFocus disabled={save.isPending} onClick={() => save.reset()}>
+                Cancel
+              </Button>
+            </div>
+          </Alert>
+        ) : (
+          <ErrorText error={save.error} />
+        )}
       </div>
     </Drawer>
   );

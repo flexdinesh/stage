@@ -62,7 +62,7 @@ func (s *server) validateSelection(ctx context.Context, id, project int64, c *ex
 		return nil
 	}
 	if id == 0 {
-		id = db.T3ConnectionID
+		id = s.Store.T3ID()
 	}
 	caps, err := s.capabilities(ctx, id, project)
 	if err != nil {

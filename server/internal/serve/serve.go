@@ -190,19 +190,20 @@ func Run(ctx context.Context, o Options) error {
 		logger.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
 	}
 
-	syncSvc := t3sync.New(store, t3.NewAdapter(t3Client), logger)
-	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SetAdapter)
+	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.T3ID()), logger)
+	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter)
 	if err != nil {
 		return err
 	}
 	var releases []*release.Runner
 	var schedules []*schedule.Runner
-	for _, id := range []int64{db.T3ConnectionID, openCode.ID()} {
+	// One runner per harness, following its active connection.
+	for _, harness := range []string{db.HarnessT3, db.HarnessOpenCode} {
 		r := release.NewRunner(store, syncSvc, logger)
-		r.ConnectionID = id
+		r.Harness = harness
 		releases = append(releases, r)
 		sc := schedule.NewRunner(store, syncSvc, logger)
-		sc.ConnectionID = id
+		sc.Harness = harness
 		schedules = append(schedules, sc)
 	}
 	kickTrees := func() {
@@ -228,6 +229,10 @@ func Run(ctx context.Context, o Options) error {
 	setup := t3setup.New(t3setup.Options{
 		Config: cfg, Store: store, Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
 		OnPaired: syncSvc.Kick, Logger: logger,
+		// A different T3 environment moved T3 to another connection.
+		OnSwitched: func(sw db.Switch) {
+			syncSvc.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(t3Client, sw.New))
+		},
 	})
 	for _, runner := range releases {
 		runner.OnReady = notifier.OnReady

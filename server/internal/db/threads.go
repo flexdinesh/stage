@@ -41,9 +41,10 @@ SELECT th.t3_thread_id, th.t3_project_id, COALESCE(tk.project_id,p.id), COALESCE
   th.settled_at, th.pending_request_count, min(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
   th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
   th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
-  th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `
+  th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `,
+  COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),0)
 FROM threads th
-LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),` + activeT3SQL + `) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
 LEFT JOIN tasks tk ON tk.session_id = th.session_id`
 
 func scanThread(row rowScanner) (Thread, error) {
@@ -52,13 +53,12 @@ func scanThread(row rowScanner) (Thread, error) {
 		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.PendingQuestionCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
 		&t.InteractionMode, &t.Branch, &t.WorktreePath, &t.ParentThreadID, &t.Relationship,
 		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt, &t.Archived, &t.ActiveRunID, &t.LatestRunID,
-		&t.RunStartedAt, &t.RunEndedAt, &t.LastWordPreview, &t.LastWordAt, &t.RunCount, &t.PullRequests, &t.State)
+		&t.RunStartedAt, &t.RunEndedAt, &t.LastWordPreview, &t.LastWordAt, &t.RunCount, &t.PullRequests, &t.State, &t.ConnectionID)
 	if err != nil {
 		return Thread{}, notFound(err)
 	}
 	t.PullRequests = nonNilPRs(t.PullRequests)
-	t.ConnectionID = T3ConnectionID
-	t.Session = SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: t.T3ThreadID}
+	t.Session = SessionRef{ConnectionID: t.ConnectionID, ExternalSessionID: t.T3ThreadID}
 	t.Source = SourceT3
 	if t.TaskID != nil {
 		t.Source = SourceApp
@@ -167,7 +167,7 @@ func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int,
 	}
 	var total int
 	countSQL := `SELECT count(*) FROM threads th
-LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),` + activeT3SQL + `) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
 LEFT JOIN tasks tk ON tk.session_id = th.session_id` + w.sql()
 	if err := s.pool.QueryRow(ctx, countSQL, w.args...).Scan(&total); err != nil {
 		return nil, 0, err
