@@ -81,7 +81,7 @@ func TestCreatedBy(t *testing.T) {
 	if len(got.Trees) != 1 || !slices.Equal(idsOf(got.Trees[0].Tasks), []int64{a.ID, b.ID}) || !slices.Equal(idsOf(got.Independent), []int64{c.ID}) {
 		t.Fatalf("batch %+v", got)
 	}
-	if tr := got.Trees[0].Tree; tr.Title != "a" || tr.StartMode != db.StartManual {
+	if tr := got.Trees[0].Tree; tr.Title != "a" || tr.StartMode != db.StartAuto {
 		t.Fatalf("tree ref %+v", tr)
 	}
 	if deps := got.Trees[0].Tasks[1].Dependents; !slices.Equal(deps, []int64{mine.ID}) {

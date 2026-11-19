@@ -25,7 +25,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const list = trees.data?.trees ?? [];
   const [picked, setPicked] = useState<TreeChoice>("new");
   const [title, setTitle] = useState(task.title);
-  const [mode, setMode] = useState<StartMode>("manual");
+  const [mode, setMode] = useState<StartMode>("auto");
 
   const add = useMutation({
     mutationFn: async (choice: TreeChoice) => {

@@ -278,7 +278,7 @@ func (s *Store) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) 
 	}
 	mode := in.StartMode
 	if mode == "" {
-		mode = StartManual
+		mode = StartAuto
 	}
 	var id int64
 	err := s.inTx(ctx, func(tx *Tx) error {
@@ -812,7 +812,7 @@ func resolveTree(ctx context.Context, tx *Tx, tree *int64, needs []int64) (int64
 	case len(trees) == 1:
 		target = trees[0]
 	default:
-		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title,start_mode) VALUES ($1,'manual') RETURNING id`, found[needs[0]].title).Scan(&target); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title,start_mode) VALUES ($1,'auto') RETURNING id`, found[needs[0]].title).Scan(&target); err != nil {
 			return 0, err
 		}
 	}

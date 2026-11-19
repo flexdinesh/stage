@@ -148,4 +148,4 @@ stage show "http://127.0.0.1:7380/tasks/12"                                     
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
 ```
 
-User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to manual; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.
+User completion is separate from execution. Complete task opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first. Reopen preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later T3 activity never revokes acceptance. New trees default to auto and tasks inherit; existing explicit policies remain. Agents report outcomes but have no completion or reopening tool.

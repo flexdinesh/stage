@@ -30,7 +30,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
   const invalidate = useInvalidateWork();
   const [title, setTitle] = useState(tasks[0]?.title ?? "");
   const [shape, setShape] = useState<TreeShape>("parallel");
-  const [mode, setMode] = useState<StartMode>("manual");
+  const [mode, setMode] = useState<StartMode>("auto");
   const [order, setOrder] = useState<readonly Task[]>(tasks);
 
   const create = useMutation({

@@ -137,7 +137,7 @@ func TestSetNeedsRules(t *testing.T) {
 	// auto tree named after the first need.
 	a := mustTask(t, s, ctx, p.ID, "Plan", nil)
 	b := mustTask(t, s, ctx, p.ID, "Build", []int64{a.ID})
-	if b.TreeID == nil || b.TreeTitle == nil || *b.TreeTitle != "Plan" || *b.EffectiveStartMode != db.StartManual || !slices.Equal(b.Needs, []int64{a.ID}) {
+	if b.TreeID == nil || b.TreeTitle == nil || *b.TreeTitle != "Plan" || *b.EffectiveStartMode != db.StartAuto || !slices.Equal(b.Needs, []int64{a.ID}) {
 		t.Fatalf("created with needs %+v", b)
 	}
 	tree := *b.TreeID

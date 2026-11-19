@@ -35,7 +35,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | RuntimeMode | `approval-required` `auto-accept-edits` `auto` `full-access` (task default `full-access`) |
 | InteractionMode | `default` `plan` (default `default`) |
 | SendMode | `auto` `queue` `steer` `restart` (default `auto`) |
-| StartMode | `auto` (a tree member launches once its needs are completed in Stage) `manual` (it reads `ready` and notifies; the user starts it). New tree default `manual`; a task's own `startMode` null inherits the tree's |
+| StartMode | `auto` (a tree member launches once its needs are completed in Stage) `manual` (it reads `ready` and notifies; the user starts it). New tree default `auto`; a task's own `startMode` null inherits the tree's |
 | Readiness | `blocked` (a need lacks user acceptance) `ready` (every need has user acceptance, no start time, and manual or no needs); backlog tree members only, else null |
 | NotificationEvent | `needs_input` `failed` `ready` `done` `settled` |
 | ProjectSource | `app` (created via stage) `t3` (imported from T3) |
@@ -777,14 +777,14 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 - `POST /api/tasks/:id/reopen`: `{requestId, revision}`. Clears current acceptance; retains immutable history, execution and existing launch claims. Does not start a run. A successful execution continues in T3; ordinary failed/interrupted/cancelled retries remain available.
 - Both writes return `{revision, acceptanceId}`. Exact request replay returns its original result without applying it again, even after a later reopen. Reusing a request ID with changed content, stale revision or changed evidence yields 409; refresh and review before a new submission.
 - Acceptance records contain `id, taskId, acceptedAt, capturedAt, provenance, evidence, note`. Evidence captures task/title/project/tree, execution/thread/branch/worktree references, bounded cached reply with run/item IDs, timestamps, truncation, available artifact links, and the latest journal entry ID at capture. Cache observation time, earlier/unverified run and missing reply are explicit. No live read is required to review, accept or use handoff.
-- Confirmation and launch claims serialize in SQLite. Reopen before claim blocks it; claim before reopen continues with pinned inputs. Completing again cannot launch an existing attempt twice. Manual trees become ready; explicitly automatic trees retain automatic release. Closed trees stay closed.
+- Confirmation and launch claims serialize in SQLite. Reopen before claim blocks it; claim before reopen continues with pinned inputs. Completing again cannot launch an existing attempt twice. Manual trees become ready; automatic trees retain automatic release. Closed trees stay closed.
 - Migration accepts only tasks currently `settled`, with `historical_settlement` provenance and cache-only evidence. A previous settlement timestamp on running work does not qualify. Existing IDs, notes, histories, execution links, policies and overrides survive.
 - Completion/reopening are user-facing REST actions. There is no CLI/MCP completion or reopen tool. Agents report outcomes using notes; ordinary task updates cannot set acceptance.
 
 ## Tree rules
 
 - Needs (create `needs`, `PUT /api/tasks/:id/needs`, tree `needs`), 409 unless noted: change only in `backlog` (an unchanged set is a no-op in any state); not with a start time (400); each need exists (404), is not the task, is in the task's tree, and does not (transitively) need the task (no loops). An accepted need is allowed.
-- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `manual` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
+- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `auto` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
 - Tasks inherit the tree's start mode by default (`startMode` omitted or null; CLI/MCP also accept `inherit`). Set shared policy on the tree, and explicit task `auto` or `manual` only for an exception. Tree mode changes preserve explicit overrides; clear a task's override to make it inherit again.
 - `start: true` or a start time with needs is 400. A non-backlog task may join a tree only without needs.
 - A need is passed only when `acceptanceId` is non-null. Execution success, stopping, settlement, archive and PR merge never release new work. Complete the need in Stage or edit dependencies.
