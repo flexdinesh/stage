@@ -5,8 +5,19 @@ import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
-import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
-import type { T3State } from "../api/types.ts";
+import { t3Identity } from "../lib/onboarding.ts";
+import {
+  openCodeErrorText,
+  openCodeSummary,
+  overallStatus,
+  t3ErrorText,
+  t3Summary,
+  type HarnessSummary,
+  type HarnessTone,
+  type OverallStatus,
+  type StatusRead,
+} from "../lib/connections.ts";
+import { serviceHostText, signInText } from "../lib/opencode.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
@@ -32,7 +43,7 @@ import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { AttentionCount, ProjectNav, SideLink, useScopeAttention } from "./Sidebar.tsx";
-import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx, type ChipTone } from "./ui.tsx";
+import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -84,77 +95,102 @@ function Mark({ needsInput, compact = false }: { needsInput: number; compact?: b
 
 function StatusRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+    <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
       <dt className="text-muted">{label}</dt>
       <dd className="truncate text-fg">{children}</dd>
     </div>
   );
 }
 
-const T3_LABEL: Record<T3State, string> = {
-  connected: "T3 connected",
-  unpaired: "T3 not paired",
-  expired: "T3 pairing expired",
-  unreachable: "T3 unreachable",
-  rejected: "T3 rejected the pairing",
-};
+/** A status query as the control reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
+function statusRead<T>(q: { data: T | undefined; isPending: boolean; errorUpdateCount: number; error: Error | null }): StatusRead<T> {
+  return { data: q.data, checking: q.isPending && q.errorUpdateCount === 0, error: q.error?.message ?? null };
+}
 
-/** Square T3 status control; links to Settings, hover/focus (pointer devices only) reveals details. */
+const TONE_TEXT: Record<HarnessTone, string> = { ok: "text-ok", need: "text-need-fg", bad: "text-bad", idle: "text-muted" };
+
+function StatusIcon({ tone }: { tone: OverallStatus["tone"] }) {
+  switch (tone) {
+    case "none":
+      return <IconChainLink size={16} />;
+    case "idle":
+      return <span className="size-1.5 bg-idle" />;
+    case "ok":
+      return <span className={TONE_TEXT.ok}><IconCheck /></span>;
+    case "need":
+      return <span className={TONE_TEXT.need}><IconChainLink size={16} /></span>;
+    case "bad":
+      return <span className={TONE_TEXT.bad}><IconClose /></span>;
+  }
+}
+
+function StatusSection({ title, summary, error, children }: { title: string; summary: HarnessSummary; error: string | null; children: ReactNode }) {
+  return (
+    <section className="border-b border-line">
+      <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
+        <span className="label-caps text-fg">{title}</span>
+        <Chip dot tone={summary.tone} className="ml-auto">
+          {summary.state}
+        </Chip>
+      </div>
+      <div className="flex flex-col gap-1 px-3 py-2 font-mono text-meta">
+        <dl className="flex flex-col gap-1">{children}</dl>
+        {error === null ? null : <p className="line-clamp-2 break-words text-bad">{error}</p>}
+      </div>
+    </section>
+  );
+}
+
+/** Square harness status control; links to Settings, hover/focus (pointer devices only) reveals one section per configured harness. */
 function ConnectionStatus() {
-  const status = useT3Status();
   const detailsId = useId();
   const harnesses = useHarnesses();
-  const openCode = useOpenCodeStatus();
-  const data = status.data;
-  if (harnesses.loaded && harnesses.activeConnection("t3")?.configured !== true) {
-    const info = openCode.data;
-    const label = !info || info.state === "unconfigured" ? "Connect a harness" : "OpenCode " + info.state;
-    return <Link to="/settings" title={label} aria-label={label} className={cx(buttonClass("secondary"),"w-10 px-0 md:w-8")}>
-      {info?.state==="connected" ? <IconCheck/> : <IconChainLink size={16}/>}
-    </Link>;
-  }
-  // A data-less query returns to pending on every refetch; after the first error keep showing offline.
-  const checking = status.isPending && status.errorUpdateCount === 0;
-  const state = checking ? "checking" : data === undefined ? "offline" : data.state;
-  const tone: ChipTone = state === "checking" ? "idle" : state === "offline" ? "bad" : T3_STATE_TONE[state];
-  const label = state === "checking" ? "Checking T3" : state === "offline" ? "T3 offline" : T3_LABEL[state];
-  const lastError =
-    (data?.state === "unreachable" ? data.probeError : null) ?? data?.lastError ?? (status.isError ? status.error.message : null);
-  const tokenExpiresAt = data?.tokenExpiresAt ?? null;
-  const identity = data === undefined ? null : t3Identity(data);
+  const t3 = statusRead(useT3Status());
+  const openCode = statusRead(useOpenCodeStatus());
+  // Until connections load, keep checking; if they never load, fall back to T3 alone.
+  const showT3 = harnesses.loaded ? harnesses.activeConnection("t3")?.configured === true : harnesses.error != null;
+  const showOpenCode = harnesses.loaded && harnesses.activeConnection("opencode")?.configured === true;
+  const t3Status = showT3 ? t3Summary(t3) : null;
+  const openCodeStatus = showOpenCode ? openCodeSummary(openCode) : null;
+  const summaries = [t3Status, openCodeStatus].filter((s) => s !== null);
+  const overall: OverallStatus = harnesses.loaded || showT3 ? overallStatus(summaries) : { tone: "idle", label: "Checking harnesses" };
+  const t3Data = t3.data;
+  const openCodeData = openCode.data;
+  const tokenExpiresAt = t3Data?.tokenExpiresAt ?? null;
   return (
     <div className="group relative shrink-0">
-      <Link to="/settings" aria-label={label} aria-describedby={detailsId} className={cx(buttonClass("secondary"), "w-10 px-0 md:w-8")}>
-        {state === "checking" ? (
-          <span className="size-1.5 bg-idle" />
-        ) : (
-          <span className={tone === "ok" ? "text-ok" : tone === "need" ? "text-need-fg" : "text-bad"}>
-            {tone === "ok" ? <IconCheck /> : tone === "need" ? <IconChainLink size={16} /> : <IconClose />}
-          </span>
-        )}
+      <Link to="/settings" aria-label={overall.label} aria-describedby={detailsId} className={cx(buttonClass("secondary"), "w-10 px-0 md:w-8")}>
+        <StatusIcon tone={overall.tone} />
       </Link>
       <div
         id={detailsId}
         role="tooltip"
         className="pointer-events-none invisible absolute top-full right-0 z-50 mt-1 w-[280px] lg:right-auto lg:left-0 border border-line-strong bg-surface opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none group-hover:visible group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:opacity-100"
       >
-        <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
-          <span className="label-caps text-fg">T3 connection</span>
-          <Chip dot tone={tone} className="ml-auto">
-            {state}
-          </Chip>
-        </div>
-        <div className="flex flex-col gap-1 px-3 py-2 font-mono text-meta">
-          <dl className="flex flex-col gap-1">
-            <StatusRow label="T3">{identity ?? "-"}</StatusRow>
-            <StatusRow label="URL">{data?.t3Url ?? "-"}</StatusRow>
-            {openCode.data && openCode.data.state!=="unconfigured" ? <StatusRow label="OpenCode">{openCode.data.state}</StatusRow> : null}
-            <StatusRow label="Last sync">{relativeTime(data?.lastFullSyncAt ?? null)}</StatusRow>
-            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `${data?.state === "expired" ? "expired" : "expires"} ${relativeTime(tokenExpiresAt)}`}</StatusRow>
-          </dl>
-          {lastError === null ? null : <p className="line-clamp-2 break-words text-bad">{lastError}</p>}
-        </div>
-        <div className="border-t border-line px-3 py-1.5 font-mono text-meta-sm text-muted">Click to open settings</div>
+        {t3Status === null ? null : (
+          <StatusSection title="T3" summary={t3Status} error={t3ErrorText(t3)}>
+            <StatusRow label="T3">{(t3Data === undefined ? null : t3Identity(t3Data)) ?? "-"}</StatusRow>
+            <StatusRow label="URL">{t3Data?.t3Url ?? "-"}</StatusRow>
+            <StatusRow label="Last sync">{relativeTime(t3Data?.lastFullSyncAt ?? null)}</StatusRow>
+            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `${t3Data?.state === "expired" ? "expired" : "expires"} ${relativeTime(tokenExpiresAt)}`}</StatusRow>
+          </StatusSection>
+        )}
+        {openCodeStatus === null ? null : (
+          <StatusSection title="OpenCode" summary={openCodeStatus} error={openCodeErrorText(openCode)}>
+            <StatusRow label="Service">{openCodeData === undefined || openCodeData.endpoint === "" ? "-" : serviceHostText(openCodeData)}</StatusRow>
+            <StatusRow label="Sign-in">{openCodeData === undefined ? "-" : signInText(openCodeData)}</StatusRow>
+            <StatusRow label="Checked">{relativeTime(openCodeData?.checkedAt ?? null)}</StatusRow>
+          </StatusSection>
+        )}
+        {summaries.length > 0 ? null : (
+          <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
+            <span className="label-caps text-fg">Harnesses</span>
+            <Chip dot tone="idle" className="ml-auto">
+              {overall.tone === "none" ? "not connected" : "checking"}
+            </Chip>
+          </div>
+        )}
+        <div className="px-3 py-1.5 font-mono text-meta-sm text-muted">Click to open settings</div>
       </div>
     </div>
   );

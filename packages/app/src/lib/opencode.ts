@@ -54,11 +54,16 @@ export function openCodeChip(s: OpenCodeStatus, now = Date.now()): { label: stri
 
 const versionText = (v: string) => (v === "" ? "" : v.startsWith("v") ? v : `v${v}`);
 
-/** Service row: the endpoint, with the local service's version when it is the one connected. */
-export function serviceText(s: OpenCodeStatus): string {
+function withLocalVersion(s: OpenCodeStatus, text: string): string {
   const version = s.local.url !== "" && s.local.url === s.endpoint ? versionText(s.local.version) : "";
-  return version === "" ? s.endpoint : `${s.endpoint} · ${version}`;
+  return version === "" ? text : `${text} · ${version}`;
 }
+
+/** Service row: the endpoint, with the local service's version when it is the one connected. */
+export const serviceText = (s: OpenCodeStatus): string => withLocalVersion(s, s.endpoint);
+
+/** Harness status card Service row: `host:port`, with the local version when it is the one connected. */
+export const serviceHostText = (s: OpenCodeStatus): string => withLocalVersion(s, serviceHost(s.endpoint));
 
 /** Sign-in row. */
 export function signInText(s: OpenCodeStatus, now = Date.now()): string {
