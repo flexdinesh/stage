@@ -11,7 +11,7 @@ import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Chip, Kbd, cx } from "./ui.tsx";
+import { Chip, Kbd, activeRowClass, cx } from "./ui.tsx";
 
 /** A closed item's plain chip (archived, done, tree done) beside its other badge. */
 function ClosedBadge({ label, children }: { label: string | null; children?: ReactNode }) {
@@ -227,7 +227,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                     onClick={() => item.run()}
                     className={cx(
                       "cursor-pointer px-4 py-2 text-ui",
-                      i === active && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
+                      i === active && activeRowClass,
                     )}
                   >
                     <div className="flex items-center gap-2.5">

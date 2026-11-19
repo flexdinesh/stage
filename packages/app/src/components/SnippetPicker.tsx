@@ -5,7 +5,7 @@ import type { Snippet } from "../api/types.ts";
 import { anchorBox, anchorRoom, type AnchorInput } from "../lib/snippet-placement.ts";
 import { findTrigger, matchSnippets, snippetsFor } from "../lib/snippets.ts";
 import { IconClose } from "./icons.tsx";
-import { Button, Chip, Kbd, Textarea, cx } from "./ui.tsx";
+import { Button, Chip, Kbd, Textarea, activeRowClass, cx } from "./ui.tsx";
 
 const MIRRORED = [
   "box-sizing",
@@ -297,7 +297,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
             onClick={() => insert(s)}
             className={cx(
               "flex cursor-pointer flex-col gap-0.5 px-3 py-2.5 md:py-1.5",
-              i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
+              i === index && activeRowClass,
             )}
           >
             <span className="flex min-w-0 items-center gap-2">

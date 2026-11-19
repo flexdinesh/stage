@@ -247,6 +247,7 @@ function Shell() {
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line pr-3 pl-4">
           <Mark needsInput={needsInput} />
           <div className="ml-auto flex items-center gap-1.5">
+            <ThemeButton />
             <NotificationsBell onOpen={openInbox} />
             <ConnectionStatus />
           </div>
@@ -277,12 +278,7 @@ function Shell() {
         <div className="flex shrink-0 flex-col border-t border-line px-2 py-2">
           <SideLink to="/snippets" icon={<IconSnippets />} label="Snippets" />
           <SideLink to="/settings" icon={<IconSettings />} label="Settings" />
-          <div className="flex items-center gap-2 px-0.5 pt-2">
-            <ServerMenu className="min-w-0 flex-1" />
-            <span className="ml-auto">
-              <ThemeButton />
-            </span>
-          </div>
+          <ServerMenu className="mx-0.5 mt-2" />
         </div>
       </aside>
 
