@@ -988,3 +988,17 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatalf("missing task error %q", msg)
 	}
 }
+
+func TestGuideNamesEveryInterface(t *testing.T) {
+	for _, w := range []string{
+		"Use whichever Stage interface you have: Stage MCP tools (names here), the stage CLI, or the Stage server's HTTP API (/api).",
+		"If none is reachable, say so and continue; never install one.",
+		"MCP: OpenCode sends session metadata on each direct call.",
+		"CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session.",
+		"HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption",
+	} {
+		if !strings.Contains(agenttools.Guide, w) {
+			t.Errorf("guide missing %q", w)
+		}
+	}
+}

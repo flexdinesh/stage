@@ -147,6 +147,10 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   URL saved in Settings (`stage t3 url`) is stored there too; `T3_URL` wins
   over it. `T3_ADMIN_TOKEN` is optional
   (auto-renew) and is never assumed inherited by GUI launches.
+- OpenCode credentials: an `opencode pair` token (Settings, `stage opencode
+  pair LINK`) or entered credentials are stored in `stage.db`. A local
+  connection (`stage opencode connect`) reads the OpenCode registration file
+  under the service's `XDG_STATE_HOME` (else `~/.local/state`) each time.
 - `stage service start` validates the file before starting, so a bad file is
   an error there (exit 7) instead of a restart loop.
 

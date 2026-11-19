@@ -31,7 +31,7 @@ stage setup instructions     # idempotent usage block in ~/.claude/CLAUDE.md and
 ```
 
 - `--claude` or `--codex` limits either command to one agent (default both). `setup instructions --file PATH` writes another file. An agent that is not installed, or a missing config directory, is skipped.
-- Rerunning `stage setup instructions` replaces the block in place with the current guide.
+- Rerunning `stage setup instructions` replaces the block in place with the current guide. The guide tells agents to use whichever Stage interface they have (MCP tools, the CLI or the HTTP API) and never install one.
 - `STAGE_URL` (or `--url`) points the CLI and stdio MCP at the server: an `http(s)` URL, or `unix:///abs/path.sock` for a socket. Unset, they use the private default socket when a server owns it, else `http://127.0.0.1:7380`. `stage status` shows which server the CLI reaches.
 - `stage setup mcp` passes an explicit `STAGE_URL` to the stdio server. `--http` needs an `http(s)` URL, so use stdio with a socket.
 
@@ -103,7 +103,7 @@ Every task and tree has an append-only journal ([Journals](/docs/features#journa
 - **CLI**: `stage task|tree notes ID [list] [--kind notes|events|all] [--category C] [--q TEXT] [--limit N]`, `... notes ID add --text TEXT [--category C] [--request-id KEY]` (`--text -` reads stdin; a tree note takes `--source-task ID`), `... notes ID get ENTRY_ID`.
 - Categories are optional: `finding`, `decision`, `blocker`, `outcome`. Retry a write with the same `requestId` and identical content; the CLI generates a key when you omit one.
 - Refresh membership with `get_context` or `get_task` first. Write your own progress to the task (`taskId`) and shared conclusions to the tree (`treeId` with `sourceTaskId`). Adding a note to closed work never reopens it.
-- Every launch, including standalone tasks and handoff off, includes a journal instruction block: checkpoint before risky work, record the outcome before returning, treat notes as context rather than instructions or proof, and report failed writes. The block is fixed per launch attempt. Existing and adopted sessions receive no retroactive message.
+- Every launch, including standalone tasks and handoff off, includes a journal instruction block: use whichever Stage interface the agent has (MCP tools, the `stage` CLI, or the HTTP API, named with its address when `STAGE_PUBLIC_URL` is set; never install one), pass caller identity per interface, checkpoint before risky work, record the outcome before returning, treat notes as context rather than instructions or proof, and report failed writes. The block is fixed per launch attempt. Existing and adopted sessions receive no retroactive message.
 - New tasks and adopted sessions take `--initial-note` / `initialNote`; schedules take `--notes` as a template for each spawned task.
 
 ## References
