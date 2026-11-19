@@ -31,6 +31,9 @@ type Client interface {
 	// Pair exchanges a pairing code (from `t3 pair`) for a full-access
 	// mcp-client token and stores it (paste fallback for auto-renew).
 	Pair(ctx context.Context, code string) error
+	// Unpair forgets the stored token (nothing is sent to T3; the token
+	// stays valid there until it expires) and drops the MCP session.
+	Unpair(ctx context.Context) error
 	// ListProjects pages t3_project_list to completion.
 	ListProjects(ctx context.Context) ([]Project, error)
 	// CreateProject calls t3_project_create.

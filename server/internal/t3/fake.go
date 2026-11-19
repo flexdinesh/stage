@@ -56,6 +56,8 @@ type Fake struct {
 	BaseURL, PublicURL string
 	// Pairs: every accepted Pair code.
 	Pairs []string
+	// unpaired: Unpair ran since the last Pair; Status reports no token.
+	unpaired bool
 }
 
 type fakeMessage struct {
@@ -133,7 +135,11 @@ func (f *Fake) Status(context.Context) ConnectionStatus {
 	exp := f.now().Add(30 * 24 * time.Hour)
 	f.mu.Lock()
 	p := f.probeLocked()
+	unpaired := f.unpaired
 	f.mu.Unlock()
+	if unpaired {
+		return ConnectionStatus{EnvironmentID: FakeEnvironmentID, Probe: p}
+	}
 	return ConnectionStatus{Connected: true, ClientID: "fake", ExpiresAt: &exp, EnvironmentID: FakeEnvironmentID, HasToken: true, Probe: p}
 }
 
@@ -173,6 +179,15 @@ func (f *Fake) Pair(_ context.Context, code string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Pairs = append(f.Pairs, code)
+	f.unpaired = false
+	return nil
+}
+
+// Unpair makes Status report no token until the next Pair.
+func (f *Fake) Unpair(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unpaired = true
 	return nil
 }
 

@@ -130,6 +130,14 @@ func (s *server) t3Pair(w http.ResponseWriter, r *http.Request) error {
 	return s.writeStatus(w, r, false)
 }
 
+// t3Unpair disconnects: forgets the token and the environment binding.
+func (s *server) t3Unpair(w http.ResponseWriter, r *http.Request) error {
+	if err := s.Setup.Unpair(r.Context()); err != nil {
+		return err
+	}
+	return s.writeStatus(w, r, false)
+}
+
 // t3PairAuto pairs through the t3 CLI on this machine.
 func (s *server) t3PairAuto(w http.ResponseWriter, r *http.Request) error {
 	if err := s.Setup.AutoPair(r.Context()); err != nil {

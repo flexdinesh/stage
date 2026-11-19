@@ -113,6 +113,7 @@ Usage:
   stage t3 [status]                   the server's T3: URL, reachability, pairing, sync, auto-pair
   stage t3 pair [--code CODE]         pair the server with T3: auto-pair with the t3 CLI on the server's
                                       machine, or a code from "t3 pair" on the T3 host
+  stage t3 disconnect                 forget the server's T3 token and environment binding (tasks stay)
   stage t3 url [URL | --reset]        show or set the server's T3 URL (--reset: default; T3_URL wins)
   stage version [--json]              this binary: version, identity, commit, API version, schema,
                                       and its installation (mode, location) when installed

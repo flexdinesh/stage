@@ -74,6 +74,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/t3/status", s.t3Status)
 	h("POST /api/t3/pair", s.t3Pair)
 	h("POST /api/t3/pair/auto", s.t3PairAuto)
+	h("DELETE /api/t3/pair", s.t3Unpair)
 	h("PUT /api/t3/url", s.t3SetURL)
 	h("GET /api/opencode/status", s.openCodeStatus)
 	h("PUT /api/opencode/settings", s.openCodeSettings)

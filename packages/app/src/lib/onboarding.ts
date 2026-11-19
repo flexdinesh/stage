@@ -92,6 +92,14 @@ export function primaryAction(s: T3Status): SetupAction | null {
   }
 }
 
+/** Settings Disconnect: hidden without a stored token; locked while T3_ADMIN_TOKEN would mint a new one at once. */
+export type DisconnectAvailability = "hidden" | "locked" | "ready";
+
+export function disconnectAvailability(s: T3Status): DisconnectAvailability {
+  if (!s.connected && s.tokenExpiresAt === null) return "hidden";
+  return s.adminTokenConfigured ? "locked" : "ready";
+}
+
 /** Why pairing needs a code, when auto-pair is unavailable. */
 export function codeReason(reason: AutoPairReason | null): string {
   switch (reason) {

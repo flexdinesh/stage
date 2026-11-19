@@ -263,6 +263,36 @@ func TestUnauthorizedWithoutAdminIsNotConnected(t *testing.T) {
 	}
 }
 
+func TestUnpairForgetsToken(t *testing.T) {
+	f := newFakeT3(t)
+	capabilitiesTool(f)
+	f.addUserPairingCode("USER-CODE")
+	store := NewMemoryTokenStore()
+	c := newTestClient(t, f, "", store)
+	ctx := ctxT(t)
+	if err := c.Pair(ctx, "USER-CODE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Capabilities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Unpair(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tok, _ := store.LoadToken(ctx); tok != (StoredToken{}) {
+		t.Fatalf("stored token after unpair = %+v", tok)
+	}
+	if st := c.Status(ctx); st.Connected || st.HasToken || st.ClientID != "" || st.ExpiresAt != nil {
+		t.Fatalf("status after unpair = %+v", st)
+	}
+	if _, err := c.Capabilities(ctx); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("after unpair: err = %v, want ErrNotConnected", err)
+	}
+	if err := c.Unpair(ctx); err != nil {
+		t.Fatalf("second unpair: %v", err)
+	}
+}
+
 func TestReconnectsWhenSessionDropped(t *testing.T) {
 	f := newFakeT3(t)
 	capabilitiesTool(f)

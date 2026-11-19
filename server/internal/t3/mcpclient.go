@@ -202,6 +202,25 @@ func (c *MCPClient) Pair(ctx context.Context, code string) error {
 	return c.adoptLocked(ctx, tok)
 }
 
+// Unpair implements Client. It waits for a running OAuth flow.
+func (c *MCPClient) Unpair(ctx context.Context) error {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	if err := c.opts.Store.SaveToken(ctx, StoredToken{}); err != nil {
+		return fmt.Errorf("t3: clear token: %w", err)
+	}
+	c.mu.Lock()
+	c.tok, c.loaded = StoredToken{}, true
+	c.rejected = false
+	c.lastFailAt = time.Time{}
+	c.envID = ""
+	c.mu.Unlock()
+	c.clearError(ctx)
+	c.Close()
+	c.log.Info("t3 token forgotten")
+	return nil
+}
+
 // Status reports connection state from memory and the probe cache. Never
 // fails and never calls T3 (health polls it).
 func (c *MCPClient) Status(ctx context.Context) ConnectionStatus {

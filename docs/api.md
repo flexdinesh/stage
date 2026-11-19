@@ -120,10 +120,13 @@ Binding: a Stage server serves one T3 backend. The first successful pairing bind
 
 ### `POST /api/t3/pair`
 Paste fallback: exchange a pairing code from `t3 pair` for a token.
-Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 409 the T3 now at `t3Url` is not the bound environment. 502 pairing failed. A success binds the server on the first pairing and starts a full sync and a catalog refresh in the background (watch `sync`).
+Body: `{ "code": "ABCD-1234" }`. 200 `T3Status`. 400 empty code. 409 the T3 now at `t3Url` is not the bound environment. 502 pairing failed. A success binds the server on the first pairing (or the first after a disconnect) and starts a full sync and a catalog refresh in the background (watch `sync`).
 
 ### `POST /api/t3/pair/auto`
 Pair with no code: runs `t3 auth pairing create --json --label "<client name> mcp" --ttl 5m --scope ...` (the full-access scopes) with the `t3` CLI on the server's machine (15s limit) and redeems the code like `POST /api/t3/pair`. No body. 200 `T3Status`. 409 auto-pair unavailable (`autoPair.reason`, named in `error`) or the T3 is not the bound environment. 502 T3 is not answering at `t3Url` (checked first, so nothing is minted), or the CLI or the pairing failed (its error in `error`; a T3 with a custom `T3CODE_HOME` can make the CLI mint for another instance: pair with a code instead).
+
+### `DELETE /api/t3/pair`
+Disconnect: forget the stored token and the environment binding, so this or another T3 can be paired next. Tasks, projects, journals and mirrored data stay; nothing is sent to T3, so the token stays valid there until it expires. Active T3 tasks keep running in T3, untracked until a pairing. No body. 200 `T3Status` (`unpaired`). Idempotent. 409 `T3_ADMIN_TOKEN` is set (it would mint a new token at once).
 
 ### `PUT /api/t3/url`
 Body `{ "url": string | null }` (`null` = back to the default). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `T3Status` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is bound and the new URL does not serve that environment (`This stage server is bound to T3 '<label>'. Run another stage server for a different T3.`), or cannot be checked because nothing answers there. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.

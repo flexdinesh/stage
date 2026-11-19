@@ -12,7 +12,7 @@ import { DesktopAppCard } from "../components/Host.tsx";
 import { SharedPaths } from "../components/SharedPaths.tsx";
 import { OpenCodeSetup } from "../components/OpenCodeSetup.tsx";
 import { ServersCard } from "../components/Servers.tsx";
-import { PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
+import { DisconnectT3, PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
 import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
@@ -35,21 +35,24 @@ function StatusCard({ status }: { status: T3Status }) {
         </Chip>
       }
     >
-      <Details>
-        <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
-        <Detail label="T3 URL">{status.t3Url}</Detail>
-        <Detail label="Public URL">{status.publicUrl}</Detail>
-        <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
-        <Detail label="Client id">{status.clientId ?? "-"}</Detail>
-        <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
-        <Detail label="Admin token">
-          {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
-        </Detail>
-        <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
-        <Detail label="Last error">
-          {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
-        </Detail>
-      </Details>
+      <div className="flex flex-col gap-3">
+        <Details>
+          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
+          <Detail label="T3 URL">{status.t3Url}</Detail>
+          <Detail label="Public URL">{status.publicUrl}</Detail>
+          <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
+          <Detail label="Client id">{status.clientId ?? "-"}</Detail>
+          <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
+          <Detail label="Admin token">
+            {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
+          </Detail>
+          <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
+          <Detail label="Last error">
+            {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
+          </Detail>
+        </Details>
+        <DisconnectT3 status={status} />
+      </div>
     </Panel>
   );
 }
