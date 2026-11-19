@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
-import { keys } from "../api/queries.ts";
+import { keys, useHarnesses } from "../api/queries.ts";
 import type { TaskState } from "../api/types.ts";
 import {
   parseStageRef,
@@ -112,11 +112,14 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     refetchInterval: 30_000,
     retry: false,
   });
-  const sessionPath=ref.kind==="session" ? `/connections/${ref.connectionId ?? 1}/sessions/${encodeURIComponent(ref.id)}` : "";
+  // A session ref without a connection names the active T3 connection's session.
+  const t3 = useHarnesses().activeId("t3");
+  const sessionConnection = ref.kind === "session" ? (ref.connectionId ?? t3) : null;
+  const sessionPath = ref.kind === "session" && sessionConnection !== null ? `/connections/${sessionConnection}/sessions/${encodeURIComponent(ref.id)}` : "";
   const thread = useQuery({
     queryKey: ["session-reference",sessionPath],
     queryFn: () => api.resolveRef(sessionPath,undefined,true),
-    enabled: ref.kind === "session",
+    enabled: sessionPath !== "",
     refetchInterval: 30_000,
     retry: false,
   });
@@ -196,8 +199,9 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
   return [root, portals];
 }
 
-export function SourceSessionLink({ id,connectionId=1 }: { id: string;connectionId?:number }) {
-  const { data } = useResolved({ kind: "session", id,connectionId });
+/** A journal entry's source session; without a connection it names the active T3 connection's session. */
+export function SourceSessionLink({ id, connectionId }: { id: string; connectionId?: number }) {
+  const { data } = useResolved(connectionId === undefined ? { kind: "session", id } : { kind: "session", id, connectionId });
   if (data?.href == null) return <span title={id}>source session</span>;
   return <a href={data.href} className="underline hover:text-fg">source session</a>;
 }

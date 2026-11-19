@@ -43,7 +43,7 @@ type metadataKey struct{}
 
 func (o *Ops) caller(ctx context.Context, a CallerArgs) (agentctx.Caller, error) {
 	meta, _ := ctx.Value(metadataKey{}).(*db.SessionRef)
-	return o.Caller.Resolve(a.CallerSession, a.CallerThreadID, a.Cwd, meta)
+	return o.Caller.Resolve(a.CallerSession, a.CallerThreadID, a.Cwd, meta, o.t3Lookup(ctx))
 }
 
 // IDArgs names one task or schedule.
@@ -79,7 +79,11 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 		out.ProjectError = "No caller session. Pass callerSession or specify a project on creation."
 		return out, nil
 	}
-	if c.Session.ConnectionID == db.T3ConnectionID {
+	h, err := o.harnesses(ctx)
+	if err != nil {
+		return out, err
+	}
+	if h.isT3(c.Session.ConnectionID) {
 		out.ThreadID = c.Session.ExternalSessionID
 	}
 	d, err := o.Client.SessionContext(ctx, *c.Session)
@@ -358,7 +362,12 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	if err != nil {
 		return rc, err
 	}
-	if a.ExecutionConfig != nil || rc.connectionID != db.T3ConnectionID {
+	h, err := o.harnesses(ctx)
+	if err != nil {
+		return rc, err
+	}
+	toT3 := h.isT3(rc.connectionID)
+	if a.ExecutionConfig != nil || !toT3 {
 		if a.legacyConfig() {
 			return rc, errors.New("use executionConfig for the selected harness; legacy T3 configuration cannot be combined with it")
 		}
@@ -413,7 +422,7 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	default:
 		return rc, errors.New("choose workspaceType root or worktree")
 	}
-	if rc.connectionID != db.T3ConnectionID && (a.Branch != "" || a.Base != "" || a.BaseRef != "") {
+	if !toT3 && (a.Branch != "" || a.Base != "" || a.BaseRef != "") {
 		return rc, errors.New("OpenCode selects the worktree base and branch; choose workspaceType worktree without a branch or base")
 	}
 	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
@@ -660,7 +669,11 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 			}
 			projectID = pr.ID
 		}
-		if legacy && (a.ExecutionConfig != nil || id != db.T3ConnectionID) {
+		h, err := o.harnesses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if legacy && (a.ExecutionConfig != nil || !h.isT3(id)) {
 			return nil, errors.New("use executionConfig for this connection without legacy T3 options")
 		}
 		if a.ExecutionConfig != nil {
@@ -1024,7 +1037,11 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 		out.Next = "Not launched yet: no session or conversation."
 		return out, nil
 	}
-	if r.Session.ConnectionID == db.T3ConnectionID {
+	h, err := o.harnesses(ctx)
+	if err != nil {
+		return out, err
+	}
+	if h.isT3(r.Session.ConnectionID) {
 		if out.Task == nil {
 			d, err := o.Client.Thread(ctx, r.Session.ExternalSessionID)
 			if err != nil {

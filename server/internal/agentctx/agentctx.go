@@ -33,13 +33,18 @@ func FromEnv() Caller {
 }
 
 // Resolve combines an explicit caller with a per-call transport claim.
-func (c Caller) Resolve(explicit *db.SessionRef, legacy, cwd string, meta *db.SessionRef) (Caller, error) {
+// t3 resolves the active T3 connection for a legacy T3 thread id.
+func (c Caller) Resolve(explicit *db.SessionRef, legacy, cwd string, meta *db.SessionRef, t3 func() (int64, error)) (Caller, error) {
 	legacy = strings.TrimSpace(legacy)
 	if legacy != "" && explicit != nil {
 		return Caller{}, errors.New("pass callerSession or callerThreadId")
 	}
 	if legacy != "" {
-		explicit = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: legacy}
+		id, err := t3()
+		if err != nil {
+			return Caller{}, err
+		}
+		explicit = &db.SessionRef{ConnectionID: id, ExternalSessionID: legacy}
 	}
 	if explicit != nil && (explicit.ConnectionID <= 0 || strings.TrimSpace(explicit.ExternalSessionID) == "") {
 		return Caller{}, errors.New("callerSession requires connectionId and externalSessionId")
@@ -55,7 +60,11 @@ func (c Caller) Resolve(explicit *db.SessionRef, legacy, cwd string, meta *db.Se
 		c.Session = explicit
 		c.ThreadID = legacy
 	case c.Session == nil && c.ThreadID != "":
-		c.Session = &db.SessionRef{ConnectionID: db.T3ConnectionID, ExternalSessionID: c.ThreadID}
+		id, err := t3()
+		if err != nil {
+			return Caller{}, err
+		}
+		c.Session = &db.SessionRef{ConnectionID: id, ExternalSessionID: c.ThreadID}
 	}
 	if s := strings.TrimSpace(cwd); s != "" {
 		c.Cwd = s

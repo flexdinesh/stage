@@ -4,10 +4,13 @@
 // local t3 CLI) and the status the setup UI shows (docs/api.md "T3
 // connection").
 //
-// Binding: the first successful pairing binds the server to that T3
-// environment; its token and mirror belong to it. The URL may then change
+// Instances: each T3 environment is its own harness connection. Pairing
+// stamps the active T3 connection with the environment it reached; pairing
+// a different environment retires that connection (its tasks, sessions and
+// bindings stay on it, read-only) and makes a new one active, or revives the
+// retired connection of that environment. While paired, the URL may change
 // only to an address serving the same environment. Unpair (disconnect)
-// forgets the token and the binding, so any T3 may be paired next.
+// forgets only the token.
 package t3setup
 
 import (
@@ -47,7 +50,8 @@ type Endpoint struct {
 type Store interface {
 	GetConnection(ctx context.Context) (db.Connection, error)
 	SetT3URL(ctx context.Context, u string) error
-	SetTokenEnvironment(ctx context.Context, envID string) error
+	SwitchInstance(ctx context.Context, harness, identity, label string, revive int64) (db.Switch, error)
+	GetHarnessConnection(ctx context.Context, id int64) (db.HarnessConnection, error)
 }
 
 // Resolve is the endpoint at startup: T3_URL wins, then the saved setting
@@ -110,7 +114,10 @@ type Options struct {
 	// OnPaired runs after every successful pairing (full sync and catalog
 	// refresh now). Must not block.
 	OnPaired func()
-	Logger   *slog.Logger
+	// OnSwitched runs when pairing moved T3 to another connection (the
+	// adapter must follow before OnPaired). Must not block.
+	OnSwitched func(db.Switch)
+	Logger     *slog.Logger
 	// Run executes the t3 CLI; nil = os/exec.
 	Run Runner
 	// LookPath resolves a command name or path to an executable; nil =
@@ -217,44 +224,51 @@ func (s *Service) SetURL(ctx context.Context, raw *string) error {
 	return nil
 }
 
-// Pair redeems a pairing code (`t3 pair`), binds the server to the T3
-// environment on the first pairing, and kicks a sync. 409 when the T3 at
-// the URL is not the bound one; 502 when pairing fails.
-func (s *Service) Pair(ctx context.Context, code string) error {
+// Paired is the outcome of a pairing.
+type Paired struct {
+	// Replaced is the T3 connection this pairing retired (nil when the
+	// same environment was paired again, or the old one held nothing).
+	Replaced *db.HarnessConnection
+}
+
+// Pair redeems a pairing code (`t3 pair`), records the T3 environment it
+// reached on the T3 connection, and kicks a sync. A different environment
+// than the connection's replaces it (see the package doc). 502 when pairing
+// fails.
+func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	bound, label, err := s.bound(ctx)
-	if err != nil {
-		return err
-	}
-	if bound != "" {
-		if p := s.o.Client.Probe(ctx); p.Identity != nil && p.Identity.EnvironmentID != bound {
-			return boundConflict(label)
-		}
-	}
 	if err := s.o.Client.Pair(ctx, code); err != nil {
 		// Always 502 "pairing failed" (drop the chain so ErrNotConnected can't map to 503).
-		return &db.T3Error{Err: errors.New("pairing failed: " + err.Error())}
+		return Paired{}, &db.T3Error{Err: errors.New("pairing failed: " + err.Error())}
 	}
-	if bound == "" {
-		if p := s.o.Client.Probe(ctx); p.Identity != nil {
-			if err := s.o.Store.SetTokenEnvironment(ctx, p.Identity.EnvironmentID); err != nil {
-				s.log.Warn("bind t3 environment", "err", err)
-			} else {
-				s.log.Info("bound to t3 environment", "environment", p.Identity.EnvironmentID, "label", p.Identity.Label)
+	var out Paired
+	if p := s.o.Client.Probe(ctx); p.Identity != nil {
+		sw, err := s.o.Store.SwitchInstance(ctx, db.HarnessT3, p.Identity.EnvironmentID, p.Identity.Label, 0)
+		if err != nil {
+			return out, err
+		}
+		if sw.Changed {
+			s.log.Info("t3 connection replaced", "from", sw.Old, "to", sw.New, "revived", sw.Revived, "environment", p.Identity.EnvironmentID)
+			if s.o.OnSwitched != nil {
+				s.o.OnSwitched(sw)
+			}
+			if old, err := s.o.Store.GetHarnessConnection(ctx, sw.Old); err == nil {
+				out.Replaced = &old
 			}
 		}
 	}
 	if s.o.OnPaired != nil {
 		s.o.OnPaired()
 	}
-	return nil
+	return out, nil
 }
 
-// Unpair disconnects: forgets the token and the environment binding. Tasks,
-// projects and the mirror stay. Nothing is sent to T3 (the token stays
-// valid there until it expires). 409 when T3_ADMIN_TOKEN is set (the
-// client would mint a new token at once). Idempotent.
+// Unpair disconnects: forgets the token. The T3 connection keeps its
+// environment, so pairing it again resumes it and pairing another T3
+// replaces it. Tasks, projects and the mirror stay. Nothing is sent to T3
+// (the token stays valid there until it expires). 409 when T3_ADMIN_TOKEN is
+// set (the client would mint a new token at once). Idempotent.
 func (s *Service) Unpair(ctx context.Context) error {
 	if s.o.Config.T3AdminToken != "" {
 		return db.Conflict("T3_ADMIN_TOKEN in this stage server's environment renews the T3 token; unset it and restart stage to disconnect")
@@ -264,15 +278,12 @@ func (s *Service) Unpair(ctx context.Context) error {
 	if err := s.o.Client.Unpair(ctx); err != nil {
 		return err
 	}
-	if err := s.o.Store.SetTokenEnvironment(ctx, ""); err != nil {
-		return err
-	}
 	s.log.Info("t3 disconnected")
 	return nil
 }
 
-// bound is the bound environment id ("" when unbound) and its label (the
-// probed T3's label when it is that environment, else the id).
+// bound is the active T3 connection's environment ("" when none yet) and
+// its label (the probed T3's label when it is that environment, else the id).
 func (s *Service) bound(ctx context.Context) (string, string, error) {
 	conn, err := s.o.Store.GetConnection(ctx)
 	if err != nil {
@@ -289,8 +300,9 @@ func (s *Service) bound(ctx context.Context) (string, string, error) {
 	return env, label, nil
 }
 
-// bindLegacy binds a server paired before binding existed: it holds a
-// valid token T3 has not rejected and the URL answers with an identity.
+// bindLegacy stamps a T3 connection paired before identities existed: it
+// holds a valid token T3 has not rejected and the URL answers with an
+// identity. It never replaces a stamped connection.
 func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if !st.Connected || st.Probe.Identity == nil {
 		return
@@ -299,15 +311,20 @@ func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if err != nil || (conn.EnvironmentID != nil && *conn.EnvironmentID != "") {
 		return
 	}
-	if err := s.o.Store.SetTokenEnvironment(ctx, st.Probe.Identity.EnvironmentID); err != nil {
-		s.log.Warn("bind t3 environment", "err", err)
+	if _, err := s.o.Store.SwitchInstance(ctx, db.HarnessT3, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
+		s.log.Warn("stamp t3 environment", "err", err)
 	}
 }
 
-// checkBinding allows target when unbound, or when it serves the bound
-// environment. opMu held.
+// checkBinding allows target when not paired, or when it serves the paired
+// environment. A different T3 is paired only after Disconnect, so the
+// replacement is explicit. opMu held.
 func (s *Service) checkBinding(ctx context.Context, target string) error {
-	s.bindLegacy(ctx, s.o.Client.Status(ctx))
+	st := s.o.Client.Status(ctx)
+	s.bindLegacy(ctx, st)
+	if !st.HasToken {
+		return nil
+	}
 	bound, label, err := s.bound(ctx)
 	if err != nil || bound == "" {
 		return err
@@ -319,16 +336,12 @@ func (s *Service) checkBinding(ctx context.Context, target string) error {
 		p = s.o.ProbeURL(ctx, target)
 	}
 	if !p.Reachable || p.Identity == nil {
-		return db.Conflict("This stage server is bound to T3 '%s'. No T3 answered at %s (%s), so it cannot be checked; start it and try again.", label, target, orNoAnswer(p.Err))
+		return db.Conflict("This stage server is paired with T3 '%s'. No T3 answered at %s (%s), so it cannot be checked; start it and try again, or disconnect first.", label, target, orNoAnswer(p.Err))
 	}
 	if p.Identity.EnvironmentID != bound {
-		return boundConflict(label)
+		return db.Conflict("This stage server is paired with T3 '%s'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only.", label)
 	}
 	return nil
-}
-
-func boundConflict(label string) error {
-	return db.Conflict("This stage server is bound to T3 '%s'. Run another stage server for a different T3.", label)
 }
 
 // pairErr wraps a CLI failure as a 502.

@@ -725,7 +725,26 @@ func (c *Client) StartTree(ctx context.Context, id int64) (TreeStart, error) {
 // AdoptThread tracks session threadID as a task; created is false when a
 // task already owned it.
 func (c *Client) AdoptThread(ctx context.Context, threadID string, in AdoptSession) (Task, bool, error) {
-	return c.AdoptScoped(ctx, db.SessionRef{ConnectionID: 1, ExternalSessionID: threadID}, in)
+	t3, err := c.T3ConnectionID(ctx)
+	if err != nil {
+		return Task{}, false, err
+	}
+	return c.AdoptScoped(ctx, db.SessionRef{ConnectionID: t3, ExternalSessionID: threadID}, in)
+}
+
+// T3ConnectionID is the server's active T3 connection: legacy T3 thread
+// ids belong to it.
+func (c *Client) T3ConnectionID(ctx context.Context) (int64, error) {
+	cs, err := c.Connections(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, conn := range cs {
+		if conn.Harness == db.HarnessT3 && conn.Active {
+			return conn.ID, nil
+		}
+	}
+	return 0, errors.New("no T3 connection on this Stage server")
 }
 func sessionPath(ref db.SessionRef) string {
 	return "/api/connections/" + strconv.FormatInt(ref.ConnectionID, 10) + "/sessions/" + url.PathEscape(ref.ExternalSessionID)
@@ -841,7 +860,11 @@ func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (
 
 func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
 	var out ThreadDetail
-	err := c.do(ctx, http.MethodGet, "/api/connections/1/sessions/"+url.PathEscape(id), nil, &out)
+	t3, err := c.T3ConnectionID(ctx)
+	if err != nil {
+		return out, err
+	}
+	err = c.do(ctx, http.MethodGet, "/api/connections/"+strconv.FormatInt(t3, 10)+"/sessions/"+url.PathEscape(id), nil, &out)
 	return out, err
 }
 

@@ -49,9 +49,17 @@ func (a ConfigArgs) legacyConfig() bool {
 }
 
 func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c agentctx.Caller) (int64, error) {
-	cs, err := o.Client.Connections(ctx)
+	h, err := o.harnesses(ctx)
 	if err != nil {
 		return 0, err
+	}
+	// Replaced connections take no new work; neither do their bindings.
+	cs := h.active()
+	var bindings []db.ProjectBinding
+	for _, b := range p.Bindings {
+		if b.ConnectionActive {
+			bindings = append(bindings, b)
+		}
 	}
 	id := a.ConnectionID
 	if id == 0 {
@@ -62,11 +70,11 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 			}
 		}
 		switch {
-		case len(p.Bindings) == 1:
-			id = p.Bindings[0].ConnectionID
+		case len(bindings) == 1:
+			id = bindings[0].ConnectionID
 		case c.ThreadID != "" || a.legacyConfig():
-			id = db.T3ConnectionID
-		case len(p.Bindings) > 1:
+			id = h.t3()
+		case len(bindings) > 1:
 			return 0, errors.New("this project has multiple harness bindings; select connectionId from list_projects")
 		case c.Session != nil:
 			id = c.Session.ConnectionID
@@ -79,6 +87,9 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 		}
 	}
 	if !slices.ContainsFunc(cs, func(c db.HarnessConnection) bool { return c.ID == id }) {
+		if slices.ContainsFunc(h, func(c db.HarnessConnection) bool { return c.ID == id }) {
+			return 0, fmt.Errorf("connection %d was replaced; select the current connection from list_projects", id)
+		}
 		return 0, fmt.Errorf("connection %d is unavailable; select a configured connection from list_projects", id)
 	}
 	return id, nil

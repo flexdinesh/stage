@@ -4,7 +4,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { keys } from "../api/queries.ts";
-import type { T3Status } from "../api/types.ts";
+import type { ReplacedConnection, T3Status } from "../api/types.ts";
+import { replacedNotice } from "../lib/harnesses.ts";
 import { shortDate } from "../lib/format.ts";
 import { codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps } from "../lib/onboarding.ts";
 import { useApi } from "../platform/context.tsx";
@@ -26,7 +27,7 @@ function useRetry() {
   return useMutation({ mutationFn: () => qc.refetchQueries({ queryKey: keys.t3Status }, { throwOnError: true }) });
 }
 
-function CodeForm({ primary }: { primary: boolean }) {
+function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3Status) => void }) {
   const api = useApi();
   const setStatus = useSetStatus();
   const [code, setCode] = useState("");
@@ -35,6 +36,7 @@ function CodeForm({ primary }: { primary: boolean }) {
     onSuccess: (s) => {
       setCode("");
       setStatus(s);
+      onPaired?.(s);
     },
   });
   const submit = (e: FormEvent) => {
@@ -76,13 +78,24 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
   const api = useApi();
   const setStatus = useSetStatus();
   const [showCode, setShowCode] = useState(false);
-  const auto = useMutation({ mutationFn: api.autoPair, onSuccess: setStatus });
+  // Pairing another T3 retires the previous connection: say so once, where the user paired.
+  const [replaced, setReplaced] = useState<ReplacedConnection | null>(null);
+  const onPaired = (s: T3Status) => setReplaced(s.replaced ?? null);
+  const auto = useMutation({
+    mutationFn: api.autoPair,
+    onSuccess: (s) => {
+      setStatus(s);
+      onPaired(s);
+    },
+  });
+  const notice = replaced === null ? null : <Alert tone="plain">{replacedNotice(replaced)}</Alert>;
   if (!status.autoPair.available) {
     return (
       <div className="flex flex-col gap-3">
+        {notice}
         <Muted>{codeReason(status.autoPair.reason)}</Muted>
         {status.autoPair.reason === "fake" ? null : <CommandBox command="t3 pair" />}
-        <CodeForm primary={primary} />
+        <CodeForm primary={primary} onPaired={onPaired} />
       </div>
     );
   }
@@ -90,6 +103,7 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
   const codeOpen = showCode || auto.isError;
   return (
     <div className="flex flex-col gap-3">
+      {notice}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Button variant={primary ? "primary" : "secondary"} busy={auto.isPending} onClick={() => auto.mutate()}>
           Pair with T3
@@ -98,7 +112,7 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
       </div>
       <ErrorText error={auto.error} />
       {codeOpen ? (
-        <CodeForm primary={false} />
+        <CodeForm primary={false} onPaired={onPaired} />
       ) : (
         <div>
           <Button variant="ghost" small onClick={() => setShowCode(true)}>
@@ -174,8 +188,8 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
 }
 
 /**
- * Disconnect (Settings T3 connection footer): forgets the token and the
- * environment binding after an inline confirm. Locked while T3_ADMIN_TOKEN
+ * Disconnect (Settings T3 connection footer): forgets the token after an
+ * inline confirm; the environment binding stays, so pairing this T3 resumes it. Locked while T3_ADMIN_TOKEN
  * would mint a new token at once.
  */
 export function DisconnectT3({ status }: { status: T3Status }) {
@@ -205,8 +219,8 @@ export function DisconnectT3({ status }: { status: T3Status }) {
       {confirm ? (
         <Alert tone="bad">
           <p>
-            {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing; you can then pair this or another
-            T3. Tasks and journals stay; running T3 tasks continue untracked until you pair again.
+            {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing. Pair this T3 again to
+            resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.
             {expires === null ? null : ` The token stays valid in T3 until ${shortDate(expires)}.`}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">

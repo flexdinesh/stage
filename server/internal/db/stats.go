@@ -78,7 +78,7 @@ SELECT created_at FROM threads WHERE created_at >= $1 AND created_at < $2
 
 	rows, err = s.pool.Query(ctx, `
 SELECT p.id, th.t3_project_id, COALESCE(p.title, th.t3_project_id), count(*) AS n
-FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=1 AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),`+activeT3SQL+`) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
 WHERE th.created_at >= $1 AND th.created_at < $2
   AND (NOT $3 OR th.parent_thread_id IS NULL)
 GROUP BY p.id, th.t3_project_id, p.title ORDER BY n DESC, th.t3_project_id`, from, to, excludeSubagents)

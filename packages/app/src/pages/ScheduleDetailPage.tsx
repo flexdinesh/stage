@@ -1,9 +1,8 @@
-import { harnessName } from "../lib/tasks.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi } from "../platform/context.tsx";
-import { useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { RefText } from "../components/StageLinks.tsx";
@@ -37,6 +36,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
   const api = useApi();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
+  const harnesses = useHarnesses();
   const [editing, setEditing] = useState(false);
   const [armed, setArmed] = useState(false);
   const run = useMutation({ mutationFn: () => api.runSchedule(s.id), onSettled: invalidate });
@@ -66,7 +66,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />
-        <Chip>{s.connectionId===1 ? modelText(s.model, s.modelOptions) : s.executionConfig?.model || "OpenCode default"}</Chip>
+        <Chip>{harnesses.harness(s.connectionId) !== "opencode" ? modelText(s.model, s.modelOptions) : s.executionConfig?.model || "OpenCode default"}</Chip>
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceText(s.workspace)}</Chip>
@@ -179,6 +179,7 @@ function WhenPanel({ schedule: s }: { schedule: ScheduleDetail }) {
 }
 
 function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
+  const harnesses = useHarnesses();
   return (
     <Panel title="Config">
       <Details>
@@ -187,8 +188,8 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
             {s.projectTitle}
           </Link>
         </Detail>
-        <Detail label="Harness">{harnessName(s.connectionId)}</Detail>
-        {s.connectionId !== 1 ? <><Detail label="Model">{modelText(s.executionConfig?.model || "Harness default", s.executionConfig?.options ?? [])}</Detail><Detail label="Agent">{s.executionConfig?.mode || "Harness default"}</Detail></> : <><Detail label="Provider">{s.providerInstanceId ?? "T3 default"}</Detail>
+        <Detail label="Harness">{harnesses.name(s.connectionId)}{harnesses.retired(s.connectionId) ? <span className="text-muted"> (replaced)</span> : null}</Detail>
+        {harnesses.harness(s.connectionId) === "opencode" ? <><Detail label="Model">{modelText(s.executionConfig?.model || "Harness default", s.executionConfig?.options ?? [])}</Detail><Detail label="Agent">{s.executionConfig?.mode || "Harness default"}</Detail></> : <><Detail label="Provider">{s.providerInstanceId ?? "T3 default"}</Detail>
         <Detail label="Model">{modelText(s.model, s.modelOptions)}</Detail>
         <Detail label="Runtime">{s.executionConfig ? s.executionConfig.permission || "Harness default" : s.runtimeMode}</Detail>
         <Detail label="Interaction">{s.executionConfig ? s.executionConfig.mode || "Harness default" : s.interactionMode}</Detail></>}

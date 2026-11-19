@@ -10,7 +10,8 @@ import { inState, nodeState } from "../../lib/trees.ts";
 import { TaskStateBadge } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
 import { CompletionButton } from "../Completion.tsx";
-import { harnessName } from "../../lib/tasks.ts";
+import { HARNESS_NAME, isRetired } from "../../lib/harnesses.ts";
+import { HarnessName } from "../HarnessName.tsx";
 import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
@@ -56,7 +57,7 @@ export function NodeAction({ task, className }: { task: Task; pending: readonly 
     action =
       appLink === null ? null : (
         <AppButton small variant="primary" href={appLink} className={cls}>
-          Open in {harnessName(task.connectionId)}
+          Open in {HARNESS_NAME[task.harness]}
         </AppButton>
       );
   } else if (task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
@@ -70,7 +71,7 @@ export function NodeAction({ task, className }: { task: Task; pending: readonly 
   } else if (appLink !== null) {
     action = (
       <AppButton small href={appLink} className={cls}>
-        Open in {harnessName(task.connectionId)}
+        Open in {HARNESS_NAME[task.harness]}
       </AppButton>
     );
   }
@@ -141,7 +142,10 @@ export function TreeNode({
             {task.title}
           </Link>
         </span>
-        <span className="font-mono text-meta text-fg [overflow-wrap:anywhere]">{task.projectTitle}</span>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">
+          {task.projectTitle}
+          {isRetired(task) ? <HarnessName task={task} className="text-muted" /> : null}
+        </span>
       </span>
       <span
         className="order-4 font-mono text-meta text-muted tabular md:order-none md:truncate md:px-2"

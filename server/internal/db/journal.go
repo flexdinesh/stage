@@ -56,7 +56,7 @@ type AppendNoteInput struct {
 	SourceThreadID *string     `json:"sourceThreadId"`
 }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id=1)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id)`
+const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id)`
 
 func scanJournal(r rowScanner) (JournalEntry, error) {
 	var e JournalEntry
@@ -119,7 +119,11 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 		}
 		sourceID = &id
 	} else if in.SourceThreadID != nil {
-		ref := SessionRef{ConnectionID: T3ConnectionID, ExternalSessionID: *in.SourceThreadID}
+		t3, err := activeT3(ctx, tx)
+		if err != nil {
+			return JournalEntry{}, err
+		}
+		ref := SessionRef{ConnectionID: t3, ExternalSessionID: *in.SourceThreadID}
 		in.SourceSession = &ref
 		id, err := sessionIdentity(ctx, tx, ref)
 		if err != nil {

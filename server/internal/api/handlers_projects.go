@@ -40,9 +40,11 @@ func (s *server) plannedConnection(id int64) error {
 	return err
 }
 
-func connectionPath(r *http.Request) (int64, error) {
+// connectionPath is the {connectionId} path value; none means the active
+// T3 connection.
+func (s *server) connectionPath(r *http.Request) (int64, error) {
 	if r.PathValue("connectionId") == "" {
-		return db.T3ConnectionID, nil
+		return s.Store.T3ID(), nil
 	}
 	id, err := strconv.ParseInt(r.PathValue("connectionId"), 10, 64)
 	if err != nil || id < 1 {
@@ -70,6 +72,9 @@ func (s *server) updateProject(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, p)
 	return nil
 }
+
+// connections lists every connection: the active one per harness (when
+// usable) and the replaced ones, so tasks on them still name their harness.
 func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	cs, err := s.Store.Connections(r.Context())
 	if err != nil {
@@ -77,7 +82,7 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := []db.HarnessConnection{}
 	for _, c := range cs {
-		if s.plannedConnection(c.ID) == nil {
+		if !c.Active || s.plannedConnection(c.ID) == nil {
 			out = append(out, s.configured(r.Context(), c))
 		}
 	}
@@ -85,18 +90,36 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.HarnessConnection {
+	if !c.Active {
+		c.Configured = false
+		return c
+	}
 	_, adapterErr := s.Sync.Adapter(c.ID)
 	c.Configured = adapterErr == nil
-	if c.ID == db.T3ConnectionID && s.Setup != nil {
+	if c.Harness == db.HarnessT3 && s.Setup != nil {
 		st := s.Setup.Status(ctx, false)
 		c.Configured = st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != "default"
 	}
 	return c
 }
 
+// forgetConnection is DELETE /api/connections/{connectionId}: lets go of a
+// replaced connection (db.Store.ForgetConnection).
+func (s *server) forgetConnection(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.connectionPath(r)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.ForgetConnection(r.Context(), id); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 // setAutoComplete is PUT /api/connections/{connectionId}/auto-complete {autoComplete}.
 func (s *server) setAutoComplete(w http.ResponseWriter, r *http.Request) error {
-	id, err := connectionPath(r)
+	id, err := s.connectionPath(r)
 	if err != nil {
 		return err
 	}
@@ -117,7 +140,7 @@ func (s *server) setAutoComplete(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error {
-	id, err := connectionPath(r)
+	id, err := s.connectionPath(r)
 	if err != nil {
 		return err
 	}
@@ -181,7 +204,7 @@ func (s *server) unbindProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	connection, err := connectionPath(r)
+	connection, err := s.connectionPath(r)
 	if err != nil {
 		return err
 	}
@@ -208,7 +231,8 @@ func (s *server) registerWorkspace(w http.ResponseWriter, r *http.Request) error
 	if in.Title == "" || in.Workspace == "" {
 		return db.Invalid("title and an existing directory are required")
 	}
-	adapter, err := s.Sync.Adapter(db.T3ConnectionID)
+	t3 := s.Store.T3ID()
+	adapter, err := s.Sync.Adapter(t3)
 	if err != nil {
 		return err
 	}
@@ -216,6 +240,6 @@ func (s *server) registerWorkspace(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return &db.HarnessError{Err: err}
 	}
-	writeJSON(w, http.StatusCreated, db.ExternalProject{ConnectionID: db.T3ConnectionID, ExternalID: p.ID, Title: p.Title, Workspace: p.WorkspaceRoot})
+	writeJSON(w, http.StatusCreated, db.ExternalProject{ConnectionID: t3, ExternalID: p.ID, Title: p.Title, Workspace: p.WorkspaceRoot})
 	return nil
 }

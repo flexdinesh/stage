@@ -70,7 +70,7 @@ SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s
   (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
   (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
-  COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id=1)), s.created_at, s.updated_at,
+  COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), s.created_at, s.updated_at,
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config
 FROM schedules s
@@ -197,7 +197,7 @@ INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, m
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
-			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, defaultConnection(in.ConnectionID),
+			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, s.defaultConnection(in.ConnectionID),
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -280,7 +280,11 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			if p.ConnectionID.V != connection && p.ConnectionID.V != T3ConnectionID {
+			toT3, err := harnessIs(ctx, tx, p.ConnectionID.V, HarnessT3)
+			if err != nil {
+				return err
+			}
+			if p.ConnectionID.V != connection && !toT3 {
 				var hasImages bool
 				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE schedule_id=$1)`, id).Scan(&hasImages); err != nil {
 					return err

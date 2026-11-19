@@ -8,6 +8,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
 
 // t3StatusJSON is T3Status (docs/api.md "GET /api/t3/status").
@@ -29,6 +30,11 @@ type t3StatusJSON struct {
 	T3                   *t3IdentityJSON  `json:"t3"`
 	AutoPair             autoPairJSON     `json:"autoPair"`
 	Sync                 syncProgressJSON `json:"sync"`
+	// ConnectionID is the active T3 connection.
+	ConnectionID int64 `json:"connectionId"`
+	// Replaced is the T3 connection a pairing just retired (pair responses
+	// only).
+	Replaced *db.HarnessConnection `json:"replaced,omitempty"`
 }
 
 type t3IdentityJSON struct {
@@ -73,6 +79,7 @@ func (s *server) statusJSON(r *http.Request, refresh bool) (t3StatusJSON, error)
 		EnvironmentID:        strPtr(st.EnvironmentID),
 		ClientID:             strPtr(st.ClientID),
 		AdminTokenConfigured: s.Config.T3AdminToken != "",
+		ConnectionID:         conn.ConnectionID,
 		LastError:            strPtr(st.LastError),
 		LastFullSyncAt:       conn.LastFullSyncAt,
 		Reachable:            st.Probe.Reachable,
@@ -124,13 +131,24 @@ func (s *server) t3Pair(w http.ResponseWriter, r *http.Request) error {
 	if code == "" {
 		return db.Invalid("code is required")
 	}
-	if err := s.Setup.Pair(r.Context(), code); err != nil {
+	paired, err := s.Setup.Pair(r.Context(), code)
+	if err != nil {
 		return err
 	}
-	return s.writeStatus(w, r, false)
+	return s.writePaired(w, r, paired)
 }
 
-// t3Unpair disconnects: forgets the token and the environment binding.
+func (s *server) writePaired(w http.ResponseWriter, r *http.Request, paired t3setup.Paired) error {
+	out, err := s.statusJSON(r, false)
+	if err != nil {
+		return err
+	}
+	out.Replaced = paired.Replaced
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+// t3Unpair disconnects: forgets the token (the connection keeps its environment).
 func (s *server) t3Unpair(w http.ResponseWriter, r *http.Request) error {
 	if err := s.Setup.Unpair(r.Context()); err != nil {
 		return err
@@ -140,10 +158,11 @@ func (s *server) t3Unpair(w http.ResponseWriter, r *http.Request) error {
 
 // t3PairAuto pairs through the t3 CLI on this machine.
 func (s *server) t3PairAuto(w http.ResponseWriter, r *http.Request) error {
-	if err := s.Setup.AutoPair(r.Context()); err != nil {
+	paired, err := s.Setup.AutoPair(r.Context())
+	if err != nil {
 		return err
 	}
-	return s.writeStatus(w, r, false)
+	return s.writePaired(w, r, paired)
 }
 
 // t3SetURL saves the T3 URL setting; {"url": null} resets it.
@@ -169,7 +188,7 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 		if _, err := s.Sync.Adapter(s.OpenCode.ID()); err == nil {
 			st := s.Setup.Status(r.Context(), false)
 			if !st.Conn.HasToken && !st.Conn.Connected && st.Endpoint.Source == "default" {
-				skip = append(skip, db.T3ConnectionID)
+				skip = append(skip, s.Store.T3ID())
 			}
 		}
 	}

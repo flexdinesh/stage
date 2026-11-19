@@ -15,7 +15,7 @@ func TestEnvironmentCredentialsStayOnTheirConfiguredService(t *testing.T) {
 	var temp dbtest.DB
 	store := db.NewStore(temp.Reset(t))
 	cfg := config.OpenCodeSettings{Endpoint: "https://user:private@example.com", BrowserEndpoint: "https://example.com?secret=private", Username: "user", Password: "private"}
-	s, err := New(t.Context(), store, cfg, func(int64, execution.Adapter) { t.Fatal("invalid connection installed") })
+	s, err := New(t.Context(), store, cfg, func(int64, int64, execution.Adapter) { t.Fatal("invalid connection installed") })
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostState } from "../platform/index.ts";
+import { sessionLinks } from "./harnesses.ts";
 
 
 const unsubscribed = () => {};
@@ -23,12 +24,14 @@ export function useHostEpoch(): number {
   return useHostState()?.epoch ?? 0;
 }
 
-/** Let the host choose a session destination for the active Stage server. */
+/** Let the host choose a session destination for the active Stage server; none for a task on a replaced connection. */
 export function useSessionDestination() {
   const { links: hostLinks } = usePlatform();
   useHostState();
-  return useCallback((links: { t3DeepLink: string | null; t3WebUrl?: string | null; links?: {native?: string; web?: string} }) =>
-    hostLinks.executionDestination({ native: links.links?.native ?? links.t3DeepLink, web: links.links?.web ?? links.t3WebUrl ?? null }), [hostLinks]);
+  return useCallback((links: Parameters<typeof sessionLinks>[0]) => {
+    const target = sessionLinks(links);
+    return target === null ? null : hostLinks.executionDestination(target);
+  }, [hostLinks]);
 }
 
 export interface HostServerList {

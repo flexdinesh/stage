@@ -1,7 +1,9 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
+import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import type { HarnessConnection, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
@@ -32,6 +34,28 @@ export function useConnections() {
 }
 
 type Connections = { connections: HarnessConnection[] };
+
+const NO_CONNECTIONS: HarnessConnection[] = [];
+
+/** Harness lookups by connection id (name, harness, active, label) and the active connection per harness. */
+export function useHarnesses(): Harnesses & { loaded: boolean; error: unknown } {
+  const connections = useConnections();
+  const list = connections.data?.connections ?? NO_CONNECTIONS;
+  const lookup = useMemo(() => harnessLookup(list), [list]);
+  return { ...lookup, loaded: connections.data !== undefined, error: connections.error };
+}
+
+/** Forgets a retired connection: it leaves Settings and its bindings stop asking for repair. */
+export function useForgetConnection() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.forgetConnection(id),
+    onSuccess: async () => {
+      await Promise.all([qc.invalidateQueries({ queryKey: keys.connections }), qc.invalidateQueries({ queryKey: keys.projects }), invalidateWork(qc)]);
+    },
+  });
+}
 
 /** Toggles a connection's auto-complete; optimistic, reverted on failure. */
 export function useSetAutoComplete() {
@@ -182,9 +206,15 @@ export const useSchedulePreview = (body: SchedulePreviewRequest | null) => {
   });
 };
 
+/** A session on the active T3 connection. */
 export const useThread = (id: string) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.thread, id], queryFn: () => api.thread(id), enabled: id !== "" });
+  const t3 = useHarnesses().activeId("t3");
+  return useQuery({
+    queryKey: [...keys.thread, t3, id],
+    queryFn: () => (t3 === null ? Promise.reject(new Error("T3 is not connected")) : api.thread(t3, id)),
+    enabled: id !== "" && t3 !== null,
+  });
 };
 
 /** Tasks + external threads needing input (app badge, nav count). */

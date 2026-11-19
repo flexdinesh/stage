@@ -1,17 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useConnections } from "../api/queries.ts";
-import { harnessName } from "../lib/tasks.ts";
+import { useHarnesses } from "../api/queries.ts";
+import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
 import { Button, Drawer, ErrorText, Field, Input, Panel, Select } from "./ui.tsx";
 
 export function SharedPaths() {
   const api = useApi();
   const qc = useQueryClient();
-  const connections = useConnections();
+  const harnesses = useHarnesses();
   const paths = useQuery({ queryKey: ["shared-paths"], queryFn: api.sharedPaths });
   const [editing, setEditing] = useState(false);
-  const [connection, setConnection] = useState(1);
+  const [chosen, setConnection] = useState(0);
+  // Mappings belong to active connections; default to the first one.
+  const connection = harnesses.activeList.some((c) => c.id === chosen) ? chosen : (harnesses.activeList[0]?.id ?? 0);
   const [source, setSource] = useState("");
   const [local, setLocal] = useState("");
   const save = useMutation({
@@ -42,7 +44,7 @@ export function SharedPaths() {
           key={p.connectionId + p.harnessRoot}
           className="mt-2 border-t border-line pt-2 text-small"
         >
-          <span className="font-medium">{harnessName(p.connectionId)}</span>{" "}
+          <span className="font-medium">{harnesses.name(p.connectionId)}</span>{" "}
           <code className="break-all">{p.harnessRoot}</code> to{" "}
           <code className="break-all">{p.stageRoot}</code>
           <Button
@@ -64,7 +66,7 @@ export function SharedPaths() {
             <Button
               variant="primary"
               busy={save.isPending}
-              disabled={!source.trim() || !local.trim()}
+              disabled={connection === 0 || !source.trim() || !local.trim()}
               onClick={() => save.mutate({ id: connection, from: source, to: local })}
             >
               Save mapping
@@ -79,9 +81,9 @@ export function SharedPaths() {
                   value={connection}
                   onChange={(e) => setConnection(Number(e.target.value))}
                 >
-                  {connections.data?.connections.map((c) => (
+                  {harnesses.activeList.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {harnessName(c.id)}
+                      {HARNESS_NAME[c.harness]}
                     </option>
                   ))}
                 </Select>

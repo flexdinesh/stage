@@ -122,7 +122,10 @@ func waitsOn(needs []int64, start *time.Time) string {
 func printTask(w io.Writer, t client.Task) {
 	fmt.Fprintf(w, "task %d  %s  [%s]  %s\n", t.ID, t.Title, t.State, t.ProjectTitle)
 	model, permission, mode := "T3 default", t.RuntimeMode, t.InteractionMode
-	if t.ConnectionID > 0 && t.ConnectionID != db.T3ConnectionID {
+	if !t.ConnectionActive && t.ConnectionID > 0 {
+		fmt.Fprintf(w, "  replaced connection %d (%s): history only\n", t.ConnectionID, t.ConnectionLabel)
+	}
+	if t.ConnectionID > 0 && t.Harness != db.HarnessT3 {
 		fmt.Fprintf(w, "  connection %d\n", t.ConnectionID)
 		model, permission, mode = "harness default", "", ""
 		if cfg := t.ExecutionConfig; cfg != nil {
@@ -157,12 +160,12 @@ func printTask(w io.Writer, t client.Task) {
 	if t.Adopted {
 		fmt.Fprintln(w, "  adopted  tracks an existing session (stage never starts it)")
 	}
-	if t.OriginSession != nil && t.OriginSession.ConnectionID != db.T3ConnectionID {
+	if t.OriginSession != nil && t.OriginThreadID == nil {
 		fmt.Fprintf(w, "  created by connection %d session %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID)
 	} else if t.OriginThreadID != nil {
 		fmt.Fprintf(w, "  created by session %s %s\n", *t.OriginThreadID, orDash(t.OriginThreadTitle))
 	}
-	if t.Session != nil && t.Session.ConnectionID != db.T3ConnectionID {
+	if t.Session != nil && t.Harness != db.HarnessT3 {
 		fmt.Fprintf(w, "  session  %s\n", t.Session.ExternalSessionID)
 	} else if t.T3ThreadID != nil {
 		fmt.Fprintf(w, "  thread   %s\n", *t.T3ThreadID)

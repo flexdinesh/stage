@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
-import { useBadge, useConnections, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { useBadge, useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
@@ -152,10 +152,10 @@ const T3_LABEL: Record<T3State, string> = {
 function ConnectionStatus() {
   const status = useT3Status();
   const detailsId = useId();
-  const connections = useConnections();
+  const harnesses = useHarnesses();
   const openCode = useOpenCodeStatus();
   const data = status.data;
-  if (connections.data && !connections.data.connections.some(c => c.id === 1 && c.configured)) {
+  if (harnesses.loaded && harnesses.activeConnection("t3")?.configured !== true) {
     const info = openCode.data;
     const label = !info || info.state === "unconfigured" ? "Connect a harness" : "OpenCode " + info.state;
     return <Link to="/settings" title={label} aria-label={label} className={cx(buttonClass("secondary"),"w-10 px-0 md:w-8")}>

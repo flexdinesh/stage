@@ -79,11 +79,11 @@ func TestT3SettingsRoundTrip(t *testing.T) {
 	if err := s.SetT3URL(ctx, "http://127.0.0.1:4000"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetTokenEnvironment(ctx, "env-1"); err != nil {
+	if _, err := s.SwitchInstance(ctx, db.HarnessT3, "env-1", "box", 0); err != nil {
 		t.Fatal(err)
 	}
 	c, _ = s.GetConnection(ctx)
-	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" {
+	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" || c.ConnectionID != s.T3ID() {
 		t.Fatalf("saved %+v", c)
 	}
 	// Saving a token leaves the settings alone.
@@ -93,11 +93,8 @@ func TestT3SettingsRoundTrip(t *testing.T) {
 	if err := s.SetT3URL(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetTokenEnvironment(ctx, ""); err != nil {
-		t.Fatal(err)
-	}
 	c, _ = s.GetConnection(ctx)
-	if c.T3URL != nil || c.EnvironmentID != nil {
+	if c.T3URL != nil || c.EnvironmentID == nil {
 		t.Fatalf("cleared %+v", c)
 	}
 }

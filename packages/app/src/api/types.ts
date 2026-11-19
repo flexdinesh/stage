@@ -146,6 +146,8 @@ export interface T3Status {
   t3: T3Identity | null;
   autoPair: { available: boolean; reason: AutoPairReason | null };
   sync: T3SyncProgress;
+  /** Pair and auto-pair only: the previous T3 connection this pairing replaced. */
+  replaced?: ReplacedConnection | null;
 }
 
 /** T3Status as an older server may send it: fields added with onboarding can be missing. */
@@ -224,6 +226,10 @@ export interface ProjectBinding {
  revision: number;
  status: "available" | "missing" | "changed";
  observedWorkspace: string | null;
+ /** False when the binding's connection was replaced: history only, never repaired. */
+ connectionActive: boolean;
+ /** The connection's T3 environment label or OpenCode address. */
+ connectionLabel: string;
 }
 export interface ExternalProject {
  connectionId: number;
@@ -251,7 +257,27 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
 export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string }
-export interface HarnessConnection {id: number; configured: boolean; harness: "t3" | "opencode"; /** Complete tasks when a successful run is settled (T3) or archived (OpenCode) there. */ autoComplete: boolean}
+export type Harness = "t3" | "opencode";
+/** One harness instance (a T3 environment or an OpenCode service); at most one active per harness. */
+export interface HarnessConnection {
+  id: number;
+  harness: Harness;
+  /** Meaningful for the active connection only. */
+  configured: boolean;
+  /** Complete tasks when a successful run is settled (T3) or archived (OpenCode) there. */
+  autoComplete: boolean;
+  /** False once another instance of the harness replaced it: its tasks and bindings stay read-only. */
+  active: boolean;
+  /** T3 environment label or OpenCode address. */
+  label: string;
+  retiredAt: string | null;
+  /** Forgotten retired connections leave Settings; their tasks keep the label. */
+  forgottenAt: string | null;
+  tasks: number;
+  bindings: number;
+}
+/** The T3 connection a pairing replaced. */
+export interface ReplacedConnection { id: number; label: string; tasks: number; bindings: number }
 export interface OpenCodeStatus {
   connectionId: number;
   endpoint: string;
@@ -303,6 +329,11 @@ export interface Task {
   session: SessionRef | null;
   originSession: SessionRef | null;
   connectionId: number;
+  harness: Harness;
+  /** False once the task's connection was replaced: read-only history, Stage no longer follows it. */
+  connectionActive: boolean;
+  /** The connection's T3 environment label or OpenCode address. */
+  connectionLabel: string;
   acceptanceId: number | null;
   acceptanceRevision: number;
   completedAt: string | null;

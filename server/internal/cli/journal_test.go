@@ -17,8 +17,13 @@ func TestJournalCommands(t *testing.T) {
 	var requests []string
 	var keys []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
+		// The legacy T3 caller thread belongs to the active T3 connection.
+		if r.URL.Path == "/api/connections" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"connections": []db.HarnessConnection{{ID: 1, Harness: db.HarnessT3, Active: true}}})
+			return
+		}
+		requests = append(requests, r.Method+" "+r.URL.String())
 		switch {
 		case r.Method == "POST":
 			var in db.AppendNoteInput

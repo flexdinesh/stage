@@ -22,8 +22,8 @@ type scheduleDetailJSON struct {
 	Runs []scheduleRunJSON `json:"runs"`
 }
 
-func scheduleJSON(sc db.Schedule) db.Schedule {
-	if sc.ConnectionID == db.T3ConnectionID && sc.ExecutionConfig != nil {
+func (s *server) scheduleJSON(sc db.Schedule) db.Schedule {
+	if s.Store.IsT3(sc.ConnectionID) && sc.ExecutionConfig != nil {
 		d := t3Defaults(sc.ExecutionConfig, sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode)
 		sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
 	}
@@ -50,7 +50,7 @@ func (s *server) listSchedules(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	for i := range out {
-		out[i] = scheduleJSON(out[i])
+		out[i] = s.scheduleJSON(out[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"schedules": out})
 	return nil
@@ -87,7 +87,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate()
+	in, err := req.validate(s.Store.IsT3)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, scheduleJSON(sc))
+	writeJSON(w, http.StatusCreated, s.scheduleJSON(sc))
 	return nil
 }
 
@@ -130,7 +130,7 @@ func (s *server) getSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	env := s.envID(ctx)
-	out := scheduleDetailJSON{Schedule: scheduleJSON(sc), Runs: make([]scheduleRunJSON, len(runs))}
+	out := scheduleDetailJSON{Schedule: s.scheduleJSON(sc), Runs: make([]scheduleRunJSON, len(runs))}
 	for i, run := range runs {
 		out.Runs[i] = scheduleRunJSON{ScheduleRun: run}
 		if run.Task != nil {
@@ -163,7 +163,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if connection != db.T3ConnectionID && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
+	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
 		return db.Invalid("Choose harness-specific configuration and remove unsupported attachments.")
 	}
 	projectID := current.ProjectID
@@ -179,7 +179,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
-	}); err != nil {
+	}, s.Store.IsT3); err != nil {
 		return err
 	}
 	if p.Workspace.Set && p.Workspace.V.FromPredecessor() {
@@ -200,7 +200,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, scheduleJSON(sc))
+	writeJSON(w, http.StatusOK, s.scheduleJSON(sc))
 	return nil
 }
 

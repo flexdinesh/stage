@@ -8,11 +8,14 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-const T3ConnectionID int64 = 1
-
 func checkDestinationChange(ctx context.Context, tx *Tx, old, next int64, c Optional[execution.Config], w Optional[Workspace]) error {
 	if err := connectionExists(ctx, tx, next); err != nil {
 		return err
+	}
+	if old != next {
+		if err := connectionInUse(ctx, tx, next); err != nil {
+			return err
+		}
 	}
 	if old != next && (!c.Set || c.Null || !w.Set || w.Null) {
 		return Invalid("Choose the new harness configuration and workspace when changing destination.")
@@ -21,11 +24,22 @@ func checkDestinationChange(ctx context.Context, tx *Tx, old, next int64, c Opti
 }
 
 type SessionRef = execution.SessionRef
+
+// HarnessConnection is one harness instance. At most one per harness is
+// active; a replaced instance is retired and keeps its tasks and bindings.
 type HarnessConnection struct {
 	Configured   bool   `json:"configured"`
 	ID           int64  `json:"id"`
 	Harness      string `json:"harness"`
 	AutoComplete bool   `json:"autoComplete"`
+	Active       bool   `json:"active"`
+	// Label names the instance (T3 environment, OpenCode address).
+	Label       string  `json:"label"`
+	RetiredAt   *string `json:"retiredAt"`
+	ForgottenAt *string `json:"forgottenAt"`
+	// Tasks and Bindings count what stays on the connection.
+	Tasks    int `json:"tasks"`
+	Bindings int `json:"bindings"`
 }
 type ProjectBinding struct {
 	ID                int64   `json:"id"`
@@ -37,6 +51,9 @@ type ProjectBinding struct {
 	Revision          int64   `json:"revision"`
 	Status            string  `json:"status"`
 	ObservedWorkspace *string `json:"observedWorkspace"`
+	// ConnectionActive is false for a binding on a replaced instance.
+	ConnectionActive bool   `json:"connectionActive"`
+	ConnectionLabel  string `json:"connectionLabel"`
 }
 type ExternalProject struct {
 	ConnectionID int64  `json:"connectionId"`
@@ -46,23 +63,36 @@ type ExternalProject struct {
 	ProjectID    *int64 `json:"projectId"`
 }
 
+const connectionCols = `id,harness,auto_complete,active,label,retired_at,forgotten_at,
+ (SELECT count(*) FROM tasks t WHERE t.connection_id=c.id),
+ (SELECT count(*) FROM project_bindings b WHERE b.connection_id=c.id AND b.active=1)`
+
 func scanConnection(r rowScanner) (HarnessConnection, error) {
 	var c HarnessConnection
-	err := r.Scan(&c.ID, &c.Harness, &c.AutoComplete)
-	return c, err
+	err := r.Scan(&c.ID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings)
+	return c, notFound(err)
 }
+
+// Connections lists every connection: active ones first, then retired
+// ones (forgotten included, so their tasks still name the harness).
 func (s *Store) Connections(ctx context.Context) ([]HarnessConnection, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id,harness,auto_complete FROM harness_connections ORDER BY id`)
+	rows, err := s.pool.Query(ctx, `SELECT `+connectionCols+` FROM harness_connections c ORDER BY active DESC,id`)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, scanConnection)
 }
 
+func (s *Store) GetHarnessConnection(ctx context.Context, id int64) (HarnessConnection, error) {
+	return scanConnection(s.pool.QueryRow(ctx, `SELECT `+connectionCols+` FROM harness_connections c WHERE id=$1`, id))
+}
+
 // SetAutoComplete sets whether a harness closure may complete a done task.
 func (s *Store) SetAutoComplete(ctx context.Context, id int64, on bool) (HarnessConnection, error) {
-	c, err := scanConnection(s.pool.QueryRow(ctx, `UPDATE harness_connections SET auto_complete=$2 WHERE id=$1 RETURNING id,harness,auto_complete`, id, on))
-	return c, notFound(err)
+	if _, err := s.pool.Exec(ctx, `UPDATE harness_connections SET auto_complete=$2 WHERE id=$1`, id, on); err != nil {
+		return HarnessConnection{}, err
+	}
+	return s.GetHarnessConnection(ctx, id)
 }
 func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
 	rows, err := s.pool.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,b.project_id FROM external_projects e
@@ -84,7 +114,7 @@ func bindProject(ctx context.Context, tx *Tx, b ProjectBinding) (int64, error) {
 	if err := projectExists(ctx, tx, b.ProjectID); err != nil {
 		return 0, err
 	}
-	if err := connectionExists(ctx, tx, b.ConnectionID); err != nil {
+	if err := connectionInUse(ctx, tx, b.ConnectionID); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE project_bindings SET active=0 WHERE project_id=$1 AND connection_id=$2`, b.ProjectID, b.ConnectionID); err != nil {
@@ -134,6 +164,27 @@ func connectionExists(ctx context.Context, tx *Tx, id int64) error {
 		return Invalid("unknown connection %d; select a configured harness connection", id)
 	}
 	return nil
+}
+
+// connectionInUse refuses new work on a replaced connection.
+func connectionInUse(ctx context.Context, tx *Tx, id int64) error {
+	if err := connectionExists(ctx, tx, id); err != nil {
+		return err
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT active FROM harness_connections WHERE id=$1`, id).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return ConnectionRetired()
+	}
+	return nil
+}
+
+// ConnectionRetired: the connection's instance was replaced. Its history
+// stays; new work goes to the harness's current connection.
+func ConnectionRetired() error {
+	return &ConflictError{Code: "connection_retired", Msg: "This harness connection was replaced. Its history stays here; start new work on the current connection."}
 }
 func (s *Store) EnsureSession(ctx context.Context, ref SessionRef) (int64, error) {
 	var id int64
@@ -215,9 +266,10 @@ func (s *Store) HoldScheduled(ctx context.Context, id int64, reason string) erro
 	})
 }
 
-func defaultConnection(id int64) int64 {
+// defaultConnection: no connection named means the active T3 connection.
+func (s *Store) defaultConnection(id int64) int64 {
 	if id == 0 {
-		return T3ConnectionID
+		return s.T3ID()
 	}
 	return id
 }

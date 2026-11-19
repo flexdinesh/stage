@@ -11,7 +11,7 @@ func TestExecutionMigrationHoldsLegacyUnknownLaunches(t *testing.T) {
  (2,1,'restart','p','launching',2,0,'interrupted-request'),
  (3,1,'normal','p','backlog',0,0,NULL)`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(901,'note',1,'preserve history','note')`)
-	migrateTo(t, pool, 9)
+	migrateTo(t, pool, 12) // the store reads the latest schema
 	store := NewStore(pool)
 	for _, id := range []int64{1, 2} {
 		task, err := store.GetTask(t.Context(), id)

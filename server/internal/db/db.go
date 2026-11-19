@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -46,6 +47,9 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 // Store is hand-written data access over a SQLite pool.
 type Store struct {
 	pool conn
+	// conns caches harness_connections (a handful of rows). Every Store
+	// write to that table drops it; nil reloads on the next read.
+	conns atomic.Pointer[connectionSnapshot]
 }
 
 func NewStore(pool *sql.DB) *Store { return &Store{pool: conn{pool}} }

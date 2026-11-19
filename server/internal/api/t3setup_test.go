@@ -13,7 +13,6 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -57,7 +56,7 @@ type setupT3 struct {
 func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 	return func(d *api.Deps) {
 		d.Config = cfg
-		a, _ := d.Sync.Adapter(db.T3ConnectionID)
+		a, _ := d.Sync.Adapter(d.Store.T3ID())
 		client := a.(*t3.Adapter).Client
 		d.Setup = t3setup.New(t3setup.Options{
 			Config: cfg, Store: d.Store, Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -201,11 +200,11 @@ func TestT3URLEndpoint(t *testing.T) {
 	// Links follow the new public URL.
 	e.must("GET", "/api/refs/resolve?ref=http://localhost:4000/fake-env/thread-x", nil, 404, nil)
 
-	// The fake is connected with an identity: the server binds to it, so a
-	// different environment is refused.
+	// The fake is paired with an identity: while paired, a different
+	// environment is refused until Disconnect.
 	s.envOther = true
 	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, &eb)
-	if eb.Error != "This stage server is bound to T3 'fake'. Run another stage server for a different T3." {
+	if eb.Error != "This stage server is paired with T3 'fake'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only." {
 		t.Fatalf("409 %q", eb.Error)
 	}
 	s.envOther = false

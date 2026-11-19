@@ -136,7 +136,7 @@ func t3Defaults(config *execution.Config, provider, model *string, options []exe
 }
 
 func (s *server) task(env string, t db.Task) taskJSON {
-	if t.ConnectionID == db.T3ConnectionID && t.ExecutionConfig != nil {
+	if t.Harness == db.HarnessT3 && t.ExecutionConfig != nil {
 		d := t3Defaults(t.ExecutionConfig, t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode)
 		t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
 	}
@@ -144,7 +144,9 @@ func (s *server) task(env string, t db.Task) taskJSON {
 		t.Launch = &a
 	}
 	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
-	if t.ConnectionID == db.T3ConnectionID && t.T3ThreadID != nil {
+	// T3 links are built from the active environment: a task on a replaced
+	// T3 connection gets none.
+	if t.ConnectionID == s.Store.T3ID() && t.T3ThreadID != nil {
 		out.T3WebURL = s.webURL(env, t.T3ThreadID)
 		out.T3DeepLink = deepLink(env, t.T3ThreadID)
 		out.T3AppURL = t.ThreadLink

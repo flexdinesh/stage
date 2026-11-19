@@ -77,18 +77,18 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return notFoundAs(err, fmt.Sprintf("task %d not found", ref.TaskID))
 		}
 		out.TaskID = &t.ID
-		if t.ConnectionID == db.T3ConnectionID {
+		if t.Harness == db.HarnessT3 {
 			out.ThreadID = t.T3ThreadID
 		}
 		out.Session = t.Session
 	case refs.KindSession:
 		id := ref.ConnectionID
 		if id == 0 {
-			id = db.T3ConnectionID
+			id = s.Store.T3ID()
 		}
 		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
 		out.Session = &target
-		if id == db.T3ConnectionID {
+		if s.Store.IsT3(id) {
 			out.ThreadID = &target.ExternalSessionID
 		}
 		owner, err := s.Store.TaskBySession(ctx, target)
@@ -102,7 +102,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		obs, err := s.Store.Observation(ctx, target)
-		if errors.Is(err, db.ErrNotFound) && id == db.T3ConnectionID {
+		if errors.Is(err, db.ErrNotFound) && id == s.Store.T3ID() {
 			th, e := s.Store.GetThread(ctx, target.ExternalSessionID)
 			if e == nil {
 				out.SessionTitle = th.Title

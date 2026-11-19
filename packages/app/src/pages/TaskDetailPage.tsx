@@ -40,7 +40,9 @@ import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../l
 import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
-import { harnessName, canStart, canStop, isActive } from "../lib/tasks.ts";
+import { canStart, canStop, isActive } from "../lib/tasks.ts";
+import { HARNESS_NAME, isRetired, retiredHint, retiredNotice } from "../lib/harnesses.ts";
+import { ReplacedChip } from "../components/HarnessName.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -120,21 +122,24 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
-  const startable = canStart(task);
-  // Blocked on its needs: Start runs it before they are completed (needs kept), so it takes a second click to confirm.
-  const stoppable = canStop(task);
+  // A replaced connection keeps Start / Stop visible but disabled, with the reason.
+  const retired = isRetired(task);
+  const live = { ...task, connectionActive: true };
+  const startable = canStart(live);
+  const stoppable = canStop(live);
+  const lockedHint = retired ? retiredHint(task) : undefined;
   const appUrl = useSessionDestination()(task);
   const phoneBar = appUrl !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) =>
     appUrl === null ? null : (
       <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in {harnessName(task.connectionId)}
+        Open in {HARNESS_NAME[task.harness]}
       </AppButton>
     );
 
   const stopButton = (className?: string) => (
-    <Button busy={stop.isPending} onClick={() => stop.mutate()} className={className}>
+    <Button busy={stop.isPending} disabled={retired} title={lockedHint} onClick={() => stop.mutate()} className={className}>
       Stop
     </Button>
   );
@@ -168,7 +173,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         <NodeChip task={task} />
         {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
         {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
-        <Chip>{task.connectionId===1 ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "OpenCode default"}</Chip>
+        <ReplacedChip task={task} />
+        <Chip>{task.harness === "t3" ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "OpenCode default"}</Chip>
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceChip(task)}</Chip>
@@ -180,9 +186,10 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {waiting ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            {harnessName(task.connectionId)} needs input
+            {HARNESS_NAME[task.harness]} needs input
           </Alert>
         ) : null}
+        {retired ? <Alert tone="plain">{retiredNotice(task)}</Alert> : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <CompletionButton task={task} />
@@ -190,8 +197,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <Button
               variant="primary"
               busy={start.isPending}
+              disabled={retired}
               onClick={() => start.mutate()}
-              {...(task.startAt === null ? {} : { title: "Starts now instead of at the scheduled time" })}
+              {...(lockedHint !== undefined ? { title: lockedHint } : task.startAt === null ? {} : { title: "Starts now instead of at the scheduled time" })}
             >
               {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
             </Button>
@@ -290,7 +298,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
   const destination = useSessionDestination();
-  if (task.connectionId !== 1) {
+  if (task.harness !== "t3") {
     return <Panel title="OpenCode session">{task.session === null ? <Muted>No session attached.</Muted> : <div className="flex flex-wrap items-center gap-2"><code className="break-all text-meta">{task.session.externalSessionId}</code><CopyButton text={task.session.externalSessionId} label="Copy session ID" />{task.links?.service ? <AppButton small href={task.links.service}>Open on service</AppButton> : null}{!destination(task) ? <Link to="/settings" className="underline">Configure browser address</Link> : null}</div>}</Panel>;
   }
   if (task.externalSessionId === null) {
@@ -304,7 +312,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   if (destination(task) !== null) {
     links.push(
       <AppButton key="app" href={destination(task) ?? ""} small>
-        Open in {harnessName(task.connectionId)}
+        Open in {HARNESS_NAME[task.harness]}
       </AppButton>,
     );
   }
@@ -352,8 +360,12 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
   return (
     <Panel title="Config">
       <Details>
-        <Detail label="Harness">{harnessName(task.connectionId)}</Detail>
-        {task.connectionId !== 1 ? <>
+        <Detail label="Harness">
+          {HARNESS_NAME[task.harness]}
+          {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
+          {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
+        </Detail>
+        {task.harness !== "t3" ? <>
           <Detail label="Model">{modelText(task.executionConfig?.model || "Harness default", task.executionConfig?.options ?? [])}</Detail>
           <Detail label="Agent">{task.executionConfig?.mode || "Harness default"}</Detail>
         </> : <>

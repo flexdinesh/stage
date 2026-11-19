@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { useConnections, useInvalidateWork, useProjects } from "../../api/queries.ts";
 import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { harnessName } from "../../lib/tasks.ts";
+import { HARNESS_NAME } from "../../lib/harnesses.ts";
 
 import { SnippetTextarea } from "../SnippetPicker.tsx";
 import { Button, Drawer, ErrorText, Field, Input, Panel, Select } from "../ui.tsx";
@@ -23,7 +23,7 @@ export function AdoptSessionDrawer({
   const projects = useProjects();
   const connections = useConnections();
   const [chosen, setConnection] = useState("");
-  const available = connections.data?.connections.filter((c) => c.configured) ?? [];
+  const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
   const [projectId, setProjectId] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -115,9 +115,9 @@ export function AdoptSessionDrawer({
                 }}
               >
                 <option value="">Choose harness</option>
-                {connections.data?.connections.map((c) => (
+                {connections.data?.connections.filter((c) => c.active).map((c) => (
                   <option key={c.id} value={c.id}>
-                    {harnessName(c.id)}
+                    {HARNESS_NAME[c.harness]}
                   </option>
                 ))}
               </Select>

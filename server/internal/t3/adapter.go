@@ -20,7 +20,12 @@ type Adapter struct {
 	replies      sync.Map
 }
 
+// NewAdapter is the adapter of the original T3 connection (tests).
 func NewAdapter(c Client) *Adapter { return &Adapter{Client: c, ConnectionID: 1} }
+
+// NewConnectionAdapter scopes c to one T3 connection: every session it
+// observes or launches belongs to that connection.
+func NewConnectionAdapter(c Client, id int64) *Adapter { return &Adapter{Client: c, ConnectionID: id} }
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	st := a.Client.Status(ctx)
 	p := a.Client.Probe(ctx)
@@ -236,6 +241,9 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	}
 	o := d.Observation()
 	o.Session = ref
+	if o.Parent != nil {
+		o.Parent.ConnectionID = ref.ConnectionID
+	}
 	o.Links = a.Destinations(ctx, ref)
 	if o.Links.App == "" {
 		o.Links.App = d.Link

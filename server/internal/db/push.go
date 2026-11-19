@@ -142,12 +142,16 @@ SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
 // WatchedThreadIDs: external non-subagent threads the watcher last saw running,
 // needing input or done (re-read until they leave those states; done until
 // observed again, including when work resumes).
-func (s *Store) WatchedThreadIDs(ctx context.Context) ([]string, error) {
+func (s *Store) WatchedThreadIDs(ctx context.Context, connection int64) ([]string, error) {
+	// Scoped to the connection: a replaced T3's threads are never watched
+	// against the T3 that replaced it.
 	rows, err := s.pool.Query(ctx, `
 SELECT th.t3_thread_id FROM threads th
 WHERE (th.observed_state IN ('running', 'needs_input', 'done') OR (`+threadStateSQL+`) IN ('running','needs_input'))
   AND th.relationship IS NOT 'subagent'
-ORDER BY th.created_at`)
+  AND (th.session_id IN (SELECT id FROM session_identities WHERE connection_id=$1)
+    OR (th.session_id IS NULL AND $1=`+activeT3SQL+`))
+ORDER BY th.created_at`, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +176,7 @@ type ThreadObservation struct {
 // ThreadObservations returns an entry for every id.
 func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.connection_id=1 AND tk.t3_thread_id = i.id)
+SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.connection_id=`+activeT3SQL+` AND tk.t3_thread_id = i.id)
 FROM (SELECT value AS id FROM json_each($1)) AS i LEFT JOIN threads th ON th.t3_thread_id = i.id`, jsonArray(ids))
 	if err != nil {
 		return nil, err
