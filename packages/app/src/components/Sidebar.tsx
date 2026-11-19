@@ -4,7 +4,7 @@ import { useProjects, useTasks } from "../api/queries.ts";
 import { EMPTY_LOAD, LIVE_STATES, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
 import { IconChevronDown, IconMore, IconPin } from "./icons.tsx";
 import { useScope } from "./Scope.tsx";
-import { cx } from "./ui.tsx";
+import { activeRowClass, cx } from "./ui.tsx";
 
 /** Views that follow the scope; picking a project anywhere else opens the Dashboard. */
 const SCOPED_PATHS = ["/", "/tasks", "/schedules"];
@@ -23,13 +23,13 @@ export function useScopeAttention(): { need: number; total: number } {
   return { need: load.need, total: load.need + load.waiting };
 }
 
-/** Sidebar nav row style: Ink inset edge and Bench Gray fill when current (`fill` false: the row's parent paints them). */
+/** Sidebar nav row style: the active row box when current (`fill` false: the row's parent paints it). */
 export function navRowClass(active: boolean, touch = false, fill = true): string {
   return cx(
     "flex w-full min-w-0 items-center gap-2.5 px-2.5 text-left text-ui transition-colors duration-150",
     touch ? "min-h-11" : "min-h-8",
     active ? "font-medium text-fg" : "text-muted hover:text-fg",
-    fill && (active ? "bg-panel shadow-[inset_2px_0_var(--accent)]" : "hover:bg-panel"),
+    fill && (active ? activeRowClass : "hover:bg-panel"),
   );
 }
 
@@ -71,7 +71,7 @@ function ProjectItem({
   touch: boolean;
 }) {
   return (
-    <li className={cx("group/project flex items-stretch", selected ? "bg-panel shadow-[inset_2px_0_var(--accent)]" : "hover:bg-panel")}>
+    <li className={cx("group/project flex items-stretch", selected ? activeRowClass : "hover:bg-panel")}>
       <button
         type="button"
         aria-pressed={selected}

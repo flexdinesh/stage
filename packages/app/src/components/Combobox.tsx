@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { MatchRange } from "../lib/projects.ts";
-import { Chip, Kbd, cx, inputClass } from "./ui.tsx";
+import { Chip, Kbd, activeRowClass, cx, inputClass } from "./ui.tsx";
 
 export interface ComboboxOption {
   value: string;
@@ -217,7 +217,7 @@ export function Combobox({
             onClick={() => commit(o)}
             className={cx(
               "flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 px-3 py-2 md:min-h-0 md:py-1.5",
-              i === index && "bg-accent/7 shadow-[inset_2px_0_var(--accent)]",
+              i === index && activeRowClass,
             )}
           >
             <span className="flex min-w-0 items-center gap-2">

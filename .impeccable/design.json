@@ -617,9 +617,9 @@
         "purpose": "Selected stat strip cell, in its tone."
       },
       {
-        "name": "palette-active",
-        "value": "inset 2px 0 var(--accent)",
-        "purpose": "Active row over a 7% ink fill in the palette, project combobox and snippet picker."
+        "name": "active-row",
+        "value": "inset 0 0 0 1px var(--line-strong)",
+        "purpose": "Active row box over a Bench Gray fill: current sidebar row, and the highlighted palette, project combobox and snippet picker result."
       },
       {
         "name": "input-focus",
