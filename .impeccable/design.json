@@ -646,7 +646,7 @@
       {
         "name": "overlay-fade",
         "value": "150ms opacity fade, no movement; none with reduced motion",
-        "purpose": "Toasts and the T3 status details card."
+        "purpose": "Toasts and the harness status details card."
       },
       {
         "name": "pull-settle",
