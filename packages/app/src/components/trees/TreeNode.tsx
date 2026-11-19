@@ -4,11 +4,11 @@ import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { canStart } from "../../lib/tasks.ts";
+import { canStart, statusChips, type StatusChip } from "../../lib/tasks.ts";
 import { dateTime, duration } from "../../lib/format.ts";
-import { inState, nodeState } from "../../lib/trees.ts";
-import { TaskStateBadge } from "../StateBadge.tsx";
-import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
+import { inState } from "../../lib/trees.ts";
+import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
+import { AppButton, Button, Chip, type ChipTone, cx, errorText } from "../ui.tsx";
 import { CompletionButton } from "../Completion.tsx";
 import { HARNESS_NAME, isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
@@ -16,17 +16,31 @@ import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
-/** Ready / blocked for backlog members with readiness, else the task state chip. */
+function chipView(c: StatusChip): { label: string; tone: ChipTone } {
+  switch (c) {
+    case "completed":
+      return { label: "completed", tone: "ok" };
+    case "to_review":
+      return { label: "to review", tone: "done" };
+    case "ready":
+    case "blocked":
+      return { label: c, tone: "idle" };
+    default:
+      return { label: taskStateLabel(c), tone: taskStateTone(c) };
+  }
+}
+
+/** The task's status chips (see `statusChips`). `className` styles an open task's chip (a completed one ignores it). */
 export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness" | "acceptanceId">; className?: string | undefined }) {
-  const s = nodeState(task);
-  if (task.acceptanceId !== null) return <span className="inline-flex flex-wrap gap-1"><Chip tone="ok" dot>completed</Chip>{task.state !== "backlog" ? <TaskStateBadge state={task.state} /> : null}</span>;
-  if (s === "ready" || s === "blocked")
+  const chips = statusChips(task).map((c) => {
+    const { label, tone } = chipView(c);
     return (
-      <Chip tone="idle" dot className={className}>
-        {s}
+      <Chip key={c} tone={tone} dot className={task.acceptanceId === null ? className : undefined}>
+        {label}
       </Chip>
     );
-  return <TaskStateBadge state={s} className={className} />;
+  });
+  return chips.length === 1 ? <>{chips}</> : <span className="inline-flex flex-wrap gap-1">{chips}</span>;
 }
 
 /** Needs that keep a task blocked (not accepted yet), and those among them that failed. */

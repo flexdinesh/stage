@@ -85,13 +85,15 @@ function ProjectCell({ projectId, title }: { projectId: number | null; title: st
   );
 }
 
-/** "settled 3h ago" (exact time on hover), then "ran 35m" when the run span is known. */
+/** "completed 3h ago" (exact time on hover), "via T3 settle" when inferred, then "ran 35m" when the run span is known. */
 function SettledMeta({
   settledAt,
+  via,
   runStartedAt,
   runEndedAt,
 }: {
   settledAt: string;
+  via: string | null;
   runStartedAt: string | null;
   runEndedAt: string | null;
 }) {
@@ -100,6 +102,7 @@ function SettledMeta({
     <>
       <span title={`Completed ${dateTime(settledAt)}`} className="tabular">
         completed {relativeTime(settledAt)}
+        {via === null ? null : ` ${via}`}
       </span>
       {ran === null ? null : (
         <span title={`Ran ${dateTime(runStartedAt)} to ${dateTime(runEndedAt)}`} className="tabular">
@@ -245,10 +248,7 @@ export function TaskRow({
           )}
           <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {task.harness === "t3" ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
           {task.completedAt !== null ? (
-            <>
-              <SettledMeta settledAt={task.completedAt} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
-              {autoMeta === null ? null : <span>{autoMeta}</span>}
-            </>
+            <SettledMeta settledAt={task.completedAt} via={autoMeta} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (
             <span title={dateTime(since)} className="tabular">
               {relativeTime(since)}

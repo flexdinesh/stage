@@ -19,6 +19,24 @@ export const isFullyEditable = (t: Task) => t.state === "backlog" && !t.adopted;
 /** Accepted: satisfies dependents until explicitly reopened. */
 export const isFinal = (t: Task) => t.acceptanceId !== null;
 
+/** One status chip: acceptance ("completed", "to review"), readiness, or an execution state. */
+export type StatusChip = TaskState | "completed" | "to_review" | "ready" | "blocked";
+
+/** Execution states a completed task's chip leaves unsaid: the run it accepted, or no run at all. */
+const QUIET_WHEN_COMPLETED: readonly TaskState[] = ["backlog", "done", "settled"];
+
+/**
+ * A task's status chips, acceptance first. Completed: "completed", plus the execution state only once execution moved
+ * on (running again, needs input, failed...). A finished run not accepted yet reads "to review"; a backlog tree member
+ * reads its readiness.
+ */
+export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId">): StatusChip[] {
+  if (t.acceptanceId !== null) return QUIET_WHEN_COMPLETED.includes(t.state) ? ["completed"] : ["completed", t.state];
+  if (t.state === "done" || t.state === "settled") return ["to_review"];
+  if (t.state === "backlog" && t.readiness !== null) return [t.readiness];
+  return [t.state];
+}
+
 // ---- Session batch (tasks one session created) ----
 
 /** Copy of items with the one at `from` moved by `by` (clamped to the ends). */

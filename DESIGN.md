@@ -232,8 +232,8 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 ### State
 - **Waiting Yellow** (`need`, text `need-fg`): needs input, waiting threads, T3 pairing that waits on the user (unpaired, expired). The marker and border are the bright yellow; text uses the darker `need-fg` because the bright yellow fails as text on white.
 - **Running Sky** (`run`): launching, running, queued, starting threads.
-- **Settle Teal** (`done`): done (run finished) and awaiting settle in T3; T3 threads labelled `completed` read "done".
-- **Settled Green** (`ok`): settled tasks and threads (a settled thread shows "settled" whatever its run status), T3 connected.
+- **Settle Teal** (`done`): a finished run not completed yet, whose task chip reads "to review" (history and notifications, which know only the run, read "run finished"); T3 threads labelled `completed` read "done".
+- **Settled Green** (`ok`): completed tasks and settled threads (a settled thread shows "settled" whatever its run status), T3 connected. A completed task shows one "completed" chip; its execution chip joins only once execution moves on (running again, needs input, failed, interrupted, cancelled).
 - **Fault Red** (`bad`): failed, interrupted, T3 unreachable or rejected, errors, danger buttons.
 - **Idle Gray** (`idle`): backlog, cancelled, idle, rolled back.
 
