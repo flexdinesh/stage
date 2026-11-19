@@ -210,8 +210,9 @@ func modelOptions(effort string, opts map[string]string) []execution.ModelOption
 }
 
 // resolveModel fills provider/model: explicit, provider inferred from the
-// catalog, else (applyDefaults) the pinned or last-used defaults like the
-// web app's new-task form.
+// catalog, else (applyDefaults) the pinned or last-used model and options like
+// the web app's new-task form. Runtime and interaction mode never come from
+// defaults: unset stays the harness default.
 func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, applyDefaults bool, rc *resolvedConfig) error {
 	rc.provider, rc.model = strPtr(a.Provider), strPtr(a.Model)
 	rc.runtimeMode, rc.interactionMode = strPtr(a.RuntimeMode), strPtr(a.InteractionMode)
@@ -255,14 +256,6 @@ func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, applyDefaults bool
 	rc.provider, rc.model = d.ProviderInstanceID, d.Model
 	if rc.options == nil {
 		rc.options = d.ModelOptions
-	}
-	if rc.runtimeMode == nil && d.RuntimeMode != "" {
-		m := d.RuntimeMode
-		rc.runtimeMode = &m
-	}
-	if rc.interactionMode == nil && d.InteractionMode != "" {
-		m := d.InteractionMode
-		rc.interactionMode = &m
 	}
 	return nil
 }

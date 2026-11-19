@@ -397,7 +397,8 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 ### `GET /api/connections/:connectionId/capabilities`
 Stage-owned operation availability/reasons, models/options, permissions,
 interaction modes and workspace kinds. Task/schedule `executionConfig` is
-`{model,options,permission,mode}`; model IDs are opaque catalog keys.
+`{model,options,permission,mode}`; model IDs are opaque catalog keys. A model's
+`permissions: null` (not reported) inherits the top-level `permissions`.
 Legacy T3 request fields remain supported through translation. Create requests
 cannot combine neutral config with legacy model/permission fields.
 
@@ -644,7 +645,7 @@ Reusable prompt text, inserted into prompts, follow-ups and notes by typing `/` 
 
 ## Preferences
 
-New-task model defaults and the global notification filter. A new task prefills from `pinned`, else `lastUsed`, else the built-in default (T3 default model, `full-access`, `default`).
+New-task model defaults and the global notification filter. A new task prefills its model and model options from `pinned`, else `lastUsed`, else the T3 default model. `runtimeMode` / `interactionMode` are stored but never prefilled: a new task's permission and interaction mode start at the harness default.
 
 `ModelDefaults`:
 ```json
@@ -877,7 +878,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.
 - Project: explicit `project` (id or unambiguous exact title) > the caller session's explicitly bound project. Cwd is context only; paths across machines are not verified identity.
-- Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default.
+- Model: explicit (`provider` inferred from `model` via the catalog) > `preferences.pinned` > `preferences.lastUsed` > T3 default. Preferences supply model and options only; `runtimeMode` / `interactionMode` are explicit or unset.
 - `get_task` returns the grouped creator batch, current tree, cached `finalReply`, available links and accepted snapshots.
 - `afterMe` submits the scoped caller as `needsSession`. Owner reuse, adoption, tree placement and the dependent task commit together.
 - Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.

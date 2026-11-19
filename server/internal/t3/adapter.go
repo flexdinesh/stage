@@ -88,9 +88,13 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			if group == "" {
 				group = p.ProviderInstanceID
 			}
-			model := execution.Model{Choice: execution.Choice{ID: ModelKey(p.ProviderInstanceID, m.ID), Label: label, Availability: av}, Group: group, Options: []execution.Option{}, Permissions: []execution.Choice{}}
+			model := execution.Model{Choice: execution.Choice{ID: ModelKey(p.ProviderInstanceID, m.ID), Label: label, Availability: av}, Group: group, Options: []execution.Option{}}
 			for _, o := range m.Options {
 				model.Options = append(model.Options, execution.Option{ID: o.ID, Values: o.Values, Default: o.Default})
+			}
+			// Unreported runtime modes leave Permissions nil: the model inherits the harness list.
+			if p.RuntimeModes != nil {
+				model.Permissions = []execution.Choice{}
 			}
 			for _, mode := range p.RuntimeModes {
 				model.Permissions = append(model.Permissions, execution.Choice{ID: string(mode), Label: string(mode), Availability: av})
@@ -123,7 +127,7 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 		if !m.Available {
 			return &execution.Rejected{Reason: m.Reason}
 		}
-		if in.Config.Permission != "" && !slices.ContainsFunc(m.Permissions, func(p execution.Choice) bool { return p.ID == in.Config.Permission && p.Available }) {
+		if in.Config.Permission != "" && !slices.ContainsFunc(c.PermissionsFor(m), func(p execution.Choice) bool { return p.ID == in.Config.Permission && p.Available }) {
 			return &execution.Rejected{Reason: "Selected permission mode is unavailable for this model. Choose a supported mode."}
 		}
 		for _, opt := range in.Config.Options {

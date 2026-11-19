@@ -296,7 +296,9 @@ function TaskFormDrawer({
   };
   const originalConfig = existing?.executionConfig ?? (!existing && connection === 1 ? prefill?.defaults.executionConfig : undefined);
   const hasLegacyConfig = existing ? existing.connectionId === 1 : connection === 1 && prefill !== null;
-  const initialConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : hasLegacyConfig ? legacy : harnessDefaults;
+  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : hasLegacyConfig ? legacy : harnessDefaults;
+  // New-task prefill carries model and options only; mode and permission start at the harness default.
+  const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
   const effectiveConfig = draftConfig ?? initialConfig;
   const issues = incompatibleSettings(effectiveConfig, caps.data);
   const changedHarness = existing !== undefined && connection !== existing.connectionId;

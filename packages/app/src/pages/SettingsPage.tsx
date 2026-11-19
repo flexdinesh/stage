@@ -3,8 +3,6 @@ import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, usePreferences, useT3Status } from "../api/queries.ts";
 import {
-  INTERACTION_MODES,
-  type InteractionMode,
   type ModelDefaults,
   type NotificationEvent,
   type Preferences,
@@ -107,8 +105,6 @@ function SyncCard() {
   );
 }
 
-const INTERACTION_OPTIONS = INTERACTION_MODES.map((m) => ({ value: m, label: m }));
-
 const FALLBACK: ModelDefaults = {
   providerInstanceId: null,
   model: null,
@@ -139,7 +135,6 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
     modelOptions: start.modelOptions,
     runtimeMode: start.runtimeMode,
   });
-  const [mode, setMode] = useState<InteractionMode>(start.interactionMode);
   const save = useMutation({
     mutationFn: (d: ModelDefaults | null) => api.setPinned(d),
     onSuccess: (p) => qc.setQueryData(keys.preferences, p),
@@ -152,18 +147,14 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
       : "New T3 tasks reuse the last T3 selection, including harness defaults. Pin the values shown below to use them explicitly.";
   return (
     <div className="flex flex-col gap-3">
-      <Muted>{note}</Muted>
+      <Muted>{note} Interaction mode and permission start at harness default.</Muted>
       <ModelFields value={config} onChange={setConfig} />
-      <div className="flex flex-col items-start gap-1.5">
-        <span className="label-caps">Mode</span>
-        <Segmented label="Interaction mode" options={INTERACTION_OPTIONS} value={mode} onChange={setMode} />
-      </div>
       <div className="flex flex-wrap gap-2">
         <Button
           variant="primary"
           busy={save.isPending && save.variables !== null}
           disabled={save.isPending}
-          onClick={() => save.mutate({ ...config, interactionMode: mode })}
+          onClick={() => save.mutate({ ...config, interactionMode: start.interactionMode })}
         >
           {pinned ? "Save pinned default" : "Pin as default"}
         </Button>

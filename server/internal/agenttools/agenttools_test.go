@@ -261,6 +261,25 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 }
 
+func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
+	e := newEnv(t)
+	e.project("/w/defaults")
+	provider, model := "claude", "claude-haiku-5-5"
+	if _, err := e.store.SetPinned(t.Context(), &db.ModelDefaults{ProviderInstanceID: &provider, Model: &model, RuntimeMode: "approval-required", InteractionMode: "plan"}); err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/defaults"}})
+	var tk client.Task
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "d", "prompt": "x"}, &tk)
+	if tk.Model == nil || *tk.Model != model || tk.InteractionMode == "plan" || tk.RuntimeMode == "approval-required" {
+		t.Fatalf("pinned modes leaked: model %v runtime %q interaction %q", tk.Model, tk.RuntimeMode, tk.InteractionMode)
+	}
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "interactionMode": "plan", "runtimeMode": "auto"}, &tk)
+	if tk.InteractionMode != "plan" || tk.RuntimeMode != "auto" {
+		t.Fatalf("explicit modes dropped: runtime %q interaction %q", tk.RuntimeMode, tk.InteractionMode)
+	}
+}
+
 func TestLifecycleWaitTools(t *testing.T) {
 	e := newEnv(t)
 	e.project("/w/life")

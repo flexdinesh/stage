@@ -110,3 +110,43 @@ func TestAdapterLinkKeepsOpaqueSessionIdentity(t *testing.T) {
 		t.Fatal("foreign environment accepted")
 	}
 }
+
+func TestUnreportedRuntimeModesInheritHarnessPermissions(t *testing.T) {
+	fake := NewFake()
+	fake.Catalog.Providers[0].RuntimeModes = nil
+	adapter := NewAdapter(fake)
+	caps, err := adapter.Features(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := caps.Models[0]
+	if m.Permissions != nil {
+		t.Fatalf("unreported runtime modes reported as %+v", m.Permissions)
+	}
+	if got := caps.PermissionsFor(m); len(got) != 4 || got[3].ID != "full-access" {
+		t.Fatalf("inherited permissions = %+v", got)
+	}
+	intent := func(permission string) execution.Intent {
+		return execution.Intent{Config: execution.Config{Model: m.ID, Permission: permission}, Workspace: execution.Workspace{Kind: "root"}}
+	}
+	if err := adapter.validate(t.Context(), intent("full-access")); err != nil {
+		t.Fatal("harness permission rejected:", err)
+	}
+	if err := caps.ValidateConfig(intent("full-access").Config); err != nil {
+		t.Fatal("ValidateConfig rejected harness permission:", err)
+	}
+	if adapter.validate(t.Context(), intent("bogus")) == nil || caps.ValidateConfig(intent("bogus").Config) == nil {
+		t.Fatal("unknown permission accepted")
+	}
+	fake.Catalog.Providers[0].RuntimeModes = []RuntimeMode{RuntimeAuto}
+	caps, err = adapter.Features(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := caps.PermissionsFor(caps.Models[0]); len(got) != 1 || got[0].ID != "auto" {
+		t.Fatalf("reported runtime modes = %+v", got)
+	}
+	if adapter.validate(t.Context(), intent("full-access")) == nil {
+		t.Fatal("permission outside reported modes accepted")
+	}
+}
