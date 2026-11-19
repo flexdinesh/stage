@@ -97,10 +97,13 @@ These contract tests use isolated harnesses. The OpenCode live suite is describe
 ## OpenCode V2 adapter
 
 Stage connects to an existing
-service using its URL and optional HTTP Basic credentials. The tested release is
-OpenCode 2.3.0. Stage checks the reported version, required V2 operations and worktree
-request schema. The server does not advertise a binary digest. Repeat the live suite
-before adding another supported release.
+service using its URL and optional HTTP Basic credentials. It accepts OpenCode V2
+(tested with 2.3.0); any version whose API has the operations Stage uses. Stage does
+not pin the reported version: it checks the required V2 operations and worktree, session
+and prompt request schemas in `/openapi.json`, and refuses to connect when one is missing
+(the error names the version and the operation). Version-specific handling, when a
+release needs it, branches on the reported version. The server does not advertise a
+binary digest. Repeat the live suite when a release changes behavior Stage relies on.
 
 OpenCode owns project inventory, workspace strategy, model selection and agent policy.
 An empty selection uses its defaults. A bound directory provides the model catalog,
