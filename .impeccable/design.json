@@ -838,7 +838,7 @@
       "Do place the `//` meta line directly below the H1 in 12px mono Slate with a bold Ink Text `//`.",
       "Do head every panel with the 32px Bench Gray bar and an uppercase 11px mono label at 0.12em.",
       "Do set titles, actions and prose in Geist; set metadata, labels, chips, counts and keycaps in JetBrains Mono with tabular numerals.",
-      "Do draw icons as authored 16px SVGs: 1.5 stroke, square caps, miter joins, currentColor.",
+      "Do take icons from Lucide through icons.tsx: square caps, miter joins, constant 1.33px stroke, currentColor.",
       "Do open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.",
       "Do keep motion to 150ms color, opacity and border transitions on state change.",
       "Do give needs-input rows (and still-waiting needs-input toasts and inbox rows) the 2px Waiting Yellow left edge and a primary Open in app; it is the only colored row edge."

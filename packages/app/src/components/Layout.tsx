@@ -14,14 +14,14 @@ import {
   IconCheck,
   IconChevronDown,
   IconClose,
+  IconDashboard,
   IconMoon,
-  IconClock,
   IconMore,
   IconPlus,
   IconSearch,
   IconSettings,
+  IconSchedules,
   IconSnippets,
-  IconStage,
   IconSun,
   IconTasks,
   IconThemeSystem,
@@ -38,9 +38,9 @@ import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx, type ChipTone } 
 const TAB_ICON = 22;
 
 const TABS = [
-  { to: "/", label: "Dashboard", icon: <IconStage size={TAB_ICON} /> },
+  { to: "/", label: "Dashboard", icon: <IconDashboard size={TAB_ICON} /> },
   { to: "/tasks", label: "Tasks", icon: <IconTasks size={TAB_ICON} /> },
-  { to: "/schedules", label: "Schedules", icon: <IconClock size={TAB_ICON} /> },
+  { to: "/schedules", label: "Schedules", icon: <IconSchedules size={TAB_ICON} /> },
 ] as const;
 
 /** Phone More drawer: the sidebar destinations the bottom tabs leave out. */
@@ -268,9 +268,9 @@ function Shell() {
           </Button>
         </div>
         <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
-          <SideLink to="/" icon={<IconStage />} label="Dashboard" count={<AttentionCount need={attention.need} total={attention.total} />} />
+          <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<AttentionCount need={attention.need} total={attention.total} />} />
           <SideLink to="/tasks" icon={<IconTasks />} label="Tasks" />
-          <SideLink to="/schedules" icon={<IconClock size={16} />} label="Schedules" />
+          <SideLink to="/schedules" icon={<IconSchedules />} label="Schedules" />
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-3">
           <ProjectNav />

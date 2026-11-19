@@ -1,195 +1,82 @@
-import type { ReactNode } from "react";
-
-/** Authored 16px line icons: 1.5 stroke, square caps, miter joins (matches the sharp grid). */
-function Svg({ children, size = 16, label }: { children: ReactNode; size?: number; label?: string }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      role={label === undefined ? undefined : "img"}
-      aria-hidden={label === undefined ? true : undefined}
-      aria-label={label}
-      className="shrink-0"
-    >
-      {children}
-    </svg>
-  );
-}
+import {
+  ArrowRightIcon,
+  BellIcon,
+  CalendarClockIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronUpIcon,
+  ClockIcon,
+  EllipsisIcon,
+  FileCodeIcon,
+  ImageIcon,
+  InboxIcon,
+  LinkIcon,
+  ListChecksIcon,
+  MonitorIcon,
+  MoonIcon,
+  NetworkIcon,
+  PinIcon,
+  PlusIcon,
+  RepeatIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  SunIcon,
+  XIcon,
+  type LucideIcon,
+} from "lucide-react";
 
 type IconProps = { size?: number; label?: string };
 
-export const IconStage = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z" />
-  </Svg>
-);
+/**
+ * Lucide, sharpened: square caps, miter joins and a constant 1.33px stroke at every size,
+ * so the line weight matches the sharp grid. Unlabelled icons are decorative.
+ */
+function sharp(Glyph: LucideIcon, defaultSize = 16) {
+  return function Icon({ size = defaultSize, label }: IconProps) {
+    return (
+      <Glyph
+        size={size}
+        strokeWidth={1.33}
+        absoluteStrokeWidth
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+        role={label === undefined ? undefined : "img"}
+        aria-hidden={label === undefined ? true : undefined}
+        aria-label={label}
+        className="shrink-0"
+      />
+    );
+  };
+}
 
-export const IconProjects = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2 3.5h4.5l1.5 1.5h6v7.5H2z" />
-  </Svg>
-);
-
-export const IconSnippets = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M3.5 2h9v12h-9zM6 5.5h4M6 8h4M6 10.5h2.5" />
-  </Svg>
-);
-
-export const IconHistory = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M8 2.5a5.5 5.5 0 1 1-5.2 3.7M2.5 2.5v3.5H6M8 5v3.2l2.2 1.3" />
-  </Svg>
-);
-
-export const IconMore = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M3 7.5h1.5v1.5H3zM7.25 7.5h1.5v1.5h-1.5zM11.5 7.5H13v1.5h-1.5z" />
-  </Svg>
-);
-
-export const IconSearch = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M7 2.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM10.5 10.5l3 3" />
-  </Svg>
-);
-
-export const IconPlus = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M8 3v10M3 8h10" />
-  </Svg>
-);
-
-export const IconExternal = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M6 3H3v10h10v-3M9 3h4v4M13 3L7.5 8.5" />
-  </Svg>
-);
-
-export const IconCheck = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M3 8.5l3.5 3.5L13 4.5" />
-  </Svg>
-);
-
-export const IconClose = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
-  </Svg>
-);
-
-export const IconBack = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M10 3L5 8l5 5" />
-  </Svg>
-);
-
-export const IconArrowRight = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2.5 8h10M9 4.5L12.5 8 9 11.5" />
-  </Svg>
-);
-
-export const IconChevronDown = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M4 6l4 4 4-4" />
-  </Svg>
-);
-
-export const IconChevronUp = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M4 10l4-4 4 4" />
-  </Svg>
-);
-
+/** Dashboard: an inbox tray, the work waiting on you. */
+export const IconDashboard = sharp(InboxIcon);
+export const IconTasks = sharp(ListChecksIcon);
+/** Schedules view: a calendar with a clock. */
+export const IconSchedules = sharp(CalendarClockIcon);
+export const IconSnippets = sharp(FileCodeIcon);
+export const IconSettings = sharp(SlidersHorizontalIcon);
+export const IconMore = sharp(EllipsisIcon);
+export const IconSearch = sharp(SearchIcon);
+export const IconPlus = sharp(PlusIcon);
+export const IconCheck = sharp(CheckIcon);
+export const IconClose = sharp(XIcon);
+export const IconBack = sharp(ChevronLeftIcon);
+export const IconArrowRight = sharp(ArrowRightIcon);
+export const IconChevronDown = sharp(ChevronDownIcon);
+export const IconChevronUp = sharp(ChevronUpIcon);
 /** Theme: monitor (system), sun (light), moon (dark). */
-export const IconThemeSystem = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2 3h12v8H2zM8 11v2.5M5 13.5h6" />
-  </Svg>
-);
-
-export const IconSun = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M5.5 5.5h5v5h-5zM8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1" />
-  </Svg>
-);
-
-export const IconMoon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z" />
-  </Svg>
-);
-
-export const IconSync = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M13 6a5 5 0 0 0-9.2-1.5M3 10a5 5 0 0 0 9.2 1.5M3 2v3h3M13 14v-3h-3" />
-  </Svg>
-);
-
-export const IconChainLink = (p: IconProps) => (
-  <Svg {...p} size={p.size ?? 12}>
-    <path d="M6.5 9.5l3-3M5 7.5L3.5 9a2.1 2.1 0 0 0 3 3L8 10.5M11 8.5L12.5 7a2.1 2.1 0 0 0-3-3L8 5.5" />
-  </Svg>
-);
-
-export const IconImage = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2.5 2.5h11v11h-11zM2.5 11l3.5-3.5 3 3 1.5-1.5 3 3" />
-    <path d="M10 5.5h1v1h-1z" />
-  </Svg>
-);
-
-export const IconBell = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M4.5 11.5V6.5a3.5 3.5 0 0 1 7 0v5M2.5 11.5h11M6.5 14h3" />
-  </Svg>
-);
-
-/** One-shot start time: square clock face (sharp grid), hands at 8:00 → 12. */
-export const IconClock = (p: IconProps) => (
-  <Svg {...p} size={p.size ?? 12}>
-    <path d="M2.5 2.5h11v11h-11zM8 5v3.5h2.5" />
-  </Svg>
-);
-
-/** Recurring schedule: two square-cornered return arrows. */
-export const IconRepeat = (p: IconProps) => (
-  <Svg {...p} size={p.size ?? 12}>
-    <path d="M2.5 7.5V4.5h10M10.5 2.5l2 2-2 2M13.5 8.5v3h-10M5.5 13.5l-2-2 2-2" />
-  </Svg>
-);
-
-/** Task tree: a need over two dependents, joined by an orthogonal connector (as the tree view draws them). */
-export const IconTree = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M5.5 2h5v3.5h-5zM1.5 10.5h5V14h-5zM9.5 10.5h5V14h-5zM8 5.5V8M4 10.5V8h8v2.5" />
-  </Svg>
-);
-
-/** Task list: square bullets beside three rules. */
-export const IconTasks = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M6.5 4h7M6.5 8h7M6.5 12h7M2.5 3.25h1.5v1.5H2.5zM2.5 7.25h1.5v1.5H2.5zM2.5 11.25h1.5v1.5H2.5z" />
-  </Svg>
-);
-
-/** Pin: a square head over a needle. */
-export const IconPin = (p: IconProps) => (
-  <Svg {...p} size={p.size ?? 12}>
-    <path d="M5 2.5h6M6 2.5v4.5L4 9.5h8L10 7V2.5M8 9.5V14" />
-  </Svg>
-);
-
-/** Settings: two sliders with square knobs. */
-export const IconSettings = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M2 5h12M2 11h12M4.5 3.5h2.5v3H4.5zM9 9.5h2.5v3H9z" />
-  </Svg>
-);
+export const IconThemeSystem = sharp(MonitorIcon);
+export const IconSun = sharp(SunIcon);
+export const IconMoon = sharp(MoonIcon);
+export const IconChainLink = sharp(LinkIcon, 12);
+export const IconImage = sharp(ImageIcon);
+export const IconBell = sharp(BellIcon);
+/** One-shot start time ("at 02:00"). */
+export const IconClock = sharp(ClockIcon, 12);
+/** Recurring schedule. */
+export const IconRepeat = sharp(RepeatIcon, 12);
+/** Task tree: a need over its dependents. */
+export const IconTree = sharp(NetworkIcon);
+export const IconPin = sharp(PinIcon, 12);
