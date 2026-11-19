@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-10T18:19:21+11:00",
+  "generatedAt": "2026-11-20T10:58:56+11:00",
   "title": "Design System: stage",
   "extensions": {
     "colorMeta": {
@@ -331,14 +331,14 @@
         "role": "neutral",
         "displayName": "Slate (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.011 267.8)",
-          "oklch(26.4% 0.015 267.8)",
-          "oklch(37.9% 0.020 267.8)",
-          "oklch(49.3% 0.024 267.8)",
-          "oklch(60.7% 0.024 267.8)",
-          "oklch(72.1% 0.020 267.8)",
-          "oklch(83.6% 0.015 267.8)",
-          "oklch(95.0% 0.011 267.8)"
+          "oklch(15.0% 0.010 265.7)",
+          "oklch(26.4% 0.014 265.7)",
+          "oklch(37.9% 0.017 265.7)",
+          "oklch(49.3% 0.021 265.7)",
+          "oklch(60.7% 0.021 265.7)",
+          "oklch(72.1% 0.017 265.7)",
+          "oklch(83.6% 0.014 265.7)",
+          "oklch(95.0% 0.010 265.7)"
         ],
         "cssVar": "--muted",
         "theme": "dark"
@@ -347,14 +347,14 @@
         "role": "neutral",
         "displayName": "Paper (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.005 268.0)",
-          "oklch(26.4% 0.006 268.0)",
-          "oklch(37.9% 0.008 268.0)",
-          "oklch(49.3% 0.010 268.0)",
-          "oklch(60.7% 0.010 268.0)",
-          "oklch(72.1% 0.008 268.0)",
-          "oklch(83.6% 0.006 268.0)",
-          "oklch(95.0% 0.005 268.0)"
+          "oklch(15.0% 0.005 264.3)",
+          "oklch(26.4% 0.007 264.3)",
+          "oklch(37.9% 0.009 264.3)",
+          "oklch(49.3% 0.011 264.3)",
+          "oklch(60.7% 0.011 264.3)",
+          "oklch(72.1% 0.009 264.3)",
+          "oklch(83.6% 0.007 264.3)",
+          "oklch(95.0% 0.005 264.3)"
         ],
         "cssVar": "--bg",
         "theme": "dark"
@@ -363,14 +363,14 @@
         "role": "neutral",
         "displayName": "Paper Surface (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.005 264.2)",
-          "oklch(26.4% 0.008 264.2)",
-          "oklch(37.9% 0.010 264.2)",
-          "oklch(49.3% 0.012 264.2)",
-          "oklch(60.7% 0.012 264.2)",
-          "oklch(72.1% 0.010 264.2)",
-          "oklch(83.6% 0.008 264.2)",
-          "oklch(95.0% 0.005 264.2)"
+          "oklch(15.0% 0.006 267.0)",
+          "oklch(26.4% 0.008 267.0)",
+          "oklch(37.9% 0.010 267.0)",
+          "oklch(49.3% 0.013 267.0)",
+          "oklch(60.7% 0.013 267.0)",
+          "oklch(72.1% 0.010 267.0)",
+          "oklch(83.6% 0.008 267.0)",
+          "oklch(95.0% 0.006 267.0)"
         ],
         "cssVar": "--surface",
         "theme": "dark"
@@ -379,14 +379,14 @@
         "role": "neutral",
         "displayName": "Bench Gray (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.007 264.1)",
-          "oklch(26.4% 0.010 264.1)",
-          "oklch(37.9% 0.013 264.1)",
-          "oklch(49.3% 0.016 264.1)",
-          "oklch(60.7% 0.016 264.1)",
-          "oklch(72.1% 0.013 264.1)",
-          "oklch(83.6% 0.010 264.1)",
-          "oklch(95.0% 0.007 264.1)"
+          "oklch(15.0% 0.006 269.1)",
+          "oklch(26.4% 0.009 269.1)",
+          "oklch(37.9% 0.012 269.1)",
+          "oklch(49.3% 0.014 269.1)",
+          "oklch(60.7% 0.014 269.1)",
+          "oklch(72.1% 0.012 269.1)",
+          "oklch(83.6% 0.009 269.1)",
+          "oklch(95.0% 0.006 269.1)"
         ],
         "cssVar": "--panel",
         "theme": "dark"
@@ -395,14 +395,14 @@
         "role": "neutral",
         "displayName": "Hairline (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.006 264.5)",
-          "oklch(26.4% 0.008 264.5)",
-          "oklch(37.9% 0.011 264.5)",
-          "oklch(49.3% 0.013 264.5)",
-          "oklch(60.7% 0.013 264.5)",
-          "oklch(72.1% 0.011 264.5)",
-          "oklch(83.6% 0.008 264.5)",
-          "oklch(95.0% 0.006 264.5)"
+          "oklch(15.0% 0.006 258.3)",
+          "oklch(26.4% 0.008 258.3)",
+          "oklch(37.9% 0.010 258.3)",
+          "oklch(49.3% 0.013 258.3)",
+          "oklch(60.7% 0.013 258.3)",
+          "oklch(72.1% 0.010 258.3)",
+          "oklch(83.6% 0.008 258.3)",
+          "oklch(95.0% 0.006 258.3)"
         ],
         "canonical": "rgba(220, 226, 235, 0.11)",
         "cssVar": "--line",
@@ -412,14 +412,14 @@
         "role": "neutral",
         "displayName": "Strong Hairline (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.006 264.5)",
-          "oklch(26.4% 0.008 264.5)",
-          "oklch(37.9% 0.011 264.5)",
-          "oklch(49.3% 0.013 264.5)",
-          "oklch(60.7% 0.013 264.5)",
-          "oklch(72.1% 0.011 264.5)",
-          "oklch(83.6% 0.008 264.5)",
-          "oklch(95.0% 0.006 264.5)"
+          "oklch(15.0% 0.006 258.3)",
+          "oklch(26.4% 0.008 258.3)",
+          "oklch(37.9% 0.010 258.3)",
+          "oklch(49.3% 0.013 258.3)",
+          "oklch(60.7% 0.013 258.3)",
+          "oklch(72.1% 0.010 258.3)",
+          "oklch(83.6% 0.008 258.3)",
+          "oklch(95.0% 0.006 258.3)"
         ],
         "canonical": "rgba(220, 226, 235, 0.22)",
         "cssVar": "--line-strong",
@@ -542,14 +542,14 @@
         "role": "tertiary",
         "displayName": "Idle Gray (dark)",
         "tonalRamp": [
-          "oklch(15.0% 0.011 267.8)",
-          "oklch(26.4% 0.015 267.8)",
-          "oklch(37.9% 0.020 267.8)",
-          "oklch(49.3% 0.024 267.8)",
-          "oklch(60.7% 0.024 267.8)",
-          "oklch(72.1% 0.020 267.8)",
-          "oklch(83.6% 0.015 267.8)",
-          "oklch(95.0% 0.011 267.8)"
+          "oklch(15.0% 0.010 265.7)",
+          "oklch(26.4% 0.014 265.7)",
+          "oklch(37.9% 0.017 265.7)",
+          "oklch(49.3% 0.021 265.7)",
+          "oklch(60.7% 0.021 265.7)",
+          "oklch(72.1% 0.017 265.7)",
+          "oklch(83.6% 0.014 265.7)",
+          "oklch(95.0% 0.010 265.7)"
         ],
         "cssVar": "--idle",
         "theme": "dark"
@@ -574,7 +574,7 @@
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Base text; steps up to 15.5px below 768px."
+        "purpose": "Base text; steps up to 15.5px below 768px. Sidebar view rows use the 14px UI size (`--fs-ui`)."
       },
       "body-sm": {
         "displayName": "Body Small",
@@ -594,15 +594,15 @@
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase mono panel headers (Ink Text), field and section labels (Slate)."
+        "purpose": "Uppercase mono panel headers (Ink Text), field labels and section labels, sidebar Pinned / Projects included (Slate)."
       },
       "meta": {
         "displayName": "Meta",
-        "purpose": "Row metadata, chips, hints, timestamps, task numbers."
+        "purpose": "Row metadata, chips, hints, timestamps, task numbers; 11.5px (`--fs-meta-sm`) for small counts, panel meta and the sidebar marks' counts."
       },
       "meta-line": {
         "displayName": "Meta Line",
-        "purpose": "Detail values and the // context line below the H1."
+        "purpose": "Detail values, sidebar project titles and the // context line below the H1."
       }
     },
     "shadows": [
@@ -619,7 +619,7 @@
       {
         "name": "active-row",
         "value": "inset 0 0 0 1px var(--line-strong)",
-        "purpose": "Active row box over a Bench Gray fill: current sidebar row, and the highlighted palette, project combobox and snippet picker result."
+        "purpose": "Active row box over a Bench Gray fill: the current sidebar row (views and the selected project; no side bar), and the highlighted palette, project combobox and snippet picker result. Inset, so rows never shift."
       },
       {
         "name": "input-focus",
@@ -640,8 +640,8 @@
     "motion": [
       {
         "name": "state-transition",
-        "value": "150ms (browser default ease) on background-color, opacity, color, border-color, box-shadow",
-        "purpose": "Hover and state changes only."
+        "value": "150ms (browser default ease) on background-color, opacity, color, border-color, box-shadow, fill",
+        "purpose": "Hover and state changes only, including the brand mark's top step turning Waiting Yellow (none with reduced motion)."
       },
       {
         "name": "overlay-fade",
@@ -667,6 +667,16 @@
         "name": "busy-spin",
         "value": "12px square border spinner, 1.5px, top edge transparent; still with reduced motion",
         "purpose": "Busy buttons and the reloading indicator."
+      },
+      {
+        "name": "fold-rotate",
+        "value": "150ms transform, chevron rotated -90deg when collapsed",
+        "purpose": "Group header folding and the sidebar's quiet projects disclosure."
+      },
+      {
+        "name": "pin-reveal",
+        "value": "150ms opacity and color",
+        "purpose": "Sidebar pin slot revealed on row hover or focus; always shown when pinned and on touch."
       }
     ],
     "breakpoints": [
@@ -676,11 +686,18 @@
       },
       {
         "name": "md",
-        "value": "768px"
+        "value": "768px",
+        "purpose": "Phone below: 40px controls, type roles step up about 1px, drawers become full-screen sheets."
       },
       {
         "name": "lg",
-        "value": "1024px"
+        "value": "1024px",
+        "purpose": "Sidebar from here (248px); below it the 52px top bar and 56px bottom tabs; detail pages split into main and side columns."
+      },
+      {
+        "name": "xl",
+        "value": "1280px",
+        "purpose": "Stat strip shows its \"click a count to filter\" hint."
       }
     ],
     "themes": {
@@ -692,88 +709,90 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Ink-filled action; one per region (New task, Start/Restart, Open in app on needs input, drawer submit).",
-      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M8 3v10M3 8h10\"/></svg>New task</button>",
+      "description": "Ink-filled action, one per region: New task, Start/Restart, Complete on a review row, Open in T3 when the task needs input, drawer submit. Hover drops to 85% opacity.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.28\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg>New task</button>",
       "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .ds-btn-primary:hover { opacity: 0.85; } .ds-btn-primary:active { opacity: 0.75; }"
     },
     {
       "name": "Secondary Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Default button: paper fill, strong hairline outline; Bench Gray on hover.",
-      "html": "<button class=\"ds-btn ds-btn-secondary\">Open in app</button>",
+      "description": "The default button: Paper fill, Strong Hairline outline, Ink Text; Bench Gray on hover.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Review</button><button class=\"ds-btn ds-btn-secondary\">Open in T3</button>",
       "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-secondary { background: var(--surface); border-color: var(--line-strong); color: var(--fg); } .ds-btn-secondary:hover { background: var(--panel); }"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "Borderless slate action for close buttons and panel-header actions.",
-      "html": "<button class=\"ds-btn ds-btn-ghost\" aria-label=\"Close\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3.5 3.5l9 9M12.5 3.5l-9 9\"/></svg></button><button class=\"ds-btn ds-btn-ghost\">Expand all</button>",
+      "description": "Transparent-border Slate action for close buttons and panel-header actions; Bench Gray fill and Ink Text on hover.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\" aria-label=\"Close\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/></svg></button><button class=\"ds-btn ds-btn-ghost\">Expand all</button>",
       "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 150ms, opacity 150ms, color 150ms; } .ds-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; pointer-events: none; cursor: not-allowed; } @media (max-width: 767px) { .ds-btn { height: 40px; padding: 0 14px; } } .ds-btn-ghost { background: transparent; border-color: transparent; color: var(--muted); } .ds-btn-ghost:hover { background: var(--panel); color: var(--fg); }"
     },
     {
       "name": "Text Field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Square 32px field (40px phone) with uppercase mono label; focus turns border and 1px ring ink.",
+      "description": "Square 32px field (40px phone, 16px text so iOS never zooms) under an uppercase mono Slate label; focus turns the border and a 1px ring Ink.",
       "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Title</span><input class=\"ds-input\" placeholder=\"Fix flaky chain test\" /></label>",
       "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field-label { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); } .ds-input { height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--surface); color: var(--fg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-input, 14px); transition: border-color 150ms, box-shadow 150ms; } .ds-input::placeholder { color: var(--muted); } .ds-input:focus, .ds-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); } .ds-input:disabled { opacity: 0.55; cursor: not-allowed; } @media (max-width: 767px) { .ds-input { height: 40px; font-size: 16px; } }"
     },
     {
       "name": "Checkbox",
       "kind": "input",
-      "description": "16px square native checkbox: Strong Hairline on Paper, Ink fill with authored On-Accent check; shown in the Settings notification events ruled list.",
-      "html": "<ul class=\"ds-check-list\"><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-need\"></span><span class=\"ds-check-label\">Needs input</span><span class=\"ds-check-hint\">waits on you</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-bad\"></span><span class=\"ds-check-label\">Failed</span><span class=\"ds-check-hint\">run failed</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" /><svg width=\"12\" height=\"12\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M3 8.5l3.5 3.5L13 4.5\"/></svg></span><span class=\"ds-sq ds-tone-done\"></span><span class=\"ds-check-label\">Done</span><span class=\"ds-check-hint\">run finished</span></label></li></ul>",
-      "css": ".ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-check-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); } .ds-check-list li { border-bottom: 1px solid var(--line); } .ds-check-list li:last-child { border-bottom: 0; } .ds-check-row { display: flex; align-items: center; gap: 12px; min-height: 32px; cursor: pointer; transition: background-color 150ms; } .ds-check-row:hover { background: var(--panel); } .ds-check { position: relative; display: inline-flex; width: 16px; height: 16px; flex-shrink: 0; } .ds-check input { appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--surface); cursor: pointer; transition: background-color 150ms, border-color 150ms, box-shadow 150ms; } .ds-check input:checked { background: var(--accent); border-color: var(--accent); } .ds-check input:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--surface), 0 0 0 2px var(--accent); } .ds-check input:disabled { opacity: 0.55; cursor: not-allowed; } .ds-check svg { position: absolute; inset: 2px; display: none; color: var(--on-accent); pointer-events: none; } .ds-check input:checked + svg { display: block; } .ds-sq { width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-check-label { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); color: var(--fg); } .ds-check-hint { margin-left: auto; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); } @media (max-width: 767px) { .ds-check-row { min-height: 44px; } }"
+      "refersTo": null,
+      "description": "16px square native checkbox: Strong Hairline on Paper, Ink fill with the Lucide check in On-Accent; the whole row is the label (32px laptop, 44px phone, Bench Gray hover), as in the Settings notification events ruled list.",
+      "html": "<ul class=\"ds-check-list\"><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-sq ds-tone-need\"></span><span class=\"ds-check-label\">Needs input</span><span class=\"ds-check-hint\">waits on you</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" checked /><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-sq ds-tone-bad\"></span><span class=\"ds-check-label\">Failed</span><span class=\"ds-check-hint\">run failed</span></label></li><li><label class=\"ds-check-row\"><span class=\"ds-check\"><input type=\"checkbox\" /><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-sq ds-tone-done\"></span><span class=\"ds-check-label\">Done</span><span class=\"ds-check-hint\">run finished</span></label></li></ul>",
+      "css": ".ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-tone-plain { --c: var(--muted); --cf: var(--fg); } .ds-check-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); } .ds-check-list li { border-bottom: 1px solid var(--line); } .ds-check-list li:last-child { border-bottom: 0; } .ds-check-row { display: flex; align-items: center; gap: 12px; min-height: 32px; padding: 0 12px; cursor: pointer; transition: background-color 150ms; } .ds-check-row:hover { background: var(--panel); } .ds-check { position: relative; display: inline-flex; width: 16px; height: 16px; flex-shrink: 0; } .ds-check input { appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--surface); cursor: pointer; transition: background-color 150ms, border-color 150ms, box-shadow 150ms; } .ds-check input:checked { background: var(--accent); border-color: var(--accent); } .ds-check input:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--surface), 0 0 0 2px var(--accent); } .ds-check input:disabled { opacity: 0.55; cursor: not-allowed; } .ds-check svg { position: absolute; inset: 2px; display: none; color: var(--on-accent); pointer-events: none; } .ds-check input:checked + svg { display: block; } .ds-sq { width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-check-label { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); color: var(--fg); } .ds-check-hint { margin-left: auto; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); } @media (max-width: 767px) { .ds-check-row { min-height: 44px; } }"
     },
     {
       "name": "State Chips",
       "kind": "chip",
       "refersTo": "chip",
-      "description": "Tinted-border mono chips; the dot variant prefixes a 6px square marker. Plain chips (Slate border, Ink Text) carry model, tags and run order.",
-      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><span class=\"ds-chip ds-chip-dot ds-tone-run\">running</span><span class=\"ds-chip ds-chip-dot ds-tone-done\">done</span><span class=\"ds-chip ds-chip-dot ds-tone-ok\">settled</span><span class=\"ds-chip ds-chip-dot ds-tone-bad\">failed</span><span class=\"ds-chip ds-chip-dot ds-tone-idle\">backlog</span><span class=\"ds-chip ds-tone-plain\">then #55</span></div>",
+      "description": "Tinted-border mono chips in the six tones (need fills at 14%); the dot variant prefixes a 6px square marker. A finished run awaiting completion reads \"to review\", a completed task one \"completed\" chip. Plain chips (Slate border, Ink Text) carry model, runtime, workspace, tags, needs and the tree link.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><span class=\"ds-chip ds-chip-dot ds-tone-run\">running</span><span class=\"ds-chip ds-chip-dot ds-tone-done\">to review</span><span class=\"ds-chip ds-chip-dot ds-tone-ok\">completed</span><span class=\"ds-chip ds-chip-dot ds-tone-bad\">failed</span><span class=\"ds-chip ds-chip-dot ds-tone-idle\">backlog</span><span class=\"ds-chip ds-tone-plain\">needs #3 #5</span></div>",
       "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 6px; } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-tone-plain { --c: var(--muted); --cf: var(--fg); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--cf); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); line-height: 1.5; white-space: nowrap; border-radius: 0; } .ds-chip.ds-tone-need { background: color-mix(in srgb, var(--need) 14%, transparent); } .ds-chip-dot::before { content: \"\"; width: 6px; height: 6px; flex-shrink: 0; background: var(--c); }"
     },
     {
-      "name": "Top Bar Navigation",
+      "name": "Sidebar Navigation",
       "kind": "nav",
-      "refersTo": "top-bar",
-      "description": "48px laptop bar: 10px ink square mark, text tabs with 2px ink underline, needs-input count chip on Dashboard.",
-      "html": "<nav class=\"ds-nav\"><a class=\"ds-mark\" href=\"#\"><span class=\"ds-mark-sq\"></span>stage</a><a class=\"ds-tab ds-tab-active\" href=\"#\" aria-current=\"page\">Dashboard <span class=\"ds-count\">2</span></a><a class=\"ds-tab\" href=\"#\">Projects</a><a class=\"ds-tab\" href=\"#\">Sessions</a><a class=\"ds-tab\" href=\"#\">History</a><a class=\"ds-tab\" href=\"#\">Snippets</a><a class=\"ds-tab\" href=\"#\">Settings</a></nav>",
-      "css": ".ds-nav { display: flex; align-items: stretch; height: 48px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--bg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; } .ds-mark { display: flex; align-items: center; gap: 8px; margin-right: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); text-decoration: none; } .ds-mark-sq { width: 10px; height: 10px; background: var(--accent); } .ds-tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--muted); text-decoration: none; transition: color 150ms, border-color 150ms; } .ds-tab:hover { color: var(--fg); } .ds-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } .ds-tab-active { border-bottom-color: var(--accent); color: var(--fg); } .ds-count { padding: 0 6px; border: 1px solid color-mix(in srgb, var(--need) 45%, transparent); background: color-mix(in srgb, var(--need) 14%, transparent); color: var(--need-fg); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); line-height: 16px; font-variant-numeric: tabular-nums; }"
+      "refersTo": null,
+      "description": "Laptop (1024px+) 248px sidebar: stepped-bars mark (top step Waiting Yellow while anything needs input), Ctrl K search beside a square primary New task, Lucide-icon views (Dashboard inbox, Tasks list-checks, Schedules calendar-clock), the project scope list and a Snippets / Settings footer. The current row takes the active row box (Bench Gray fill, 1px inset Strong Hairline, no side bar). Every mark is two fixed slots: a 6px square (need over run) and a 2ch right-aligned mono count of what the user owes, need-fg while anything needs input, `99+` hanging its `+`; Dashboard's mark is inset by the 28px pin slot so it shares the project columns.",
+      "html": "<aside class=\"ds-side\"><div class=\"ds-side-head\"><a class=\"ds-brand\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" aria-hidden=\"true\"><rect x=\"1\" y=\"11\" width=\"14\" height=\"3\"/><rect x=\"3\" y=\"7\" width=\"10\" height=\"3\" opacity=\"0.72\"/><rect class=\"ds-brand-step\" x=\"5\" y=\"3\" width=\"6\" height=\"3\"/></svg>stage</a></div><div class=\"ds-side-actions\"><button class=\"ds-search\" aria-label=\"Search tasks, projects\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.28\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"m21 21-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/></svg>Search<kbd class=\"ds-kbd\">Ctrl K</kbd></button><button class=\"ds-new\" aria-label=\"New task\" title=\"New task (N)\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.28\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg></button></div><nav class=\"ds-side-nav\" aria-label=\"Main\"><a class=\"ds-nav-row ds-active\" href=\"#\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\"/><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/></svg><span class=\"ds-nav-label\">Dashboard</span><span class=\"ds-mark ds-mark-inset\" title=\"3 need you, 2 waiting for input\"><span class=\"ds-mark-sq ds-sq-need\" aria-hidden=\"true\"></span><span class=\"ds-mark-n ds-n-need\" aria-hidden=\"true\">3</span><span class=\"ds-sr\">3 need you, 2 waiting for input</span></span></a><a class=\"ds-nav-row\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M13 5h8\"/><path d=\"M13 12h8\"/><path d=\"M13 19h8\"/><path d=\"m3 17 2 2 4-4\"/><path d=\"m3 7 2 2 4-4\"/></svg><span class=\"ds-nav-label\">Tasks</span></a><a class=\"ds-nav-row\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M16 14v2.2l1.6 1\"/><path d=\"M16 2v3\"/><path d=\"M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338\"/><path d=\"M3 9h5.859\"/><path d=\"M8 2v3\"/><circle cx=\"16\" cy=\"16\" r=\"6\"/></svg><span class=\"ds-nav-label\">Schedules</span></a></nav><nav class=\"ds-projects\" aria-label=\"Projects\"><ul><li class=\"ds-proj\"><button class=\"ds-nav-row\" aria-pressed=\"false\"><span class=\"ds-nav-label\">All projects</span><span class=\"ds-mark\" title=\"2 need input, 120 to review, start or retry, 2 running\"><span class=\"ds-mark-sq ds-sq-need\" aria-hidden=\"true\"></span><span class=\"ds-mark-n ds-n-need\" aria-hidden=\"true\">99<span class=\"ds-hang\">+</span></span><span class=\"ds-sr\">2 need input, 120 to review, start or retry, 2 running</span></span></button><span class=\"ds-pin-slot\" aria-hidden=\"true\"></span></li></ul><div class=\"ds-sec\"><span class=\"ds-caps\">Projects</span><a class=\"ds-sec-act\" href=\"#\" aria-label=\"Manage projects\" title=\"Manage projects\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.28\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/></svg></a></div><ul><li class=\"ds-proj ds-active\"><button class=\"ds-nav-row\" aria-pressed=\"true\"><span class=\"ds-nav-label ds-mono\">stage</span><span class=\"ds-mark\" title=\"2 need input, 1 to review, start or retry\"><span class=\"ds-mark-sq ds-sq-need\" aria-hidden=\"true\"></span><span class=\"ds-mark-n ds-n-need\" aria-hidden=\"true\">3</span><span class=\"ds-sr\">2 need input, 1 to review, start or retry</span></span></button><button class=\"ds-pin ds-pinned\" aria-pressed=\"true\" aria-label=\"Unpin stage\" title=\"Unpin\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/></svg></button></li><li class=\"ds-proj\"><button class=\"ds-nav-row\" aria-pressed=\"false\"><span class=\"ds-nav-label ds-mono\">zero</span><span class=\"ds-mark\" title=\"1 to review, start or retry, 1 running\"><span class=\"ds-mark-sq ds-sq-run\" aria-hidden=\"true\"></span><span class=\"ds-mark-n\" aria-hidden=\"true\">1</span><span class=\"ds-sr\">1 to review, start or retry, 1 running</span></span></button><button class=\"ds-pin\" aria-pressed=\"false\" aria-label=\"Pin zero\" title=\"Pin to top\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/></svg></button></li><li class=\"ds-proj\"><button class=\"ds-nav-row\" aria-pressed=\"false\"><span class=\"ds-nav-label ds-mono\">monorepo</span><span class=\"ds-mark\" title=\"118 to review, start or retry\"><span class=\"ds-mark-sq\" aria-hidden=\"true\"></span><span class=\"ds-mark-n\" aria-hidden=\"true\">99<span class=\"ds-hang\">+</span></span><span class=\"ds-sr\">118 to review, start or retry</span></span></button><button class=\"ds-pin\" aria-pressed=\"false\" aria-label=\"Pin monorepo\" title=\"Pin to top\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/></svg></button></li><li class=\"ds-proj\"><button class=\"ds-nav-row\" aria-pressed=\"false\"><span class=\"ds-nav-label ds-mono\">t3code</span><span class=\"ds-mark\" title=\"1 running\"><span class=\"ds-mark-sq ds-sq-run\" aria-hidden=\"true\"></span><span class=\"ds-mark-n\" aria-hidden=\"true\"></span><span class=\"ds-sr\">1 running</span></span></button><button class=\"ds-pin\" aria-pressed=\"false\" aria-label=\"Pin t3code\" title=\"Pin to top\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/></svg></button></li></ul><button class=\"ds-quiet\" aria-expanded=\"false\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg>4 quiet projects</button></nav><div class=\"ds-side-foot\"><a class=\"ds-nav-row\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M10 12.5 8 15l2 2.5\"/><path d=\"m14 12.5 2 2.5-2 2.5\"/></svg><span class=\"ds-nav-label\">Snippets</span></a><a class=\"ds-nav-row\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.995\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M10 5H3\"/><path d=\"M12 19H3\"/><path d=\"M14 3v4\"/><path d=\"M16 17v4\"/><path d=\"M21 12h-9\"/><path d=\"M21 19h-5\"/><path d=\"M21 5h-7\"/><path d=\"M8 10v4\"/><path d=\"M8 12H3\"/></svg><span class=\"ds-nav-label\">Settings</span></a></div></aside>",
+      "css": ".ds-side { display: flex; flex-direction: column; width: 248px; border-right: 1px solid var(--line); background: var(--bg); color: var(--fg); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; } .ds-side ul { list-style: none; margin: 0; padding: 0; } .ds-side-head { display: flex; align-items: center; height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); } .ds-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); text-decoration: none; } .ds-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-brand rect { fill: currentColor; } .ds-brand .ds-brand-step { fill: var(--need); transition: fill 150ms; } @media (prefers-reduced-motion: reduce) { .ds-brand .ds-brand-step { transition: none; } } .ds-side-actions { display: flex; gap: 8px; padding: 12px 12px 0; } .ds-search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--surface); color: var(--muted); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); white-space: nowrap; cursor: pointer; transition: color 150ms; } .ds-search:hover { color: var(--fg); } .ds-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-kbd { margin-left: auto; padding: 0 4px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); line-height: 16px; } .ds-new { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--accent); border-radius: 0; background: var(--accent); color: var(--on-accent); cursor: pointer; transition: opacity 150ms; } .ds-new:hover { opacity: 0.85; } .ds-new:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-side-nav { display: flex; flex-direction: column; padding: 12px 8px 0; } .ds-projects { display: flex; flex-direction: column; padding: 4px 8px 12px; } .ds-side-foot { display: flex; flex-direction: column; padding: 8px; border-top: 1px solid var(--line); } .ds-nav-row { display: flex; min-width: 0; min-height: 32px; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-ui, 14px); text-align: left; text-decoration: none; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-nav-row svg { flex-shrink: 0; } .ds-nav-row:hover { background: var(--panel); color: var(--fg); } .ds-nav-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-nav-row.ds-active, .ds-proj.ds-active { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line-strong); } .ds-nav-row.ds-active, .ds-proj.ds-active .ds-nav-row { color: var(--fg); font-weight: 500; } .ds-proj { display: flex; align-items: stretch; transition: background-color 150ms; } .ds-proj:hover { background: var(--panel); } .ds-proj .ds-nav-row { flex: 1; } .ds-proj .ds-nav-row:hover { background: transparent; } .ds-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-mono { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-detail, 12.5px); } .ds-mark { display: flex; flex-shrink: 0; align-items: center; gap: 6px; margin-left: auto; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); font-weight: 400; font-variant-numeric: tabular-nums; } .ds-mark-inset { margin-right: 28px; } .ds-mark-sq { width: 6px; height: 6px; } .ds-sq-need { background: var(--need); } .ds-sq-run { background: var(--run); } .ds-mark-n { position: relative; min-width: 2ch; text-align: right; color: var(--muted); } .ds-n-need { color: var(--need-fg); } .ds-hang { position: absolute; left: 100%; } .ds-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } .ds-pin-slot { width: 28px; flex-shrink: 0; } .ds-pin { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 28px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--muted); opacity: 0; cursor: pointer; transition: color 150ms, opacity 150ms; } .ds-proj:hover .ds-pin, .ds-pin:focus-visible, .ds-pin.ds-pinned { opacity: 1; } .ds-pin:hover, .ds-pin.ds-pinned { color: var(--fg); } .ds-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } @media (hover: none) { .ds-pin { opacity: 1; } } .ds-sec { display: flex; min-height: 28px; align-items: center; justify-content: space-between; padding: 12px 10px 4px; } .ds-caps { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); } .ds-sec-act { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--muted); transition: background-color 150ms, color 150ms; } .ds-sec-act:hover { background: var(--panel); color: var(--fg); } .ds-sec-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-quiet { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); cursor: pointer; transition: color 150ms; } .ds-quiet:hover { color: var(--fg); } .ds-quiet:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-quiet svg { transform: rotate(-90deg); transition: transform 150ms; } .ds-quiet[aria-expanded=\"true\"] svg { transform: none; }"
     },
     {
       "name": "Panel",
       "kind": "card",
       "refersTo": "panel-header",
-      "description": "Ruled container: Bench Gray 32px header with uppercase mono label and count, hairline-separated rows.",
-      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><h2 class=\"ds-panel-title\"><span class=\"ds-sq ds-tone-run\"></span>Running</h2><span class=\"ds-panel-meta\">2</span></div><ul class=\"ds-rows\"><li>Refactor poll throttle</li><li>Chain ordering guard</li></ul></section>",
-      "css": ".ds-panel { border: 1px solid var(--line); background: var(--surface); } .ds-panel-head { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; border-bottom: 1px solid var(--line); background: var(--panel); } .ds-panel-title { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 400; color: var(--fg); } .ds-panel-meta { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); color: var(--muted); font-variant-numeric: tabular-nums; } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-rows { list-style: none; margin: 0; padding: 0; } .ds-rows li { padding: 8px 12px; border-bottom: 1px solid var(--line); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-body, 14.5px); font-weight: 500; color: var(--fg); transition: background-color 150ms; } .ds-rows li:last-child { border-bottom: 0; } .ds-rows li:hover { background: var(--panel); }"
+      "description": "Ruled container: Paper body, 32px Bench Gray header with an uppercase mono label and mono count, hairline-separated rows, no shadow. A group header folds from the whole bar (12px Slate chevron, Ink on hover, -90deg when collapsed).",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><h2 class=\"ds-panel-title\"><button class=\"ds-fold\" aria-expanded=\"true\"><span class=\"ds-fold-chev\" aria-hidden=\"true\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.66\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg></span><span class=\"ds-panel-label ds-tone-run\"><span class=\"ds-sq\" aria-hidden=\"true\"></span>Running</span></button></h2><span class=\"ds-panel-meta\">2</span></div><ul class=\"ds-rows\"><li>Refactor poll throttle</li><li>Chain ordering guard</li></ul></section>",
+      "css": ".ds-panel { border: 1px solid var(--line); background: var(--surface); } .ds-panel-head { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; padding: 4px 12px; border-bottom: 1px solid var(--line); background: var(--panel); } .ds-panel-title { margin: 0; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg); } .ds-fold { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; } .ds-fold::after { content: \"\"; position: absolute; inset: 0; } .ds-fold:focus-visible { outline: none; } .ds-fold:focus-visible::after { outline: 2px solid var(--accent); outline-offset: -2px; } .ds-fold-chev { display: inline-flex; color: var(--muted); transition: color 150ms, transform 150ms; } .ds-fold:hover .ds-fold-chev { color: var(--fg); } .ds-fold[aria-expanded=\"false\"] .ds-fold-chev { transform: rotate(-90deg); } .ds-panel-label { display: inline-flex; align-items: center; gap: 8px; } .ds-panel-meta { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); color: var(--muted); font-variant-numeric: tabular-nums; } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-tone-plain { --c: var(--muted); --cf: var(--fg); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-rows { list-style: none; margin: 0; padding: 0; } .ds-rows li { padding: 8px 12px; border-bottom: 1px solid var(--line); font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-body, 14.5px); font-weight: 500; color: var(--fg); transition: background-color 150ms; } .ds-rows li:last-child { border-bottom: 0; } .ds-rows li:hover { background: var(--panel); }"
     },
     {
       "name": "Stat Strip",
       "kind": "custom",
-      "description": "Signature: state counts that filter the Dashboard; markers only on non-zero counts, selected cell tints 10% and gains a 2px inset tone bar.",
-      "html": "<div class=\"ds-stats\" role=\"group\" aria-label=\"Filter by state\"><button class=\"ds-stat ds-tone-need\" aria-pressed=\"true\"><span class=\"ds-sq\"></span><b>2</b><span class=\"ds-stat-l\">Needs input</span></button><button class=\"ds-stat ds-tone-run\" aria-pressed=\"false\"><span class=\"ds-sq\"></span><b>3</b><span class=\"ds-stat-l\">Running</span></button><button class=\"ds-stat ds-tone-done\" aria-pressed=\"false\"><b class=\"ds-zero\">0</b><span class=\"ds-stat-l\">Awaiting settle</span></button><span class=\"ds-stats-hint\">click a count to filter</span></div>",
-      "css": ".ds-stats { display: flex; border: 1px solid var(--line); background: var(--surface); } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-stat { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 0; border-right: 1px solid var(--line); background: transparent; white-space: nowrap; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-stat:hover { background: var(--panel); } .ds-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-stat[aria-pressed=\"true\"] { background: color-mix(in srgb, var(--c) 10%, transparent); box-shadow: inset 0 -2px var(--c); } .ds-stat b { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-title, 16px); font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; } .ds-stat[aria-pressed=\"true\"] b { color: var(--cf); } .ds-stat b.ds-zero { color: var(--muted); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-stat-l { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); } .ds-stats-hint { flex: 1; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); color: var(--muted); }"
+      "refersTo": null,
+      "description": "Signature: one bordered row of state counts that doubles as the Tasks filter (?state=). Markers only on non-zero counts, zero counts Slate; the selected cell fills its tone at 10% with a 2px inset bottom bar and colors the count. The hint shows from 1280px.",
+      "html": "<div class=\"ds-stats\" role=\"group\" aria-label=\"Filter by state\"><button class=\"ds-stat ds-tone-need\" aria-pressed=\"true\"><span class=\"ds-sq\"></span><b>2</b><span class=\"ds-stat-l\">Needs input</span></button><button class=\"ds-stat ds-tone-done\" aria-pressed=\"false\"><span class=\"ds-sq\"></span><b>1</b><span class=\"ds-stat-l\">Review</span></button><button class=\"ds-stat ds-tone-run\" aria-pressed=\"false\"><span class=\"ds-sq\"></span><b>3</b><span class=\"ds-stat-l\">Running</span></button><button class=\"ds-stat ds-tone-bad\" aria-pressed=\"false\"><b class=\"ds-zero\">0</b><span class=\"ds-stat-l\">Failed</span></button><span class=\"ds-stats-hint\">click a count to filter</span></div>",
+      "css": ".ds-stats { display: flex; border: 1px solid var(--line); background: var(--surface); } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-tone-plain { --c: var(--muted); --cf: var(--fg); } .ds-stat { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; white-space: nowrap; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-stat:hover { background: var(--panel); } .ds-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-stat[aria-pressed=\"true\"] { background: color-mix(in srgb, var(--c) 10%, transparent); box-shadow: inset 0 -2px var(--c); } .ds-stat b { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-title, 16px); font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; } .ds-stat[aria-pressed=\"true\"] b { color: var(--cf); } .ds-stat b.ds-zero { color: var(--muted); } .ds-sq { width: 6px; height: 6px; background: var(--c); } .ds-stat-l { font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-label, 11px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); } .ds-stats-hint { flex: 1; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta-sm, 11.5px); color: var(--muted); } @media (max-width: 1279px) { .ds-stats-hint { display: none; } }"
     },
     {
       "name": "Needs-Input Task Row",
       "kind": "custom",
       "refersTo": "task-row",
-      "description": "Signature row: user-approved 2px yellow left edge, state chip, mono task number before the title, mono meta, primary Open in app.",
-      "html": "<div class=\"ds-row\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><div class=\"ds-row-main\"><span class=\"ds-row-num\">#51</span><a class=\"ds-row-title\" href=\"#\">Wire real T3 client</a><div class=\"ds-row-meta\"><span>stage</span><span>opus-5.5 high</span><span>4m ago</span></div></div><a class=\"ds-btn ds-btn-primary ds-btn-sm\" href=\"#\">Open in app</a></div>",
-      "css": ".ds-row { display: grid; grid-template-columns: 118px minmax(0,1fr) auto; align-items: center; gap: 14px; padding: 8px 12px; border: 1px solid var(--line); border-left: 2px solid var(--need); background: var(--surface); } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--cf); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); line-height: 1.5; white-space: nowrap; border-radius: 0; } .ds-chip.ds-tone-need { background: color-mix(in srgb, var(--need) 14%, transparent); } .ds-chip-dot::before { content: \"\"; width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-row-num { margin-right: 6px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; } .ds-row-title { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-body, 14.5px); font-weight: 500; color: var(--fg); text-decoration: none; text-underline-offset: 3px; } .ds-row-title:hover { text-decoration: underline; } .ds-row-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-row-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); } .ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; text-decoration: none; white-space: nowrap; transition: opacity 150ms; } .ds-btn-sm { height: 24px; padding: 0 8px; font-size: var(--fs-meta, 12px); } .ds-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .ds-btn-primary:hover { opacity: 0.85; } .ds-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } @media (max-width: 767px) { .ds-btn-sm { height: 32px; padding: 0 10px; } }"
+      "description": "Signature row: user-approved 2px Waiting Yellow left edge (the only colored row edge), 118px state column, unlinked mono #51 before the title, mono meta line, a one-line Slate last-word preview, and primary Open in T3.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-chip ds-chip-dot ds-tone-need\">needs input</span><div class=\"ds-row-main\"><div class=\"ds-row-head\"><span class=\"ds-row-num\">#51</span><a class=\"ds-row-title\" href=\"#\">Wire real T3 client</a></div><div class=\"ds-row-meta\"><span>stage</span><span>opus-5.5 high</span><span>4m ago</span></div><p class=\"ds-row-last\" title=\"Which branch should the migration land on, main or the release branch?\">Which branch should the migration land on, main or the release branch?</p></div><a class=\"ds-btn ds-btn-primary ds-btn-sm\" href=\"#\">Open in T3</a></div>",
+      "css": ".ds-row { display: grid; grid-template-columns: 118px minmax(0,1fr) auto; align-items: center; gap: 14px; padding: 8px 12px; border: 1px solid var(--line); border-left: 2px solid var(--need); background: var(--surface); } .ds-tone-need { --c: var(--need); --cf: var(--need-fg); } .ds-tone-run { --c: var(--run); --cf: var(--run); } .ds-tone-done { --c: var(--done); --cf: var(--done); } .ds-tone-ok { --c: var(--ok); --cf: var(--ok); } .ds-tone-bad { --c: var(--bad); --cf: var(--bad); } .ds-tone-idle { --c: var(--idle); --cf: var(--idle); } .ds-tone-plain { --c: var(--muted); --cf: var(--fg); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--cf); font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); line-height: 1.5; white-space: nowrap; border-radius: 0; } .ds-chip.ds-tone-need { background: color-mix(in srgb, var(--need) 14%, transparent); } .ds-chip-dot::before { content: \"\"; width: 6px; height: 6px; flex-shrink: 0; background: var(--c); } .ds-row-main { min-width: 0; } .ds-row-head { display: flex; align-items: baseline; } .ds-row-num { margin-right: 6px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; } .ds-row-title { font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-body, 14.5px); font-weight: 500; color: var(--fg); text-decoration: none; text-underline-offset: 3px; } .ds-row-title:hover { text-decoration: underline; } .ds-row-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-row-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; font-family: \"JetBrains Mono Variable\", ui-monospace, monospace; font-size: var(--fs-meta, 12px); color: var(--muted); } .ds-row-last { margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-size: var(--fs-small, 13px); color: var(--muted); } .ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid; border-radius: 0; font-family: \"Geist Variable\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; text-decoration: none; white-space: nowrap; transition: opacity 150ms; } .ds-btn-sm { height: 24px; padding: 0 8px; font-size: var(--fs-meta, 12px); } .ds-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .ds-btn-primary:hover { opacity: 0.85; } .ds-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } @media (max-width: 767px) { .ds-btn-sm { height: 32px; padding: 0 10px; } }"
     }
   ],
   "narrative": {
     "northStar": "The Ink Workbench",
-    "overview": "**Creative North Star: \"The Ink Workbench\"**\n\nstage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or near-black (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the user.\n\nDensity is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.\n\nMotion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading, a square spinner on busy buttons, and no entrance choreography.",
+    "overview": "**Creative North Star: \"The Ink Workbench\"**\n\nstage is a workbench, not a dashboard of cards. Every view is a stack of ruled, square-cornered panels on a white (light) or deep slate (dark) ground, each headed by a tinted bar with an uppercase mono label, each holding hairline-separated rows. The chrome is ink and hairline only: black-on-white primary actions in light mode, near-white-on-near-black in dark. Color is withheld until a task's state earns it, so the one yellow on screen is always the thing waiting on the user.\n\nDensity is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.\n\nMotion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading, a square spinner on busy buttons, and no entrance choreography.",
     "keyCharacteristics": [
       "Zero radius on every element, including chips, markers, spinners and focus outlines.",
       "1px hairlines (11% ink) separate rows and regions; 20% ink outlines controls.",
-      "Ink accent that inverts per theme; no brand hue in chrome.",
+      "Ink accent that inverts per theme; no brand hue in chrome (the mark's yellow top step is a needs-input marker, not brand color).",
       "Six state tones (need, run, done, ok, bad, idle) drawn as tinted borders, square markers and colored text.",
       "Uppercase JetBrains Mono panel headers on a light-gray bar.",
       "Drawers and full-screen sheets instead of modals."
@@ -781,7 +800,7 @@
     "rules": [
       {
         "name": "The State Earns Color Rule",
-        "body": "Hue appears only on a state: a chip, a square marker, a stat count, an alert, or the needs-input row edge. Chrome, navigation, links and primary buttons stay ink.",
+        "body": "Hue appears only on a state: a chip, a square marker, a stat count, an alert, the needs-input row edge, or the mark's top step while anything needs input. Chrome, navigation, links and primary buttons stay ink.",
         "section": "colors"
       },
       {
@@ -791,7 +810,7 @@
       },
       {
         "name": "The One Yellow Edge Rule",
-        "body": "User-approved: a task row in needs input carries a 2px Waiting Yellow left edge and makes \"Open in app\" primary. It is the only colored row edge in the system; every other row keeps a transparent 2px edge so titles align. The same edge marks a needs-input toast and an inbox row whose task or thread is still waiting.",
+        "body": "User-approved: a task row in needs input carries a 2px Waiting Yellow left edge and makes its primary action \"Open in T3\". It is the only colored row edge in the system; every other row keeps a transparent 2px edge so titles align. The same edge marks a needs-input toast, an inbox row whose task or thread is still waiting, and the Needs input panel while something still waits on the user.",
         "section": "colors"
       },
       {
@@ -838,10 +857,10 @@
       "Do place the `//` meta line directly below the H1 in 12px mono Slate with a bold Ink Text `//`.",
       "Do head every panel with the 32px Bench Gray bar and an uppercase 11px mono label at 0.12em.",
       "Do set titles, actions and prose in Geist; set metadata, labels, chips, counts and keycaps in JetBrains Mono with tabular numerals.",
-      "Do take icons from Lucide through icons.tsx: square caps, miter joins, constant 1.33px stroke, currentColor.",
+      "Do take icons from Lucide through `icons.tsx`: square caps, miter joins, constant 1.33px stroke, currentColor.",
       "Do open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.",
       "Do keep motion to 150ms color, opacity and border transitions on state change.",
-      "Do give needs-input rows (and still-waiting needs-input toasts and inbox rows) the 2px Waiting Yellow left edge and a primary Open in app; it is the only colored row edge."
+      "Do give needs-input rows (and still-waiting needs-input toasts, inbox rows and the Needs input panel) the 2px Waiting Yellow left edge and a primary Open in T3; it is the only colored row edge."
     ],
     "donts": [
       "Don't round any corner.",
