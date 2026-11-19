@@ -10,7 +10,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
-// runT3 is `stage t3 status|pair|url`: the server's T3 connection.
+// runT3 is `stage t3 status|pair|disconnect|url`: the server's T3 connection.
 func runT3(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "status")
 	c := newCmd(env, "t3 "+v)
@@ -20,10 +20,11 @@ func runT3(ctx context.Context, env Env, args []string) error {
 	case "status":
 	case "pair":
 		c.fs.StringVar(&code, "code", "", "pairing code from `t3 pair` (default: auto-pair with the t3 CLI on the server's machine)")
+	case "disconnect":
 	case "url":
 		c.fs.BoolVar(&reset, "reset", false, "go back to the default T3 URL")
 	default:
-		return usagef("t3 %s: unknown (want status, pair or url)", v)
+		return usagef("t3 %s: unknown (want status, pair, disconnect or url)", v)
 	}
 	if err := c.parse(rest); err != nil {
 		return err
@@ -49,6 +50,11 @@ func runT3(ctx context.Context, env Env, args []string) error {
 		} else {
 			st, err = cl.AutoPairT3(ctx)
 		}
+	case "disconnect":
+		if len(c.pos) > 0 {
+			return usagef("t3 disconnect: unexpected argument %q", c.pos[0])
+		}
+		st, err = cl.DisconnectT3(ctx)
 	case "url":
 		switch {
 		case len(c.pos) > 1 || (reset && len(c.pos) == 1):

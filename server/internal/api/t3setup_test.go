@@ -153,6 +153,37 @@ func TestT3PairKicksSync(t *testing.T) {
 	}
 }
 
+func TestT3UnpairEndpoint(t *testing.T) {
+	s := &setupT3{}
+	e := newEnv(t, s.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL}))
+	var st t3Status
+	e.must("GET", "/api/t3/status", nil, 200, &st) // binds the connected fake
+	s.envOther = true
+	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, nil)
+
+	e.must("DELETE", "/api/t3/pair", nil, 200, &st)
+	if st.State != "unpaired" || st.Connected {
+		t.Fatalf("after disconnect %+v", st)
+	}
+	// Unbound: a T3 serving another environment is accepted.
+	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, 200, nil)
+	e.must("DELETE", "/api/t3/pair", nil, 200, &st)
+
+	admin := &setupT3{}
+	e = newEnv(t, admin.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL, T3AdminToken: "admin"}))
+	var eb struct {
+		Error string `json:"error"`
+	}
+	e.must("DELETE", "/api/t3/pair", nil, http.StatusConflict, &eb)
+	if !strings.Contains(eb.Error, "T3_ADMIN_TOKEN") {
+		t.Fatalf("admin 409 %q", eb.Error)
+	}
+	e.must("GET", "/api/t3/status", nil, 200, &st)
+	if st.State != "connected" {
+		t.Fatalf("refused disconnect changed state %+v", st)
+	}
+}
+
 func TestT3URLEndpoint(t *testing.T) {
 	s := &setupT3{}
 	e := newEnv(t, s.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://127.0.0.1:3773"}))

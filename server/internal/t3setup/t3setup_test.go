@@ -48,6 +48,14 @@ func (c *client) Pair(ctx context.Context, code string) error {
 	return nil
 }
 
+func (c *client) Unpair(ctx context.Context) error {
+	if err := c.Fake.Unpair(ctx); err != nil {
+		return err
+	}
+	c.paired.Store(false)
+	return nil
+}
+
 func reachable(env string) t3.Probe {
 	return t3.Probe{Reachable: true, CheckedAt: time.Now(), Identity: &t3.Identity{EnvironmentID: env, Label: "box " + env, ServerVersion: "0.1.9"}}
 }
@@ -301,6 +309,50 @@ func TestPairBindsFirstEnvironmentOnly(t *testing.T) {
 	}
 	if !slices.Equal(e.client.Pairs, []string{"CODE-1", "CODE-2"}) || e.bound() != "env-a" {
 		t.Fatalf("pairs %v bound %q", e.client.Pairs, e.bound())
+	}
+}
+
+func TestUnpairForgetsTokenAndBinding(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, defaultCfg(), false)
+	if err := e.svc.Pair(ctx, "CODE-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Unpair(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.svc.Status(ctx, false); st.State != t3.StateUnpaired || st.Conn.HasToken {
+		t.Fatalf("after unpair: state %q %+v", st.State, st.Conn)
+	}
+	if e.bound() != "" {
+		t.Fatalf("still bound to %q", e.bound())
+	}
+	// Unbound: another T3 can be paired and binds.
+	e.client.SetProbe(reachable("env-b"))
+	if err := e.svc.Pair(ctx, "CODE-2"); err != nil || e.bound() != "env-b" {
+		t.Fatalf("pair other T3: %v bound %q", err, e.bound())
+	}
+	if err := e.svc.Unpair(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Unpair(ctx); err != nil {
+		t.Fatalf("idempotent unpair: %v", err)
+	}
+}
+
+func TestUnpairRefusedWithAdminToken(t *testing.T) {
+	ctx := context.Background()
+	cfg := defaultCfg()
+	cfg.T3AdminToken = "admin"
+	e := newEnv(t, cfg, false)
+	if err := e.svc.Pair(ctx, "CODE-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Unpair(ctx); !isConflict(err, "T3_ADMIN_TOKEN") {
+		t.Fatalf("unpair with admin token: %v", err)
+	}
+	if st := e.svc.Status(ctx, false); !st.Conn.HasToken || e.bound() != "env-a" {
+		t.Fatalf("refused unpair changed state: %+v bound %q", st.Conn, e.bound())
 	}
 }
 

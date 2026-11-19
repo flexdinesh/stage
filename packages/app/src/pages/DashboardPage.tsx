@@ -7,6 +7,7 @@ import {
   useSchedules,
   useT3Status,
   useOpenCodeStatus,
+  useConnections,
   useTasks,
   useTrees,
 } from "../api/queries.ts";
@@ -276,7 +277,9 @@ function StatStrip({
 export function DashboardPage() {
   const t3 = useT3Status();
   const openCode = useOpenCodeStatus();
-  const t3Configured = t3.data !== undefined && (t3.data.connected || t3.data.environmentId !== null || t3.data.t3UrlSource !== "default");
+  const connections = useConnections();
+  // The server's view (a token, or a saved/env T3 URL), as the top-bar control uses: a disconnected T3 stays quiet.
+  const t3Configured = connections.data?.connections.some((c) => c.id === 1 && c.configured) ?? false;
   return (
     <>
       {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}

@@ -57,6 +57,20 @@ func TestT3Pair(t *testing.T) {
 	}
 }
 
+func TestT3Disconnect(t *testing.T) {
+	h := newHarness(t)
+	code, out, errOut := h.run("", "t3", "disconnect")
+	if code != 0 || !strings.Contains(out, "t3 unpaired") || !strings.Contains(out, "next: run `t3 pair`") {
+		t.Fatalf("disconnect: %d %q %q", code, out, errOut)
+	}
+	if code, _, errOut := h.run("", "t3", "disconnect", "now"); code != 2 || !strings.Contains(errOut, "unexpected argument") {
+		t.Fatalf("extra arg: %d %q", code, errOut)
+	}
+	if code, out, errOut := h.run("", "t3", "pair", "--code", "ABCD-1234"); code != 0 || !strings.Contains(out, "t3 connected") {
+		t.Fatalf("re-pair: %d %q %q", code, out, errOut)
+	}
+}
+
 func TestT3URL(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "t3", "url", "http://localhost:4000/")

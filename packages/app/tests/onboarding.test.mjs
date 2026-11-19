@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizeT3Status } from "../src/api/client.ts";
-import { codeReason, dashboardAlert, firstSyncLanded, primaryAction, setupSteps } from "../src/lib/onboarding.ts";
+import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, setupSteps } from "../src/lib/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const SYNCED = "2026-11-17T10:00:00Z";
@@ -119,6 +119,27 @@ test("an older server without onboarding fields gets a derived state and safe de
   assert.equal(normalizeT3Status({ ...legacy, tokenExpiresAt: "2026-11-17T09:00:00Z" }, now).state, "expired");
   assert.equal(normalizeT3Status({ ...legacy, tokenExpiresAt: "2026-11-18T09:00:00Z" }, now).state, "unpaired");
   assert.deepEqual(normalizeT3Status(base, now), base, "a current server passes through unchanged");
+});
+
+test("disconnect shows only with a stored token and locks while an admin token renews it", () => {
+  assert.equal(disconnectAvailability(status({})), "hidden", "never paired");
+  assert.equal(disconnectAvailability(connected), "ready");
+  assert.equal(disconnectAvailability(status({ state: "expired", tokenExpiresAt: "2026-11-01T00:00:00Z" })), "ready");
+  assert.equal(disconnectAvailability({ ...unreachable, tokenExpiresAt: "2026-12-17T00:00:00Z" }), "ready", "T3 away, token still stored");
+  assert.equal(disconnectAvailability({ ...connected, adminTokenConfigured: true }), "locked");
+  assert.equal(disconnectAvailability(status({ adminTokenConfigured: true })), "hidden");
+});
+
+test("disconnect sends DELETE /t3/pair and returns a normalized status", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body });
+    return Response.json(base);
+  });
+  const s = await api.disconnectT3();
+  assert.equal(s.state, "unpaired");
+  assert.equal(s.tokenExpiresAt, null);
+  assert.deepEqual(seen, [{ path: "/t3/pair", method: "DELETE", body: undefined }]);
 });
 
 test("auto-pair and set-URL hit their endpoints and return a normalized status", async () => {

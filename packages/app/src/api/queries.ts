@@ -6,6 +6,7 @@ import type { JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequ
 
 export const keys = {
   t3Status: ["t3Status"],
+  connections: ["connections"],
   catalog: ["catalog"],
   projects: ["projects"],
   tasks: ["tasks"],
@@ -27,7 +28,7 @@ export const keys = {
 /** Default poll; 1s while a full sync runs so its counts tick. */
 export function useConnections() {
   const api = useApi();
-  return useQuery({queryKey:["connections"], queryFn: api.connections});
+  return useQuery({queryKey:keys.connections, queryFn: api.connections});
 }
 
 export function useOpenCodeStatus() {

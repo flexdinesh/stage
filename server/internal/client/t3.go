@@ -59,6 +59,13 @@ func (c *Client) AutoPairT3(ctx context.Context) (T3Status, error) {
 	return out, err
 }
 
+// DisconnectT3 forgets the server's T3 token and environment binding.
+func (c *Client) DisconnectT3(ctx context.Context) (T3Status, error) {
+	var out T3Status
+	err := c.do(ctx, "DELETE", "/api/t3/pair", nil, &out)
+	return out, err
+}
+
 // SetT3URL saves the server's T3 URL; nil resets it to the default.
 func (c *Client) SetT3URL(ctx context.Context, url *string) (T3Status, error) {
 	var out T3Status

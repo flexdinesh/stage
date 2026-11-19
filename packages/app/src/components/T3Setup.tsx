@@ -1,19 +1,23 @@
 // T3 onboarding: the setup screen that is the Dashboard until the first full
-// sync, the Dashboard alert for later trouble, and the pairing and T3 URL
-// controls Settings shares. Logic lives in lib/onboarding.ts.
+// sync, the Dashboard alert for later trouble, and the pairing, T3 URL and
+// disconnect controls Settings shares. Logic lives in lib/onboarding.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { keys } from "../api/queries.ts";
 import type { T3Status } from "../api/types.ts";
-import { codeReason, dashboardAlert, primaryAction, setupSteps } from "../lib/onboarding.ts";
+import { shortDate } from "../lib/format.ts";
+import { codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps } from "../lib/onboarding.ts";
 import { useApi } from "../platform/context.tsx";
 import { CommandBox, Step, Steps } from "./Steps.tsx";
 import { Alert, Button, ErrorText, Field, Input, Muted, Panel } from "./ui.tsx";
 
-/** Pair, auto-pair and set-URL answer with the new status: show it at once. */
+/** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
   const qc = useQueryClient();
-  return (s) => qc.setQueryData(keys.t3Status, s);
+  return (s) => {
+    qc.setQueryData(keys.t3Status, s);
+    void qc.invalidateQueries({ queryKey: keys.connections });
+  };
 }
 
 /** Re-reads the status; the server probes T3 again when its last probe is stale. */
@@ -166,6 +170,57 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
       <p className="font-mono text-meta text-muted">{status.t3UrlSource === "settings" ? "saved in stage" : "default"}</p>
       <ErrorText error={save.error} />
     </form>
+  );
+}
+
+/**
+ * Disconnect (Settings T3 connection footer): forgets the token and the
+ * environment binding after an inline confirm. Locked while T3_ADMIN_TOKEN
+ * would mint a new token at once.
+ */
+export function DisconnectT3({ status }: { status: T3Status }) {
+  const api = useApi();
+  const setStatus = useSetStatus();
+  const [confirm, setConfirm] = useState(false);
+  const disconnect = useMutation({
+    mutationFn: api.disconnectT3,
+    onSuccess: (s) => {
+      setConfirm(false);
+      setStatus(s);
+    },
+  });
+  const availability = disconnectAvailability(status);
+  if (availability === "hidden") return null;
+  const label = status.t3 === null || status.t3.label === "" ? null : status.t3.label;
+  // `connected` is a valid token T3 has not rejected: only then does it outlive the disconnect.
+  const expires = status.connected ? status.tokenExpiresAt : null;
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+        {availability === "locked" ? <span className="font-mono text-meta text-muted">renewed by T3_ADMIN_TOKEN</span> : null}
+        <Button small variant="danger" disabled={availability === "locked" || confirm} onClick={() => setConfirm(true)}>
+          Disconnect
+        </Button>
+      </div>
+      {confirm ? (
+        <Alert tone="bad">
+          <p>
+            {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing; you can then pair this or another
+            T3. Tasks and journals stay; running T3 tasks continue untracked until you pair again.
+            {expires === null ? null : ` The token stays valid in T3 until ${shortDate(expires)}.`}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button small variant="danger" busy={disconnect.isPending} onClick={() => disconnect.mutate()}>
+              Disconnect
+            </Button>
+            <Button small variant="ghost" autoFocus disabled={disconnect.isPending} onClick={() => setConfirm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </Alert>
+      ) : null}
+      <ErrorText error={disconnect.error} />
+    </div>
   );
 }
 

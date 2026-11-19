@@ -6,7 +6,8 @@
 //
 // Binding: the first successful pairing binds the server to that T3
 // environment; its token and mirror belong to it. The URL may then change
-// only to an address serving the same environment.
+// only to an address serving the same environment. Unpair (disconnect)
+// forgets the token and the binding, so any T3 may be paired next.
 package t3setup
 
 import (
@@ -247,6 +248,26 @@ func (s *Service) Pair(ctx context.Context, code string) error {
 	if s.o.OnPaired != nil {
 		s.o.OnPaired()
 	}
+	return nil
+}
+
+// Unpair disconnects: forgets the token and the environment binding. Tasks,
+// projects and the mirror stay. Nothing is sent to T3 (the token stays
+// valid there until it expires). 409 when T3_ADMIN_TOKEN is set (the
+// client would mint a new token at once). Idempotent.
+func (s *Service) Unpair(ctx context.Context) error {
+	if s.o.Config.T3AdminToken != "" {
+		return db.Conflict("T3_ADMIN_TOKEN in this stage server's environment renews the T3 token; unset it and restart stage to disconnect")
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if err := s.o.Client.Unpair(ctx); err != nil {
+		return err
+	}
+	if err := s.o.Store.SetTokenEnvironment(ctx, ""); err != nil {
+		return err
+	}
+	s.log.Info("t3 disconnected")
 	return nil
 }
 

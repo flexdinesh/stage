@@ -176,6 +176,8 @@ export function createApi(transport: Transport) {
     pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),
     /** Pairs through the t3 CLI on the server's machine (409 when unavailable, 502 when it fails). */
     autoPair: () => apiFetch<T3StatusWire>("/t3/pair/auto", post()).then((w) => normalizeT3Status(w)),
+    /** Forgets the T3 token and environment binding (409 while T3_ADMIN_TOKEN renews it). */
+    disconnectT3: () => apiFetch<T3StatusWire>("/t3/pair", del).then((w) => normalizeT3Status(w)),
     /** 409 when T3_URL locks it or the URL is another T3; 400 when invalid. */
     setT3Url: (body: SetT3UrlRequest) => apiFetch<T3StatusWire>("/t3/url", put(body)).then((w) => normalizeT3Status(w)),
     sync: () => apiFetch<SyncResult>("/sync", post()),
