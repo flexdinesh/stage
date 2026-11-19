@@ -39,6 +39,7 @@ type Service struct {
 	log                                                                          *slog.Logger
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
+	OnAccepted                                                                   func() // a completion was inferred (tree release may follow)
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	progress                                                                     atomic.Pointer[Progress]
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
@@ -329,8 +330,18 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	if task.Adopted && task.LaunchedAt == nil {
 		change.ObservedStart = o.StartedAt
 	}
-	_, e = s.transition(ctx, change)
-	return e
+	if _, e = s.transition(ctx, change); e != nil {
+		return e
+	}
+	inferred, e := s.store.InferCompletion(ctx, task.ID, o)
+	if e != nil || !inferred {
+		return e
+	}
+	s.log.Info("completion inferred from harness closure", "task", task.ID, "signal", o.Closed.Signal, "execution", o.ExecutionID)
+	if s.OnAccepted != nil {
+		s.OnAccepted()
+	}
+	return nil
 }
 func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {
 	a, e := s.Adapter(1)

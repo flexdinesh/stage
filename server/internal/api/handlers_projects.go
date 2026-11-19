@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,16 +78,42 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	out := []db.HarnessConnection{}
 	for _, c := range cs {
 		if s.plannedConnection(c.ID) == nil {
-			_, adapterErr := s.Sync.Adapter(c.ID)
-			c.Configured = adapterErr == nil
-			if c.ID == db.T3ConnectionID && s.Setup != nil {
-				st := s.Setup.Status(r.Context(), false)
-				c.Configured = st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != "default"
-			}
-			out = append(out, c)
+			out = append(out, s.configured(r.Context(), c))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
+	return nil
+}
+func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.HarnessConnection {
+	_, adapterErr := s.Sync.Adapter(c.ID)
+	c.Configured = adapterErr == nil
+	if c.ID == db.T3ConnectionID && s.Setup != nil {
+		st := s.Setup.Status(ctx, false)
+		c.Configured = st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != "default"
+	}
+	return c
+}
+
+// setAutoComplete is PUT /api/connections/{connectionId}/auto-complete {autoComplete}.
+func (s *server) setAutoComplete(w http.ResponseWriter, r *http.Request) error {
+	id, err := connectionPath(r)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		AutoComplete *bool `json:"autoComplete"`
+	}
+	if err = decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if in.AutoComplete == nil {
+		return db.Invalid("autoComplete is required")
+	}
+	c, err := s.Store.SetAutoComplete(r.Context(), id, *in.AutoComplete)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connection": s.configured(r.Context(), c)})
 	return nil
 }
 func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error {

@@ -201,3 +201,142 @@ func TestAcceptanceEligibilityAndStaleEvidence(t *testing.T) {
 		t.Fatalf("activity revoked acceptance or froze observation: %+v %v", got, err)
 	}
 }
+
+func (e *env) autoComplete(id int64, on bool) db.HarnessConnection {
+	e.t.Helper()
+	var out struct {
+		Connection db.HarnessConnection `json:"connection"`
+	}
+	e.must("PUT", fmt.Sprintf("/api/connections/%d/auto-complete", id), map[string]bool{"autoComplete": on}, 200, &out)
+	return out.Connection
+}
+func (e *env) acceptances(id int64) []db.Acceptance {
+	e.t.Helper()
+	got, err := e.store.Acceptances(context.Background(), id)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return got
+}
+
+func TestAutoCompleteToggle(t *testing.T) {
+	e := newEnv(t)
+	var list struct {
+		Connections []db.HarnessConnection `json:"connections"`
+	}
+	e.must("GET", "/api/connections", nil, 200, &list)
+	if len(list.Connections) != 1 || list.Connections[0].AutoComplete {
+		t.Fatalf("connections %+v", list.Connections)
+	}
+	if c := e.autoComplete(1, true); c.ID != 1 || c.Harness != "t3" || !c.AutoComplete || !c.Configured {
+		t.Fatalf("connection %+v", c)
+	}
+	e.must("GET", "/api/connections", nil, 200, &list)
+	if !list.Connections[0].AutoComplete {
+		t.Fatal("toggle not persisted")
+	}
+	e.must("PUT", "/api/connections/99/auto-complete", map[string]bool{"autoComplete": true}, 404, nil)
+	e.must("PUT", "/api/connections/1/auto-complete", map[string]any{}, 400, nil)
+	e.must("PUT", "/api/connections/1/auto-complete", map[string]any{"autoComplete": "yes"}, 400, nil)
+	e.must("PUT", "/api/connections/1/auto-complete", map[string]any{"autoComplete": false, "extra": 1}, 400, nil)
+}
+
+func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	released := 0
+	e.sync.OnAccepted = func() { released++ }
+	e.autoComplete(1, true)
+	p := e.project("/w/infer")
+	a := e.task(p.ID, "source", map[string]any{"start": true})
+	b := e.task(p.ID, "dependent", map[string]any{"needs": []int64{a.ID}, "startMode": "auto"})
+	thread := *a.T3ThreadID
+	_ = e.fake.Settle(thread)
+	e.poll()
+	if len(e.acceptances(a.ID)) != 0 {
+		t.Fatal("active settled session completed")
+	}
+	_ = e.fake.SetThread(thread, func(d *t3.ThreadDetail) { d.Settled, d.SettledAt = false, nil })
+	_ = e.fake.SetStatus(thread, t3.StatusCompleted)
+	e.poll()
+	if len(e.acceptances(a.ID)) != 0 {
+		t.Fatal("completion inferred without closure")
+	}
+	_ = e.fake.Settle(thread)
+	e.poll()
+	got := e.acceptances(a.ID)
+	if len(got) != 1 || got[0].Provenance != "harness_settled" || got[0].Note != "" || released != 1 {
+		t.Fatalf("inferred %+v, released %d", got, released)
+	}
+	completed := false
+	for _, entry := range e.journal(taskPath(a.ID, "/journal?kind=events")).Entries {
+		completed = completed || entry.EventType == "task_completed" && entry.Text == "Completed from T3 settle; accepted evidence saved in Stage."
+	}
+	if !completed {
+		t.Fatal("inferred completion not journaled")
+	}
+	e.reconcile()
+	if got := e.getTask(b.ID); got.LaunchAttempt != 1 {
+		t.Fatal("inferred completion did not release auto dependent")
+	}
+	e.poll()
+	if len(e.acceptances(a.ID)) != 1 || released != 1 {
+		t.Fatal("same execution inferred twice")
+	}
+	e.reopen(a.ID)
+	e.poll()
+	if task, err := e.store.GetTask(ctx, a.ID); err != nil || task.AcceptanceID != nil {
+		t.Fatal("reopened execution re-completed from its settle")
+	}
+	// A follow-up run is a new execution and may infer again.
+	_ = e.fake.SetThread(thread, func(d *t3.ThreadDetail) { d.Settled, d.SettledAt, d.LatestRunID = false, nil, "run-follow-up" })
+	_ = e.fake.SetStatus(thread, t3.StatusRunning)
+	e.poll()
+	_ = e.fake.SetStatus(thread, t3.StatusCompleted)
+	_ = e.fake.Settle(thread)
+	e.poll()
+	if got := e.acceptances(a.ID); len(got) != 2 || got[0].Provenance != "harness_settled" || released != 2 {
+		t.Fatalf("new execution: %+v, released %d", got, released)
+	}
+}
+
+func TestHarnessSettleDoesNotCompleteUnsuccessfulOrDisabled(t *testing.T) {
+	e := newEnv(t)
+	e.autoComplete(1, true)
+	p := e.project("/w/no-infer")
+	for _, status := range []t3.ThreadStatus{t3.StatusFailed, t3.StatusInterrupted} {
+		a := e.task(p.ID, string(status), map[string]any{"start": true})
+		_ = e.fake.SetStatus(*a.T3ThreadID, status)
+		_ = e.fake.Settle(*a.T3ThreadID)
+		e.poll()
+		if got := e.getTask(a.ID); got.State != string(status) || len(e.acceptances(a.ID)) != 0 {
+			t.Fatalf("%s settle completed task", status)
+		}
+	}
+	e.autoComplete(1, false)
+	a := e.task(p.ID, "disabled", map[string]any{"start": true})
+	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.T3ThreadID)
+	e.poll()
+	if len(e.acceptances(a.ID)) != 0 {
+		t.Fatal("disabled connection completed task")
+	}
+	// A user reopen suppresses a later settle of the same execution.
+	reopened := e.task(p.ID, "reopened", map[string]any{"start": true})
+	_ = e.fake.SetStatus(*reopened.T3ThreadID, t3.StatusCompleted)
+	e.poll()
+	e.complete(reopened.ID)
+	e.reopen(reopened.ID)
+	e.autoComplete(1, true)
+	_ = e.fake.Settle(*reopened.T3ThreadID)
+	e.poll()
+	if got := e.acceptances(reopened.ID); len(got) != 1 || got[0].Provenance != "user" {
+		t.Fatalf("settle after reopen completed: %+v", got)
+	}
+	// Turning it on later infers on the next poll.
+	e.autoComplete(1, true)
+	e.poll()
+	if got := e.acceptances(a.ID); len(got) != 1 || got[0].Provenance != "harness_settled" {
+		t.Fatalf("enabled later: %+v", got)
+	}
+}

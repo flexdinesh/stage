@@ -4,6 +4,7 @@ import type { OpenCodeStatus } from "../api/types.ts";
 import { useOpenCodeStatus } from "../api/queries.ts";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { dateTime } from "../lib/format.ts";
+import { AutoCompleteToggle } from "./Completion.tsx";
 import { Button, Chip, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
 
 export function OpenCodeSetup() {
@@ -51,6 +52,7 @@ export function OpenCodeSetup() {
             Check connection
           </Button>
         </div>
+        <AutoCompleteToggle harness="opencode" className="mt-1 w-full border-t border-line pt-2" />
       </div>
       {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
     </Panel>

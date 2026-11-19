@@ -259,6 +259,22 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 	if got := fmt.Sprint(titles(true)); got != "[running fresh stale]" {
 		t.Fatalf("stale poll %s", got)
 	}
+	age := func() {
+		if _, err := pool.ExecContext(ctx, `UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-2 hours') WHERE id = $1`, ids["stale"]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An accepted stale task has nothing left to infer.
+	acceptTask(t, s, ctx, ids["stale"])
+	age()
+	if got := fmt.Sprint(titles(true)); got != "[running fresh]" {
+		t.Fatalf("accepted stale poll %s", got)
+	}
+	reopenTask(t, s, ctx, ids["stale"])
+	age()
+	if got := fmt.Sprint(titles(true)); got != "[running fresh stale]" {
+		t.Fatalf("reopened stale poll %s", got)
+	}
 }
 
 func TestUpsertThreadsKeepsDetailColumns(t *testing.T) {

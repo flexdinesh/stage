@@ -29,7 +29,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   t.archived_at, tr.status, ` + unstartedSQL + `,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
@@ -49,7 +49,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.ExecutionConfig)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -153,8 +153,8 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 }
 
 // PollableTasks: tasks whose thread may still change state. Active tasks
-// always; done tasks updated in the last hour always, older ones only
-// when includeStale (the poller passes it at most once a minute);
+// always; done tasks updated in the last hour always, older uncompleted
+// ones only when includeStale (the poller passes it at most once a minute);
 // failed/interrupted/cancelled when touched in the last 10 minutes (e.g. a
 // follow-up restarted the thread) or the mirror shows the thread active.
 // An adopted backlog session is watched for its first native execution.
@@ -167,7 +167,7 @@ func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, e
 WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
   t.state IN ('launching', 'running', 'needs_input')
   OR (t.state='backlog' AND t.adopted=1)
-  OR (t.state IN ('done','settled') AND ($1 OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
+  OR (t.state IN ('done','settled') AND ((t.acceptance_id IS NULL AND $1) OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
     OR COALESCE((SELECT json_extract(observation,'$.active') FROM execution_observations WHERE session_id=t.session_id),0)=1)))

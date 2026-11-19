@@ -181,6 +181,19 @@ type Observation struct {
 	Reply       *Reply       `json:"reply,omitempty"`
 	Artifacts   []Artifact   `json:"artifacts"`
 	Base        Availability `json:"base"`
+	Closed      *Closure     `json:"closed,omitempty"`
+}
+
+// Closure signals. A closure never implies the execution succeeded.
+const (
+	ClosedSettled  = "settled"  // T3 thread settled
+	ClosedArchived = "archived" // OpenCode session archived
+)
+
+// Closure reports that the session was closed in its harness. Stage may infer
+// completion from it (docs/execution.md).
+type Closure struct {
+	Signal string `json:"signal"`
 }
 type Source interface{ Observation() Observation }
 

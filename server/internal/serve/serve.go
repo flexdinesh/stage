@@ -224,6 +224,7 @@ func Run(ctx context.Context, o Options) error {
 		inbox.Signal()
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
+	syncSvc.OnAccepted = kickTrees
 	setup := t3setup.New(t3setup.Options{
 		Config: cfg, Store: store, Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
 		OnPaired: syncSvc.Kick, Logger: logger,

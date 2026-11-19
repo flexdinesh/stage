@@ -146,6 +146,35 @@ func TestObservationEvidence(t *testing.T) {
 	}
 }
 
+func TestArchivedSessionReportsClosure(t *testing.T) {
+	for _, archived := range []int64{0, 50} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/session/ses_test":
+				_ = json.NewEncoder(w).Encode(envelope[session]{Data: session{ID: "ses_test", Time: wireTime{Created: 10, Updated: 50, Busy: 30, Idle: 40, Archived: archived}, Outcome: "succeeded", ProjectID: "project", Location: location{Directory: "/repo"}}})
+			case "/api/session/active":
+				fmt.Fprint(w, `{"data":{}}`)
+			case "/api/session/ses_test/permission", "/api/session/ses_test/form", "/api/session/ses_test/message":
+				fmt.Fprint(w, `{"data":[]}`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		a, e := New(2, Settings{Endpoint: srv.URL})
+		if e != nil {
+			t.Fatal(e)
+		}
+		o, e := a.Observe(t.Context(), execution.SessionRef{ConnectionID: 2, ExternalSessionID: "ses_test"})
+		srv.Close()
+		if e != nil || o.State != "done" {
+			t.Fatal(o, e)
+		}
+		if archived == 0 && o.Closed != nil || archived > 0 && (o.Closed == nil || o.Closed.Signal != execution.ClosedArchived || !o.Archived) {
+			t.Fatalf("archived %d: closed %+v", archived, o.Closed)
+		}
+	}
+}
+
 func TestLiveCheckpointWrites(t *testing.T) {
 	f := newFixture(t)
 	a := f.a

@@ -224,6 +224,9 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	if o.Child {
 		o.Parent = &execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: s.ParentID}
 	}
+	if s.Time.Archived > 0 {
+		o.Closed = &execution.Closure{Signal: execution.ClosedArchived}
+	}
 	if s.Model != nil {
 		o.Config.Model = s.Model.ProviderID + "/" + s.Model.ID
 		o.ModelLabel = o.Config.Model

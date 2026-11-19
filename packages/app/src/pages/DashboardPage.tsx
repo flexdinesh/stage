@@ -18,7 +18,8 @@ import { ScheduleRow } from "../components/ScheduleList.tsx";
 import { SettledRows, TaskRow, TaskRows } from "../components/TaskList.tsx";
 import { TreeRow } from "../components/trees/TreeRow.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
-import { splitTreeMembers } from "../lib/dashboard.ts";
+import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
+import { awaitingReview, completedSince, splitTreeMembers } from "../lib/dashboard.ts";
 import { mergeSettled } from "../lib/settled.ts";
 import { AppButton, ErrorText, PageHeader, Panel, QueryState, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -284,7 +285,9 @@ export function DashboardPage() {
     <>
       {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}
       {openCode.data?.state === "unavailable" ? <p className="mb-3 text-small">OpenCode is unavailable. <Link className="underline" to="/settings">Check connection</Link></p> : null}
-      <Dashboard />
+      <CompletionLinger>
+        <Dashboard />
+      </CompletionLinger>
     </>
   );
 }
@@ -302,10 +305,17 @@ function Dashboard() {
   const all = [...new Map([...(tasks.data?.tasks ?? []), ...(settled.data?.tasks ?? [])].map((t) => [t.id, t])).values()];
   // Active trees, plus trees completed inside the settled window; members roll up into their tree's row.
   const trees = useTrees({ settledFrom: since, ...projectQuery });
-  const split = splitTreeMembers(all, trees.data?.trees ?? []);
+  // Rows completed here linger in Awaiting review (completed chip, Undo) before moving to Completed.
+  const { lingering } = useCompletionLinger();
+  const split = splitTreeMembers(all, trees.data?.trees ?? [], lingering);
   const dueSchedules = useSchedules({ dueWithin: "24h", ...projectQuery });
   const due = dueSchedules.data?.schedules ?? [];
-  const inGroup = (g: Group) => (t: Task) => g.key === "settled" ? t.completedAt !== null && t.completedAt >= since : (g.key === "needs" || g.key === "running" || t.acceptanceId === null) && g.states.includes(t.state) && (g.filter?.(t) ?? true);
+  const inGroup = (g: Group) => (t: Task) =>
+    g.key === "settled"
+      ? completedSince(t, since, lingering)
+      : g.key === "done"
+        ? awaitingReview(t, lingering)
+        : (g.key === "needs" || g.key === "running" || t.acceptanceId === null) && g.states.includes(t.state) && (g.filter?.(t) ?? true);
   // Stat counts include tree members; rows leave out members rolled up into a tree row.
   const byGroup = (g: Group) => all.filter(inGroup(g));
   const rowsOf = (g: Group) => split.rows.filter(inGroup(g));
@@ -315,6 +325,8 @@ function Dashboard() {
   /** Rows the group lists (tasks, external threads, schedules, tree rows). */
   const listed = (g: Group) =>
     rowsOf(g).length + (g.key === "scheduled" ? due.length : 0) + treeRows(g).length;
+  // Complete all covers the listed review rows still to complete (not lingering ones, not rows rolled into trees).
+  const completeAll = useCompleteAll(split.rows.filter((t) => !lingering.has(t.id) && awaitingReview(t, lingering)));
   /** Members counted here but shown in a tree row. */
   const inTrees = (g: Group) => (g.key === "trees" || g.key === "ready" ? 0 : split.rolledUp.filter(inGroup(g)).length);
 
@@ -430,6 +442,7 @@ function Dashboard() {
                   </span>
                 }
                 {...(g.key === "needs" && list.length > 0 ? { actions: <NeedsOpenLink tasks={list} /> } : {})}
+                {...(g.key === "done" ? { actions: <CompleteAllActions state={completeAll} /> } : {})}
               >
                 {g.key === "settled" ? (
                   <SettledRows items={mergeSettled(list, split.settled)} emptyText={g.empty} />
@@ -451,12 +464,15 @@ function Dashboard() {
                     )}
                   </>
                 ) : (
-                  <TaskRows
-                    tasks={list}
-                    emptyText={hidden === 0 ? g.empty : `All ${hidden} are in trees, shown in the Trees group.`}
-                    showProject
-                    showTree
-                  />
+                  <>
+                    {g.key === "done" ? <CompleteAllFailures state={completeAll} /> : null}
+                    <TaskRows
+                      tasks={list}
+                      emptyText={hidden === 0 ? g.empty : `All ${hidden} are in trees, shown in the Trees group.`}
+                      showProject
+                      showTree
+                    />
+                  </>
                 )}
               </Panel>
             );

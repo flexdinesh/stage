@@ -22,9 +22,10 @@ func checkDestinationChange(ctx context.Context, tx *Tx, old, next int64, c Opti
 
 type SessionRef = execution.SessionRef
 type HarnessConnection struct {
-	Configured bool   `json:"configured"`
-	ID         int64  `json:"id"`
-	Harness    string `json:"harness"`
+	Configured   bool   `json:"configured"`
+	ID           int64  `json:"id"`
+	Harness      string `json:"harness"`
+	AutoComplete bool   `json:"autoComplete"`
 }
 type ProjectBinding struct {
 	ID                int64   `json:"id"`
@@ -45,16 +46,23 @@ type ExternalProject struct {
 	ProjectID    *int64 `json:"projectId"`
 }
 
+func scanConnection(r rowScanner) (HarnessConnection, error) {
+	var c HarnessConnection
+	err := r.Scan(&c.ID, &c.Harness, &c.AutoComplete)
+	return c, err
+}
 func (s *Store) Connections(ctx context.Context) ([]HarnessConnection, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id,harness FROM harness_connections ORDER BY id`)
+	rows, err := s.pool.Query(ctx, `SELECT id,harness,auto_complete FROM harness_connections ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
-	return collectRows(rows, func(r rowScanner) (HarnessConnection, error) {
-		var c HarnessConnection
-		err := r.Scan(&c.ID, &c.Harness)
-		return c, err
-	})
+	return collectRows(rows, scanConnection)
+}
+
+// SetAutoComplete sets whether a harness closure may complete a done task.
+func (s *Store) SetAutoComplete(ctx context.Context, id int64, on bool) (HarnessConnection, error) {
+	c, err := scanConnection(s.pool.QueryRow(ctx, `UPDATE harness_connections SET auto_complete=$2 WHERE id=$1 RETURNING id,harness,auto_complete`, id, on))
+	return c, notFound(err)
 }
 func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
 	rows, err := s.pool.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,b.project_id FROM external_projects e

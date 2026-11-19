@@ -128,6 +128,7 @@ type Task struct {
 	AcceptanceID            *int64                  `json:"acceptanceId"`
 	AcceptanceRevision      int64                   `json:"acceptanceRevision"`
 	CompletedAt             *time.Time              `json:"completedAt"`
+	CompletionProvenance    *string                 `json:"completionProvenance"`
 	ID                      int64                   `json:"id"`
 	ProjectID               int64                   `json:"projectId"`
 	ProjectTitle            string                  `json:"projectTitle"`
