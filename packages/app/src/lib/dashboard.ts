@@ -1,49 +1,64 @@
 import type { Task, TreeSummary } from "../api/types.ts";
 
-/** How the Dashboard shows tree members: rolled up into tree rows, or on their own row. */
-export interface TreeSplit {
-  /** Trees with unsettled work (the Trees group), in list order. */
-  active: TreeSummary[];
-  /** Completed trees (every member settled), shown as rows in Settled. */
-  settled: TreeSummary[];
-  /** Tasks the state groups list on their own row, input order. */
-  rows: Task[];
-  /** Tree members represented by their tree row instead (still counted in the stat strip). */
-  rolledUp: Task[];
-}
+/** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
+export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "settled";
 
-/** A member that also breaks out of its tree row: it waits on the user (needs input) or on a start (ready). */
-export const breaksOut = (t: Pick<Task, "state" | "readiness" | "acceptanceId">) => t.state === "needs_input" || (t.acceptanceId === null && (t.state === "done" || t.state === "settled")) || (t.acceptanceId !== null && (t.state === "running" || t.state === "launching")) || t.readiness === "ready";
+export const GROUP_KEYS: readonly GroupKey[] = ["needs", "done", "ready", "failed", "running", "backlog", "scheduled", "settled"];
+
+/** What asks for the user: the Dashboard. */
+export const ATTENTION_GROUPS: readonly GroupKey[] = ["needs", "done", "ready", "failed"];
+
+export const parseGroupKey = (v: string | null): GroupKey | null => GROUP_KEYS.find((k) => k === v) ?? null;
+
+type Grouped = Pick<Task, "id" | "state" | "readiness" | "acceptanceId" | "startAt" | "completedAt">;
 
 /**
- * Splits Dashboard tasks against the listed trees. A member of a listed tree rolls up into that tree's row unless it
- * needs input or is ready (those keep their own row, with a tree chip). A settled member rolls up only when its whole
- * tree is complete; settled members of an active tree stay in Settled. Members of trees not listed keep their rows.
- * Done and archived trees are left out (their members are closed and not listed either). Ids in `keep` (tasks just
- * completed here, still lingering in Awaiting review) always keep their own row.
+ * Whether a task lists in a group. Needs input and running hold every such task; the rest only work not yet completed
+ * in Stage. Backlog splits into ready, timed (scheduled) and the rest. Completed is the window since `since`; a task
+ * completed here lingers in Awaiting review instead.
  */
-export function splitTreeMembers(
-  tasks: readonly Task[],
-  trees: readonly TreeSummary[],
-  keep: ReadonlySet<number> = new Set(),
-): TreeSplit {
-  const open = trees.filter((t) => t.status === "open");
-  const active = open.filter((t) => t.settledAt === null);
-  const settled = open.filter((t) => t.settledAt !== null);
-  const activeIds = new Set(active.map((t) => t.id));
-  const settledIds = new Set(settled.map((t) => t.id));
-  const rows: Task[] = [];
-  const rolledUp: Task[] = [];
-  for (const t of tasks) {
-    const tree = t.treeId;
-    const rolls =
-      tree !== null &&
-      !keep.has(t.id) &&
-      !breaksOut(t) &&
-      (t.acceptanceId !== null ? settledIds.has(tree) : activeIds.has(tree) || settledIds.has(tree));
-    (rolls ? rolledUp : rows).push(t);
+export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: ReadonlySet<number>): boolean {
+  switch (key) {
+    case "needs":
+      return t.state === "needs_input";
+    case "running":
+      return t.state === "launching" || t.state === "running";
+    case "done":
+      return awaitingReview(t, lingering);
+    case "settled":
+      return completedSince(t, since, lingering);
   }
-  return { active, settled, rows, rolledUp };
+  if (t.acceptanceId !== null) return false;
+  switch (key) {
+    case "failed":
+      return t.state === "failed" || t.state === "interrupted";
+    case "ready":
+      return t.state === "backlog" && t.readiness === "ready";
+    case "backlog":
+      return t.state === "backlog" && t.startAt === null && t.readiness !== "ready";
+    case "scheduled":
+      return t.state === "backlog" && t.startAt !== null;
+  }
+}
+
+/** Tasks view grouped by kind: trees with their members, and tasks outside them. */
+export interface KindSplit<T> {
+  /** Trees with work left (the Trees group). */
+  active: T[];
+  /** Trees whose every member is completed (listed in Completed). */
+  settled: T[];
+  /** Tasks not in a listed tree, input order. */
+  standalone: Task[];
+}
+
+/** Splits tasks from trees. Members of trees not listed keep their own rows, so no task drops out of view. */
+export function splitByKind<T extends Pick<TreeSummary, "id" | "settledAt">>(tasks: readonly Task[], trees: readonly T[]): KindSplit<T> {
+  const listed = new Set(trees.map((t) => t.id));
+  return {
+    active: trees.filter((t) => t.settledAt === null),
+    settled: trees.filter((t) => t.settledAt !== null),
+    standalone: tasks.filter((t) => t.treeId === null || !listed.has(t.treeId)),
+  };
 }
 
 /** How long a task completed from the Dashboard keeps its Awaiting review row (with Undo). */

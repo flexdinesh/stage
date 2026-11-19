@@ -43,7 +43,8 @@ interface Item {
 
 const PAGES: [string, string][] = [
   ["Dashboard", "/"],
-  ["Trees", "/trees"],
+  ["Tasks", "/tasks"],
+  ["Schedules", "/schedules"],
   ["Projects", "/projects"],
   ["Snippets", "/snippets"],
   ["Settings", "/settings"],

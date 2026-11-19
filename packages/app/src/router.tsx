@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { Navigate, createBrowserRouter } from "react-router";
 import { Layout } from "./components/Layout.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
@@ -9,8 +9,8 @@ import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
 import { SnippetsPage } from "./pages/SnippetsPage.tsx";
 import { ScheduleDetailPage } from "./pages/ScheduleDetailPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
+import { TasksPage } from "./pages/TasksPage.tsx";
 import { TreeDetailPage } from "./pages/TreeDetailPage.tsx";
-import { TreesPage } from "./pages/TreesPage.tsx";
 
 export const router = createBrowserRouter([
   {
@@ -18,7 +18,9 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <DashboardPage /> },
-      { path: "trees", element: <TreesPage /> },
+      { path: "tasks", element: <TasksPage /> },
+      // The Trees list became the Tasks view; old links land there.
+      { path: "trees", element: <Navigate to="/tasks" replace /> },
       { path: "trees/:id", element: <TreeDetailPage /> },
       { path: "projects", element: <ProjectsPage /> },
       { path: "projects/:id", element: <ProjectDetailPage /> },

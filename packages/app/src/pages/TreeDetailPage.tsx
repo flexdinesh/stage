@@ -67,10 +67,10 @@ function TreeNotFound({ id }: { id: number }) {
     <>
       <PageHeader title="Tree not found" meta={`tree ${id}`} />
       <p className="mb-3 text-ui text-muted">
-        This tree was deleted or does not exist. Empty and dissolved trees remain in the Archived list.
+        This tree was deleted or does not exist. Empty and dissolved trees remain under Closed in Tasks.
       </p>
-      <Link to="/trees" className={buttonClass("secondary")}>
-        <IconBack /> Back to trees
+      <Link to="/tasks" className={buttonClass("secondary")}>
+        <IconBack /> Back to tasks
       </Link>
     </>
   );
@@ -201,7 +201,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const mode = useMutation({ mutationFn: (startMode: StartMode) => api.updateTree(tree.id, { startMode }), onSettled: invalidate });
   const status = useMutation({ mutationFn: (next: TreeStatus) => api.updateTree(tree.id, { status: next }), onSettled: invalidate });
   const leave = async () => {
-    await navigate("/trees");
+    await navigate("/tasks");
     await invalidate();
   };
   const dissolve = useMutation({

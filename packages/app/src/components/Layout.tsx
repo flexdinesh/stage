@@ -15,92 +15,42 @@ import {
   IconChevronDown,
   IconClose,
   IconMoon,
+  IconClock,
   IconMore,
   IconPlus,
-  IconProjects,
   IconSearch,
+  IconSettings,
+  IconSnippets,
   IconStage,
   IconSun,
+  IconTasks,
   IconThemeSystem,
-  IconTree,
 } from "./icons.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
+import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
+import { AttentionCount, ProjectNav, SideLink, useScopeAttention } from "./Sidebar.tsx";
 import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx, type ChipTone } from "./ui.tsx";
-
-const NAV = [
-  { to: "/", label: "Dashboard" },
-  { to: "/trees", label: "Trees" },
-  { to: "/projects", label: "Projects" },
-  { to: "/schedules", label: "Schedules" },
-  { to: "/snippets", label: "Snippets" },
-  { to: "/settings", label: "Settings" },
-] as const;
-
-/** Phone More drawer: the laptop nav items the bottom tabs leave out. */
-const MORE = NAV.filter(
-  (item) => item.to === "/schedules" || item.to === "/snippets" || item.to === "/settings",
-);
-
-/** Paths of the MORE items; the laptop bar folds them into a More menu below `lg`. */
-const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
-
-/**
- * Laptop top bar tab styling, shared by nav links and the More menu trigger. Padding tightens between lg and xl so
- * all eight tabs fit at 1024px (with a classic scrollbar) without clipping Settings.
- */
-function navTabClass(active: boolean): string {
-  return cx(
-    "flex shrink-0 items-center gap-1.5 border-b-2 px-2 text-ui transition-colors duration-150 lg:px-1.5 xl:px-3",
-    active ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
-  );
-}
-
-/** Laptop More menu (below `lg` only): the nav items that don't fit beside the primary tabs. */
-function MoreMenu({ active }: { active: boolean }) {
-  const menuId = useId();
-  const menuRef = useRef<HTMLDivElement>(null);
-  return (
-    <>
-      <button type="button" popoverTarget={menuId} className={cx(navTabClass(active), "[anchor-name:--nav-more] lg:hidden")}>
-        More
-        <IconChevronDown size={12} />
-      </button>
-      <div
-        ref={menuRef}
-        id={menuId}
-        popover="auto"
-        className="m-0 w-44 border border-line-strong bg-surface text-fg [position-anchor:--nav-more] [top:anchor(bottom)] [left:anchor(left)]"
-      >
-        <nav className="flex flex-col" aria-label="More">
-          {MORE.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => menuRef.current?.hidePopover()}
-              className={({ isActive }) =>
-                cx("border-b border-line px-3 py-2 text-ui last:border-b-0 hover:bg-panel", isActive && "bg-panel font-medium")
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-      </div>
-    </>
-  );
-}
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
 
 const TABS = [
-  { to: "/", label: "Stage", icon: <IconStage size={TAB_ICON} /> },
-  { to: "/trees", label: "Trees", icon: <IconTree size={TAB_ICON} /> },
-  { to: "/projects", label: "Projects", icon: <IconProjects size={TAB_ICON} /> },
+  { to: "/", label: "Dashboard", icon: <IconStage size={TAB_ICON} /> },
+  { to: "/tasks", label: "Tasks", icon: <IconTasks size={TAB_ICON} /> },
+  { to: "/schedules", label: "Schedules", icon: <IconClock size={TAB_ICON} /> },
 ] as const;
+
+/** Phone More drawer: the sidebar destinations the bottom tabs leave out. */
+const MORE = [
+  { to: "/projects", label: "Projects" },
+  { to: "/snippets", label: "Snippets" },
+  { to: "/settings", label: "Settings" },
+] as const;
+
+const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
 
 const THEME_ICON: Record<Theme, ReactNode> = {
   system: <IconThemeSystem />,
@@ -109,7 +59,8 @@ const THEME_ICON: Record<Theme, ReactNode> = {
 };
 
 /** Stepped-bars glyph + wordmark; the top step turns Waiting Yellow while anything needs input. */
-function Mark({ needsInput }: { needsInput: number }) {
+/** `compact` (phone top bar) keeps the wordmark for screen readers only. */
+function Mark({ needsInput, compact = false }: { needsInput: number; compact?: boolean }) {
   return (
     <Link to="/" className="flex shrink-0 items-center gap-2 font-bold tracking-[-0.02em] whitespace-nowrap">
       <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden className="shrink-0 fill-current">
@@ -126,7 +77,7 @@ function Mark({ needsInput }: { needsInput: number }) {
           )}
         />
       </svg>
-      stage
+      <span className={cx(compact && "sr-only")}>stage</span>
     </Link>
   );
 }
@@ -185,7 +136,7 @@ function ConnectionStatus() {
       <div
         id={detailsId}
         role="tooltip"
-        className="pointer-events-none invisible absolute top-full right-0 z-50 mt-1 w-[280px] border border-line-strong bg-surface opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none group-hover:visible group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:opacity-100"
+        className="pointer-events-none invisible absolute top-full right-0 z-50 mt-1 w-[280px] lg:right-auto lg:left-0 border border-line-strong bg-surface opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none group-hover:visible group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:opacity-100"
       >
         <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
           <span className="label-caps text-fg">T3 connection</span>
@@ -215,15 +166,6 @@ function ThemeButton() {
     <Button variant="secondary" onClick={cycle} title={`Theme: ${theme} (click to change)`} aria-label={`Theme: ${theme}`} className="w-8 px-0">
       {THEME_ICON[theme]}
     </Button>
-  );
-}
-
-function NeedsCount({ n }: { n: number }) {
-  if (n === 0) return null;
-  return (
-    <span title="Tasks and threads needing input" className="chip tone-need px-1.5 text-meta-sm leading-4">
-      {n}
-    </span>
   );
 }
 
@@ -294,63 +236,78 @@ function Shell() {
   }, [newTask]);
 
   const moreActive = MORE_PATHS.some((p) => location.pathname.startsWith(p));
+  const attention = useScopeAttention();
+  const scope = useScope();
+  const [scopeSheet, setScopeSheet] = useState(false);
 
   return (
-    <div className="min-h-screen bg-bg text-fg">
-      {/* Laptop top bar */}
-      <header className="sticky top-0 z-40 hidden h-12 items-stretch gap-4 border-b border-line bg-bg px-6 md:flex lg:max-xl:gap-3">
-        <div className="flex items-center">
+    <div className="min-h-screen bg-bg text-fg lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+      {/* Laptop sidebar */}
+      <aside className="sticky top-0 z-40 hidden h-screen min-w-0 flex-col border-r border-line bg-bg lg:flex">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line pr-3 pl-4">
           <Mark needsInput={needsInput} />
+          <div className="ml-auto flex items-center gap-1.5">
+            <NotificationsBell onOpen={openInbox} />
+            <ConnectionStatus />
+          </div>
         </div>
-        <nav className="flex items-stretch overflow-x-auto" aria-label="Main">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) => cx(navTabClass(isActive), MORE_PATHS.includes(item.to) && "max-lg:hidden")}
-            >
-              {item.label}
-              {item.to === "/" ? <NeedsCount n={needsInput} /> : null}
-            </NavLink>
-          ))}
-          <MoreMenu active={moreActive} />
-        </nav>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          <ServerMenu />
+        <div className="flex shrink-0 gap-2 px-3 pt-3">
           <button
             type="button"
             onClick={() => setPalette(true)}
             aria-label="Search tasks, projects"
-            className="flex h-8 items-center gap-3 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 border border-line-strong bg-surface px-2.5 text-small whitespace-nowrap text-muted transition-colors duration-150 hover:text-fg"
           >
             <IconSearch size={14} />
-            <span className="hidden 2xl:inline">Search tasks, projects</span>
-            <Kbd className="max-xl:hidden">Ctrl K</Kbd>
+            Search
+            <Kbd className="ml-auto">Ctrl K</Kbd>
           </button>
-          <NotificationsBell onOpen={openInbox} />
-          <ConnectionStatus />
-          <ThemeButton />
-          <Button variant="primary" onClick={() => newTask()} className="max-lg:w-8 max-lg:px-0">
+          <Button variant="primary" onClick={() => newTask()} title="New task (N)" aria-label="New task" className="w-8 shrink-0 px-0">
             <IconPlus size={14} />
-            <span className="max-lg:sr-only">New task</span>
           </Button>
         </div>
-      </header>
+        <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
+          <SideLink to="/" icon={<IconStage />} label="Dashboard" count={<AttentionCount need={attention.need} total={attention.total} />} />
+          <SideLink to="/tasks" icon={<IconTasks />} label="Tasks" />
+          <SideLink to="/schedules" icon={<IconClock size={16} />} label="Schedules" />
+        </nav>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-3">
+          <ProjectNav />
+        </div>
+        <div className="flex shrink-0 flex-col border-t border-line px-2 py-2">
+          <SideLink to="/snippets" icon={<IconSnippets />} label="Snippets" />
+          <SideLink to="/settings" icon={<IconSettings />} label="Settings" />
+          <div className="flex items-center gap-2 px-0.5 pt-2">
+            <ServerMenu className="min-w-0 flex-1" />
+            <span className="ml-auto">
+              <ThemeButton />
+            </span>
+          </div>
+        </div>
+      </aside>
 
+      <div className="min-w-0">
       {/* Phone top bar */}
-      <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] md:hidden">
-        <Mark needsInput={needsInput} />
-        <div className="ml-auto flex min-w-0 items-center gap-2">
+      <header className="sticky top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] lg:hidden">
+        <Mark needsInput={needsInput} compact />
+        <button
+          type="button"
+          onClick={() => setScopeSheet(true)}
+          aria-label={`Project: ${scope.project?.title ?? "All projects"}`}
+          className={cx(buttonClass("secondary"), "h-10 min-w-0 gap-1.5 px-2.5 font-mono text-meta font-normal")}
+        >
+          <span className="min-w-0 truncate">{scope.project?.title ?? "All projects"}</span>
+          <IconChevronDown size={12} />
+        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <ConnectionStatus />
           <NotificationsBell onOpen={openInbox} />
           <ServerMenu />
           <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 shrink-0 px-0">
             <IconSearch size={16} />
           </Button>
-          <Button variant="primary" onClick={() => newTask()}>
-            <IconPlus size={14} />
-            Task
+          <Button variant="primary" onClick={() => newTask()} aria-label="New task" className="w-10 shrink-0 px-0">
+            <IconPlus size={16} />
           </Button>
         </div>
       </header>
@@ -358,7 +315,7 @@ function Shell() {
       <PullToReload key={location.key} contentRef={contentRef} />
 
       {/* Relative positioning keeps fixed task actions anchored to the viewport during a pull. */}
-      <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 md:pb-10">
+      <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 lg:pb-10">
         <HostBanner />
         <Outlet />
       </main>
@@ -366,7 +323,7 @@ function Shell() {
       {/* Phone bottom tabs */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-4 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-4 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] lg:hidden"
       >
         {TABS.map((t) => (
           <NavLink
@@ -399,6 +356,14 @@ function Shell() {
           More
         </button>
       </nav>
+
+      </div>
+
+      {scopeSheet ? (
+        <Drawer title="Projects" onClose={() => setScopeSheet(false)}>
+          <ProjectNav touch onPick={() => setScopeSheet(false)} />
+        </Drawer>
+      ) : null}
 
       {more ? (
         <Drawer title="More" onClose={() => setMore(false)}>
@@ -439,8 +404,10 @@ function Shell() {
 
 export function Layout() {
   return (
-    <NewTaskProvider>
-      <Shell />
-    </NewTaskProvider>
+    <ScopeProvider>
+      <NewTaskProvider>
+        <Shell />
+      </NewTaskProvider>
+    </ScopeProvider>
   );
 }
