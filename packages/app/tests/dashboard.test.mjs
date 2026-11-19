@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DEFAULT_FOLD,
   LINGER_MS,
   awaitingReview,
   breaksOut,
   completedSince,
   endLinger,
+  isFolded,
+  needsEpisode,
   nextLingerEnd,
+  parseFold,
   pruneLinger,
   splitTreeMembers,
   startLinger,
+  toggleFold,
 } from "../src/lib/dashboard.ts";
 
 const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "settled" ? id : null, treeId: null, readiness: null, ...extra });
@@ -114,4 +119,36 @@ test("lingers start at LINGER_MS, end on undo, and prune when expired", () => {
   assert.deepEqual([...pruneLinger(linger, 1000 + LINGER_MS).keys()], [6]);
   assert.deepEqual([...endLinger(linger, 5).keys()], [6]);
   assert.equal(linger.size, 2, "inputs are not mutated");
+});
+
+test("only Completed starts collapsed; bad storage reads as the default", () => {
+  for (const raw of [null, "", "{", "null", "[]", '{"collapsed":3}']) assert.deepEqual(parseFold(raw), DEFAULT_FOLD, String(raw));
+  assert.equal(isFolded(DEFAULT_FOLD, "settled"), true);
+  assert.equal(isFolded(DEFAULT_FOLD, "running"), false);
+  assert.deepEqual(parseFold('{"collapsed":["running",1],"seen":"x"}'), { collapsed: ["running"], seen: [] });
+});
+
+test("toggling round-trips through storage", () => {
+  const opened = toggleFold(DEFAULT_FOLD, "settled");
+  assert.equal(isFolded(opened, "settled"), false);
+  const both = toggleFold(opened, "backlog");
+  assert.equal(isFolded(parseFold(JSON.stringify(both)), "backlog"), true);
+  assert.equal(isFolded(parseFold(JSON.stringify(both)), "settled"), false);
+  assert.equal(isFolded(toggleFold(both, "backlog"), "backlog"), false);
+});
+
+test("collapsed Needs input reopens for a new needs-input episode", () => {
+  const a = needsEpisode({ id: 1, stateSince: "2026-11-19T10:00:00Z" });
+  const b = needsEpisode({ id: 2, stateSince: "2026-11-19T10:05:00Z" });
+  const fold = toggleFold({ collapsed: [], seen: [] }, "needs", [a]);
+  assert.equal(isFolded(fold, "needs", [a]), true);
+  // The seen task resolving keeps it collapsed; a new task (or the same task asking again) reopens it.
+  assert.equal(isFolded(fold, "needs", []), true);
+  assert.equal(isFolded(fold, "needs", [a, b]), false);
+  assert.equal(isFolded(fold, "needs", [needsEpisode({ id: 1, stateSince: "2026-11-19T11:00:00Z" })]), false);
+  // Collapsing again while reopened acknowledges the new episode instead of expanding.
+  const again = toggleFold(fold, "needs", [a, b]);
+  assert.equal(isFolded(again, "needs", [a, b]), true);
+  assert.deepEqual(again.collapsed, ["needs"]);
+  assert.equal(isFolded(toggleFold(again, "needs", [a, b]), "needs", [a, b]), false);
 });
