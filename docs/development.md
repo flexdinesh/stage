@@ -80,7 +80,7 @@ scripts/install-dev.sh --working-tree  # this checkout's working tree
 | --- | --- |
 | `SHA` | full 40-character commit hash; any commit origin has (main, a branch, a pull request head) |
 | `--headless` | CLI/server only (no desktop app) |
-| `--cli-name NAME` | the CLI's name in `~/.local/bin` (default `stage-dev`) |
+| `--cli-name NAME` | the CLI's name in `~/.local/bin` (default `stage-dev`); agent instructions from Stage Dev name it ([install.md](install.md#layout)) |
 | `--check` | run `mise run check` on the commit before building (slow) |
 | `--force` | rebuild and reinstall even if that commit is already installed |
 | `--working-tree` | build this checkout's working tree instead of a commit (no fetch; uncommitted changes marked `-dirty`); takes no SHA; checkout runs only (piped: exit 2) |

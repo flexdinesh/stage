@@ -10,16 +10,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/guard"
+	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
@@ -190,8 +193,12 @@ func Run(ctx context.Context, o Options) error {
 		logger.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
 	}
 
+	// Agent instructions name the CLI this identity installed on PATH.
+	home, _ := os.UserHomeDir()
+	cliName := install.CLIName(home, buildinfo.Identity)
 	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.T3ID()), logger)
 	syncSvc.PublicURL = cfg.PublicURL
+	syncSvc.CLI = cliName
 	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter, logger)
 	if err != nil {
 		return err
@@ -266,7 +273,7 @@ func Run(ctx context.Context, o Options) error {
 	// served in-process (no dial back to a listener, tcp or unix), so
 	// validation stays in one place. No local file access.
 	mux.Handle("/mcp", policy.Wrap(agenttools.HTTPHandler(&agenttools.Ops{
-		Client: client.NewInProcess(apiHandler, addrs[0].URL()),
+		Client: client.NewInProcess(apiHandler, addrs[0].URL()), CLI: cliName,
 	})))
 	mux.Handle("/", webui.Handler())
 

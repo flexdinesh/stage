@@ -13,23 +13,29 @@ import (
 // Version is the MCP server implementation version.
 const Version = "1.0.0"
 
-// Guide is the agent workflow guidance: MCP server instructions, `stage
-// guide`, and the block `stage setup instructions` writes.
-const Guide = `Stage owns projects, tasks, trees, accepted results and journals. Open conversations in the selected harness.
+// guide is the agent workflow guidance; {cli} is the installed CLI's name.
+const guide = `Stage owns projects, tasks, trees, accepted results and journals. Open conversations in the selected harness.
 - Call get_context to see your scoped session, project, owning task and current tree. Before work, read the task journal and the current tree journal. Refresh membership before contributing a tree note.
-- Use whichever Stage interface you have: Stage MCP tools (names here), the stage CLI, or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
-- Caller session. MCP: OpenCode sends session metadata on each direct call. An intermediary can pass callerSession with connectionId and externalSessionId. T3 callers can pass callerThreadId from T3CODE_THREAD_ID. Only dedicated stdio processes may use stage mcp --t3-session-env. CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
+- Use whichever Stage interface you have: Stage MCP tools (names here), the {cli} CLI, or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
+- Caller session. MCP: OpenCode sends session metadata on each direct call. An intermediary can pass callerSession with connectionId and externalSessionId. T3 callers can pass callerThreadId from T3CODE_THREAD_ID. Only dedicated stdio processes may use {cli} mcp --t3-session-env. CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
 - Create work with create_task. Supply a self-contained prompt. The default is backlog. Specify project by ID or exact title when context is missing. list_projects shows bindings and configured connections. Set connectionId to choose the execution harness independently of the creator. list_models with connectionId and projectId shows workspace-specific executionConfig choices.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks; manual (tree or per task) is an explicit choice. Only user completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. A predecessor worktree base requires an available branch in the same harness and project.
 - Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Agents can report outcomes. Acceptance belongs to the user.
 - Use list_tasks with originSession to find work you created. Use read_ref with a Stage link, a historical T3 reference or a scoped session. get_task returns stored results and available links. Use the native harness for the conversation.
-- create_schedule queues recurring work. Use get_task, get_tree, list_tasks or wait_task for progress. The CLI exposes the same workflows through stage task, tree, schedule, sessions adopt and show. Run stage help for flags.`
+- create_schedule queues recurring work. Use get_task, get_tree, list_tasks or wait_task for progress. The CLI exposes the same workflows through {cli} task, tree, schedule, sessions adopt and show. Run {cli} help for flags.`
+
+// Guide is the agent workflow guidance naming cli, the CLI installed on
+// PATH (install.CLIName): MCP server instructions, `stage guide`, and the
+// block `stage setup instructions` writes.
+func Guide(cli string) string {
+	return strings.ReplaceAll(guide, "{cli}", cli)
+}
 
 // NewServer returns an MCP server exposing every operation as a tool.
 func NewServer(o *Ops) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "stage", Title: "stage", Version: Version},
-		&mcp.ServerOptions{Instructions: Guide})
+		&mcp.ServerOptions{Instructions: Guide(o.cli())})
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	destructive := true
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
@@ -112,6 +118,6 @@ func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnn
 
 // HTTPHandler serves streamable HTTP MCP over ops (no local file access).
 func HTTPHandler(o *Ops) http.Handler {
-	s := NewServer(&Ops{Client: o.Client, PollEvery: o.PollEvery})
+	s := NewServer(&Ops{Client: o.Client, PollEvery: o.PollEvery, CLI: o.CLI})
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{Stateless: true})
 }

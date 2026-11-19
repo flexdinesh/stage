@@ -122,13 +122,13 @@ func register(env Env, tool string, args []string) error {
 }
 
 // instructionsBlock is the marked block written to agent instruction files.
-func instructionsBlock() string {
-	return blockBegin + "\n## stage (task queue)\n\n" + agenttools.Guide + "\n" + blockEnd + "\n"
+func instructionsBlock(cli string) string {
+	return blockBegin + "\n## stage (task queue)\n\n" + agenttools.Guide(cli) + "\n" + blockEnd + "\n"
 }
 
 // upsertBlock replaces the marked block in content, or appends it.
-func upsertBlock(content string) string {
-	block := instructionsBlock()
+func upsertBlock(content, cli string) string {
+	block := instructionsBlock(cli)
 	if i := strings.Index(content, blockBegin); i >= 0 {
 		if j := strings.Index(content[i:], blockEnd); j >= 0 {
 			end := i + j + len(blockEnd)
@@ -183,7 +183,7 @@ func setupInstructions(env Env, args []string) error {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-		next := upsertBlock(string(cur))
+		next := upsertBlock(string(cur), env.cliName())
 		if next == string(cur) {
 			fmt.Fprintf(env.Stdout, "unchanged %s\n", path)
 			continue
