@@ -29,6 +29,14 @@ func RequireChoice(what, id string, choices []Choice) error {
 	}
 	return RequireAvailable(what+" "+id, Availability{})
 }
+// PermissionsFor is m's permission list; nil (not reported) inherits the harness list.
+func (f Capabilities) PermissionsFor(m Model) []Choice {
+	if m.Permissions == nil {
+		return f.Permissions
+	}
+	return m.Permissions
+}
+
 func (f Capabilities) ValidateConfig(c Config) error {
 	if err := RequireChoice("interaction mode", c.Mode, f.Modes); err != nil {
 		return err
@@ -49,7 +57,7 @@ func (f Capabilities) ValidateConfig(c Config) error {
 		if err := RequireAvailable("model "+m.ID, m.Availability); err != nil {
 			return err
 		}
-		if err := RequireChoice("permission", c.Permission, m.Permissions); err != nil {
+		if err := RequireChoice("permission", c.Permission, f.PermissionsFor(m)); err != nil {
 			return err
 		}
 		seen := map[string]bool{}

@@ -1,13 +1,7 @@
 import { useCatalog } from "../api/queries.ts";
-import {
-  RUNTIME_MODES,
-  type CatalogModel,
-  type CatalogProvider,
-  type ModelOption,
-  type RuntimeMode,
-} from "../api/types.ts";
+import { type CatalogModel, type ModelOption, type RuntimeMode } from "../api/types.ts";
 import { optionsText } from "../lib/format.ts";
-import { Field, Muted, Segmented, Select, errorText } from "./ui.tsx";
+import { Field, Muted, Select, errorText } from "./ui.tsx";
 
 export interface ModelConfig {
   providerInstanceId: string | null;
@@ -16,21 +10,12 @@ export interface ModelConfig {
   runtimeMode: RuntimeMode;
 }
 
-const RUNTIME_LABELS: Record<RuntimeMode, string> = {
-  "approval-required": "approval",
-  "auto-accept-edits": "auto-edits",
-  auto: "auto",
-  "full-access": "full-access",
-};
-
-const allowedModes = (p: CatalogProvider | undefined): readonly RuntimeMode[] => p?.runtimeModes ?? RUNTIME_MODES;
-
 export function defaultOptions(m: CatalogModel | undefined): ModelOption[] {
   if (m === undefined) return [];
   return m.options.flatMap((o) => (o.default === null ? [] : [{ id: o.id, value: o.default }]));
 }
 
-/** Provider → model → per-model option selects → runtime mode, driven by GET /api/catalog. */
+/** Provider → model → per-model option selects, driven by GET /api/catalog. */
 export function ModelFields({
   value,
   onChange,
@@ -44,7 +29,6 @@ export function ModelFields({
   const providers = catalog.data?.providers ?? [];
   const provider = providers.find((p) => p.providerInstanceId === value.providerInstanceId);
   const model = provider?.models.find((m) => m.id === value.model);
-  const modes = allowedModes(provider);
 
   const setProvider = (id: string) => {
     const next = providers.find((p) => p.providerInstanceId === id);
@@ -68,7 +52,6 @@ export function ModelFields({
   };
 
   const catalogError = errorText(catalog.error);
-  const modeList = modes.includes(value.runtimeMode) ? modes : [...modes, value.runtimeMode];
 
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -141,16 +124,6 @@ export function ModelFields({
           <Muted>Options (kept): {optionsText(value.modelOptions)}</Muted>
         </div>
       ) : null}
-      {modes.includes(value.runtimeMode) ? null : <p role="status" className="col-span-full text-small text-bad">Selected permission mode is unavailable for this provider. Choose a supported mode before launching.</p>}
-      <fieldset disabled={disabled} className="col-span-full min-w-0 disabled:opacity-55">
-        <legend className="label-caps mb-1.5">Runtime</legend>
-        <Segmented
-          label="Runtime mode"
-          options={modeList.map((m) => ({ value: m, label: RUNTIME_LABELS[m] }))}
-          value={value.runtimeMode}
-          onChange={(runtimeMode) => onChange({ ...value, runtimeMode })}
-        />
-      </fieldset>
     </div>
   );
 }
