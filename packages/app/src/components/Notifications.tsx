@@ -195,7 +195,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
       role="region"
       aria-label="New notifications"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-3 bottom-[calc(56px+env(safe-area-inset-bottom)+8px)] z-[45] flex flex-col gap-2 md:inset-x-auto md:right-6 md:bottom-6 md:w-[360px]"
+      className="pointer-events-none fixed inset-x-3 bottom-[calc(56px+env(safe-area-inset-bottom)+8px)] z-[45] flex flex-col gap-2 md:inset-x-auto md:right-6 md:w-[360px] lg:bottom-6"
     >
       {hidden > 0 ? (
         <button

@@ -1,5 +1,4 @@
 import { useCallback, useMemo, type ReactNode } from "react";
-import { useProjects } from "../api/queries.ts";
 import type { Project } from "../api/types.ts";
 import { matchProjects, projectDetail, type ProjectMatch } from "../lib/projects.ts";
 import { Combobox, type ComboboxOption } from "./Combobox.tsx";
@@ -59,31 +58,6 @@ export function ProjectCombobox({
       className={className}
       size={size}
       autoFocus={autoFocus}
-    />
-  );
-}
-
-/** Project filter; value "" = all projects. */
-export function ProjectSelect({
-  id,
-  value,
-  onChange,
-  allLabel = "All projects",
-}: {
-  id?: string;
-  value: string;
-  onChange: (value: string) => void;
-  allLabel?: string;
-}) {
-  const projects = useProjects();
-  return (
-    <ProjectCombobox
-      projects={projects.data?.projects ?? []}
-      id={id}
-      value={value}
-      onChange={onChange}
-      pinned={allLabel}
-      size={12}
     />
   );
 }

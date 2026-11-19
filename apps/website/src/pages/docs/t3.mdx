@@ -64,6 +64,6 @@ Once the server is bound, the T3 URL can only change to an address serving the s
 stage t3 status    # URL, reachability, pairing, token expiry, sync, auto-pair availability
 ```
 
-Later trouble (T3 unreachable, unpaired, session expired or rejected) shows as an alert at the top of the Dashboard with the same fix, and the top bar's T3 control turns yellow (pairing) or red (T3 or its pairing failed). Settings shows the T3 connection, Pair, the T3 URL and Sync now.
+Later trouble (T3 unreachable, unpaired, session expired or rejected) shows as an alert at the top of the Dashboard with the same fix, and the T3 control (sidebar header, or the phone top bar) turns yellow (pairing) or red (T3 or its pairing failed). Settings shows the T3 connection, Pair, the T3 URL and Sync now.
 
 stage reports itself and T3 separately: a missing or offline T3 never stops the stage server from starting, and `stage service status` lists T3 apart from the server's own health.

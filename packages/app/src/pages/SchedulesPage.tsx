@@ -1,17 +1,15 @@
-import { useSearchParams } from "react-router";
 import { useSchedules } from "../api/queries.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
-import { ProjectSelect } from "../components/ProjectSelect.tsx";
+import { useScope } from "../components/Scope.tsx";
 import { ScheduleRows } from "../components/ScheduleList.tsx";
 import { Button, PageHeader, Panel, QueryState } from "../components/ui.tsx";
 import { relativeTime } from "../lib/format.ts";
 
 export function SchedulesPage() {
-  const [params, setParams] = useSearchParams();
-  const project = params.get("project") ?? "";
-  const projectId = project === "" ? undefined : Number(project);
-  const schedules = useSchedules(projectId === undefined ? {} : { project: projectId });
+  const scope = useScope();
+  const projectId = scope.projectId ?? undefined;
+  const schedules = useSchedules(scope.query);
   const newTask = useNewTask();
   const list = schedules.data?.schedules ?? [];
   const active = list.filter((s) => !s.paused);
@@ -29,22 +27,13 @@ export function SchedulesPage() {
           .filter((s) => s !== null)
           .join(" · ");
 
-  const setProject = (value: string) =>
-    setParams((prev) => {
-      const nextParams = new URLSearchParams(prev);
-      if (value === "") nextParams.delete("project");
-      else nextParams.set("project", value);
-      return nextParams;
-    });
-
   return (
     <>
       <PageHeader
-        title="Schedules"
+        title={scope.project === null ? "Schedules" : <><span className="text-muted">{scope.project.title} / </span>Schedules</>}
         {...(meta === undefined ? {} : { meta })}
         actions={
           <>
-            <ProjectSelect value={project} onChange={setProject} />
             <Button variant="primary" onClick={() => newTask(projectId, "repeat")}>
               <IconPlus /> New schedule
             </Button>
@@ -56,11 +45,11 @@ export function SchedulesPage() {
           <ScheduleRows
             schedules={list}
             emptyText={
-              project === ""
+              scope.project === null
                 ? "No schedules yet. A schedule starts a fresh task from the same prompt on a cron, e.g. every weekday at 09:00. Create one with New schedule."
                 : "No schedules in this project."
             }
-            showProject={project === ""}
+            showProject={scope.project === null}
           />
         </QueryState>
       </Panel>

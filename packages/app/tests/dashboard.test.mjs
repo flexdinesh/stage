@@ -4,15 +4,18 @@ import {
   DEFAULT_FOLD,
   LINGER_MS,
   awaitingReview,
-  breaksOut,
+  ATTENTION_GROUPS,
+  GROUP_KEYS,
   completedSince,
   endLinger,
+  inGroup,
   isFolded,
   needsEpisode,
   nextLingerEnd,
   parseFold,
+  parseGroupKey,
   pruneLinger,
-  splitTreeMembers,
+  splitByKind,
   startLinger,
   toggleFold,
 } from "../src/lib/dashboard.ts";
@@ -21,75 +24,41 @@ const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "s
 const tree = (id, settledAt = null, status = "open") => ({ id, settledAt, status });
 const ids = (list) => list.map((t) => t.id);
 
-test("awaiting review and loose tasks have their own rows", () => {
-  const tasks = [
-    task(1, "running", { treeId: 10 }),
-    task(2, "done", { treeId: 10 }),
-    task(3, "failed", { treeId: 10 }),
-    task(4, "backlog", { treeId: 10, readiness: "blocked" }),
-    task(5, "running"),
-    task(6, "backlog"),
-  ];
-  const split = splitTreeMembers(tasks, [tree(10)]);
-  assert.deepEqual(ids(split.rolledUp), [1, 3, 4]);
-  assert.deepEqual(ids(split.rows), [2, 5, 6]);
-  assert.deepEqual(ids(split.active), [10]);
-  assert.deepEqual(split.settled, []);
+const SINCE = "2026-11-13T00:00:00Z";
+const groupsOf = (t, lingering = new Set()) => GROUP_KEYS.filter((k) => inGroup(k, t, SINCE, lingering));
+
+test("each open task lists in exactly one group", () => {
+  assert.deepEqual(groupsOf(task(1, "needs_input")), ["needs"]);
+  assert.deepEqual(groupsOf(task(1, "done")), ["done"]);
+  assert.deepEqual(groupsOf(task(1, "backlog", { readiness: "ready", startAt: null })), ["ready"]);
+  assert.deepEqual(groupsOf(task(1, "interrupted")), ["failed"]);
+  assert.deepEqual(groupsOf(task(1, "launching")), ["running"]);
+  assert.deepEqual(groupsOf(task(1, "backlog", { startAt: null })), ["backlog"]);
+  assert.deepEqual(groupsOf(task(1, "backlog", { startAt: "2026-11-20T09:00:00Z" })), ["scheduled"]);
+  assert.deepEqual(groupsOf(task(1, "settled", { completedAt: "2026-11-15T00:00:00Z" })), ["settled"]);
+  assert.deepEqual(groupsOf(task(1, "settled", { completedAt: "2026-11-01T00:00:00Z" })), [], "completed before the window");
+  assert.deepEqual(groupsOf(task(1, "failed", { acceptanceId: 4 })), [], "completed failures ask nothing");
 });
 
-test("needs-input and ready members break out of their tree row", () => {
-  const tasks = [
-    task(1, "needs_input", { treeId: 10 }),
-    task(2, "backlog", { treeId: 10, readiness: "ready" }),
-    task(3, "backlog", { treeId: 10, readiness: "blocked" }),
-  ];
-  const split = splitTreeMembers(tasks, [tree(10)]);
-  assert.deepEqual(ids(split.rows), [1, 2]);
-  assert.deepEqual(ids(split.rolledUp), [3]);
-  assert.equal(breaksOut(tasks[0]), true);
-  assert.equal(breaksOut(tasks[1]), true);
-  assert.equal(breaksOut(tasks[2]), false);
+test("a task completed here lingers in Awaiting review, not Completed", () => {
+  const t = task(1, "done", { acceptanceId: 9, completedAt: "2026-11-15T00:00:00Z" });
+  assert.deepEqual(groupsOf(t, new Set([1])), ["done"]);
+  assert.deepEqual(groupsOf(t), ["settled"]);
 });
 
-test("settled members roll up only into a completed tree", () => {
-  const tasks = [
-    task(1, "settled", { treeId: 10 }), // active tree: stays in Settled
-    task(2, "running", { treeId: 10 }),
-    task(3, "settled", { treeId: 20 }), // completed tree: its row replaces it
-    task(4, "settled", { treeId: 20 }),
-    task(5, "settled"),
-  ];
-  const split = splitTreeMembers(tasks, [tree(10), tree(20, "2026-11-15T10:00:00Z")]);
-  assert.deepEqual(ids(split.rows), [1, 5]);
-  assert.deepEqual(ids(split.rolledUp), [2, 3, 4]);
+test("the Dashboard lists only what asks for the user", () => {
+  assert.deepEqual(ATTENTION_GROUPS, ["needs", "done", "ready", "failed"]);
+  assert.equal(parseGroupKey("running"), "running");
+  assert.equal(parseGroupKey("trees"), null);
+  assert.equal(parseGroupKey(null), null);
+});
+
+test("splitByKind: tree members leave the task groups; members of unlisted trees stay", () => {
+  const tasks = [task(1, "running", { treeId: 10 }), task(2, "backlog"), task(3, "settled", { treeId: 20 }), task(4, "done", { treeId: 99 })];
+  const split = splitByKind(tasks, [tree(10), tree(20, "2026-11-15T10:00:00Z")]);
   assert.deepEqual(ids(split.active), [10]);
   assert.deepEqual(ids(split.settled), [20]);
-});
-
-test("members of trees not listed keep their rows (trees not loaded, or filtered out)", () => {
-  const tasks = [task(1, "running", { treeId: 10 }), task(2, "settled", { treeId: 10 })];
-  const split = splitTreeMembers(tasks, []);
-  assert.deepEqual(ids(split.rows), [1, 2]);
-  assert.deepEqual(split.rolledUp, []);
-});
-
-test("done and archived trees are left out of the Dashboard split", () => {
-  const tasks = [task(1, "running", { treeId: 10 }), task(2, "settled", { treeId: 20 })];
-  const split = splitTreeMembers(tasks, [tree(10, null, "done"), tree(20, "2026-11-15T10:00:00Z", "archived"), tree(30)]);
-  assert.deepEqual(ids(split.active), [30]);
-  assert.deepEqual(split.settled, []);
-  assert.deepEqual(ids(split.rows), [1, 2]);
-  assert.deepEqual(split.rolledUp, []);
-});
-
-test("a lingering completed member keeps its row even when its tree completes", () => {
-  // #2 was just completed here; its tree is now complete, so without linger it would roll up into the tree row.
-  const tasks = [task(1, "settled", { treeId: 20 }), task(2, "done", { treeId: 20, acceptanceId: 7 })];
-  const trees = [tree(20, "2026-11-15T10:00:00Z")];
-  assert.deepEqual(ids(splitTreeMembers(tasks, trees).rows), []);
-  const split = splitTreeMembers(tasks, trees, new Set([2]));
-  assert.deepEqual(ids(split.rows), [2]);
-  assert.deepEqual(ids(split.rolledUp), [1]);
+  assert.deepEqual(ids(split.standalone), [2, 4]);
 });
 
 test("a lingering task stays in Awaiting review and out of Completed until its linger ends", () => {

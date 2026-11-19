@@ -343,8 +343,8 @@ export function TaskRow({
   );
 }
 
-/** Dashboard Settled group: tasks and external threads in one list (already ordered by settle time). */
-export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyText: string }) {
+/** Completed group: tasks and trees in one list (already ordered by settle time). */
+export function SettledRows({ items, emptyText, showProject = true }: { items: SettledItem[]; emptyText: string; showProject?: boolean }) {
   if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
   return (
     <ul>
@@ -354,7 +354,7 @@ export function SettledRows({ items, emptyText }: { items: SettledItem[]; emptyT
           className="border-b border-line last:border-b-0"
         >
           {item.kind === "task" ? (
-            <TaskRow task={item.task} showProject />
+            <TaskRow task={item.task} showProject={showProject} />
           ) : (
             <TreeRow tree={item.tree} />
           )}

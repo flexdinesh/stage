@@ -173,3 +173,24 @@ export const IconTree = (p: IconProps) => (
     <path d="M5.5 2h5v3.5h-5zM1.5 10.5h5V14h-5zM9.5 10.5h5V14h-5zM8 5.5V8M4 10.5V8h8v2.5" />
   </Svg>
 );
+
+/** Task list: square bullets beside three rules. */
+export const IconTasks = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6.5 4h7M6.5 8h7M6.5 12h7M2.5 3.25h1.5v1.5H2.5zM2.5 7.25h1.5v1.5H2.5zM2.5 11.25h1.5v1.5H2.5z" />
+  </Svg>
+);
+
+/** Pin: a square head over a needle. */
+export const IconPin = (p: IconProps) => (
+  <Svg {...p} size={p.size ?? 12}>
+    <path d="M5 2.5h6M6 2.5v4.5L4 9.5h8L10 7V2.5M8 9.5V14" />
+  </Svg>
+);
+
+/** Settings: two sliders with square knobs. */
+export const IconSettings = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2 5h12M2 11h12M4.5 3.5h2.5v3H4.5zM9 9.5h2.5v3H9z" />
+  </Svg>
+);
