@@ -21,8 +21,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-const supportedVersion = "2.3.0"
-
 type Adapter struct {
 	connection                                         int64
 	endpoint, browserEndpoint, web, username, password string
@@ -197,9 +195,8 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 	if e := a.get(ctx, "/api/info", &info); e != nil {
 		return info, e
 	}
-	if info.Version != supportedVersion {
-		return info, fmt.Errorf("OpenCode %q is unverified. Connect a tested V2 %s service.", info.Version, supportedVersion)
-	}
+	// Any version is accepted while its OpenAPI contract has what Stage
+	// calls; version-specific handling can branch on info.Version.
 	a.contractMu.Lock()
 	defer a.contractMu.Unlock()
 	if info.PID > 0 && info.Hostname != "" && a.verified == info {
@@ -233,7 +230,7 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 		{"get", "/api/session/{sessionID}/form", "session.form.list"},
 	} {
 		if spec.Paths[op.path][op.method].OperationID != op.id {
-			return info, fmt.Errorf("OpenCode contract is missing %s. Check the server build.", op.id)
+			return info, fmt.Errorf("OpenCode %s is missing %s, which Stage needs.", info.Version, op.id)
 		}
 	}
 	for path, fields := range map[string][]string{
@@ -247,7 +244,7 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 		}
 		for _, field := range fields {
 			if shape.Properties[field] == nil {
-				return info, fmt.Errorf("OpenCode %s request lacks %s", path, field)
+				return info, fmt.Errorf("OpenCode %s: the %s request lacks %s, which Stage needs.", info.Version, path, field)
 			}
 		}
 	}

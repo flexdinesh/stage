@@ -309,6 +309,12 @@ func (p *APIProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stop := context.AfterFunc(c.ctx, cancel)
 	defer stop()
 	ctx = context.WithValue(ctx, reqKey{}, reqInfo{c: c, page: r.Context()})
+	// MyGo sets ContentLength only from a Content-Length header, which
+	// macOS WKWebView does not send; ReverseProxy drops a body of length 0.
+	// Forward it with unknown length (chunked) instead.
+	if r.ContentLength == 0 && r.Body != nil && r.Body != http.NoBody {
+		r.ContentLength = -1
+	}
 	p.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 

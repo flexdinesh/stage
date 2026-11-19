@@ -23,12 +23,13 @@ type Server struct {
 	// Users records the Basic username of each authenticated request.
 	Users []string
 	// Pairs counts POST /api/pair calls.
-	Pairs int
+	Pairs   int
+	version string
 }
 
 // New starts a fake service; password "" requires no auth.
 func New(t testing.TB, password string) *Server {
-	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}}
+	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}, version: "2.3.0"}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
@@ -39,6 +40,13 @@ func (s *Server) SetPassword(p string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.password, s.tokens = p, map[string]bool{}
+}
+
+// SetVersion changes what /api/info reports (default 2.3.0).
+func (s *Server) SetVersion(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.version = v
 }
 
 // Revoke rejects every issued token.
@@ -120,7 +128,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "expires_in": 300})
 	case r.URL.Path == "/api/info":
-		fmt.Fprint(w, `{"version":"2.3.0","hostname":"fake","pid":42}`)
+		s.mu.Lock()
+		version := s.version
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
 		_ = json.NewEncoder(w).Encode(spec())
 	case r.URL.Path == "/api/project":

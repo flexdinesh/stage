@@ -57,6 +57,10 @@ func (s *stub) handler() http.Handler {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]int{"id": 1, "sizeBytes": len(b)})
 	})
+	mux.HandleFunc("POST /api/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.Copy(w, r.Body)
+	})
 	mux.HandleFunc("GET /api/attachments/1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Set-Cookie", "a=b")
@@ -269,6 +273,35 @@ func TestProxyUploadAndAttachment(t *testing.T) {
 	}
 	if c := rec.sentHeader().Get("Set-Cookie"); c != "" {
 		t.Errorf("Set-Cookie passed through: %q", c)
+	}
+}
+
+// TestProxyBodyWithoutLength: MyGo hands over a body as an io.NopCloser
+// and knows its length only from a Content-Length header, which macOS
+// WKWebView does not send. The body must still reach the server.
+func TestProxyBodyWithoutLength(t *testing.T) {
+	_, sock := startStub(t)
+	h := bridge.Scheme(bridge.NewAPIProxy(target.Local(sock)), http.NotFoundHandler())
+	myGoRequest := func(path string, body []byte, ctype string) *http.Request {
+		r := httpRequest(t, context.Background(), "POST", "mygo://localhost"+path, io.NopCloser(bytes.NewReader(body)))
+		r.Header.Set("Content-Type", ctype)
+		return r
+	}
+	const link = `{"link":"http://127.0.0.1:49374/auth/connect/abc"}`
+	rec := newStreamRecorder()
+	h.ServeHTTP(rec, myGoRequest("/api/echo", []byte(link), "application/json"))
+	if status, out := rec.result(); status != 200 || out != link {
+		t.Fatalf("json: %d %q, want %q", status, out, link)
+	}
+	upload, ctype := multipartPNG(t, "dot.png", pngBytes)
+	raw, err := io.ReadAll(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = newStreamRecorder()
+	h.ServeHTTP(rec, myGoRequest("/api/uploads", raw, ctype))
+	if status, out := rec.result(); status != http.StatusCreated || !strings.Contains(out, fmt.Sprintf(`"sizeBytes":%d`, len(pngBytes))) {
+		t.Fatalf("upload: %d %s", status, out)
 	}
 }
 

@@ -16,7 +16,7 @@ Decisions: [ADR 0001](adr/0001-desktop-shell.md).
 | Path | What |
 | --- | --- |
 | `desktop/app/` | Go module `github.com/flexdinesh/stage/desktop/app` (MyGo v0.9.0). Never imports `server/internal` or the fixture. |
-| `bridge/` | Bridge B: the `mygo://localhost` scheme serves the embedded UI (`dist/`, with a CSP header) and reverse-proxies `/api/*` to the active server (socket or TCP). |
+| `bridge/` | Bridge B: the `mygo://localhost` scheme serves the embedded UI (`dist/`, with a CSP header) and reverse-proxies `/api/*` to the active server (socket or TCP). Request bodies without a `Content-Length` (macOS WKWebView sends none) are forwarded with unknown length. |
 | `target/` | The servers: the local target (implicit) and saved remotes (`servers.json`), each one's transport (no HTTP proxy), Host and base URL. No MyGo import. |
 | `launch/` | Launcher and monitor: ensures the local service through the bundled CLI, checks readiness and API version (socket or TCP), watches health, switches servers, tests a server URL. No MyGo import. |
 | `nav/` | URL policy: what the webview may load, what goes to the OS, deep links, notification click paths. |
