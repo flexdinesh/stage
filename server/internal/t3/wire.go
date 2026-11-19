@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 // Wire shapes of T3 MCP tool results (t3code packages/contracts/src/
@@ -144,9 +146,13 @@ type wireProject struct {
 	CommitError        string                                      `json:"commitError"` // t3_project_create only
 }
 
+// toProject: a live T3 project is importable; users add T3 projects
+// deliberately.
 func (w wireProject) toProject() Project {
 	return Project{
 		OriginRemote:  w.RepositoryIdentity.Origin.RemoteURL,
+		Repo:          gitmeta.RemoteIdentity(w.RepositoryIdentity.Origin.RemoteURL),
+		Importable:    w.ArchivedAt.ptr() == nil && w.DeletedAt.ptr() == nil,
 		ID:            w.ID,
 		Title:         w.Title,
 		WorkspaceRoot: w.WorkspaceRoot,

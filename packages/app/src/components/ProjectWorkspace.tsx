@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import type { ExternalProject, HarnessConnection, Project } from "../api/types.ts";
 import { HARNESS_NAME, rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
+import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
 import { Alert, Button, Drawer, ErrorText, Field, Input, Panel, QueryState } from "./ui.tsx";
@@ -117,6 +118,7 @@ export function BindWorkspaceDrawer({
                       </span>
                       <span className="block break-all font-mono text-meta text-muted">
                         {candidate.workspace}
+                        {candidate.repo === "" ? null : ` · ${repoLabel(candidate.repo)}`}
                       </span>
                       <span className="block text-small text-muted">
                         {unavailable
@@ -347,6 +349,9 @@ function ConnectionWorkspace({
       ) : (
         <>
           <p className="break-all font-mono text-meta">{current.workspace}</p>
+          {current.origin === "manual" ? null : (
+            <p className="font-mono text-meta text-muted">{current.origin === "imported" ? "auto · imported" : "auto · same path"}</p>
+          )}
           {current.status === "available" ? null : (
             <Alert>
               {current.status === "changed"
@@ -391,7 +396,7 @@ function ConnectionWorkspace({
       {confirmUnbind ? (
         <Alert>
           Unbind this workspace? Planning and history remain available. New launches need a
-          binding.
+          binding. Discovery won't bind this workspace again; bind it here to undo.
           <div className="mt-2 flex gap-2">
             <Button busy={unbind.isPending} onClick={() => unbind.mutate()}>
               Unbind workspace

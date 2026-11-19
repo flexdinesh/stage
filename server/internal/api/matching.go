@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 type checkoutEvidence struct {
@@ -73,20 +73,7 @@ func checkout(ctx context.Context, paths []db.SharedPath, connection int64, dire
 
 // Only repository hosts and paths enter comparisons. Credentials and local
 // directory remotes are never returned to a client or treated as proof.
-func remoteIdentity(raw string) string {
-	if !strings.Contains(raw, "://") {
-		host, path, ok := strings.Cut(raw, ":")
-		if !ok || strings.ContainsAny(host, "/\\") {
-			return ""
-		}
-		raw = "ssh://" + host + "/" + path
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Path == "" || (u.Scheme != "ssh" && u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "git") {
-		return ""
-	}
-	return strings.ToLower(u.Host) + strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git")
-}
+func remoteIdentity(raw string) string { return gitmeta.RemoteIdentity(raw) }
 
 func (s *server) sharedPaths(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == http.MethodPut {
@@ -109,8 +96,9 @@ func (s *server) sharedPaths(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// Only this explicit setup action may automatically bind. Refresh is read-only
-// with respect to binding ownership.
+// The explicit match action binds by verified checkout evidence. Discovery
+// refresh here stays read-only for bindings; the sync pass alone imports
+// (db.Store.ImportWorkspaces).
 func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	id, err := pathID(r)
@@ -121,11 +109,10 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	adapter, err := s.Sync.Adapter(connection)
-	if err != nil {
+	if _, err = s.Sync.Adapter(connection); err != nil {
 		return err
 	}
-	inventory, err := adapter.Workspaces(ctx)
+	inventory, err := s.Sync.Inventory(ctx, connection)
 	if err != nil {
 		return &db.HarnessError{Err: err}
 	}

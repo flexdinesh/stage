@@ -257,31 +257,38 @@ func (a api) read(groups ...string) {
 	a.do("POST", "/api/notifications/read", map[string]any{"groups": groups}, 204, nil)
 }
 
-// project explicitly imports and binds the isolated fake's demo workspace.
+// project is the Stage project the server's sync imported for the isolated
+// fake's demo workspace.
 func (a api) project() (int64, string) { return bindDemoProject(a.t, a.do) }
 
-// Exercise the same explicit create/bind workflow over both bridge and socket.
+// The startup sync imports and binds the demo workspace; read it over both
+// bridge and socket.
 func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) (int64, string) {
 	t.Helper()
-	var discovered struct {
-		Projects []struct {
-			ExternalID string `json:"externalId"`
-			Workspace  string `json:"workspace"`
-			Title      string `json:"title"`
-		} `json:"projects"`
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var discovered struct {
+			Projects []struct {
+				ProjectID *int64 `json:"projectId"`
+			} `json:"projects"`
+		}
+		request("GET", "/api/connections/t3/projects", nil, 200, &discovered)
+		if len(discovered.Projects) == 0 {
+			t.Fatal("fake has no workspace")
+		}
+		if id := discovered.Projects[0].ProjectID; id != nil {
+			var project struct {
+				ID    int64  `json:"id"`
+				Title string `json:"title"`
+			}
+			request("GET", fmt.Sprintf("/api/projects/%d", *id), nil, 200, &project)
+			return project.ID, project.Title
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sync did not import the demo workspace")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	request("GET", "/api/connections/t3/projects", nil, 200, &discovered)
-	if len(discovered.Projects) == 0 {
-		t.Fatal("fake has no workspace")
-	}
-	workspace := discovered.Projects[0]
-	var project struct {
-		ID    int64  `json:"id"`
-		Title string `json:"title"`
-	}
-	request("POST", "/api/projects", map[string]any{"title": workspace.Title}, 201, &project)
-	request("PUT", fmt.Sprintf("/api/projects/%d/binding", project.ID), map[string]any{"connectionId": 1, "externalProjectId": workspace.ExternalID, "workspace": workspace.Workspace}, 200, nil)
-	return project.ID, project.Title
 }
 
 // launch creates and starts a task; the fake T3 makes it ask a question.

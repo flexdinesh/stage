@@ -28,6 +28,9 @@ type Adapter struct {
 	contractMu                                         sync.Mutex
 	verified                                           serverInfo
 	onHealth                                           func()
+	// local: the service runs on Stage's machine (local auth), so its
+	// checkout paths are readable here for repository metadata.
+	local bool
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
@@ -92,7 +95,7 @@ func New(connection int64, cfg Settings) (*Adapter, error) {
 	if (cfg.Username == "") != (cfg.Password == "") {
 		return nil, errors.New("provide both OpenCode Basic credentials or neither")
 	}
-	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, local: cfg.Auth == config.OpenCodeAuthLocal, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // OnHealth registers fn to run at the start of every health check (the

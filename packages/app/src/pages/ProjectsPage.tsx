@@ -1,5 +1,5 @@
 import { bindingsSummary } from "../lib/harnesses.ts";
-import { projectWorkspace } from "../lib/projects.ts";
+import { importNotice, projectWorkspace } from "../lib/projects.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
@@ -116,12 +116,17 @@ export function ProjectsPage() {
     storage.set(SORT_KEY, next);
   };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
+  const notice = importNotice(projects.data?.imports ?? []);
 
   return (
     <>
       <PageHeader
         title="Projects"
-        meta={`${projects.data === undefined ? "…" : list.length} projects · archived ${filter === "all" ? "shown" : "hidden"}`}
+        meta={[
+          `${projects.data === undefined ? "…" : list.length} projects`,
+          `archived ${filter === "all" ? "shown" : "hidden"}`,
+          ...(notice === null ? [] : [notice]),
+        ].join(" · ")}
         actions={
           <>
             <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />

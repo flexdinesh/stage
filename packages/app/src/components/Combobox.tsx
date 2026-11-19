@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { MatchRange } from "../lib/projects.ts";
 import { Chip, Kbd, cx, inputClass } from "./ui.tsx";
@@ -80,7 +80,7 @@ export function Combobox({
   /** Listed first while the query is empty (e.g. "All projects"). */
   pinned?: readonly ComboboxOption[] | undefined;
   placeholder?: string | undefined;
-  emptyText: string;
+  emptyText: ReactNode;
   listLabel: string;
   disabled?: boolean | undefined;
   className?: string | undefined;

@@ -1,8 +1,7 @@
-import { projectWorkspace } from "../lib/projects.ts";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useProjects } from "../api/queries.ts";
 import type { Project } from "../api/types.ts";
-import { matchProjects, type ProjectMatch } from "../lib/projects.ts";
+import { matchProjects, projectDetail, type ProjectMatch } from "../lib/projects.ts";
 import { Combobox, type ComboboxOption } from "./Combobox.tsx";
 
 function toOption(m: ProjectMatch): ComboboxOption {
@@ -10,7 +9,7 @@ function toOption(m: ProjectMatch): ComboboxOption {
     value: String(m.project.id),
     label: m.project.title,
     labelMatch: m.title,
-    detail: projectWorkspace(m.project),
+    detail: projectDetail(m.project),
     detailMatch: m.path,
     ...(m.project.archivedAt === null ? {} : { chip: "archived" }),
   };
@@ -28,6 +27,7 @@ export function ProjectCombobox({
   className,
   size,
   autoFocus,
+  emptyText = "No matching projects",
 }: {
   projects: readonly Project[];
   id?: string | undefined;
@@ -40,6 +40,8 @@ export function ProjectCombobox({
   className?: string | undefined;
   size?: number | undefined;
   autoFocus?: boolean | undefined;
+  /** Shown when no project matches. */
+  emptyText?: ReactNode;
 }) {
   const options = useCallback((query: string) => matchProjects(projects, query).map(toOption), [projects]);
   const pinnedOptions = useMemo(() => (pinned === undefined ? [] : [{ value: "", label: pinned }]), [pinned]);
@@ -51,7 +53,7 @@ export function ProjectCombobox({
       options={options}
       pinned={pinnedOptions}
       placeholder={placeholder}
-      emptyText="No matching projects"
+      emptyText={emptyText}
       listLabel="Projects"
       disabled={disabled}
       className={className}

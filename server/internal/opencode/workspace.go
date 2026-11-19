@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 func queryDirectory(dir string) string {
@@ -22,10 +24,37 @@ func millis(i int64) *time.Time {
 	t := time.UnixMilli(i).UTC()
 	return &t
 }
+// globalProject is OpenCode's catch-all project for directories outside any
+// repository it can identify.
+const globalProject = "global"
+
+// title names an unnamed project after its checkout: the last path segment,
+// or parent/segment for a worktree-style layout (octo/main).
+func title(name, canonical string) string {
+	if name != "" {
+		return name
+	}
+	clean := path.Clean(canonical)
+	base := path.Base(clean)
+	if base == "/" || base == "." {
+		return canonical
+	}
+	switch base {
+	case "main", "master", "trunk":
+		if parent := path.Base(path.Dir(clean)); parent != "/" && parent != "." {
+			return parent + "/" + base
+		}
+	}
+	return base
+}
+
+// Workspaces lists OpenCode's project inventory. A project is importable
+// when it is a version-controlled checkout OpenCode has not archived;
+// plain directories (home, config, scratch) stay manual-bind only.
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	var projects []struct {
-		ID, Name, Canonical string
-		Time                struct{ Created, Updated, Archived int64 }
+		ID, Name, Canonical, Vcs string
+		Time                     struct{ Created, Updated, Active, Archived int64 }
 	}
 	if e := a.get(ctx, "/api/project?archived=true", &projects); e != nil {
 		return nil, e
@@ -38,16 +67,19 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 		if p.ID == "" || p.Canonical == "" || p.Time.Created <= 0 || p.Time.Updated <= 0 {
 			return nil, errors.New("incomplete OpenCode project inventory")
 		}
-		title := p.Name
-		if title == "" {
-			title = p.Canonical
-		}
 		// A project binding pins the canonical checkout. Created worktrees
 		// belong to its separate per-project inventory.
-		out = append(out, execution.WorkspaceInfo{
-			ID: p.ID, Title: title, WorkspaceRoot: p.Canonical,
+		w := execution.WorkspaceInfo{
+			ID: p.ID, Title: title(p.Name, p.Canonical), WorkspaceRoot: p.Canonical,
 			ArchivedAt: millis(p.Time.Archived), CreatedAt: *millis(p.Time.Created), UpdatedAt: *millis(p.Time.Updated),
-		})
+			ActiveAt:   millis(p.Time.Active),
+			Importable: p.Vcs != "" && p.Time.Archived <= 0 && p.ID != globalProject,
+		}
+		// Only a service on Stage's machine shares its filesystem.
+		if a.local && p.Vcs == "git" {
+			w.Repo = gitmeta.OriginRepo(p.Canonical)
+		}
+		out = append(out, w)
 	}
 	return out, nil
 }

@@ -85,7 +85,8 @@ func (e *env) project(root string) db.Project {
 	if _, err := e.sync.FullSync(ctx); err != nil {
 		e.t.Fatal(err)
 	}
-	out, err := e.store.InsertProject(ctx, db.Project{Title: p.Title, Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: p.ID, Workspace: root}}})
+	// The sync pass imports the T3 project.
+	out, err := e.store.BoundProject(ctx, db.ProjectBinding{ConnectionID: 1, ExternalProjectID: p.ID, Workspace: root})
 	if err != nil {
 		e.t.Fatal(err)
 	}

@@ -1,4 +1,18 @@
-import type { Project } from "../api/types.ts";
+import type { ImportSummary, Project } from "../api/types.ts";
+import { relativeTime } from "./format.ts";
+import { HARNESS_NAME } from "./harnesses.ts";
+
+/**
+ * The Projects page's quiet import note: "12 imported from OpenCode 2h ago", or per harness
+ * ("12 imported from OpenCode, 3 from T3 2h ago"). Null when nothing was imported recently.
+ * `imports` comes newest first; the time is the latest import.
+ */
+export function importNotice(imports: readonly ImportSummary[], now: number = Date.now()): string | null {
+  const [latest] = imports;
+  if (latest === undefined) return null;
+  const sources = imports.map((m, i) => `${i === 0 ? `${m.count} imported from` : `${m.count} from`} ${HARNESS_NAME[m.harness]}`);
+  return `${sources.join(", ")} ${relativeTime(latest.at, now)}`;
+}
 
 /** Half-open [start, end) span of matched text. */
 export interface MatchRange {
@@ -10,8 +24,10 @@ export interface ProjectMatch {
   project: Project;
   /** Matched span in `project.title`; null when the title did not match (or the query is empty). */
   title: MatchRange | null;
-  /** Matched span in `project.workspaceRoot`; null when the path did not match (or the query is empty). */
+  /** Matched span in `projectDetail(project)` (paths, then repos); null when neither matched (or the query is empty). */
   path: MatchRange | null;
+  /** True when only the repo metadata matched. */
+  repo: boolean;
 }
 
 function find(text: string, q: string): MatchRange | null {
@@ -19,10 +35,35 @@ function find(text: string, q: string): MatchRange | null {
   return start < 0 ? null : { start, end: start + q.length };
 }
 
-/** Title prefix, then title substring, then path only. */
+/** Title prefix, then title substring, then path, then repo only. */
 function rank(m: ProjectMatch): number {
-  if (m.title === null) return 2;
+  if (m.title === null) return m.repo ? 3 : 2;
   return m.title.start === 0 ? 0 : 1;
+}
+
+const DETAIL_SEPARATOR = " · ";
+
+/** A repo for display: GitHub's host is implied, any other host stays. */
+export function repoLabel(repo: string): string {
+  return repo.startsWith("github.com/") ? repo.slice("github.com/".length) : repo;
+}
+
+/** Paths, then repo labels: the picker subtext. Paths stay the source of truth; repos only aid search. */
+export function projectDetail(project: Project): string {
+  const repos = project.repos.map(repoLabel).join(", ");
+  const path = projectWorkspace(project);
+  return repos === "" ? path : path + DETAIL_SEPARATOR + repos;
+}
+
+function matchDetail(project: Project, q: string): { range: MatchRange | null; repo: boolean } {
+  const path = projectWorkspace(project);
+  const inPath = find(path, q);
+  if (inPath !== null) return { range: inPath, repo: false };
+  const repos = project.repos.map(repoLabel).join(", ");
+  const inRepo = find(repos, q);
+  if (inRepo === null) return { range: null, repo: false };
+  const offset = path.length + DETAIL_SEPARATOR.length;
+  return { range: { start: inRepo.start + offset, end: inRepo.end + offset }, repo: true };
 }
 
 /** Most recent activity first; projects with no activity last; then title. */
@@ -37,16 +78,32 @@ function byRecency(a: Project, b: Project): number {
 }
 
 /**
- * Projects matching `query` (case-insensitive substring of title or workspace path, surrounding space ignored).
- * Ranked title prefix, title substring, path only; ties and the empty query order by recent activity.
+ * Projects matching `query` (case-insensitive substring of title, workspace path or repo label, surrounding space ignored).
+ * Ranked title prefix, title substring, path, repo only; ties and the empty query order by recent activity.
  */
 export function matchProjects(projects: readonly Project[], query: string): ProjectMatch[] {
   const q = query.trim().toLowerCase();
-  if (q === "") return projects.toSorted(byRecency).map((project) => ({ project, title: null, path: null }));
+  if (q === "") return projects.toSorted(byRecency).map((project) => ({ project, title: null, path: null, repo: false }));
   return projects
-    .map((project) => ({ project, title: find(project.title, q), path: find(projectWorkspace(project), q) }))
+    .map((project) => {
+      const detail = matchDetail(project, q);
+      return { project, title: find(project.title, q), path: detail.range, repo: detail.repo };
+    })
     .filter((m) => m.title !== null || m.path !== null)
     .toSorted((a, b) => rank(a) - rank(b) || byRecency(a.project, b.project));
+}
+
+/**
+ * The projects a task on `connectionId` can use: bound to that connection, or not bound to any
+ * active connection (plannable, bindable later). 0 means no harness chosen yet: all of them.
+ * `keepId` (the current selection) always stays listed.
+ */
+export function projectsForConnection(projects: readonly Project[], connectionId: number, keepId: string): Project[] {
+  if (connectionId === 0) return [...projects];
+  return projects.filter((p) => {
+    const active = p.bindings.filter((b) => b.connectionActive);
+    return String(p.id) === keepId || active.length === 0 || active.some((b) => b.connectionId === connectionId);
+  });
 }
 
 export function projectWorkspace(project: Project): string {

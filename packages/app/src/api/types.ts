@@ -209,10 +209,24 @@ export interface Project {
   updatedAt: string;
   /** Latest thread update/settle or task update; null when none. */
   lastActivityAt: string | null;
+  /** "discovered" when harness discovery imported it. */
+  origin: "discovered" | null;
+  importedAt: string | null;
+  /** Normalized origin remotes (host/owner/name) of its bound workspaces. Search metadata only. */
+  repos: string[];
+}
+
+/** Projects one connection's discovery created in the last 7 days. */
+export interface ImportSummary {
+  connectionId: number;
+  harness: "t3" | "opencode";
+  count: number;
+  at: string;
 }
 
 export interface ProjectList {
   projects: Project[];
+  imports: ImportSummary[];
 }
 
 export interface CreateProjectRequest { title: string }
@@ -230,6 +244,8 @@ export interface ProjectBinding {
  connectionActive: boolean;
  /** The connection's T3 environment label or OpenCode address. */
  connectionLabel: string;
+ /** manual: a user bound it; imported: discovery created the project for it; path: discovery bound it to the project already at that path. */
+ origin: "manual" | "imported" | "path";
 }
 export interface ExternalProject {
  connectionId: number;
@@ -237,6 +253,8 @@ export interface ExternalProject {
  title: string;
  workspace: string;
  projectId: number | null;
+ /** Normalized origin remote, "" when unknown. */
+ repo: string;
 }
 
 

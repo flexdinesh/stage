@@ -97,4 +97,15 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	if pr := svc.Progress(); pr.Running || pr.Threads != 0 {
 		t.Fatalf("after sync %+v", pr)
 	}
+	// The sync pass imports the discovered project once.
+	ps, err := store.ListProjects(t.Context(), "all")
+	if err != nil || len(ps) != 1 || ps[0].Title != "app" || len(ps[0].Bindings) != 1 || ps[0].Bindings[0].Origin != db.BindingImported {
+		t.Fatalf("projects %+v %v", ps, err)
+	}
+	if _, err = svc.FullSync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if ps, err = store.ListProjects(t.Context(), "all"); err != nil || len(ps) != 1 {
+		t.Fatalf("reimported %+v %v", ps, err)
+	}
 }

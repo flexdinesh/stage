@@ -38,6 +38,7 @@ import {
 import { handoffHint } from "../lib/handoff.ts";
 import { choiceToWorkspace, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
+import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
@@ -278,6 +279,8 @@ function TaskFormDrawer({
   // Bindings on replaced connections are history: they never pick the destination.
   const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
   const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
+  // An explicitly chosen harness narrows the picker to projects it can run.
+  const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, s.projectId), [projects.data, chosen, s.projectId]);
   const isT3 = harnesses.harness(connection) === "t3";
   const openCode = harnesses.harness(connection) === "opencode";
   const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
@@ -489,12 +492,14 @@ function TaskFormDrawer({
             {(id) => (
               <ProjectCombobox
                 id={id}
-                projects={projects.data?.projects ?? []}
+                projects={pickable}
                 disabled={!full}
                 value={s.projectId}
-                onChange={(projectId) => {set({projectId}); if (!existing) setChosen(0);}}
+                // The list holds only projects the chosen harness can use, so the choice stands.
+                onChange={(projectId) => set({projectId})}
                 placeholder="Select project…"
                 autoFocus={isNew}
+                emptyText={chosen === 0 || pickable.length > 0 ? undefined : <NoHarnessProjects connectionId={chosen} />}
               />
             )}
           </Field>
@@ -649,6 +654,17 @@ function TaskFormDrawer({
 }
 
 type FieldsProps = { s: FormState; set: (patch: Partial<FormState>) => void };
+
+/** The picker's empty state for a chosen harness with no usable project. */
+function NoHarnessProjects({ connectionId }: { connectionId: number }) {
+  const harnesses = useHarnesses();
+  const name = harnesses.name(connectionId);
+  const settings = <Link to="/settings" className="underline">Settings</Link>;
+  if (harnesses.connection(connectionId)?.configured === false) {
+    return <>{name} is not connected. Connect it in {settings}.</>;
+  }
+  return <>No {name} projects yet. Open a Git repository in {name}, then Sync now in {settings}.</>;
+}
 
 function ZoneField({ s, set }: FieldsProps) {
   const zones = useMemo(() => timeZones(s.tz), [s.tz]);
