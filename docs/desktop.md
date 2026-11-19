@@ -267,7 +267,7 @@ Build with `mise run dist` (`TARGETS=all` for every platform) and install or ope
 | 15 | Restart the `stage-dev` service: stream reconnects, no duplicates, a new event arrives | | | |
 | 16 | Window hidden during events: no stale toast pile-up on return | | | |
 
-Task completion uses the shared app review drawer (full width on phones), with cached evidence, dependent impact and optional acceptance note. Accepted history stays available without T3. Reopen preserves history and never reopens a closed tree. Execution chips and notifications remain live beside acceptance; API v4 separates these contracts.
+Task completion uses the shared app review drawer (full width on phones), with cached evidence, dependent impact and optional acceptance note. Accepted history stays available without T3. Reopen preserves history and never reopens a closed tree. A completed task shows one "completed" chip; its execution chip joins only once execution moves on (running again, needs input, failed), and a finished run not completed yet reads "to review". Notifications stay live beside acceptance; API v4 separates these contracts.
 
 Project planning remains available without T3. The shared project form creates
 Stage metadata offline. Bind the selected harness workspace before launch.

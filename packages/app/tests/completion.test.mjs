@@ -30,8 +30,8 @@ test("provenanceText says who completed the result", () => {
 });
 
 test("autoCompletedMeta labels inferred completions only", () => {
-  assert.equal(autoCompletedMeta("harness_settled"), "auto · T3 settle");
-  assert.equal(autoCompletedMeta("harness_archived"), "auto · OpenCode archive");
+  assert.equal(autoCompletedMeta("harness_settled"), "via T3 settle");
+  assert.equal(autoCompletedMeta("harness_archived"), "via OpenCode archive");
   assert.equal(autoCompletedMeta("user"), null);
   assert.equal(autoCompletedMeta(null), null);
 });

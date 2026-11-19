@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeApi } from "./fake-transport.mjs";
-import { batchSize, canStart, isFullyEditable, isWaiting, moveItem, waitTarget } from "../src/lib/tasks.ts";
+import { batchSize, canStart, isFullyEditable, isWaiting, moveItem, statusChips, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
   acceptanceId: null, treeStatus: null, id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
@@ -87,4 +87,23 @@ test("HTTP contract: needs, trees and adopt calls", async () => {
     { path: "/tasks?project=2&closed=true", method: "GET", body: undefined },
     { path: "/connections/1/sessions/a%2Fb/adopt", method: "POST", body: { title: "Plan" } },
   ]);
+});
+
+test("a completed task shows one chip until execution moves on", () => {
+  for (const state of ["done", "settled", "backlog"]) assert.deepEqual(statusChips(task(1, { state, acceptanceId: 9 })), ["completed"]);
+  for (const state of ["running", "needs_input", "launching", "failed", "interrupted", "cancelled"])
+    assert.deepEqual(statusChips(task(1, { state, acceptanceId: 9 })), ["completed", state]);
+});
+
+test("a finished run not completed yet reads to review", () => {
+  assert.deepEqual(statusChips(task(1, { state: "done" })), ["to_review"]);
+  assert.deepEqual(statusChips(task(1, { state: "settled" })), ["to_review"]);
+});
+
+test("open tasks show readiness in backlog, else their execution state", () => {
+  assert.deepEqual(statusChips(task(1, { readiness: "ready" })), ["ready"]);
+  assert.deepEqual(statusChips(task(1, { readiness: "blocked", needs: [3] })), ["blocked"]);
+  assert.deepEqual(statusChips(task(1)), ["backlog"]);
+  assert.deepEqual(statusChips(task(1, { state: "running" })), ["running"]);
+  assert.deepEqual(statusChips(task(1, { state: "failed" })), ["failed"]);
 });

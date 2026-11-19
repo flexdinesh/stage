@@ -8,7 +8,7 @@ import { CopyButton } from "../components/CopyButton.tsx";
 import { RefText } from "../components/StageLinks.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
-import { TaskStateBadge } from "../components/StateBadge.tsx";
+import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import { Alert, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, cx } from "../components/ui.tsx";
 import { dateTime, executionModes, modelText, relativeTime, workspaceText } from "../lib/format.ts";
@@ -228,7 +228,7 @@ function RunsPanel({ schedule: s }: { schedule: ScheduleDetail }) {
 }
 
 function OutcomeChip({ run }: { run: ScheduleRun }) {
-  if (run.task !== null && (run.outcome === "started" || run.outcome === "manual")) return <TaskStateBadge state={run.task.state} />;
+  if (run.task !== null && (run.outcome === "started" || run.outcome === "manual")) return <NodeChip task={run.task} />;
   switch (run.outcome) {
     case "skipped":
       return (

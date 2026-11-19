@@ -10,7 +10,7 @@ import { THEMES, useTheme } from "../lib/theme.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
-import { TaskStateBadge } from "./StateBadge.tsx";
+import { NodeChip } from "./trees/TreeNode.tsx";
 import { Chip, Kbd, activeRowClass, cx } from "./ui.tsx";
 
 /** A closed item's plain chip (archived, done, tree done) beside its other badge. */
@@ -97,7 +97,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           group: "Tasks",
           label: t.title,
           hint: t.projectTitle,
-          badge: <ClosedBadge label={taskClosedLabel(t)}><TaskStateBadge state={t.state} /></ClosedBadge>,
+          badge: <ClosedBadge label={taskClosedLabel(t)}><NodeChip task={t} /></ClosedBadge>,
           run: go(`/tasks/${t.id}`),
           sessionUrl: destination(t),
           link: { kind: "task", id: t.id, title: t.title },

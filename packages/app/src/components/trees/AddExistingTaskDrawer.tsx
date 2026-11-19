@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useInvalidateWork, useTasks } from "../../api/queries.ts";
 import type { Task, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { TaskStateBadge } from "../StateBadge.tsx";
+import { NodeChip } from "./TreeNode.tsx";
 import { Button, Checkbox, Drawer, ErrorText, Field, Input, QueryState, Radio, cx } from "../ui.tsx";
 
 const RESULT_LIMIT = 30;
@@ -83,7 +83,7 @@ export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onC
                       {t.treeTitle === null ? "" : ` · moves from ${t.treeTitle}`}
                     </span>
                   </span>
-                  <TaskStateBadge state={t.state} />
+                  <NodeChip task={t} />
                 </label>
               ))
             )}

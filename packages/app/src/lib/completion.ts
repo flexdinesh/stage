@@ -28,9 +28,9 @@ export function provenanceText(provenance: Acceptance["provenance"]): string {
   }
 }
 
-/** Completed row meta for inferred completions ("auto · T3 settle"); null for user or migrated ones. */
+/** How an inferred completion happened, after "completed 3h ago" ("via T3 settle"); null for user or migrated ones. */
 export function autoCompletedMeta(provenance: Acceptance["provenance"] | null): string | null {
-  if (provenance === "harness_settled") return "auto · T3 settle";
-  if (provenance === "harness_archived") return "auto · OpenCode archive";
+  if (provenance === "harness_settled") return "via T3 settle";
+  if (provenance === "harness_archived") return "via OpenCode archive";
   return null;
 }
