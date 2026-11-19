@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useProjects, useTasks } from "../api/queries.ts";
-import { EMPTY_LOAD, LIVE_STATES, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
+import { capCount } from "../lib/format.ts";
+import { EMPTY_LOAD, LIVE_STATES, loadMark, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
 import { IconChevronDown, IconMore, IconPin } from "./icons.tsx";
 import { useScope } from "./Scope.tsx";
 import { activeRowClass, cx } from "./ui.tsx";
@@ -33,24 +34,36 @@ export function navRowClass(active: boolean, touch = false, fill = true): string
   );
 }
 
-/** A row's open work: a run square while anything runs, then needs input (yellow) and the rest the user owes. */
-function LoadMarks({ load }: { load: ProjectLoad }) {
+/**
+ * A row's mark, the same two slots on every row so squares and counts line up down the sidebar: the loudest state's
+ * square (need over run) and what the user owes, need-toned while anything needs input. `label` is the breakdown.
+ */
+function Mark({ square, owed, need, label }: { square: "need" | "run" | null; owed: number; need: boolean; label: string }) {
+  const count = owed > 0 ? capCount(owed) : "";
+  // A capped count's "+" hangs past the two-digit slot, so "99+" keeps the column.
+  const hang = count.endsWith("+");
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-meta-sm tabular">
-      {load.run > 0 ? <span title={`${load.run} running`} aria-label={`${load.run} running`} className="size-1.5 bg-run" /> : null}
-      {load.need > 0 ? (
-        <span title={`${load.need} need input`} className="inline-flex items-center gap-1 text-need-fg">
-          <span aria-hidden className="size-1.5 bg-need" />
-          {load.need}
-        </span>
-      ) : null}
-      {load.waiting > 0 ? (
-        <span title={`${load.waiting} to review, start or retry`} className="text-muted">
-          {load.waiting}
-        </span>
-      ) : null}
+    <span title={label} className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-meta-sm tabular">
+      <span aria-hidden className={cx("size-1.5", square === "need" && "bg-need", square === "run" && "bg-run")} />
+      <span aria-hidden className={cx("relative min-w-[2ch] text-right", need ? "text-need-fg" : "text-muted")}>
+        {hang ? count.slice(0, -1) : count}
+        {hang ? <span className="absolute left-full">+</span> : null}
+      </span>
+      <span className="sr-only">{label}</span>
     </span>
   );
+}
+
+/** A project row's open work as its mark; nothing for a row with none, so quiet names keep their room. */
+function LoadMark({ load }: { load: ProjectLoad }) {
+  const { square, owed } = loadMark(load);
+  if (square === null && owed === 0) return null;
+  const parts = [
+    load.need > 0 ? `${load.need} need input` : null,
+    load.waiting > 0 ? `${load.waiting} to review, start or retry` : null,
+    load.run > 0 ? `${load.run} running` : null,
+  ].filter((p) => p !== null);
+  return <Mark square={square} owed={owed} need={load.need > 0} label={parts.join(", ")} />;
 }
 
 function ProjectItem({
@@ -79,7 +92,7 @@ function ProjectItem({
         className={cx(navRowClass(selected, touch, false), "flex-1")}
       >
         <span className={cx("min-w-0 flex-1 truncate", mono && "font-mono text-detail")}>{label}</span>
-        <LoadMarks load={load} />
+        <LoadMark load={load} />
       </button>
       {pin === undefined ? (
         <span aria-hidden className="w-7 shrink-0" />
@@ -202,27 +215,26 @@ export function ProjectNav({ onPick, touch = false }: { onPick?: () => void; tou
   );
 }
 
-/** A main view in the sidebar: icon, label and an optional count. */
+/** A main view in the sidebar: icon, label and an optional count, its right edge on the project rows' marks. */
 export function SideLink({ to, icon, label, count }: { to: string; icon: ReactNode; label: string; count?: ReactNode }) {
   return (
     <NavLink to={to} end={to === "/"} className={({ isActive }) => navRowClass(isActive)}>
       <span className="flex shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count}
+      {count === undefined ? null : <span className="mr-7 flex shrink-0">{count}</span>}
     </NavLink>
   );
 }
 
-/** Dashboard's count: what the scope asks of the user, need-toned while anything needs input. */
+/** Dashboard's count: what the scope asks of the user, the same mark as a project row's. */
 export function AttentionCount({ need, total }: { need: number; total: number }) {
   if (total === 0) return null;
   return (
-    <span
-      title={`${total} need${total === 1 ? "s" : ""} you${need > 0 ? `, ${need} waiting for input` : ""}`}
-      className={cx("inline-flex items-center gap-1.5 font-mono text-meta-sm tabular", need > 0 ? "text-need-fg" : "text-muted")}
-    >
-      {need > 0 ? <span aria-hidden className="size-1.5 bg-need" /> : null}
-      {total}
-    </span>
+    <Mark
+      square={need > 0 ? "need" : null}
+      owed={total}
+      need={need > 0}
+      label={`${total} need${total === 1 ? "s" : ""} you${need > 0 ? `, ${need} waiting for input` : ""}`}
+    />
   );
 }

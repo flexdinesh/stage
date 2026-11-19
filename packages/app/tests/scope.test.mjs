@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   attentionOf,
+  loadMark,
   parsePinned,
   parseScope,
   projectLoads,
@@ -47,6 +48,16 @@ test("projectLoads counts open work per project and skips completed tasks", () =
   assert.deepEqual(loads.get(20), { need: 0, waiting: 1, run: 0, open: 1 });
   assert.equal(loads.has(30), false);
   assert.deepEqual(totalLoad(loads.values()), { need: 1, waiting: 2, run: 1, open: 5 });
+});
+
+const load = (need, waiting, run) => ({ need, waiting, run, open: need + waiting + run });
+
+test("loadMark: need outranks run, and the count is what the user owes", () => {
+  assert.deepEqual(loadMark(load(1, 2, 1)), { square: "need", owed: 3 });
+  assert.deepEqual(loadMark(load(0, 1, 1)), { square: "run", owed: 1 });
+  assert.deepEqual(loadMark(load(0, 0, 2)), { square: "run", owed: 0 });
+  assert.deepEqual(loadMark(load(0, 1, 0)), { square: null, owed: 1 });
+  assert.deepEqual(loadMark(load(0, 0, 0)), { square: null, owed: 0 });
 });
 
 test("sidebarProjects: pinned first, active by recent activity, quiet folded", () => {

@@ -71,6 +71,14 @@ export function totalLoad(loads: Iterable<ProjectLoad>): ProjectLoad {
   return sum;
 }
 
+/** A sidebar row's mark: the loudest state's square (need over run) and what the user owes (need plus waiting). */
+export function loadMark(load: ProjectLoad): { square: "need" | "run" | null; owed: number } {
+  return {
+    square: load.need > 0 ? "need" : load.run > 0 ? "run" : null,
+    owed: load.need + load.waiting,
+  };
+}
+
 /** The sidebar's project lists. */
 export interface SidebarProjects {
   pinned: Project[];

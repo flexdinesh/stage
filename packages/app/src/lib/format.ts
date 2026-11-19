@@ -153,6 +153,11 @@ export function localDateToIso(date: string, addDays = 0): string | undefined {
   return d.toISOString();
 }
 
+/** A badge count, capped so it fits its slot: 99 and below as is, then "99+". */
+export function capCount(n: number): string {
+  return n > 99 ? "99+" : String(n);
+}
+
 /** Narrows a string (e.g. a select value) to a member of `list` without a type assertion. */
 export function pick<T extends string>(list: readonly T[], value: string): T | undefined {
   return list.find((item) => item === value);
