@@ -1,10 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { useInvalidateWork, useTrees } from "../../api/queries.ts";
+import { useInvalidateWork, useTree, useTrees } from "../../api/queries.ts";
 import type { StartMode, Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { treeMeta } from "../../lib/trees.ts";
-import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, cx } from "../ui.tsx";
+import { joinSummary, treeMeta } from "../../lib/trees.ts";
+import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, Select, cx } from "../ui.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -16,7 +16,8 @@ type TreeChoice = "new" | number;
 
 /**
  * Put a task outside any tree into one: a new tree with it as the root (title defaults to the task's), or an active
- * tree, where it joins as a root (set its needs in the tree view).
+ * tree, where it joins as a parallel root unless After picks a member for it to run after (backlog without a start
+ * time only).
  */
 export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => void }) {
   const api = useApi();
@@ -26,11 +27,20 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const [picked, setPicked] = useState<TreeChoice>("new");
   const [title, setTitle] = useState(task.title);
   const [mode, setMode] = useState<StartMode>("auto");
+  const [after, setAfter] = useState<number | null>(null);
+  const detail = useTree(typeof picked === "number" ? picked : 0, typeof picked === "number");
+  const canNeed = task.state === "backlog" && task.startAt === null;
+  const members = typeof picked === "number" && detail.data?.id === picked ? detail.data.tasks : [];
+  const afterTask = canNeed ? (members.find((m) => m.id === after) ?? null) : null;
+  const pick = (choice: TreeChoice) => {
+    setPicked(choice);
+    setAfter(null);
+  };
 
   const add = useMutation({
     mutationFn: async (choice: TreeChoice) => {
       if (choice === "new") await api.createTree({ title: title.trim(), startMode: mode, tasks: [{ taskId: task.id }] });
-      else await api.addToTree(choice, task.id);
+      else await api.addToTree(choice, task.id, afterTask === null ? undefined : [afterTask.id]);
     },
     onSuccess: async () => {
       await invalidate();
@@ -43,7 +53,11 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const footer = (
     <>
       <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted md:text-right">
-        {blocked ? "required: title" : target === null ? `#${task.id} roots a new tree` : `#${task.id} joins ${target.title} as a root`}
+        {blocked
+          ? "required: title"
+          : target === null
+            ? `#${task.id} roots a new tree`
+            : joinSummary(task.id, afterTask === null ? [] : [afterTask], task.startMode ?? target.startMode, target.title)}
       </span>
       <Button variant="primary" busy={add.isPending} disabled={blocked} onClick={() => add.mutate(picked)}>
         {picked === "new" ? "Create tree" : "Add to tree"}
@@ -59,7 +73,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
         picked === key && "bg-accent/5",
       )}
     >
-      <Radio name="tree" checked={picked === key} onChange={() => setPicked(key)} />
+      <Radio name="tree" checked={picked === key} onChange={() => pick(key)} />
       <span className="min-w-0 flex-1">
         <span className="block text-small font-medium break-words">{label}</span>
         <span className="mt-0.5 block truncate font-mono text-meta text-muted tabular">{meta}</span>
@@ -71,8 +85,8 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
     <Drawer title="Add to tree" onClose={onClose} footer={footer}>
       <div className="flex flex-col gap-4">
         <p className="text-small text-muted">
-          <span className="font-mono tabular">#{task.id}</span> {task.title} joins as a root. Give it needs, or add tasks that need it, in the
-          tree view.
+          <span className="font-mono tabular">#{task.id}</span> {task.title} joins as a parallel root: it waits on nothing. To run it
+          after a task, pick its tree, then that task under After.
         </p>
         <QueryState isPending={trees.isPending} error={trees.error}>
           <div role="radiogroup" aria-label="Tree" className="border border-line">
@@ -91,8 +105,38 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
               </p>
             </div>
           </>
-        ) : null}
-        <ErrorText error={add.error} />
+        ) : (
+          <Field label="After">
+            {(id) => (
+              <>
+                <Select
+                  id={id}
+                  value={afterTask === null ? "" : String(afterTask.id)}
+                  disabled={!canNeed || detail.isPending}
+                  onChange={(e) => setAfter(e.target.value === "" ? null : Number(e.target.value))}
+                  className="w-full"
+                >
+                  <option value="">Nothing: runs in parallel</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      #{m.id} {m.title}
+                    </option>
+                  ))}
+                </Select>
+                <p className="font-mono text-meta text-muted">
+                  {!canNeed
+                    ? task.state !== "backlog"
+                      ? "It has already run, so it joins as a parallel root."
+                      : "It has a start time, so it joins as a parallel root."
+                    : afterTask === null
+                      ? "A parallel root starts when you start it."
+                      : `Waits until #${afterTask.id} is completed.`}
+                </p>
+              </>
+            )}
+          </Field>
+        )}
+        <ErrorText error={add.error ?? detail.error} />
       </div>
     </Drawer>
   );

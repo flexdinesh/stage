@@ -191,6 +191,8 @@ Config: --project P --provider ID --model ID --effort E --option K=V... --runtim
         --mode default|plan --base-ref REF --branch NAME --tag T...
         --prompt-file PATH --image PATH...
 Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
+Trees: joining a tree without --needs makes a parallel root; --needs ID runs it after
+       that task (joining its tree); tasks that need the same task run in parallel.
 Start mode: tasks inherit their tree by default. Set shared policy on the tree;
             task --start-mode auto|manual overrides it; inherit clears the override.
   stage task|tree notes ID [list] [--kind notes|events|all] [--category C] [--q TEXT]

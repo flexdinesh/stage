@@ -82,7 +82,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		return printTreeOut(res)
 	case "add":
 		var needs string
-		c.fs.StringVar(&needs, "needs", "", "task ids (tree members) it needs, comma-separated")
+		c.fs.StringVar(&needs, "needs", "", "task ids (tree members) it runs after, comma-separated; omitted: a parallel root (a member keeps its needs)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}

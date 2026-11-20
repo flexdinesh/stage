@@ -64,7 +64,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "create_tree", "Create a tree from existing tasks with the needs between them (a task in another tree moves).", nil, o.CreateTree)
 	add(s, o, "update_tree", "Rename a tree, set its start mode (auto | manual; inherited by default, preserves explicit task overrides), or set its status: done (you will not work on the rest; members keep their states, nothing more starts), archived, or open (reopen). Done and archived trees leave the default lists; member activity does not reopen the tree.", nil, o.UpdateTree)
 	add(s, o, "delete_tree", "Delete a tree and all its tasks only when no recorded work is protected, including work from former members; otherwise archive it.", del, o.DeleteTree)
-	add(s, o, "add_to_tree", "Add a task to a tree, optionally with its needs (a task in another tree moves).", nil, o.AddToTree)
+	add(s, o, "add_to_tree", "Add a task to a tree: without needs it is a parallel root; with needs it runs after those members (a task in another tree moves).", nil, o.AddToTree)
 	add(s, o, "remove_from_tree", "Take a task out of its tree; its dependents take over its needs. The task stays.", nil, o.RemoveFromTree)
 	add(s, o, "set_needs", "Replace a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree.", nil, o.SetNeeds)
 	add(s, o, "start_tree", "Start every ready member of a tree (manual trees, ready roots).", nil, o.StartTree)
