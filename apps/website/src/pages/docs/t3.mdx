@@ -27,8 +27,8 @@ path needs confirmation before launching.
 The same from a terminal:
 
 ```sh
-stage t3 pair                  # auto-pair through the t3 CLI on the server's machine
-stage t3 pair --code CODE      # redeem a code from `t3 pair` on the T3 host
+stage harness t3 run auto-pair         # auto-pair through the t3 CLI on the server's machine
+stage harness t3 run pair code=CODE    # redeem a code from `t3 pair` on the T3 host
 ```
 
 Pairing starts a full sync. To switch to another T3, Disconnect in Settings, change the T3 URL and pair the other T3. Tasks from the first T3 stay in stage as read-only history and nothing is bound to the new T3 until you rebind each project. Pairing the first T3 again restores its tasks and bindings. Settings lists previous T3s under Previous connections; Forget lets one go and keeps its history.
@@ -47,13 +47,13 @@ Set it as `T3_ADMIN_TOKEN` in the server's environment: `service.env` for the pe
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `T3_URL` | `http://127.0.0.1:3773` | The T3 server stage calls. Without it, the URL saved in the app (Dashboard alert, Settings or `stage t3 url`) applies; with it, that setting is locked. |
+| `T3_URL` | `http://127.0.0.1:3773` | The T3 server stage calls. Without it, the URL saved in the app (Dashboard alert, Settings or `stage harness t3 set url=URL`) applies; with it, that setting is locked. |
 | `T3_PUBLIC_URL` | `T3_URL` | The T3 address browsers use for "Open in T3" links. Set it when browsers reach T3 at another address. |
 
 ```sh
-stage t3 url                         # show it
-stage t3 url http://10.0.0.5:3773    # save it (http(s)://host[:port])
-stage t3 url --reset                 # back to the default
+stage harness t3                              # show it
+stage harness t3 set url=http://10.0.0.5:3773 # save it (http(s)://host[:port])
+stage harness t3 set --reset url              # back to the default
 ```
 
 Once the server is bound, the T3 URL can only change to an address serving the same T3 environment.
@@ -61,7 +61,7 @@ Once the server is bound, the T3 URL can only change to an address serving the s
 ## Status and troubleshooting
 
 ```sh
-stage t3 status    # URL, reachability, pairing, token expiry, sync, auto-pair availability
+stage harness t3 status    # URL, reachability, pairing, token expiry, sync, auto-pair availability
 ```
 
 Later trouble (T3 unreachable, unpaired, session expired or rejected) shows as an alert at the top of the Dashboard with the same fix, and the T3 control (sidebar header, or the phone top bar) turns yellow (pairing) or red (T3 or its pairing failed). Settings shows the T3 connection, Pair, the T3 URL and Sync now.

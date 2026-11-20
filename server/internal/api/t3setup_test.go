@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -41,6 +42,18 @@ type t3Status struct {
 		Projects  int     `json:"projects"`
 		Threads   int     `json:"threads"`
 	} `json:"sync"`
+}
+
+// UnmarshalJSON reads the details of GET /api/harnesses/t3/status.
+func (s *t3Status) UnmarshalJSON(b []byte) error {
+	var w struct {
+		Details json.RawMessage `json:"details"`
+	}
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	type plain t3Status
+	return json.Unmarshal(w.Details, (*plain)(s))
 }
 
 // setupT3 replaces the T3 setup with one whose CLI, PATH and candidate
@@ -84,7 +97,7 @@ func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 func TestT3StatusShape(t *testing.T) {
 	e := newEnv(t)
 	var st t3Status
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if !st.Connected || st.State != "connected" || st.T3URL != "http://127.0.0.1:3773" || st.PublicURL != publicURL ||
 		st.T3URLSource != "default" || !st.Reachable || st.CheckedAt == nil || st.ProbeError != nil ||
 		st.T3 == nil || st.T3.EnvironmentID != "fake-env" || st.T3.Label != "fake" || st.T3.ServerVersion != "fake" ||
@@ -93,18 +106,14 @@ func TestT3StatusShape(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 	e.fake.SetProbe(t3.Probe{CheckedAt: time.Now(), Err: "connection refused"})
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.State != "unreachable" || st.Reachable || st.T3 != nil || st.ProbeError == nil || *st.ProbeError != "connection refused" {
 		t.Fatalf("unreachable %+v", st)
 	}
 	// Health keeps its meaning: a valid token, regardless of the probe.
-	var h struct {
-		T3 struct {
-			Connected bool `json:"connected"`
-		} `json:"t3"`
-	}
+	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if !h.T3.Connected {
+	if len(h.Harnesses) != 1 || !h.Harnesses[0].Connected {
 		t.Fatalf("health %+v", h)
 	}
 }
@@ -113,30 +122,30 @@ func TestT3AutoPairEndpoint(t *testing.T) {
 	s := &setupT3{}
 	e := newEnv(t, s.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL}))
 	var st t3Status
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.AutoPair.Available || st.AutoPair.Reason == nil || *st.AutoPair.Reason != "cli_not_found" {
 		t.Fatalf("no cli %+v", st.AutoPair)
 	}
-	e.must("POST", "/api/t3/pair/auto", nil, http.StatusConflict, nil)
+	e.must("POST", "/api/harnesses/t3/actions/auto-pair", nil, http.StatusConflict, nil)
 
 	s.cli = true
 	s.runErr = errors.New("exit status 1: boom")
 	var eb struct {
 		Error string `json:"error"`
 	}
-	e.must("POST", "/api/t3/pair/auto", nil, http.StatusBadGateway, &eb)
+	e.must("POST", "/api/harnesses/t3/actions/auto-pair", nil, http.StatusBadGateway, &eb)
 	if !strings.Contains(eb.Error, "boom") {
 		t.Fatalf("502 body %q", eb.Error)
 	}
 	s.runErr, s.runOut = nil, `{"id":"1","credential":"PAIR-9","scopes":[],"expiresAt":"2026-11-17T10:00:00Z"}`
-	e.must("POST", "/api/t3/pair/auto", nil, 200, &st)
+	e.must("POST", "/api/harnesses/t3/actions/auto-pair", nil, 200, &st)
 	if st.State != "connected" || s.paired.Load() != 1 || len(e.fake.Pairs) != 1 || e.fake.Pairs[0] != "PAIR-9" {
 		t.Fatalf("auto pair %+v, kicks %d, pairs %v", st, s.paired.Load(), e.fake.Pairs)
 	}
 
 	remote := &setupT3{cli: true}
 	e = newEnv(t, remote.opt(config.Config{T3URL: "http://t3.lan:3773", T3URLFromEnv: true}))
-	e.must("POST", "/api/t3/pair/auto", nil, http.StatusConflict, &eb)
+	e.must("POST", "/api/harnesses/t3/actions/auto-pair", nil, http.StatusConflict, &eb)
 	if !strings.Contains(eb.Error, "not a loopback address") {
 		t.Fatalf("remote 409 %q", eb.Error)
 	}
@@ -145,8 +154,8 @@ func TestT3AutoPairEndpoint(t *testing.T) {
 func TestT3PairKicksSync(t *testing.T) {
 	s := &setupT3{}
 	e := newEnv(t, s.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL}))
-	e.must("POST", "/api/t3/pair", map[string]any{"code": " "}, 400, nil)
-	e.must("POST", "/api/t3/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
+	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": " "}, 400, nil)
+	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
 	if s.paired.Load() != 1 {
 		t.Fatalf("pair kicked %d syncs", s.paired.Load())
 	}
@@ -156,28 +165,28 @@ func TestT3UnpairEndpoint(t *testing.T) {
 	s := &setupT3{}
 	e := newEnv(t, s.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL}))
 	var st t3Status
-	e.must("GET", "/api/t3/status", nil, 200, &st) // binds the connected fake
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st) // binds the connected fake
 	s.envOther = true
-	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, nil)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, nil)
 
-	e.must("DELETE", "/api/t3/pair", nil, 200, &st)
+	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, &st)
 	if st.State != "unpaired" || st.Connected {
 		t.Fatalf("after disconnect %+v", st)
 	}
 	// Unbound: a T3 serving another environment is accepted.
-	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, 200, nil)
-	e.must("DELETE", "/api/t3/pair", nil, 200, &st)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://127.0.0.1:5000"}, 200, nil)
+	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, &st)
 
 	admin := &setupT3{}
 	e = newEnv(t, admin.opt(config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL, T3AdminToken: "admin"}))
 	var eb struct {
 		Error string `json:"error"`
 	}
-	e.must("DELETE", "/api/t3/pair", nil, http.StatusConflict, &eb)
+	e.must("DELETE", "/api/harnesses/t3/connection", nil, http.StatusConflict, &eb)
 	if !strings.Contains(eb.Error, "T3_ADMIN_TOKEN") {
 		t.Fatalf("admin 409 %q", eb.Error)
 	}
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.State != "connected" {
 		t.Fatalf("refused disconnect changed state %+v", st)
 	}
@@ -190,10 +199,10 @@ func TestT3URLEndpoint(t *testing.T) {
 		Error string `json:"error"`
 	}
 	for _, body := range []any{map[string]any{}, map[string]any{"url": "nope"}, map[string]any{"url": "http://h/x"}, map[string]any{"url": 3}, map[string]any{"url": "http://h", "extra": 1}} {
-		e.must("PUT", "/api/t3/url", body, 400, nil)
+		e.must("PUT", "/api/harnesses/t3/settings", body, 400, nil)
 	}
 	var st t3Status
-	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://localhost:4000/"}, 200, &st)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://localhost:4000/"}, 200, &st)
 	if st.T3URL != "http://localhost:4000" || st.PublicURL != "http://localhost:4000" || st.T3URLSource != "settings" || e.fake.BaseURL != "http://localhost:4000" {
 		t.Fatalf("set %+v (client %q)", st, e.fake.BaseURL)
 	}
@@ -203,23 +212,23 @@ func TestT3URLEndpoint(t *testing.T) {
 	// The fake is paired with an identity: while paired, a different
 	// environment is refused until Disconnect.
 	s.envOther = true
-	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, &eb)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://127.0.0.1:5000"}, http.StatusConflict, &eb)
 	if eb.Error != "This stage server is paired with T3 'fake'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only." {
 		t.Fatalf("409 %q", eb.Error)
 	}
 	s.envOther = false
-	e.must("PUT", "/api/t3/url", map[string]any{"url": nil}, 200, &st)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": nil}, 200, &st)
 	if st.T3URL != "http://127.0.0.1:3773" || st.T3URLSource != "default" {
 		t.Fatalf("reset %+v", st)
 	}
 
 	locked := &setupT3{}
 	e = newEnv(t, locked.opt(config.Config{T3URL: "http://t3.lan:3773", T3URLFromEnv: true}))
-	e.must("PUT", "/api/t3/url", map[string]any{"url": "http://localhost:4000"}, http.StatusConflict, &eb)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://localhost:4000"}, http.StatusConflict, &eb)
 	if !strings.Contains(eb.Error, "T3_URL") {
 		t.Fatalf("locked 409 %q", eb.Error)
 	}
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.T3URLSource != "env" || st.T3URL != "http://t3.lan:3773" {
 		t.Fatalf("env status %+v", st)
 	}
@@ -235,7 +244,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 	go func() { _, err := e.sync.FullSync(context.Background()); done <- err }()
 	<-reached
 	var st t3Status
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.Sync == nil || !st.Sync.Running || st.Sync.StartedAt == nil || st.Sync.Projects != 1 || st.Sync.Threads != 0 {
 		t.Fatalf("running sync %+v", st.Sync)
 	}
@@ -243,7 +252,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.Sync.Running {
 		t.Fatalf("finished sync %+v", st.Sync)
 	}

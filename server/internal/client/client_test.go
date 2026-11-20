@@ -90,7 +90,7 @@ func TestAPIVersionGate(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL)
-	for _, v := range []string{"", "5"} { // older server without the header; same version
+	for _, v := range []string{"", "6"} { // older server without the header; same version
 		version = v
 		if _, err := c.Projects(context.Background()); err != nil {
 			t.Fatalf("version %q: %v", v, err)
@@ -99,7 +99,7 @@ func TestAPIVersionGate(t *testing.T) {
 	version = "1"
 	_, err := c.Projects(context.Background())
 	var ve *VersionError
-	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v5") {
+	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v6") {
 		t.Fatalf("mismatch: %v", err)
 	}
 }
@@ -112,9 +112,9 @@ func TestHealthRecognizesStage(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL)
-	body = `{"status":"ok","db":"ok","service":"stage","apiVersion":1,"schema":4,"t3":{"connected":false,"lastError":"down"}}`
+	body = `{"status":"ok","db":"ok","service":"stage","apiVersion":1,"schema":4,"harnesses":[{"kind":"t3","connectionId":1,"configured":true,"connected":false,"lastError":"down"}]}`
 	h, err := c.Health(context.Background())
-	if err != nil || h.Schema != 4 || h.T3.Connected || h.T3.LastError == nil || *h.T3.LastError != "down" {
+	if err != nil || h.Schema != 4 || len(h.Harnesses) != 1 || h.Harnesses[0].Connected || h.Harnesses[0].LastError == nil || *h.Harnesses[0].LastError != "down" {
 		t.Fatalf("health %+v, %v", h, err)
 	}
 	body = `{"status":"ok","db":"ok"}` // server predating the metadata

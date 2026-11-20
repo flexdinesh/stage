@@ -195,7 +195,7 @@ Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin`
 | --- | --- |
 | In-app routes | stay in the webview (`mygo://localhost`) |
 | `http(s)` | the default browser |
-| `t3code://threads/<env>/<thread>` | the OS (T3 app); if no handler opens it, the T3 web URL (`/api/t3/status` `publicUrl` + `/<env>/<thread>`) in the browser |
+| `t3code://threads/<env>/<thread>` | the OS (T3 app); if no handler opens it, the T3 web URL (`/api/harnesses/t3/status` `details.publicUrl` + `/<env>/<thread>`) in the browser |
 | `<identity>://tasks/<n>` | shows the app at that page |
 | attachment images (`/api/attachments/<id>`, new tab) | a child window without bindings |
 | anything else | refused and logged |

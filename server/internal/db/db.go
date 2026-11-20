@@ -1,11 +1,13 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -177,4 +179,21 @@ func (o Optional[T]) Ptr() *T {
 	}
 	v := o.V
 	return &v
+}
+
+// DecodeStrict decodes one JSON object (empty: {}) into v, rejecting unknown
+// fields; errors are Invalid.
+func DecodeStrict(raw []byte, v any) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = []byte("{}")
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(v); err != nil {
+		return Invalid("invalid JSON body: %v", err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return Invalid("body must contain one JSON object")
+	}
+	return nil
 }

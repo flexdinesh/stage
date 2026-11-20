@@ -214,15 +214,20 @@ func printServiceStatus(w io.Writer, s service.Status) {
 	} else {
 		fmt.Fprintf(w, "  stage       not reachable at %s\n", s.Stage.URL)
 	}
-	switch {
-	case s.T3 == nil:
-		fmt.Fprintln(w, "  t3          unknown (Stage not reachable)")
-	case s.T3.Connected:
-		fmt.Fprintln(w, "  t3          connected")
-	case s.T3.LastError != nil:
-		fmt.Fprintf(w, "  t3          offline: %s\n", *s.T3.LastError)
-	default:
-		fmt.Fprintln(w, "  t3          offline")
+	if s.Harnesses == nil {
+		fmt.Fprintln(w, "  harnesses   unknown (Stage not reachable)")
+	}
+	for _, h := range s.Harnesses {
+		switch {
+		case h.Connected:
+			fmt.Fprintf(w, "  %-11s connected\n", h.Kind)
+		case !h.Configured:
+			fmt.Fprintf(w, "  %-11s not set up\n", h.Kind)
+		case h.LastError != nil:
+			fmt.Fprintf(w, "  %-11s offline: %s\n", h.Kind, *h.LastError)
+		default:
+			fmt.Fprintf(w, "  %-11s offline\n", h.Kind)
+		}
 	}
 	login := "off"
 	if s.Definition.LoginStartup {

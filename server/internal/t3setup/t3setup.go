@@ -33,7 +33,7 @@ import (
 // Where the T3 URL comes from.
 const (
 	SourceEnv      = "env"      // T3_URL; locks the setting
-	SourceSettings = "settings" // saved with PUT /api/t3/url
+	SourceSettings = "settings" // saved through the url setting
 	SourceDefault  = "default"  // config.DefaultT3URL
 )
 
@@ -170,7 +170,7 @@ func (s *Service) Endpoint() Endpoint {
 	return s.ep
 }
 
-// Status is the setup state (GET /api/t3/status).
+// Status is the setup state (Connector.Status details).
 type Status struct {
 	Conn     t3.ConnectionStatus
 	State    t3.State

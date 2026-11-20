@@ -1,5 +1,5 @@
 import type {
-  OpenCodeStatus, OpenCodeStatusWire, HarnessConnection, HarnessesReply, Capabilities, ExecutionLinks, TaskState,
+  OpenCodeStatus, OpenCodeStatusWire, Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -143,6 +143,20 @@ export function normalizeOpenCodeStatus(w: OpenCodeStatusWire): OpenCodeStatus {
   };
 }
 
+const harnessPath = (kind: Harness, rest: string) => `/harnesses/${encodeURIComponent(kind)}${rest}`;
+
+/** T3's panel state from its harness status (details plus the connection a pairing replaced). */
+export function t3Details(s: HarnessStatus<T3StatusWire>, now = Date.now()): T3Status {
+  if (s.details === undefined) throw new ApiError(502, "T3 status without details");
+  return normalizeT3Status({ ...s.details, replaced: s.replaced ?? null }, now);
+}
+
+/** OpenCode's panel state from its harness status. */
+export function openCodeDetails(s: HarnessStatus<OpenCodeStatusWire>): OpenCodeStatus {
+  if (s.details === undefined) throw new ApiError(502, "OpenCode status without details");
+  return normalizeOpenCodeStatus(s.details);
+}
+
 /** Typed Stage API client over a host transport (trusted contract: docs/api.md). */
 export type Api = ReturnType<typeof createApi>;
 
@@ -181,26 +195,34 @@ export function createApi(transport: Transport) {
     harnesses: () => apiFetch<HarnessesReply>("/harnesses"),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
-    openCodeStatus: () => apiFetch<OpenCodeStatusWire>("/opencode/status").then(normalizeOpenCodeStatus),
     /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
+    /** Connection setup of a connectable harness (404 unknown kind, 409 none on this server). */
+    harnessStatus: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(harnessPath(kind, "/status")),
+    /** Saves settings keyed by setup field id (null resets); 409 when the environment locks one. */
+    configureHarness: <D = unknown>(kind: Harness, settings: Record<string, unknown>) => apiFetch<HarnessStatus<D>>(harnessPath(kind, "/settings"), put(settings)),
+    runHarnessAction: <D = unknown>(kind: Harness, action: string, input?: Record<string, unknown>) =>
+      apiFetch<HarnessStatus<D>>(harnessPath(kind, `/actions/${encodeURIComponent(action)}`), post(input)),
+    /** Forgets the connection's credentials; tasks and history stay. */
+    disconnectHarness: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(harnessPath(kind, "/connection"), del),
+    openCodeStatus: () => apiFetch<HarnessStatus<OpenCodeStatusWire>>(harnessPath("opencode", "/status")).then(openCodeDetails),
     /** 409 `opencode_auth_required` when the service demands a password; 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
-    saveOpenCode: (body: OpenCodeSettings) => apiSend("/opencode/settings", put(body)),
+    saveOpenCode: (body: OpenCodeSettings) => apiSend(harnessPath("opencode", "/settings"), put(body)),
     /** Connects the OpenCode service on the server's machine with its own password (409 `opencode_local_unavailable`, or instance_changed / instance_returned as for saveOpenCode). */
-    connectLocalOpenCode: (newInstance = false) => apiSend("/opencode/connect-local", post(newInstance ? { newInstance: true } : undefined)),
+    connectLocalOpenCode: (newInstance = false) => apiSend(harnessPath("opencode", "/actions/connect-local"), post(newInstance ? { newInstance: true } : undefined)),
     /** Redeems a link from `opencode pair` (400 when invalid, 409 `opencode_pairing_expired`, or instance_changed / instance_returned: resend the same link with newInstance). */
-    pairOpenCode: (link: string, newInstance = false) => apiSend("/opencode/pair", post(newInstance ? { link, newInstance: true } : { link })),
+    pairOpenCode: (link: string, newInstance = false) => apiSend(harnessPath("opencode", "/actions/pair"), post(newInstance ? { link, newInstance: true } : { link })),
     /** Forgets the OpenCode connection; tasks and history stay (409 when environment-managed). */
-    disconnectOpenCode: () => apiSend("/opencode/settings", del),
+    disconnectOpenCode: () => apiSend(harnessPath("opencode", "/connection"), del),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
-    t3Status: () => apiFetch<T3StatusWire>("/t3/status").then((w) => normalizeT3Status(w)),
-    pair: (body: PairRequest) => apiFetch<T3StatusWire>("/t3/pair", post(body)).then((w) => normalizeT3Status(w)),
+    t3Status: () => apiFetch<HarnessStatus<T3StatusWire>>(harnessPath("t3", "/status")).then((s) => t3Details(s)),
+    pair: (body: PairRequest) => apiFetch<HarnessStatus<T3StatusWire>>(harnessPath("t3", "/actions/pair"), post(body)).then((s) => t3Details(s)),
     /** Pairs through the t3 CLI on the server's machine (409 when unavailable, 502 when it fails). */
-    autoPair: () => apiFetch<T3StatusWire>("/t3/pair/auto", post()).then((w) => normalizeT3Status(w)),
+    autoPair: () => apiFetch<HarnessStatus<T3StatusWire>>(harnessPath("t3", "/actions/auto-pair"), post()).then((s) => t3Details(s)),
     /** Forgets the T3 token; the environment binding stays (409 while T3_ADMIN_TOKEN renews it). */
-    disconnectT3: () => apiFetch<T3StatusWire>("/t3/pair", del).then((w) => normalizeT3Status(w)),
+    disconnectT3: () => apiFetch<HarnessStatus<T3StatusWire>>(harnessPath("t3", "/connection"), del).then((s) => t3Details(s)),
     /** 409 when T3_URL locks it or the URL is another T3; 400 when invalid. */
-    setT3Url: (body: SetT3UrlRequest) => apiFetch<T3StatusWire>("/t3/url", put(body)).then((w) => normalizeT3Status(w)),
+    setT3Url: (body: SetT3UrlRequest) => apiFetch<HarnessStatus<T3StatusWire>>(harnessPath("t3", "/settings"), put(body)).then((s) => t3Details(s)),
     sync: () => apiFetch<SyncResult>("/sync", post()),
     catalog: () => apiFetch<Catalog>("/catalog"),
 

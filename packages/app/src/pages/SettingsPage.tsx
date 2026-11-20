@@ -1,79 +1,24 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { invalidateWork, keys, useHarnesses, usePreferences, useT3Status } from "../api/queries.ts";
+import { invalidateWork, keys, useHarnesses, usePreferences } from "../api/queries.ts";
 import {
   type ModelDefaults,
   type NotificationEvent,
   type Preferences,
-  type T3Status,
 } from "../api/types.ts";
-import { AutoCompleteToggle } from "../components/Completion.tsx";
 import { DesktopAppCard } from "../components/Host.tsx";
 import { SharedPaths } from "../components/SharedPaths.tsx";
-import { OpenCodeSetup } from "../components/OpenCodeSetup.tsx";
-import { PreviousConnections } from "../components/PreviousConnections.tsx";
+import { HarnessConnections } from "../components/HarnessConnections.tsx";
 import { ServersCard } from "../components/Servers.tsx";
-import { DisconnectT3, PairActions, T3UrlEditor } from "../components/T3Setup.tsx";
-import { T3_STATE_TONE, t3Identity } from "../lib/onboarding.ts";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
-import { Alert, Button, Checkbox, Chip, Detail, Details, ErrorText, ExternalButton, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { Alert, Button, Checkbox, Chip, ErrorText, ExternalButton, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
-import { dateTime, relativeTime } from "../lib/format.ts";
+import { dateTime } from "../lib/format.ts";
 
-const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
-
-function StatusCard({ status }: { status: T3Status }) {
-  return (
-    <Panel
-      title="T3 connection"
-      actions={
-        <Chip tone={T3_STATE_TONE[status.state]} dot>
-          {status.state}
-        </Chip>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        <Details>
-          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
-          <Detail label="T3 URL">{status.t3Url}</Detail>
-          <Detail label="Public URL">{status.publicUrl}</Detail>
-          <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
-          <Detail label="Client id">{status.clientId ?? "-"}</Detail>
-          <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
-          <Detail label="Admin token">
-            {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
-          </Detail>
-          <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
-          <Detail label="Last error">
-            {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
-          </Detail>
-        </Details>
-        <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
-        <DisconnectT3 status={status} />
-        <PreviousConnections harness="t3" className="border-t border-line pt-3" />
-      </div>
-    </Panel>
-  );
-}
-
-/** Pairing (auto through the t3 CLI, or a code) and the T3 URL. */
-function PairCard({ status }: { status: T3Status }) {
-  const paired = status.state === "connected";
-  return (
-    <Panel title="Pair" meta={paired ? "paired · pair again to replace the token" : status.state === "unpaired" ? "not paired" : status.state}>
-      <div className="flex flex-col gap-4">
-        <PairActions status={status} primary={!paired} />
-        <section className="flex flex-col gap-3 border-t border-line pt-3">
-          <T3UrlEditor status={status} />
-        </section>
-      </div>
-    </Panel>
-  );
-}
 
 function SyncCard() {
   const api = useApi();
@@ -397,22 +342,17 @@ function ThemeCard() {
 }
 
 export function SettingsPage() {
-  const status = useT3Status();
   return (
     <>
       <PageHeader title="Settings" meta="Harness connections, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
         <div className="flex flex-col gap-3.5 lg:row-span-5">
-          <QueryState isPending={status.isPending} error={status.error}>
-            {status.data === undefined ? null : <StatusCard status={status.data} />}
-          </QueryState>
-          <OpenCodeSetup />
+          <HarnessConnections />
           <SharedPaths />
           <ServersCard />
         </div>
         <SyncCard />
         <DefaultModelCard />
-        {status.data === undefined ? null : <PairCard status={status.data} />}
         <NotificationsCard />
         <ThemeCard />
         <DesktopAppCard />

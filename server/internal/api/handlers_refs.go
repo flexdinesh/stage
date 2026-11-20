@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/refs"
 )
 
@@ -56,14 +57,21 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 				ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, ThreadID: native.ExternalSessionID}, nil
 			}
 		}
-	} else if err != nil && s.OpenCode != nil {
-		if a, e := s.Sync.Adapter(s.OpenCode.ID()); e == nil {
+	} else if err != nil {
+		s.Connectors.Each(func(_ harness.Descriptor, c harness.Connector) {
+			if err == nil {
+				return
+			}
+			a, e := s.Sync.Adapter(c.Summary(r.Context()).ConnectionID)
+			if e != nil {
+				return
+			}
 			if resolver, ok := a.(execution.LinkResolver); ok {
 				if native, e := resolver.ResolveLink(r.Context(), raw); e == nil {
 					ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, ThreadID: native.ExternalSessionID}, nil
 				}
 			}
-		}
+		})
 	}
 	if err != nil {
 		return db.Invalid("%s", err.Error())

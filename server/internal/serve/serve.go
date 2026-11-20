@@ -255,6 +255,16 @@ func Run(ctx context.Context, o Options) error {
 			syncSvc.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(t3Client, sw.New))
 		},
 	})
+	connectors, err := harness.NewConnectors(harnesses, map[string]harness.Connector{
+		t3.Kind: t3setup.NewConnector(setup, func() t3setup.SyncProgress {
+			p := syncSvc.Progress()
+			return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+		}),
+		opencode.Kind: opencodesetup.NewConnector(openCode),
+	})
+	if err != nil {
+		return err
+	}
 	for _, runner := range releases {
 		runner.OnReady = notifier.OnReady
 	}
@@ -277,7 +287,7 @@ func Run(ctx context.Context, o Options) error {
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
-		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: setup, OpenCode: openCode,
+		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: setup, Connectors: connectors,
 		Harnesses: harnesses, Profile: profile,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's

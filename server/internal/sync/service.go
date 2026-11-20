@@ -40,10 +40,10 @@ type Service struct {
 	log                                                                          *slog.Logger
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
-	OnAccepted                                                                   func() // a completion was inferred (tree release may follow)
+	OnAccepted                                                                   func()            // a completion was inferred (tree release may follow)
 	Harnesses                                                                    *harness.Registry // descriptors by kind; completion is inferred only from a declared closure
-	PublicURL                                                                    string // STAGE_PUBLIC_URL, named in launch journal instructions when set
-	CLI                                                                          string // installed CLI name (install.CLIName), named in launch journal instructions
+	PublicURL                                                                    string            // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                                          string            // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	progress                                                                     atomic.Pointer[Progress]
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
@@ -387,6 +387,7 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	}
 	return nil
 }
+
 // closure is the harness's declared closure for o's signal.
 func (s *Service) closure(kind string, o execution.Observation) (harness.Closure, bool) {
 	if o.Closed == nil || s.Harnesses == nil {

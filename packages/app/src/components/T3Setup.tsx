@@ -3,14 +3,16 @@
 // disconnect controls Settings shares. Logic lives in lib/onboarding.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { keys } from "../api/queries.ts";
+import { keys, useT3Status } from "../api/queries.ts";
 import type { ReplacedConnection, T3Status } from "../api/types.ts";
 import { replacedNotice } from "../lib/harnesses.ts";
-import { shortDate } from "../lib/format.ts";
-import { codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps } from "../lib/onboarding.ts";
+import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
+import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps, t3Identity } from "../lib/onboarding.ts";
 import { useApi } from "../platform/context.tsx";
+import { AutoCompleteToggle } from "./Completion.tsx";
+import { PreviousConnections } from "./PreviousConnections.tsx";
 import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, ErrorText, Field, Input, Muted, Panel } from "./ui.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, Panel, QueryState } from "./ui.tsx";
 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
@@ -384,3 +386,70 @@ export function T3Alert({ status }: { status: T3Status | undefined }) {
     </div>
   );
 }
+
+const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
+
+/** The T3 setup panel in Settings (registered for kind t3 in HarnessConnections). */
+export function T3ConnectionPanel() {
+  const status = useT3Status();
+  return (
+    <QueryState isPending={status.isPending} error={status.error}>
+      {status.data === undefined ? null : (
+        <>
+          <StatusCard status={status.data} />
+          <PairCard status={status.data} />
+        </>
+      )}
+    </QueryState>
+  );
+}
+
+function StatusCard({ status }: { status: T3Status }) {
+  return (
+    <Panel
+      title="T3 connection"
+      actions={
+        <Chip tone={T3_STATE_TONE[status.state]} dot>
+          {status.state}
+        </Chip>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Details>
+          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
+          <Detail label="T3 URL">{status.t3Url}</Detail>
+          <Detail label="Public URL">{status.publicUrl}</Detail>
+          <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
+          <Detail label="Client id">{status.clientId ?? "-"}</Detail>
+          <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
+          <Detail label="Admin token">
+            {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
+          </Detail>
+          <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
+          <Detail label="Last error">
+            {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
+          </Detail>
+        </Details>
+        <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
+        <DisconnectT3 status={status} />
+        <PreviousConnections harness="t3" className="border-t border-line pt-3" />
+      </div>
+    </Panel>
+  );
+}
+
+/** Pairing (auto through the t3 CLI, or a code) and the T3 URL. */
+function PairCard({ status }: { status: T3Status }) {
+  const paired = status.state === "connected";
+  return (
+    <Panel title="Pair" meta={paired ? "paired · pair again to replace the token" : status.state === "unpaired" ? "not paired" : status.state}>
+      <div className="flex flex-col gap-4">
+        <PairActions status={status} primary={!paired} />
+        <section className="flex flex-col gap-3 border-t border-line pt-3">
+          <T3UrlEditor status={status} />
+        </section>
+      </div>
+    </Panel>
+  );
+}
+

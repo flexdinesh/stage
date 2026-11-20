@@ -43,6 +43,15 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   environment id), pairing a retired connection's identity revives it, and
   identities are unique per machine and kind. Otherwise (an OpenCode address)
   the connector proves continuity itself and passes the connection to revive.
+- **Connection setup.** A connected harness's descriptor carries a setup
+  schema (settings fields with their locking environment variable, typed
+  actions, disconnect). Its setup package implements `harness.Connector`
+  (memory-only summary, status with harness details, configure, run,
+  disconnect) over narrow ports; `serve` composes one per kind
+  (`harness.Connectors`, checked against the registry). The API exposes them
+  generically under `/api/harnesses/{kind}/...`; health, sync skipping and
+  connection lists read connector summaries. Hosts render the schema, or a
+  panel registered for the kind (UI `CONNECTION_PANELS`, CLI `slots_*.go`).
 - **Closures.** Completion is inferred only from a closure the harness's
   descriptor declares; the descriptor supplies the stored provenance, the
   journal event, the auto-complete toggle label and the accepted-result copy.

@@ -46,8 +46,8 @@ func newRemoteServer(t *testing.T) *remoteServer {
 				return
 			}
 			_ = json.NewEncoder(w).Encode(r.health.Load())
-		case "/api/t3/status":
-			_, _ = w.Write([]byte(`{"connected":true,"publicUrl":"http://remote-t3:3773"}`))
+		case "/api/harnesses/t3/status":
+			_, _ = w.Write([]byte(`{"kind":"t3","connected":true,"details":{"connected":true,"publicUrl":"http://remote-t3:3773"}}`))
 		default:
 			http.NotFound(w, req)
 		}

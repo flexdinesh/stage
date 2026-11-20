@@ -340,11 +340,11 @@ func TestStatusSeparatesT3(t *testing.T) {
 	r := start(t, w)
 	mustOK(t, w, r)
 	joined := strings.Join(r.Notes, "\n")
-	if !strings.Contains(joined, "T3 is not connected") || !strings.Contains(joined, "lingering is off") {
+	if !strings.Contains(joined, "t3 is not connected") || !strings.Contains(joined, "lingering is off") {
 		t.Fatalf("notes %v", r.Notes)
 	}
 	st, code := w.ctl().Status(ctx)
-	if code != CodeOK || !st.Ready || st.T3 == nil || st.T3.Connected || !hasProblem(&st, "t3_offline") || !hasProblem(&st, "linger_off") {
+	if code != CodeOK || !st.Ready || len(st.Harnesses) != 1 || st.Harnesses[0].Connected || !hasProblem(&st, "harness_offline") || !hasProblem(&st, "linger_off") {
 		t.Fatalf("status %d %+v", code, st)
 	}
 	if !st.CLI.AgentResolvesService || hasProblem(&st, "agent_socket_mismatch") {

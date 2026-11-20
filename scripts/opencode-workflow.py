@@ -214,11 +214,11 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         lambda: request(oc, "/api/location?directory=" + urllib.parse.quote(str(repo)), auth=True),
         "OpenCode location",
     )
-    cid = request(stage, "/api/opencode/status")["connectionId"]
+    cid = request(stage, "/api/harnesses/opencode/status")["connectionId"]
     client = "http://localhost:" + str(oc_port)
     request(
         stage,
-        "/api/opencode/settings",
+        "/api/harnesses/opencode/settings",
         {
             "endpoint": oc,
             "browserEndpoint": oc,
@@ -228,8 +228,8 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         },
         "PUT",
     )
-    status = request(stage, "/api/opencode/status")
-    assert status["state"] == "connected" and status["hasCredentials"] and "fixture" not in json.dumps(status)
+    status = request(stage, "/api/harnesses/opencode/status")
+    assert status["state"] == "connected" and status["details"]["hasCredentials"] and "fixture" not in json.dumps(status)
     synced = request(stage, "/api/sync", {})
     assert synced["projects"] >= 1 and synced["unavailableConnections"] == [1], synced
     project = request(stage, "/api/projects", {"title": "Integration fixture"})

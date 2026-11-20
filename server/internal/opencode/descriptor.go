@@ -8,6 +8,12 @@ import (
 // Kind is OpenCode's harness kind.
 const Kind = "opencode"
 
+// Setup actions (opencodesetup.Connector).
+const (
+	ActionConnectLocal = "connect-local" // {"newInstance"}: the service registered on the server's machine
+	ActionPair         = "pair"          // {"link","newInstance"}: an `opencode pair` link
+)
+
 // Descriptor: OpenCode is a connected service. Its address is not a lasting
 // identity (the connector proves continuity); an archived session may
 // complete its task.
@@ -20,4 +26,21 @@ var Descriptor = harness.Descriptor{
 		Via:       "via OpenCode archive",
 		Event:     "Completed from OpenCode archive; accepted evidence saved in Stage.",
 	}},
+	Setup: harness.Setup{
+		Fields: []harness.Field{
+			{ID: "endpoint", Label: "Server URL", Kind: harness.FieldURL, Env: "OPENCODE_URL"},
+			{ID: "browserEndpoint", Label: "Browser URL", Kind: harness.FieldURL, Env: "OPENCODE_PUBLIC_URL"},
+			{ID: "webClient", Label: "Web client URL", Kind: harness.FieldURL, Env: "OPENCODE_WEB_URL"},
+			{ID: "username", Label: "Username", Kind: harness.FieldText, Env: "OPENCODE_USERNAME"},
+			{ID: "password", Label: "Password", Kind: harness.FieldSecret, Env: "OPENCODE_PASSWORD"},
+			{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool, Help: "Confirms a different OpenCode service; the current connection retires."},
+		},
+		Actions: []harness.Action{
+			{ID: ActionConnectLocal, Label: "Connect local service", Input: []harness.Field{newInstance}},
+			{ID: ActionPair, Label: "Pair with link", Input: []harness.Field{{ID: "link", Label: "Pairing link", Kind: harness.FieldSecret, Help: "Printed by `opencode pair`."}, newInstance}},
+		},
+		Disconnect: true,
+	},
 }
+
+var newInstance = harness.Field{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool}

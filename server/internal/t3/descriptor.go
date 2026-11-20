@@ -8,6 +8,12 @@ import (
 // Kind is T3's harness kind.
 const Kind = "t3"
 
+// Setup actions (t3setup.Connector).
+const (
+	ActionPair     = "pair"      // {"code"}: redeem a `t3 pair` code
+	ActionAutoPair = "auto-pair" // {}: pair through the t3 CLI on the server's machine
+)
+
 // Descriptor: T3 is a connected service whose environment id names one
 // instance for good; a settled thread may complete its task.
 var Descriptor = harness.Descriptor{
@@ -19,4 +25,12 @@ var Descriptor = harness.Descriptor{
 		Via:       "via T3 settle",
 		Event:     "Completed from T3 settle; accepted evidence saved in Stage.",
 	}},
+	Setup: harness.Setup{
+		Fields: []harness.Field{{ID: "url", Label: "T3 URL", Kind: harness.FieldURL, Env: "T3_URL", Help: "scheme://host[:port] of the T3 server; null resets to the default."}},
+		Actions: []harness.Action{
+			{ID: ActionPair, Label: "Pair with code", Input: []harness.Field{{ID: "code", Label: "Pairing code", Kind: harness.FieldSecret, Help: "Printed by `t3 pair` on the T3 host."}}},
+			{ID: ActionAutoPair, Label: "Pair automatically"},
+		},
+		Disconnect: true,
+	},
 }

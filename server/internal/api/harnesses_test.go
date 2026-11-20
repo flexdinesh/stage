@@ -75,3 +75,69 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 		})
 	}
 }
+
+// mustConnectors validates m against testHarnesses.
+func mustConnectors(m map[string]harness.Connector) harness.Connectors {
+	c, err := harness.NewConnectors(testHarnesses, m)
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
+func TestHarnessConnectionRoutes(t *testing.T) {
+	e := newEnv(t, func(d *api.Deps) {
+		d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, hostedFake)
+	})
+	var list struct {
+		Harnesses []struct {
+			Kind        string        `json:"kind"`
+			Connectable bool          `json:"connectable"`
+			Setup       harness.Setup `json:"setup"`
+		} `json:"harnesses"`
+	}
+	e.must("GET", "/api/harnesses", nil, 200, &list)
+	t3h, oc, hosted := list.Harnesses[0], list.Harnesses[1], list.Harnesses[2]
+	if !t3h.Connectable || len(t3h.Setup.Fields) != 1 || t3h.Setup.Fields[0].Env != "T3_URL" || len(t3h.Setup.Actions) != 2 || !t3h.Setup.Disconnect {
+		t.Fatalf("t3 setup %+v", t3h)
+	}
+	// newEnv composes no OpenCode connector; a hosted harness has none.
+	if oc.Connectable || hosted.Connectable || hosted.Setup.Fields == nil || hosted.Setup.Actions == nil {
+		t.Fatalf("not connectable %+v %+v", oc, hosted)
+	}
+
+	var st struct {
+		Kind         string `json:"kind"`
+		Name         string `json:"name"`
+		ConnectionID int64  `json:"connectionId"`
+		Configured   bool   `json:"configured"`
+		Connected    bool   `json:"connected"`
+		State        string `json:"state"`
+		Fields       []harness.FieldState
+		Actions      []harness.ActionState
+		Details      map[string]any `json:"details"`
+	}
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
+	if st.Kind != "t3" || st.Name != "T3" || st.ConnectionID != e.store.T3ID() || !st.Connected || !st.Configured || st.State != "connected" ||
+		len(st.Fields) != 1 || st.Fields[0].ID != "url" || st.Fields[0].Source != "default" || st.Fields[0].Locked ||
+		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || st.Actions[1].Reason != "fake" || st.Details["publicUrl"] != publicURL {
+		t.Fatalf("status %+v", st)
+	}
+
+	e.must("GET", "/api/harnesses/nope/status", nil, 404, nil)
+	e.must("GET", "/api/harnesses/hosted-fake/status", nil, 409, nil)
+	e.must("POST", "/api/harnesses/hosted-fake/actions/pair", nil, 409, nil)
+	e.must("POST", "/api/harnesses/t3/actions/nope", nil, 404, nil)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"nope": 1}, 400, nil)
+	e.must("POST", "/api/harnesses/t3/actions/auto-pair", map[string]any{"extra": true}, 400, nil)
+	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://localhost:4000"}, 200, &st)
+	if st.Fields[0].Value != "http://localhost:4000" || st.Fields[0].Source != "saved" || !st.Fields[0].Set {
+		t.Fatalf("saved url %+v", st.Fields)
+	}
+
+	var h api.Health
+	e.must("GET", "/api/health", nil, 200, &h)
+	if len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || h.Harnesses[0].ConnectionID != e.store.T3ID() {
+		t.Fatalf("health harnesses %+v", h.Harnesses)
+	}
+}

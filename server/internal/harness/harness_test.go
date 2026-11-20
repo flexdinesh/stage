@@ -16,6 +16,10 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 		"unknown hosting":    {{Kind: "a", Name: "A", Hosting: "cloud"}},
 		"unknown signal":     {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: "merged", Provenance: "harness_merged"}}}},
 		"mismatched closure": {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: execution.ClosedSettled, Provenance: "harness_archived"}}}},
+		"duplicate field":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: harness.FieldURL}, {ID: "u", Label: "U2", Kind: harness.FieldText}}}}},
+		"unknown field kind": {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: "date"}}}}},
+		"unlabeled action":   {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go"}}}}},
+		"duplicate input":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go", Label: "Go", Input: []harness.Field{{ID: "x", Label: "X", Kind: harness.FieldText}, {ID: "x", Label: "X", Kind: harness.FieldText}}}}}}},
 	} {
 		if _, err := harness.NewRegistry(ds...); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -69,4 +73,30 @@ func TestProfilePolicy(t *testing.T) {
 			t.Errorf("%s: connected %+v", c.name, a)
 		}
 	}
+}
+
+type nopConnector struct{ harness.Connector }
+
+func TestConnectorsAreCheckedAgainstTheRegistry(t *testing.T) {
+	conn := harness.Descriptor{Kind: "svc", Name: "Svc", Hosting: harness.Connected}
+	hosted := harness.Descriptor{Kind: "proc", Name: "Proc", Hosting: harness.Hosted}
+	reg := harness.MustRegistry(conn, hosted)
+	if _, err := harness.NewConnectors(reg, map[string]harness.Connector{"nope": nopConnector{}}); err == nil {
+		t.Fatal("connector for an unregistered kind accepted")
+	}
+	if _, err := harness.NewConnectors(reg, map[string]harness.Connector{"proc": nopConnector{}}); err == nil {
+		t.Fatal("connector for a hosted kind accepted")
+	}
+	cs, err := harness.NewConnectors(reg, map[string]harness.Connector{"svc": nopConnector{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cs.Get("svc"); !ok {
+		t.Fatal("svc connector missing")
+	}
+	if _, ok := cs.Get("proc"); ok {
+		t.Fatal("proc has no connector")
+	}
+	var zero harness.Connectors
+	zero.Each(func(harness.Descriptor, harness.Connector) { t.Fatal("zero Connectors has none") })
 }

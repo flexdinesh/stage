@@ -31,7 +31,7 @@ const AutoPairTimeout = 15 * time.Second
 // carries its stderr.
 type Runner func(ctx context.Context, bin string, args []string) ([]byte, error)
 
-// AutoPair is whether POST /api/t3/pair/auto can work.
+// AutoPair is whether the auto-pair setup action can work.
 type AutoPair struct {
 	Available bool
 	Reason    string // "" when available

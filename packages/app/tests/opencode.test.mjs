@@ -64,11 +64,11 @@ test("client: pair, connect-local, connect address and disconnect hit the contra
   await api.saveOpenCode({ endpoint: "http://studio.lan:49374", username: "opencode", password: "pw" });
   await api.disconnectOpenCode();
   assert.deepEqual(seen, [
-    { path: "/opencode/pair", method: "POST", body: { link: "http://192.168.1.2:49374/auth/connect/abc" } },
-    { path: "/opencode/connect-local", method: "POST", body: undefined },
-    { path: "/opencode/settings", method: "PUT", body: { endpoint: "http://studio.lan:49374" } },
-    { path: "/opencode/settings", method: "PUT", body: { endpoint: "http://studio.lan:49374", username: "opencode", password: "pw" } },
-    { path: "/opencode/settings", method: "DELETE", body: undefined },
+    { path: "/harnesses/opencode/actions/pair", method: "POST", body: { link: "http://192.168.1.2:49374/auth/connect/abc" } },
+    { path: "/harnesses/opencode/actions/connect-local", method: "POST", body: undefined },
+    { path: "/harnesses/opencode/settings", method: "PUT", body: { endpoint: "http://studio.lan:49374" } },
+    { path: "/harnesses/opencode/settings", method: "PUT", body: { endpoint: "http://studio.lan:49374", username: "opencode", password: "pw" } },
+    { path: "/harnesses/opencode/connection", method: "DELETE", body: undefined },
   ]);
 });
 

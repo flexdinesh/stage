@@ -130,8 +130,8 @@ func (s *fakeServer) start(t *testing.T) {
 		case "/api/health":
 			w.WriteHeader(int(s.code.Load()))
 			_ = json.NewEncoder(w).Encode(s.health.Load())
-		case "/api/t3/status":
-			_, _ = w.Write([]byte(`{"connected":true,"publicUrl":"http://t3.example:3773/"}`))
+		case "/api/harnesses/t3/status":
+			_, _ = w.Write([]byte(`{"kind":"t3","connected":true,"details":{"connected":true,"publicUrl":"http://t3.example:3773/"}}`))
 		default:
 			http.NotFound(w, r)
 		}

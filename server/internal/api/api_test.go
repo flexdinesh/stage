@@ -24,7 +24,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -180,6 +182,14 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	if deps.Setup == nil {
 		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Store: store, Client: client, Fake: true, Logger: log})
 	}
+	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(deps.Setup, func() t3setup.SyncProgress {
+		p := svc.Progress()
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+	})}
+	if c, ok := deps.Connectors.Get(opencode.Kind); ok {
+		connectors[opencode.Kind] = c
+	}
+	deps.Connectors = mustConnectors(connectors)
 	h := api.NewRouter(deps)
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
@@ -339,18 +349,18 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 5 || h.Version == "" || !h.T3.Connected || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 6 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "5" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "6" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
 	e.t3.offline.Store(true)
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.T3.Connected {
+	if h.Status != "ok" || h.Harnesses[0].Connected {
 		t.Fatalf("health with T3 offline %+v", h)
 	}
 	e.must("GET", "/api/nope", nil, 404, nil)
@@ -957,13 +967,16 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 	if res.Projects != 2 || res.Threads != 1 || res.FinishedAt == "" {
 		t.Fatalf("sync %+v", res)
 	}
-	var st struct {
-		LastFullSyncAt *string `json:"lastFullSyncAt"`
-		Connected      bool    `json:"connected"`
-		EnvironmentID  *string `json:"environmentId"`
-		PublicURL      string  `json:"publicUrl"`
+	var reply struct {
+		Details struct {
+			LastFullSyncAt *string `json:"lastFullSyncAt"`
+			Connected      bool    `json:"connected"`
+			EnvironmentID  *string `json:"environmentId"`
+			PublicURL      string  `json:"publicUrl"`
+		} `json:"details"`
 	}
-	e.must("GET", "/api/t3/status", nil, 200, &st)
+	e.must("GET", "/api/harnesses/t3/status", nil, 200, &reply)
+	st := reply.Details
 	if st.LastFullSyncAt == nil || !st.Connected || st.EnvironmentID == nil || st.PublicURL != publicURL {
 		t.Fatalf("status %+v", st)
 	}
@@ -1014,8 +1027,8 @@ func TestCatalogAndPair(t *testing.T) {
 	if bare.DisplayName != "bare" || bare.Models[0].Label != "m1" || bare.Models[0].Options == nil || bare.RuntimeModes != nil {
 		t.Fatalf("fallbacks %+v", bare)
 	}
-	e.must("POST", "/api/t3/pair", map[string]any{"code": " "}, 400, nil)
-	e.must("POST", "/api/t3/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
+	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": " "}, 400, nil)
+	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
 }
 
 func TestSnippets(t *testing.T) {

@@ -112,19 +112,17 @@ Usage:
                                       comma-separate for several (env STAGE_LISTEN, default 127.0.0.1:7380)
   stage serve --managed               run as the per-user service (what "stage service" registers):
                                       config from service.env only, default data dir, unix required
-  stage status [--wait DUR]           the server this CLI reaches: version, readiness, T3 state
+  stage status [--wait DUR]           the server this CLI reaches: version, readiness, harness states
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
-  stage t3 [status]                   the server's T3: URL, reachability, pairing, sync, auto-pair
-  stage t3 pair [--code CODE]         pair the server with T3: auto-pair with the t3 CLI on the server's
-                                      machine, or a code from "t3 pair" on the T3 host
-  stage t3 disconnect                 forget the server's T3 token and environment binding (tasks stay)
-  stage t3 url [URL | --reset]        show or set the server's T3 URL (--reset: default; T3_URL wins)
-  stage opencode [status]             the server's OpenCode: address, auth, state, the local service
-  stage opencode connect              connect the OpenCode service on the server's machine
-  stage opencode pair LINK            connect a remote OpenCode with a link from "opencode pair" on its
-                                      host; the session token renews automatically
-                                      (connect/pair --new-instance: confirm a different service)
-  stage opencode disconnect           forget the server's OpenCode address and credentials (tasks stay)
+  stage harness [list]                the harnesses this server knows, its machine profile, and which
+                                      ones can run here
+  stage harness KIND [status]         KIND's connection setup on the server: state, settings, actions
+  stage harness KIND set FIELD=VALUE... [--reset FIELD]...
+                                      save connection settings (an environment variable locks a field)
+  stage harness KIND run ACTION [FIELD=VALUE...]
+                                      run a setup action, e.g. t3: pair code=CODE, auto-pair;
+                                      opencode: connect-local, pair link=LINK [newInstance=true]
+  stage harness KIND disconnect       forget KIND's connection credentials (tasks stay)
   stage version [--json]              this binary: version, identity, commit, API version, schema,
                                       and its installation (mode, location) when installed
   stage update [--check] [--version X] [--from DIR]
@@ -142,7 +140,7 @@ Usage:
                                       and start it; waits for readiness; never restarts a running one
   stage service restart [--exe PATH] [--wait 150s]
   stage service stop|uninstall [--wait 2m]   uninstall keeps data and service.env
-  stage service status                service, definition, data dir holder, Stage health, T3, problems
+  stage service status                service, definition, data dir holder, Stage health, harnesses, problems
   stage service logs [-f] [-n 100]
   stage service enable|disable        login startup on/off (does not start or stop it)
                                       service commands take --json; exit 0 ok, 1 failed, 3 wait
@@ -303,10 +301,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runContext(ctx, env, sub)
 	case "status":
 		return runStatus(ctx, env, sub)
-	case "t3":
-		return runT3(ctx, env, sub)
-	case "opencode":
-		return runOpenCode(ctx, env, sub)
+	case "harness":
+		return runHarness(ctx, env, sub)
 	case "version":
 		return runVersion(env, sub)
 	case "service":
