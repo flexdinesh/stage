@@ -234,7 +234,7 @@ includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?}, available, reason?, connectable}]}`. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable its agents find their session id in (see [Agent interface](#agent-interface)). `profile.kind`: `desktop` (the managed per-user service), `server` (foreground `stage serve`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
+- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?}, launch, available, reason?, connectable}]}`. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable its agents find their session id in (see [Agent interface](#agent-interface)). `profile.kind`: `desktop` (the managed per-user service), `server` (foreground `stage serve`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
 - `GET /api/connections`: `{connections: [{id, machineId, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. `machineId`: the machine that runs the instance (one local machine today). One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `DELETE /api/connections/:connectionId`: forget a retired connection. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its discovered projects and shared paths are dropped. 204. 404 unknown or already forgotten. 409 the connection is active.
@@ -492,6 +492,19 @@ Backlog can advance when execution begins in its harness. Execution observations
 alter acceptance only through inferred completion.
 200 `Task`. 502 / 503.
 
+### Session interaction (API v6)
+
+A harness may answer what its session waits on and take messages (optional
+operations `respond` and `send` in its capabilities). Each route needs a task
+with an execution session (409 otherwise); a harness without the operation,
+or reporting it unavailable, answers 409 `{"code": "operation_unavailable"}`
+with the reason, and nothing else is limited. T3 and OpenCode offer neither
+yet; no UI or MCP tool uses them yet.
+
+- `GET /api/tasks/:id/requests` (operation `respond`): 200 `{"requests": [{id, kind: approval|question|input, title, detail?, options?: [{id, label, available}], createdAt}]}`.
+- `POST /api/tasks/:id/requests/:rid` body `{"option"?: string, "text"?: string}` (one required): answers the request, then polls the session once. 200 `Task`; 400; 404 the request is no longer pending.
+- `POST /api/tasks/:id/messages` body `{"text": string}` (nonblank): sends the session a message, then polls once. 200 `Task`; 400.
+
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), model config, workspace, tags; no copied notes, no tree, no needs, no start time, no schedule.
 201 `Task`. 404. 409 for an adopted task.
@@ -687,6 +700,8 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, text, truncated, up
 ## API v6 changes
 
 Breaking, so `apiVersion` is 6 and v5 clients refuse this server. Removed, returning 404: `GET /api/t3/status`, `POST /api/t3/pair`, `POST /api/t3/pair/auto`, `DELETE /api/t3/pair`, `PUT /api/t3/url`, `GET /api/opencode/status`, `PUT /api/opencode/settings`, `DELETE /api/opencode/settings`, `POST /api/opencode/connect-local`, `POST /api/opencode/pair`. Use [Harness connections](#harness-connections-api-v6): their old bodies are the new settings and action bodies, and their old replies are the status `details` (the OpenCode routes now answer 200 with the status instead of 204). Health's `t3` object is now `harnesses[]`. CLI: `stage t3` and `stage opencode` are `stage harness KIND status|set|run|disconnect`.
+
+Added: [session interaction](#session-interaction-api-v6) routes, descriptor `launch`.
 
 Caller attribution is generic: removed `callerThreadId` (MCP tools), journal `sourceThreadId` input, adoption `threadId`, CLI `--thread`, `sessions adopt THREAD` (use `--target-connection` and `--target-session`) and `mcp --t3-session-env`; Stage no longer reads `T3CODE_THREAD_ID`. Use `callerSession`, the `Stage-Caller-Session` header or `STAGE_CALLER_SESSION` ([Agent interface](#agent-interface)); a dedicated T3 stdio registration sets `STAGE_CALLER_SESSION=<connectionId>:$T3CODE_THREAD_ID` in the agent's environment instead.
 
