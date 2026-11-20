@@ -25,7 +25,7 @@ test("journal endpoints preserve ownership, provenance and literal filters", asy
   assert.equal(calls[1].path, "/tasks/7/journal");
   await api.journalEntry(41);
   assert.equal(calls[2].path, "/journal/41");
-  const body = { text: "Keep the record", category: "decision", requestId: "request-1", sourceTaskId: 9, sourceThreadId: "session/9" };
+  const body = { text: "Keep the record", category: "decision", requestId: "request-1", sourceTaskId: 9, sourceSession: { connectionId: 2, externalSessionId: "session/9" } };
   await api.appendNote({ treeId: 3 }, body);
   assert.deepEqual(calls[3], { path: "/trees/3/journal", method: "POST", body });
   await api.appendNote({ taskId: 7 }, body);

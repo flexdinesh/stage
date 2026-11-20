@@ -72,7 +72,7 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 		switch {
 		case len(bindings) == 1:
 			id = bindings[0].ConnectionID
-		case c.ThreadID != "" || a.legacyConfig():
+		case a.legacyConfig():
 			id = h.t3()
 		case len(bindings) > 1:
 			return 0, errors.New("this project has multiple harness bindings; select connectionId from list_projects")

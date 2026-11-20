@@ -54,7 +54,7 @@ Invoke `get_context` from a conversation. Check the session, project and owning 
 
 OpenCode 2.3.0 sends native caller identity per MCP call. To expose named Stage tools directly in its MCP server configuration, use `"codemode": false` and `"protocol": "legacy"` alongside the Stage HTTP URL.
 
-The T3 CLI reads `T3CODE_THREAD_ID`. A shared MCP process uses per-call identity. For T3 over HTTP or shared stdio, pass `callerThreadId` from the current session. When migrating a stdio registration dedicated to exactly one T3 session, rerun `stage setup mcp --t3-session-env` or change its command to `stage mcp --t3-session-env` to retain environment attribution.
+Every harness can name its session as `<connectionId>:<externalSessionId>`: the CLI reads `STAGE_CALLER_SESSION`, and an HTTP MCP request can send the `Stage-Caller-Session` header. A shared MCP process uses per-call identity. T3 sets the session id in `T3CODE_THREAD_ID`, so a T3 agent exports `STAGE_CALLER_SESSION=<connectionId>:$T3CODE_THREAD_ID` or passes `callerSession`. Launch instructions name the connection id.
 
 Intermediaries can pass `callerSession` with `connectionId` and `externalSessionId`. The CLI equivalent is `--caller-connection ID --caller-session ID`. A conflicting OpenCode claim returns an error. Without session context, supply a project or journal owner explicitly. Stage leaves the author session empty.
 
@@ -143,7 +143,7 @@ stage tree new --title "Auth" 41 43:41 42:43                                   #
 stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
-stage task ls --origin-thread "$T3CODE_THREAD_ID"                              # tasks created by this T3 session
+stage task ls --origin-thread "$T3CODE_THREAD_ID"                              # tasks a T3 session created
 stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
 ```

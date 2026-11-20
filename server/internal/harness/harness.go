@@ -52,6 +52,27 @@ type Descriptor struct {
 	Closures       []Closure `json:"closures"`
 	// Setup is the connection setup schema (connected harnesses).
 	Setup Setup `json:"setup"`
+	// Attribution is how an agent running on this harness tells Stage its
+	// session.
+	Attribution Attribution `json:"attribution"`
+}
+
+// Attribution is how a calling agent's session reaches Stage. Every harness
+// can use the generic channels: an explicit callerSession argument, the
+// Stage-Caller-Session header on HTTP MCP, and STAGE_CALLER_SESSION for the
+// CLI (agentctx). A harness may add its own per-call channel and must
+// describe the session its agents can name.
+type Attribution struct {
+	// MetaKeys are MCP request _meta keys whose string value is the
+	// caller's external session id on the kind's active connection (sent by
+	// the harness itself on each call).
+	MetaKeys []string `json:"metaKeys"`
+	// Env is the environment variable the harness sets in agent processes
+	// to the session id. A hint for agents; Stage never reads it.
+	Env string `json:"env,omitempty"`
+	// Hint is the caller line of launch journal instructions; {connectionId}
+	// and {cli} are filled in. Empty: the generic hint.
+	Hint string `json:"-"`
 }
 
 // Closure is the descriptor's closure for signal.

@@ -131,6 +131,9 @@ func decode[T any](t *testing.T, s string) T {
 	return v
 }
 
+// t3Session is session id s on the T3 connection (id 1).
+func t3Session(s string) *db.SessionRef { return &db.SessionRef{ConnectionID: 1, ExternalSessionID: s} }
+
 func TestTaskCommands(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("/w/cli")
@@ -141,7 +144,7 @@ func TestTaskCommands(t *testing.T) {
 	if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
 		t.Fatal(err)
 	}
-	h.caller = agentctx.Caller{ThreadID: out.ThreadID, Cwd: "/elsewhere"}
+	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
 
 	// Prompt from stdin; flags after the subcommand; session picks the project.
 	code, stdout, stderr := h.run("multi\nline prompt\n", "task", "add", "--project", "1", "--title", "From agent", "--prompt", "-", "--after-me", "--tag", "a", "--tag", "b", "--json")
@@ -207,7 +210,7 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
 		t.Fatal(err)
 	}
-	h.caller = agentctx.Caller{ThreadID: out.ThreadID}
+	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID)}
 	add := func(args ...string) client.Task {
 		t.Helper()
 		code, stdout, stderr := h.run("", append([]string{"task", "add", "--project", "1", "--prompt", "p", "--json"}, args...)...)
@@ -317,10 +320,13 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		return out.ThreadID
 	}
 	me, other := launch("Mine"), launch("Theirs")
-	if code, _, stderr := h.run("", "sessions", "adopt"); code != 1 || !strings.Contains(stderr, "threadId is required") {
+	if code, _, stderr := h.run("", "sessions", "adopt"); code != 1 || !strings.Contains(stderr, "session is required") {
 		t.Fatalf("adopt without a session: %d %s", code, stderr)
 	}
-	h.caller = agentctx.Caller{ThreadID: me}
+	if code, _, stderr := h.run("", "sessions", "adopt", other); code != 2 || !strings.Contains(stderr, "--target-session") {
+		t.Fatalf("bare session id: %d %s", code, stderr)
+	}
+	h.caller = agentctx.Caller{Session: t3Session(me)}
 	code, stdout, stderr := h.run("", "sessions", "adopt", "--tag", "x")
 	if code != 0 || !strings.Contains(stdout, "adopted session as a task") || !strings.Contains(stdout, "adopted  tracks an existing session") {
 		t.Fatalf("adopt own: %d %s %s", code, stdout, stderr)
@@ -335,7 +341,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		t.Fatalf("tree new: %s", stderr)
 	}
 	tree := decode[client.TreeDetail](t, stdout)
-	code, stdout, stderr = h.run("", "sessions", "adopt", other, "--title", "Side", "--initial-note", "n", "--tree", fmt.Sprint(tree.ID), "--json")
+	code, stdout, stderr = h.run("", "sessions", "adopt", "--target-connection", "1", "--target-session", other, "--title", "Side", "--initial-note", "n", "--tree", fmt.Sprint(tree.ID), "--json")
 	got := decode[agenttools.AdoptOut](t, stdout)
 	if code != 0 || !got.Created || got.Task.Title != "Side" || got.Task.TreeID == nil || *got.Task.TreeID != tree.ID {
 		t.Fatalf("adopt other: %d %s %s", code, stdout, stderr)
@@ -467,12 +473,8 @@ func TestSetupMCP(t *testing.T) {
 		t.Fatalf("http execs %s", got)
 	}
 	h.execs = nil
-	if code, _, stderr := h.run("", "setup", "mcp", "--claude", "--t3-session-env"); code != 0 || !strings.Contains(fmt.Sprint(h.execs), "stage mcp --t3-session-env]") {
-		t.Fatalf("dedicated stdio: %s %v", stderr, h.execs)
-	}
-	h.execs = nil
-	if code, _, _ := h.run("", "setup", "mcp", "--http", "--t3-session-env"); code != 2 || len(h.execs) != 0 {
-		t.Fatalf("invalid HTTP registration: %d %v", code, h.execs)
+	if code, _, _ := h.run("", "setup", "mcp", "--claude", "--t3-session-env"); code != 2 || len(h.execs) != 0 {
+		t.Fatalf("removed --t3-session-env still accepted: %d %v", code, h.execs)
 	}
 	// A unix socket URL passes through unchanged to the stdio server; agents
 	// cannot reach HTTP MCP over a socket.

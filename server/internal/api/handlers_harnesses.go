@@ -40,6 +40,9 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 		if d.Closures == nil {
 			d.Closures = []harness.Closure{}
 		}
+		if d.Attribution.MetaKeys == nil {
+			d.Attribution.MetaKeys = []string{}
+		}
 		if d.Setup.Fields == nil {
 			d.Setup.Fields = []harness.Field{}
 		}

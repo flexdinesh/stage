@@ -400,6 +400,15 @@ func (s *Service) closure(kind string, o execution.Observation) (harness.Closure
 	return d.Closure(o.Closed.Signal)
 }
 
+// attribution is kind's caller attribution (zero when unknown).
+func (s *Service) attribution(kind string) harness.Attribution {
+	if s.Harnesses == nil {
+		return harness.Attribution{}
+	}
+	d, _ := s.Harnesses.Lookup(kind)
+	return d.Attribution
+}
+
 func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {
 	// The legacy catalog is the active T3 connection's (GET /api/catalog),
 	// wherever T3 moved after a replaced instance.
@@ -540,7 +549,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
-	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, features.SessionEnvironment, s.PublicURL, s.CLI))
+	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, s.attribution(t.Harness), s.PublicURL, s.CLI))
 	if e != nil {
 		return t, e
 	}

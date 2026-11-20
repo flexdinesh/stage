@@ -106,12 +106,11 @@ type Model struct {
 	Permissions []Choice `json:"permissions"`
 }
 type Capabilities struct {
-	Permissions        []Choice                `json:"permissions,omitempty"`
-	Operations         map[string]Availability `json:"operations"`
-	Models             []Model                 `json:"models"`
-	Modes              []Choice                `json:"modes"`
-	Workspaces         []Choice                `json:"workspaces"`
-	SessionEnvironment string                  `json:"sessionEnvironment"`
+	Permissions []Choice                `json:"permissions,omitempty"`
+	Operations  map[string]Availability `json:"operations"`
+	Models      []Model                 `json:"models"`
+	Modes       []Choice                `json:"modes"`
+	Workspaces  []Choice                `json:"workspaces"`
 }
 type Config struct {
 	Model      string        `json:"model"`

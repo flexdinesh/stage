@@ -66,7 +66,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		return execution.Capabilities{}, err
 	}
 	yes := execution.Availability{Available: true}
-	out := execution.Capabilities{Operations: map[string]execution.Availability{}, Models: []execution.Model{}, SessionEnvironment: "T3CODE_THREAD_ID"}
+	out := execution.Capabilities{Operations: map[string]execution.Availability{}, Models: []execution.Model{}}
 	for _, name := range []string{"launch", "stop", "adopt", "opening", "reply", "attention", "images", "registerWorkspace", "predecessorBase"} {
 		out.Operations[name] = yes
 	}

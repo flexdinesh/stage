@@ -13,59 +13,72 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// ThreadEnv is the env var T3 sets to the provider session's thread id.
-const ThreadEnv = "T3CODE_THREAD_ID"
+// The generic caller channels every harness can use besides an explicit
+// callerSession argument: CallerEnv for the CLI (one process, one session)
+// and CallerHeader on HTTP MCP requests. Both take ParseSession's form.
+const (
+	CallerEnv    = "STAGE_CALLER_SESSION"
+	CallerHeader = "Stage-Caller-Session"
+)
+
+// ParseSession reads "<connectionId>:<externalSessionId>".
+func ParseSession(v string) (db.SessionRef, error) {
+	id, session, ok := strings.Cut(strings.TrimSpace(v), ":")
+	n, err := strconv.ParseInt(id, 10, 64)
+	if !ok || err != nil || n <= 0 || strings.TrimSpace(session) == "" {
+		return db.SessionRef{}, fmt.Errorf("want <connectionId>:<externalSessionId>, got %q", v)
+	}
+	return db.SessionRef{ConnectionID: n, ExternalSessionID: strings.TrimSpace(session)}, nil
+}
 
 // Caller is the calling agent's context; empty fields are unknown.
 type Caller struct {
-	Session  *db.SessionRef `json:"session"`
-	ThreadID string         `json:"threadId"`
-	Cwd      string         `json:"cwd"`
+	Session *db.SessionRef `json:"session"`
+	Cwd     string         `json:"cwd"`
+	// invalid is a malformed CallerEnv, reported by Resolve when nothing
+	// else names the caller.
+	invalid error
 }
 
-// FromEnv reads process-local context for the CLI or explicitly dedicated T3 stdio.
-func FromEnv() Caller {
-	c := Caller{ThreadID: strings.TrimSpace(os.Getenv(ThreadEnv))}
+// FromEnv reads the CLI process's context: CallerEnv and the working
+// directory.
+func FromEnv() Caller { return fromEnv(os.Getenv) }
+
+func fromEnv(getenv func(string) string) Caller {
+	var c Caller
+	if v := getenv(CallerEnv); strings.TrimSpace(v) != "" {
+		ref, err := ParseSession(v)
+		if err != nil {
+			c.invalid = fmt.Errorf("%s: %w", CallerEnv, err)
+		} else {
+			c.Session = &ref
+		}
+	}
 	if wd, err := os.Getwd(); err == nil {
 		c.Cwd = wd
 	}
 	return c
 }
 
-// Resolve combines an explicit caller with a per-call transport claim.
-// t3 resolves the active T3 connection for a legacy T3 thread id.
-func (c Caller) Resolve(explicit *db.SessionRef, legacy, cwd string, meta *db.SessionRef, t3 func() (int64, error)) (Caller, error) {
-	legacy = strings.TrimSpace(legacy)
-	if legacy != "" && explicit != nil {
-		return Caller{}, errors.New("pass callerSession or callerThreadId")
-	}
-	if legacy != "" {
-		id, err := t3()
-		if err != nil {
-			return Caller{}, err
-		}
-		explicit = &db.SessionRef{ConnectionID: id, ExternalSessionID: legacy}
-	}
+// Resolve combines an explicit caller with a per-call transport claim
+// (harness request metadata or CallerHeader). An explicit caller overrides
+// the process environment; it must agree with a transport claim.
+func (c Caller) Resolve(explicit *db.SessionRef, cwd string, claim *db.SessionRef) (Caller, error) {
 	if explicit != nil && (explicit.ConnectionID <= 0 || strings.TrimSpace(explicit.ExternalSessionID) == "") {
 		return Caller{}, errors.New("callerSession requires connectionId and externalSessionId")
 	}
-	if meta != nil && explicit != nil && *meta != *explicit {
-		return Caller{}, errors.New("callerSession conflicts with OpenCode request metadata; remove the conflicting caller argument")
+	if claim != nil && explicit != nil && *claim != *explicit {
+		return Caller{}, errors.New("callerSession conflicts with the request's session metadata; remove the conflicting caller argument")
 	}
 	switch {
-	case meta != nil:
-		c.Session = meta
-		c.ThreadID = ""
+	case claim != nil:
+		c.Session = claim
 	case explicit != nil:
 		c.Session = explicit
-		c.ThreadID = legacy
-	case c.Session == nil && c.ThreadID != "":
-		id, err := t3()
-		if err != nil {
-			return Caller{}, err
-		}
-		c.Session = &db.SessionRef{ConnectionID: id, ExternalSessionID: c.ThreadID}
+	case c.invalid != nil:
+		return Caller{}, c.invalid
 	}
+	c.invalid = nil
 	if s := strings.TrimSpace(cwd); s != "" {
 		c.Cwd = s
 	}

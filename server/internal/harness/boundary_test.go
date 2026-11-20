@@ -23,7 +23,6 @@ var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/",
 // boundary. Shrink it; never grow it.
 var pending = map[string]bool{
 	"internal/agenttools/connections.go": true,
-	"internal/agenttools/mcp.go":         true,
 	"internal/api/handlers_execution.go": true,
 	"internal/api/handlers_misc.go":      true,
 	"internal/api/handlers_projects.go":  true,
@@ -46,7 +45,6 @@ var pending = map[string]bool{
 	"internal/db/tasks.go":               true,
 	"internal/db/types.go":               true,
 	"internal/notify/notify.go":          true,
-	"internal/sync/journal.go":           true,
 	"internal/sync/service.go":           true,
 	"internal/sync/session.go":           true,
 	"internal/sync/watch.go":             true,

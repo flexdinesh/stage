@@ -18,11 +18,6 @@ func TestJournalCommands(t *testing.T) {
 	var keys []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// The legacy T3 caller thread belongs to the active T3 connection.
-		if r.URL.Path == "/api/connections" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"connections": []db.HarnessConnection{{ID: 1, Harness: db.HarnessT3, Active: true}}})
-			return
-		}
 		requests = append(requests, r.Method+" "+r.URL.String())
 		switch {
 		case r.Method == "POST":
@@ -51,7 +46,7 @@ func TestJournalCommands(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	h := &harness{t: t, url: srv.URL, caller: agentctx.Caller{ThreadID: "caller"}}
+	h := &harness{t: t, url: srv.URL, caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: 1, ExternalSessionID: "caller"}}}
 	for _, args := range [][]string{
 		{"task", "notes", "1", "--json"},
 		{"tree", "notes", "2", "list", "--kind", "all", "--category", "finding", "--q", "high signal", "--task", "1", "--limit", "3", "--cursor", "old", "--json"},

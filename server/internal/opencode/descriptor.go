@@ -41,6 +41,11 @@ var Descriptor = harness.Descriptor{
 		},
 		Disconnect: true,
 	},
+	Attribution: harness.Attribution{
+		MetaKeys: []string{"ai.opencode/sessionID"},
+		Env:      "OPENCODE_SESSION_ID",
+		Hint:     "MCP: direct OpenCode MCP supplies it per call; an intermediary passes callerSession {connectionId: {connectionId}, externalSessionId}. CLI: export STAGE_CALLER_SESSION={connectionId}:<session id>, or pass --caller-connection {connectionId} --caller-session ID.",
+	},
 }
 
 var newInstance = harness.Field{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool}

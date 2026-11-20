@@ -23,7 +23,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -67,8 +69,9 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
-		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store, Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Config:    config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
+		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
+		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store, Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -94,6 +97,11 @@ func (e *env) project(root string) db.Project {
 }
 
 // session launches a running external thread in project p.
+// t3 is session id s on the T3 connection.
+func (e *env) t3(s string) *db.SessionRef {
+	return &db.SessionRef{ConnectionID: e.store.T3ID(), ExternalSessionID: s}
+}
+
 func (e *env) session(p db.Project, title string) string {
 	e.t.Helper()
 	ctx := context.Background()
@@ -198,7 +206,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	p := e.project("/w/agent")
 	other := e.project("/w/other")
 	s := e.session(p, "Planner")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s, Cwd: "/w/other/sub"}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: e.t3(s), Cwd: "/w/other/sub"}})
 
 	var cx agenttools.ContextOut
 	mustCall(t, cs, "get_context", nil, &cx)
@@ -231,7 +239,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 		t.Fatalf("explicit project: %+v", tk2)
 	}
 	var cx2 agenttools.ContextOut
-	mustCall(t, cs, "get_context", map[string]any{"callerThreadId": "unknown-thread", "cwd": "/w/other/x"}, &cx2)
+	mustCall(t, cs, "get_context", map[string]any{"callerSession": e.t3("unknown-thread"), "cwd": "/w/other/x"}, &cx2)
 	if cx2.ThreadID != "unknown-thread" || cx2.Project != nil || cx2.ProjectSource != "" {
 		t.Fatalf("cwd fallback %+v", cx2)
 	}
@@ -619,7 +627,7 @@ func TestAdoptSessionTool(t *testing.T) {
 	p := e.project("/w/adopt")
 	me := e.session(p, "Planner")
 	other := e.session(p, "Other work")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: me}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: e.t3(me)}})
 
 	var out agenttools.AdoptOut
 	mustCall(t, cs, "adopt_session", map[string]any{"tags": []string{"plan"}}, &out)
@@ -639,7 +647,7 @@ func TestAdoptSessionTool(t *testing.T) {
 	if tk.TreeID == nil {
 		t.Fatalf("needs on an adopted task builds a tree %+v", tk)
 	}
-	mustCall(t, cs, "adopt_session", map[string]any{"threadId": other, "title": "Side quest", "initialNote": "n", "treeId": *tk.TreeID}, &out)
+	mustCall(t, cs, "adopt_session", map[string]any{"session": e.t3(other), "title": "Side quest", "initialNote": "n", "treeId": *tk.TreeID}, &out)
 	if !out.Created || out.Task.Title != "Side quest" || out.Task.TreeID == nil || *out.Task.TreeID != *tk.TreeID {
 		t.Fatalf("adopt other into tree %+v", out)
 	}
@@ -664,10 +672,10 @@ func TestAdoptSessionTool(t *testing.T) {
 	}
 
 	noCaller := connect(t, &agenttools.Ops{Client: e.client})
-	if msg := call(t, noCaller, "adopt_session", nil, nil); !strings.Contains(msg, "threadId is required") {
+	if msg := call(t, noCaller, "adopt_session", nil, nil); !strings.Contains(msg, "session is required") {
 		t.Fatalf("adopt without a session: %q", msg)
 	}
-	if msg := call(t, noCaller, "adopt_session", map[string]any{"threadId": "nope"}, nil); !strings.Contains(msg, "404") {
+	if msg := call(t, noCaller, "adopt_session", map[string]any{"session": e.t3("nope")}, nil); !strings.Contains(msg, "404") {
 		t.Fatalf("adopt unknown session: %q", msg)
 	}
 }
@@ -715,7 +723,7 @@ func TestPlanningSessionBatch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/plan")
 	s := e.session(p, "Planner")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: e.t3(s)}})
 	var a, b, c client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "do a", "afterMe": true}, &a)
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "do b", "needs": []int64{a.ID}}, &b)
@@ -740,7 +748,7 @@ func TestScheduleTools(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched")
 	s := e.session(p, "Owner")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: s}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: e.t3(s)}})
 
 	var sc db.Schedule
 	mustCall(t, cs, "create_schedule", map[string]any{"project": "1", "title": "nightly", "prompt": "bump", "cron": "0 2 * * *", "tz": "UTC"}, &sc)
@@ -994,8 +1002,9 @@ func TestGuideNamesEveryInterface(t *testing.T) {
 	for _, w := range []string{
 		"Use whichever Stage interface you have: Stage MCP tools (names here), the stage CLI, or the Stage server's HTTP API (/api).",
 		"If none is reachable, say so and continue; never install one.",
-		"MCP: OpenCode sends session metadata on each direct call.",
-		"CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session.",
+		"MCP: a harness that sends session metadata on each call (OpenCode) needs nothing",
+		"CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session.",
+		"over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>",
 		"HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption",
 	} {
 		if !strings.Contains(agenttools.Guide("stage"), w) {
@@ -1006,7 +1015,7 @@ func TestGuideNamesEveryInterface(t *testing.T) {
 
 func TestGuideNamesInstalledCLI(t *testing.T) {
 	g := agenttools.Guide("stage-dev")
-	for _, w := range []string{"the stage-dev CLI,", "stage-dev mcp --t3-session-env", "through stage-dev task, tree,", "Run stage-dev help"} {
+	for _, w := range []string{"the stage-dev CLI,", "through stage-dev task, tree,", "Run stage-dev help"} {
 		if !strings.Contains(g, w) {
 			t.Errorf("guide missing %q", w)
 		}

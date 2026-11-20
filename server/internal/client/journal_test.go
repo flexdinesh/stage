@@ -45,7 +45,7 @@ func TestJournalTransport(t *testing.T) {
 				t.Error(err)
 			}
 			if in.Text != "full note" || in.Category != "decision" || in.RequestID != "retry-1" ||
-				in.SourceTaskID == nil || *in.SourceTaskID != taskID || in.SourceThreadID == nil || *in.SourceThreadID != threadID {
+				in.SourceTaskID == nil || *in.SourceTaskID != taskID || in.SourceSession == nil || *in.SourceSession != (db.SessionRef{ConnectionID: 3, ExternalSessionID: threadID}) {
 				t.Errorf("body: %+v", in)
 			}
 			w.WriteHeader(http.StatusCreated)
@@ -72,7 +72,7 @@ func TestJournalTransport(t *testing.T) {
 		t.Fatalf("page %+v: %v", page, err)
 	}
 	entry, err := c.AppendNote(ctx, db.JournalOwner{TreeID: &treeID}, db.AppendNoteInput{
-		Text: "full note", Category: "decision", RequestID: "retry-1", SourceTaskID: &taskID, SourceThreadID: &threadID,
+		Text: "full note", Category: "decision", RequestID: "retry-1", SourceTaskID: &taskID, SourceSession: &db.SessionRef{ConnectionID: 3, ExternalSessionID: threadID},
 	})
 	if err != nil || entry.ID != 6 || entry.TaskID != nil || entry.TreeID == nil || entry.Truncated {
 		t.Fatalf("appended %+v: %v", entry, err)

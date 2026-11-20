@@ -2,10 +2,11 @@ package agenttools
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,7 +18,7 @@ const Version = "1.0.0"
 const guide = `Stage owns projects, tasks, trees, accepted results and journals. Open conversations in the selected harness.
 - Call get_context to see your scoped session, project, owning task and current tree. Before work, read the task journal and the current tree journal. Refresh membership before contributing a tree note.
 - Use whichever Stage interface you have: Stage MCP tools (names here), the {cli} CLI, or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
-- Caller session. MCP: OpenCode sends session metadata on each direct call. An intermediary can pass callerSession with connectionId and externalSessionId. T3 callers can pass callerThreadId from T3CODE_THREAD_ID. Only dedicated stdio processes may use {cli} mcp --t3-session-env. CLI: reads T3CODE_THREAD_ID or accepts --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
+- Caller session: {connectionId, externalSessionId}, your harness connection in Stage and your session there (your launch instructions say how to name it). MCP: a harness that sends session metadata on each call (OpenCode) needs nothing; otherwise pass callerSession, or over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>. CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
 - Create work with create_task. Supply a self-contained prompt. The default is backlog. Specify project by ID or exact title when context is missing. list_projects shows bindings and configured connections. Set connectionId to choose the execution harness independently of the creator. list_models with connectionId and projectId shows workspace-specific executionConfig choices.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks; manual (tree or per task) is an explicit choice. Only user completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. A predecessor worktree base requires an available branch in the same harness and project.
@@ -87,26 +88,18 @@ func NewServer(o *Ops) *mcp.Server {
 func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnnotations, op func(context.Context, In) (Out, error)) {
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc, Annotations: ann},
 		func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
-			if value, present := req.Params.GetMeta()["ai.opencode/sessionID"]; present {
-				id, ok := value.(string)
-				if !ok || strings.TrimSpace(id) == "" {
-					return nil, nil, errors.New("OpenCode request metadata must contain a nonempty session ID")
+			claim, err := o.metaClaim(ctx, req.Params.GetMeta())
+			if err != nil {
+				return nil, nil, err
+			}
+			if header, _ := ctx.Value(headerKey{}).(*db.SessionRef); header != nil {
+				if claim != nil && *claim != *header {
+					return nil, nil, fmt.Errorf("the %s header conflicts with the request's session metadata", agentctx.CallerHeader)
 				}
-				connections, err := o.Client.Connections(ctx)
-				if err != nil {
-					return nil, nil, err
-				}
-				var ref *db.SessionRef
-				for _, c := range connections {
-					if c.Harness == "opencode" && c.Configured {
-						ref = &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: id}
-						break
-					}
-				}
-				if ref == nil {
-					return nil, nil, errors.New("configure the OpenCode connection in Stage before using OpenCode session metadata")
-				}
-				ctx = context.WithValue(ctx, metadataKey{}, ref)
+				claim = header
+			}
+			if claim != nil {
+				ctx = context.WithValue(ctx, claimKey{}, claim)
 			}
 			out, err := op(ctx, in)
 			if err != nil {
@@ -116,8 +109,75 @@ func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnn
 		})
 }
 
-// HTTPHandler serves streamable HTTP MCP over ops (no local file access).
+// metaClaim is the caller a harness names in MCP request _meta: a key its
+// descriptor declares (harness.Attribution.MetaKeys), resolved to that
+// kind's active configured connection.
+func (o *Ops) metaClaim(ctx context.Context, meta map[string]any) (*db.SessionRef, error) {
+	candidate := false
+	for k := range meta {
+		candidate = candidate || harnessMetaKey(k)
+	}
+	if !candidate {
+		return nil, nil
+	}
+	hs, err := o.Client.Harnesses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range hs.Harnesses {
+		for _, key := range d.Attribution.MetaKeys {
+			value, present := meta[key]
+			if !present {
+				continue
+			}
+			id, ok := value.(string)
+			if !ok || strings.TrimSpace(id) == "" {
+				return nil, fmt.Errorf("%s request metadata %s must be a nonempty session ID", d.Name, key)
+			}
+			connections, err := o.Client.Connections(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range connections {
+				if c.Harness == d.Kind && c.Configured {
+					return &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: id}, nil
+				}
+			}
+			return nil, fmt.Errorf("configure the %s connection in Stage before using %s session metadata", d.Name, d.Name)
+		}
+	}
+	return nil, nil
+}
+
+// harnessMetaKey reports whether a _meta key may be a harness's: not
+// progressToken and not under a prefix MCP reserves (second label
+// modelcontextprotocol or mcp, e.g. io.modelcontextprotocol/clientInfo).
+func harnessMetaKey(key string) bool {
+	prefix, _, ok := strings.Cut(key, "/")
+	if !ok {
+		return key != "progressToken"
+	}
+	labels := strings.Split(prefix, ".")
+	return len(labels) < 2 || (labels[1] != "modelcontextprotocol" && labels[1] != "mcp")
+}
+
+// headerKey holds the Stage-Caller-Session header of an HTTP MCP request.
+type headerKey struct{}
+
+// HTTPHandler serves streamable HTTP MCP over ops (no local file access). A
+// request may name its caller with the agentctx.CallerHeader header.
 func HTTPHandler(o *Ops) http.Handler {
 	s := NewServer(&Ops{Client: o.Client, PollEvery: o.PollEvery, CLI: o.CLI})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{Stateless: true})
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{Stateless: true})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get(agentctx.CallerHeader); v != "" {
+			ref, err := agentctx.ParseSession(v)
+			if err != nil {
+				http.Error(w, agentctx.CallerHeader+": "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), headerKey{}, &ref))
+		}
+		h.ServeHTTP(w, r)
+	})
 }
