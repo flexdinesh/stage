@@ -283,7 +283,7 @@ Rows are grids: 118px state column, fluid title (task rows lead it with the task
 ### Named Rules
 **The Ruled List Rule.** One bordered panel per state or concern, rows separated by hairlines. Never a grid of cards.
 
-**The Drawer Not Modal Rule.** Secondary flows (new task, edit, filters, More) open in a right drawer, 580px or 680px wide, that becomes a full-screen sheet below 768px, with Esc, a focus trap and focus restore.
+**The Drawer Not Modal Rule.** Secondary flows (new task, edit, filters) open in a right drawer, 580px or 680px wide, that becomes a full-screen sheet below 768px, with Esc, a focus trap and focus restore.
 
 **The Go Or Change Rule.** Navigation, a manual state change and an action never look alike. Going somewhere is a link with a trailing arrow (a panel header's mono `Open →`), never a button. A manual state change goes through the State picker: a select-only Combobox showing the current status (tone square, mono label) whose other option is the one allowed move with its consequence on the detail line ("accept without a run", "clears acceptance; history stays"; disabled with "stop execution first" while it runs), confirmed in a drawer. Buttons act: Start, Retry, Open in T3, Edit.
 
@@ -359,7 +359,7 @@ Three stepped square bars, widest at the bottom, on the 16-unit grid; no rounded
 ### Navigation
 
 - Laptop (from 1024px): the sidebar's views, Dashboard, Tasks, Schedules, then the project scope list, with Snippets and Settings in its footer (see Layout).
-- Phone: four equal tabs, Dashboard, Tasks, Schedules, More. More contains Projects, Snippets, Settings and theme. Keep existing sizes, borders and active indicators.
+- Phone: four equal tabs, Dashboard, Tasks, Schedules, More. More is a page in the standard shell, with a ruled list of Projects, Snippets and Settings followed by the Theme control. The bottom tabs stay visible, and More carries the active indicator on its page and those destinations.
 
 ### Pull to reload
 On phones and tablets, in browser and installed PWA, a single-finger downward pull from the document top reloads the current URL when released at 80 CSS pixels. Below that distance it cancels. Controls, focused editors, nested scrollers, drawers and the palette keep their gestures; horizontal intent, multitouch and navigation cancel the pull.

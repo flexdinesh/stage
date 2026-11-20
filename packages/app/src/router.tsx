@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from "react-router";
 import { Layout } from "./components/Layout.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
+import { MorePage } from "./pages/MorePage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
       { path: "tasks/:id", element: <TaskDetailPage /> },
       { path: "schedules", element: <SchedulesPage /> },
       { path: "schedules/:id", element: <ScheduleDetailPage /> },
+      { path: "more", element: <MorePage /> },
       { path: "snippets", element: <SnippetsPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
