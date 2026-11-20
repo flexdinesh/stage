@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
+import { Link, NavLink, Outlet, matchPath, useLocation, useSearchParams } from "react-router";
 import { useBadge, useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { relativeTime } from "../lib/format.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
-import { THEMES, useTheme, type Theme } from "../lib/theme.ts";
+import { useTheme, type Theme } from "../lib/theme.ts";
 import { t3Identity } from "../lib/onboarding.ts";
 import {
   openCodeErrorText,
@@ -18,6 +18,7 @@ import {
   type StatusRead,
 } from "../lib/connections.ts";
 import { serviceHostText, signInText } from "../lib/opencode.ts";
+import { MORE_DESTINATIONS } from "../pages/MorePage.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
@@ -43,7 +44,7 @@ import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { AttentionCount, ProjectNav, SideLink, useScopeAttention } from "./Sidebar.tsx";
-import { Button, Chip, Drawer, Kbd, Segmented, buttonClass, cx } from "./ui.tsx";
+import { Button, Chip, Drawer, Kbd, buttonClass, cx } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -54,14 +55,12 @@ const TABS = [
   { to: "/schedules", label: "Schedules", icon: <IconSchedules size={TAB_ICON} /> },
 ] as const;
 
-/** Phone More drawer: the sidebar destinations the bottom tabs leave out. */
-const MORE = [
-  { to: "/projects", label: "Projects" },
-  { to: "/snippets", label: "Snippets" },
-  { to: "/settings", label: "Settings" },
-] as const;
-
-const MORE_PATHS: readonly string[] = MORE.map((item) => item.to);
+function tabClass(active: boolean) {
+  return cx(
+    "relative -mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-tab",
+    active ? "border-accent text-fg" : "border-transparent text-muted",
+  );
+}
 
 const THEME_ICON: Record<Theme, ReactNode> = {
   system: <IconThemeSystem />,
@@ -225,9 +224,7 @@ function Shell() {
   const [inbox, setInbox] = useState(false);
   const openInbox = useCallback(() => setInbox(true), []);
   const newTask = useNewTask();
-  const { theme, setTheme } = useTheme();
   const [palette, setPalette] = useState(false);
-  const [more, setMore] = useState(false);
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const inboxRequested = params.has(INBOX_PARAM);
@@ -271,7 +268,8 @@ function Shell() {
     return () => document.removeEventListener("keydown", onKey);
   }, [newTask]);
 
-  const moreActive = MORE_PATHS.some((p) => location.pathname.startsWith(p));
+  const onMorePage = matchPath("/more", location.pathname) !== null;
+  const inMoreSection = MORE_DESTINATIONS.some(({ to }) => matchPath({ path: to, end: false }, location.pathname) !== null);
   const attention = useScopeAttention();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
@@ -362,12 +360,7 @@ function Shell() {
             key={t.to}
             to={t.to}
             end={t.to === "/"}
-            className={({ isActive }) =>
-              cx(
-                "relative -mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-tab",
-                isActive ? "border-accent text-fg" : "border-transparent text-muted",
-              )
-            }
+            className={({ isActive }) => tabClass(isActive)}
           >
             {t.icon}
             {t.label}
@@ -376,17 +369,14 @@ function Shell() {
             ) : null}
           </NavLink>
         ))}
-        <button
-          type="button"
-          onClick={() => setMore(true)}
-          className={cx(
-            "-mt-px flex flex-col items-center justify-center gap-1 border-t-2 text-tab",
-            moreActive ? "border-accent text-fg" : "border-transparent text-muted",
-          )}
+        <Link
+          to="/more"
+          aria-current={onMorePage ? "page" : inMoreSection ? "true" : undefined}
+          className={tabClass(onMorePage || inMoreSection)}
         >
           <IconMore size={TAB_ICON} />
           More
-        </button>
+        </Link>
       </nav>
 
       </div>
@@ -394,36 +384,6 @@ function Shell() {
       {scopeSheet ? (
         <Drawer title="Projects" onClose={() => setScopeSheet(false)}>
           <ProjectNav touch onPick={() => setScopeSheet(false)} />
-        </Drawer>
-      ) : null}
-
-      {more ? (
-        <Drawer title="More" onClose={() => setMore(false)}>
-          <div className="flex flex-col gap-5">
-            <nav className="flex flex-col border border-line" aria-label="More">
-              {MORE.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  onClick={() => setMore(false)}
-                  className={({ isActive }) =>
-                    cx("border-b border-line px-3 py-3 text-body last:border-b-0", isActive && "bg-panel font-medium")
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-            <div className="flex flex-col gap-2">
-              <span className="label-caps">Theme</span>
-              <Segmented
-                label="Theme"
-                options={THEMES.map((t) => ({ value: t, label: t }))}
-                value={theme}
-                onChange={setTheme}
-              />
-            </div>
-          </div>
         </Drawer>
       ) : null}
 
