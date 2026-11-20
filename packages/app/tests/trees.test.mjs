@@ -13,6 +13,7 @@ import {
   needCandidates,
   nextActionText,
   nodeState,
+  pickedTask,
   rollupLabel,
   taskClosedLabel,
   treeClosed,
@@ -21,7 +22,9 @@ import {
   treeProjects,
   treeRollup,
   treeMembers,
+  treePosition,
   treeSettled,
+  treeTaskPath,
   wouldCycle,
 } from "../src/lib/trees.ts";
 
@@ -322,4 +325,24 @@ test("closed trees: chip text, blocker and task label", () => {
   assert.equal(taskClosedLabel({ archivedAt: "2026-11-16T10:00:00Z", treeStatus: null }), "archived");
   assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: "done" }), "tree done");
   assert.equal(taskClosedLabel({ archivedAt: null, treeStatus: "archived" }), "tree archived");
+});
+
+test("a member's position follows level order, not id order", () => {
+  // diamond levels: [1, 2], [4, 3], [5]
+  assert.deepEqual(treePosition(diamond, 1), { index: 1, total: 5 });
+  assert.deepEqual(treePosition(diamond, 4), { index: 3, total: 5 });
+  assert.deepEqual(treePosition(diamond, 3), { index: 4, total: 5 });
+  assert.deepEqual(treePosition(diamond, 5), { index: 5, total: 5 });
+  assert.equal(treePosition(diamond, 99), null);
+});
+
+test("back to tree selects the task", () => {
+  assert.equal(treeTaskPath(194, 293), "/trees/194?task=293");
+});
+
+test("?task= selects only a current member", () => {
+  assert.equal(pickedTask("3", diamond), 3);
+  assert.equal(pickedTask(null, diamond), null);
+  assert.equal(pickedTask("99", diamond), null);
+  for (const bad of ["", "abc", "3x", "-3", "0", "03", "3.0", " 3"]) assert.equal(pickedTask(bad, diamond), null, bad);
 });

@@ -5,6 +5,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   ClockIcon,
   EllipsisIcon,
@@ -63,6 +64,8 @@ export const IconPlus = sharp(PlusIcon);
 export const IconCheck = sharp(CheckIcon);
 export const IconClose = sharp(XIcon);
 export const IconBack = sharp(ChevronLeftIcon);
+/** Level step in the task detail tree bar. */
+export const IconStep = sharp(ChevronRightIcon, 12);
 export const IconArrowRight = sharp(ArrowRightIcon);
 export const IconChevronDown = sharp(ChevronDownIcon);
 export const IconChevronUp = sharp(ChevronUpIcon);

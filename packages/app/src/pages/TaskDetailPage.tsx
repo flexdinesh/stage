@@ -18,7 +18,7 @@ import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components
 import { ImageStrip } from "../components/Images.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
-import { NoTreePanel, TreePanel } from "../components/trees/TreePanel.tsx";
+import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -41,6 +41,7 @@ import { useIdParam } from "../lib/params.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { canStart, canStop, isActive } from "../lib/tasks.ts";
+import { treeTaskPath } from "../lib/trees.ts";
 import { HARNESS_NAME, isRetired, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -90,6 +91,8 @@ function workspaceChip(task: TaskDetail): string {
 }
 
 const linkClass = "text-fg underline-offset-2 hover:underline";
+// The tree is underlined at rest so the way back reads as a link, not a label.
+const treeLinkClass = "text-fg underline decoration-line-strong underline-offset-2 hover:decoration-current";
 
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
@@ -154,6 +157,14 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <Link to={`/projects/${task.projectId}`} className={linkClass}>
               {task.projectTitle}
             </Link>
+            {task.tree === null ? null : (
+              <>
+                {" / "}
+                <Link to={treeTaskPath(task.tree.id, task.id)} className={treeLinkClass}>
+                  {task.tree.title}
+                </Link>
+              </>
+            )}
             {` / task ${task.id}`}
             {task.startAt === null ? null : (
               <span title={dateTime(task.startAt)}>{` · starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
@@ -184,6 +195,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
       </div>
 
       <div className="flex flex-col gap-3.5">
+        {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
             {HARNESS_NAME[task.harness]} needs input

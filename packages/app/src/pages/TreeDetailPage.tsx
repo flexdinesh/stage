@@ -17,7 +17,7 @@ import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { closeBlocker, closedLabel, countMembers, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
+import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
@@ -187,7 +187,14 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
     else updated.delete("layout");
     setParams(updated);
   };
-  const [picked, setPicked] = useState<number | null>(null);
+  // The selected member lives in `?task=` so task detail's Back to tree returns to it.
+  const picked = pickedTask(params.get("task"), tree.tasks);
+  const setPicked = (next: number | null) => {
+    const updated = new URLSearchParams(params);
+    if (next === null) updated.delete("task");
+    else updated.set("task", String(next));
+    setParams(updated, { replace: true });
+  };
   const [renaming, setRenaming] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [confirming, setConfirming] = useState<"dissolve" | "delete" | null>(null);
@@ -360,9 +367,9 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             {tree.tasks.length === 0 ? (
               <p className="p-3 text-small text-muted">No tasks remain in this tree. Its notes and history are retained.</p>
             ) : layout === "graph" ? (
-              <TreeGraph tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
+              <TreeGraph tree={tree} selected={picked} onSelect={(id) => setPicked(picked === id ? null : id)} />
             ) : (
-              <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked((cur) => (cur === id ? null : id))} />
+              <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked(picked === id ? null : id)} />
             )}
           </Panel>
           <TreeActivity tree={tree} className="lg:hidden" />
