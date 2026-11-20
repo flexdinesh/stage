@@ -280,7 +280,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               <TreeMenu tree={tree} onPick={onMenu} />
               <Button onClick={addTask} title={selected === null ? "New parallel root. Select a task to add after it." : `New task that runs after #${selected.id}`}>
                 <IconPlus size={14} />
-                {selected === null ? "Add task" : `Add task after #${selected.id}`}
+                {selected === null ? "Add task" : `New task after #${selected.id}`}
               </Button>
               <Button
                 variant="primary"

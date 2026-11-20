@@ -20,7 +20,7 @@ function matches(tasks: readonly Task[], treeId: number, query: string): Task[] 
 
 /**
  * Add an existing task to the tree: search tasks by title or #id, pick one, then (backlog without a start time only)
- * choose which members it runs after (none: a parallel root). `after` (Link existing after on a member) starts with that
+ * choose which members it runs after (none: a parallel root). `after` (Existing task under a member's Dependents) starts with that
  * member checked. A task in another tree moves (spliced out there).
  */
 export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDetail; after?: number; onClose: () => void }) {
@@ -57,7 +57,7 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
   );
 
   return (
-    <Drawer title={after === undefined ? "Add existing task" : `Link existing after #${after}`} onClose={onClose} footer={footer}>
+    <Drawer title={after === undefined ? "Add existing task" : `Existing task after #${after}`} onClose={onClose} footer={footer}>
       <div className="flex flex-col gap-4">
         <Field label="Find a task">
           {(id) => (

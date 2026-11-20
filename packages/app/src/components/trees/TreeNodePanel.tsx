@@ -9,7 +9,7 @@ import { handoffHint } from "../../lib/handoff.ts";
 import { baseCandidates, needCandidates, startModeCaption, treeClosed } from "../../lib/trees.ts";
 import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
-import { IconArrowRight, IconClose, IconPlus } from "../icons.tsx";
+import { IconArrowRight, IconChainLink, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
 import { Combobox } from "../Combobox.tsx";
 import { Button, ErrorText, Panel, Segmented } from "../ui.tsx";
@@ -117,8 +117,8 @@ export function TreeNodePanel({
 
 /**
  * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
- * dependents (with Add task after and Link existing after: a task added from here runs after this one; several run
- * in parallel with each other), start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
+ * dependents (stacked New task and Existing task buttons, each captioned: a task added from here waits for this one),
+ * start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
  * base and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
  * (`onSelect`) or open the task.
  */
@@ -136,6 +136,8 @@ export function TreeNodeEditor({
   const api = useApi();
   const invalidate = useInvalidateWork();
   const baseId = useId();
+  const newHintId = useId();
+  const existingHintId = useId();
   const newTask = useNewTask();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -225,19 +227,30 @@ export function TreeNodeEditor({
           </ul>
         )}
         {closed ? null : (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              small
-              title={`New task that runs after #${task.id}`}
-              onClick={() => newTask(task.projectId, undefined, { treeId: tree.id, treeTitle: tree.title, needs: [task.id], startMode: tree.startMode })}
-            >
-              <IconPlus size={12} />
-              Add task after
-            </Button>
-            <Button small title={`Pick a task to run after #${task.id}`} onClick={() => setLinking(true)}>
-              Link existing after
-            </Button>
-            <p className="w-full font-mono text-meta text-muted">Added tasks run after #{task.id}, in parallel with each other.</p>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-1">
+              <Button
+                small
+                aria-describedby={newHintId}
+                className="w-full justify-start"
+                onClick={() => newTask(task.projectId, undefined, { treeId: tree.id, treeTitle: tree.title, needs: [task.id], startMode: tree.startMode })}
+              >
+                <IconPlus size={12} />
+                New task
+              </Button>
+              <p id={newHintId} className="font-mono text-meta text-muted">
+                Create a new task that waits for #{task.id}.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Button small aria-describedby={existingHintId} className="w-full justify-start" onClick={() => setLinking(true)}>
+                <IconChainLink />
+                Existing task
+              </Button>
+              <p id={existingHintId} className="font-mono text-meta text-muted">
+                Pick one from any project. It moves into this tree and waits for #{task.id}.
+              </p>
+            </div>
           </div>
         )}
       </Section>
