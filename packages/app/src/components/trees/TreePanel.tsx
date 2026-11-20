@@ -1,24 +1,29 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import type { Task, TreeDetail } from "../../api/types.ts";
-import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
-import { closedLabel, countMembers, layoutLevels, nodeState, treeMeta } from "../../lib/trees.ts";
+import { closedLabel, countMembers, layoutLevels, nodeState, treePosition, treeTaskPath } from "../../lib/trees.ts";
+import { IconBack, IconStep, IconTree } from "../icons.tsx";
 import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
 import { Button, Chip, Muted, Panel, buttonClass, cx, toneClass } from "../ui.tsx";
 import { AddToTreeDrawer } from "./AddToTreeDrawer.tsx";
 import { TreeNodeEditor } from "./TreeNodePanel.tsx";
 
 /**
- * Compact level view: one row of cells per level (roots first), each a tone square and mono `#id` linking the task.
- * Not-started members are dashed; `current` gets the Ink outline.
+ * Compact level view: one inline run of levels in execution order (roots first, a step chevron between levels), each
+ * cell a tone square and mono `#id` linking the task. Not-started members are dashed; `current` gets the Ink outline.
  */
 export function MiniLevels({ tree, current }: { tree: Pick<TreeDetail, "tasks">; current: number }) {
   const byId = new Map(tree.tasks.map((t) => [t.id, t]));
   const levels = layoutLevels(tree.tasks);
   return (
-    <ol aria-label="Tree levels" className="flex flex-col gap-1.5">
+    <ol aria-label="Tree levels" className="flex flex-wrap items-center gap-1.5">
       {levels.map((band, i) => (
-        <li key={band.join("-")} aria-label={`Level ${i + 1}`} className="flex flex-wrap gap-1.5">
+        <li key={band.join("-")} aria-label={`Level ${i + 1}`} className="flex flex-wrap items-center gap-1.5">
+          {i === 0 ? null : (
+            <span aria-hidden className="text-muted">
+              <IconStep />
+            </span>
+          )}
           {band.flatMap((id) => {
             const t = byId.get(id);
             if (t === undefined) return [];
@@ -51,39 +56,51 @@ export function MiniLevels({ tree, current }: { tree: Pick<TreeDetail, "tasks">;
 }
 
 /**
- * Task detail side panel (top of the side column) for a tree member: the tree's title and meta, the compact level
- * view with this task outlined, then the member's tree controls (needs, dependents, start mode, base, handoff, remove).
+ * Task detail bar for a tree member, between the chips and the actions: the tree it sits in (linked), its place in
+ * level order, the compact level view with this task outlined, and Back to tree (the tree view with this task selected).
  */
-export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
+export function TreeBar({ task, tree }: { task: Task; tree: TreeDetail }) {
   const chip = closedLabel(tree, countMembers(tree.tasks));
+  const position = treePosition(tree.tasks, task.id);
+  const back = treeTaskPath(tree.id, task.id);
   return (
-    <Panel
-      title="Tree"
-      flush
-      actions={
-        <Link to={`/trees/${tree.id}`} className={buttonClass("ghost", true)}>
-          Open tree
-        </Link>
-      }
+    <nav
+      aria-label="Tree"
+      className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border border-line-strong bg-surface py-2.5 pr-2.5 pl-3 md:py-2 md:pr-2"
     >
-      <div className="flex min-w-0 flex-col gap-2.5 border-b border-line px-3 py-3">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <Link to={`/trees/${tree.id}`} className="text-body font-medium break-words hover:underline">
-              {tree.title}
-            </Link>
-            {chip === null ? null : <Chip>{chip}</Chip>}
-          </div>
-          <p className="mt-0.5 font-mono text-meta text-muted tabular">{treeMeta(tree)}</p>
-          <p className="font-mono text-meta text-muted tabular">
-            <span title={dateTime(tree.createdAt)}>created {shortDate(tree.createdAt)}</span> ·{" "}
-            <span title={dateTime(tree.lastActivityAt)} className="text-fg">
-              active {relativeTime(tree.lastActivityAt)}
-            </span>
-          </p>
-        </div>
+      <div className="flex min-w-0 items-center gap-2 max-md:basis-full">
+        <span className="text-muted">
+          <IconTree />
+        </span>
+        <span className="label-caps text-muted max-md:hidden">Tree</span>
+        <Link to={back} className="min-w-0 text-body font-medium break-words hover:underline">
+          {tree.title}
+        </Link>
+        {chip === null ? null : <Chip>{chip}</Chip>}
+        {position === null ? null : (
+          <span className="shrink-0 font-mono text-meta whitespace-nowrap text-muted tabular">
+            <span className="max-md:hidden">task </span>
+            {position.index} of {position.total}
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 max-md:flex-1">
         <MiniLevels tree={tree} current={task.id} />
       </div>
+      <Link to={back} className={cx(buttonClass("secondary"), "ml-auto self-start md:self-center")}>
+        <IconBack /> Back to tree
+      </Link>
+    </nav>
+  );
+}
+
+/**
+ * Task detail side panel (top of the side column) for a tree member: its tree controls (needs, dependents, start mode,
+ * base, handoff, remove). The tree itself and the way back are in the TreeBar.
+ */
+export function TreePanel({ task, tree }: { task: Task; tree: TreeDetail }) {
+  return (
+    <Panel title="Tree" flush>
       <TreeNodeEditor tree={tree} task={task} />
     </Panel>
   );

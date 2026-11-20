@@ -410,3 +410,22 @@ export function treeMembers(order: readonly Pick<Task, "id">[], shape: TreeShape
     return shape === "chain" && prev !== undefined ? { taskId: t.id, needs: [prev.id] } : { taskId: t.id };
   });
 }
+
+/** Where a member sits in the tree's level order (1-based), and the member count; null when not a member. */
+export function treePosition(nodes: readonly Node[], taskId: number): { index: number; total: number } | null {
+  const order = layoutLevels(nodes).flat();
+  const at = order.indexOf(taskId);
+  return at === -1 ? null : { index: at + 1, total: order.length };
+}
+
+/** The tree view with a member selected (`?task=`), so returning from task detail keeps the place. */
+export function treeTaskPath(treeId: number, taskId: number): string {
+  return `/trees/${treeId}?task=${taskId}`;
+}
+
+/** The selected member from a `?task=` value: its id when it names a current member, else null. */
+export function pickedTask(param: string | null, nodes: readonly Pick<Task, "id">[]): number | null {
+  if (param === null || !/^[1-9]\d*$/.test(param)) return null;
+  const id = Number(param);
+  return nodes.some((n) => n.id === id) ? id : null;
+}
