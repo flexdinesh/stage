@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { Acceptance, AcceptanceRequest, AcceptedEvidence, HarnessConnection, Task } from "../api/types.ts";
-import { useConnections, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
+import { useConnections, useHarnesses, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
 import { provenanceText, stateMove } from "../lib/completion.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
@@ -35,10 +35,11 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
   </div>;
 }
 
-export function AcceptedResult({ acceptance, current }: { acceptance: Acceptance; current: boolean }) {
+export function AcceptedResult({ acceptance, current, harness }: { acceptance: Acceptance; current: boolean; harness: Task["harness"] }) {
+  const descriptor = useHarnesses().descriptor(harness);
   return <Panel title={current ? "Accepted result" : "Previous accepted result"} meta={`#${acceptance.id} · ${relativeTime(acceptance.acceptedAt)}`}>
     <div className="flex flex-col gap-3">
-      <p className="text-small text-muted">{provenanceText(acceptance.provenance)}</p>
+      <p className="text-small text-muted">{provenanceText(acceptance.provenance, descriptor)}</p>
       {acceptance.note === "" ? null : <section><h3 className="label-caps mb-2">Acceptance note</h3><p className="whitespace-pre-wrap break-words text-small">{acceptance.note}</p></section>}
       <Evidence evidence={acceptance.evidence} />
     </div>
@@ -111,23 +112,22 @@ function StateChange({ task, to: toChip }: { task: Task; to: StatusChip }) {
   );
 }
 
-const AUTO_COMPLETE_LABEL: Record<HarnessConnection["harness"], string> = {
-  t3: "Complete tasks when settled in T3",
-  opencode: "Complete tasks when archived in OpenCode",
-};
-
-/** Settings connection card toggle for the harness's auto-complete; saves at once. Hidden until the connection loads. */
+/**
+ * Settings connection card toggle for the harness's auto-complete; saves at once. Labeled by the harness's declared
+ * closure; hidden until the connection loads, and for a harness that declares no closure (nothing to infer from).
+ */
 export function AutoCompleteToggle({ harness, className }: { harness: HarnessConnection["harness"]; className?: string }) {
   const connections = useConnections();
+  const closure = useHarnesses().descriptor(harness)?.closures[0];
   const save = useSetAutoComplete();
   const hintId = useId();
   const connection = connections.data?.connections.find((c) => c.harness === harness && c.active);
-  if (connection === undefined) return null;
+  if (connection === undefined || closure === undefined) return null;
   return (
     <div className={cx("flex min-w-0 flex-col gap-0.5", className)} aria-busy={save.isPending}>
       <label className="-mx-1.5 flex min-h-11 cursor-pointer items-center gap-3 px-1.5 transition-colors duration-150 hover:bg-panel md:min-h-8">
         <Checkbox checked={connection.autoComplete} aria-describedby={hintId} onChange={(e) => save.mutate({ id: connection.id, on: e.target.checked })} />
-        <span className="text-small text-fg">{AUTO_COMPLETE_LABEL[harness]}</span>
+        <span className="text-small text-fg">{closure.setting}</span>
       </label>
       <p id={hintId} className="font-mono text-meta text-muted">Only successful runs. Change the task's state to undo it.</p>
       <ErrorText error={save.error} />

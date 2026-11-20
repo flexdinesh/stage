@@ -275,10 +275,29 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
 export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string }
-export type Harness = "t3" | "opencode";
-/** One harness instance (a T3 environment or an OpenCode service); at most one active per harness. */
+/** A harness kind ("t3", "opencode", ...): the server's registry (GET /harnesses) says which exist. */
+export type Harness = string;
+/** A closure signal the harness reports and the copy that names it (an inferred completion's provenance). */
+export interface HarnessClosure { signal: string; provenance: Acceptance["provenance"]; setting: string; completed: string; via: string }
+/** GET /api/harnesses: one harness kind, its policies and copy, and whether this machine can run it. */
+export interface HarnessDescriptor {
+  kind: Harness;
+  name: string;
+  /** connected: Stage connects to its service; hosted: it runs as processes on Stage's machine. */
+  hosting: "connected" | "hosted";
+  closures: HarnessClosure[];
+  available: boolean;
+  /** Why it cannot run here (e.g. Stage runs in a container); "" when available. */
+  reason?: string;
+}
+/** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
+export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }
+export interface HarnessesReply { machine: { id: number; label: string; profile: MachineProfile }; harnesses: HarnessDescriptor[] }
+/** One harness instance; at most one active per harness kind on a machine. */
 export interface HarnessConnection {
   id: number;
+  /** The machine that runs it (one local machine today). */
+  machineId: number;
   harness: Harness;
   /** Meaningful for the active connection only. */
   configured: boolean;

@@ -103,15 +103,17 @@ test("a chosen harness narrows the picker to its projects and unbound ones", () 
   assert.deepEqual(projectsForConnection(list, 2, "1").map((p) => p.id), [1, 9, 10, 11]);
 });
 
+const kindName = (kind) => ({ t3: "T3", opencode: "OpenCode" })[kind] ?? kind;
+
 test("import notice names harnesses and the latest import", () => {
   const now = Date.parse("2026-11-19T12:00:00Z");
-  assert.equal(importNotice([], now), null);
-  assert.equal(importNotice([{connectionId: 2, harness: "opencode", count: 12, at: "2026-11-19T10:00:00Z"}], now), "12 imported from OpenCode 2h ago");
+  assert.equal(importNotice([], kindName, now), null);
+  assert.equal(importNotice([{connectionId: 2, harness: "opencode", count: 12, at: "2026-11-19T10:00:00Z"}], kindName, now), "12 imported from OpenCode 2h ago");
   assert.equal(
     importNotice([
       {connectionId: 2, harness: "opencode", count: 12, at: "2026-11-19T10:00:00Z"},
       {connectionId: 1, harness: "t3", count: 3, at: "2026-11-18T10:00:00Z"},
-    ], now),
+    ], kindName, now),
     "12 imported from OpenCode, 3 from T3 2h ago",
   );
 });

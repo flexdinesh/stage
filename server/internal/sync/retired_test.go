@@ -43,7 +43,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	ctx := context.Background()
 	a := &readsT3{Fake: t3.NewFake()}
 	first := store.T3ID()
-	if _, err := store.SwitchInstance(ctx, db.HarnessT3, "env-a", "box a", 0); err != nil {
+	if _, err := store.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
 	external := a.AddProject("app", "/w")
@@ -75,7 +75,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	}
 
 	// T3 B replaces A. B happens to serve a thread with A's id.
-	sw, err := store.SwitchInstance(ctx, db.HarnessT3, "env-b", "box b", 0)
+	sw, err := store.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed {
 		t.Fatalf("switch %+v %v", sw, err)
 	}

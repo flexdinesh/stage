@@ -15,6 +15,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
@@ -47,6 +48,18 @@ type Deps struct {
 		Pair(ctx context.Context, link string, newInstance bool) error
 		Disconnect(context.Context) error
 	}
+	// Harnesses is the server's fixed harness composition (nil: none).
+	Harnesses *harness.Registry
+	// Profile is this machine's hosting profile (GET /api/harnesses).
+	Profile harness.Profile
+}
+
+// registry is Harnesses, or an empty registry.
+func (s *server) registry() *harness.Registry {
+	if s.Harnesses == nil {
+		return harness.MustRegistry()
+	}
+	return s.Harnesses
 }
 
 type server struct {
@@ -97,6 +110,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/projects/{id}/binding", s.bindProject)
 	h("DELETE /api/projects/{id}/binding", s.unbindProject)
 	h("DELETE /api/projects/{id}/bindings/{connectionId}", s.unbindProject)
+	h("GET /api/harnesses", s.listHarnesses)
 	h("GET /api/connections", s.connections)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)

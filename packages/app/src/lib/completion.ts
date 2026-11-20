@@ -1,4 +1,4 @@
-import type { Acceptance, CompletionPreview, Task } from "../api/types.ts";
+import type { Acceptance, CompletionPreview, HarnessDescriptor, Task } from "../api/types.ts";
 import { relativeTime } from "./format.ts";
 import { statusChips, waitTarget, type StatusChip } from "./tasks.ts";
 
@@ -16,25 +16,27 @@ export function startsText(dependents: readonly Pick<Dependent, "taskId">[]): st
   return ids.length === 0 ? "" : `Starts ${ids.map((id) => `#${id}`).join(", ")}`;
 }
 
-/** Accepted result line: who completed it and what stays fixed. */
-export function provenanceText(provenance: Acceptance["provenance"]): string {
+/** The task's harness closure that produced an inferred completion's provenance. */
+const closureFor = (provenance: Acceptance["provenance"] | null, harness: Pick<HarnessDescriptor, "closures"> | undefined) =>
+  harness?.closures.find((c) => c.provenance === provenance);
+
+/** Accepted result line: who completed it and what stays fixed. `harness` is the task's harness descriptor (copy). */
+export function provenanceText(provenance: Acceptance["provenance"], harness?: Pick<HarnessDescriptor, "closures">): string {
   switch (provenance) {
     case "historical_settlement":
       return "Migrated from historical T3 settlement. Evidence reflects the local cache at migration.";
     case "harness_settled":
-      return "Completed automatically: settled in T3. This result stays unchanged when execution continues.";
     case "harness_archived":
-      return "Completed automatically: archived in OpenCode. This result stays unchanged when execution continues.";
+      return closureFor(provenance, harness)?.completed ?? "Completed automatically when its harness closed the session. This result stays unchanged when execution continues.";
     case "user":
       return "Completed by you in Stage. This result stays unchanged when execution continues.";
   }
 }
 
 /** How an inferred completion happened, after "completed 3h ago" ("via T3 settle"); null for user or migrated ones. */
-export function autoCompletedMeta(provenance: Acceptance["provenance"] | null): string | null {
-  if (provenance === "harness_settled") return "via T3 settle";
-  if (provenance === "harness_archived") return "via OpenCode archive";
-  return null;
+export function autoCompletedMeta(provenance: Acceptance["provenance"] | null, harness?: Pick<HarnessDescriptor, "closures">): string | null {
+  if (provenance !== "harness_settled" && provenance !== "harness_archived") return null;
+  return closureFor(provenance, harness)?.via ?? "via harness";
 }
 
 type StateTask = Pick<Task, "state" | "readiness" | "acceptanceId" | "needs" | "startAt" | "completedAt" | "finishedAt" | "completionProvenance">;
@@ -70,10 +72,10 @@ function readinessWithout(t: MoveTask, accepted: ReadonlySet<number>): Task["rea
 
 const isActiveState = (s: Task["state"]) => s === "launching" || s === "running" || s === "needs_input";
 
-/** One line under the State picker: what the current state means. */
-export function stateSummary(t: StateTask, now: number = Date.now()): string {
+/** One line under the State picker: what the current state means. `harness` is the task's descriptor (closure copy). */
+export function stateSummary(t: StateTask, now: number = Date.now(), harness?: Pick<HarnessDescriptor, "closures">): string {
   if (t.acceptanceId !== null) {
-    const via = autoCompletedMeta(t.completionProvenance);
+    const via = autoCompletedMeta(t.completionProvenance, harness);
     const accepted = t.completedAt === null ? "Accepted" : `Accepted ${relativeTime(t.completedAt, now)}`;
     const moved = statusChips(t).length > 1 ? " Execution moved on since." : "";
     return `${accepted}${via === null ? "" : ` ${via}`}.${moved}`;

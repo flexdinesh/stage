@@ -1,4 +1,3 @@
-import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { Link } from "react-router";
@@ -22,11 +21,12 @@ const FOLD_KEY = "stage-dashboard-groups";
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   // App links open one thread, so only a lone task gets one.
   const destination = useSessionDestination();
+  const { kindName } = useHarnesses();
   const href = tasks.length === 1 ? (tasks[0] === undefined ? null : destination(tasks[0])) : null;
   if (href === null || !tasks[0]) return null;
   return (
     <AppButton href={href} small variant="ghost">
-      Open in {HARNESS_NAME[tasks[0].harness]}
+      Open in {kindName(tasks[0].harness)}
     </AppButton>
   );
 }

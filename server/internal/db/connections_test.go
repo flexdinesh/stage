@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func foreignKeyViolations(t *testing.T, pool *sql.DB) int {
@@ -32,7 +34,7 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,1,'thread'),(6,2,'ses_x')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,session_id,connection_id,launch_attempt) VALUES(1,1,'t3','p','running',5,1,1),(2,1,'oc','p','running',6,2,1)`)
 	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES(2,'/srv','/home')`)
-	migrateTo(t, pool, 13) // 12 plus OpenCode auth, which OpenCodeSettings reads
+	migrateTo(t, pool, MaxVersion()) // the store reads the latest schema
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}
@@ -74,10 +76,10 @@ func TestLegacyThreadIdsMapToTheActiveT3Connection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	first := s.T3ID()
 	project := projectWithBinding(t, s, first, "/w/a")
-	if _, err := s.SwitchInstance(ctx, HarnessT3, "env-a", "box a", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
-	sw, err := s.SwitchInstance(ctx, HarnessT3, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed || sw.Old != first {
 		t.Fatalf("switch %+v %v", sw, err)
 	}
@@ -108,7 +110,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	first := s.T3ID()
 	// First pairing stamps the connection in place.
-	if sw, err := s.SwitchInstance(ctx, HarnessT3, "env-a", "box a", 0); err != nil || sw.Changed || s.T3ID() != first {
+	if sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil || sw.Changed || s.T3ID() != first {
 		t.Fatalf("stamp %+v %v", sw, err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
@@ -122,7 +124,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sw, err := s.SwitchInstance(ctx, HarnessT3, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed || sw.Revived || sw.Old != first || sw.New == first {
 		t.Fatalf("replace %+v %v", sw, err)
 	}
@@ -156,7 +158,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 
 	// env-a again: its connection comes back; env-b held only moved work,
 	// so it is deleted rather than kept.
-	sw, err = s.SwitchInstance(ctx, HarnessT3, "env-a", "box a", 0)
+	sw, err = s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0)
 	if err != nil || !sw.Revived || sw.New != first || sw.Old != second {
 		t.Fatalf("revive %+v %v", sw, err)
 	}
@@ -174,7 +176,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 func TestForgetConnection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	first := s.T3ID()
-	if _, err := s.SwitchInstance(ctx, HarnessT3, "env-a", "box a", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
@@ -184,7 +186,7 @@ func TestForgetConnection(t *testing.T) {
 	if err := s.ForgetConnection(ctx, first); !errors.As(err, &conflict) {
 		t.Fatalf("forgot the active connection: %v", err)
 	}
-	sw, err := s.SwitchInstance(ctx, HarnessT3, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed {
 		t.Fatal(sw, err)
 	}
@@ -208,14 +210,14 @@ func TestForgetConnection(t *testing.T) {
 		t.Fatalf("forgot twice: %v", err)
 	}
 	// Pairing env-a again starts a new connection: forgotten is final.
-	sw, err = s.SwitchInstance(ctx, HarnessT3, "env-a", "box a", 0)
+	sw, err = s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0)
 	if err != nil || sw.Revived || sw.New == first {
 		t.Fatalf("forgotten revived %+v %v", sw, err)
 	}
 	// A replaced connection nothing references is deleted outright.
 	empty := sw.Old
 	projectWithBinding(t, s, empty, "/w/b")
-	if _, err := s.SwitchInstance(ctx, HarnessT3, "env-c", "box c", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-c", "box c", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ForgetConnection(ctx, empty); err != nil {

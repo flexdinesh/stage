@@ -1,5 +1,5 @@
 import type {
-  OpenCodeStatus, OpenCodeStatusWire, HarnessConnection, Capabilities, ExecutionLinks, TaskState,
+  OpenCodeStatus, OpenCodeStatusWire, HarnessConnection, HarnessesReply, Capabilities, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -177,6 +177,8 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
+    /** The harness kinds the server knows, their policies and copy, and what this machine can run. */
+    harnesses: () => apiFetch<HarnessesReply>("/harnesses"),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
     openCodeStatus: () => apiFetch<OpenCodeStatusWire>("/opencode/status").then(normalizeOpenCodeStatus),

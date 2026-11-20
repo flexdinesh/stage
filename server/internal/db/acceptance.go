@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // AcceptedEvidence is copied once. No source-harness read is needed to use it.
@@ -291,22 +292,15 @@ func recordAcceptance(ctx context.Context, tx *Tx, id, revision int64, acceptanc
 }
 
 // InferCompletion completes a done task whose session was closed in its
-// harness (T3 settle, OpenCode archive), when the task's connection allows
-// it. It decides once per execution: an earlier inference or a user reopen
-// for o.ExecutionID suppresses it. Reports whether it completed the task.
-func (s *Store) InferCompletion(ctx context.Context, id int64, o execution.Observation) (bool, error) {
-	if o.Closed == nil || o.Active || o.ExecutionID == "" {
+// harness, when the task's connection allows it. closure is the harness
+// descriptor's entry for o's signal (provenance and event text). It decides
+// once per execution: an earlier inference or a user reopen for
+// o.ExecutionID suppresses it. Reports whether it completed the task.
+func (s *Store) InferCompletion(ctx context.Context, id int64, o execution.Observation, closure harness.Closure) (bool, error) {
+	if o.Closed == nil || o.Active || o.ExecutionID == "" || closure.Signal != o.Closed.Signal || closure.Provenance == "" {
 		return false, nil
 	}
-	var provenance, detail string
-	switch o.Closed.Signal {
-	case execution.ClosedSettled:
-		provenance, detail = "harness_settled", "Completed from T3 settle; accepted evidence saved in Stage."
-	case execution.ClosedArchived:
-		provenance, detail = "harness_archived", "Completed from OpenCode archive; accepted evidence saved in Stage."
-	default:
-		return false, nil
-	}
+	provenance, detail := closure.Provenance, closure.Event
 	inferred := false
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var eligible bool

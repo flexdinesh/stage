@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useHarnesses } from "../api/queries.ts";
 import type { Task, TreeDetail } from "../api/types.ts";
 import { stateMove, stateSummary } from "../lib/completion.ts";
 import { statusChips } from "../lib/tasks.ts";
@@ -14,6 +15,7 @@ import { cx, toneClass } from "./ui.tsx";
  */
 export function StateControl({ task, tree, action }: { task: Task; tree: TreeDetail | null; action?: ReactNode }) {
   const [confirming, setConfirming] = useState(false);
+  const { descriptor } = useHarnesses();
   const current = statusChipView(statusChips(task)[0] ?? task.state);
   const move = stateMove(task, new Set((tree?.tasks ?? []).flatMap((t) => (t.acceptanceId === null ? [] : [t.id]))));
   return (
@@ -31,7 +33,7 @@ export function StateControl({ task, tree, action }: { task: Task; tree: TreeDet
           { value: "move", label: statusChipView(move.to).label, detail: move.detail, disabled: move.disabled },
         ]}
       />
-      <p className="text-small text-muted">{stateSummary(task)}</p>
+      <p className="text-small text-muted">{stateSummary(task, undefined, descriptor(task.harness))}</p>
       {action}
       {confirming ? <CompletionDrawer task={task} reopen={move.kind === "uncomplete"} to={move.to} onClose={() => setConfirming(false)} /> : null}
     </div>

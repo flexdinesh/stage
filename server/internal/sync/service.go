@@ -15,6 +15,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
@@ -40,6 +41,7 @@ type Service struct {
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	OnAccepted                                                                   func() // a completion was inferred (tree release may follow)
+	Harnesses                                                                    *harness.Registry // descriptors by kind; completion is inferred only from a declared closure
 	PublicURL                                                                    string // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	CLI                                                                          string // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
@@ -371,7 +373,11 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	if _, e = s.transition(ctx, change); e != nil {
 		return e
 	}
-	inferred, e := s.store.InferCompletion(ctx, task.ID, o)
+	closure, ok := s.closure(task.Harness, o)
+	if !ok {
+		return nil
+	}
+	inferred, e := s.store.InferCompletion(ctx, task.ID, o, closure)
 	if e != nil || !inferred {
 		return e
 	}
@@ -381,8 +387,22 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	}
 	return nil
 }
+// closure is the harness's declared closure for o's signal.
+func (s *Service) closure(kind string, o execution.Observation) (harness.Closure, bool) {
+	if o.Closed == nil || s.Harnesses == nil {
+		return harness.Closure{}, false
+	}
+	d, ok := s.Harnesses.Lookup(kind)
+	if !ok {
+		return harness.Closure{}, false
+	}
+	return d.Closure(o.Closed.Signal)
+}
+
 func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {
-	a, e := s.Adapter(1)
+	// The legacy catalog is the active T3 connection's (GET /api/catalog),
+	// wherever T3 moved after a replaced instance.
+	a, e := s.Adapter(s.store.T3ID())
 	if e != nil {
 		return nil, e
 	}

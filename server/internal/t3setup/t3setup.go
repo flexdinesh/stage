@@ -26,6 +26,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -50,7 +51,7 @@ type Endpoint struct {
 type Store interface {
 	GetConnection(ctx context.Context) (db.Connection, error)
 	SetT3URL(ctx context.Context, u string) error
-	SwitchInstance(ctx context.Context, harness, identity, label string, revive int64) (db.Switch, error)
+	SwitchInstance(ctx context.Context, d harness.Descriptor, identity, label string, revive int64) (db.Switch, error)
 	GetHarnessConnection(ctx context.Context, id int64) (db.HarnessConnection, error)
 }
 
@@ -244,7 +245,7 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 	}
 	var out Paired
 	if p := s.o.Client.Probe(ctx); p.Identity != nil {
-		sw, err := s.o.Store.SwitchInstance(ctx, db.HarnessT3, p.Identity.EnvironmentID, p.Identity.Label, 0)
+		sw, err := s.o.Store.SwitchInstance(ctx, t3.Descriptor, p.Identity.EnvironmentID, p.Identity.Label, 0)
 		if err != nil {
 			return out, err
 		}
@@ -311,7 +312,7 @@ func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if err != nil || (conn.EnvironmentID != nil && *conn.EnvironmentID != "") {
 		return
 	}
-	if _, err := s.o.Store.SwitchInstance(ctx, db.HarnessT3, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
+	if _, err := s.o.Store.SwitchInstance(ctx, t3.Descriptor, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
 		s.log.Warn("stamp t3 environment", "err", err)
 	}
 }

@@ -27,6 +27,26 @@ values keep their old meaning. Empty items and duplicates are errors.
 | Foreground / compose (unchanged) | `127.0.0.1:7380` (compose: `0.0.0.0:7380` inside the container) |
 | Per-user service ([service.md](service.md)) | `stage serve --managed`: listeners from `service.env` `STAGE_LISTEN`, default `unix`, which is required (TCP is opt-in: `unix,127.0.0.1:7380`) |
 
+## Machine profile and hosted harnesses
+
+The way the server runs decides which harnesses it may run
+([execution.md](execution.md#harness-registry)). Connected harnesses (a
+service Stage connects to: T3, OpenCode) run on every profile. Hosted
+harnesses run as processes on this machine and need a profile that allows
+local processes.
+
+| Profile | When | Local processes |
+| --- | --- | --- |
+| `desktop` | `stage serve --managed` (the per-user service the desktop app ensures) | yes |
+| `server` | foreground `stage serve` | only with `--local-harnesses` or `STAGE_LOCAL_HARNESSES=1` (desktop dev, tests) |
+| `container` | `STAGE_MACHINE_PROFILE=container`, set by the Docker image | never, whatever else is set |
+
+`GET /api/harnesses` reports the profile and, per harness, whether it is
+available here with the reason when not. The profile is not stored: it is
+computed at each start. Every connection belongs to a machine
+(`harness_connections.machine_id`); one local machine (`machines` id 1)
+exists until workers do.
+
 ## Identity and paths
 
 The installation identity (`buildinfo.Identity`, default `stage`) is fixed at

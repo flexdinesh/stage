@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"strings"
 	"testing"
@@ -14,6 +15,13 @@ import (
 
 // This harness has documents and phases, not T3 threads, providers or runs.
 // Its two-step launch records a document before starting the worker.
+// documentHarnesses registers the fake harness kind: neither T3 nor OpenCode,
+// so the coordinator can only use what the descriptor declares.
+var documentHarnesses = harness.MustRegistry(harness.Descriptor{
+	Kind: "document", Name: "Document", Hosting: harness.Connected,
+	Closures: []harness.Closure{{Signal: execution.ClosedArchived, Provenance: "harness_archived", Event: "Completed from document archive."}},
+})
+
 type documentHarness struct {
 	offline, loseReply, malformed, disallow bool
 	created, started                        int
@@ -116,7 +124,7 @@ func contractSetup(t *testing.T) (*db.Store, *documentHarness, *coordinator.Serv
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
-	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')"); err != nil {
+	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness) VALUES(2,'document')"); err != nil {
 		t.Fatal(err)
 	}
 	p, err := store.InsertProject(t.Context(), db.Project{Title: "Stage collection", Bindings: []db.ProjectBinding{{ConnectionID: 2, ExternalProjectID: "collection-z", Workspace: "volume://checkout"}}})
@@ -128,7 +136,9 @@ func contractSetup(t *testing.T) (*db.Store, *documentHarness, *coordinator.Serv
 		t.Fatal(err)
 	}
 	fake := &documentHarness{}
-	return store, fake, coordinator.NewWithAdapters(store, map[int64]execution.Adapter{2: fake}, nil), task
+	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{2: fake}, nil)
+	svc.Harnesses = documentHarnesses
+	return store, fake, svc, task
 }
 func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 	store, fake, svc, task := contractSetup(t)
@@ -147,6 +157,7 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 	}
 	fake.loseReply = false
 	restarted := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{2: fake}, nil)
+	restarted.Harnesses = documentHarnesses
 	restarted.RecoverLaunching(ctx)
 	// The periodic recovery path, without a second Start action.
 	if _, err := testDB.Pool.ExecContext(ctx, "UPDATE execution_attempts SET retry_at=NULL"); err != nil {

@@ -2,12 +2,11 @@ import { useMutation } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
-import { useInvalidateWork } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
 import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
-import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { HarnessName } from "./HarnessName.tsx";
 import { taskClosedLabel } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
@@ -202,9 +201,10 @@ export function TaskRow({
   const chip = rowChip(task, contextThreadId, showTree);
   const needsInput = task.state === "needs_input";
   const appLink = useSessionDestination()(task);
+  const { kindName, descriptor } = useHarnesses();
   // Completed here a moment ago: the row stays in place with a completed chip and Undo (Dashboard linger).
   const justCompleted = useCompletionLinger().lingering.has(task.id);
-  const autoMeta = autoCompletedMeta(task.completionProvenance);
+  const autoMeta = autoCompletedMeta(task.completionProvenance, descriptor(task.harness));
   const review = !justCompleted && task.acceptanceId === null && (task.state === "done" || task.state === "settled");
   const quick = useQuickComplete(task);
   const undo = useUndoComplete(task);
@@ -317,7 +317,7 @@ export function TaskRow({
         ) : null}
         {appLink === null || justCompleted || confirming !== null ? null : (
           <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
-            Open in {HARNESS_NAME[task.harness]}
+            Open in {kindName(task.harness)}
           </AppButton>
         )}
         {extra}
