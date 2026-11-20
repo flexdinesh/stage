@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   attentionOf,
-  loadMark,
   parsePinned,
   parseScope,
   projectLoads,
@@ -50,14 +49,21 @@ test("projectLoads counts open work per project and skips completed tasks", () =
   assert.deepEqual(totalLoad(loads.values()), { need: 1, waiting: 2, run: 1, open: 5 });
 });
 
-const load = (need, waiting, run) => ({ need, waiting, run, open: need + waiting + run });
-
-test("loadMark: need outranks run, and the count is what the user owes", () => {
-  assert.deepEqual(loadMark(load(1, 2, 1)), { square: "need", owed: 3 });
-  assert.deepEqual(loadMark(load(0, 1, 1)), { square: "run", owed: 1 });
-  assert.deepEqual(loadMark(load(0, 0, 2)), { square: "run", owed: 0 });
-  assert.deepEqual(loadMark(load(0, 1, 0)), { square: null, owed: 1 });
-  assert.deepEqual(loadMark(load(0, 0, 0)), { square: null, owed: 0 });
+test("projectLoads: open, the sidebar count, is every open task: need, waiting, running and not-ready backlog", () => {
+  const loads = projectLoads([
+    task(1, 10, "needs_input"),
+    task(2, 10, "settled"),
+    task(3, 10, "backlog", { readiness: "ready" }),
+    task(4, 10, "failed"),
+    task(5, 10, "launching"),
+    task(6, 10, "running"),
+    task(7, 10, "backlog", { readiness: "blocked" }),
+    task(8, 20, "backlog"),
+    task(9, 30, "running"),
+  ]);
+  assert.equal(loads.get(10)?.open, 7);
+  assert.equal(loads.get(20)?.open, 1, "a backlog-only project still counts, so it is listed with a number");
+  assert.equal(loads.get(30)?.open, 1, "a running-only project counts its running task");
 });
 
 test("sidebarProjects: pinned first, active by recent activity, quiet folded", () => {
