@@ -287,6 +287,8 @@ Rows are grids: 118px state column, fluid title (task rows lead it with the task
 
 **The Go Or Change Rule.** Navigation, a manual state change and an action never look alike. Going somewhere is a link with a trailing arrow (a panel header's mono `Open →`), never a button. A manual state change goes through the State picker: a select-only Combobox showing the current status (tone square, mono label) whose other option is the one allowed move with its consequence on the detail line ("accept without a run", "clears acceptance; history stays"; disabled with "stop execution first" while it runs), confirmed in a drawer. Buttons act: Start, Retry, Open in T3, Edit.
 
+**The One Door Rule.** A view offers one Open in {harness} per task, T3 and OpenCode alike: on task detail the action row, the needs-input alert while it waits, or the phone action bar, exactly one per state and breakpoint. Panels (Thread, OpenCode session) hold metadata and never repeat it.
+
 **The Safe Area Rule.** The page sets `viewport-fit=cover`, so anything pinned to a screen edge on phone pads itself with `env(safe-area-inset-*)`: the phone top bar (top), bottom tabs, task detail action bar and toasts (bottom), and every drawer sheet and the command palette (header top, footer or body bottom, sides in landscape). Primary actions never sit on the home indicator.
 
 ## Elevation & Depth

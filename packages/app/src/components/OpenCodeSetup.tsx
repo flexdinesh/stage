@@ -479,8 +479,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
         )}
         {urls.webClient && urls.webClient !== (urls.browserEndpoint || urls.endpoint) ? (
           <p className="text-small text-muted">
-            Add the address for other devices to this web client once on each device. Task detail
-            also offers Open on service.
+            Add the address for other devices to this web client once on each device.
           </p>
         ) : null}
         {locked("credentials") ? (
