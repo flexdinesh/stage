@@ -91,7 +91,7 @@ func (o *Ops) GetTree(ctx context.Context, a TreeIDArgs) (client.TreeDetail, err
 // TreeTaskArgs is a create_tree member.
 type TreeTaskArgs struct {
 	ID    int64   `json:"id" jsonschema:"task id"`
-	Needs []int64 `json:"needs,omitempty" jsonschema:"task ids (members of this tree) it needs; omitted = keep its needs"`
+	Needs []int64 `json:"needs,omitempty" jsonschema:"task ids (members of this tree) it runs after; omitted = keep its needs (none: a parallel root)"`
 }
 
 // CreateTreeArgs is create_tree.
@@ -165,7 +165,7 @@ func (o *Ops) DeleteTree(ctx context.Context, a TreeIDArgs) (DeletedOut, error) 
 type AddToTreeArgs struct {
 	TreeID int64   `json:"treeId" jsonschema:"tree id"`
 	TaskID int64   `json:"taskId" jsonschema:"task id (a task in another tree moves; its old edges go)"`
-	Needs  []int64 `json:"needs,omitempty" jsonschema:"task ids (members of the tree) it needs; omitted = keep its needs (none when it moves from another tree)"`
+	Needs  []int64 `json:"needs,omitempty" jsonschema:"task ids (members of the tree) it runs after; omitted = a parallel root (a member keeps its needs; a task moving from another tree drops them)"`
 }
 
 func (o *Ops) AddToTree(ctx context.Context, a AddToTreeArgs) (client.TreeDetail, error) {

@@ -400,6 +400,28 @@ export function taskClosedLabel(t: Pick<Task, "archivedAt" | "treeStatus">): str
   return null;
 }
 
+/** Start mode caption for a backlog member: a root never starts on its own, whatever the mode. */
+export function startModeCaption(t: Pick<Task, "needs" | "effectiveStartMode">): string {
+  const manual = t.effectiveStartMode === "manual";
+  if (t.needs.length === 0) return manual ? "A root reads ready; you start it." : "A root never starts on its own: start it, or give it a need.";
+  return manual ? "Reads ready when its needs are completed; you start it." : "Starts on its own once every need is completed.";
+}
+
+/**
+ * Confirm line for a task joining a tree: a parallel root without needs, else runs after them. Notes an auto launch
+ * when every need is already completed. `mode` is the task's effective start mode in that tree.
+ */
+export function joinSummary(
+  taskId: number,
+  needs: readonly Pick<Task, "id" | "acceptanceId">[],
+  mode: StartMode,
+  treeTitle?: string,
+): string {
+  if (needs.length === 0) return `#${taskId} joins ${treeTitle ?? "the tree"} as a parallel root`;
+  const after = `#${taskId} runs after ${needs.map((n) => `#${n.id}`).join(" ")}`;
+  return mode === "auto" && needs.every((n) => n.acceptanceId !== null) ? `${after}: starts right away` : after;
+}
+
 /** New tree from a selection: parallel (every task a root) or a chain (each needs the one before it). */
 export type TreeShape = "parallel" | "chain";
 

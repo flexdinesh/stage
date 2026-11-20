@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useInvalidateWork, useTasks } from "../../api/queries.ts";
 import type { Task, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
+import { joinSummary } from "../../lib/trees.ts";
 import { NodeChip } from "./TreeNode.tsx";
 import { Button, Checkbox, Drawer, ErrorText, Field, Input, QueryState, Radio, cx } from "../ui.tsx";
 
@@ -19,15 +20,16 @@ function matches(tasks: readonly Task[], treeId: number, query: string): Task[] 
 
 /**
  * Add an existing task to the tree: search tasks by title or #id, pick one, then (backlog without a start time only)
- * choose which members it needs. A task in another tree moves (spliced out there).
+ * choose which members it runs after (none: a parallel root). `after` (Link existing after on a member) starts with that
+ * member checked. A task in another tree moves (spliced out there).
  */
-export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onClose: () => void }) {
+export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDetail; after?: number; onClose: () => void }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const tasks = useTasks();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Task | null>(null);
-  const [needs, setNeeds] = useState<number[]>([]);
+  const [needs, setNeeds] = useState<number[]>(after === undefined ? [] : [after]);
   const results = matches(tasks.data?.tasks ?? [], tree.id, query);
   const canNeed = picked !== null && picked.state === "backlog" && picked.startAt === null;
   const chosen = canNeed ? needs : [];
@@ -40,12 +42,13 @@ export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onC
     },
   });
 
+  const chosenTasks = tree.tasks.filter((m) => chosen.includes(m.id));
   const toggle = (id: number, on: boolean) => setNeeds((prev) => (on ? [...prev, id].toSorted((a, b) => a - b) : prev.filter((n) => n !== id)));
 
   const footer = (
     <>
       <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted md:text-right">
-        {picked === null ? "required: a task" : chosen.length === 0 ? `#${picked.id} joins as a root` : `#${picked.id} needs ${chosen.map((n) => `#${n}`).join(" ")}`}
+        {picked === null ? "required: a task" : joinSummary(picked.id, chosenTasks, picked.startMode ?? tree.startMode)}
       </span>
       <Button variant="primary" busy={add.isPending} disabled={picked === null} onClick={() => picked !== null && add.mutate(picked)}>
         Add to tree
@@ -54,7 +57,7 @@ export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onC
   );
 
   return (
-    <Drawer title="Add existing task" onClose={onClose} footer={footer}>
+    <Drawer title={after === undefined ? "Add existing task" : `Link existing after #${after}`} onClose={onClose} footer={footer}>
       <div className="flex flex-col gap-4">
         <Field label="Find a task">
           {(id) => (
@@ -91,7 +94,7 @@ export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onC
         </QueryState>
         {picked === null ? null : (
           <fieldset disabled={!canNeed} className="flex min-w-0 flex-col gap-1.5 disabled:opacity-55">
-            <legend className="label-caps mb-1.5">Needs</legend>
+            <legend className="label-caps mb-1.5">Runs after</legend>
             <div className="border border-line">
               {tree.tasks.map((m) => (
                 <label key={m.id} className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-line px-3 last:border-b-0 hover:bg-panel md:min-h-8">
@@ -103,9 +106,9 @@ export function AddExistingTaskDrawer({ tree, onClose }: { tree: TreeDetail; onC
             </div>
             <p className="font-mono text-meta text-muted">
               {canNeed
-                ? "None checked: it joins as a root."
+                ? "None checked: a parallel root. Checked: it waits for them."
                 : picked.state !== "backlog"
-                  ? "It has already run, so it joins without needs."
+                  ? "It has already run, so it joins as a parallel root."
                   : "It has a start time; clear it to give it needs."}
             </p>
           </fieldset>

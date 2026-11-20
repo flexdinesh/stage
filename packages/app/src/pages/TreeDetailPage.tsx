@@ -278,7 +278,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             <>
               <Segmented label="Tree start mode" options={MODE_OPTIONS} value={tree.startMode} onChange={(m) => m !== tree.startMode && mode.mutate(m)} />
               <TreeMenu tree={tree} onPick={onMenu} />
-              <Button onClick={addTask} title={selected === null ? "New root task in this tree" : `New task that needs #${selected.id}`}>
+              <Button onClick={addTask} title={selected === null ? "New parallel root. Select a task to add after it." : `New task that runs after #${selected.id}`}>
                 <IconPlus size={14} />
                 {selected === null ? "Add task" : `Add task after #${selected.id}`}
               </Button>

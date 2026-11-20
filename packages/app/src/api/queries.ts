@@ -146,10 +146,11 @@ export const useTrees = (q: TreeListQuery = {}) => {
   return useQuery({ queryKey: [...keys.trees, q], queryFn: () => api.trees(q), placeholderData: keepPreviousData });
 };
 
-export const useTree = (id: number) => {
+export const useTree = (id: number, enabled = true) => {
   const api = useApi();
   // A deleted tree is a 404; dissolved and empty trees retain their archived identity.
   return useQuery({
+    enabled,
     queryKey: [...keys.tree, id],
     queryFn: () => api.tree(id),
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,

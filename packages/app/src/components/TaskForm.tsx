@@ -475,10 +475,10 @@ function TaskFormDrawer({
           <Alert tone="plain">
             Joins tree <span className="font-medium">{defaultTree.treeTitle}</span>
             {defaultTree.needs.length === 0 ? (
-              " as a root."
+              " as a parallel root: it waits on nothing. To run it after a task, add it from that task."
             ) : (
               <>
-                , needing <span className="font-mono tabular">{defaultTree.needs.map((id) => `#${id}`).join(" ")}</span>. It waits
+                , running after <span className="font-mono tabular">{defaultTree.needs.map((id) => `#${id}`).join(" ")}</span>. It waits
                 in backlog until {defaultTree.needs.length === 1 ? "it is completed" : "they are completed"}.
               </>
             )}

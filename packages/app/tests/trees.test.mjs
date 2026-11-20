@@ -9,12 +9,14 @@ import {
   edgeState,
   graphLayout,
   inState,
+  joinSummary,
   layoutLevels,
   needCandidates,
   nextActionText,
   nodeState,
   pickedTask,
   rollupLabel,
+  startModeCaption,
   taskClosedLabel,
   treeClosed,
   treeMeta,
@@ -345,4 +347,23 @@ test("?task= selects only a current member", () => {
   assert.equal(pickedTask(null, diamond), null);
   assert.equal(pickedTask("99", diamond), null);
   for (const bad of ["", "abc", "3x", "-3", "0", "03", "3.0", " 3"]) assert.equal(pickedTask(bad, diamond), null, bad);
+});
+
+test("startModeCaption: a root never starts on its own, whatever the mode", () => {
+  assert.equal(startModeCaption({ needs: [], effectiveStartMode: "auto" }), "A root never starts on its own: start it, or give it a need.");
+  assert.equal(startModeCaption({ needs: [], effectiveStartMode: "manual" }), "A root reads ready; you start it.");
+  assert.equal(startModeCaption({ needs: [3], effectiveStartMode: "auto" }), "Starts on its own once every need is completed.");
+  assert.equal(startModeCaption({ needs: [3], effectiveStartMode: "manual" }), "Reads ready when its needs are completed; you start it.");
+});
+
+test("joinSummary: parallel root without needs, runs after them with needs", () => {
+  const open = { id: 2, acceptanceId: null };
+  const done = { id: 3, acceptanceId: 7 };
+  assert.equal(joinSummary(9, [], "auto", "OAuth"), "#9 joins OAuth as a parallel root");
+  assert.equal(joinSummary(9, [], "auto"), "#9 joins the tree as a parallel root");
+  assert.equal(joinSummary(9, [open], "auto"), "#9 runs after #2");
+  assert.equal(joinSummary(9, [open, done], "auto"), "#9 runs after #2 #3");
+  // Every need completed in an auto tree: the release runner launches it at once.
+  assert.equal(joinSummary(9, [done], "auto"), "#9 runs after #3: starts right away");
+  assert.equal(joinSummary(9, [done], "manual"), "#9 runs after #3");
 });

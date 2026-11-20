@@ -2,13 +2,15 @@ import { useMutation } from "@tanstack/react-query";
 import { useId, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
+import { useNewTask } from "../NewTask.tsx";
 import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { handoffHint } from "../../lib/handoff.ts";
-import { baseCandidates, needCandidates, treeClosed } from "../../lib/trees.ts";
+import { baseCandidates, needCandidates, startModeCaption, treeClosed } from "../../lib/trees.ts";
 import { CompletionButton } from "../Completion.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
-import { IconClose } from "../icons.tsx";
+import { IconClose, IconPlus } from "../icons.tsx";
+import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
 import { Button, ErrorText, Panel, Segmented, Select, buttonClass } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeChip } from "./TreeNode.tsx";
@@ -111,7 +113,8 @@ export function TreeNodePanel({
 
 /**
  * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
- * dependents, start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
+ * dependents (with Add task after and Link existing after: a task added from here runs after this one; several run
+ * in parallel with each other), start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
  * base and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
  * (`onSelect`) or open the task.
  */
@@ -129,7 +132,9 @@ export function TreeNodeEditor({
   const api = useApi();
   const invalidate = useInvalidateWork();
   const baseId = useId();
+  const newTask = useNewTask();
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [linking, setLinking] = useState(false);
   const closed = treeClosed(tree);
   const editable = task.state === "backlog" && !closed;
   const byId = new Map(tree.tasks.map((t) => [t.id, t]));
@@ -166,7 +171,7 @@ export function TreeNodeEditor({
     <>
       <Section label="Needs" meta={needs.length}>
         {needs.length === 0 ? (
-          <p className="text-small text-muted">{editable ? "None. It is a root: it starts when you start it." : "None."}</p>
+          <p className="text-small text-muted">{editable ? "None. A root: runs in parallel, starts when you start it." : "None."}</p>
         ) : (
           <ul className="flex flex-col">
             {needs.map((n) => (
@@ -207,7 +212,7 @@ export function TreeNodeEditor({
 
       <Section label="Dependents" meta={dependents.length}>
         {dependents.length === 0 ? (
-          <p className="text-small text-muted">Nothing needs it yet.</p>
+          <p className="text-small text-muted">Nothing runs after it yet.</p>
         ) : (
           <ul className="flex flex-col">
             {dependents.map((d) => (
@@ -215,7 +220,24 @@ export function TreeNodeEditor({
             ))}
           </ul>
         )}
+        {closed ? null : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              small
+              title={`New task that runs after #${task.id}`}
+              onClick={() => newTask(task.projectId, undefined, { treeId: tree.id, treeTitle: tree.title, needs: [task.id], startMode: tree.startMode })}
+            >
+              <IconPlus size={12} />
+              Add task after
+            </Button>
+            <Button small title={`Pick a task to run after #${task.id}`} onClick={() => setLinking(true)}>
+              Link existing after
+            </Button>
+            <p className="w-full font-mono text-meta text-muted">Added tasks run after #{task.id}, in parallel with each other.</p>
+          </div>
+        )}
       </Section>
+      {linking ? <AddExistingTaskDrawer tree={tree} after={task.id} onClose={() => setLinking(false)} /> : null}
 
       {/* Start mode, base and handoff only shape a launch: once it has run they no longer apply. */}
       {editable ? (
@@ -230,9 +252,7 @@ export function TreeNodeEditor({
         </fieldset>
         <p className="font-mono text-meta text-muted">
           {mode === "inherit" ? `Tree is ${tree.startMode}. ` : ""}
-          {task.effectiveStartMode === "manual"
-            ? "Reads ready when its needs are completed; you start it."
-            : "Starts on its own once every need is completed."}
+          {startModeCaption(task)}
         </p>
       </Section>
 
