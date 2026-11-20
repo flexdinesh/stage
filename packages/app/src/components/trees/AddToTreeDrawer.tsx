@@ -4,7 +4,8 @@ import { useInvalidateWork, useTree, useTrees } from "../../api/queries.ts";
 import type { StartMode, Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { joinSummary, treeMeta } from "../../lib/trees.ts";
-import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, Select, cx } from "../ui.tsx";
+import { Combobox } from "../Combobox.tsx";
+import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, cx } from "../ui.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -109,20 +110,18 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
           <Field label="After">
             {(id) => (
               <>
-                <Select
+                <Combobox
                   id={id}
                   value={afterTask === null ? "" : String(afterTask.id)}
                   disabled={!canNeed || detail.isPending}
-                  onChange={(e) => setAfter(e.target.value === "" ? null : Number(e.target.value))}
+                  onChange={(next) => setAfter(next === "" ? null : Number(next))}
+                  listLabel="Tree members"
                   className="w-full"
-                >
-                  <option value="">Nothing: runs in parallel</option>
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      #{m.id} {m.title}
-                    </option>
-                  ))}
-                </Select>
+                  options={[
+                    { value: "", label: "Nothing: runs in parallel" },
+                    ...members.map((m) => ({ value: String(m.id), label: `#${m.id} ${m.title}` })),
+                  ]}
+                />
                 <p className="font-mono text-meta text-muted">
                   {!canNeed
                     ? task.state !== "backlog"

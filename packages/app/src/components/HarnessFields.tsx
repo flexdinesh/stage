@@ -1,5 +1,6 @@
 import type { Capabilities, ExecutionConfig, HarnessChoice } from "../api/types.ts";
-import { Button, Field, Select } from "./ui.tsx";
+import { Combobox } from "./Combobox.tsx";
+import { Button, Field } from "./ui.tsx";
 
 export const harnessDefaults: ExecutionConfig = {
   model: "",
@@ -57,27 +58,26 @@ export function HarnessFields({
     return (
       <Field label={label} {...(unavailable?.reason ? { hint: unavailable.reason } : {})}>
         {(id) => (
-          <Select
+          <Combobox
             id={id}
             disabled={disabled}
             value={current}
-            onChange={(e) => onChange({ ...config, [field]: e.target.value })}
-          >
-            <option value="">Harness default</option>
-            {current && !list.some((c) => c.id === current && c.available) ? (
-              <option value={current} disabled>
-                {current} (unavailable)
-              </option>
-            ) : null}
-            {list
-              .filter((c) => c.available)
-              .map((c) => (
-                <option key={c.id} value={c.id}>
-                  {"group" in c && typeof c.group === "string" ? c.group + " / " : ""}
-                  {c.label || c.id}
-                </option>
-              ))}
-          </Select>
+            onChange={(next) => onChange({ ...config, [field]: next })}
+            listLabel={label}
+            options={[
+              { value: "", label: "Harness default" },
+              ...(current && !list.some((c) => c.id === current && c.available)
+                ? [{ value: current, label: `${current} (unavailable)`, disabled: true }]
+                : []),
+              ...list
+                .filter((c) => c.available)
+                .map((c) => ({
+                  value: c.id,
+                  label: c.label || c.id,
+                  ...("group" in c && typeof c.group === "string" ? { tag: c.group } : {}),
+                })),
+            ]}
+          />
         )}
       </Field>
     );
@@ -101,24 +101,20 @@ export function HarnessFields({
         return (
           <Field key={o.id} label={o.id}>
             {(id) => (
-              <Select
+              <Combobox
                 id={id}
                 disabled={disabled}
                 value={current && idx < 0 ? "unavailable" : String(idx)}
-                onChange={(e) => setOption(o.id, o.values[Number(e.target.value)])}
-              >
-                <option value="-1">Harness default</option>
-                {current && idx < 0 ? (
-                  <option value="unavailable" disabled>
-                    {String(current.value)} (unavailable)
-                  </option>
-                ) : null}
-                {o.values.map((v, i) => (
-                  <option key={i} value={i}>
-                    {String(v)}
-                  </option>
-                ))}
-              </Select>
+                onChange={(next) => setOption(o.id, o.values[Number(next)])}
+                listLabel={o.id}
+                options={[
+                  { value: "-1", label: "Harness default" },
+                  ...(current && idx < 0
+                    ? [{ value: "unavailable", label: `${String(current.value)} (unavailable)`, disabled: true }]
+                    : []),
+                  ...o.values.map((v, i) => ({ value: String(i), label: String(v) })),
+                ]}
+              />
             )}
           </Field>
         );

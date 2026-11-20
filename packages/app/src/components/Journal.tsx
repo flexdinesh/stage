@@ -9,7 +9,8 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
-import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Select } from "./ui.tsx";
+import { Combobox } from "./Combobox.tsx";
+import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented } from "./ui.tsx";
 
 const Markdown = lazy(() => import("./ReplyMarkdown.tsx"));
 const KIND_OPTIONS: { value: JournalKind; label: string }[] = [
@@ -55,19 +56,21 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
       {owner.treeId === undefined ? null : (
         <Field label="Save note to">
           {(id) => (
-            <Select
+            <Combobox
               id={id}
               value={selectedTask}
               disabled={append.isPending}
-              onChange={(event) => {
-                setSelectedTask(event.target.value);
+              onChange={(next) => {
+                setSelectedTask(next);
                 previous.current = null;
               }}
-            >
-              <option value="">This tree</option>
-              {tasks.map((task) => <option key={task.id} value={task.id}>Task #{task.id}: {task.title}</option>)}
-              {missingMember ? <option value={selectedTask}>Task #{selectedTask} left this tree</option> : null}
-            </Select>
+              listLabel="Note owners"
+              options={[
+                { value: "", label: "This tree" },
+                ...tasks.map((task) => ({ value: String(task.id), label: `Task #${task.id}: ${task.title}` })),
+                ...(missingMember ? [{ value: selectedTask, label: `Task #${selectedTask} left this tree` }] : []),
+              ]}
+            />
           )}
         </Field>
       )}
@@ -89,10 +92,14 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
         <div className="min-w-0 flex-1">
           <Field label="Category (optional)">
             {(id) => (
-              <Select id={id} value={category} disabled={append.isPending} onChange={(e) => { if (isNoteCategory(e.target.value)) setCategory(e.target.value); }}>
-                <option value="">Uncategorized</option>
-                {NOTE_CATEGORIES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </Select>
+              <Combobox
+                id={id}
+                value={category}
+                disabled={append.isPending}
+                onChange={(next) => { if (isNoteCategory(next)) setCategory(next); }}
+                listLabel="Categories"
+                options={[{ value: "", label: "Uncategorized" }, ...NOTE_CATEGORIES]}
+              />
             )}
           </Field>
         </div>
@@ -230,10 +237,13 @@ export function JournalPanel({ owner, projectId = null, tasks = [], active = tru
           <Field label="Search text">{(id) => <Input id={id} type="search" placeholder="Literal text" value={search} onChange={(e) => setSearch(e.target.value)} />}</Field>
           <Field label="Category">
             {(id) => (
-              <Select id={id} value={category} onChange={(e) => { if (isNoteCategory(e.target.value)) setCategory(e.target.value); }}>
-                <option value="">All categories</option>
-                {NOTE_CATEGORIES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </Select>
+              <Combobox
+                id={id}
+                value={category}
+                onChange={(next) => { if (isNoteCategory(next)) setCategory(next); }}
+                listLabel="Categories"
+                options={[{ value: "", label: "All categories" }, ...NOTE_CATEGORIES]}
+              />
             )}
           </Field>
           {owner.treeId === undefined ? null : <Field label="Task ID">{(id) => <Input id={id} inputMode="numeric" placeholder="All tasks and tree" value={task} aria-invalid={invalidTask} onChange={(e) => setTask(e.target.value)} />}</Field>}

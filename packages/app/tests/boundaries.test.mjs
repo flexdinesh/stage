@@ -41,3 +41,15 @@ test("product code uses the platform contract, not browser or host APIs", () => 
   }
   assert.deepEqual(found, []);
 });
+
+test("every dropdown is the Combobox, never a native select", () => {
+  const found = [];
+  for (const file of files(src)) {
+    readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        if (/<select\b/.test(line)) found.push(`${relative(src, file)}:${i + 1}: use Combobox: ${line.trim()}`);
+      });
+  }
+  assert.deepEqual(found, []);
+});

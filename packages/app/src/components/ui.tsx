@@ -153,13 +153,9 @@ export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
   );
 }
 
-export function Select({ className, small = false, ...rest }: ComponentProps<"select"> & { small?: boolean }) {
-  return (
-    <select
-      className={cx(inputBase, small ? "h-8 py-0 text-input-sm md:h-6" : "h-10 md:h-8", "select-chevron appearance-none pr-8", className)}
-      {...rest}
-    />
-  );
+/** A single-line control's box: the input's, or the compact one for dense panels. */
+export function controlClass(small: boolean): string {
+  return small ? `h-8 py-0 text-input-sm md:h-6 ${inputBase}` : inputClass;
 }
 
 /** Square checkbox: native input (keyboard, forms, a11y) with an Ink fill and authored check. */

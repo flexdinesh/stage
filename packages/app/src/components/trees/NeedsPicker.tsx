@@ -1,8 +1,8 @@
 import type { Task } from "../../api/types.ts";
-import { Select } from "../ui.tsx";
+import { Combobox } from "../Combobox.tsx";
 
 /**
- * Adds a need from cycle-safe candidates (see `needCandidates`): a select that resets after each pick. Disabled with
+ * Adds a need from cycle-safe candidates (see `needCandidates`): a combobox that resets after each pick. Disabled with
  * no candidates.
  */
 export function NeedsPicker({
@@ -18,24 +18,20 @@ export function NeedsPicker({
 }) {
   const none = candidates.length === 0;
   return (
-    <Select
+    <Combobox
       small
       id={id}
       aria-label="Add a need"
       value=""
       disabled={disabled || none}
-      onChange={(e) => {
-        const picked = Number(e.target.value);
+      onChange={(next) => {
+        const picked = Number(next);
         if (Number.isSafeInteger(picked) && picked > 0) onAdd(picked);
       }}
+      listLabel="Tasks"
+      placeholder={none ? "No task can be added without a loop" : "Add a need…"}
       className="w-full"
-    >
-      <option value="">{none ? "No task can be added without a loop" : "Add a need…"}</option>
-      {candidates.map((t) => (
-        <option key={t.id} value={t.id}>
-          #{t.id} {t.title}
-        </option>
-      ))}
-    </Select>
+      options={candidates.map((t) => ({ value: String(t.id), label: `#${t.id} ${t.title}` }))}
+    />
   );
 }

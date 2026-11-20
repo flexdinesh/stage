@@ -11,7 +11,8 @@ import { CompletionButton } from "../Completion.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
-import { Button, ErrorText, Panel, Segmented, Select, buttonClass } from "../ui.tsx";
+import { Combobox } from "../Combobox.tsx";
+import { Button, ErrorText, Panel, Segmented, buttonClass } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeChip } from "./TreeNode.tsx";
 
@@ -264,23 +265,23 @@ export function TreeNodeEditor({
             <p className="text-small text-muted">Runs at the project root, so there is no base to pick.</p>
           ) : (
             <>
-              <Select
+              <Combobox
                 small
                 id={baseId}
                 aria-label="Worktree base"
                 value={baseValue(w, bases)}
                 disabled={!editable || update.isPending}
-                onChange={(e) => setBase(e.target.value)}
+                onChange={setBase}
+                listLabel="Worktree bases"
                 className="w-full font-mono"
-              >
-                <option value="">Stable base ({w.baseRef})</option>
-                {baseValue(w, bases) === "unavailable" ? <option value="unavailable" disabled>Predecessor unavailable: choose a base</option> : null}
-                {bases.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    #{b.id}&apos;s branch
-                  </option>
-                ))}
-              </Select>
+                options={[
+                  { value: "", label: `Stable base (${w.baseRef})` },
+                  ...(baseValue(w, bases) === "unavailable"
+                    ? [{ value: "unavailable", label: "Predecessor unavailable: choose a base", disabled: true }]
+                    : []),
+                  ...bases.map((b) => ({ value: String(b.id), label: `#${b.id}'s branch` })),
+                ]}
+              />
               <p className="font-mono text-meta text-muted">
                 {bases.length === 0
                   ? "No eligible predecessor. Choose the stable base explicitly."

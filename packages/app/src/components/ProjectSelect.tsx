@@ -51,6 +51,8 @@ export function ProjectCombobox({
       onChange={onChange}
       options={options}
       pinned={pinnedOptions}
+      // Projects match on paths and repos too, so filtering helps even in a short list.
+      searchable
       placeholder={placeholder}
       emptyText={emptyText}
       listLabel="Projects"

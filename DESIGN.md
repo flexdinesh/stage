@@ -294,7 +294,7 @@ Flat. Depth comes from tone and line, not shadow: a Bench Gray header bar over a
 ### Shadow Vocabulary
 - **Palette overlay** (`box-shadow: 0 16px 48px rgba(0,0,0,0.28)`): command palette on laptop only.
 - **Selected stat bar** (`box-shadow: inset 0 -2px var(--c)`): the active stat strip cell, in its tone.
-- **Active row box** (`box-shadow: inset 0 0 0 1px var(--line-strong)`): over a Bench Gray fill, the current sidebar row and the highlighted palette, project combobox and snippet picker result. Inset, so rows never shift.
+- **Active row box** (`box-shadow: inset 0 0 0 1px var(--line-strong)`): over a Bench Gray fill, the current sidebar row and the highlighted palette, combobox and snippet picker result. Inset, so rows never shift.
 - **Input focus ring** (`box-shadow: 0 0 0 1px var(--accent)`): with an ink border on focused inputs and selects.
 
 ### Named Rules
@@ -337,8 +337,12 @@ Compact, flat, and ink-led.
 - **Focus:** border and a 1px ring both go Ink.
 - **Error / Disabled:** errors render as a red Alert below; disabled at 55% opacity. Labels sit above in the Label style.
 
-### Project combobox
-Every project picker (task form, snippet scope) is a type-to-filter combobox that looks like a select at rest: same height, border, chevron and focus ring. Focus or click opens the list with the current label selected, so typing replaces it. Matches are case-insensitive substrings of the title or workspace path, ranked title prefix, title substring, path only; ties and the empty query sort by recent activity. A pinned first option ("All projects", "Global") leads while the query is empty. The list drops under the input (left-aligned, at least 280px, right-aligned when it would overflow), at most 344px tall, and flips above near the bottom of the visible area, including over a phone keyboard. Flat (Strong Hairline, Paper, no shadow); rows show the title at 13px over a 1-line mono Slate path, matched text bold, archived projects with a plain chip; 44px+ rows on phone. The active row gets the active row box; the laptop footer shows keycaps (↑↓ move, ↵ select, Esc close). Enter selects and never submits the form; Esc closes the list (not the drawer) and restores the label, as do Tab and blur. No match shows a muted "No matching projects" line.
+### Combobox
+Every dropdown is the one `Combobox`; there is no native select (a boundaries test bans `<select>`). At rest it looks like an input: same height (small: 24px, 32px on phone), border, chevron and focus ring. Two variants share the list, rows and keys:
+- **Searchable** (lists over 8 options, and every project picker): an input. Focus or click opens the list with the current label selected, so typing replaces it and filters. Matches are case-insensitive substrings, ranked label prefix, label substring, tag, detail; ties keep the list's order. Projects rank title prefix, title substring, path only, with ties and the empty query by recent activity. A pinned first option ("All projects", "Global", "Create new project") leads while the query is empty.
+- **Select-only** (8 or fewer, so a phone keyboard never opens for a short list): a button. Click, Enter, Space or ↓ opens; typing jumps to the first label starting with the typed prefix (repeating a letter cycles); Enter or Space selects.
+
+The list drops under the control (left-aligned, at least 280px, right-aligned when it would overflow), at most 344px tall, and flips above near the bottom of the visible area, including over a phone keyboard. Flat (Strong Hairline, Paper, no shadow); rows show a leading Ink check on the current value, the label at 13px, an optional 1-line mono Slate detail (a project's path), an optional plain chip (archived) and an optional mono Slate tag at the end (a model's provider); matched text bold; 44px+ rows on phone. A saved value the harness no longer offers lists as a muted row that arrows skip and clicks ignore. The active row gets the active row box; the laptop footer shows keycaps (↑↓ move, ↵ select, Esc close). Enter selects and never submits the form; Esc closes the list (not the drawer) and restores the label, as do Tab and blur. No match shows a muted line ("No matches", "No matching projects").
 
 ### Segmented control
 Joined mono buttons inside one Strong Hairline border, hairline dividers between options; the pressed option fills Ink. Default is 32px tall overall (40px on phone), matching buttons and inputs it sits beside; small (compact controls) is 26px (34px on phone). Used for runtime mode, time window, theme, project sort/archive filter.

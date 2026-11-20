@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useHarnesses } from "../api/queries.ts";
 import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel, Select } from "./ui.tsx";
+import { Combobox } from "./Combobox.tsx";
+import { Button, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
 
 export function SharedPaths() {
   const api = useApi();
@@ -76,17 +77,13 @@ export function SharedPaths() {
           <div className="flex flex-col gap-3">
             <Field label="Harness">
               {(id) => (
-                <Select
+                <Combobox
                   id={id}
-                  value={connection}
-                  onChange={(e) => setConnection(Number(e.target.value))}
-                >
-                  {harnesses.activeList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {HARNESS_NAME[c.harness]}
-                    </option>
-                  ))}
-                </Select>
+                  value={String(connection)}
+                  onChange={(next) => setConnection(Number(next))}
+                  listLabel="Harnesses"
+                  options={harnesses.activeList.map((c) => ({ value: String(c.id), label: HARNESS_NAME[c.harness] }))}
+                />
               )}
             </Field>
             <Field label="Directory on the harness">
