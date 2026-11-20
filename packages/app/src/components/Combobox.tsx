@@ -67,6 +67,7 @@ export function Combobox({
   className,
   size,
   autoFocus = false,
+  leading,
   "aria-label": ariaLabel,
 }: {
   id?: string | undefined;
@@ -90,6 +91,8 @@ export function Combobox({
   size?: number | undefined;
   /** Marks the control `data-autofocus` so an enclosing Drawer focuses it first. */
   autoFocus?: boolean | undefined;
+  /** Shown before the selected label in a select-only trigger (e.g. a state marker). */
+  leading?: ReactNode;
   "aria-label"?: string | undefined;
 }) {
   const listId = useId();
@@ -372,7 +375,16 @@ export function Combobox({
           onBlur={close}
           onKeyDown={onButtonKeyDown}
         >
-          {selected === undefined ? <span className="text-muted">{placeholder ?? " "}</span> : selected.label}
+          {selected === undefined ? (
+            <span className="text-muted">{placeholder ?? " "}</span>
+          ) : leading === undefined ? (
+            selected.label
+          ) : (
+            <span className="flex min-w-0 items-center gap-2">
+              {leading}
+              <span className="min-w-0 truncate">{selected.label}</span>
+            </span>
+          )}
         </button>
       )}
       {open && style !== null ? createPortal(panel, document.body) : null}

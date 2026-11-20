@@ -7,14 +7,14 @@ import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "
 import { useApi } from "../../platform/context.tsx";
 import { handoffHint } from "../../lib/handoff.ts";
 import { baseCandidates, needCandidates, startModeCaption, treeClosed } from "../../lib/trees.ts";
-import { CompletionButton } from "../Completion.tsx";
+import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
-import { IconClose, IconPlus } from "../icons.tsx";
+import { IconArrowRight, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
 import { Combobox } from "../Combobox.tsx";
-import { Button, ErrorText, Panel, Segmented, buttonClass } from "../ui.tsx";
+import { Button, ErrorText, Panel, Segmented } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
-import { NodeChip } from "./TreeNode.tsx";
+import { NodeAction, NodeChip } from "./TreeNode.tsx";
 
 type ModeChoice = "inherit" | StartMode;
 
@@ -69,7 +69,8 @@ function baseValue(w: Workspace, candidates: readonly Task[]): string {
 }
 
 /**
- * lg+ side column for the selected node: the task with Complete and Open task, then its tree controls. Edits apply at once.
+ * lg+ side column for the selected node: Open (to the task page) in the header, the task, its State picker with its
+ * one action (Start, Retry, Open in T3), then its tree controls. Edits apply at once.
  */
 export function TreeNodePanel({
   tree,
@@ -87,26 +88,28 @@ export function TreeNodePanel({
       title={`Task #${task.id}`}
       flush
       actions={
-        <Button variant="ghost" small onClick={onClose} aria-label="Close task panel">
-          <IconClose size={14} />
-        </Button>
+        <>
+          <Link
+            to={`/tasks/${task.id}`}
+            aria-label={`Open task #${task.id}`}
+            className="inline-flex min-h-7 items-center gap-1 px-1.5 font-mono text-meta text-fg hover:underline"
+          >
+            Open
+            <IconArrowRight size={12} />
+          </Link>
+          <Button variant="ghost" small onClick={onClose} aria-label="Close task panel">
+            <IconClose size={14} />
+          </Button>
+        </>
       }
     >
       <div className="flex min-w-0 flex-col gap-1.5 border-b border-line px-3 py-3">
-        <div>
-          <NodeChip task={task} />
-        </div>
-        <Link to={`/tasks/${task.id}`} className="text-body font-medium break-words hover:underline">
-          {task.title}
-        </Link>
+        <p className="text-body font-medium break-words">{task.title}</p>
         <p className="font-mono text-meta text-muted">{task.projectTitle}</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <CompletionButton task={task} />
-          <Link to={`/tasks/${task.id}`} className={buttonClass("secondary")}>
-            Open task
-          </Link>
-        </div>
       </div>
+      <Section label="State">
+        <StateControl task={task} tree={tree} action={<NodeAction task={task} pending={[]} review={false} />} />
+      </Section>
       <TreeNodeEditor tree={tree} task={task} onSelect={onSelect} onRemoved={onClose} />
     </Panel>
   );

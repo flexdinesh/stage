@@ -104,7 +104,7 @@ func completionPreview(ctx context.Context, tx *Tx, id int64) (CompletionPreview
 		p.BlockedReason = "Launch unconfirmed. Wait for reconciliation or link the existing session before completing."
 	}
 	if task.AcceptanceID != nil {
-		p.BlockedReason = "This task is already completed. Reopen it to accept another result."
+		p.BlockedReason = "This task is already completed. Change its state back to accept another result."
 	}
 	if task.T3ThreadID != nil {
 		var status string

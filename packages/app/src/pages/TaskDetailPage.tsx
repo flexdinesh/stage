@@ -11,7 +11,8 @@ import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
-import { AcceptedResult, CompletionButton } from "../components/Completion.tsx";
+import { AcceptedResult } from "../components/Completion.tsx";
+import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
@@ -204,7 +205,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {retired ? <Alert tone="plain">{retiredNotice(task)}</Alert> : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <CompletionButton task={task} />
           {startable ? (
             <Button
               variant="primary"
@@ -256,6 +256,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
           ) : null}
         </div>
 
+        <StatePanel task={task} className="lg:hidden" />
         <ErrorText error={actionError} />
         <LaunchRecovery task={task} />
         {task.lastError === null || task.state === "launching" ? null : (
@@ -288,6 +289,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <TimelinePanel events={task.events} />
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
+            <StatePanel task={task} className="max-lg:hidden" />
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
@@ -305,6 +307,15 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {editing ? <TaskFormModal task={task} onClose={() => setEditing(false)} /> : null}
     </div>
+  );
+}
+
+/** The task's State picker: first in the side column on lg+, under the action row on phones (one shows per breakpoint). */
+function StatePanel({ task, className }: { task: TaskDetail; className: string }) {
+  return (
+    <Panel title="State" className={className}>
+      <StateControl task={task} tree={task.tree} />
+    </Panel>
   );
 }
 
