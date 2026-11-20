@@ -178,10 +178,10 @@ Usage:
   stage schedule edit ID [config] [--cron CRON] [--tz ZONE]
   stage schedule rm|run|pause|resume ID
   stage schedule preview --cron CRON --tz ZONE
-  stage sessions adopt [THREAD_ID] [--title T] [--initial-note TEXT] [--tag T]... [--tree ID]
-                                      track a session as a task (default: your session)
-  stage mcp [--t3-session-env]        opt in only for a dedicated T3 stdio process
-  stage setup mcp [--claude] [--codex] [--http|--t3-session-env]
+  stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT]
+                       [--tag T]... [--tree ID]   track a session as a task (default: your session)
+  stage mcp                           the agent tools over stdio MCP
+  stage setup mcp [--claude] [--codex] [--http]
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
 
@@ -199,8 +199,9 @@ Start mode: tasks inherit their tree by default. Set shared policy on the tree;
   stage task|tree notes ID get ENTRY_ID
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
-Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID.
-The CLI also reads T3CODE_THREAD_ID. OpenCode MCP sends per-call session metadata.
+Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID,
+        else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>. Harness MCP metadata
+        (OpenCode) and the Stage-Caller-Session header on HTTP MCP name the caller per call.
 Creation: --connection ID selects the destination. --execution-config JSON sets harness options.
 References/adoption: --target-connection ID --target-session ID names a scoped session.
 Creator filter: task ls --origin-connection ID --origin-session ID.
@@ -346,7 +347,6 @@ func runContext(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "context")
 	var a agenttools.CallerArgs
 	caller := c.sessionFlags("caller")
-	c.fs.StringVar(&a.CallerThreadID, "thread", "", "session id")
 	c.fs.StringVar(&a.Cwd, "cwd", "", "working directory")
 	if err := c.parse(args); err != nil {
 		return err
@@ -436,13 +436,12 @@ func runModels(ctx context.Context, env Env, args []string) error {
 
 func runMCP(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "mcp")
-	dedicated := c.fs.Bool("t3-session-env", false, "dedicated T3 process: read T3CODE_THREAD_ID")
 	if err := c.parse(args); err != nil {
 		return err
 	}
+	// A stdio MCP process may serve several sessions: callers come per call
+	// (harness metadata or callerSession), never from the environment.
 	ops := c.ops()
-	if !*dedicated {
-		ops.Caller = agentctx.Caller{}
-	}
+	ops.Caller = agentctx.Caller{}
 	return agenttools.NewServer(ops).Run(ctx, &mcp.StdioTransport{})
 }

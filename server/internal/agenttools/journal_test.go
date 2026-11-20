@@ -48,7 +48,7 @@ func TestJournalMCPInputs(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cs := connect(t, &agenttools.Ops{Client: client.New(srv.URL), Caller: agentctx.Caller{ThreadID: "environment"}})
+	cs := connect(t, &agenttools.Ops{Client: client.New(srv.URL), Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: 1, ExternalSessionID: "environment"}}})
 	for _, tc := range []struct {
 		tool string
 		args map[string]any
@@ -78,7 +78,7 @@ func TestJournalMCPInputs(t *testing.T) {
 	mustCall(t, cs, "read_journal", map[string]any{"treeId": 2, "filterTaskId": 3, "kind": "all"}, nil)
 	var entry db.JournalEntry
 	mustCall(t, cs, "append_note", map[string]any{
-		"treeId": 2, "text": "decision", "requestId": "key", "sourceTaskId": 3, "callerThreadId": "override",
+		"treeId": 2, "text": "decision", "requestId": "key", "sourceTaskId": 3, "callerSession": map[string]any{"connectionId": 1, "externalSessionId": "override"},
 	}, &entry)
 	if entry.ID != 9 || entry.SourceSession == nil || entry.SourceSession.ExternalSessionID != "override" {
 		t.Fatalf("entry %+v", entry)
@@ -156,7 +156,7 @@ func TestContextTracksCurrentTreeAndNoteSource(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/context-journal")
 	threadID := e.session(p, "Contributor")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: threadID}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: e.store.T3ID(), ExternalSessionID: threadID}}})
 	var adopted agenttools.AdoptOut
 	mustCall(t, cs, "adopt_session", nil, &adopted)
 	var first client.TreeDetail

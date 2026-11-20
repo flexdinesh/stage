@@ -218,7 +218,6 @@ type AdoptSessionArgs struct {
 	Session         *db.SessionRef `json:"session,omitempty" jsonschema:"target session on its connection; omitted uses caller"`
 	ProjectID       *int64         `json:"projectId,omitempty"`
 	NewProjectTitle string         `json:"newProjectTitle,omitempty"`
-	ThreadID        string         `json:"threadId,omitempty" jsonschema:"T3 thread id of a top-level session; default: your own session"`
 	Title           string         `json:"title,omitempty" jsonschema:"task title; default: the session title"`
 	InitialNote     string         `json:"initialNote,omitempty"`
 	Tags            []string       `json:"tags,omitempty"`
@@ -241,16 +240,6 @@ func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, e
 		return AdoptOut{}, err
 	}
 	ref := a.Session
-	if id := strings.TrimSpace(a.ThreadID); id != "" {
-		if ref != nil {
-			return AdoptOut{}, errors.New("choose session or legacy threadId")
-		}
-		t3, err := o.t3Lookup(ctx)()
-		if err != nil {
-			return AdoptOut{}, err
-		}
-		ref = &db.SessionRef{ConnectionID: t3, ExternalSessionID: id}
-	}
 	if ref == nil {
 		ref = c.Session
 	}
@@ -258,7 +247,7 @@ func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, e
 		return AdoptOut{}, errors.New("target session requires connectionId and externalSessionId")
 	}
 	if ref == nil {
-		return AdoptOut{}, errors.New("session or threadId is required outside a harness session; pass the target session")
+		return AdoptOut{}, errors.New("session is required outside a harness session; pass the target session {connectionId, externalSessionId}")
 	}
 	t, created, err := o.Client.AdoptScoped(ctx, *ref, client.AdoptSession{
 		CallerSession: c.Session, ProjectID: a.ProjectID, NewProjectTitle: a.NewProjectTitle, Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), Tags: a.Tags, TreeID: a.TreeID,

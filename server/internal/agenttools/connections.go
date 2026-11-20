@@ -2,7 +2,6 @@ package agenttools
 
 import (
 	"context"
-	"errors"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
@@ -44,22 +43,4 @@ func (h harnesses) active() []db.HarnessConnection {
 		}
 	}
 	return out
-}
-
-// t3Lookup resolves the active T3 connection for legacy thread ids, once.
-func (o *Ops) t3Lookup(ctx context.Context) func() (int64, error) {
-	var id int64
-	return func() (int64, error) {
-		if id != 0 {
-			return id, nil
-		}
-		h, err := o.harnesses(ctx)
-		if err != nil {
-			return 0, err
-		}
-		if id = h.t3(); id == 0 {
-			return 0, errors.New("no T3 connection on this Stage server; pass callerSession")
-		}
-		return id, nil
-	}
 }

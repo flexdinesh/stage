@@ -48,12 +48,14 @@ type JournalPage struct {
 	NextCursor *string        `json:"nextCursor"`
 }
 type AppendNoteInput struct {
-	SourceSession  *SessionRef `json:"sourceSession,omitempty"`
-	Text           string      `json:"text"`
-	Category       string      `json:"category"`
-	RequestID      string      `json:"requestId"`
-	SourceTaskID   *int64      `json:"sourceTaskId"`
-	SourceThreadID *string     `json:"sourceThreadId"`
+	SourceSession *SessionRef `json:"sourceSession,omitempty"`
+	Text          string      `json:"text"`
+	Category      string      `json:"category"`
+	RequestID     string      `json:"requestId"`
+	SourceTaskID  *int64      `json:"sourceTaskId"`
+	// SourceThreadID is a legacy T3 thread id from a task create's
+	// originThreadId (initial note); not accepted on the journal API.
+	SourceThreadID *string `json:"-"`
 }
 
 const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id)`

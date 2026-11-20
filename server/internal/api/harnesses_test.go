@@ -94,6 +94,10 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 			Kind        string        `json:"kind"`
 			Connectable bool          `json:"connectable"`
 			Setup       harness.Setup `json:"setup"`
+			Attribution struct {
+				MetaKeys []string `json:"metaKeys"`
+				Env      string   `json:"env"`
+			} `json:"attribution"`
 		} `json:"harnesses"`
 	}
 	e.must("GET", "/api/harnesses", nil, 200, &list)
@@ -104,6 +108,11 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 	// newEnv composes no OpenCode connector; a hosted harness has none.
 	if oc.Connectable || hosted.Connectable || hosted.Setup.Fields == nil || hosted.Setup.Actions == nil {
 		t.Fatalf("not connectable %+v %+v", oc, hosted)
+	}
+	// Attribution is the descriptor's, never null; the hint stays server-side.
+	if t3h.Attribution.MetaKeys == nil || len(t3h.Attribution.MetaKeys) != 0 || t3h.Attribution.Env != "T3CODE_THREAD_ID" ||
+		len(oc.Attribution.MetaKeys) != 1 || oc.Attribution.MetaKeys[0] != "ai.opencode/sessionID" {
+		t.Fatalf("attribution %+v %+v", t3h.Attribution, oc.Attribution)
 	}
 
 	var st struct {

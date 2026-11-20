@@ -35,7 +35,7 @@ func (f *documentHarness) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: !f.offline, Reason: "Reconnect documents"}, Identity: "documents-local"}
 }
 func (f *documentHarness) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: !f.disallow, Reason: "Read-only document service"}, "opening": {Reason: "Documents have no opening prompt"}}, SessionEnvironment: "DOCUMENT_SESSION", Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}}}, nil
+	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: !f.disallow, Reason: "Read-only document service"}, "opening": {Reason: "Documents have no opening prompt"}}, Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}}}, nil
 }
 func (f *documentHarness) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	if f.offline {

@@ -101,7 +101,7 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   `Links.executionDestination`. Product code does not inspect browser location
   or dispatch native URLs directly.
 
-Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. OpenCode attaches its native session ID to each MCP call. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
+Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. A harness names the caller through its descriptor's attribution (OpenCode attaches its native session ID to each MCP call) or the generic `Stage-Caller-Session` header and `STAGE_CALLER_SESSION` variable; the launch instructions carry the descriptor's caller hint. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
 
 ## Durable launch lifecycle
 

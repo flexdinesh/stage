@@ -31,7 +31,11 @@ type HarnessDescriptor struct {
 	Available   bool   `json:"available"`
 	Reason      string `json:"reason,omitempty"`
 	Connectable bool   `json:"connectable"`
-	Setup       struct {
+	Attribution struct {
+		MetaKeys []string `json:"metaKeys"`
+		Env      string   `json:"env,omitempty"`
+	} `json:"attribution"`
+	Setup struct {
 		Fields     []SetupField  `json:"fields"`
 		Actions    []SetupAction `json:"actions"`
 		Disconnect bool          `json:"disconnect"`

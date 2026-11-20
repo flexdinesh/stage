@@ -615,12 +615,8 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 		if err := c.parse(rest); err != nil {
 			return err
 		}
-		switch len(c.pos) {
-		case 0:
-		case 1:
-			a.ThreadID = c.pos[0]
-		default:
-			return usagef("sessions adopt: want at most one thread id (default: your session)")
+		if len(c.pos) > 0 {
+			return usagef("sessions adopt: unexpected argument %q (name the session with --target-connection ID --target-session ID; default: your session)", c.pos[0])
 		}
 		var err error
 		a.CallerSession, err = caller()

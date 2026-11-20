@@ -43,16 +43,17 @@ func (o *Ops) cli() string {
 
 // CallerArgs override the environment's caller.
 type CallerArgs struct {
-	CallerSession  *db.SessionRef `json:"callerSession,omitempty" jsonschema:"explicit caller connectionId and externalSessionId for intermediaries"`
-	CallerThreadID string         `json:"callerThreadId,omitempty" jsonschema:"your T3 session id (env T3CODE_THREAD_ID); CLI and dedicated T3 stdio can read it from the environment"`
-	Cwd            string         `json:"cwd,omitempty" jsonschema:"your working directory for context only; never used to infer a project"`
+	CallerSession *db.SessionRef `json:"callerSession,omitempty" jsonschema:"your session: the Stage connectionId of your harness and your externalSessionId there (your launch instructions say where to find them)"`
+	Cwd           string         `json:"cwd,omitempty" jsonschema:"your working directory for context only; never used to infer a project"`
 }
 
-type metadataKey struct{}
+// claimKey holds the per-call transport claim (harness request metadata or
+// the Stage-Caller-Session header).
+type claimKey struct{}
 
 func (o *Ops) caller(ctx context.Context, a CallerArgs) (agentctx.Caller, error) {
-	meta, _ := ctx.Value(metadataKey{}).(*db.SessionRef)
-	return o.Caller.Resolve(a.CallerSession, a.CallerThreadID, a.Cwd, meta, o.t3Lookup(ctx))
+	claim, _ := ctx.Value(claimKey{}).(*db.SessionRef)
+	return o.Caller.Resolve(a.CallerSession, a.Cwd, claim)
 }
 
 // IDArgs names one task or schedule.

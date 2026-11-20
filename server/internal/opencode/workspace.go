@@ -133,7 +133,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if _, err := a.check(ctx); err != nil {
 		return execution.Capabilities{}, err
 	}
-	return execution.Capabilities{SessionEnvironment: "OPENCODE_SESSION_ID", Operations: map[string]execution.Availability{
+	return execution.Capabilities{Operations: map[string]execution.Availability{
 		"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "attention": available,
 		"predecessorBase":   {Reason: "OpenCode selects the worktree strategy and base. Choose its default base."},
 		"images":            {Reason: "Image attachment delivery has not been verified for this adapter."},

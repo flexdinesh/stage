@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -60,32 +61,54 @@ func TestMCPSubprocess(t *testing.T) {
 	if os.Getenv("STAGE_TEST_CALLER_STDIO") != "1" {
 		return
 	}
-	args := []string{"mcp"}
-	if os.Getenv("STAGE_TEST_DEDICATED") == "1" {
-		args = append(args, "--t3-session-env")
-	}
-	os.Exit(cli.Run(context.Background(), args, cli.OSEnv()))
+	os.Exit(cli.Run(context.Background(), []string{"mcp"}, cli.OSEnv()))
 }
-func transportClient(t *testing.T, e *env, transport, thread string) *mcp.ClientSession {
+
+// headerTransport sends the caller header on every request.
+type headerTransport struct{ value string }
+
+func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set(agentctx.CallerHeader, h.value)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// transportClient connects over HTTP MCP (caller is its Stage-Caller-Session
+// header) or stdio (caller is the subprocess's STAGE_CALLER_SESSION, which a
+// shared MCP server ignores).
+func transportClient(t *testing.T, e *env, transport, caller string) (*mcp.ClientSession, error) {
 	t.Helper()
 	var tr mcp.Transport
 	if transport == "http" {
-		srv := httptest.NewServer(agenttools.HTTPHandler(&agenttools.Ops{Client: e.client, Caller: agentctx.Caller{ThreadID: thread}, LocalFiles: true}))
+		srv := httptest.NewServer(agenttools.HTTPHandler(&agenttools.Ops{Client: e.client, LocalFiles: true}))
 		t.Cleanup(srv.Close)
-		tr = &mcp.StreamableClientTransport{Endpoint: srv.URL}
+		st := &mcp.StreamableClientTransport{Endpoint: srv.URL}
+		if caller != "" {
+			st.HTTPClient = &http.Client{Transport: headerTransport{caller}}
+		}
+		tr = st
 	} else {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestMCPSubprocess$")
-		cmd.Env = append(os.Environ(), "STAGE_TEST_CALLER_STDIO=1", "STAGE_URL="+e.url, agentctx.ThreadEnv+"="+thread)
-		if transport == "dedicated" {
-			cmd.Env = append(cmd.Env, "STAGE_TEST_DEDICATED=1")
+		cmd.Env = append(os.Environ(), "STAGE_TEST_CALLER_STDIO=1", "STAGE_URL="+e.url)
+		if caller != "" {
+			cmd.Env = append(cmd.Env, agentctx.CallerEnv+"="+caller)
 		}
 		tr = &mcp.CommandTransport{Command: cmd}
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "caller-test", Version: "1"}, nil).Connect(t.Context(), tr, nil)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	t.Cleanup(func() { cs.Close() })
+	return cs, nil
+}
+
+func mustTransport(t *testing.T, e *env, transport, caller string) *mcp.ClientSession {
+	t.Helper()
+	cs, err := transportClient(t, e, transport, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return cs
 }
 
@@ -100,7 +123,7 @@ func TestScopedCallerTransports(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cs := transportClient(t, e, transport, id)
+			cs := mustTransport(t, e, transport, "")
 			ref := db.SessionRef{ConnectionID: 7, ExternalSessionID: id}
 			meta := mcp.Meta{"ai.opencode/sessionID": id}
 			calls := []struct {
@@ -108,7 +131,7 @@ func TestScopedCallerTransports(t *testing.T) {
 				meta                mcp.Meta
 				connection, project int64
 			}{
-				{map[string]any{"callerThreadId": id}, nil, 1, t3project.ID}, {nil, meta, 7, other.ID},
+				{map[string]any{"callerSession": db.SessionRef{ConnectionID: 1, ExternalSessionID: id}}, nil, 1, t3project.ID}, {nil, meta, 7, other.ID},
 			}
 			owners := make([]int64, 2)
 			var group sync.WaitGroup
@@ -158,11 +181,11 @@ func TestScopedCallerTransports(t *testing.T) {
 					t.Fatal("accepted malformed metadata")
 				}
 			}
-			note["callerThreadId"] = id
+			note["callerSession"] = db.SessionRef{ConnectionID: 1, ExternalSessionID: id}
 			if msg := callMeta(t, cs, "append_note", note, meta, nil); !strings.Contains(msg, "conflict") {
 				t.Fatal("caller mismatch", msg)
 			}
-			delete(note, "callerThreadId")
+			delete(note, "callerSession")
 			var entry db.JournalEntry
 			if msg := callMeta(t, cs, "append_note", note, meta, &entry); msg != "" || entry.SourceSession == nil || *entry.SourceSession != ref {
 				t.Fatal(entry, msg)
@@ -194,13 +217,24 @@ func TestScopedCallerTransports(t *testing.T) {
 			if anon.Session != nil || anon.CallerTaskID != nil {
 				t.Fatal(anon)
 			}
+			t3ref := fmt.Sprintf("1:%s", id)
+			named := mustTransport(t, e, transport, t3ref)
+			var me agenttools.ContextOut
+			mustCall(t, named, "get_context", nil, &me)
 			if transport == "stdio" {
-				dedicated := transportClient(t, e, "dedicated", id)
-				var me agenttools.ContextOut
-				mustCall(t, dedicated, "get_context", nil, &me)
-				if me.ThreadID != id || me.CallerTaskID == nil || *me.CallerTaskID != owners[0] {
-					t.Fatal(me)
+				if me.Session != nil {
+					t.Fatal("shared stdio MCP server used its environment caller", me)
 				}
+				return
+			}
+			if me.ThreadID != id || me.CallerTaskID == nil || *me.CallerTaskID != owners[0] {
+				t.Fatal(me)
+			}
+			if msg := callMeta(t, named, "get_context", nil, meta, nil); !strings.Contains(msg, "conflicts") {
+				t.Fatal("header and metadata disagree", msg)
+			}
+			if _, err := transportClient(t, e, "http", "not-a-session"); err == nil || !strings.Contains(err.Error(), "Bad Request") {
+				t.Fatal("accepted malformed caller header", err)
 			}
 		})
 	}
@@ -253,16 +287,11 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	env := cli.OSEnv()
 	env.Stdout = &out
 	env.Stderr = &out
-	env.Caller = agentctx.Caller{ThreadID: "inherited"}
+	env.Caller = agentctx.Caller{Session: &db.SessionRef{ConnectionID: 1, ExternalSessionID: "inherited"}}
 	code := cli.Run(ctx, []string{"task", "add", "--url", e.url, "--project", fmt.Sprint(unbound.ID), "--title", "CLI", "--prompt", "Work", "--caller-connection", "7", "--caller-session", ref.ExternalSessionID, "--json"}, env)
 	var created client.Task
 	if code != 0 || json.Unmarshal(out.Bytes(), &created) != nil || created.ConnectionID != 7 || created.OriginSession == nil || *created.OriginSession != ref {
 		t.Fatal(code, out.String())
-	}
-	var legacy client.Task
-	mustCall(t, cs, "create_task", map[string]any{"callerThreadId": "legacy", "project": fmt.Sprint(p.ID), "title": "old", "prompt": "work"}, &legacy)
-	if legacy.ConnectionID != 1 || legacy.OriginThreadID == nil || *legacy.OriginThreadID != "legacy" {
-		t.Fatal(legacy)
 	}
 }
 
@@ -286,7 +315,7 @@ func TestAtomicScopedAdoption(t *testing.T) {
 	var group sync.WaitGroup
 	for i := range replies {
 		group.Go(func() {
-			if msg := call(t, cs, "adopt_session", map[string]any{"session": ref, "callerThreadId": "different-session", "initialNote": "my note"}, &replies[i]); msg != "" {
+			if msg := call(t, cs, "adopt_session", map[string]any{"session": ref, "callerSession": db.SessionRef{ConnectionID: 1, ExternalSessionID: "different-session"}, "initialNote": "my note"}, &replies[i]); msg != "" {
 				t.Error(msg)
 			}
 		})
