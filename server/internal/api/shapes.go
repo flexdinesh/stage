@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -20,18 +21,10 @@ type taskJSON struct {
 	Links         execution.Links `json:"links"`
 	ArtifactLinks []artifactLink  `json:"artifactLinks"`
 	db.Task
-	T3WebURL *string `json:"t3WebUrl"`
-	T3AppURL *string `json:"t3AppUrl"`
-	// T3DeepLink opens the thread in the T3 desktop/mobile app.
-	T3DeepLink *string `json:"t3DeepLink"`
 }
 
 type threadJSON struct {
 	db.Thread
-	T3WebURL *string `json:"t3WebUrl"`
-	T3AppURL *string `json:"t3AppUrl"`
-	// T3DeepLink opens the thread in the T3 desktop/mobile app.
-	T3DeepLink *string `json:"t3DeepLink"`
 }
 
 type taskDetailJSON struct {
@@ -135,22 +128,29 @@ func t3Defaults(config *execution.Config, provider, model *string, options []exe
 	return d
 }
 
-func (s *server) task(env string, t db.Task) taskJSON {
-	if t.Harness == db.HarnessT3 && t.ExecutionConfig != nil {
-		d := t3Defaults(t.ExecutionConfig, t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode)
-		t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
+// executionConfig is a row's canonical config: its own, else the one its
+// harness decodes from the legacy model columns (nil when neither).
+func (s *server) executionConfig(kind string, config *execution.Config, legacy func() json.RawMessage) *execution.Config {
+	if config != nil {
+		return config
 	}
+	d, ok := s.registry().Lookup(kind)
+	if !ok || d.LegacyConfig == nil {
+		return nil
+	}
+	c, err := d.LegacyConfig(legacy())
+	if err != nil {
+		return nil
+	}
+	return &c
+}
+
+func (s *server) task(env string, t db.Task) taskJSON {
+	t.ExecutionConfig = s.executionConfig(t.Harness, t.ExecutionConfig, t.LegacyModel)
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
 		t.Launch = &a
 	}
 	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
-	// T3 links are built from the active environment: a task on a replaced
-	// T3 connection gets none.
-	if t.ConnectionID == s.Store.T3ID() && t.T3ThreadID != nil {
-		out.T3WebURL = s.webURL(env, t.T3ThreadID)
-		out.T3DeepLink = deepLink(env, t.T3ThreadID)
-		out.T3AppURL = t.ThreadLink
-	}
 	if t.Session != nil {
 		out.Links = s.sessionLinks(context.Background(), t.ConnectionID, &t.Session.ExternalSessionID)
 	}
@@ -197,8 +197,7 @@ func (s *server) thread(env string, t db.Thread) threadJSON {
 	case "running":
 		t.Settled = false
 	}
-	id := t.T3ThreadID
-	return threadJSON{Thread: t, T3WebURL: s.webURL(env, &id), T3AppURL: t.Link, T3DeepLink: deepLink(env, &id)}
+	return threadJSON{Thread: t}
 }
 
 type catalogOptionJSON struct {

@@ -52,6 +52,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := t3sync.New(store, t3.NewConnectionAdapter(a, first), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.Harnesses = t3Harnesses
 	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: first, Title: "run", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)

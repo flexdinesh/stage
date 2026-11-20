@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,11 +24,11 @@ type Schedule struct {
 	ProjectTitle       string                  `json:"projectTitle"`
 	Title              string                  `json:"title"`
 	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"providerInstanceId"`
-	Model              *string                 `json:"model"`
-	ModelOptions       []execution.ModelOption `json:"modelOptions"`
-	RuntimeMode        string                  `json:"runtimeMode"`
-	InteractionMode    string                  `json:"interactionMode"`
+	ProviderInstanceID *string                 `json:"-"`
+	Model              *string                 `json:"-"`
+	ModelOptions       []execution.ModelOption `json:"-"`
+	RuntimeMode        string                  `json:"-"`
+	InteractionMode    string                  `json:"-"`
 	Workspace          Workspace               `json:"workspace"`
 	Tags               []string                `json:"tags"`
 	Notes              string                  `json:"notes"`
@@ -39,7 +40,7 @@ type Schedule struct {
 	LastRunAt          *time.Time              `json:"lastRunAt"`
 	LastTaskID         *int64                  `json:"lastTaskId"`
 	LastTaskState      *TaskState              `json:"lastTaskState"`
-	OriginThreadID     *string                 `json:"originThreadId"` // T3 session that created the schedule; spawned tasks inherit it
+	OriginThreadID     *string                 `json:"-"` // T3 session that created the schedule; spawned tasks inherit it
 	CreatedAt          time.Time               `json:"createdAt"`
 	UpdatedAt          time.Time               `json:"updatedAt"`
 }
@@ -638,4 +639,9 @@ func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 		return Task{}, err
 	}
 	return s.GetTask(ctx, task)
+}
+
+// LegacyModel is the schedule's legacy model columns (Task.LegacyModel).
+func (s Schedule) LegacyModel() json.RawMessage {
+	return legacyModel(s.ProviderInstanceID, s.Model, s.ModelOptions, s.RuntimeMode, s.InteractionMode)
 }

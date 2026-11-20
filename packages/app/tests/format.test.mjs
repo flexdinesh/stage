@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, capCount, clockTime, dayLabel, executionModes, groupByDay, shortDate } from "../src/lib/format.ts";
+import { age, capCount, clockTime, configModelText, dayLabel, executionModes, groupByDay, modelName, shortDate } from "../src/lib/format.ts";
 
 // Local times, so the expectations hold in any TZ.
 const now = new Date(2026, 10, 16, 15, 0).getTime();
@@ -55,16 +55,21 @@ test("groupByDay keeps order and splits on local day changes", () => {
   assert.deepEqual(groupByDay([], now), []);
 });
 
-test("executionModes prefers executionConfig over stale legacy fields", () => {
-  const legacy = { runtimeMode: "full-access", interactionMode: "plan" };
-  assert.deepEqual(executionModes({ ...legacy, executionConfig: null }), { permission: "full-access", mode: "plan" });
-  assert.deepEqual(executionModes(legacy), { permission: "full-access", mode: "plan" });
+test("executionModes reads executionConfig; none or empty is the harness default", () => {
+  assert.deepEqual(executionModes({ executionConfig: null }), { permission: "", mode: "" });
+  assert.deepEqual(executionModes({}), { permission: "", mode: "" });
   const config = { model: "", options: [], permission: "", mode: "" };
-  assert.deepEqual(executionModes({ ...legacy, executionConfig: config }), { permission: "", mode: "" });
-  assert.deepEqual(
-    executionModes({ ...legacy, executionConfig: { ...config, permission: "auto", mode: "plan" } }),
-    { permission: "auto", mode: "plan" },
-  );
+  assert.deepEqual(executionModes({ executionConfig: config }), { permission: "", mode: "" });
+  assert.deepEqual(executionModes({ executionConfig: { ...config, permission: "auto", mode: "plan" } }), { permission: "auto", mode: "plan" });
+});
+
+test("model text names a composite key by its last part and an empty model as the harness default", () => {
+  assert.equal(modelName(""), null);
+  assert.equal(modelName("anthropic/claude"), "anthropic/claude");
+  assert.equal(modelName('["codex","gpt-5"]'), "gpt-5");
+  assert.equal(modelName("[not json"), "[not json");
+  assert.equal(configModelText(null), "Harness default");
+  assert.equal(configModelText({ model: '["codex","gpt-5"]', options: [{ id: "effort", value: "high" }], permission: "", mode: "" }), "gpt-5 · high");
 });
 
 test("capCount caps a badge at 99+", () => {

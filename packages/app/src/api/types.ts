@@ -388,6 +388,8 @@ export interface Capabilities {
   permissions?: HarnessChoice[];
   /** Harness-wide options, beside the selected model's own (ids never collide). */
   options?: HarnessOption[];
+  /** The mode choice in the harness's own words ("Agent"); absent reads "Interaction mode". */
+  modeLabel?: string;
   operations: Record<string, {available: boolean; reason?: string}>;
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;
@@ -436,11 +438,6 @@ export interface Task {
   projectTitle: string;
   title: string;
   prompt: string;
-  providerInstanceId: string | null;
-  model: string | null;
-  modelOptions: ModelOption[];
-  runtimeMode: RuntimeMode;
-  interactionMode: InteractionMode;
   workspace: Workspace;
   tags: string[];
   state: TaskState;
@@ -469,19 +466,14 @@ export interface Task {
   /** Recurring schedule that spawned this task. */
   scheduleId: number | null;
   scheduleTitle: string | null;
-  /** T3 session that created the task (agent CLI/MCP); null otherwise. */
-  originThreadId: string | null;
-  originThreadTitle: string | null;
+  /** The origin session's title; null when unknown. */
+  originSessionTitle: string | null;
   /** Append one handoff block per finished need (final reply, PRs, branch, thread link) to the launch prompt. */
   handoff: boolean;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
   launchAttempt: number;
   lastError: string | null;
-  t3WebUrl: string | null;
-  t3AppUrl: string | null;
-  /** t3code://threads/<env>/<thread>: opens the thread in the T3 desktop/mobile app. */
-  t3DeepLink: string | null;
   launchedAt: string | null;
   finishedAt: string | null;
   settledAt: string | null;
@@ -758,8 +750,8 @@ export interface CreateTaskRequest {
   treeId?: number;
   /** Tasks this one needs (not with start or startLocal). */
   needs?: number[];
-  /** Also need this T3 session (adopted as a task first). */
-  needsSessionId?: string;
+  /** Also need this session (adopted as a task first). */
+  needsSession?: SessionRef;
   /** Omitted inherits the tree's. */
   startMode?: StartMode;
   /** Append each need's handoff at launch (server default true). */
@@ -858,11 +850,6 @@ export interface Schedule {
   projectTitle: string;
   title: string;
   prompt: string;
-  providerInstanceId: string | null;
-  model: string | null;
-  modelOptions: ModelOption[];
-  runtimeMode: RuntimeMode;
-  interactionMode: InteractionMode;
   workspace: Workspace;
   tags: string[];
   notes: string;
@@ -876,8 +863,6 @@ export interface Schedule {
   lastRunAt: string | null;
   lastTaskId: number | null;
   lastTaskState: TaskState | null;
-  /** T3 session that created the schedule (agent CLI/MCP); spawned tasks inherit it. */
-  originThreadId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -942,7 +927,6 @@ export interface SchedulePreview {
 }
 
 export interface TaskListQuery {
-  originThreadId?: string;
   project?: number;
   state?: TaskState[];
   tag?: string;
@@ -990,10 +974,6 @@ export interface Thread {
   creationSource: string | null;
   source: ThreadSource;
   taskId: number | null;
-  t3WebUrl: string | null;
-  t3AppUrl: string | null;
-  /** t3code://threads/<env>/<thread>: opens the thread in the T3 desktop/mobile app. */
-  t3DeepLink: string | null;
   createdAt: string;
   updatedAt: string;
   syncedAt: string;
@@ -1112,7 +1092,6 @@ export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "fai
 export interface Notification {
   links?: ExecutionLinks;
   connectionId: number;
-  t3WebUrl: string | null;
   id: number;
   event: NotificationEvent;
   /** null for external threads (or once the task is deleted). */
@@ -1127,7 +1106,6 @@ export interface Notification {
   readAt: string | null;
   /** Live: the task's state, or the external thread's (`settled` when settled). null = unknown. */
   currentState: TaskState | null;
-  t3DeepLink: string | null;
 }
 
 export interface NotificationPage {
@@ -1149,8 +1127,6 @@ export interface WaitingSession {
   externalSessionId: string;
   title: string;
   projectTitle: string | null;
-  t3WebUrl: string | null;
-  t3DeepLink: string | null;
 }
 
 export interface NotificationGroupPage {

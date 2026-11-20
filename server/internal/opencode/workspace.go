@@ -138,7 +138,8 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		"predecessorBase":   {Reason: "OpenCode selects the worktree strategy and base. Choose its default base."},
 		"images":            {Reason: "Image attachment delivery has not been verified for this adapter."},
 		"registerWorkspace": {Reason: "Open the workspace in OpenCode and refresh discovery."},
-	}, Workspaces: []execution.Choice{choice("root", "Bound checkout"), choice("worktree", "OpenCode-managed worktree")}}, nil
+		"worktreeBase":      {Reason: "OpenCode chooses the worktree base and branch."},
+	}, ModeLabel: "Agent", Workspaces: []execution.Choice{choice("root", "Bound checkout"), choice("worktree", "OpenCode-managed worktree")}}, nil
 }
 
 type wireModel struct {

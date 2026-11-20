@@ -182,7 +182,7 @@ func TestHandoffFromAdoptedSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/session")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSessionId": s})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSession": e.t3Session(s)})
 	planner := b.Needs[0]
 	_ = e.fake.SetReply(s, t3.Reply{Text: "Plan ready."})
 	e.acceptThread(s)

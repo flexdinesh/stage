@@ -128,7 +128,7 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id, href: `/tasks/${d.id}` }, failed: task.isError };
   }
   const t = thread.data;
-  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination({links:t.links,t3DeepLink:null}) : `/tasks/${t.taskId}` }, failed: thread.isError };
+  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: thread.isError };
 }
 
 /** A stage link as a live chip: mono #id (or "session"), title, square state marker; opens in stage. */

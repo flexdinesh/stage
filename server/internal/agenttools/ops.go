@@ -66,7 +66,6 @@ type IDArgs struct {
 // ContextOut is get_context.
 type ContextOut struct {
 	Session       *db.SessionRef `json:"session"`
-	ThreadID      string         `json:"threadId"`
 	Cwd           string         `json:"cwd"`
 	Project       *db.Project    `json:"project"`
 	ProjectSource string         `json:"projectSource"` // session | "" (unresolved)
@@ -88,13 +87,6 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 	if c.Session == nil {
 		out.ProjectError = "No caller session. Pass callerSession or specify a project on creation."
 		return out, nil
-	}
-	h, err := o.harnesses(ctx)
-	if err != nil {
-		return out, err
-	}
-	if h.isT3(c.Session.ConnectionID) {
-		out.ThreadID = c.Session.ExternalSessionID
 	}
 	d, err := o.Client.SessionContext(ctx, *c.Session)
 	if err != nil {
@@ -479,14 +471,13 @@ func taskRow(t client.Task) TaskRow {
 
 // ListTasksArgs is list_tasks.
 type ListTasksArgs struct {
-	OriginSession  *db.SessionRef `json:"originSession,omitempty"`
-	OriginThreadID string         `json:"originThreadId,omitempty" jsonschema:"only tasks created by this session"`
-	Project        string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
-	States         []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
-	Tag            string         `json:"tag,omitempty"`
-	Query          string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
-	Closed         string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
-	Limit          int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
+	OriginSession *db.SessionRef `json:"originSession,omitempty"`
+	Project       string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
+	States        []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
+	Tag           string         `json:"tag,omitempty"`
+	Query         string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
+	Closed        string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
+	Limit         int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
 }
 
 // TasksOut is list_tasks.
@@ -505,7 +496,6 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 		q.ProjectID = &p.ID
 	}
 	q.States, q.Tag, q.Q = a.States, a.Tag, a.Query
-	q.OriginThreadID = a.OriginThreadID
 	q.OriginSession = a.OriginSession
 	switch a.Closed {
 	case "", "false":

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,11 +27,13 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	}
 	f.Tag = strings.TrimSpace(q.Get("tag"))
 	f.Q = strings.TrimSpace(q.Get("q"))
-	f.OriginThreadID = strings.TrimSpace(q.Get("originThreadId"))
+	if q.Has("originThreadId") {
+		return db.Invalid("originThreadId was removed in API v6; supply originConnectionId and originSessionId")
+	}
 	if q.Has("originConnectionId") || q.Has("originSessionId") {
 		id, e := queryInt64(q, "originConnectionId")
-		if e != nil || id == nil || *id <= 0 || strings.TrimSpace(q.Get("originSessionId")) == "" || f.OriginThreadID != "" {
-			return db.Invalid("supply originConnectionId and originSessionId together, or originThreadId for T3")
+		if e != nil || id == nil || *id <= 0 || strings.TrimSpace(q.Get("originSessionId")) == "" {
+			return db.Invalid("supply originConnectionId and originSessionId together")
 		}
 		f.OriginSession = &db.SessionRef{ConnectionID: *id, ExternalSessionID: q.Get("originSessionId")}
 	}
@@ -80,9 +83,7 @@ type taskConfigReq struct {
 	Tags               []string                `json:"tags"`
 	TreeID             *int64                  `json:"treeId"`
 	Needs              []int64                 `json:"needs"`
-	NeedsSessionID     *string                 `json:"needsSessionId"`
 	StartMode          *db.StartMode           `json:"startMode"`
-	OriginThreadID     *string                 `json:"originThreadId"`
 	AttachmentIDs      []int64                 `json:"attachmentIds"`
 	StartLocal         *string                 `json:"startLocal"`
 	StartTz            *string                 `json:"startTz"`
@@ -132,9 +133,6 @@ func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
 	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
 		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
 	}
-	if req.NeedsSession != nil && req.NeedsSessionID != nil {
-		return db.NewTask{}, db.Invalid("choose needsSession or needsSessionId")
-	}
 	in := db.NewTask{
 		NeedsSession:       req.NeedsSession,
 		ExecutionConfig:    req.ExecutionConfig,
@@ -149,9 +147,7 @@ func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
 		Tags:               cleanTags(req.Tags),
 		TreeID:             req.TreeID,
 		Needs:              req.Needs,
-		NeedsThreadID:      trimmedPtr(req.NeedsSessionID),
 		StartMode:          req.StartMode,
-		OriginThreadID:     trimmedPtr(req.OriginThreadID),
 		AttachmentIDs:      req.AttachmentIDs,
 		Handoff:            req.Handoff,
 	}
@@ -271,10 +267,6 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err := s.validateSelection(r.Context(), in.ConnectionID, in.ProjectID, in.ExecutionConfig); err != nil {
 		return err
 	}
-	if in.NeedsThreadID != nil {
-		in.NeedsSession = &db.SessionRef{ConnectionID: s.Store.T3ID(), ExternalSessionID: *in.NeedsThreadID}
-		in.NeedsThreadID = nil
-	}
 	if in.NeedsSession != nil {
 		in.NeedsBinding, err = s.prepareAdoption(r, *in.NeedsSession)
 		if err != nil {
@@ -328,11 +320,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
 			out.FinalReply = obs.Reply
-			if task.Harness != db.HarnessT3 {
-				for _, link := range obs.Artifacts {
-					if link.URL != "" {
-						out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: link.Repository, URL: link.URL})
-					}
+			for _, link := range obs.Artifacts {
+				if link.URL != "" && !slices.ContainsFunc(out.ArtifactLinks, func(a artifactLink) bool { return a.URL == link.URL }) {
+					out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: link.Repository, URL: link.URL})
 				}
 			}
 		} else if !errors.Is(e, db.ErrNotFound) {

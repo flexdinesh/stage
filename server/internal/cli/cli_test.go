@@ -59,6 +59,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log})
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	h.sync.Harnesses = reg
 	connectors, err := stageharness.NewConnectors(reg, map[string]stageharness.Connector{
 		t3.Kind: t3setup.NewConnector(setup, nil), opencode.Kind: opencodesetup.NewConnector(openCode),
 	})
@@ -153,7 +154,7 @@ func TestTaskCommands(t *testing.T) {
 	}
 	tk := decode[client.Task](t, stdout)
 	if tk.ProjectID != p.ID || tk.Prompt != "multi\nline prompt\n" || len(tk.Needs) != 1 ||
-		tk.OriginThreadID == nil || len(tk.Tags) != 2 {
+		tk.OriginSession == nil || *tk.OriginSession != *t3Session(out.ThreadID) || len(tk.Tags) != 2 {
 		t.Fatalf("task %+v", tk)
 	}
 
@@ -171,7 +172,7 @@ func TestTaskCommands(t *testing.T) {
 		t.Fatalf("ls human: %s", stdout)
 	}
 	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(tk.ID))
-	if code != 0 || !strings.Contains(stdout, "created by session") || !strings.Contains(stdout, "line prompt") {
+	if code != 0 || !strings.Contains(stdout, "created by connection 1 session "+out.ThreadID) || !strings.Contains(stdout, "line prompt") {
 		t.Fatalf("show: %s", stdout)
 	}
 	if code, _, _ = h.run("", "task", "unlink", fmt.Sprint(tk.ID)); code != 2 {
@@ -228,9 +229,12 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if code, _, _ := h.run("", "task", "add", "--project", "1", "--title", "x", "--prompt", "p", "--needs", "nope"); code != 2 {
 		t.Fatalf("bad --needs exit %d", code)
 	}
-	code, stdout, _ := h.run("", "task", "ls", "--origin-thread", out.ThreadID, "--json")
+	code, stdout, _ := h.run("", "task", "ls", "--origin-connection", "1", "--origin-session", out.ThreadID, "--json")
 	if rows := decode[agenttools.TasksOut](t, stdout); code != 0 || rows.Total != 3 {
 		t.Fatalf("batch: %s", stdout)
+	}
+	if code, _, _ := h.run("", "task", "ls", "--origin-thread", out.ThreadID); code != 2 {
+		t.Fatalf("removed --origin-thread exit %d", code)
 	}
 
 	// tree new with ID:NEED members, then show/ls/edit/add/rm/start.

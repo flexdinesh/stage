@@ -11,7 +11,7 @@ import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import { Alert, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, cx } from "../components/ui.tsx";
-import { dateTime, executionModes, modelText, relativeTime, workspaceText } from "../lib/format.ts";
+import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { cronSummary, wallTime } from "../lib/schedules.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -36,7 +36,6 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
   const api = useApi();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
-  const harnesses = useHarnesses();
   const [editing, setEditing] = useState(false);
   const [armed, setArmed] = useState(false);
   const run = useMutation({ mutationFn: () => api.runSchedule(s.id), onSettled: invalidate });
@@ -66,7 +65,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />
-        <Chip>{harnesses.harness(s.connectionId) !== "opencode" ? modelText(s.model, s.modelOptions) : s.executionConfig?.model || "OpenCode default"}</Chip>
+        <Chip>{configModelText(s.executionConfig)}</Chip>
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceText(s.workspace)}</Chip>
@@ -189,10 +188,9 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
           </Link>
         </Detail>
         <Detail label="Harness">{harnesses.name(s.connectionId)}{harnesses.retired(s.connectionId) ? <span className="text-muted"> (replaced)</span> : null}</Detail>
-        {harnesses.harness(s.connectionId) === "opencode" ? <><Detail label="Model">{modelText(s.executionConfig?.model || "Harness default", s.executionConfig?.options ?? [])}</Detail><Detail label="Agent">{s.executionConfig?.mode || "Harness default"}</Detail></> : <><Detail label="Provider">{s.providerInstanceId ?? "T3 default"}</Detail>
-        <Detail label="Model">{modelText(s.model, s.modelOptions)}</Detail>
-        <Detail label="Runtime">{s.executionConfig ? s.executionConfig.permission || "Harness default" : s.runtimeMode}</Detail>
-        <Detail label="Interaction">{s.executionConfig ? s.executionConfig.mode || "Harness default" : s.interactionMode}</Detail></>}
+        <Detail label="Model">{configModelText(s.executionConfig)}</Detail>
+        <Detail label="Permission">{executionModes(s).permission || "Harness default"}</Detail>
+        <Detail label="Mode">{executionModes(s).mode || "Harness default"}</Detail>
         <Detail label="Workspace">{workspaceText(s.workspace)}</Detail>
         <Detail label="Tags">{s.tags.length === 0 ? "-" : s.tags.map((t) => `#${t}`).join(" ")}</Detail>
         <Detail label="Created">

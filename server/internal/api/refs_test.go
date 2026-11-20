@@ -10,9 +10,9 @@ import (
 )
 
 type resolved struct {
-	Kind     string  `json:"kind"`
-	TaskID   *int64  `json:"taskId"`
-	ThreadID *string `json:"threadId"`
+	Kind    string      `json:"kind"`
+	TaskID  *int64      `json:"taskId"`
+	Session *sessionRef `json:"session"`
 }
 
 func (e *env) resolve(ref string, want int) resolved {
@@ -28,7 +28,7 @@ func TestResolveRef(t *testing.T) {
 
 	backlog := e.task(p.ID, "Backlog", nil)
 	got := e.resolve(fmt.Sprintf("http://tailnet.example:7380/tasks/%d", backlog.ID), 200)
-	if got.Kind != "task" || got.TaskID == nil || *got.TaskID != backlog.ID || got.ThreadID != nil {
+	if got.Kind != "task" || got.TaskID == nil || *got.TaskID != backlog.ID || got.Session != nil {
 		t.Fatalf("backlog task %+v", got)
 	}
 
@@ -39,7 +39,7 @@ func TestResolveRef(t *testing.T) {
 	md := fmt.Sprintf("[stage task #%d: Fix \\[login\\]](http://localhost:7380/tasks/%d)", tk.ID, tk.ID)
 	for _, ref := range []string{md, fmt.Sprintf("#%d", tk.ID)} {
 		got := e.resolve(ref, 200)
-		if got.Kind != "task" || *got.TaskID != tk.ID || got.ThreadID == nil || *got.ThreadID != threadID {
+		if got.Kind != "task" || *got.TaskID != tk.ID || !e.isT3Session(got.Session, threadID) {
 			t.Fatalf("%q -> %+v", ref, got)
 		}
 	}
@@ -52,7 +52,7 @@ func TestResolveRef(t *testing.T) {
 		threadID,
 	} {
 		got := e.resolve(ref, 200)
-		if got.Kind != "session" || *got.ThreadID != threadID || got.TaskID == nil || *got.TaskID != tk.ID {
+		if got.Kind != "session" || !e.isT3Session(got.Session, threadID) || got.TaskID == nil || *got.TaskID != tk.ID {
 			t.Fatalf("%q -> %+v", ref, got)
 		}
 	}
@@ -63,7 +63,7 @@ func TestResolveRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = e.resolve("http://localhost:7380/sessions/"+url.PathEscape(ext.ThreadID), 200)
-	if got.Kind != "session" || *got.ThreadID != ext.ThreadID || got.TaskID != nil {
+	if got.Kind != "session" || !e.isT3Session(got.Session, ext.ThreadID) || got.TaskID != nil {
 		t.Fatalf("external %+v", got)
 	}
 

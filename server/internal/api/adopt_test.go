@@ -3,18 +3,32 @@ package api_test
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
+type sessionRef struct {
+	ConnectionID      int64  `json:"connectionId"`
+	ExternalSessionID string `json:"externalSessionId"`
+}
+
 type agentTask struct {
-	ProviderInstanceID *string `json:"providerInstanceId"`
-	RuntimeMode        string  `json:"runtimeMode"`
 	task
-	OriginThreadID    *string `json:"originThreadId"`
-	OriginThreadTitle *string `json:"originThreadTitle"`
+	OriginSession      *sessionRef `json:"originSession"`
+	OriginSessionTitle *string     `json:"originSessionTitle"`
+}
+
+// t3Session is a T3 session reference body (needsSession, originSession).
+func (e *env) t3Session(id string) map[string]any {
+	return map[string]any{"connectionId": e.store.T3ID(), "externalSessionId": id}
+}
+
+// isT3Session reports whether ref names T3 session id.
+func (e *env) isT3Session(ref *sessionRef, id string) bool {
+	return ref != nil && ref.ConnectionID == e.store.T3ID() && ref.ExternalSessionID == id
 }
 
 func (e *env) agentTask(projectID int64, title string, extra map[string]any, want int) agentTask {
@@ -73,8 +87,8 @@ func TestAdoptSession(t *testing.T) {
 
 	var a agentTask
 	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
-	if a.Model == nil || *a.Model != "model-from-session" || a.ProviderInstanceID == nil || *a.ProviderInstanceID != "codex" || a.RuntimeMode != "auto" {
-		t.Fatalf("adoption lost compatibility fields: %+v", a)
+	if c := a.Config; c == nil || c.Model != t3.ModelKey("codex", "model-from-session") || c.Permission != "auto" || c.Mode != "plan" {
+		t.Fatalf("adoption lost the session's execution config: %+v", a.Config)
 	}
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
 		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || !slices.Equal(a.Tags, []string{"plan"}) || a.TreeID != nil {
@@ -141,18 +155,21 @@ func TestAdoptionCreatesBindingAtomically(t *testing.T) {
 	}
 }
 
-// needsSessionId (agent afterMe) adopts the caller's session and needs it.
+// needsSession (agent afterMe) adopts the caller's session and needs it.
 func TestTaskNeedsSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-session")
 	s := runningSession(t, e, p.T3ProjectID, "Agent session")
 
-	e.agentTask(p.ID, "x", map[string]any{"needsSessionId": s, "startMode": "auto", "start": true}, 400)
-	e.agentTask(p.ID, "y", map[string]any{"needsSessionId": s, "startMode": "auto", "startLocal": "2999-01-01T10:00", "startTz": "UTC"}, 400)
-	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s, "startMode": "auto", "originThreadId": s}, 201)
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201) // fan-out
+	e.agentTask(p.ID, "x", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto", "start": true}, 400)
+	e.agentTask(p.ID, "y", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto", "startLocal": "2999-01-01T10:00", "startTz": "UTC"}, 400)
+	// Removed v5 inputs are rejected.
+	e.agentTask(p.ID, "z", map[string]any{"needsSessionId": s, "startMode": "auto"}, 400)
+	e.agentTask(p.ID, "z", map[string]any{"originThreadId": s}, 400)
+	a := e.agentTask(p.ID, "a", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto", "originSession": e.t3Session(s)}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto"}, 201) // fan-out
 	if a.State != "backlog" || len(a.Needs) != 1 || a.Readiness == nil || *a.Readiness != "blocked" ||
-		a.OriginThreadID == nil || *a.OriginThreadID != s || a.OriginThreadTitle == nil || *a.OriginThreadTitle != "Agent session" {
+		!e.isT3Session(a.OriginSession, s) || a.OriginSessionTitle == nil || *a.OriginSessionTitle != "Agent session" {
 		t.Fatalf("a %+v", a)
 	}
 	caller := e.getTask(a.Needs[0])
@@ -189,19 +206,19 @@ func TestTaskNeedsSession(t *testing.T) {
 
 	// A settled session can still be needed (it releases at once); unknown
 	// sessions are 404.
-	c := e.agentTask(p.ID, "c", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto"}, 201)
 	e.reconcile()
 	if got := e.getTask(c.ID); got.State != "running" {
 		t.Fatalf("needing a settled session releases: %+v", got)
 	}
-	e.agentTask(p.ID, "d", map[string]any{"needsSessionId": "nope"}, 404)
+	e.agentTask(p.ID, "d", map[string]any{"needsSession": e.t3Session("nope")}, 404)
 }
 
 func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-cancelled-session")
 	s := runningSession(t, e, p.T3ProjectID, "Agent session")
-	a := e.agentTask(p.ID, "a", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
+	a := e.agentTask(p.ID, "a", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto"}, 201)
 
 	// Cancelled: keeps waiting, and can still be needed.
 	_ = e.fake.SetStatus(s, t3.StatusCancelled)
@@ -213,7 +230,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 	if got := e.getTask(a.Needs[0]); got.State != "cancelled" {
 		t.Fatalf("caller task %s", got.State)
 	}
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": s, "startMode": "auto"}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSession": e.t3Session(s), "startMode": "auto"}, 201)
 
 	// Settled with the last run still cancelled: passes.
 	_ = e.fake.Settle(s)
@@ -234,8 +251,8 @@ func TestNeedsSessionOwnedByTask(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-task-session")
 	a := e.agentTask(p.ID, "a", map[string]any{"start": true}, 201)
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSessionId": *a.T3ThreadID}, 201)
-	c := e.agentTask(p.ID, "c", map[string]any{"needsSessionId": *a.T3ThreadID}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSession": e.t3Session(*a.T3ThreadID)}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"needsSession": e.t3Session(*a.T3ThreadID)}, 201)
 	if !slices.Equal(b.Needs, []int64{a.ID}) || !slices.Equal(c.Needs, []int64{a.ID}) || b.Adopted {
 		t.Fatalf("b and c need task %d: %+v %+v", a.ID, b, c)
 	}
@@ -249,21 +266,24 @@ func TestScheduleOriginInherited(t *testing.T) {
 	p := e.project("/w/schedule-origin")
 	s := runningSession(t, e, p.T3ProjectID, "S")
 	var sc struct {
-		ID             int64   `json:"id"`
-		OriginThreadID *string `json:"originThreadId"`
+		ID            int64       `json:"id"`
+		OriginSession *sessionRef `json:"originSession"`
 	}
 	e.must("POST", "/api/schedules", map[string]any{
 		"projectId": p.ID, "title": "nightly", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "originThreadId": s,
+	}, 400, nil)
+	e.must("POST", "/api/schedules", map[string]any{
+		"projectId": p.ID, "title": "nightly", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "originSession": e.t3Session(s),
 	}, 201, &sc)
-	if sc.OriginThreadID == nil || *sc.OriginThreadID != s {
+	if !e.isT3Session(sc.OriginSession, s) {
 		t.Fatalf("schedule %+v", sc)
 	}
 	e.must("POST", "/api/schedules", map[string]any{
-		"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSessionId": s, "startMode": "auto",
+		"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSession": e.t3Session(s), "startMode": "auto",
 	}, 400, nil)
 	var spawned agentTask
 	e.must("POST", fmt.Sprintf("/api/schedules/%d/run", sc.ID), nil, 201, &spawned)
-	if spawned.OriginThreadID == nil || *spawned.OriginThreadID != s || spawned.TreeID != nil {
+	if !e.isT3Session(spawned.OriginSession, s) || spawned.TreeID != nil {
 		t.Fatalf("spawned %+v", spawned)
 	}
 }
@@ -298,15 +318,16 @@ func TestSessionBatchByTree(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/batch")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	a := e.agentTask(p.ID, "a", map[string]any{"originThreadId": s, "needsSessionId": s, "startMode": "auto"}, 201)
-	b := e.agentTask(p.ID, "b", map[string]any{"originThreadId": s}, 201)
-	_ = e.agentTask(p.ID, "c", map[string]any{"originThreadId": s, "needs": []int64{a.ID}}, 201)
+	a := e.agentTask(p.ID, "a", map[string]any{"originSession": e.t3Session(s), "needsSession": e.t3Session(s), "startMode": "auto"}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"originSession": e.t3Session(s)}, 201)
+	_ = e.agentTask(p.ID, "c", map[string]any{"originSession": e.t3Session(s), "needs": []int64{a.ID}}, 201)
 	solo := e.agentTask(p.ID, "solo", nil, 201)
 
 	var rows struct {
 		Tasks []task `json:"tasks"`
 	}
-	e.must("GET", "/api/tasks?originThreadId="+s, nil, 200, &rows)
+	e.must("GET", "/api/tasks?originThreadId="+s, nil, 400, nil)
+	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.T3ID(), url.QueryEscape(s)), nil, 200, &rows)
 	if len(rows.Tasks) != 3 {
 		t.Fatalf("batch filter %+v", rows)
 	}

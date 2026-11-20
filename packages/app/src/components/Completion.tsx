@@ -29,7 +29,8 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
       <p className="font-mono text-meta text-muted">{e.journalThroughId === 0 ? "No journal entries at capture." : `Journal context through entry #${e.journalThroughId}.`}</p>
       {e.treeId === null ? null : <Link to={`/trees/${e.treeId}?view=notes`} className="underline">Tree #{e.treeId} journal</Link>}
       {e.branch === null ? null : <p className="font-mono text-meta break-all">Branch: {e.branch}</p>}
-      {e.threadId === null ? <p className="text-muted">No execution reference.</p> : <p className="font-mono text-meta break-all">T3: {e.threadId}</p>}
+      {/* Snapshots captured before sessions carried a connection keep only the thread id. */}
+      {(e.session?.externalSessionId ?? e.threadId) === null ? <p className="text-muted">No execution reference.</p> : <p className="font-mono text-meta break-all">Session: {e.session?.externalSessionId ?? e.threadId}</p>}
       {e.artifacts.length === 0 ? <p className="text-muted">No artifact links captured.</p> : <ul className="mt-2 space-y-1">{e.artifacts.map((link) => <li key={link.url}><a href={link.url} target="_blank" rel="noopener noreferrer" className="break-all underline">{link.repository || link.url}{link.number > 0 ? ` #${link.number}` : ""}</a></li>)}</ul>}
     </div>
   </div>;

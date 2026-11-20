@@ -111,9 +111,6 @@ func (s *server) badge(w http.ResponseWriter, r *http.Request) error {
 type notificationJSON struct {
 	Links execution.Links `json:"links"`
 	db.Notification
-	// T3DeepLink opens the thread in the T3 desktop/mobile app.
-	T3DeepLink *string `json:"t3DeepLink"`
-	T3WebURL   *string `json:"t3WebUrl"`
 }
 
 func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error {
@@ -146,14 +143,9 @@ func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	env := s.envID(r.Context())
 	out := make([]notificationJSON, len(rows))
 	for i, n := range rows {
 		out[i] = notificationJSON{Notification: n, Links: s.sessionLinks(r.Context(), n.ConnectionID, n.T3ThreadID)}
-		if n.ConnectionID == s.Store.T3ID() {
-			out[i].T3DeepLink = deepLink(env, n.T3ThreadID)
-			out[i].T3WebURL = s.webURL(env, n.T3ThreadID)
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notifications": out, "unread": unread, "nextBefore": nextBefore})
 	return nil
@@ -173,8 +165,6 @@ func notificationLimit(r *http.Request) (int, error) {
 type notificationGroupJSON struct {
 	Links execution.Links `json:"links"`
 	db.NotificationGroup
-	T3DeepLink *string `json:"t3DeepLink"`
-	T3WebURL   *string `json:"t3WebUrl"`
 }
 
 func notificationGroupCursor(g db.NotificationGroup) string {
@@ -188,8 +178,6 @@ func notificationGroupCursor(g db.NotificationGroup) string {
 type waitingSessionJSON struct {
 	Links execution.Links `json:"links"`
 	db.WaitingSession
-	T3WebURL   *string `json:"t3WebUrl"`
-	T3DeepLink *string `json:"t3DeepLink"`
 }
 
 func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) error {
@@ -221,14 +209,9 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 		value := notificationGroupCursor(rows[limit-1])
 		nextCursor = &value
 	}
-	env := s.envID(r.Context())
 	out := make([]notificationGroupJSON, len(rows))
 	for i, g := range rows {
 		out[i] = notificationGroupJSON{NotificationGroup: g, Links: s.sessionLinks(r.Context(), g.ConnectionID, g.T3ThreadID)}
-		if g.ConnectionID == s.Store.T3ID() {
-			out[i].T3DeepLink = deepLink(env, g.T3ThreadID)
-			out[i].T3WebURL = s.webURL(env, g.T3ThreadID)
-		}
 	}
 	waiting, err := s.Store.WaitingWithoutNotifications(r.Context(), latestID)
 	if err != nil {
@@ -237,10 +220,6 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	silent := make([]waitingSessionJSON, len(waiting))
 	for i, row := range waiting {
 		silent[i] = waitingSessionJSON{WaitingSession: row, Links: s.sessionLinks(r.Context(), row.ConnectionID, &row.ThreadID)}
-		if row.ConnectionID == s.Store.T3ID() {
-			silent[i].T3DeepLink = deepLink(env, &row.ThreadID)
-			silent[i].T3WebURL = s.webURL(env, &row.ThreadID)
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"waitingSessions": silent,

@@ -143,7 +143,7 @@ stage tree new --title "Auth" 41 43:41 42:43                                   #
 stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
-stage task ls --origin-thread "$T3CODE_THREAD_ID"                              # tasks a T3 session created
+stage task ls --origin-connection 1 --origin-session "$T3CODE_THREAD_ID"        # tasks a T3 session created (connection 1)
 stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
 stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
 ```

@@ -227,7 +227,7 @@ func TestScopedCallerTransports(t *testing.T) {
 				}
 				return
 			}
-			if me.ThreadID != id || me.CallerTaskID == nil || *me.CallerTaskID != owners[0] {
+			if me.Session == nil || me.Session.ConnectionID != 1 || me.Session.ExternalSessionID != id || me.CallerTaskID == nil || *me.CallerTaskID != owners[0] {
 				t.Fatal(me)
 			}
 			if msg := callMeta(t, named, "get_context", nil, meta, nil); !strings.Contains(msg, "conflicts") {

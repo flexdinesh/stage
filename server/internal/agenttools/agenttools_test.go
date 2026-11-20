@@ -66,6 +66,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 		adapters[7] = other
 	}
 	svc := t3sync.NewWithAdapters(store, adapters, log)
+	svc.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
@@ -210,14 +211,14 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 
 	var cx agenttools.ContextOut
 	mustCall(t, cs, "get_context", nil, &cx)
-	if cx.ThreadID != s || cx.Project == nil || cx.Project.ID != p.ID || cx.ProjectSource != "session" || cx.TreeID != nil || cx.TreeTitle != nil {
+	if cx.Session == nil || *cx.Session != *e.t3(s) || cx.Project == nil || cx.Project.ID != p.ID || cx.ProjectSource != "session" || cx.TreeID != nil || cx.TreeTitle != nil {
 		t.Fatalf("context %+v (session beats cwd)", cx)
 	}
 
 	var tk client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high", "tags": []string{"agent"}}, &tk)
 	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || len(tk.Needs) != 1 || tk.Readiness == nil || *tk.Readiness != db.ReadinessBlocked ||
-		tk.OriginThreadID == nil || *tk.OriginThreadID != s || len(tk.ModelOptions) != 1 || tk.ModelOptions[0].ID != "effort" {
+		tk.OriginSession == nil || *tk.OriginSession != *e.t3(s) || tk.ExecutionConfig == nil || len(tk.ExecutionConfig.Options) != 1 || tk.ExecutionConfig.Options[0].ID != "effort" {
 		t.Fatalf("task %+v", tk)
 	}
 	// afterMe tracks the caller's session as a task and needs it.
@@ -240,7 +241,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 	var cx2 agenttools.ContextOut
 	mustCall(t, cs, "get_context", map[string]any{"callerSession": e.t3("unknown-thread"), "cwd": "/w/other/x"}, &cx2)
-	if cx2.ThreadID != "unknown-thread" || cx2.Project != nil || cx2.ProjectSource != "" {
+	if cx2.Session == nil || *cx2.Session != *e.t3("unknown-thread") || cx2.Project != nil || cx2.ProjectSource != "" {
 		t.Fatalf("cwd fallback %+v", cx2)
 	}
 
@@ -284,12 +285,12 @@ func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/defaults"}})
 	var tk client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "d", "prompt": "x"}, &tk)
-	if tk.Model == nil || *tk.Model != model || tk.InteractionMode == "plan" || tk.RuntimeMode == "approval-required" {
-		t.Fatalf("pinned modes leaked: model %v runtime %q interaction %q", tk.Model, tk.RuntimeMode, tk.InteractionMode)
+	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || c.Mode == "plan" || c.Permission == "approval-required" {
+		t.Fatalf("pinned modes leaked: config %+v", tk.ExecutionConfig)
 	}
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "interactionMode": "plan", "runtimeMode": "auto"}, &tk)
-	if tk.InteractionMode != "plan" || tk.RuntimeMode != "auto" {
-		t.Fatalf("explicit modes dropped: runtime %q interaction %q", tk.RuntimeMode, tk.InteractionMode)
+	if c := tk.ExecutionConfig; c == nil || c.Mode != "plan" || c.Permission != "auto" {
+		t.Fatalf("explicit modes dropped: config %+v", tk.ExecutionConfig)
 	}
 }
 
@@ -733,9 +734,12 @@ func TestPlanningSessionBatch(t *testing.T) {
 	}
 
 	var rows agenttools.TasksOut
-	mustCall(t, cs, "list_tasks", map[string]any{"originThreadId": s}, &rows)
+	mustCall(t, cs, "list_tasks", map[string]any{"originSession": e.t3(s)}, &rows)
 	if rows.Total != 3 {
 		t.Fatalf("batch: %+v", rows)
+	}
+	if msg := call(t, cs, "list_tasks", map[string]any{"originThreadId": s}, nil); !strings.Contains(msg, "originThreadId") {
+		t.Fatalf("removed originThreadId accepted: %q", msg)
 	}
 	var td client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &td)
@@ -752,7 +756,7 @@ func TestScheduleTools(t *testing.T) {
 
 	var sc db.Schedule
 	mustCall(t, cs, "create_schedule", map[string]any{"project": "1", "title": "nightly", "prompt": "bump", "cron": "0 2 * * *", "tz": "UTC"}, &sc)
-	if sc.ProjectID != p.ID || sc.OriginThreadID == nil || *sc.OriginThreadID != s || sc.NextRunAt == nil {
+	if sc.ProjectID != p.ID || sc.OriginSession == nil || *sc.OriginSession != *e.t3(s) || sc.NextRunAt == nil {
 		t.Fatalf("schedule %+v", sc)
 	}
 	mustCall(t, cs, "update_schedule", map[string]any{"id": sc.ID, "paused": true}, &sc)
@@ -766,7 +770,7 @@ func TestScheduleTools(t *testing.T) {
 	}
 	var run client.Task
 	mustCall(t, cs, "run_schedule", map[string]any{"id": sc.ID}, &run)
-	if run.ScheduleID == nil || *run.ScheduleID != sc.ID || run.OriginThreadID == nil || *run.OriginThreadID != s {
+	if run.ScheduleID == nil || *run.ScheduleID != sc.ID || run.OriginSession == nil || *run.OriginSession != *e.t3(s) {
 		t.Fatalf("run %+v", run)
 	}
 	var list agenttools.SchedulesOut
