@@ -277,4 +277,4 @@ Harness navigation uses `Links.executionDestination`. The desktop host chooses n
 
 ## OpenCode navigation
 
-Open in OpenCode opens the configured web client in the system browser for local and remote Stage servers. Each browser needs to know the service address. On a fresh device, add the browser service URL in OpenCode once, or choose **Open on service** on the Stage task. **Copy session ID** copies the scoped task's external ID. Settings shows the registration hint when the two addresses differ. Browser authentication happens on the destination.
+Open in OpenCode opens the configured web client in the system browser for local and remote Stage servers. Each browser needs to know the service address. On a fresh device, add the browser service URL in OpenCode once. The OpenCode session panel's **Copy** copies the scoped task's external ID. Settings shows the registration hint when the two addresses differ. Browser authentication happens on the destination.

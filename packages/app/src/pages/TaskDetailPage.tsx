@@ -1,6 +1,6 @@
 import { LaunchRecovery } from "../components/LaunchRecovery.tsx";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useInvalidateWork, useTask } from "../api/queries.ts";
@@ -322,21 +322,38 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
   const destination = useSessionDestination();
   if (task.harness !== "t3") {
-    return <Panel title="OpenCode session">{task.session === null ? <Muted>No session attached.</Muted> : <div className="flex flex-wrap items-center gap-2"><code className="break-all text-meta">{task.session.externalSessionId}</code><CopyButton text={task.session.externalSessionId} label="Copy session ID" />{task.links?.service ? <AppButton small href={task.links.service}>Open on service</AppButton> : null}{!destination(task) ? <Link to="/settings" className="underline">Configure browser address</Link> : null}</div>}</Panel>;
+    const session = task.session;
+    return (
+      <Panel title="OpenCode session">
+        {session === null ? (
+          <Muted>No session attached.</Muted>
+        ) : (
+          <>
+            <Details>
+              <Detail label="Session id">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate" title={session.externalSessionId}>
+                    {session.externalSessionId}
+                  </span>
+                  <CopyButton text={session.externalSessionId} label="Copy" />
+                </span>
+              </Detail>
+            </Details>
+            {destination(task) === null ? (
+              <Link to="/settings" className={cx("mt-3 inline-block text-small", linkClass)}>
+                Configure browser address
+              </Link>
+            ) : null}
+          </>
+        )}
+      </Panel>
+    );
   }
   if (task.externalSessionId === null) {
     return (
       <Panel title="Thread">
         <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
       </Panel>
-    );
-  }
-  const links: ReactNode[] = [];
-  if (destination(task) !== null) {
-    links.push(
-      <AppButton key="app" href={destination(task) ?? ""} small>
-        Open in {HARNESS_NAME[task.harness]}
-      </AppButton>,
     );
   }
   return (
@@ -374,7 +391,6 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
           </span>
         </Detail>
       </Details>
-      {links.length === 0 ? null : <div className="mt-3 flex flex-wrap gap-1.5">{links}</div>}
     </Panel>
   );
 }
