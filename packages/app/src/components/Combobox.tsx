@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SEARCH_THRESHOLD, edgeIndex, filterOptions, stepIndex, typeaheadIndex, type ComboboxOption } from "../lib/combobox.ts";
 import type { MatchRange } from "../lib/projects.ts";
@@ -127,10 +127,10 @@ export function Combobox({
     const at = all.findIndex((o) => o.value === value);
     setActive(at >= 0 ? at : Math.max(0, edgeIndex(all, "first")));
   };
-  const close = () => {
+  const close = useCallback(() => {
     setOpen(false);
     setQuery(null);
-  };
+  }, []);
   const commit = (o: ComboboxOption) => {
     if (o.disabled === true) return;
     if (o.value !== value) onChange(o.value);
@@ -138,7 +138,7 @@ export function Combobox({
   };
 
   useLayoutEffect(() => {
-    const anchor = inputRef.current ?? buttonRef.current;
+    const anchor = search ? inputRef.current : buttonRef.current;
     if (!open || anchor === null) {
       setStyle(null);
       return;
@@ -149,19 +149,29 @@ export function Combobox({
       if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
       update();
     };
+    // Safari can open a button by tap without focusing it, so blur alone cannot dismiss the list.
+    const onOutside = (e: Event) => {
+      const target = e.target;
+      if (!(target instanceof Node) || anchor.contains(target) || panelRef.current?.contains(target)) return;
+      close();
+    };
     update();
     const vv = window.visualViewport;
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("focusin", onOutside, true);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", update);
     vv?.addEventListener("resize", update);
     vv?.addEventListener("scroll", update);
     return () => {
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("focusin", onOutside, true);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", update);
       vv?.removeEventListener("resize", update);
       vv?.removeEventListener("scroll", update);
     };
-  }, [open]);
+  }, [open, close, search]);
 
   // Keep the active row in view when it changes, without touching the list's scroll otherwise.
   const placed = style !== null;
