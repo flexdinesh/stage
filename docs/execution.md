@@ -7,6 +7,47 @@ authentication, models, permission modes, workspace strategies and states.
 Composition is a fixed connection-to-adapter map in the server. There is no
 plugin registration or service installation framework.
 
+## Design rules
+
+- **Lean.** The harness keeps what it owns: model catalog, workspaces and
+  worktrees, archive, its UI. Stage owns something only when the harness
+  cannot, on a best-effort basis.
+- **Generic code, explicit policies.** Product code reads the harness
+  descriptor, capabilities and operations, never a harness name. Behavior one
+  harness needs sits behind a typed optional interface or a registered UI
+  slot, so a harness without a feature never limits the app for the others.
+  `internal/harness/boundary_test.go` fails on harness names outside the
+  adapters, their connection setup and the server composition (its pending
+  list only shrinks).
+- **Worker-ready placement.** A future deployment runs Stage in the cloud and
+  a worker on each machine that syncs its harnesses upstream. So adapters and
+  connection setup take narrow ports (settings, checkpoint save, event sink),
+  never the store; contract types stay JSON-serializable; connections,
+  workspace paths and hosting policy belong to a machine; and pushed
+  observations are the shape a worker's upstream channel will take.
+
+## Harness registry
+
+Each harness package declares a `harness.Descriptor`: kind, name, hosting,
+whether its instance identity is stable, and the closure signals it reports
+with their copy. `serve` composes a fixed `harness.Registry` (T3, OpenCode)
+and builds one release and schedule runner per kind from it. The database
+stores kinds as text; the registry, not a schema CHECK, decides which exist.
+
+- **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any
+  machine profile. `hosted`: the harness runs as processes on Stage's machine
+  and is available only where the machine profile allows local processes
+  ([runtime.md](runtime.md#machine-profile-and-hosted-harnesses)); elsewhere
+  `GET /api/harnesses` reports it unavailable with the reason.
+- **Stable identity.** When the identity names one instance for good (a T3
+  environment id), pairing a retired connection's identity revives it, and
+  identities are unique per machine and kind. Otherwise (an OpenCode address)
+  the connector proves continuity itself and passes the connection to revive.
+- **Closures.** Completion is inferred only from a closure the harness's
+  descriptor declares; the descriptor supplies the stored provenance, the
+  journal event, the auto-complete toggle label and the accepted-result copy.
+  A harness that declares none has no auto-complete.
+
 ## Contracts for roadmap tasks 5 and 6
 
 - A session is `{connectionId, externalSessionId}`. Neither a directory string

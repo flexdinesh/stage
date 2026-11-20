@@ -22,17 +22,25 @@ test("startsText names each started task once", () => {
   assert.equal(startsText([{ taskId: 12 }, { taskId: 13 }, { taskId: 12 }]), "Starts #12, #13");
 });
 
+// Closure copy comes from the task's harness descriptor (GET /harnesses), never from a harness list in the app.
+const settles = { closures: [{ signal: "settled", provenance: "harness_settled", setting: "", completed: "Completed automatically: settled in Box.", via: "via Box settle" }] };
+const archives = { closures: [{ signal: "archived", provenance: "harness_archived", setting: "", completed: "Completed automatically: archived in Crate.", via: "via Crate archive" }] };
+
 test("provenanceText says who completed the result", () => {
   assert.match(provenanceText("user"), /^Completed by you in Stage\./);
   assert.match(provenanceText("historical_settlement"), /^Migrated from historical T3 settlement\./);
-  assert.equal(provenanceText("harness_settled"), "Completed automatically: settled in T3. This result stays unchanged when execution continues.");
-  assert.equal(provenanceText("harness_archived"), "Completed automatically: archived in OpenCode. This result stays unchanged when execution continues.");
+  assert.equal(provenanceText("harness_settled", settles), "Completed automatically: settled in Box.");
+  assert.equal(provenanceText("harness_archived", archives), "Completed automatically: archived in Crate.");
+  // A descriptor that does not declare the closure (or none loaded yet) reads generically.
+  assert.match(provenanceText("harness_archived", settles), /^Completed automatically when its harness closed the session\./);
+  assert.match(provenanceText("harness_settled"), /^Completed automatically when its harness closed the session\./);
 });
 
 test("autoCompletedMeta labels inferred completions only", () => {
-  assert.equal(autoCompletedMeta("harness_settled"), "via T3 settle");
-  assert.equal(autoCompletedMeta("harness_archived"), "via OpenCode archive");
-  assert.equal(autoCompletedMeta("user"), null);
+  assert.equal(autoCompletedMeta("harness_settled", settles), "via Box settle");
+  assert.equal(autoCompletedMeta("harness_archived", archives), "via Crate archive");
+  assert.equal(autoCompletedMeta("harness_archived"), "via harness");
+  assert.equal(autoCompletedMeta("user", settles), null);
   assert.equal(autoCompletedMeta(null), null);
 });
 
@@ -59,7 +67,7 @@ test("stateMove disables Completed while execution is active", () => {
 });
 
 const back = (extra, accepted = NONE) => stateMove(st({ acceptanceId: 7, ...extra }), accepted);
-const accepted = (extra) => stateSummary(st({ state: "done", acceptanceId: 7, completedAt: HOUR_AGO, ...extra }), NOW);
+const accepted = (extra) => stateSummary(st({ state: "done", acceptanceId: 7, completedAt: HOUR_AGO, ...extra }), NOW, settles);
 
 test("stateMove takes completed work back to the status it shows without acceptance", () => {
   assert.deepEqual(back({ state: "done" }), { kind: "uncomplete", to: "to_review", detail: "clears acceptance; history stays", disabled: false });
@@ -94,6 +102,6 @@ test("stateSummary says what the current state means", () => {
 
 test("stateSummary for completed work names when and how it was accepted", () => {
   assert.equal(accepted({ completionProvenance: "user" }), "Accepted 1h ago.");
-  assert.equal(accepted({ completionProvenance: "harness_settled" }), "Accepted 1h ago via T3 settle.");
+  assert.equal(accepted({ completionProvenance: "harness_settled" }), "Accepted 1h ago via Box settle.");
   assert.equal(accepted({ state: "running" }), "Accepted 1h ago. Execution moved on since.");
 });

@@ -1,9 +1,9 @@
 import { Suspense, lazy } from "react";
+import { useHarnesses } from "../api/queries.ts";
 import type { TaskState, TaskDetail } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { Panel, cx } from "./ui.tsx";
-import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 // marked + DOMPurify load only when a reply is shown.
@@ -19,7 +19,7 @@ export function LastWordPanel({ task }: { task: TaskDetail }) {
   const thread = task.thread;
   const reply = task.finalReply;
   const word = reply ? { ...reply, at: reply.updatedAt } : thread?.lastWord;
-  const name = HARNESS_NAME[task.harness];
+  const name = useHarnesses().kindName(task.harness);
   const destination = useSessionDestination();
   if (!word) return null;
   const earlier = word.runId !== null && thread?.latestRunId != null && word.runId !== thread.latestRunId;

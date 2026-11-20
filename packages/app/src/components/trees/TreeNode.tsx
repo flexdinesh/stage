@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { Link } from "react-router";
-import { useInvalidateWork } from "../../api/queries.ts";
+import { useHarnesses, useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { canStart, statusChips } from "../../lib/tasks.ts";
@@ -10,7 +10,7 @@ import { inState } from "../../lib/trees.ts";
 import { statusChipView } from "../StateBadge.tsx";
 import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
 import { CompletionButton } from "../Completion.tsx";
-import { HARNESS_NAME, isRetired } from "../../lib/harnesses.ts";
+import { isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
 import { useSessionDestination } from "../../lib/hostState.ts";
 
@@ -46,6 +46,7 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
  */
 export function NodeAction({ task, className, review = true }: { task: Task; pending: readonly number[]; className?: string; review?: boolean }) {
   const api = useApi();
+  const { kindName } = useHarnesses();
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const cls = cx("relative z-[2]", className);
@@ -57,7 +58,7 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
     action =
       appLink === null ? null : (
         <AppButton small variant="primary" href={appLink} className={cls}>
-          Open in {HARNESS_NAME[task.harness]}
+          Open in {kindName(task.harness)}
         </AppButton>
       );
   } else if (review && task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
@@ -71,7 +72,7 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
   } else if (appLink !== null) {
     action = (
       <AppButton small href={appLink} className={cls}>
-        Open in {HARNESS_NAME[task.harness]}
+        Open in {kindName(task.harness)}
       </AppButton>
     );
   }

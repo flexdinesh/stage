@@ -34,7 +34,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 			OnSwitched: func(sw db.Switch) { d.Sync.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New)) }})
 	})
 	first := e.store.T3ID()
-	if _, err := e.store.SwitchInstance(t.Context(), db.HarnessT3, t3.FakeEnvironmentID, "box a", 0); err != nil {
+	if _, err := e.store.SwitchInstance(t.Context(), t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
 		t.Fatal(err)
 	}
 	p := e.project("/w/app")

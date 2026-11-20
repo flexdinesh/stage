@@ -165,13 +165,14 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.New(store, t3.NewAdapter(client), log)
+	svc.Harnesses = testHarnesses
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)
 	runner.OnReady = push.OnReady
 	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
-		Store:  store, Sync: svc, Push: push, Logger: log,
+		Store:  store, Sync: svc, Push: push, Logger: log, Harnesses: testHarnesses,
 	}
 	for _, opt := range opts {
 		opt(&deps)

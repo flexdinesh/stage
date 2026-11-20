@@ -1,19 +1,22 @@
-// Harness connections: one per harness instance (a T3 environment or an OpenCode service), at most one active per
-// harness. Ids are not fixed: name and branch by `harness`, never by id. Retired connections keep their tasks and
-// bindings as read-only history.
+// Harness connections: one per harness instance, at most one active per harness kind. Ids are not fixed: name and
+// branch by `harness`, never by id. Names, closure copy and availability come from the server's harness descriptors
+// (GET /harnesses), never from a list here. Retired connections keep their tasks and bindings as read-only history.
 import { ApiError } from "../api/client.ts";
 import type { ExecutionLinks } from "../platform/index.ts";
-import type { ExternalProject, Harness, HarnessConnection, Project, ProjectBinding, ReplacedConnection, Task } from "../api/types.ts";
+import type { ExternalProject, Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, ReplacedConnection, Task } from "../api/types.ts";
 
-export const HARNESS_NAME: Record<Harness, string> = { t3: "T3", opencode: "OpenCode" };
-
-/** Lookups over GET /connections (every row, active first). */
+/** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
   list: readonly HarnessConnection[];
   /** Active connections only: the ones new work, bindings and settings pick from. */
   activeList: readonly HarnessConnection[];
+  /** Every harness kind the server knows, in its order. */
+  descriptors: readonly HarnessDescriptor[];
+  descriptor: (kind: Harness) => HarnessDescriptor | undefined;
+  /** A kind's display name ("T3"); the kind itself while descriptors load. */
+  kindName: (kind: Harness) => string;
   connection: (id: number) => HarnessConnection | undefined;
-  /** "T3" | "OpenCode"; "Harness" for an id not (yet) loaded. */
+  /** The connection's harness name; "Harness" for an id not (yet) loaded. */
   name: (id: number) => string;
   harness: (id: number) => Harness | null;
   /** False for retired and unknown ids. */
@@ -26,16 +29,21 @@ export interface Harnesses {
   activeConnection: (harness: Harness) => HarnessConnection | undefined;
 }
 
-export function harnessLookup(list: readonly HarnessConnection[]): Harnesses {
+export function harnessLookup(list: readonly HarnessConnection[], descriptors: readonly HarnessDescriptor[] = []): Harnesses {
   const byId = new Map(list.map((c) => [c.id, c]));
+  const byKind = new Map(descriptors.map((d) => [d.kind, d]));
   const activeConnection = (h: Harness) => list.find((c) => c.harness === h && c.active);
+  const kindName = (kind: Harness) => byKind.get(kind)?.name ?? kind;
   return {
     list,
     activeList: list.filter((c) => c.active),
+    descriptors,
+    descriptor: (kind) => byKind.get(kind),
+    kindName,
     connection: (id) => byId.get(id),
     name: (id) => {
       const c = byId.get(id);
-      return c === undefined ? "Harness" : HARNESS_NAME[c.harness];
+      return c === undefined ? "Harness" : kindName(c.harness);
     },
     harness: (id) => byId.get(id)?.harness ?? null,
     active: (id) => byId.get(id)?.active ?? false,
@@ -63,14 +71,14 @@ export function sessionLinks(links: {
   return { native: links.links?.native ?? links.t3DeepLink, web: links.links?.web ?? links.t3WebUrl ?? null };
 }
 
-/** Task detail Alert for a task on a replaced connection. */
-export function retiredNotice(t: Pick<Task, "harness" | "connectionLabel">): string {
-  return `Ran on ${HARNESS_NAME[t.harness]}${quoted(t.connectionLabel)}, which was replaced. Its history and result stay here; Stage no longer follows it.`;
+/** Task detail Alert for a task on a replaced connection; `name` is its harness's name. */
+export function retiredNotice(t: Pick<Task, "connectionLabel">, name: string): string {
+  return `Ran on ${name}${quoted(t.connectionLabel)}, which was replaced. Its history and result stay here; Stage no longer follows it.`;
 }
 
-/** Hint on Start / Retry / Stop for a task on a replaced connection. */
-export function retiredHint(t: Pick<Task, "harness">): string {
-  return `Its ${HARNESS_NAME[t.harness]} connection was replaced. Duplicate it to run again.`;
+/** Hint on Start / Retry / Stop for a task on a replaced connection; `name` is its harness's name. */
+export function retiredHint(name: string): string {
+  return `Its ${name} connection was replaced. Duplicate it to run again.`;
 }
 
 /** Settings PREVIOUS list: retired, not forgotten connections of one harness. */
@@ -110,11 +118,11 @@ export function newServicePrompt(address: string, old: Pick<HarnessConnection, "
 }
 
 /** Projects list chip: current (active-connection) bindings only; replaced ones never ask for repair. */
-export function bindingsSummary(bindings: readonly ProjectBinding[]): string {
+export function bindingsSummary(bindings: readonly ProjectBinding[], kindName: (kind: Harness) => string): string {
   const current = bindings.filter((b) => b.connectionActive);
   if (current.length === 0) return "not bound";
   if (current.some((b) => b.status !== "available")) return "check workspace";
-  return current.map((b) => HARNESS_NAME[b.harness]).join(" · ");
+  return current.map((b) => kindName(b.harness)).join(" · ");
 }
 
 /** The project's bindings on replaced connections of a harness. */

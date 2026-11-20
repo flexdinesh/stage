@@ -32,4 +32,6 @@ COPY --from=server --chown=65532:65532 /out/data /data
 ENV STAGE_DATA_DIR=/data
 # Reachable through a published port (the default is container loopback).
 ENV STAGE_LISTEN=0.0.0.0:7380
+# A container never runs harnesses that are local processes (docs/runtime.md).
+ENV STAGE_MACHINE_PROFILE=container
 ENTRYPOINT ["/stage"]

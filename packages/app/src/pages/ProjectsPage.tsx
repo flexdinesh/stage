@@ -5,7 +5,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import type { PreferenceStorage } from "../platform/index.ts";
-import { keys, useProjects, useTasks } from "../api/queries.ts";
+import { keys, useHarnesses, useProjects, useTasks } from "../api/queries.ts";
 import type { Project, Task } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import {
@@ -116,7 +116,8 @@ export function ProjectsPage() {
     storage.set(SORT_KEY, next);
   };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
-  const notice = importNotice(projects.data?.imports ?? []);
+  const { kindName } = useHarnesses();
+  const notice = importNotice(projects.data?.imports ?? [], kindName);
 
   return (
     <>
@@ -162,7 +163,7 @@ export function ProjectsPage() {
                   </div>
                   <div className="flex items-center gap-1.5 justify-self-end md:justify-self-start">
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
-                    <Chip>{bindingsSummary(p.bindings)}</Chip>
+                    <Chip>{bindingsSummary(p.bindings, kindName)}</Chip>
                   </div>
                   <div className="flex flex-col font-mono text-meta text-muted tabular">
                     <span>

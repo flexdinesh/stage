@@ -574,7 +574,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 			}
 			return &db.ConflictError{Code: "instance_changed", Msg: msg}
 		}
-		sw, err := s.store.SwitchInstance(ctx, db.HarnessOpenCode, cfg.Endpoint, label, revive)
+		sw, err := s.store.SwitchInstance(ctx, opencode.Descriptor, cfg.Endpoint, label, revive)
 		if err != nil {
 			return err
 		}
@@ -604,7 +604,7 @@ func (s *Service) holds(ctx context.Context, id int64) (bool, error) {
 // previous is the replaced OpenCode connection the candidate service proves
 // to be (0 when none): it serves that connection's workspaces and sessions.
 func (s *Service) previous(ctx context.Context, a *opencode.Adapter) (int64, error) {
-	ids, err := s.store.RetiredConnections(ctx, db.HarnessOpenCode)
+	ids, err := s.store.RetiredConnections(ctx, opencode.Kind)
 	if err != nil {
 		return 0, err
 	}

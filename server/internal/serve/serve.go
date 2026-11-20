@@ -22,10 +22,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/guard"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/schedule"
@@ -54,6 +56,10 @@ type Options struct {
 	// Service, when set, marks this process as the per-user service
 	// (`stage serve --managed`) in the data dir's holder record.
 	Service *Service
+	// Profile is the machine profile (harness.ResolveProfile): which
+	// harnesses this server may host. Zero is a foreground server that runs
+	// no local processes.
+	Profile harness.Profile
 	// OnLocked, when set, runs once the data dir lock is held and before
 	// anything else; a non-nil logger it returns replaces Logger (the macOS
 	// managed log file, which a losing process must never rotate).
@@ -196,7 +202,14 @@ func Run(ctx context.Context, o Options) error {
 	// Agent instructions name the CLI this identity installed on PATH.
 	home, _ := os.UserHomeDir()
 	cliName := install.CLIName(home, buildinfo.Identity)
+	// The fixed harness composition: every kind this server knows, in order.
+	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	profile := o.Profile
+	if profile.Kind == "" {
+		profile.Kind = harness.ProfileServer
+	}
 	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.T3ID()), logger)
+	syncSvc.Harnesses = harnesses
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
 	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter, logger)
@@ -205,13 +218,13 @@ func Run(ctx context.Context, o Options) error {
 	}
 	var releases []*release.Runner
 	var schedules []*schedule.Runner
-	// One runner per harness, following its active connection.
-	for _, harness := range []string{db.HarnessT3, db.HarnessOpenCode} {
+	// One runner per harness kind, following its active connection.
+	for _, kind := range harnesses.Kinds() {
 		r := release.NewRunner(store, syncSvc, logger)
-		r.Harness = harness
+		r.Harness = kind
 		releases = append(releases, r)
 		sc := schedule.NewRunner(store, syncSvc, logger)
-		sc.Harness = harness
+		sc.Harness = kind
 		schedules = append(schedules, sc)
 	}
 	kickTrees := func() {
@@ -265,6 +278,7 @@ func Run(ctx context.Context, o Options) error {
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: setup, OpenCode: openCode,
+		Harnesses: harnesses, Profile: profile,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/logfile"
@@ -85,6 +86,7 @@ func run(args []string) (bool, error) {
 	var listens listenFlags
 	fs.Var(&listens, "listen", "listen address, repeatable or comma-separated: host:port, unix:/abs/path.sock, or unix (the private default socket); overrides STAGE_LISTEN; default "+listen.Default)
 	managed := fs.Bool("managed", false, "run as the per-user service (`stage service`): config from service.env only, the default data dir, unix listener required")
+	localHarnesses := fs.Bool("local-harnesses", false, "let this foreground server run harnesses that are local processes (the managed service always may; a container never); also "+harness.LocalHarnessesEnv+"=1")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return false, err
@@ -99,7 +101,7 @@ func run(args []string) (bool, error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	opts := serve.Options{Logger: slog.Default()}
+	opts := serve.Options{Logger: slog.Default(), Profile: harness.ResolveProfile(*managed, *localHarnesses, os.Getenv)}
 	var err error
 	if *managed {
 		opts.Config, err = loadManaged()

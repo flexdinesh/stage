@@ -79,7 +79,7 @@ func TestT3SettingsRoundTrip(t *testing.T) {
 	if err := s.SetT3URL(ctx, "http://127.0.0.1:4000"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SwitchInstance(ctx, db.HarnessT3, "env-1", "box", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-1", "box", 0); err != nil {
 		t.Fatal(err)
 	}
 	c, _ = s.GetConnection(ctx)

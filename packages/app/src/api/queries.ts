@@ -4,11 +4,12 @@ import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
-import type { HarnessConnection, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { HarnessConnection, HarnessDescriptor, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
   connections: ["connections"],
+  harnesses: ["harnesses"],
   catalog: ["catalog"],
   projects: ["projects"],
   tasks: ["tasks"],
@@ -36,12 +37,21 @@ export function useConnections() {
 type Connections = { connections: HarnessConnection[] };
 
 const NO_CONNECTIONS: HarnessConnection[] = [];
+const NO_DESCRIPTORS: HarnessDescriptor[] = [];
 
-/** Harness lookups by connection id (name, harness, active, label) and the active connection per harness. */
+/** The server's harness kinds (names, policies, copy, availability here). They change only with the server build. */
+export function useHarnessDescriptors() {
+  const api = useApi();
+  return useQuery({ queryKey: keys.harnesses, queryFn: api.harnesses, staleTime: Infinity });
+}
+
+/** Harness lookups by connection id (name, harness, active, label), by kind (descriptor) and the active connection per harness. */
 export function useHarnesses(): Harnesses & { loaded: boolean; error: unknown } {
   const connections = useConnections();
+  const descriptors = useHarnessDescriptors();
   const list = connections.data?.connections ?? NO_CONNECTIONS;
-  const lookup = useMemo(() => harnessLookup(list), [list]);
+  const kinds = descriptors.data?.harnesses ?? NO_DESCRIPTORS;
+  const lookup = useMemo(() => harnessLookup(list, kinds), [list, kinds]);
   return { ...lookup, loaded: connections.data !== undefined, error: connections.error };
 }
 

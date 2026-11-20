@@ -4,7 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
+
+// LocalMachine is the machine this server runs on (migration 0015). Every
+// connection belongs to it until workers exist.
+const LocalMachine int64 = 1
 
 // Harness names.
 const (
@@ -107,11 +113,13 @@ type activeConnection struct {
 // harness. The same identity keeps the connection. A connection with no
 // identity yet, or holding no relations, is restamped in place. Otherwise
 // the active connection retires and keeps its relations, and the instance
-// gets a retired T3 connection with that identity back (or revive, a retired
-// connection the caller matched), else a new connection. Unlaunched backlog
+// gets a retired connection with that identity back when the harness's
+// identity is stable (or revive, a retired connection the caller matched),
+// else a new connection. Unlaunched backlog
 // tasks and schedules follow the active connection; they launch only after
 // the user binds the project there.
-func (s *Store) SwitchInstance(ctx context.Context, harness, identity, label string, revive int64) (Switch, error) {
+func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identity, label string, revive int64) (Switch, error) {
+	kind := d.Kind
 	if identity == "" && revive == 0 {
 		return Switch{}, Invalid("an instance identity is required")
 	}
@@ -121,9 +129,9 @@ func (s *Store) SwitchInstance(ctx context.Context, harness, identity, label str
 	var out Switch
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var cur activeConnection
-		err := tx.QueryRow(ctx, `SELECT id,identity,auto_complete FROM harness_connections WHERE harness=$1 AND active=1`, harness).Scan(&cur.id, &cur.identity, &cur.autoComplete)
+		err := tx.QueryRow(ctx, `SELECT id,identity,auto_complete FROM harness_connections WHERE machine_id=$2 AND harness=$1 AND active=1`, kind, LocalMachine).Scan(&cur.id, &cur.identity, &cur.autoComplete)
 		if errors.Is(err, sql.ErrNoRows) {
-			return tx.QueryRow(ctx, `INSERT INTO harness_connections(harness,identity,label) VALUES($1,$2,$3) RETURNING id`, harness, identity, label).Scan(&out.New)
+			return tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,stable_identity) VALUES($4,$1,$2,$3,$5) RETURNING id`, kind, identity, label, LocalMachine, d.StableIdentity).Scan(&out.New)
 		}
 		if err != nil {
 			return err
@@ -132,19 +140,19 @@ func (s *Store) SwitchInstance(ctx context.Context, harness, identity, label str
 		target := revive
 		if target != 0 {
 			var ok bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2 AND active=0 AND forgotten_at IS NULL)`, target, harness).Scan(&ok); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2 AND active=0 AND forgotten_at IS NULL)`, target, kind).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {
-				return Conflict("That %s connection can no longer be restored.", harness)
+				return Conflict("That %s connection can no longer be restored.", d.Name)
 			}
 		} else {
 			if cur.identity == identity {
 				_, err := tx.Exec(ctx, `UPDATE harness_connections SET label=$2 WHERE id=$1`, cur.id, label)
 				return err
 			}
-			if harness == HarnessT3 {
-				err := tx.QueryRow(ctx, `SELECT id FROM harness_connections WHERE harness='t3' AND active=0 AND identity=$1`, identity).Scan(&target)
+			if d.StableIdentity {
+				err := tx.QueryRow(ctx, `SELECT id FROM harness_connections WHERE machine_id=$3 AND harness=$2 AND active=0 AND identity=$1`, identity, kind, LocalMachine).Scan(&target)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
@@ -171,7 +179,7 @@ func (s *Store) SwitchInstance(ctx context.Context, harness, identity, label str
 				return err
 			}
 			out.New, out.Revived = target, true
-		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(harness,identity,label,auto_complete) VALUES($1,$2,$3,$4) RETURNING id`, harness, identity, label, cur.autoComplete).Scan(&out.New); err != nil {
+		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,auto_complete,stable_identity) VALUES($5,$1,$2,$3,$4,$6) RETURNING id`, kind, identity, label, cur.autoComplete, LocalMachine, d.StableIdentity).Scan(&out.New); err != nil {
 			return err
 		}
 		out.Changed = true

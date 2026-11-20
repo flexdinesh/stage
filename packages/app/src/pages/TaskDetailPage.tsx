@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useInvalidateWork, useTask } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork, useTask } from "../api/queries.ts";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
@@ -43,7 +43,7 @@ import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { treeTaskPath } from "../lib/trees.ts";
-import { HARNESS_NAME, isRetired, retiredHint, retiredNotice } from "../lib/harnesses.ts";
+import { isRetired, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -97,6 +97,7 @@ const treeLinkClass = "text-fg underline decoration-line-strong underline-offset
 
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
+  const { kindName } = useHarnesses();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
@@ -131,14 +132,14 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const live = { ...task, connectionActive: true };
   const startable = canStart(live);
   const stoppable = canStop(live);
-  const lockedHint = retired ? retiredHint(task) : undefined;
+  const lockedHint = retired ? retiredHint(kindName(task.harness)) : undefined;
   const appUrl = useSessionDestination()(task);
   const phoneBar = appUrl !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) =>
     appUrl === null ? null : (
       <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in {HARNESS_NAME[task.harness]}
+        Open in {kindName(task.harness)}
       </AppButton>
     );
 
@@ -199,10 +200,10 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
           <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            {HARNESS_NAME[task.harness]} needs input
+            {kindName(task.harness)} needs input
           </Alert>
         ) : null}
-        {retired ? <Alert tone="plain">{retiredNotice(task)}</Alert> : null}
+        {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
 
         <div className="flex flex-wrap items-center gap-2">
           {startable ? (
@@ -282,7 +283,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 ))}
               </PromptPanel>
             )}
-            {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} />)}
+            {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} harness={task.harness} />)}
             <LastWordPanel task={task} />
             {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-small underline">{artifact.label}</a></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
@@ -396,11 +397,12 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
 }
 
 function ConfigPanel({ task }: { task: TaskDetail }) {
+  const { kindName } = useHarnesses();
   return (
     <Panel title="Config">
       <Details>
         <Detail label="Harness">
-          {HARNESS_NAME[task.harness]}
+          {kindName(task.harness)}
           {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
           {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
         </Detail>

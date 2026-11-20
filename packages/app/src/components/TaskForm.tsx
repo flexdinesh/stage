@@ -44,7 +44,6 @@ import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { Combobox } from "./Combobox.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
-import { HARNESS_NAME } from "../lib/harnesses.ts";
 import type { ModelConfig } from "./ModelFields.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
@@ -506,7 +505,7 @@ function TaskFormDrawer({
           </Field>
           <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" options={[
             {value: "", label: "Choose a harness"},
-            ...harnesses.activeList.map(c=>({value: String(c.id), label: HARNESS_NAME[c.harness]})),
+            ...harnesses.activeList.map(c=>({value: String(c.id), label: harnesses.kindName(c.harness)})),
             ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
           ]}/>}</Field>
         </div>

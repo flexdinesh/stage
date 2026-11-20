@@ -30,6 +30,7 @@ type SessionRef = execution.SessionRef
 type HarnessConnection struct {
 	Configured   bool   `json:"configured"`
 	ID           int64  `json:"id"`
+	MachineID    int64  `json:"machineId"`
 	Harness      string `json:"harness"`
 	AutoComplete bool   `json:"autoComplete"`
 	Active       bool   `json:"active"`
@@ -74,13 +75,13 @@ type ExternalProject struct {
 	Repo         string `json:"repo"`
 }
 
-const connectionCols = `id,harness,auto_complete,active,label,retired_at,forgotten_at,
+const connectionCols = `id,machine_id,harness,auto_complete,active,label,retired_at,forgotten_at,
  (SELECT count(*) FROM tasks t WHERE t.connection_id=c.id),
  (SELECT count(*) FROM project_bindings b WHERE b.connection_id=c.id AND b.active=1)`
 
 func scanConnection(r rowScanner) (HarnessConnection, error) {
 	var c HarnessConnection
-	err := r.Scan(&c.ID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings)
+	err := r.Scan(&c.ID, &c.MachineID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings)
 	return c, notFound(err)
 }
 

@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useHarnesses } from "../api/queries.ts";
-import { HARNESS_NAME } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
 import { Combobox } from "./Combobox.tsx";
 import { Button, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
@@ -82,7 +81,7 @@ export function SharedPaths() {
                   value={String(connection)}
                   onChange={(next) => setConnection(Number(next))}
                   listLabel="Harnesses"
-                  options={harnesses.activeList.map((c) => ({ value: String(c.id), label: HARNESS_NAME[c.harness] }))}
+                  options={harnesses.activeList.map((c) => ({ value: String(c.id), label: harnesses.kindName(c.harness) }))}
                 />
               )}
             </Field>

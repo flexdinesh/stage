@@ -41,13 +41,22 @@ const openCode = connection(2, "opencode", { label: "http://oc:4096" });
 const oldT3 = connection(1, "t3", { active: false, label: "desktop", retiredAt: "2026-11-10T00:00:00Z", tasks: 4, bindings: 2 });
 const forgotten = connection(3, "t3", { active: false, label: "vm", retiredAt: "2026-11-01T00:00:00Z", forgottenAt: "2026-11-02T00:00:00Z" });
 const list = [t3, openCode, oldT3, forgotten];
+// Names come from the server's descriptors (GET /harnesses).
+const descriptor = (kind, name) => ({ kind, name, hosting: "connected", closures: [], available: true });
+const descriptors = [descriptor("t3", "T3"), descriptor("opencode", "OpenCode")];
+const kindName = (kind) => harnessLookup([], descriptors).kindName(kind);
 
 test("useHarnesses lookups name and branch by harness, never by id", () => {
-  const h = harnessLookup(list);
+  const h = harnessLookup(list, descriptors);
   assert.equal(h.name(5), "T3");
   assert.equal(h.name(1), "T3");
   assert.equal(h.name(2), "OpenCode");
   assert.equal(h.name(99), "Harness");
+  assert.equal(h.kindName("opencode"), "OpenCode");
+  assert.equal(h.descriptor("t3")?.name, "T3");
+  // Before descriptors load (or for a kind this build does not know) a kind reads as itself.
+  assert.equal(harnessLookup(list).name(2), "opencode");
+  assert.equal(h.kindName("claude"), "claude");
   assert.equal(h.harness(1), "t3");
   assert.equal(h.harness(2), "opencode");
   assert.equal(h.harness(99), null);
@@ -105,11 +114,11 @@ test("a retired task has no Open in harness destination", () => {
 
 test("retired notice names the harness and the replaced instance", () => {
   assert.equal(
-    retiredNotice(task()),
+    retiredNotice(task(), "T3"),
     "Ran on T3 'desktop', which was replaced. Its history and result stay here; Stage no longer follows it.",
   );
   assert.equal(
-    retiredNotice(task({ harness: "opencode", connectionLabel: "http://oc:4096" })),
+    retiredNotice(task({ harness: "opencode", connectionLabel: "http://oc:4096" }), "OpenCode"),
     "Ran on OpenCode 'http://oc:4096', which was replaced. Its history and result stay here; Stage no longer follows it.",
   );
 });
@@ -153,10 +162,10 @@ test("the bind drawer marks the replaced binding's path per harness", () => {
 });
 
 test("projects list chip reads current bindings only", () => {
-  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" })]), "not bound");
-  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" }), binding(2, "opencode", "/b")]), "OpenCode");
-  assert.equal(bindingsSummary([binding(5, "t3", "/a", { status: "changed" })]), "check workspace");
-  assert.equal(bindingsSummary([binding(5, "t3", "/a"), binding(2, "opencode", "/b")]), "T3 · OpenCode");
+  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" })], kindName), "not bound");
+  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" }), binding(2, "opencode", "/b")], kindName), "OpenCode");
+  assert.equal(bindingsSummary([binding(5, "t3", "/a", { status: "changed" })], kindName), "check workspace");
+  assert.equal(bindingsSummary([binding(5, "t3", "/a"), binding(2, "opencode", "/b")], kindName), "T3 · OpenCode");
 });
 
 test("PREVIOUS lists a harness's retired, not forgotten connections", () => {

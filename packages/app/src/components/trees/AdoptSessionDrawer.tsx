@@ -1,10 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { useConnections, useInvalidateWork, useProjects } from "../../api/queries.ts";
+import { useConnections, useHarnesses, useInvalidateWork, useProjects } from "../../api/queries.ts";
 import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { HARNESS_NAME } from "../../lib/harnesses.ts";
 
 import { Combobox } from "../Combobox.tsx";
 import { ProjectCombobox } from "../ProjectSelect.tsx";
@@ -24,6 +23,7 @@ export function AdoptSessionDrawer({
   const api = useApi();
   const projects = useProjects();
   const connections = useConnections();
+  const harnessNames = useHarnesses();
   const [chosen, setConnection] = useState("");
   const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
@@ -120,7 +120,7 @@ export function AdoptSessionDrawer({
                   { value: "", label: "Choose harness" },
                   ...(connections.data?.connections.filter((c) => c.active) ?? []).map((c) => ({
                     value: String(c.id),
-                    label: HARNESS_NAME[c.harness],
+                    label: harnessNames.kindName(c.harness),
                   })),
                 ]}
               />

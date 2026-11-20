@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
 import type { ExternalProject, HarnessConnection, Project } from "../api/types.ts";
-import { HARNESS_NAME, rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
+import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
@@ -324,7 +324,7 @@ function ConnectionWorkspace({
 }) {
   const api = useApi();
   const [confirmUnbind, setConfirmUnbind] = useState(false);
-  const name = HARNESS_NAME[c.harness];
+  const name = useHarnesses().kindName(c.harness);
   const current = project.bindings.find((b) => b.connectionId === c.id);
   const previous = retiredBindings(project, c.harness);
   // Only an unbound project with a replaced binding looks for the same path on this connection.

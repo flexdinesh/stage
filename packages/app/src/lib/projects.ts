@@ -1,16 +1,15 @@
-import type { ImportSummary, Project } from "../api/types.ts";
+import type { Harness, ImportSummary, Project } from "../api/types.ts";
 import { relativeTime } from "./format.ts";
-import { HARNESS_NAME } from "./harnesses.ts";
 
 /**
  * The Projects page's quiet import note: "12 imported from OpenCode 2h ago", or per harness
  * ("12 imported from OpenCode, 3 from T3 2h ago"). Null when nothing was imported recently.
- * `imports` comes newest first; the time is the latest import.
+ * `imports` comes newest first; the time is the latest import. `kindName` names a harness kind (useHarnesses).
  */
-export function importNotice(imports: readonly ImportSummary[], now: number = Date.now()): string | null {
+export function importNotice(imports: readonly ImportSummary[], kindName: (kind: Harness) => string, now: number = Date.now()): string | null {
   const [latest] = imports;
   if (latest === undefined) return null;
-  const sources = imports.map((m, i) => `${i === 0 ? `${m.count} imported from` : `${m.count} from`} ${HARNESS_NAME[m.harness]}`);
+  const sources = imports.map((m, i) => `${i === 0 ? `${m.count} imported from` : `${m.count} from`} ${kindName(m.harness)}`);
   return `${sources.join(", ")} ${relativeTime(latest.at, now)}`;
 }
 
