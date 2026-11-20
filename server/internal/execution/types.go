@@ -34,6 +34,10 @@ type Links struct {
 	Web     string `json:"web,omitempty"`
 	App     string `json:"app,omitempty"`
 	Native  string `json:"native,omitempty"`
+	// Command is a shell command that resumes the session in the harness's
+	// own client (a harness without a web or app destination); hosts offer
+	// to copy it.
+	Command string `json:"command,omitempty"`
 }
 type WorkspaceInfo struct {
 	OriginRemote  string `json:"-"`
@@ -106,11 +110,14 @@ type Model struct {
 	Permissions []Choice `json:"permissions"`
 }
 type Capabilities struct {
-	Permissions []Choice                `json:"permissions,omitempty"`
-	Operations  map[string]Availability `json:"operations"`
-	Models      []Model                 `json:"models"`
-	Modes       []Choice                `json:"modes"`
-	Workspaces  []Choice                `json:"workspaces"`
+	Permissions []Choice `json:"permissions,omitempty"`
+	// Options apply whatever the model (a harness-wide setting); a model's
+	// own options sit beside them. Ids never collide (Valid).
+	Options    []Option                `json:"options,omitempty"`
+	Operations map[string]Availability `json:"operations"`
+	Models     []Model                 `json:"models"`
+	Modes      []Choice                `json:"modes"`
+	Workspaces []Choice                `json:"workspaces"`
 }
 type Config struct {
 	Model      string        `json:"model"`

@@ -77,6 +77,14 @@ func printCapabilities(w io.Writer, c execution.Capabilities) {
 	for _, v := range c.Modes {
 		fmt.Fprintf(w, "mode %s  %s\n", v.ID, v.Reason)
 	}
+	for _, o := range c.Options {
+		vals := make([]string, len(o.Values))
+		for i, v := range o.Values {
+			b, _ := v.MarshalJSON()
+			vals[i] = strings.Trim(string(b), `"`)
+		}
+		fmt.Fprintf(w, "option %s=%s  (any model)\n", o.ID, strings.Join(vals, "|"))
+	}
 	fmt.Fprintln(w, "Use --json for model options, permissions and operation availability.")
 }
 

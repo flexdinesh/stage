@@ -43,7 +43,7 @@ import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { treeTaskPath } from "../lib/trees.ts";
-import { isRetired, retiredHint, retiredNotice } from "../lib/harnesses.ts";
+import { isRetired, resumeCommand, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -134,10 +134,18 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const stoppable = canStop(live);
   const lockedHint = retired ? retiredHint(kindName(task.harness)) : undefined;
   const appUrl = useSessionDestination()(task);
-  const phoneBar = appUrl !== null || stoppable;
+  // A harness without a destination to open may offer a command that resumes the session in its own client.
+  const resume = appUrl === null ? resumeCommand(task) : null;
+  const phoneBar = appUrl !== null || resume !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) =>
-    appUrl === null ? null : (
+    appUrl === null ? (
+      resume === null ? null : (
+        <span className={className}>
+          <CopyButton text={resume} label="Copy resume command" />
+        </span>
+      )
+    ) : (
       <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
         Open in {kindName(task.harness)}
       </AppButton>
@@ -199,7 +207,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
-          <Alert tone="need" actions={appUrl === null ? undefined : openInApp("primary", "max-md:hidden")}>
+          <Alert tone="need" actions={appUrl === null && resume === null ? undefined : openInApp("primary", "max-md:hidden")}>
             {kindName(task.harness)} needs input
           </Alert>
         ) : null}

@@ -273,7 +273,7 @@ Project planning remains available without T3. The shared project form creates
 Stage metadata offline. Bind the selected harness workspace before launch.
 The bridge integration tests exercise creation and binding against isolated fake T3.
 
-Harness navigation uses `Links.executionDestination`. The desktop host chooses native links for a local Stage connection and web links for a remote connection. Shared product code does not inspect browser location or choose the platform.
+Harness navigation uses `Links.executionDestination`. The desktop host chooses native links for a local Stage connection and web links for a remote connection. A resume command (`ExecutionLinks.command`) is never opened; the shared task page offers to copy it. Shared product code does not inspect browser location or choose the platform.
 
 ## OpenCode navigation
 

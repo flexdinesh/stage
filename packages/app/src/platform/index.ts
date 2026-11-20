@@ -31,7 +31,8 @@ export interface Clipboard {
   writeText(text: string): Promise<void>;
 }
 
-export interface ExecutionLinks {native: string | null; web: string | null}
+/** `command` is a copyable shell command that resumes the session; hosts never open it. */
+export interface ExecutionLinks {native: string | null; web: string | null; command: string | null}
 export interface Links {
  /** The host chooses an appropriate native or web execution destination. */
  executionDestination(links: ExecutionLinks): string | null;
