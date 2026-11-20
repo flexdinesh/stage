@@ -1,4 +1,5 @@
 import type { Capabilities, ExecutionConfig, HarnessChoice } from "../api/types.ts";
+import { optionsFor } from "../lib/capabilities.ts";
 import { Combobox } from "./Combobox.tsx";
 import { Button, Field } from "./ui.tsx";
 
@@ -26,8 +27,9 @@ export function incompatibleSettings(
     )
   )
     issues.push("permission");
+  const allowed = optionsFor(caps, model);
   for (const o of config.options) {
-    if (!model?.options?.some((v) => v.id === o.id && v.values.includes(o.value)))
+    if (!allowed.some((v) => v.id === o.id && v.values.includes(o.value)))
       issues.push(o.id);
   }
   return issues;
@@ -47,6 +49,7 @@ export function HarnessFields({
   disabled: boolean;
 }) {
   const model = caps?.models?.find((m) => m.id === config.model);
+  const options = optionsFor(caps, model);
   const choices = (
     label: string,
     field: "model" | "permission" | "mode",
@@ -95,7 +98,7 @@ export function HarnessFields({
       {choices("Model", "model", caps?.models ?? [])}
       {choices(openCode ? "Agent" : "Interaction mode", "mode", caps?.modes ?? [])}
       {choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
-      {(model?.options ?? []).map((o) => {
+      {options.map((o) => {
         const current = config.options.find((v) => v.id === o.id);
         const idx = o.values.findIndex((v) => v === current?.value);
         return (
@@ -120,7 +123,7 @@ export function HarnessFields({
         );
       })}
       {config.options
-        .filter((o) => !model?.options?.some((v) => v.id === o.id))
+        .filter((o) => !options.some((v) => v.id === o.id))
         .map((o) => (
           <div key={o.id} className="text-small">
             {o.id} = {String(o.value)}{" "}

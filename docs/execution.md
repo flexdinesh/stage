@@ -134,6 +134,15 @@ interaction).
   discovery, launching tasks to their launch. Polling continues as
   reconciliation, so a lost event only delays; the stream is the shape a
   worker's upstream channel will take.
+- **Resume command.** `Links.command` is a copyable shell command that
+  resumes the session in the harness's own client, for a harness without a web
+  or app destination. The platform's `ExecutionLinks.command` carries it; hosts
+  never open it, and the task page offers Copy resume command when no
+  destination exists.
+- **Harness-wide options.** `Capabilities.options` apply whatever the model,
+  beside each model's own. A config may set the union
+  (`Capabilities.OptionsFor`); an id reused between them is malformed
+  (`Capabilities.Valid`), so a selection always names one option.
 - **Interaction.** `execution.Interactive` (requests, respond, send) behind
   operations `respond` and `send`. API: [session interaction](api.md#session-interaction-api-v6);
   no UI or MCP yet. A harness without it answers `operation_unavailable`.

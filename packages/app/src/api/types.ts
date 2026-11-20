@@ -274,7 +274,8 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
-export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string }
+/** Session destinations; `command` resumes it in the harness's own client (copy, never run). */
+export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string; command?: string }
 /** A harness kind ("t3", "opencode", ...): the server's registry (GET /harnesses) says which exist. */
 export type Harness = string;
 /** A closure signal the harness reports and the copy that names it (an inferred completion's provenance). */
@@ -377,13 +378,16 @@ export interface OpenCodeLocal {
   reason: "" | "missing" | "invalid" | "unreachable" | "environment";
 }
 export interface HarnessChoice {id: string; label: string; available: boolean; reason?: string}
+export interface HarnessOption {id: string; values: (string | boolean)[]; default?: string | boolean}
 export interface HarnessModel extends HarnessChoice {
   group: string;
-  options: {id: string; values: (string | boolean)[]; default?: string | boolean}[] | null;
+  options: HarnessOption[] | null;
   permissions: HarnessChoice[] | null;
 }
 export interface Capabilities {
   permissions?: HarnessChoice[];
+  /** Harness-wide options, beside the selected model's own (ids never collide). */
+  options?: HarnessOption[];
   operations: Record<string, {available: boolean; reason?: string}>;
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;

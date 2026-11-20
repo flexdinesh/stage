@@ -29,6 +29,7 @@ func RequireChoice(what, id string, choices []Choice) error {
 	}
 	return RequireAvailable(what+" "+id, Availability{})
 }
+
 // PermissionsFor is m's permission list; nil (not reported) inherits the harness list.
 func (f Capabilities) PermissionsFor(m Model) []Choice {
 	if m.Permissions == nil {
@@ -37,7 +38,57 @@ func (f Capabilities) PermissionsFor(m Model) []Choice {
 	return m.Permissions
 }
 
+// OptionsFor is what a config for m may set: the harness-wide options, then
+// m's own (nil m: the harness-wide ones only).
+func (f Capabilities) OptionsFor(m *Model) []Option {
+	out := slices.Clone(f.Options)
+	if m != nil {
+		out = append(out, m.Options...)
+	}
+	return out
+}
+
+// Valid rejects capabilities whose option ids collide: twice harness-wide,
+// or a model option reusing a harness-wide id (or its own twice).
+func (f Capabilities) Valid() error {
+	wide := map[string]bool{}
+	for _, o := range f.Options {
+		if wide[o.ID] {
+			return fmt.Errorf("malformed capabilities: harness option %s defined twice", o.ID)
+		}
+		wide[o.ID] = true
+	}
+	for _, m := range f.Models {
+		own := map[string]bool{}
+		for _, o := range m.Options {
+			if wide[o.ID] || own[o.ID] {
+				return fmt.Errorf("malformed capabilities: model %s redefines option %s", m.ID, o.ID)
+			}
+			own[o.ID] = true
+		}
+	}
+	return nil
+}
+
+// validOptions checks each option once against allowed.
+func validOptions(options []ModelOption, allowed []Option) error {
+	seen := map[string]bool{}
+	for _, v := range options {
+		if seen[v.ID] {
+			return fmt.Errorf("duplicate model option %s", v.ID)
+		}
+		seen[v.ID] = true
+		if !slices.ContainsFunc(allowed, func(o Option) bool { return o.ID == v.ID && slices.Contains(o.Values, v.Value) }) {
+			return fmt.Errorf("option %s is unavailable for this model; choose a value from list_models", v.ID)
+		}
+	}
+	return nil
+}
+
 func (f Capabilities) ValidateConfig(c Config) error {
+	if err := f.Valid(); err != nil {
+		return err
+	}
 	if err := RequireChoice("interaction mode", c.Mode, f.Modes); err != nil {
 		return err
 	}
@@ -45,10 +96,12 @@ func (f Capabilities) ValidateConfig(c Config) error {
 		if err := RequireChoice("permission", c.Permission, f.Permissions); err != nil {
 			return err
 		}
-		if len(c.Options) > 0 {
-			return errors.New("choose a model before setting permissions or model options")
+		for _, v := range c.Options {
+			if !slices.ContainsFunc(f.Options, func(o Option) bool { return o.ID == v.ID }) {
+				return errors.New("choose a model before setting model options")
+			}
 		}
-		return nil
+		return validOptions(c.Options, f.Options)
 	}
 	for _, m := range f.Models {
 		if m.ID != c.Model {
@@ -60,17 +113,7 @@ func (f Capabilities) ValidateConfig(c Config) error {
 		if err := RequireChoice("permission", c.Permission, f.PermissionsFor(m)); err != nil {
 			return err
 		}
-		seen := map[string]bool{}
-		for _, v := range c.Options {
-			if seen[v.ID] {
-				return fmt.Errorf("duplicate model option %s", v.ID)
-			}
-			seen[v.ID] = true
-			if !slices.ContainsFunc(m.Options, func(o Option) bool { return o.ID == v.ID && slices.Contains(o.Values, v.Value) }) {
-				return fmt.Errorf("option %s is unavailable for this model; choose a value from list_models", v.ID)
-			}
-		}
-		return nil
+		return validOptions(c.Options, f.OptionsFor(&m))
 	}
 	return RequireAvailable("model "+c.Model, Availability{})
 }
