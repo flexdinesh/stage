@@ -1,6 +1,8 @@
 package service
 
 import (
+	"github.com/flexdinesh/stage/server/internal/client"
+
 	"github.com/flexdinesh/stage/server/internal/instance"
 )
 
@@ -43,10 +45,12 @@ type Status struct {
 	Socket     SocketStatus     `json:"socket"`
 	Lock       LockStatus       `json:"lock"`
 	Stage      StageStatus      `json:"stage"`
-	T3         *T3Status        `json:"t3"`
-	Logs       LogsInfo         `json:"logs"`
-	CLI        CLIStatus        `json:"cli"`
-	Problems   []Problem        `json:"problems"`
+	// Harnesses is each connected harness as the server sees it (nil while
+	// Stage is not reachable).
+	Harnesses []HarnessStatus `json:"harnesses"`
+	Logs      LogsInfo        `json:"logs"`
+	CLI       CLIStatus       `json:"cli"`
+	Problems  []Problem       `json:"problems"`
 }
 
 // ManagerStatus is the service manager.
@@ -123,10 +127,41 @@ type StageStatus struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// T3Status is T3 as the server sees it (independent of Stage's own health).
-type T3Status struct {
-	Connected bool    `json:"connected"`
-	LastError *string `json:"lastError"`
+// HarnessStatus is a connected harness as the server sees it (independent
+// of Stage's own health).
+type HarnessStatus struct {
+	Kind       string  `json:"kind"`
+	Configured bool    `json:"configured"`
+	Connected  bool    `json:"connected"`
+	LastError  *string `json:"lastError"`
+}
+
+// harnessStatuses copies health's harnesses.
+func harnessStatuses(h client.Health) []HarnessStatus {
+	out := []HarnessStatus{}
+	for _, hh := range h.Harnesses {
+		out = append(out, HarnessStatus{Kind: hh.Kind, Configured: hh.Configured, Connected: hh.Connected, LastError: hh.LastError})
+	}
+	return out
+}
+
+// offline: harnesses that are set up but not connected.
+func offline(hs []HarnessStatus) []HarnessStatus {
+	var out []HarnessStatus
+	for _, h := range hs {
+		if h.Configured && !h.Connected {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func offlineMessage(prefix string, h HarnessStatus) string {
+	msg := prefix + h.Kind + " is not connected"
+	if h.LastError != nil {
+		msg += ": " + *h.LastError
+	}
+	return msg
 }
 
 // CLIStatus is the invoking CLI.

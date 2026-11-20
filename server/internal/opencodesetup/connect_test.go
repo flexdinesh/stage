@@ -20,18 +20,18 @@ import (
 	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
 )
 
-type harness struct {
+type setupHarness struct {
 	s         *Service
 	store     *db.Store
 	installed execution.Adapter
 	installs  int
 }
 
-func newHarness(t *testing.T, env config.OpenCodeSettings) *harness {
+func newHarness(t *testing.T, env config.OpenCodeSettings) *setupHarness {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var temp dbtest.DB
-	h := &harness{store: db.NewStore(temp.Reset(t))}
+	h := &setupHarness{store: db.NewStore(temp.Reset(t))}
 	s, err := New(t.Context(), h.store, env, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func register(t *testing.T, url, password string) {
 	}
 }
 
-func (h *harness) saved(t *testing.T) (config.OpenCodeSettings, string) {
+func (h *setupHarness) saved(t *testing.T) (config.OpenCodeSettings, string) {
 	t.Helper()
 	c, verified, err := h.store.OpenCodeSettings(t.Context())
 	if err != nil {
@@ -61,14 +61,14 @@ func (h *harness) saved(t *testing.T) (config.OpenCodeSettings, string) {
 	return c, verified
 }
 
-func (h *harness) status(t *testing.T) config.OpenCodeStatus {
+func (h *setupHarness) status(t *testing.T) config.OpenCodeStatus {
 	t.Helper()
 	h.s.forgetLocalStatus()
 	return h.s.Status(t.Context())
 }
 
 // idle waits for a background refresh or renewal to finish.
-func (h *harness) idle() {
+func (h *setupHarness) idle() {
 	for h.s.busy.Load() {
 		time.Sleep(time.Millisecond)
 	}

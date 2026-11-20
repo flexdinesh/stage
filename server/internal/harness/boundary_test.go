@@ -16,8 +16,8 @@ import (
 var harnessBranch = regexp.MustCompile(`HarnessT3|HarnessOpenCode|IsT3\(|T3ID\(|"t3"|"opencode"|\bt3\.Kind\b|\bopencode\.Kind\b`)
 
 // owners may name their harness: the adapters, their connection setup, this
-// package and the server composition.
-var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/", "internal/opencodesetup/", "internal/harness/", "internal/serve/"}
+// package, the server composition and the CLI's per-harness status panels.
+var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/", "internal/opencodesetup/", "internal/harness/", "internal/serve/", "internal/cli/slots_"}
 
 // pending still branches on a harness and is being moved behind the
 // boundary. Shrink it; never grow it.
@@ -30,11 +30,8 @@ var pending = map[string]bool{
 	"internal/api/handlers_push.go":      true,
 	"internal/api/handlers_refs.go":      true,
 	"internal/api/handlers_schedules.go": true,
-	"internal/api/handlers_t3.go":        true,
 	"internal/api/handlers_tasks.go":     true,
-	"internal/api/router.go":             true,
 	"internal/api/shapes.go":             true,
-	"internal/cli/cli.go":                true,
 	"internal/cli/print.go":              true,
 	"internal/client/client.go":          true,
 	"internal/client/t3.go":              true,
@@ -49,7 +46,6 @@ var pending = map[string]bool{
 	"internal/db/tasks.go":               true,
 	"internal/db/types.go":               true,
 	"internal/notify/notify.go":          true,
-	"internal/service/report.go":         true,
 	"internal/sync/journal.go":           true,
 	"internal/sync/service.go":           true,
 	"internal/sync/session.go":           true,

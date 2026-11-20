@@ -92,13 +92,17 @@ func printStatus(w io.Writer, s statusOut) {
 		fmt.Fprintf(w, "  instance  %s since %s\n", h.InstanceID, h.StartedAt.Local().Format(time.RFC3339))
 	}
 	fmt.Fprintf(w, "  database  %s\n", h.DB)
-	switch {
-	case h.T3.Connected:
-		fmt.Fprintln(w, "  t3        connected")
-	case h.T3.LastError != nil:
-		fmt.Fprintf(w, "  t3        offline: %s\n", *h.T3.LastError)
-	default:
-		fmt.Fprintln(w, "  t3        offline")
+	for _, hh := range h.Harnesses {
+		switch {
+		case hh.Connected:
+			fmt.Fprintf(w, "  %-9s connected\n", hh.Kind)
+		case !hh.Configured:
+			fmt.Fprintf(w, "  %-9s not set up\n", hh.Kind)
+		case hh.LastError != nil:
+			fmt.Fprintf(w, "  %-9s offline: %s\n", hh.Kind, *hh.LastError)
+		default:
+			fmt.Fprintf(w, "  %-9s offline\n", hh.Kind)
+		}
 	}
 	if h.Version != s.ClientVersion {
 		fmt.Fprintf(w, "note: server version %s differs from this CLI (%s)\n", h.Version, s.ClientVersion)

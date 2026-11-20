@@ -45,13 +45,13 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 		t.Fatalf("no link before the switch %+v", started)
 	}
 
-	e.must("DELETE", "/api/t3/pair", nil, 200, nil)
+	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, nil)
 	e.fake.SetProbe(t3.Probe{Reachable: true, CheckedAt: time.Now(), Identity: &t3.Identity{EnvironmentID: "env-b", Label: "box b"}})
 	var paired struct {
 		ConnectionID int64       `json:"connectionId"`
 		Replaced     *connection `json:"replaced"`
 	}
-	e.must("POST", "/api/t3/pair", map[string]any{"code": "abc"}, 200, &paired)
+	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": "abc"}, 200, &paired)
 	if paired.Replaced == nil || paired.Replaced.ID != first || paired.Replaced.Active || paired.Replaced.Label != "box a" {
 		t.Fatalf("replaced %+v", paired.Replaced)
 	}

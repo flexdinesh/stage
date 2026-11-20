@@ -50,6 +50,8 @@ type Descriptor struct {
 	// revived. Otherwise the harness proves continuity itself.
 	StableIdentity bool      `json:"-"`
 	Closures       []Closure `json:"closures"`
+	// Setup is the connection setup schema (connected harnesses).
+	Setup Setup `json:"setup"`
 }
 
 // Closure is the descriptor's closure for signal.
@@ -88,6 +90,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 			if p, ok := provenances[c.Signal]; !ok || p != c.Provenance {
 				return nil, fmt.Errorf("harness %s: closure %q needs provenance %q", d.Kind, c.Signal, p)
 			}
+		}
+		if err := d.Setup.validate(); err != nil {
+			return nil, fmt.Errorf("harness %s: %w", d.Kind, err)
 		}
 	}
 	return &Registry{list: slices.Clone(ds)}, nil

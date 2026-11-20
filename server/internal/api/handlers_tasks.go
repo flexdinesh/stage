@@ -93,7 +93,7 @@ type taskConfigReq struct {
 // Older REST clients omit the connection on single-harness projects.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	if req.ConnectionID != nil {
-		return s.plannedConnection(*req.ConnectionID)
+		return s.plannedConnection(r.Context(), *req.ConnectionID)
 	}
 	if req.ProjectID == nil {
 		return nil
@@ -115,7 +115,7 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 		return nil
 	case 1:
 		req.ConnectionID = &bindings[0].ConnectionID
-		return s.plannedConnection(*req.ConnectionID)
+		return s.plannedConnection(r.Context(), *req.ConnectionID)
 	default:
 		return db.Invalid("This project has multiple harness bindings. Choose a connectionId.")
 	}
@@ -400,7 +400,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	connection := current.ConnectionID
 	if p.ConnectionID.Set {
 		connection = p.ConnectionID.V
-		if err := s.plannedConnection(connection); err != nil {
+		if err := s.plannedConnection(r.Context(), connection); err != nil {
 			return err
 		}
 	}

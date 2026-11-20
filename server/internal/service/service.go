@@ -555,12 +555,8 @@ func (c *Controller) waitReady(ctx context.Context, base RunState, oldInstance s
 				if h.Version != buildinfo.Version {
 					rep.Notes = append(rep.Notes, fmt.Sprintf("the server is version %s; this CLI is %s", h.Version, buildinfo.Version))
 				}
-				if !h.T3.Connected {
-					msg := "Stage is ready; T3 is not connected"
-					if h.T3.LastError != nil {
-						msg += ": " + *h.T3.LastError
-					}
-					rep.Notes = append(rep.Notes, msg+" (check T3_URL in "+c.p.ServiceEnv+", or pair in Settings)")
+				for _, hs := range offline(harnessStatuses(h)) {
+					rep.Notes = append(rep.Notes, offlineMessage("Stage is ready; ", hs)+" (check its settings in "+c.p.ServiceEnv+" or Settings)")
 				}
 				if l := c.info.Linger; l != nil && !*l {
 					rep.Notes = append(rep.Notes, "lingering is off: the service stops when you log out (`loginctl enable-linger` keeps it running)")
@@ -934,7 +930,7 @@ func (c *Controller) status(ctx context.Context) Status {
 		if h.Service != "" || h.Status != "" {
 			st.Stage.Reachable = true
 			st.Stage.Version, st.Stage.APIVersion, st.Stage.InstanceID, st.Stage.DB = h.Version, h.APIVersion, h.InstanceID, h.DB
-			st.T3 = &T3Status{Connected: h.T3.Connected, LastError: h.T3.LastError}
+			st.Harnesses = harnessStatuses(h)
 		}
 		if err != nil {
 			st.Stage.Error = err.Error()
@@ -947,12 +943,8 @@ func (c *Controller) status(ctx context.Context) Status {
 		if h.APIVersion != 0 && h.APIVersion != buildinfo.APIVersion {
 			add("api_mismatch", fmt.Sprintf("the server speaks API v%d; this CLI v%d", h.APIVersion, buildinfo.APIVersion), "install the CLI and server from the same release")
 		}
-		if st.T3 != nil && !st.T3.Connected {
-			msg := "Stage is running; T3 is not connected"
-			if st.T3.LastError != nil {
-				msg += ": " + *st.T3.LastError
-			}
-			add("t3_offline", msg, "start T3 or check T3_URL in "+p.ServiceEnv+"; pair in Settings if needed")
+		for _, hs := range offline(st.Harnesses) {
+			add("harness_offline", offlineMessage("Stage is running; ", hs), "start "+hs.Kind+" or check its settings in "+p.ServiceEnv+" or Settings (`stage harness "+hs.Kind+"`)")
 		}
 	}
 

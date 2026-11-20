@@ -159,7 +159,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	connection := current.ConnectionID
 	if p.ConnectionID.Set {
 		connection = p.ConnectionID.V
-		if err := s.plannedConnection(connection); err != nil {
+		if err := s.plannedConnection(r.Context(), connection); err != nil {
 			return err
 		}
 	}

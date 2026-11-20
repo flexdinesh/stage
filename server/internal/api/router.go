@@ -38,16 +38,11 @@ type Deps struct {
 	// membership) so the release runner reconciles now; nil = no-op. Must
 	// not block.
 	OnTreeChange func()
-	// Setup owns the retained T3 connection settings and pairing endpoints.
-	Setup    *t3setup.Service
-	OpenCode interface {
-		ID() int64
-		Status(context.Context) config.OpenCodeStatus
-		Save(context.Context, config.OpenCodeEdit) error
-		ConnectLocal(ctx context.Context, newInstance bool) error
-		Pair(ctx context.Context, link string, newInstance bool) error
-		Disconnect(context.Context) error
-	}
+	// Setup is the T3 endpoint, read only for the legacy T3 link fields of
+	// task and thread responses and T3 thread refs (nil: none).
+	Setup *t3setup.Service
+	// Connectors is the connection setup per connected harness kind.
+	Connectors harness.Connectors
 	// Harnesses is the server's fixed harness composition (nil: none).
 	Harnesses *harness.Registry
 	// Profile is this machine's hosting profile (GET /api/harnesses).
@@ -87,16 +82,6 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/health", s.health)
 
-	h("GET /api/t3/status", s.t3Status)
-	h("POST /api/t3/pair", s.t3Pair)
-	h("POST /api/t3/pair/auto", s.t3PairAuto)
-	h("DELETE /api/t3/pair", s.t3Unpair)
-	h("PUT /api/t3/url", s.t3SetURL)
-	h("GET /api/opencode/status", s.openCodeStatus)
-	h("PUT /api/opencode/settings", s.openCodeSettings)
-	h("DELETE /api/opencode/settings", s.openCodeDisconnect)
-	h("POST /api/opencode/connect-local", s.openCodeConnectLocal)
-	h("POST /api/opencode/pair", s.openCodePair)
 	h("POST /api/sync", s.runSync)
 	h("GET /api/catalog", s.catalog)
 
@@ -111,6 +96,10 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/projects/{id}/binding", s.unbindProject)
 	h("DELETE /api/projects/{id}/bindings/{connectionId}", s.unbindProject)
 	h("GET /api/harnesses", s.listHarnesses)
+	h("GET /api/harnesses/{kind}/status", s.harnessStatus)
+	h("PUT /api/harnesses/{kind}/settings", s.harnessSettings)
+	h("POST /api/harnesses/{kind}/actions/{action}", s.harnessAction)
+	h("DELETE /api/harnesses/{kind}/connection", s.harnessDisconnect)
 	h("GET /api/connections", s.connections)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
@@ -211,8 +200,9 @@ func (s *server) treeChanged() {
 }
 
 // Health is GET /api/health: whether this is a live Stage server with a
-// working database, which build it is, and (separately) whether T3 is
-// connected. T3 being offline does not make the server unhealthy.
+// working database, which build it is, and (separately) each connected
+// harness's last known state. A harness being offline does not make the
+// server unhealthy.
 type Health struct {
 	Status     string     `json:"status"` // ok | error (database unreachable)
 	DB         string     `json:"db"`     // ok | error
@@ -227,14 +217,18 @@ type Health struct {
 	Schema int64 `json:"schema"`
 	// PublicURL is STAGE_PUBLIC_URL, null when unset: the address copied
 	// Stage links use on hosts whose own origin is not shareable (desktop).
-	PublicURL *string  `json:"publicUrl"`
-	T3        HealthT3 `json:"t3"`
+	PublicURL *string `json:"publicUrl"`
+	// Harnesses is each connector's memory-only summary, in registry order.
+	Harnesses []HealthHarness `json:"harnesses"`
 }
 
-// HealthT3 is the T3 connection state in Health.
-type HealthT3 struct {
-	Connected bool    `json:"connected"`
-	LastError *string `json:"lastError"`
+// HealthHarness is one connected harness in Health.
+type HealthHarness struct {
+	Kind         string  `json:"kind"`
+	ConnectionID int64   `json:"connectionId"`
+	Configured   bool    `json:"configured"`
+	Connected    bool    `json:"connected"`
+	LastError    *string `json:"lastError"`
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -250,13 +244,15 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	if u := strings.TrimRight(s.Config.PublicURL, "/"); u != "" {
 		h.PublicURL = &u
 	}
-	if s.Setup != nil {
-		st := s.Setup.Status(r.Context(), false).Conn
-		h.T3.Connected = st.Connected
-		if st.LastError != "" {
-			h.T3.LastError = &st.LastError
+	h.Harnesses = []HealthHarness{}
+	s.Connectors.Each(func(d harness.Descriptor, c harness.Connector) {
+		sum := c.Summary(r.Context())
+		hh := HealthHarness{Kind: d.Kind, ConnectionID: sum.ConnectionID, Configured: sum.Configured, Connected: sum.Connected}
+		if sum.LastError != "" {
+			hh.LastError = &sum.LastError
 		}
-	}
+		h.Harnesses = append(h.Harnesses, hh)
+	})
 	status := http.StatusOK
 	if v, err := s.Store.SchemaVersion(r.Context()); err != nil {
 		h.Status, h.DB, status = "error", "error", http.StatusServiceUnavailable

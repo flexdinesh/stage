@@ -6,78 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-func (s *server) openCodeStatus(w http.ResponseWriter, r *http.Request) error {
-	if s.OpenCode == nil {
-		return db.Conflict("OpenCode setup is unavailable on this server.")
-	}
-	writeJSON(w, 200, s.OpenCode.Status(r.Context()))
-	return nil
-}
-func (s *server) openCodeSettings(w http.ResponseWriter, r *http.Request) error {
-	if s.OpenCode == nil {
-		return db.Conflict("OpenCode setup is unavailable on this server.")
-	}
-	var in config.OpenCodeEdit
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if err := s.OpenCode.Save(r.Context(), in); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *server) openCodeConnectLocal(w http.ResponseWriter, r *http.Request) error {
-	if s.OpenCode == nil {
-		return db.Conflict("OpenCode setup is unavailable on this server.")
-	}
-	var in struct {
-		NewInstance bool `json:"newInstance"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if err := s.OpenCode.ConnectLocal(r.Context(), in.NewInstance); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-func (s *server) openCodePair(w http.ResponseWriter, r *http.Request) error {
-	if s.OpenCode == nil {
-		return db.Conflict("OpenCode setup is unavailable on this server.")
-	}
-	var in struct {
-		Link        string `json:"link"`
-		NewInstance bool   `json:"newInstance"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if err := s.OpenCode.Pair(r.Context(), in.Link, in.NewInstance); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-func (s *server) openCodeDisconnect(w http.ResponseWriter, r *http.Request) error {
-	if s.OpenCode == nil {
-		return db.Conflict("OpenCode setup is unavailable on this server.")
-	}
-	if err := s.OpenCode.Disconnect(r.Context()); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *server) plannedConnection(id int64) error {
-	if s.OpenCode != nil && s.OpenCode.ID() == id {
+// plannedConnection: id has an adapter or is a connector's active
+// connection (set up or not).
+func (s *server) plannedConnection(ctx context.Context, id int64) error {
+	if _, _, ok := s.Connectors.Owner(ctx, id); ok {
 		return nil
 	}
 	_, err := s.Sync.Adapter(id)
@@ -126,7 +61,7 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := []db.HarnessConnection{}
 	for _, c := range cs {
-		if !c.Active || s.plannedConnection(c.ID) == nil {
+		if !c.Active || s.plannedConnection(r.Context(), c.ID) == nil {
 			out = append(out, s.configured(r.Context(), c))
 		}
 	}
@@ -138,12 +73,12 @@ func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.Harn
 		c.Configured = false
 		return c
 	}
+	if _, k, ok := s.Connectors.Owner(ctx, c.ID); ok {
+		c.Configured = k.Summary(ctx).Configured
+		return c
+	}
 	_, adapterErr := s.Sync.Adapter(c.ID)
 	c.Configured = adapterErr == nil
-	if c.Harness == db.HarnessT3 && s.Setup != nil {
-		st := s.Setup.Status(ctx, false)
-		c.Configured = st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != "default"
-	}
 	return c
 }
 

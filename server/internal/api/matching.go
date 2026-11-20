@@ -81,7 +81,7 @@ func (s *server) sharedPaths(w http.ResponseWriter, r *http.Request) error {
 		if err := decodeStrict(r, &p); err != nil {
 			return err
 		}
-		if err := s.plannedConnection(p.ConnectionID); err != nil {
+		if err := s.plannedConnection(r.Context(), p.ConnectionID); err != nil {
 			return err
 		}
 		if err := s.Store.SetSharedPath(r.Context(), p); err != nil {

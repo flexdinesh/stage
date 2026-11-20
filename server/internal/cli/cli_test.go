@@ -24,8 +24,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	stageharness "github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -55,10 +57,18 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log})
+	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	connectors, err := stageharness.NewConnectors(reg, map[string]stageharness.Connector{
+		t3.Kind: t3setup.NewConnector(setup, nil), opencode.Kind: opencodesetup.NewConnector(openCode),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h.handler = api.NewRouter(api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
-		Store:  store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log}), Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
-		OpenCode: openCode,
+		Store:  store, Setup: setup, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Harnesses: reg, Connectors: connectors,
 	})
 	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)

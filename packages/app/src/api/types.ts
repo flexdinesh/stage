@@ -84,7 +84,7 @@ export type Workspace =
 
 // ---- Health ----
 
-/** GET /api/health: a live Stage server (status/db) and, separately, its T3 connection. */
+/** GET /api/health: a live Stage server (status/db) and, separately, each connected harness's last known state. */
 export interface Health {
   status: "ok" | "error";
   db: "ok" | "error";
@@ -96,7 +96,7 @@ export interface Health {
   apiVersion: number;
   instanceId: string;
   startedAt: string | null;
-  t3: { connected: boolean; lastError: string | null };
+  harnesses: { kind: Harness; connectionId: number; configured: boolean; connected: boolean; lastError: string | null }[];
 }
 
 // ---- T3 connection / sync / catalog ----
@@ -125,7 +125,7 @@ export interface T3SyncProgress {
   threads: number;
 }
 
-/** GET /api/t3/status (also the body of pair, auto-pair and set-URL). */
+/** The details of GET /api/harnesses/t3/status (also of its settings, actions and disconnect replies). */
 export interface T3Status {
   /** Holds a valid token (unchanged meaning). */
   connected: boolean;
@@ -280,15 +280,47 @@ export type Harness = string;
 /** A closure signal the harness reports and the copy that names it (an inferred completion's provenance). */
 export interface HarnessClosure { signal: string; provenance: Acceptance["provenance"]; setting: string; completed: string; via: string }
 /** GET /api/harnesses: one harness kind, its policies and copy, and whether this machine can run it. */
+/** A connection setup setting or action input; settings are one object keyed by id (null resets). */
+export interface SetupField {
+  id: string;
+  label: string;
+  kind: "text" | "url" | "secret" | "bool";
+  /** The server environment variable that locks it when set. */
+  env?: string;
+  help?: string;
+}
+export interface SetupAction { id: string; label: string; input?: SetupField[] }
+/** A harness's connection setup schema; hosts render it unless they register a panel for the kind. */
+export interface HarnessSetup { fields: SetupField[]; actions: SetupAction[]; disconnect: boolean }
 export interface HarnessDescriptor {
   kind: Harness;
   name: string;
   /** connected: Stage connects to its service; hosted: it runs as processes on Stage's machine. */
   hosting: "connected" | "hosted";
   closures: HarnessClosure[];
+  setup: HarnessSetup;
   available: boolean;
   /** Why it cannot run here (e.g. Stage runs in a container); "" when available. */
   reason?: string;
+  /** This server has connection setup for it (/harnesses/{kind}/status and friends). */
+  connectable: boolean;
+}
+/** GET /api/harnesses/{kind}/status; D is the harness's own details (its panel's state). */
+export interface HarnessStatus<D = unknown> {
+  kind: Harness;
+  name: string;
+  connectionId: number;
+  configured: boolean;
+  connected: boolean;
+  lastError?: string;
+  /** A harness-defined word: connected, unpaired, unavailable... */
+  state: string;
+  reason?: string;
+  fields: { id: string; value: string; set: boolean; source: "env" | "saved" | "default"; locked: boolean }[];
+  actions: { id: string; available: boolean; reason?: string }[];
+  details?: D;
+  /** The connection a setting change or action just retired. */
+  replaced?: ReplacedConnection | null;
 }
 /** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
 export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }

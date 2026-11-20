@@ -66,10 +66,10 @@ Mutating commands print a report:
  "socket": {"path": "...", "exists": true, "locked": true},
  "lock": {"held": true, "holder": {"pid": 4242, "instanceId": "...", "managed": true, "manager": "systemd", "...": "..."}, "ownedByService": true},
  "stage": {"url": "unix://...", "reachable": true, "ready": true, "version": "1.2.0", "apiVersion": 1, "instanceId": "...", "db": "ok"},
- "t3": {"connected": false, "lastError": "..."},
+ "harnesses": [{"kind": "t3", "configured": true, "connected": false, "lastError": "..."}],
  "logs": {"kind": "journald", "unit": "stage.service"},
  "cli": {"version": "1.2.0", "apiVersion": 1, "exe": "...", "agentResolvesService": true},
- "problems": [{"code": "t3_offline", "message": "...", "fix": "..."}]}
+ "problems": [{"code": "harness_offline", "message": "...", "fix": "..."}]}
 ```
 
 `state` is `not-installed`, `stopped`, `starting`, `running`, `stopping`,
@@ -80,7 +80,7 @@ foreground server). Problem codes: `manager_unavailable`,
 `definition_foreign`, `definition_stale`, `definition_shadowed`,
 `needs_reload`, `unit_masked`, `start_limit_hit`, `exe_missing`,
 `exe_differs`, `env_mismatch`, `service_env_invalid`, `foreground_holder`,
-`version_differs`, `api_mismatch`, `t3_offline`, `linger_off`,
+`version_differs`, `api_mismatch`, `harness_offline`, `linger_off`,
 `agent_socket_mismatch`.
 
 | Exit | Meaning |
@@ -94,9 +94,12 @@ foreground server). Problem codes: `manager_unavailable`,
 | 6 | no usable service manager |
 | 7 | invalid configuration: refused executable, invalid `service.env`, foreign or shadowed definition, masked unit, run as root |
 
-**T3 is separate.** Stage being ready and T3 being reachable are reported
-apart (`stage`, `t3`, the `t3_offline` problem). A missing or offline T3
-never fails `start`; it adds a note. Stage does not start or manage T3.
+**Harnesses are separate.** Stage being ready and its harnesses being
+reachable are reported apart (`stage`, `harnesses` from health, one
+`harness_offline` problem per harness that is set up but not connected;
+`harnesses` is null while Stage is not reachable). A missing or offline
+harness never fails `start`; it adds a note. Stage does not start or manage
+connected harnesses (T3, OpenCode).
 
 ## Paths per identity
 
@@ -142,14 +145,16 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   inherited environment (`systemctl --user import-environment`,
   `launchctl setenv` can leak them), so the service never depends on a shell
   or on webview storage. A missing file means the template defaults.
-- T3 credentials: pairing (Settings, `stage t3 pair`, or a `t3 pair` code)
-  stores Stage's T3 token in `stage.db`, so a service needs nothing else. A T3
-  URL saved in Settings (`stage t3 url`) is stored there too; `T3_URL` wins
+- T3 credentials: pairing (Settings, `stage harness t3 run auto-pair`, or a
+  `t3 pair` code: `stage harness t3 run pair code=CODE`) stores Stage's T3
+  token in `stage.db`, so a service needs nothing else. A T3 URL saved in
+  Settings (`stage harness t3 set url=URL`) is stored there too; `T3_URL` wins
   over it. `T3_ADMIN_TOKEN` is optional
   (auto-renew) and is never assumed inherited by GUI launches.
-- OpenCode credentials: an `opencode pair` token (Settings, `stage opencode
-  pair LINK`) or entered credentials are stored in `stage.db`. A local
-  connection (`stage opencode connect`) reads the OpenCode registration file
+- OpenCode credentials: an `opencode pair` token (Settings, `stage harness
+  opencode run pair link=LINK`) or entered credentials are stored in
+  `stage.db`. A local connection (`stage harness opencode run connect-local`)
+  reads the OpenCode registration file
   under the service's `XDG_STATE_HOME` (else `~/.local/state`) each time.
 - `stage service start` validates the file before starting, so a bad file is
   an error there (exit 7) instead of a restart loop.

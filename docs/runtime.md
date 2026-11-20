@@ -102,7 +102,7 @@ Startup order:
 1. **Lock the data dir.** If it is held, exit at once (status 75) with `data dir … is in use by another stage server (pid N, version V, listening on …)`, plus a hint to run `stage service stop` when the holder is the managed service. The server does not wait. It also starts nothing and binds nothing.
 2. **Open every listener in order.** For a socket, take its lock. Under the lock, an existing socket file that refuses connections is stale (its owner died) and is replaced. A regular file is refused. So is a socket that answers (a server predating the lock) or one that cannot be probed. If any bind fails, the listeners already opened are closed, their sockets removed and their locks released. The database has not been touched yet.
 3. Record the holder in `stage.lock`.
-4. Open the database and guard its schema ([below](#schema-and-backups)): a schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Migrate, start T3 (its URL: `T3_URL`, else the one saved with `PUT /api/t3/url` or `stage t3 url`, else `http://127.0.0.1:3773`), recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
+4. Open the database and guard its schema ([below](#schema-and-backups)): a schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Migrate, start T3 (its URL: `T3_URL`, else the one saved with the T3 `url` setting (`PUT /api/harnesses/t3/settings` or `stage harness t3 set url=URL`), else `http://127.0.0.1:3773`), recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
 5. Serve all listeners, then send `READY=1` to systemd.
 
 `filelock.Acquire` retries for up to 500 ms. A client briefly probing a
@@ -186,13 +186,14 @@ binary knows; `/api/health` `schema` is the database's.
 
 - It answers 200 with build and instance metadata whenever the server and its
   database work.
-- T3 being offline is still 200, with `t3.connected: false`. "Stage is live
-  and ready" is therefore separate from "T3 is reachable".
-- It never calls T3, so it answers at once while T3 hangs (desktop polls it
-  every 5s). `t3.connected` reads memory only: a valid token T3 has not
-  rejected. Reachability (a 10s-cached probe of
+- A harness being offline is still 200 (`harnesses[].connected: false`).
+  "Stage is live and ready" is therefore separate from "a harness is
+  reachable".
+- It never calls a harness, so it answers at once while T3 hangs (desktop
+  polls it every 5s). `harnesses` reads each connector's memory-only summary
+  (T3: a valid token T3 has not rejected). T3's reachability (a 10s-cached probe of
   `{T3 URL}/.well-known/t3/environment`), the setup state and auto-pair are
-  `GET /api/t3/status` ([api.md](api.md#get-apit3status)), which refreshes a
+  `GET /api/harnesses/t3/status` ([api.md](api.md#t3-details)), which refreshes a
   stale probe for at most 3s.
 - 503 means the database query failed.
 - It does not expose paths or the pid.
@@ -261,7 +262,7 @@ nor listed in `STAGE_ALLOWED_ORIGINS` now gets 403. Add it before upgrading.
 
 ## OpenCode connection
 
-Settings connect OpenCode three ways: the service on the Stage server's machine (Settings or `stage opencode connect`), a remote service through a link from `opencode pair` on its host (`stage opencode pair LINK`), or an address with optional HTTP Basic credentials. `stage opencode disconnect` (or Disconnect in Settings) forgets the address and credentials; tasks and history stay.
+Settings connect OpenCode three ways: the service on the Stage server's machine (Settings or `stage harness opencode run connect-local`), a remote service through a link from `opencode pair` on its host (`stage harness opencode run pair link=LINK`), or an address with optional HTTP Basic credentials. `stage harness opencode disconnect` (or Disconnect in Settings) forgets the address and credentials; tasks and history stay.
 
 - Local: Stage reads the service's registration file, `$XDG_STATE_HOME/opencode/service.json`, else `~/.local/state/opencode/service.json` (macOS too), in the Stage server's environment. It uses the file's `url` and authenticates as `opencode` with its `password`, which is never stored. Each health check re-reads the file and rebuilds the connection when the password or address changed; a new address passes the same continuity check as an edited one.
 - Paired: the link's code is redeemed once for a 30-day session token, stored like a password. Stage renews it after 7 days through the service (`POST /api/pair`); a failed renewal keeps the old token, logs a warning and retries after an hour. A server password change on the OpenCode host revokes the token (state `rejected`): pair again.

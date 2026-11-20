@@ -168,11 +168,18 @@ func (w *world) health(_ context.Context, url string) (client.Health, error) {
 		return client.Health{}, errors.New("stage unreachable")
 	}
 	h := client.Health{Status: "ok", DB: "ok", Service: "stage", Identity: "stage", Version: buildinfo.Version, APIVersion: buildinfo.APIVersion, InstanceID: w.srv.instance}
-	h.T3.Connected = w.t3Online
+	var lastErr *string
 	if !w.t3Online {
 		e := "dial tcp 127.0.0.1:3773: connection refused"
-		h.T3.LastError = &e
+		lastErr = &e
 	}
+	h.Harnesses = append(h.Harnesses, struct {
+		Kind         string  `json:"kind"`
+		ConnectionID int64   `json:"connectionId"`
+		Configured   bool    `json:"configured"`
+		Connected    bool    `json:"connected"`
+		LastError    *string `json:"lastError"`
+	}{Kind: "t3", ConnectionID: 1, Configured: true, Connected: w.t3Online, LastError: lastErr})
 	return h, nil
 }
 

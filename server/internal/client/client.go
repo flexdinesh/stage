@@ -426,10 +426,14 @@ type Health struct {
 	InstanceID string     `json:"instanceId"`
 	StartedAt  *time.Time `json:"startedAt"`
 	Schema     int64      `json:"schema"`
-	T3         struct {
-		Connected bool    `json:"connected"`
-		LastError *string `json:"lastError"`
-	} `json:"t3"`
+	// Harnesses is each connected harness's last known state.
+	Harnesses []struct {
+		Kind         string  `json:"kind"`
+		ConnectionID int64   `json:"connectionId"`
+		Configured   bool    `json:"configured"`
+		Connected    bool    `json:"connected"`
+		LastError    *string `json:"lastError"`
+	} `json:"harnesses"`
 }
 
 // Health fetches GET /api/health. A 503 (database down) still returns the

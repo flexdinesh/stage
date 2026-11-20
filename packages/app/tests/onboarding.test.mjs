@@ -130,30 +130,35 @@ test("disconnect shows only with a stored token and locks while an admin token r
   assert.equal(disconnectAvailability(status({ adminTokenConfigured: true })), "hidden");
 });
 
-test("disconnect sends DELETE /t3/pair and returns a normalized status", async () => {
+const reply = (details, replaced) => ({ kind: "t3", name: "T3", connectionId: 1, configured: true, connected: details.connected, state: details.state ?? "unpaired", fields: [], actions: [], details, ...(replaced ? { replaced } : {}) });
+
+test("disconnect sends DELETE /harnesses/t3/connection and returns the normalized details", async () => {
   const seen = [];
   const { api } = fakeApi(async (path, init) => {
     seen.push({ path, method: init.method, body: init.body });
-    return Response.json(base);
+    return Response.json(reply(base));
   });
   const s = await api.disconnectT3();
   assert.equal(s.state, "unpaired");
   assert.equal(s.tokenExpiresAt, null);
-  assert.deepEqual(seen, [{ path: "/t3/pair", method: "DELETE", body: undefined }]);
+  assert.deepEqual(seen, [{ path: "/harnesses/t3/connection", method: "DELETE", body: undefined }]);
 });
 
-test("auto-pair and set-URL hit their endpoints and return a normalized status", async () => {
+test("auto-pair and set-URL hit their harness endpoints and return the normalized details", async () => {
   const seen = [];
+  const replaced = { id: 1, harness: "t3", label: "box a", active: false };
   const { api } = fakeApi(async (path, init) => {
     seen.push({ path, method: init.method, body: init.body });
-    return Response.json({ ...base, connected: true, state: "connected" });
+    return Response.json(reply({ ...base, connected: true, state: "connected" }, path.includes("auto-pair") ? replaced : undefined));
   });
-  assert.equal((await api.autoPair()).state, "connected");
+  const paired = await api.autoPair();
+  assert.equal(paired.state, "connected");
+  assert.deepEqual(paired.replaced, replaced, "the replaced connection rides along with the details");
   assert.equal((await api.setT3Url({ url: "http://127.0.0.1:4000" })).state, "connected");
   await api.setT3Url({ url: null });
   assert.deepEqual(seen, [
-    { path: "/t3/pair/auto", method: "POST", body: undefined },
-    { path: "/t3/url", method: "PUT", body: JSON.stringify({ url: "http://127.0.0.1:4000" }) },
-    { path: "/t3/url", method: "PUT", body: JSON.stringify({ url: null }) },
+    { path: "/harnesses/t3/actions/auto-pair", method: "POST", body: undefined },
+    { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: "http://127.0.0.1:4000" }) },
+    { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: null }) },
   ]);
 });

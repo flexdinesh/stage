@@ -884,7 +884,8 @@ func (l *Launcher) Identity() string {
 }
 
 // T3PublicURL is T3's public URL as the active server knows it (GET
-// /api/t3/status), for opening a T3 thread in the browser.
+// /api/harnesses/t3/status details), for opening a T3 thread in the
+// browser.
 func (l *Launcher) T3PublicURL(ctx context.Context) (string, error) {
 	l.mu.Lock()
 	t := l.connected
@@ -892,12 +893,15 @@ func (l *Launcher) T3PublicURL(ctx context.Context) (string, error) {
 	if t.IsZero() {
 		return "", errors.New("the Stage server is not connected")
 	}
-	var st struct {
-		PublicURL *string `json:"publicUrl"`
+	var reply struct {
+		Details struct {
+			PublicURL *string `json:"publicUrl"`
+		} `json:"details"`
 	}
-	if err := l.cfg.Get(ctx, t, "/api/t3/status", &st); err != nil {
+	if err := l.cfg.Get(ctx, t, "/api/harnesses/t3/status", &reply); err != nil {
 		return "", err
 	}
+	st := reply.Details
 	if st.PublicURL == nil || strings.TrimSpace(*st.PublicURL) == "" {
 		return "", errors.New("T3 has no public URL configured")
 	}
