@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, clockTime, dayLabel, executionModes, groupByDay, shortDate } from "../src/lib/format.ts";
+import { age, capCount, clockTime, dayLabel, executionModes, groupByDay, shortDate } from "../src/lib/format.ts";
 
 // Local times, so the expectations hold in any TZ.
 const now = new Date(2026, 10, 16, 15, 0).getTime();
@@ -65,4 +65,12 @@ test("executionModes prefers executionConfig over stale legacy fields", () => {
     executionModes({ ...legacy, executionConfig: { ...config, permission: "auto", mode: "plan" } }),
     { permission: "auto", mode: "plan" },
   );
+});
+
+test("capCount caps a badge at 99+", () => {
+  assert.equal(capCount(0), "0");
+  assert.equal(capCount(7), "7");
+  assert.equal(capCount(99), "99");
+  assert.equal(capCount(100), "99+");
+  assert.equal(capCount(1234), "99+");
 });
