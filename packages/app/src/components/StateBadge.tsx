@@ -1,4 +1,5 @@
 import type { NotificationEvent, TaskState, ThreadStatus } from "../api/types.ts";
+import type { StatusChip } from "../lib/tasks.ts";
 import { Chip, type ChipTone } from "./ui.tsx";
 
 const TASK_TONES: Record<TaskState, ChipTone> = {
@@ -41,6 +42,21 @@ const THREAD_TONES: Record<ThreadStatus, ChipTone> = {
 
 export const taskStateLabel = (s: TaskState) => TASK_LABELS[s];
 export const taskStateTone = (s: TaskState) => TASK_TONES[s];
+
+/** Label and tone of one status chip (see `statusChips`). */
+export function statusChipView(c: StatusChip): { label: string; tone: ChipTone } {
+  switch (c) {
+    case "completed":
+      return { label: "completed", tone: "ok" };
+    case "to_review":
+      return { label: "to review", tone: "done" };
+    case "ready":
+    case "blocked":
+      return { label: c, tone: "idle" };
+    default:
+      return { label: taskStateLabel(c), tone: taskStateTone(c) };
+  }
+}
 
 /** Notification event copy: task states, plus "ready" (a manual tree task whose needs are completed; idle tone). */
 export const notificationEventLabel = (e: NotificationEvent) => (e === "ready" ? "ready" : TASK_LABELS[e]);

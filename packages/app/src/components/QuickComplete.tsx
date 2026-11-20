@@ -38,7 +38,7 @@ export function CompletionLinger({ children }: { children: ReactNode }) {
       },
       reopened: (id) => {
         setLinger((m) => endLinger(m, id));
-        setSaid(`Reopened #${id}`);
+        setSaid(`#${id} back in review`);
       },
     }),
     [linger],

@@ -4,11 +4,11 @@ import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
-import { canStart, statusChips, type StatusChip } from "../../lib/tasks.ts";
+import { canStart, statusChips } from "../../lib/tasks.ts";
 import { dateTime, duration } from "../../lib/format.ts";
 import { inState } from "../../lib/trees.ts";
-import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
-import { AppButton, Button, Chip, type ChipTone, cx, errorText } from "../ui.tsx";
+import { statusChipView } from "../StateBadge.tsx";
+import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
 import { CompletionButton } from "../Completion.tsx";
 import { HARNESS_NAME, isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
@@ -16,24 +16,10 @@ import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
-function chipView(c: StatusChip): { label: string; tone: ChipTone } {
-  switch (c) {
-    case "completed":
-      return { label: "completed", tone: "ok" };
-    case "to_review":
-      return { label: "to review", tone: "done" };
-    case "ready":
-    case "blocked":
-      return { label: c, tone: "idle" };
-    default:
-      return { label: taskStateLabel(c), tone: taskStateTone(c) };
-  }
-}
-
 /** The task's status chips (see `statusChips`). `className` styles an open task's chip (a completed one ignores it). */
 export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness" | "acceptanceId">; className?: string | undefined }) {
   const chips = statusChips(task).map((c) => {
-    const { label, tone } = chipView(c);
+    const { label, tone } = statusChipView(c);
     return (
       <Chip key={c} tone={tone} dot className={task.acceptanceId === null ? className : undefined}>
         {label}
@@ -54,11 +40,11 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
 }
 
 /**
- * The node's one action: Open in T3 while it needs input > Start (ready; a blocked
- * task cannot start) > Retry (failed) > Open in T3. A done or archived tree offers no Start or
- * Retry.
+ * The node's one action: Open in T3 while it needs input > Review (a finished run to complete; off with
+ * `review={false}` beside a State picker) > Start (ready; a blocked task cannot start) > Retry (failed) > Open in T3.
+ * A done or archived tree offers no Start or Retry.
  */
-export function NodeAction({ task, className }: { task: Task; pending: readonly number[]; className?: string }) {
+export function NodeAction({ task, className, review = true }: { task: Task; pending: readonly number[]; className?: string; review?: boolean }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
@@ -74,7 +60,7 @@ export function NodeAction({ task, className }: { task: Task; pending: readonly 
           Open in {HARNESS_NAME[task.harness]}
         </AppButton>
       );
-  } else if (task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
+  } else if (review && task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
     action = <CompletionButton task={task} review />;
   } else if (startable) {
     action = (

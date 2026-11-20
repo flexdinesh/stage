@@ -4,12 +4,13 @@ import { Link } from "react-router";
 import type { Acceptance, AcceptanceRequest, AcceptedEvidence, HarnessConnection, Task } from "../api/types.ts";
 import { useConnections, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
-import { provenanceText } from "../lib/completion.ts";
+import { provenanceText, stateMove } from "../lib/completion.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { MAX_NOTE_BYTES, noteBytes, noteRequest } from "../lib/journal.ts";
-import { isActive } from "../lib/tasks.ts";
-import { taskStateLabel } from "./StateBadge.tsx";
-import { Alert, Button, Checkbox, Drawer, ErrorText, Field, Panel, QueryState, Textarea, cx } from "./ui.tsx";
+import { isActive, statusChips, type StatusChip } from "../lib/tasks.ts";
+import { IconArrowRight } from "./icons.tsx";
+import { statusChipView, taskStateLabel } from "./StateBadge.tsx";
+import { Alert, Button, Checkbox, Chip, Drawer, ErrorText, Field, Panel, QueryState, Textarea, cx } from "./ui.tsx";
 
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 
@@ -48,12 +49,13 @@ export function CompletionButton({ task, review = false }: { task: Task; review?
   const [open, setOpen] = useState(false);
   const completed = task.acceptanceId !== null;
   return <>
-    <Button small={review} variant={completed || review || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Reopen task" : review ? "Review" : "Complete task"}</Button>
-    {open ? <CompletionDrawer task={task} reopen={completed} onClose={() => setOpen(false)} /> : null}
+    <Button small={review} variant={completed || review || isActive(task) ? "secondary" : "primary"} disabled={!completed && isActive(task)} title={!completed && isActive(task) ? "Stop execution before completing this task." : undefined} onClick={() => setOpen(true)}>{completed ? "Change state" : review ? "Review" : "Complete task"}</Button>
+    {open ? <CompletionDrawer task={task} reopen={completed} to={completed ? stateMove(task, new Set()).to : "completed"} onClose={() => setOpen(false)} /> : null}
   </>;
 }
 
-function CompletionDrawer({ task, reopen, onClose }: { task: Task; reopen: boolean; onClose: () => void }) {
+/** Confirm drawer for a state change: completing (evidence review and note) or leaving Completed ("Change state"). */
+export function CompletionDrawer({ task, reopen, to, onClose }: { task: Task; reopen: boolean; to: StatusChip; onClose: () => void }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const [note, setNote] = useState("");
@@ -73,12 +75,13 @@ function CompletionDrawer({ task, reopen, onClose }: { task: Task; reopen: boole
   });
   const tooLong = noteBytes(note) > MAX_NOTE_BYTES;
   const p = preview.data;
-  return <Drawer title={reopen ? "Reopen task" : "Complete task"} onClose={onClose} footer={<>
+  return <Drawer title={reopen ? "Change state" : "Complete task"} onClose={onClose} footer={<>
     <Button variant="ghost" onClick={onClose} disabled={change.isPending}>Cancel</Button>
-    <Button variant="primary" busy={change.isPending} disabled={p === undefined || tooLong || (!reopen && p.blockedReason !== "")} onClick={() => change.mutate()}>{reopen ? "Reopen task" : "Complete task"}</Button>
+    <Button variant="primary" busy={change.isPending} disabled={p === undefined || tooLong || (!reopen && p.blockedReason !== "")} onClick={() => change.mutate()}>{reopen ? "Change state" : "Complete task"}</Button>
   </>}>
     <div className="flex flex-col gap-4">
       <p className="text-body font-medium break-words">#{task.id} {task.title}</p>
+      <StateChange task={task} to={to} />
       <QueryState isPending={preview.isPending} error={preview.error}>
         {p === undefined ? null : <>
           {reopen ? <p className="text-small">Remove current acceptance. Previous results stay in the journal and accepted-result history. This does not start execution.</p> : <><Evidence evidence={p.evidence} /><Field label="Acceptance note (optional)">{(id) => <Textarea id={id} value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder="Why you accept this work" />}</Field>{tooLong ? <p className="text-small text-bad">Keep the note under 16 KiB.</p> : null}</>}
@@ -93,6 +96,19 @@ function CompletionDrawer({ task, reopen, onClose }: { task: Task; reopen: boole
       <Button variant="secondary" busy={preview.isFetching} disabled={change.isPending} onClick={() => { change.reset(); void preview.refetch(); }}>Refresh evidence</Button>
     </div>
   </Drawer>;
+}
+
+/** "[to review] → [completed]": the state a confirm moves the task from and to. */
+function StateChange({ task, to: toChip }: { task: Task; to: StatusChip }) {
+  const from = statusChipView(statusChips(task)[0] ?? task.state);
+  const to = statusChipView(toChip);
+  return (
+    <p className="flex flex-wrap items-center gap-2">
+      <Chip tone={from.tone} dot>{from.label}</Chip>
+      <span className="text-muted"><IconArrowRight size={14} label="to" /></span>
+      <Chip tone={to.tone} dot>{to.label}</Chip>
+    </p>
+  );
 }
 
 const AUTO_COMPLETE_LABEL: Record<HarnessConnection["harness"], string> = {
@@ -113,7 +129,7 @@ export function AutoCompleteToggle({ harness, className }: { harness: HarnessCon
         <Checkbox checked={connection.autoComplete} aria-describedby={hintId} onChange={(e) => save.mutate({ id: connection.id, on: e.target.checked })} />
         <span className="text-small text-fg">{AUTO_COMPLETE_LABEL[harness]}</span>
       </label>
-      <p id={hintId} className="font-mono text-meta text-muted">Only successful runs. Reopen undoes it.</p>
+      <p id={hintId} className="font-mono text-meta text-muted">Only successful runs. Change the task's state to undo it.</p>
       <ErrorText error={save.error} />
     </div>
   );
