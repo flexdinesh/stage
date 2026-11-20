@@ -61,14 +61,9 @@ const quoted = (label: string) => (label === "" ? "" : ` '${label}'`);
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** Where "Open in <harness>" may go: none for a task on a replaced connection (Stage no longer follows it). */
-export function sessionLinks(links: {
-  t3DeepLink: string | null;
-  t3WebUrl?: string | null;
-  links?: { native?: string; web?: string; command?: string };
-  connectionActive?: boolean;
-}): ExecutionLinks | null {
+export function sessionLinks(links: { links?: { native?: string; web?: string; command?: string }; connectionActive?: boolean }): ExecutionLinks | null {
   if (isRetired(links)) return null;
-  return { native: links.links?.native ?? links.t3DeepLink, web: links.links?.web ?? links.t3WebUrl ?? null, command: links.links?.command ?? null };
+  return { native: links.links?.native ?? null, web: links.links?.web ?? null, command: links.links?.command ?? null };
 }
 
 /** The copyable resume command, offered when the host has no destination to open; none on a replaced connection. */

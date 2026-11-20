@@ -179,15 +179,14 @@ type ArtifactLink struct {
 
 type Task struct {
 	ArtifactLinks []ArtifactLink `json:"artifactLinks"`
+	// Links: where the session opens (its harness's destinations).
+	Links execution.Links `json:"links"`
 	db.Task
-	T3WebURL *string `json:"t3WebUrl"`
-	T3AppURL *string `json:"t3AppUrl"`
 }
 
 // TaskDetail is GET /api/tasks/:id.
 type TaskDetail struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
-	Links       execution.Links  `json:"links"`
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
@@ -222,8 +221,6 @@ type CreatedTasks struct {
 // Thread is the API Thread (session) shape.
 type Thread struct {
 	db.Thread
-	T3WebURL *string `json:"t3WebUrl"`
-	T3AppURL *string `json:"t3AppUrl"`
 }
 
 // ThreadDetail is GET /api/connections/1/sessions/:id.
@@ -298,10 +295,8 @@ type CreateTask struct {
 	InitialNote        *string                 `json:"initialNote,omitempty"`
 	TreeID             *int64                  `json:"treeId,omitempty"`
 	Needs              []int64                 `json:"needs,omitempty"`
-	NeedsSessionID     *string                 `json:"needsSessionId,omitempty"`
 	StartMode          *db.StartMode           `json:"startMode,omitempty"`
 	Handoff            *bool                   `json:"handoff,omitempty"`
-	OriginThreadID     *string                 `json:"originThreadId,omitempty"`
 	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
 	StartLocal         *string                 `json:"startLocal,omitempty"`
 	StartTz            *string                 `json:"startTz,omitempty"`
@@ -324,7 +319,6 @@ type CreateSchedule struct {
 	Workspace          *db.Workspace           `json:"workspace,omitempty"`
 	Tags               []string                `json:"tags,omitempty"`
 	Notes              *string                 `json:"notes,omitempty"`
-	OriginThreadID     *string                 `json:"originThreadId,omitempty"`
 	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
 	Cron               string                  `json:"cron"`
 	Tz                 string                  `json:"tz"`
@@ -338,7 +332,6 @@ type Patch map[string]any
 // Followup is the POST /api/tasks/:id/followup body.
 type TaskQuery struct {
 	OriginSession  *db.SessionRef
-	OriginThreadID string
 	ProjectID      *int64
 	States         []string
 	Tag            string
@@ -499,7 +492,6 @@ func (c *Client) Catalog(ctx context.Context) (Catalog, error) {
 // Tasks lists tasks (updatedAt desc).
 func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	q := url.Values{}
-	q.Set("originThreadId", f.OriginThreadID)
 	if f.OriginSession != nil {
 		q.Set("originConnectionId", strconv.FormatInt(f.OriginSession.ConnectionID, 10))
 		q.Set("originSessionId", f.OriginSession.ExternalSessionID)
@@ -879,7 +871,6 @@ type Ref struct {
 	Session      *db.SessionRef  `json:"session"`
 	Kind         string          `json:"kind"` // task | session
 	TaskID       *int64          `json:"taskId"`
-	ThreadID     *string         `json:"threadId"`
 }
 
 // ResolveRef reads a stage link, T3 thread link, #task id or thread id.

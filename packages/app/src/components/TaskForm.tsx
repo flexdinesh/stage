@@ -7,7 +7,6 @@ import {
   type ExecutionConfig,
   type CreateScheduleRequest,
   type CreateTaskRequest,
-  type InteractionMode,
   type ModelDefaults,
   type Preferences,
   type Schedule,
@@ -44,7 +43,7 @@ import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { Combobox } from "./Combobox.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
-import type { ModelConfig } from "./ModelFields.tsx";
+import { prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText } from "./ui.tsx";
@@ -74,8 +73,6 @@ interface FormState {
   projectId: string;
   title: string;
   prompt: string;
-  config: ModelConfig;
-  interactionMode: InteractionMode;
   /** root, worktree from baseRef, or worktree from a need's branch (baseRef retained for an explicit ref choice). */
   workspaceType: WorkspaceChoice;
   baseRef: string;
@@ -112,11 +109,6 @@ type Template = Pick<
   | "projectId"
   | "title"
   | "prompt"
-  | "providerInstanceId"
-  | "model"
-  | "modelOptions"
-  | "runtimeMode"
-  | "interactionMode"
   | "workspace"
   | "tags"
 >;
@@ -126,13 +118,6 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeSt
     projectId: String(t.projectId),
     title: t.title,
     prompt: t.prompt,
-    config: {
-      providerInstanceId: t.providerInstanceId,
-      model: t.model,
-      modelOptions: t.modelOptions,
-      runtimeMode: t.runtimeMode,
-    },
-    interactionMode: t.interactionMode,
     workspaceType: workspaceChoice(t.workspace),
     baseRef: t.workspace.type === "worktree" ? t.workspace.baseRef : "origin/main",
     branch: t.workspace.type === "worktree" ? (t.workspace.branch ?? "") : "",
@@ -172,7 +157,6 @@ function initialState(
   schedule: Schedule | undefined,
   defaultProjectId: number | undefined,
   defaultMode: StartMode | undefined,
-  defaults: ModelDefaults | undefined,
   tree: TreePrefill | undefined,
 ): FormState {
   const tz = browserTimeZone();
@@ -199,16 +183,6 @@ function initialState(
     projectId: defaultProjectId === undefined ? "" : String(defaultProjectId),
     title: "",
     prompt: "",
-    config:
-      defaults === undefined
-        ? { providerInstanceId: null, model: null, modelOptions: [], runtimeMode: "full-access" }
-        : {
-            providerInstanceId: defaults.providerInstanceId,
-            model: defaults.model,
-            modelOptions: defaults.modelOptions,
-            runtimeMode: defaults.runtimeMode,
-          },
-    interactionMode: defaults?.interactionMode ?? "default",
     workspaceType: "root",
     baseRef: "origin/main",
     branch: "",
@@ -268,7 +242,7 @@ function TaskFormDrawer({
   prefill,
 }: TaskFormProps & { prefill: { defaults: ModelDefaults; source: DefaultsSource } | null }) {
   const api = useApi();
-  const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, prefill?.defaults, defaultTree));
+  const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, defaultTree));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
   const invalidate = useInvalidateWork();
@@ -281,8 +255,6 @@ function TaskFormDrawer({
   const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
   // An explicitly chosen harness narrows the picker to projects it can run.
   const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, s.projectId), [projects.data, chosen, s.projectId]);
-  const isT3 = harnesses.harness(connection) === "t3";
-  const openCode = harnesses.harness(connection) === "opencode";
   const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
   const caps = useQuery({
     queryKey: ["capabilities", connection, s.projectId, bound],
@@ -290,18 +262,16 @@ function TaskFormDrawer({
     queryFn: () => api.capabilities(connection, Number(s.projectId)),
     retry: false,
   });
-  const acceptsImages = caps.data?.operations.images?.available ?? isT3;
-  const supportsPredecessor = caps.data?.operations.predecessorBase?.available ?? isT3;
+  // Until the harness answers, nothing is ruled out: the server checks the launch.
+  const operation = (id: string) => caps.data?.operations[id]?.available ?? true;
+  const acceptsImages = operation("images");
+  const supportsPredecessor = operation("predecessorBase");
+  // A harness that chooses the worktree base and branch itself takes neither from Stage.
+  const harnessWorktree = !operation("worktreeBase");
   const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
-  const legacy: ExecutionConfig = {
-    model: s.config.providerInstanceId && s.config.model ? JSON.stringify([s.config.providerInstanceId, s.config.model]) : "",
-    options: s.config.modelOptions,
-    permission: s.config.runtimeMode,
-    mode: s.interactionMode,
-  };
-  const originalConfig = existing?.executionConfig ?? (!existing && isT3 ? prefill?.defaults.executionConfig : undefined);
-  const hasLegacyConfig = existing ? harnesses.harness(existing.connectionId) === "t3" : isT3 && prefill !== null;
-  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : hasLegacyConfig ? legacy : harnessDefaults;
+  const prefilled = existing ? undefined : prefillConfig(prefill?.defaults, harnesses.harness(connection));
+  const originalConfig = existing?.executionConfig ?? prefilled;
+  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : harnessDefaults;
   // New-task prefill carries model and options only; mode and permission start at the harness default.
   const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
   const effectiveConfig = draftConfig ?? initialConfig;
@@ -351,7 +321,7 @@ function TaskFormDrawer({
   const previewError = mode === "repeat" && !previewStale && preview.isError ? errorText(preview.error) : null;
 
   function template() {
-    const workspace: Workspace = openCode && wsChoice === "worktree"
+    const workspace: Workspace = harnessWorktree && wsChoice === "worktree"
       ? { type: "worktree", baseRef: "", branch: null }
       : choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId);
     return {
@@ -415,8 +385,8 @@ function TaskFormDrawer({
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
     full && unverifiedConfig && "verify or clear saved settings",
     full && !acceptsImages && images.items.length > 0 && "remove images",
-    full && openCode && wsChoice !== "root" && (wsChoice === "predecessor" || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
-    !openCode && wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
+    full && harnessWorktree && wsChoice !== "root" && (wsChoice === "predecessor" || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
+    !harnessWorktree && wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -541,7 +511,7 @@ function TaskFormDrawer({
           }
         </Field>
         {connection ? <>
-          <HarnessFields config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} openCode={openCode} disabled={!full}/>
+          <HarnessFields config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} disabled={!full}/>
           <ErrorText error={caps.error}/>
           {unverifiedConfig ? <p className="text-small">Connect and bind this harness to verify saved choices, or clear each unavailable choice above.</p> : null}
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
@@ -553,11 +523,11 @@ function TaskFormDrawer({
               label="Workspace"
               options={workspaces}
               value={wsChoice}
-              onChange={(workspaceType) => set(openCode ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
+              onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
             />
           </div>
-          {openCode && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>OpenCode chooses the worktree base and branch. Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use OpenCode worktree defaults</Button></Alert> : null}
-          {!openCode && wsChoice !== "root" ? (
+          {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
+          {!harnessWorktree && wsChoice !== "root" ? (
             <>
               <Field
                 label={wsChoice === "predecessor" ? "Configured base ref" : "Base ref"}
@@ -565,15 +535,15 @@ function TaskFormDrawer({
               >
                 {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
               </Field>
-              <Field label="Branch" hint={mode === "repeat" ? "Empty = T3 picks a name each run." : "Empty = T3 picks a name."}>
+              <Field label="Branch" hint={mode === "repeat" ? `Empty = ${harnesses.name(connection)} picks a name each run.` : `Empty = ${harnesses.name(connection)} picks a name.`}>
                 {(id) => <Input id={id} value={s.branch} onChange={(e) => set({ branch: e.target.value })} />}
               </Field>
             </>
           ) : null}
         </fieldset>
-        {prefill === null || !isT3 || draftConfig ? null : (
+        {prefilled === undefined || draftConfig ? null : (
           <p className="-mt-1.5 font-mono text-meta-sm text-muted">
-            {prefill.source === "pinned"
+            {prefill?.source === "pinned"
               ? "model and mode prefilled from your pinned default (Settings)"
               : "model and mode prefilled from your last task · pin a default in Settings"}
           </p>

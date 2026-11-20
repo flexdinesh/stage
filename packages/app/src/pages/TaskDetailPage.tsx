@@ -35,7 +35,7 @@ import {
   QueryState,
   cx,
 } from "../components/ui.tsx";
-import { dateTime, executionModes, modelText, relativeTime, workspaceText } from "../lib/format.ts";
+import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
@@ -195,7 +195,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
         {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
         <ReplacedChip task={task} />
-        <Chip>{task.harness === "t3" ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "OpenCode default"}</Chip>
+        <Chip>{configModelText(task.executionConfig)}</Chip>
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceChip(task)}</Chip>
@@ -330,43 +330,18 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
 
 function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
   const destination = useSessionDestination();
-  if (task.harness !== "t3") {
-    const session = task.session;
+  const title = `${useHarnesses().kindName(task.harness)} session`;
+  const session = task.session;
+  if (session === null) {
     return (
-      <Panel title="OpenCode session">
-        {session === null ? (
-          <Muted>No session attached.</Muted>
-        ) : (
-          <>
-            <Details>
-              <Detail label="Session id">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0 truncate" title={session.externalSessionId}>
-                    {session.externalSessionId}
-                  </span>
-                  <CopyButton text={session.externalSessionId} label="Copy" />
-                </span>
-              </Detail>
-            </Details>
-            {destination(task) === null ? (
-              <Link to="/settings" className={cx("mt-3 inline-block text-small", linkClass)}>
-                Configure browser address
-              </Link>
-            ) : null}
-          </>
-        )}
+      <Panel title={title}>
+        <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No session yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
       </Panel>
     );
   }
-  if (task.externalSessionId === null) {
-    return (
-      <Panel title="Thread">
-        <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No T3 thread yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
-      </Panel>
-    );
-  }
+  // Sessions Stage mirrors (thread history) carry run state; others only their id.
   return (
-    <Panel title="Thread" meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>
+    <Panel title={title} meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>
       <Details>
         {thread === null ? null : (
           <>
@@ -391,15 +366,20 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
             <Detail label="Synced">{when(thread.syncedAt)}</Detail>
           </>
         )}
-        <Detail label="Thread id">
+        <Detail label="Session id">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate" title={task.externalSessionId}>
-              {task.externalSessionId}
+            <span className="min-w-0 truncate" title={session.externalSessionId}>
+              {session.externalSessionId}
             </span>
-            <CopyButton text={task.externalSessionId} label="Copy" />
+            <CopyButton text={session.externalSessionId} label="Copy" />
           </span>
         </Detail>
       </Details>
+      {destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
+        <Link to="/settings" className={cx("mt-3 inline-block text-small", linkClass)}>
+          Configure browser address
+        </Link>
+      ) : null}
     </Panel>
   );
 }
@@ -414,15 +394,9 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
           {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
           {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
         </Detail>
-        {task.harness !== "t3" ? <>
-          <Detail label="Model">{modelText(task.executionConfig?.model || "Harness default", task.executionConfig?.options ?? [])}</Detail>
-          <Detail label="Agent">{task.executionConfig?.mode || "Harness default"}</Detail>
-        </> : <>
-        <Detail label="Provider">{task.providerInstanceId ?? "T3 default"}</Detail>
-        <Detail label="Model">{modelText(task.model, task.modelOptions)}</Detail>
-        <Detail label="Runtime">{task.executionConfig ? task.executionConfig.permission || "Harness default" : task.runtimeMode}</Detail>
-        <Detail label="Interaction">{task.executionConfig ? task.executionConfig.mode || "Harness default" : task.interactionMode}</Detail>
-        </>}
+        <Detail label="Model">{configModelText(task.executionConfig)}</Detail>
+        <Detail label="Permission">{executionModes(task).permission || "Harness default"}</Detail>
+        <Detail label="Mode">{executionModes(task).mode || "Harness default"}</Detail>
         <Detail label="Workspace">
           {predecessorWorkspaceText(task, task.currentLaunchBase) ?? workspaceText(task.workspace)}
           {task.currentLaunchBase?.reason == null ? null : (
@@ -448,7 +422,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         {task.originSession === null ? null : (
           <Detail label="Created by">
             <Link to={`/tasks/${task.id}?batch=1`} className={linkClass}>
-              {task.originThreadTitle ?? task.originSession.externalSessionId}
+              {task.originSessionTitle ?? task.originSession.externalSessionId}
             </Link>
           </Detail>
         )}

@@ -92,8 +92,7 @@ const task = (extra = {}) => ({
   treeStatus: null,
   state: "failed",
   externalSessionId: "thread-9",
-  t3DeepLink: "t3code://threads/env/thread-9",
-  t3WebUrl: "http://t3/thread-9",
+  links: { native: "t3code://threads/env/thread-9", web: "http://t3/thread-9" },
   ...extra,
 });
 
@@ -110,15 +109,15 @@ test("a retired task has no Open in harness destination", () => {
   assert.equal(sessionLinks(task()), null);
   assert.deepEqual(sessionLinks(task({ connectionActive: true })), { native: "t3code://threads/env/thread-9", web: "http://t3/thread-9", command: null });
   // Notifications and waiting sessions carry no connectionActive: their links stay.
-  assert.deepEqual(sessionLinks({ t3DeepLink: null, links: { web: "http://oc/s" } }), { native: null, web: "http://oc/s", command: null });
+  assert.deepEqual(sessionLinks({ links: { web: "http://oc/s" } }), { native: null, web: "http://oc/s", command: null });
 });
 
 test("a session with only a resume command offers it to copy, never on a replaced connection", () => {
-  const cli = { t3DeepLink: null, links: { command: "harness resume s-1" } };
+  const cli = { links: { command: "harness resume s-1" } };
   assert.deepEqual(sessionLinks(cli), { native: null, web: null, command: "harness resume s-1" });
   assert.equal(resumeCommand(cli), "harness resume s-1");
   assert.equal(resumeCommand({ ...cli, connectionActive: false }), null);
-  assert.equal(resumeCommand({ t3DeepLink: null, links: { web: "http://oc/s" } }), null);
+  assert.equal(resumeCommand({ links: { web: "http://oc/s" } }), null);
 });
 
 test("retired notice names the harness and the replaced instance", () => {

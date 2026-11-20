@@ -220,7 +220,7 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
 function useNotificationDestination() {
   const destination = useSessionDestination();
   const harnesses = useHarnesses();
-  return (n: Pick<Notification, "connectionId" | "t3DeepLink" | "t3WebUrl" | "links">) => (harnesses.retired(n.connectionId) ? null : destination(n));
+  return (n: Pick<Notification, "connectionId" | "links">) => (harnesses.retired(n.connectionId) ? null : destination(n));
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {

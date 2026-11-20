@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
@@ -46,9 +47,8 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	}
 	var inbox struct {
 		Waiting []struct {
-			ID   string  `json:"externalSessionId"`
-			Deep *string `json:"t3DeepLink"`
-			Web  *string `json:"t3WebUrl"`
+			ID    string `json:"externalSessionId"`
+			Links links  `json:"links"`
 		} `json:"waitingSessions"`
 		Groups []db.NotificationGroup `json:"groups"`
 		Unread int                    `json:"unread"`
@@ -56,7 +56,7 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	}
 	read := func() { t.Helper(); e.must("GET", "/api/notifications/groups", nil, 200, &inbox) }
 	read()
-	if len(inbox.Waiting) != 1 || inbox.Waiting[0].ID != id || inbox.Waiting[0].Deep == nil || inbox.Waiting[0].Web == nil || inbox.Unread != 0 || inbox.Latest != 0 || len(inbox.Groups) != 0 {
+	if len(inbox.Waiting) != 1 || inbox.Waiting[0].ID != id || inbox.Waiting[0].Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, id) || inbox.Waiting[0].Links.Web == "" || inbox.Unread != 0 || inbox.Latest != 0 || len(inbox.Groups) != 0 {
 		t.Fatalf("silent inbox %+v", inbox)
 	}
 	if err := e.store.SetObservedState(t.Context(), id, db.StateRunning); err != nil {

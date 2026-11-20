@@ -68,6 +68,11 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   `Features` supplies models, options, permissions, modes, workspaces and
   operation availability with reasons. Unsupported operations return actionable
   errors. Adapters must validate the requested semantics before dispatch.
+  Product code reads policy from these, never a harness name: `images`,
+  `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
+  worktree base and branch itself) gate form fields, and `ModeLabel` names the
+  mode choice in the harness's words. A harness whose tasks predate execution
+  configs supplies `Descriptor.LegacyConfig`, the only reader of those columns.
 - `Observation` is a validated snapshot: session/project, normalized state,
   activity, top-level/archive eligibility, workspace, links, bounded reply and
   available artifact links. States are running, needs_input, done, failed,

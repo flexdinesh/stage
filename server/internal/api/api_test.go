@@ -64,6 +64,10 @@ type flakyT3 struct {
 	launchMessages []string
 }
 
+// PublicURL is the configured T3 browser base, like t3.MCPClient's; the
+// adapter builds links.web from it.
+func (f *flakyT3) PublicURL() string { return publicURL }
+
 func (f *flakyT3) LaunchThread(ctx context.Context, in t3.LaunchInput) (t3.LaunchResult, error) {
 	f.mu.Lock()
 	f.requestIDs = append(f.requestIDs, in.ClientRequestID)
@@ -255,35 +259,32 @@ type project struct {
 }
 
 type task struct {
-	ID            int64             `json:"id"`
-	ProjectID     int64             `json:"projectId"`
-	ProjectTitle  string            `json:"projectTitle"`
-	Title         string            `json:"title"`
-	Prompt        string            `json:"prompt"`
-	Model         *string           `json:"model"`
-	ModelOptions  []json.RawMessage `json:"modelOptions"`
-	Workspace     map[string]any    `json:"workspace"`
-	Tags          []string          `json:"tags"`
-	State         string            `json:"state"`
-	T3ThreadID    *string           `json:"externalSessionId"`
-	TreeID        *int64            `json:"treeId"`
-	Needs         []int64           `json:"needs"`
-	Dependents    []int64           `json:"dependents"`
-	Readiness     *string           `json:"readiness"`
-	StartMode     *string           `json:"startMode"`
-	EffStartMode  *string           `json:"effectiveStartMode"`
-	Adopted       bool              `json:"adopted"`
-	LaunchAttempt int               `json:"launchAttempt"`
-	LastError     *string           `json:"lastError"`
-	T3WebURL      *string           `json:"t3WebUrl"`
-	T3AppURL      *string           `json:"t3AppUrl"`
-	T3DeepLink    *string           `json:"t3DeepLink"`
-	LaunchedAt    *string           `json:"launchedAt"`
-	FinishedAt    *string           `json:"finishedAt"`
-	SettledAt     *string           `json:"settledAt"`
-	RunStartedAt  *string           `json:"runStartedAt"`
-	RunEndedAt    *string           `json:"runEndedAt"`
-	CreatedAt     string            `json:"createdAt"`
+	ID            int64          `json:"id"`
+	ProjectID     int64          `json:"projectId"`
+	ProjectTitle  string         `json:"projectTitle"`
+	Title         string         `json:"title"`
+	Prompt        string         `json:"prompt"`
+	Config        *execConfig    `json:"executionConfig"`
+	Workspace     map[string]any `json:"workspace"`
+	Tags          []string       `json:"tags"`
+	State         string         `json:"state"`
+	T3ThreadID    *string        `json:"externalSessionId"`
+	TreeID        *int64         `json:"treeId"`
+	Needs         []int64        `json:"needs"`
+	Dependents    []int64        `json:"dependents"`
+	Readiness     *string        `json:"readiness"`
+	StartMode     *string        `json:"startMode"`
+	EffStartMode  *string        `json:"effectiveStartMode"`
+	Adopted       bool           `json:"adopted"`
+	LaunchAttempt int            `json:"launchAttempt"`
+	LastError     *string        `json:"lastError"`
+	Links         links          `json:"links"`
+	LaunchedAt    *string        `json:"launchedAt"`
+	FinishedAt    *string        `json:"finishedAt"`
+	SettledAt     *string        `json:"settledAt"`
+	RunStartedAt  *string        `json:"runStartedAt"`
+	RunEndedAt    *string        `json:"runEndedAt"`
+	CreatedAt     string         `json:"createdAt"`
 	Events        []struct {
 		FromState *string `json:"fromState"`
 		ToState   string  `json:"toState"`
@@ -292,6 +293,22 @@ type task struct {
 	Thread      *thread      `json:"thread"`
 	Tree        *treeDetail  `json:"tree"`
 	Attachments []attachment `json:"attachments"`
+}
+
+// execConfig is a task's canonical executionConfig.
+type execConfig struct {
+	Model      string            `json:"model"`
+	Options    []json.RawMessage `json:"options"`
+	Permission string            `json:"permission"`
+	Mode       string            `json:"mode"`
+}
+
+// links is a session's destinations.
+type links struct {
+	Web     string `json:"web"`
+	Native  string `json:"native"`
+	Service string `json:"service"`
+	Command string `json:"command"`
 }
 
 type attachment struct {
@@ -308,9 +325,6 @@ type thread struct {
 	Settled     bool    `json:"settled"`
 	Source      string  `json:"source"`
 	TaskID      *int64  `json:"taskId"`
-	T3WebURL    *string `json:"t3WebUrl"`
-	T3AppURL    *string `json:"t3AppUrl"`
-	T3DeepLink  *string `json:"t3DeepLink"`
 	ProviderID  *string `json:"providerInstanceId"`
 	Title       string  `json:"title"`
 	T3ProjectID string  `json:"externalProjectId"`
@@ -391,11 +405,25 @@ func TestTaskLifecycle(t *testing.T) {
 		"modelOptions": []map[string]any{{"id": "effort", "value": "low"}},
 		"tags":         []string{"smoke", " smoke ", ""},
 	})
-	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.T3WebURL != nil || tk.ProjectTitle != p.Title {
+	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
 		t.Fatalf("created %+v", tk)
 	}
-	if len(tk.Tags) != 1 || tk.Workspace["type"] != "root" || len(tk.ModelOptions) != 1 {
+	if len(tk.Tags) != 1 || tk.Workspace["type"] != "root" {
 		t.Fatalf("defaults %+v", tk)
+	}
+	// Legacy model input is accepted and reported only as executionConfig.
+	if c := tk.Config; c == nil || c.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(c.Options) != 1 {
+		t.Fatalf("executionConfig %+v", tk.Config)
+	}
+	var raw map[string]any
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &raw)
+	for _, k := range []string{"t3WebUrl", "t3AppUrl", "t3DeepLink", "providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode", "originThreadId", "originThreadTitle"} {
+		if _, ok := raw[k]; ok {
+			t.Fatalf("task JSON still has legacy field %q", k)
+		}
+	}
+	if _, ok := raw["originSessionTitle"]; !ok {
+		t.Fatal("task JSON lacks originSessionTitle")
 	}
 
 	var started task
@@ -404,14 +432,11 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatalf("started %+v", started)
 	}
 	threadID := *started.T3ThreadID
-	if started.T3WebURL == nil || *started.T3WebURL != publicURL+"/fake-env/"+threadID {
-		t.Fatalf("web url %v", started.T3WebURL)
+	if started.Links.Web != publicURL+"/fake-env/"+url.PathEscape(threadID) {
+		t.Fatalf("web url %q", started.Links.Web)
 	}
-	if started.T3AppURL == nil || *started.T3AppURL != "t3-thread://fake-env/"+threadID {
-		t.Fatalf("app url %v", started.T3AppURL)
-	}
-	if started.T3DeepLink == nil || *started.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(threadID) {
-		t.Fatalf("deep link %v", started.T3DeepLink)
+	if started.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(threadID) {
+		t.Fatalf("native link %q", started.Links.Native)
 	}
 	// Launch payload reached T3.
 	d, err := e.fake.ReadThread(context.Background(), threadID)
@@ -476,8 +501,8 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.Thread == nil || got.Thread.Source != "app" || !got.Thread.Settled || got.Thread.SettledAt == nil || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
 		t.Fatalf("thread %+v", got.Thread)
 	}
-	if got.Thread.T3DeepLink == nil || *got.Thread.T3DeepLink != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
-		t.Fatalf("thread deep link %v", got.Thread.T3DeepLink)
+	if got.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
+		t.Fatalf("settled task native link %q", got.Links.Native)
 	}
 	// Accepted tasks remain observable.
 	tasks, _ := e.store.PollableTasks(context.Background(), true)
@@ -488,25 +513,21 @@ func TestTaskLifecycle(t *testing.T) {
 
 // A task saved with legacy interactionMode "plan", then given an
 // executionConfig with the harness-default mode, launches without plan mode,
-// so the legacy field must not keep reporting the stale "plan".
+// so executionConfig must not keep reporting the stale "plan".
 func TestExecutionConfigOverridesLegacyInteractionMode(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/modes")
 	tk := e.task(p.ID, "A", map[string]any{"interactionMode": "plan"})
-	type modes struct {
-		InteractionMode string `json:"interactionMode"`
-	}
-	var got modes
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &got)
-	if got.InteractionMode != "plan" {
-		t.Fatalf("legacy mode %q", got.InteractionMode)
+	got := e.getTask(tk.ID)
+	if got.Config == nil || got.Config.Mode != "plan" {
+		t.Fatalf("legacy mode synthesized as %+v", got.Config)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{
 		"executionConfig": map[string]any{"model": `["claude","claude-haiku-5-5"]`, "options": []any{}, "permission": "", "mode": ""},
 	}, 200, nil)
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &got)
-	if got.InteractionMode != "default" {
-		t.Fatalf("config-backed mode %q, want default", got.InteractionMode)
+	got = e.getTask(tk.ID)
+	if got.Config == nil || got.Config.Mode != "" || got.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") {
+		t.Fatalf("config-backed mode %+v, want harness default", got.Config)
 	}
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
@@ -528,15 +549,15 @@ func TestTaskActions(t *testing.T) {
 		"prompt": "new", "providerInstanceId": "claude", "model": "claude-haiku-5-5",
 		"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "branch": nil},
 	}, 200, &patched)
-	if patched.Prompt != "new" || patched.Model == nil || patched.Workspace["type"] != "worktree" {
+	if patched.Prompt != "new" || patched.Config == nil || patched.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") || patched.Workspace["type"] != "worktree" {
 		t.Fatalf("patched %+v", patched)
 	}
 	if b, ok := patched.Workspace["branch"]; !ok || b != nil {
 		t.Fatalf("worktree branch must be present and null: %v", patched.Workspace)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"providerInstanceId": nil, "model": nil}, 200, &patched)
-	if patched.Model != nil {
-		t.Fatal("model not cleared")
+	if patched.Config != nil && patched.Config.Model != "" {
+		t.Fatalf("model not cleared: %+v", patched.Config)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"runtimeMode": "yolo"}, 400, nil)
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": nil}, 400, nil)
@@ -1408,11 +1429,11 @@ func TestNotificationsInbox(t *testing.T) {
 	}
 	type page struct {
 		Notifications []struct {
-			ID         int64   `json:"id"`
-			Event      string  `json:"event"`
-			Title      string  `json:"title"`
-			ReadAt     *string `json:"readAt"`
-			T3DeepLink *string `json:"t3DeepLink"`
+			ID     int64   `json:"id"`
+			Event  string  `json:"event"`
+			Title  string  `json:"title"`
+			ReadAt *string `json:"readAt"`
+			Links  links   `json:"links"`
 		} `json:"notifications"`
 		Unread     int    `json:"unread"`
 		NextBefore *int64 `json:"nextBefore"`
@@ -1423,8 +1444,8 @@ func TestNotificationsInbox(t *testing.T) {
 		pg.NextBefore == nil || *pg.NextBefore != ids[1] {
 		t.Fatalf("first page %+v", pg)
 	}
-	if dl := pg.Notifications[0].T3DeepLink; dl == nil || !strings.HasPrefix(*dl, "t3code://threads/") {
-		t.Fatalf("deep link %v", dl)
+	if l := pg.Notifications[0].Links; l.Native != t3.AppThreadURL(t3.FakeEnvironmentID, thread) || l.Web == "" {
+		t.Fatalf("notification links %+v", l)
 	}
 	e.must("GET", fmt.Sprintf("/api/notifications?limit=2&before=%d", *pg.NextBefore), nil, 200, &pg)
 	if len(pg.Notifications) != 1 || pg.Notifications[0].ID != ids[0] || pg.NextBefore != nil {
@@ -1491,7 +1512,7 @@ func TestNotificationGroups(t *testing.T) {
 	}
 	type group struct {
 		db.NotificationGroup
-		T3DeepLink *string `json:"t3DeepLink"`
+		Links links `json:"links"`
 	}
 	var pg struct {
 		Groups     []group `json:"groups"`
@@ -1504,8 +1525,8 @@ func TestNotificationGroups(t *testing.T) {
 		pg.Groups[0].UnreadCount != 2 || pg.LatestID != latest || pg.Unread != 3 || pg.NextCursor == nil {
 		t.Fatalf("first group page: %+v", pg)
 	}
-	if link := pg.Groups[0].T3DeepLink; link == nil || !strings.HasPrefix(*link, "t3code://threads/") {
-		t.Fatalf("group deep link: %v", link)
+	if l := pg.Groups[0].Links; l.Native != t3.AppThreadURL(t3.FakeEnvironmentID, threads[0]) || l.Web == "" {
+		t.Fatalf("group links: %+v", l)
 	}
 	e.must("GET", "/api/notifications/groups?limit=1&cursor="+url.QueryEscape(*pg.NextCursor), nil, 200, &pg)
 	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:1:ext-2" || pg.NextCursor != nil {

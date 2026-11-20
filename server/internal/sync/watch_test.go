@@ -11,11 +11,15 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB dbtest.DB
+
+// t3Harnesses is the production registry's T3 descriptor (serve wires it).
+var t3Harnesses = harness.MustRegistry(t3.Descriptor)
 
 // hookT3 runs afterList after every ListThreads (simulates a thread
 // finishing between list and read).
@@ -92,6 +96,7 @@ func TestWatchThreads(t *testing.T) {
 	setStatus(oldIdle, t3.StatusCompleted)
 
 	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.Harnesses = t3Harnesses
 	var got []change
 	svc.OnThreadChange = func(_ context.Context, c t3sync.ThreadChange) {
 		from := ""

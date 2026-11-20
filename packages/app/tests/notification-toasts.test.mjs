@@ -13,7 +13,7 @@ const notification = (id, extra = {}) => ({
   createdAt: "2026-11-17T00:00:00Z",
   readAt: null,
   currentState: "needs_input",
-  t3DeepLink: "t3://thread-a",
+  links: { native: "t3://thread-a" },
   ...extra,
 });
 
@@ -40,7 +40,7 @@ test("still-waiting toasts retain waiting state while preserving the event snaps
     createdAt: "2026-11-17T01:00:00Z",
     readAt: "2026-11-17T01:01:00Z",
     externalSessionId: "thread-b",
-    t3DeepLink: "t3://thread-b",
+    links: { native: "t3://thread-b" },
   });
   assert.deepEqual(reconcileToasts([queued], [latest]), [
     { ...queued,},

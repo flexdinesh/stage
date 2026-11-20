@@ -67,7 +67,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[string]execution.Availability{}, Models: []execution.Model{}}
-	for _, name := range []string{"launch", "stop", "adopt", "opening", "reply", "attention", "images", "registerWorkspace", "predecessorBase"} {
+	for _, name := range []string{"launch", "stop", "adopt", "opening", "reply", "attention", "images", "registerWorkspace", "predecessorBase", "worktreeBase"} {
 		out.Operations[name] = yes
 	}
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
@@ -299,8 +299,11 @@ func (a *Adapter) Destinations(ctx context.Context, ref execution.SessionRef) ex
 	}
 	env := a.Client.Status(ctx).EnvironmentID
 	web := ""
-	if c, ok := a.Client.(interface{ PublicURL() string }); ok {
+	switch c := a.Client.(type) {
+	case interface{ PublicURL() string }:
 		web = WebThreadURL(c.PublicURL(), env, ref.ExternalSessionID)
+	case interface{ WebBase() string }: // the fake (T3_FAKE)
+		web = WebThreadURL(c.WebBase(), env, ref.ExternalSessionID)
 	}
 	return execution.Links{Web: web, Native: AppThreadURL(env, ref.ExternalSessionID)}
 }
@@ -454,20 +457,6 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
-
-func (a *Adapter) LegacyConfiguration(raw json.RawMessage) (execution.Config, error) {
-	var in struct {
-		ProviderInstanceID string
-		Model              string
-		ModelOptions       []execution.ModelOption
-		RuntimeMode        string
-		InteractionMode    string
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return execution.Config{}, err
-	}
-	return LegacyConfig(in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode), nil
-}
 
 func (a *Adapter) ResolveLink(ctx context.Context, raw string) (execution.SessionRef, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))

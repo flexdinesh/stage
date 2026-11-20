@@ -243,7 +243,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	case "ls", "list":
 		var a agenttools.ListTasksArgs
 		origin := c.sessionFlags("origin")
-		c.fs.StringVar(&a.OriginThreadID, "origin-thread", "", "creator session id")
 		var states string
 		c.fs.StringVar(&a.Project, "project", "", "project")
 		c.fs.StringVar(&states, "state", "", "states")

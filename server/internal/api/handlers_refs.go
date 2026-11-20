@@ -14,8 +14,8 @@ import (
 )
 
 // refJSON is GET /api/refs/resolve: what a pasted reference names. A task's
-// threadId is its T3 thread (null before launch); a session's taskId is the
-// task that owns it (null for sessions started outside stage).
+// session is null before launch; a session's taskId is the task that owns it
+// (null for sessions started outside stage).
 type refJSON struct {
 	State        *db.TaskState   `json:"state,omitempty"`
 	Links        execution.Links `json:"links"`
@@ -23,7 +23,6 @@ type refJSON struct {
 	Session      *db.SessionRef  `json:"session"`
 	Kind         refs.Kind       `json:"kind"`
 	TaskID       *int64          `json:"taskId"`
-	ThreadID     *string         `json:"threadId"`
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
@@ -85,9 +84,6 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return notFoundAs(err, fmt.Sprintf("task %d not found", ref.TaskID))
 		}
 		out.TaskID = &t.ID
-		if t.Harness == db.HarnessT3 {
-			out.ThreadID = t.T3ThreadID
-		}
 		out.Session = t.Session
 	case refs.KindSession:
 		id := ref.ConnectionID
@@ -96,9 +92,6 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		}
 		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
 		out.Session = &target
-		if s.Store.IsT3(id) {
-			out.ThreadID = &target.ExternalSessionID
-		}
 		owner, err := s.Store.TaskBySession(ctx, target)
 		if err == nil {
 			out.TaskID = &owner.ID

@@ -109,21 +109,37 @@ export function optionsText(options: ModelOption[]): string {
   return options.map((o) => (typeof o.value === "boolean" ? `${o.id}=${o.value}` : o.value)).join(" · ");
 }
 
-/** "claude-haiku-5-5 · low", or "T3 default". */
+/** "claude-haiku-5-5 · low", or "Harness default". */
 export function modelText(model: string | null, options: ModelOption[]): string {
   const opts = optionsText(options);
-  const base = model ?? "T3 default";
+  const base = model ?? "Harness default";
   return opts === "" ? base : `${base} · ${opts}`;
 }
 
-/** Permission and interaction mode a launch uses: executionConfig when set ("" = harness default), else the legacy T3 fields. */
-export function executionModes(x: {
-  executionConfig?: ExecutionConfig | null;
-  runtimeMode: string;
-  interactionMode: string;
-}): { permission: string; mode: string } {
-  if (x.executionConfig) return { permission: x.executionConfig.permission, mode: x.executionConfig.mode };
-  return { permission: x.runtimeMode, mode: x.interactionMode };
+/** A model key's display name: a composite key (a JSON array such as ["provider","model"]) shows its last part. */
+export function modelName(key: string): string | null {
+  if (key === "") return null;
+  if (!key.startsWith("[")) return key;
+  try {
+    const parts: unknown = JSON.parse(key);
+    if (Array.isArray(parts)) {
+      const last: unknown = parts[parts.length - 1];
+      if (typeof last === "string" && last !== "") return last;
+    }
+  } catch {
+    // Not a composite key: show it as is.
+  }
+  return key;
+}
+
+/** The model and options a launch uses ("" model = harness default). */
+export function configModelText(c: ExecutionConfig | null | undefined): string {
+  return modelText(modelName(c?.model ?? ""), c?.options ?? []);
+}
+
+/** Permission and mode a launch uses ("" = harness default). */
+export function executionModes(x: { executionConfig?: ExecutionConfig | null }): { permission: string; mode: string } {
+  return { permission: x.executionConfig?.permission ?? "", mode: x.executionConfig?.mode ?? "" };
 }
 
 export function workspaceText(w: Workspace): string {

@@ -138,33 +138,35 @@ type Task struct {
 	ConnectionID    int64             `json:"connectionId"`
 	// Harness of the connection; ConnectionActive is false once its
 	// instance was replaced (ConnectionLabel names that instance).
-	Harness                 string                  `json:"harness"`
-	ConnectionActive        bool                    `json:"connectionActive"`
-	ConnectionLabel         string                  `json:"connectionLabel"`
-	SessionIdentityID       *int64                  `json:"-"`
-	OriginSessionIdentityID *int64                  `json:"-"`
-	Session                 *SessionRef             `json:"session"`
-	OriginSession           *SessionRef             `json:"originSession"`
-	AcceptanceID            *int64                  `json:"acceptanceId"`
-	AcceptanceRevision      int64                   `json:"acceptanceRevision"`
-	CompletedAt             *time.Time              `json:"completedAt"`
-	CompletionProvenance    *string                 `json:"completionProvenance"`
-	ID                      int64                   `json:"id"`
-	ProjectID               int64                   `json:"projectId"`
-	ProjectTitle            string                  `json:"projectTitle"`
-	Title                   string                  `json:"title"`
-	Prompt                  string                  `json:"prompt"`
-	ProviderInstanceID      *string                 `json:"providerInstanceId"`
-	Model                   *string                 `json:"model"`
-	ModelOptions            []execution.ModelOption `json:"modelOptions"`
-	RuntimeMode             string                  `json:"runtimeMode"`
-	InteractionMode         string                  `json:"interactionMode"`
-	Workspace               Workspace               `json:"workspace"`
-	Tags                    []string                `json:"tags"`
-	State                   TaskState               `json:"state"`
-	T3ThreadID              *string                 `json:"externalSessionId"`
-	TreeID                  *int64                  `json:"treeId"` // the task's tree (docs/api.md "Trees")
-	TreeTitle               *string                 `json:"treeTitle"`
+	Harness                 string      `json:"harness"`
+	ConnectionActive        bool        `json:"connectionActive"`
+	ConnectionLabel         string      `json:"connectionLabel"`
+	SessionIdentityID       *int64      `json:"-"`
+	OriginSessionIdentityID *int64      `json:"-"`
+	Session                 *SessionRef `json:"session"`
+	OriginSession           *SessionRef `json:"originSession"`
+	AcceptanceID            *int64      `json:"acceptanceId"`
+	AcceptanceRevision      int64       `json:"acceptanceRevision"`
+	CompletedAt             *time.Time  `json:"completedAt"`
+	CompletionProvenance    *string     `json:"completionProvenance"`
+	ID                      int64       `json:"id"`
+	ProjectID               int64       `json:"projectId"`
+	ProjectTitle            string      `json:"projectTitle"`
+	Title                   string      `json:"title"`
+	Prompt                  string      `json:"prompt"`
+	// Legacy model columns of rows saved before executionConfig (T3); the
+	// API shows executionConfig only (harness.Descriptor.LegacyConfig).
+	ProviderInstanceID *string                 `json:"-"`
+	Model              *string                 `json:"-"`
+	ModelOptions       []execution.ModelOption `json:"-"`
+	RuntimeMode        string                  `json:"-"`
+	InteractionMode    string                  `json:"-"`
+	Workspace          Workspace               `json:"workspace"`
+	Tags               []string                `json:"tags"`
+	State              TaskState               `json:"state"`
+	T3ThreadID         *string                 `json:"externalSessionId"`
+	TreeID             *int64                  `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle          *string                 `json:"treeTitle"`
 	// StartMode is the task's own start mode (nil = inherit the tree's);
 	// EffectiveStartMode applies the tree's (nil outside a tree without one).
 	StartMode          *StartMode `json:"startMode"`
@@ -181,9 +183,9 @@ type Task struct {
 	StartTz           *string              `json:"startTz"`    // IANA zone startAt was entered in
 	ScheduleID        *int64               `json:"scheduleId"` // recurring schedule that spawned the task
 	ScheduleTitle     *string              `json:"scheduleTitle"`
-	OriginThreadID    *string              `json:"originThreadId"`    // T3 session that created the task (agent interface)
-	OriginThreadTitle *string              `json:"originThreadTitle"` // its mirrored title (null when not mirrored)
-	Handoff           bool                 `json:"handoff"`           // append the needs' handoff at launch (docs/api.md "Handoff")
+	OriginThreadID    *string              `json:"-"`                  // legacy column: T3 session that created the task
+	OriginThreadTitle *string              `json:"originSessionTitle"` // the origin session's mirrored title (null when not mirrored)
+	Handoff           bool                 `json:"handoff"`            // append the needs' handoff at launch (docs/api.md "Handoff")
 	LaunchAttempt     int                  `json:"launchAttempt"`
 	LastError         *string              `json:"lastError"`
 	LaunchedAt        *time.Time           `json:"launchedAt"`
@@ -318,4 +320,21 @@ func nonNilStrings(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// LegacyModel is the row's legacy model columns as JSON, the input of
+// harness.Descriptor.LegacyConfig.
+func (t Task) LegacyModel() json.RawMessage {
+	return legacyModel(t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode)
+}
+
+func legacyModel(provider, model *string, options []execution.ModelOption, runtime, interaction string) json.RawMessage {
+	raw, _ := json.Marshal(struct {
+		ProviderInstanceID *string                 `json:"providerInstanceId"`
+		Model              *string                 `json:"model"`
+		ModelOptions       []execution.ModelOption `json:"modelOptions"`
+		RuntimeMode        string                  `json:"runtimeMode"`
+		InteractionMode    string                  `json:"interactionMode"`
+	}{provider, model, options, runtime, interaction})
+	return raw
 }

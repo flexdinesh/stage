@@ -35,10 +35,11 @@ func ts(t *time.Time) string {
 }
 
 func printContext(w io.Writer, c agenttools.ContextOut) {
+	session := ""
 	if c.Session != nil {
-		c.ThreadID = fmt.Sprintf("%s (connection %d)", c.Session.ExternalSessionID, c.Session.ConnectionID)
+		session = fmt.Sprintf("%s (connection %d)", c.Session.ExternalSessionID, c.Session.ConnectionID)
 	}
-	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(c.ThreadID), dash(c.Cwd), c.APIURL)
+	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(session), dash(c.Cwd), c.APIURL)
 	if c.Project != nil {
 		fmt.Fprintf(w, "project  %d %s (%s, from %s)\n", c.Project.ID, c.Project.Title, projectWorkspace(*c.Project), c.ProjectSource)
 	} else {
@@ -129,21 +130,18 @@ func waitsOn(needs []int64, start *time.Time) string {
 
 func printTask(w io.Writer, t client.Task) {
 	fmt.Fprintf(w, "task %d  %s  [%s]  %s\n", t.ID, t.Title, t.State, t.ProjectTitle)
-	model, permission, mode := "T3 default", t.RuntimeMode, t.InteractionMode
+	model, permission, mode := "harness default", "", ""
 	if !t.ConnectionActive && t.ConnectionID > 0 {
 		fmt.Fprintf(w, "  replaced connection %d (%s): history only\n", t.ConnectionID, t.ConnectionLabel)
 	}
-	if t.ConnectionID > 0 && t.Harness != db.HarnessT3 {
+	if t.ConnectionID > 0 {
 		fmt.Fprintf(w, "  connection %d\n", t.ConnectionID)
-		model, permission, mode = "harness default", "", ""
-		if cfg := t.ExecutionConfig; cfg != nil {
-			if cfg.Model != "" {
-				model = cfg.Model
-			}
-			permission, mode = cfg.Permission, cfg.Mode
+	}
+	if cfg := t.ExecutionConfig; cfg != nil {
+		if cfg.Model != "" {
+			model = cfg.Model
 		}
-	} else if t.Model != nil {
-		model = orDash(t.ProviderInstanceID) + "/" + *t.Model
+		permission, mode = cfg.Permission, cfg.Mode
 	}
 	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, permission, mode)
 	switch {
@@ -168,18 +166,14 @@ func printTask(w io.Writer, t client.Task) {
 	if t.Adopted {
 		fmt.Fprintln(w, "  adopted  tracks an existing session (stage never starts it)")
 	}
-	if t.OriginSession != nil && t.OriginThreadID == nil {
-		fmt.Fprintf(w, "  created by connection %d session %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID)
-	} else if t.OriginThreadID != nil {
-		fmt.Fprintf(w, "  created by session %s %s\n", *t.OriginThreadID, orDash(t.OriginThreadTitle))
+	if t.OriginSession != nil {
+		fmt.Fprintf(w, "  created by connection %d session %s %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID, orDash(t.OriginThreadTitle))
 	}
-	if t.Session != nil && t.Harness != db.HarnessT3 {
+	if t.Session != nil {
 		fmt.Fprintf(w, "  session  %s\n", t.Session.ExternalSessionID)
-	} else if t.T3ThreadID != nil {
-		fmt.Fprintf(w, "  thread   %s\n", *t.T3ThreadID)
 	}
-	if t.T3WebURL != nil {
-		fmt.Fprintf(w, "  open     %s\n", *t.T3WebURL)
+	if open := orFirst(t.Links.Web, t.Links.Native); open != "" {
+		fmt.Fprintf(w, "  open     %s\n", open)
 	}
 	if t.LastError != nil {
 		fmt.Fprintf(w, "  error    %s\n", *t.LastError)
@@ -401,10 +395,10 @@ func printScheduleDetail(w io.Writer, d client.ScheduleDetail) {
 func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 	t := d.Thread
 	fmt.Fprintf(w, "session %s  %s  [%s]  %s\n", t.T3ThreadID, t.Title, t.State, orDash(t.ProjectTitle))
-	if t.T3WebURL != nil {
-		fmt.Fprintf(w, "  open  %s\n", *t.T3WebURL)
-	}
 	if d.Task != nil {
+		if open := orFirst(d.Task.Links.Web, d.Task.Links.Native); open != "" {
+			fmt.Fprintf(w, "  open  %s\n", open)
+		}
 		fmt.Fprintf(w, "  task  %d %s\n", d.Task.ID, d.Task.Title)
 	}
 
@@ -507,4 +501,14 @@ func projectWorkspace(p db.Project) string {
 		bindings = append(bindings, fmt.Sprintf("%s %d: %s", b.Harness, b.ConnectionID, b.Workspace))
 	}
 	return strings.Join(bindings, ", ")
+}
+
+// orFirst is the first nonempty value.
+func orFirst(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

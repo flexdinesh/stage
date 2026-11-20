@@ -352,7 +352,7 @@ func TestSchedulesRejectTreeFields(t *testing.T) {
 	a := e.task(p.ID, "a", nil)
 	base := map[string]any{"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}
 	for _, extra := range []map[string]any{
-		{"treeId": 1}, {"needs": []int64{a.ID}}, {"needs": []int64{}}, {"startMode": "manual"}, {"needsSessionId": "s"},
+		{"treeId": 1}, {"needs": []int64{a.ID}}, {"needs": []int64{}}, {"startMode": "manual"}, {"needsSession": map[string]any{"connectionId": 1, "externalSessionId": "s"}},
 		{"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "base": "predecessor"}},
 	} {
 		body := map[string]any{}

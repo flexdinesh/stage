@@ -113,7 +113,10 @@ type Capabilities struct {
 	Permissions []Choice `json:"permissions,omitempty"`
 	// Options apply whatever the model (a harness-wide setting); a model's
 	// own options sit beside them. Ids never collide (Valid).
-	Options    []Option                `json:"options,omitempty"`
+	Options []Option `json:"options,omitempty"`
+	// ModeLabel names the mode choice in the harness's own words ("Agent");
+	// empty reads "Interaction mode".
+	ModeLabel  string                  `json:"modeLabel,omitempty"`
 	Operations map[string]Availability `json:"operations"`
 	Models     []Model                 `json:"models"`
 	Modes      []Choice                `json:"modes"`
@@ -260,10 +263,6 @@ func (o Observation) Valid() error {
 type Rejected struct{ Reason string }
 
 func (e *Rejected) Error() string { return e.Reason }
-
-type LegacyDecoder interface {
-	LegacyConfiguration(json.RawMessage) (Config, error)
-}
 
 type LinkResolver interface {
 	ResolveLink(context.Context, string) (SessionRef, error)

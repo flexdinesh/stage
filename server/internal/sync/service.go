@@ -3,7 +3,6 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -563,15 +562,10 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	}
 	config := t.ExecutionConfig
 	if config == nil {
-		decoder, ok := a.(execution.LegacyDecoder)
-		if !ok {
+		if d.LegacyConfig == nil {
 			return t, db.Invalid("executionConfig is required for this harness")
 		}
-		raw, err := json.Marshal(t)
-		if err != nil {
-			return t, err
-		}
-		c, err := decoder.LegacyConfiguration(raw)
+		c, err := d.LegacyConfig(t.LegacyModel())
 		if err != nil {
 			return t, err
 		}
@@ -733,6 +727,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	}
 	return s.store.GetTask(record, t.ID)
 }
+
 // correlated dispatches a correlated launch once: the dispatch is recorded
 // (the attempt leaves prepared) before the harness creates anything. Once
 // dispatched, the outcome is found by the intent's marker and never launched

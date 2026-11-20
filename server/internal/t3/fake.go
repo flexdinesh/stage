@@ -171,6 +171,13 @@ func (f *Fake) Reconfigure(base, public string) {
 	f.BaseURL, f.PublicURL = base, public
 }
 
+// WebBase is the configured public URL (the browser base for web links).
+func (f *Fake) WebBase() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.PublicURL
+}
+
 func (f *Fake) Pair(_ context.Context, code string) error {
 	code = strings.TrimSpace(code)
 	if code == "" {

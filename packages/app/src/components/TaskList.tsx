@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
-import { dateTime, duration, modelText, relativeTime } from "../lib/format.ts";
+import { configModelText, dateTime, duration, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { HarnessName } from "./HarnessName.tsx";
@@ -167,7 +167,7 @@ function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChi
     return {
       to: `/tasks/${task.id}?batch=1`,
       label: "by agent",
-      title: `Created by session ${task.originThreadTitle ?? task.originSession.externalSessionId}`,
+      title: `Created by session ${task.originSessionTitle ?? task.originSession.externalSessionId}`,
       icon: <IconChainLink />,
     };
   return null;
@@ -246,7 +246,7 @@ export function TaskRow({
               {task.projectTitle}
             </Link>
           )}
-          <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {task.harness === "t3" ? modelText(task.model, task.modelOptions) : task.executionConfig?.model || "Default model"}</span>
+          <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {configModelText(task.executionConfig)}</span>
           {task.completedAt !== null ? (
             <SettledMeta settledAt={task.completedAt} via={autoMeta} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (

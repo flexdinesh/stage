@@ -23,10 +23,7 @@ type scheduleDetailJSON struct {
 }
 
 func (s *server) scheduleJSON(sc db.Schedule) db.Schedule {
-	if s.Store.IsT3(sc.ConnectionID) && sc.ExecutionConfig != nil {
-		d := t3Defaults(sc.ExecutionConfig, sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode)
-		sc.ProviderInstanceID, sc.Model, sc.ModelOptions, sc.RuntimeMode, sc.InteractionMode = d.ProviderInstanceID, d.Model, d.ModelOptions, d.RuntimeMode, d.InteractionMode
-	}
+	sc.ExecutionConfig = s.executionConfig(s.Store.Harness(sc.ConnectionID), sc.ExecutionConfig, sc.LegacyModel)
 	return sc
 }
 
@@ -80,9 +77,9 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeStrict(r, &req); err != nil {
 		return err
 	}
-	if req.TreeID != nil || req.Needs != nil || req.NeedsSessionID != nil || req.NeedsSession != nil || req.StartMode != nil ||
+	if req.TreeID != nil || req.Needs != nil || req.NeedsSession != nil || req.StartMode != nil ||
 		req.Start || req.StartLocal != nil || req.StartTz != nil {
-		return db.Invalid("treeId, needs, needsSessionId, startMode, start, startLocal and startTz are not schedule fields")
+		return db.Invalid("treeId, needs, needsSession, startMode, start, startLocal and startTz are not schedule fields")
 	}
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
@@ -106,7 +103,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
 		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
 		Tags: in.Tags, Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
-		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginThreadID: in.OriginThreadID, OriginSession: in.OriginSession,
+		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
 	if err != nil {
 		return err

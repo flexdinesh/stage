@@ -290,9 +290,9 @@ A scoped reference is `{connectionId, externalSessionId}`; tasks expose `session
 and `originSession`, journal entries `sourceSession`, accepted evidence `session`,
 and resolved references `session`. A raw ID is never globally unique.
 
-Legacy `originThreadId` and bare historical session references explicitly mean
-the active T3 connection. New task requests may use `originSession`; journal notes
-use `sourceSession` (API v6 removed `sourceThreadId` and `callerThreadId` as inputs). T3 cache tables and historical links remain intact. Migration
+Bare historical session references explicitly mean the active T3 connection.
+Task and schedule requests use `originSession` and `needsSession`; journal notes
+use `sourceSession` (API v6 removed `originThreadId`, `needsSessionId`, `sourceThreadId` and `callerThreadId` as inputs). T3 cache tables and historical links remain intact. Migration
 does not rewrite accepted snapshot JSON or journal text.
 
 Session lookup/adoption uses `/api/connections/:connectionId/sessions/:id`.
@@ -321,15 +321,15 @@ attempt is consumed.
   "projectTitle": "stage",
   "title": "Say OK",
   "prompt": "reply OK",
-  "providerInstanceId": "claude",
-  "model": "claude-haiku-5-5",
-  "modelOptions": [{ "id": "effort", "value": "low" }],
-  "runtimeMode": "full-access",
-  "interactionMode": "default",
+  "connectionId": 1,
+  "harness": "t3",
+  "executionConfig": { "model": "[\"claude\",\"claude-haiku-5-5\"]", "options": [{ "id": "effort", "value": "low" }], "permission": "full-access", "mode": "" },
   "workspace": { "type": "root" },
   "tags": ["smoke"],
   "state": "running",
   "externalSessionId": "thread_abc",
+  "session": { "connectionId": 1, "externalSessionId": "thread_abc" },
+  "links": { "web": "http://t3.example.com:3773/env_123/thread_abc", "native": "t3code://threads/env_123/thread_abc" },
   "treeId": 3,
   "treeTitle": "Ship auth",
   "startMode": null,
@@ -343,15 +343,12 @@ attempt is consumed.
   "startTz": null,
   "scheduleId": null,
   "scheduleTitle": null,
-  "originThreadId": null,
-  "originThreadTitle": null,
+  "originSession": null,
+  "originSessionTitle": null,
   "handoff": true,
   "attachments": [{ "id": 4, "name": "error.png", "mimeType": "image/png", "sizeBytes": 48211 }],
   "launchAttempt": 1,
   "lastError": null,
-  "t3WebUrl": "http://t3.example.com:3773/env_123/thread_abc",
-  "t3AppUrl": "https://app.t3.codes/threads/env_123/thread_abc",
-  "t3DeepLink": "t3code://threads/env_123/thread_abc",
   "launchedAt": "2026-11-08T10:00:00Z",
   "finishedAt": null,
   "settledAt": null,
@@ -371,20 +368,20 @@ attempt is consumed.
 ```
 - `stateSince`: when the task entered its current `state` (its latest task event into that state); null without one.
 - `archivedAt`: when the task was archived (null = not archived); `treeStatus`: its tree's `status` (null outside a tree); `deletable`: the task never launched, has no session and has no recorded work, so it can be deleted; recorded work must be archived. See "Done, archive and delete".
-- `providerInstanceId` / `model` null = T3 default; they must be set together (400 otherwise). `modelOptions` default `[]`.
+- `executionConfig`: the model, options, permission and mode the launch uses (`""` = the harness default). A T3 task saved before execution configs reads its legacy columns through the T3 descriptor, so every task carries one.
 - `treeId` / `treeTitle`: the task's tree (see "Trees"); null outside one. `needs`: tasks in the same tree this one needs (by id); `dependents`: tasks that need this one. Both `[]` outside a tree.
 - `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all have user acceptance (the `ready` notification); cleared when it stops being ready or launches.
 - `adopted`: the task tracks an existing T3 session (see "Adopt session"); `prompt` is `""`.
 - `startAt` (UTC instant) / `startTz` (IANA zone it was entered in): one-shot start time of a `backlog` task; the scheduler launches it at that time (see "Schedule rules"). Both null or both set; non-null only while the task is in `backlog` (any launch clears them). Never set together with `needs`.
 - `scheduleId` / `scheduleTitle`: the recurring schedule that spawned this task (null for ordinary tasks, or once the schedule is deleted).
-- `originThreadId` / `originThreadTitle`: the T3 session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored thread title, null when not mirrored. Not editable.
+- `originSession` / `originSessionTitle`: the session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored session title, null when not mirrored. Not editable.
 - `handoff`: append one handoff block per accepted need to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
-- `t3WebUrl` = `T3_PUBLIC_URL/<environmentId>/<externalSessionId>` (null without thread or environment id). `t3AppUrl` = T3 thread `link` as served to external MCP clients (`https://app.t3.codes/threads/<env>/<thread>`; null without thread). `t3DeepLink` = `t3code://threads/<environmentId>/<externalSessionId>` (T3 desktop/mobile app; null without thread or environment id). Thread carries the same three.
+- `links`: where the session opens, from the harness adapter: `web`, `native` (an app scheme), `service`, `command` (a copyable resume command); each omitted when the harness has none. T3: `web` = `T3_PUBLIC_URL/<environmentId>/<externalSessionId>`, `native` = `t3code://threads/<environmentId>/<externalSessionId>`.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
-- `artifactLinks`: historical `{label, url}` entries, without live PR status; `[]` when none.
+- `artifactLinks`: historical `{label, url}` entries, without live PR status, plus the artifacts the harness reports for the session (every harness, deduped by URL); `[]` when none.
 
 `TaskEvent`:
 ```json
@@ -392,10 +389,10 @@ attempt is consumed.
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null }`. `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originThreadId` is null. `thread.lastWord` carries the reply excerpt.
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null }`. `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originSession` is null. `thread.lastWord` carries the reply excerpt.
 
 ### `GET /api/tasks`
-Query (all optional): `originThreadId` (exact creator session ID), `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
+Query (all optional): `originConnectionId` with `originSessionId` (the creator session; `originThreadId` is 400 since v6), `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -405,33 +402,30 @@ Body `CreateTaskRequest`:
   "projectId": 1,                // required
   "title": "Say OK",             // required
   "prompt": "reply OK",          // required
-  "providerInstanceId": "claude",// optional, null
-  "model": "claude-haiku-5-5",   // optional, null
-  "modelOptions": [{ "id": "effort", "value": "low" }],  // optional, default []
-  "runtimeMode": "full-access",  // optional
-  "interactionMode": "default",  // optional
+  "connectionId": 1,             // optional: the harness connection (default: the project's only active binding)
+  "executionConfig": { "model": "", "options": [], "permission": "", "mode": "" }, // optional; "" = harness default
   "workspace": { "type": "root" },// optional
   "tags": [],                    // optional
   "initialNote": "",             // optional: first task journal note
   "treeId": null,                // optional: join this tree (tree rules)
   "needs": [],                   // optional: tasks this one needs (tree rules)
-  "needsSessionId": null,        // optional: also need this T3 session (adopted first; "afterMe")
+  "needsSession": null,          // optional: {connectionId, externalSessionId}, also need this session (adopted first; "afterMe")
   "startMode": null,             // optional: auto | manual; omitted = inherit the tree's
-  "originThreadId": null,        // optional: T3 session creating the task (provenance)
+  "originSession": null,         // optional: {connectionId, externalSessionId}, the session creating the task (provenance)
   "attachmentIds": [4],          // optional: staged uploads to attach (max 8)
   "startLocal": null,            // optional: one-shot start, wall time "YYYY-MM-DDTHH:mm" in startTz
   "startTz": null,               // required with startLocal: IANA zone, e.g. "America/New_York"
   "handoff": true,               // optional, default true: append each need's handoff at launch
-  "start": false                 // optional: true = Save & start (not with needs or needsSessionId)
+  "start": false                 // optional: true = Save & start (not with needs or needsSession)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSessionId` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSessionId` not adoptable. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSession` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSession` not adoptable. T3 tasks still accept the legacy model inputs `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` in place of `executionConfig`; responses carry only `executionConfig`. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt providerInstanceId model modelOptions runtimeMode interactionMode workspace tags` `attachmentIds` `startLocal` `startTz` `handoff` `startMode`.
+Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace tags` (or the legacy T3 model inputs) `attachmentIds` `startLocal` `startTz` `handoff` `startMode`.
 In `backlog` all fields are editable; otherwise only `title`, `tags` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it; a task with needs cannot have one (400). `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`). `startMode`: `auto|manual`, `null` inherits the tree's (backlog only). Needs change with `PUT /api/tasks/:id/needs`; tree membership with the tree endpoints.
 200 `Task`. 404.
@@ -604,11 +598,8 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "projectTitle": "stage",
   "title": "Nightly deps bump",
   "prompt": "bump deps, run tests",
-  "providerInstanceId": "claude",
-  "model": "claude-sonnet-5-5",
-  "modelOptions": [],
-  "runtimeMode": "full-access",
-  "interactionMode": "default",
+  "connectionId": 1,
+  "executionConfig": { "model": "[\"claude\",\"claude-sonnet-5-5\"]", "options": [], "permission": "full-access", "mode": "" },
   "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null, "base": "ref" },
   "tags": ["deps"],
   "notes": "",
@@ -620,7 +611,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "lastRunAt": "2026-11-10T20:30:00Z",
   "lastTaskId": 41,
   "lastTaskState": "settled",
-  "originThreadId": null,
+  "originSession": null,
   "createdAt": "2026-11-08T09:59:00Z",
   "updatedAt": "2026-11-08T10:00:00Z"
 }
@@ -628,7 +619,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
 - `cron`: standard 5-field expression (minute hour day-of-month month day-of-week; `@hourly|@daily|@weekly|@monthly|@yearly` also accepted). `@every` and `CRON_TZ=`/`TZ=` prefixes are rejected (400). Evaluated in `tz` (IANA), so DST is handled by the zone.
 - `nextRunAt`: next fire (UTC); null while `paused`. `lastRunAt`: fire time of the newest run row (any outcome); null before the first.
 - `lastTaskId` / `lastTaskState`: newest task this schedule spawned (null before the first).
-- `originThreadId`: the T3 session that created the schedule (agent provenance; set on create only). Spawned tasks inherit it as their `originThreadId`.
+- `originSession`: the session that created the schedule (agent provenance; set on create only). Spawned tasks inherit it as their `originSession`.
 
 `ScheduleRun`:
 ```json
@@ -644,7 +635,7 @@ Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: 
 200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
 
 ### `POST /api/schedules`
-Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig workspace tags attachmentIds originSession, or legacy T3 model and origin fields`), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSessionId`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
+Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig workspace tags attachmentIds originSession`, or the legacy T3 model inputs), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSession`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
 201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
 
 ### `GET /api/schedules/:id`
@@ -701,7 +692,9 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, text, truncated, up
 
 Breaking, so `apiVersion` is 6 and v5 clients refuse this server. Removed, returning 404: `GET /api/t3/status`, `POST /api/t3/pair`, `POST /api/t3/pair/auto`, `DELETE /api/t3/pair`, `PUT /api/t3/url`, `GET /api/opencode/status`, `PUT /api/opencode/settings`, `DELETE /api/opencode/settings`, `POST /api/opencode/connect-local`, `POST /api/opencode/pair`. Use [Harness connections](#harness-connections-api-v6): their old bodies are the new settings and action bodies, and their old replies are the status `details` (the OpenCode routes now answer 200 with the status instead of 204). Health's `t3` object is now `harnesses[]`. CLI: `stage t3` and `stage opencode` are `stage harness KIND status|set|run|disconnect`.
 
-Added: [session interaction](#session-interaction-api-v6) routes, descriptor `launch`, `links.command`, harness-wide capability `options`.
+Added: [session interaction](#session-interaction-api-v6) routes, descriptor `launch`, `links.command`, harness-wide capability `options` and `modeLabel`, capability operation `worktreeBase` (unavailable when the harness chooses the worktree base and branch itself).
+
+T3 legacy fields are gone from responses: tasks, threads, notifications and waiting sessions drop `t3WebUrl`, `t3AppUrl` and `t3DeepLink` (use `links`); tasks and schedules drop `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` (use `executionConfig`, now always present for T3 rows) and `originThreadId` (use `originSession`); the task's `originThreadTitle` is `originSessionTitle`; resolved references drop `threadId` (use `session`). Inputs removed: `needsSessionId` and `originThreadId` on task and schedule create (use `needsSession` and `originSession`; strict decoding answers 400), the `originThreadId` task list query (400; use `originConnectionId` and `originSessionId`), MCP `list_tasks {originThreadId}` and CLI `task ls --origin-thread`. `artifactLinks` now include harness-reported artifacts for every harness. The legacy T3 model inputs on create and update stay accepted for now.
 
 Caller attribution is generic: removed `callerThreadId` (MCP tools), journal `sourceThreadId` input, adoption `threadId`, CLI `--thread`, `sessions adopt THREAD` (use `--target-connection` and `--target-session`) and `mcp --t3-session-env`; Stage no longer reads `T3CODE_THREAD_ID`. Use `callerSession`, the `Stage-Caller-Session` header or `STAGE_CALLER_SESSION` ([Agent interface](#agent-interface)); a dedicated T3 stdio registration sets `STAGE_CALLER_SESSION=<connectionId>:$T3CODE_THREAD_ID` in the agent's environment instead.
 
@@ -714,9 +707,9 @@ Removed outright, returning 404: `GET /api/threads`, `GET /api/threads/search`, 
 ### `GET /api/refs/resolve?ref=`
 What a pasted reference names. `ref` accepts: a stage task or session link (`…/tasks/<id>`, `…/sessions/<id>`; any host, query and fragment ignored, a sub-path prefix allowed), the markdown link the web UI copies (`[stage task #12: Title](…/tasks/12)`), a desktop deep link (`stage://tasks/<id>`, `stage://sessions/<id>`, also under `stage://localhost/`; any `stage-<suffix>://` developer scheme), a T3 web thread link (`T3_PUBLIC_URL/<environmentId>/<threadId>`, matched only on that host), a `t3code://threads/<environmentId>/<threadId>` app link, `#12` or `12` (task), or any other single token (T3 thread id). Stage paths win over T3 links on the same host. 200:
 ```json
-{ "kind": "task", "taskId": 12, "threadId": "th-1" }
+{ "kind": "task", "taskId": 12, "session": { "connectionId": 1, "externalSessionId": "th-1" }, "links": { "web": "…", "native": "…" }, "state": "running" }
 ```
-A task's `threadId` is its T3 thread (null before launch); a session's `taskId` is the task that owns it (null for sessions started outside stage). A session stage has not mirrored yet is read from T3 once when connected. 400 not a reference; 404 unknown task or session.
+`session`: a task's session (null before launch; API v6 removed `threadId`); a session's `taskId` is the task that owns it (null for sessions started outside stage). A session stage has not mirrored yet is read from T3 once when connected. 400 not a reference; 404 unknown task or session.
 
 ## Snippets
 
@@ -811,7 +804,8 @@ Every notification the notifier sends is stored first (also when no browser is s
   "createdAt": "2026-11-08T10:00:00Z",
   "readAt": null,
   "currentState": "needs_input",
-  "t3DeepLink": "t3code://threads/env-1/thread-abc"
+  "connectionId": 1,
+  "links": { "native": "t3code://threads/env-1/thread-abc" }
 }
 ```
 `event`: `needs_input|ready|done|failed|settled`. `taskId` null for external threads (or once the task is deleted). `title` / `projectTitle` are snapshots at send time. `currentState` is live: the task's state, or for an external thread `settled` when settled, else its `observedState`; null when unknown.
@@ -885,7 +879,7 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 
 - Needs (create `needs`, `PUT /api/tasks/:id/needs`, tree `needs`), 409 unless noted: change only in `backlog` (an unchanged set is a no-op in any state); not with a start time (400); each need exists (404), is not the task, is in the task's tree, and does not (transitively) need the task (no loops). An accepted need is allowed.
 - Joining a tree without needs (create with `treeId`, add to tree, adopt) makes a root, parallel to the other roots; `needs` chain the task after those members, and tasks that need the same member run in parallel. Nothing defaults needs: chaining is always explicit.
-- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `auto` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSessionId` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
+- Create with `needs` and no `treeId` joins the needs' tree; needs outside any tree are pulled in; with no tree among them a new `auto` tree is created, titled after the first need. Needs in different trees (or another tree than `treeId`) 409. `needsSession` adopts that session first (see "Adopt session") and adds it as the first need. One transaction.
 - Tasks inherit the tree's start mode by default (`startMode` omitted or null; CLI/MCP also accept `inherit`). Set shared policy on the tree, and explicit task `auto` or `manual` only for an exception. Tree mode changes preserve explicit overrides; clear a task's override to make it inherit again.
 - `start: true` or a start time with needs is 400. A non-backlog task may join a tree only without needs.
 - A need is passed only when `acceptanceId` is non-null. Execution success, stopping, failure and PR merge never release new work; settlement or archive does only through inferred completion. Complete the need in Stage or edit dependencies.
@@ -906,11 +900,11 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 
 ## Adopt session
 
-`POST /api/connections/:connectionId/sessions/:id/adopt` and the scoped task creation field `needsSession` adopt a top-level session. `needsSessionId` retains its T3 meaning. Adoption takes an optional `callerSession` for initial-note attribution.
+`POST /api/connections/:connectionId/sessions/:id/adopt` and the task creation field `needsSession` adopt a top-level session. Adoption takes an optional `callerSession` for initial-note attribution.
 
 - `adopted: true`, `prompt: ""`, title from the request, else the session title, else `Session <id8>`; model, runtime and interaction mode copied from the session; state from the session (State mapping, idle reads `done`); `launchAttempt` 1. Task event `adopted session`.
 - stage never starts, restarts or duplicates it (409); stop works; sync keeps its state.
-- A session a task already owns returns that task (200; `needsSessionId` uses it as the need). Unknown session 404; a subagent, an archived session, or one whose project is not in stage 409.
+- A session a task already owns returns that task (200; `needsSession` uses it as the need). Unknown session 404; a subagent, an archived session, or one whose project is not in stage 409.
 - With `treeId` the task joins that tree (no needs). Adoption never accepts the task, including an already settled session; a later poll may (connection auto-complete).
 
 ## Handoff
@@ -955,7 +949,7 @@ is sent. Historical fallback records remain readable.
 
 ## Session batch
 
-A session batch is the set of tasks one session created (`originThreadId`), usually a plan an agent broke into tasks.
+A session batch is the set of tasks one session created (`originSession`), usually a plan an agent broke into tasks.
 
 `CreatedTasks`:
 ```jsonc
@@ -969,7 +963,7 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 
 ## Agent interface
 
-`stage` CLI, stdio MCP and HTTP MCP expose tasks, trees, journals, schedules, explicit adoption and reference resolution through REST. `get_task` returns the final reply and grouped `batch`; `list_tasks {originThreadId}` (CLI `task ls --origin-thread ID`) lists the creator session's tasks. `read_ref` returns task details and/or explicit session metadata with available native links. Conversation reads and actions belong to the source harness. Removed tools and commands are listed under API v3 retirement.
+`stage` CLI, stdio MCP and HTTP MCP expose tasks, trees, journals, schedules, explicit adoption and reference resolution through REST. `get_task` returns the final reply and grouped `batch`; `list_tasks {originSession}` (CLI `task ls --origin-connection ID --origin-session ID`) lists the creator session's tasks. `read_ref` returns task details and/or explicit session metadata with available native links. Conversation reads and actions belong to the source harness. Removed tools and commands are listed under API v3 retirement.
 
 - A caller-aware tool takes `callerSession: {connectionId, externalSessionId}`. Besides it, three generic channels name the caller, each in the form `<connectionId>:<externalSessionId>`: the `Stage-Caller-Session` header on an HTTP MCP request (malformed: 400), the `STAGE_CALLER_SESSION` environment variable for the CLI (one process, one session; a stdio MCP server ignores it, being shareable across sessions), and harness request metadata: a harness descriptor's `attribution.metaKeys` (OpenCode: `ai.opencode/sessionID`) in an MCP request's `_meta`, resolved to that harness's configured connection. A per-call claim (metadata or header) wins over the environment; an explicit caller that disagrees with it is an error. Unknown context leaves the origin empty. CLI also takes `--caller-connection ID --caller-session ID`. The launch instructions tell an agent how its harness names its session (the descriptor's caller hint).
 - `GET /api/connections/:connectionId/sessions/:id/context` returns session, owning task, current project, title and available links. The owner path reads Stage storage. An unowned session requires explicit lookup and a verified workspace binding to infer its project.
@@ -984,11 +978,11 @@ A session batch is the set of tasks one session created (`originThreadId`), usua
 - `afterMe` submits the scoped caller as `needsSession`. Owner reuse, adoption, tree placement and the dependent task commit together.
 - Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
 - Close work: `archive_task {id, archived?}` (default archives; CLI `task archive ID [--undo]`), `list_tasks {closed?}` (`true|all`; CLI `task ls --closed true|all`; rows carry `treeStatus` and `archived`), `delete_task` only for a task that never started and has no recorded work. See "Done, archive and delete".
-- `adopt_session {session?, callerSession?, projectId?, newProjectTitle?, threadId?, title?, initialNote?, tags?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [THREAD_ID] [--title --initial-note --tag --tree]`).
+- `adopt_session {session?, callerSession?, projectId?, newProjectTitle?, title?, initialNote?, tags?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [--target-connection ID --target-session ID] [--title --initial-note --tag --tree]`).
 - `start_task` on a blocked task fails until the user completes its needs in Stage.
 - `create_task` and `update_task` take optional `handoff` (CLI `task add --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoffs`; `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records, plus `tree` and `readiness` lines.
 - `create_task`, `create_schedule`, `update_task` and `update_schedule` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (retained for an explicit ref choice); on `update_task` without `baseRef` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.
 
-`GET /api/notifications/groups` also returns `waitingSessions: [{externalSessionId, title, projectTitle, t3DeepLink, t3WebUrl}]`. These are current external needs-input sessions with no recorded notification up to `latestId`. They have no notification ID, timestamp or read state. Resolving input, adopting the session, or receiving a real event removes the silent row. Startup suppression and delivery preferences remain unchanged.
+`GET /api/notifications/groups` also returns `waitingSessions: [{connectionId, externalSessionId, title, projectTitle, links}]`. These are current external needs-input sessions with no recorded notification up to `latestId`. They have no notification ID, timestamp or read state. Resolving input, adopting the session, or receiving a real event removes the silent row. Startup suppression and delivery preferences remain unchanged.

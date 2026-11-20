@@ -99,16 +99,6 @@ export function isServerSwitch(prev: HostState, next: HostState): boolean {
   return prev.target.id !== next.target.id && prev.serverEpoch > 0;
 }
 
-/**
- * Open local T3 through its app scheme. A remote Stage server uses its T3 web URL,
- * because that server's app scheme would otherwise target this machine.
- */
-export function t3Destination(state: HostState | null, links: { t3DeepLink: string | null; t3WebUrl?: string | null }): string | null {
-  return state === null || state.target.kind === "local"
-    ? (links.t3DeepLink ?? links.t3WebUrl ?? null)
-    : (links.t3WebUrl ?? null);
-}
-
 export type ServerTone = "ok" | "run" | "bad" | "idle";
 
 /** A saved server's marker and note: only the active one has a known state; the others read idle, no note. */

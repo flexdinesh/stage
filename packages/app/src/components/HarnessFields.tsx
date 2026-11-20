@@ -39,13 +39,11 @@ export function HarnessFields({
   config,
   caps,
   onChange,
-  openCode,
   disabled,
 }: {
   config: ExecutionConfig;
   caps: Capabilities | undefined;
   onChange: (next: ExecutionConfig) => void;
-  openCode: boolean;
   disabled: boolean;
 }) {
   const model = caps?.models?.find((m) => m.id === config.model);
@@ -96,7 +94,7 @@ export function HarnessFields({
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
       {choices("Model", "model", caps?.models ?? [])}
-      {choices(openCode ? "Agent" : "Interaction mode", "mode", caps?.modes ?? [])}
+      {choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? [])}
       {choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
       {options.map((o) => {
         const current = config.options.find((v) => v.id === o.id);

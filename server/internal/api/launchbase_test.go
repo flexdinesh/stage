@@ -112,7 +112,7 @@ func TestPredecessorBaseFromAdoptedSession(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/base-session")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
-	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSessionId": s, "workspace": predecessorWS()})
+	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSession": e.t3Session(s), "workspace": predecessorWS()})
 	planner := b.Needs[0]
 	e.inWorktree(s, "plan/x")
 	e.acceptThread(s)

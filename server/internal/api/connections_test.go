@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	tk := e.task(p.ID, "Run", nil)
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	if started.T3WebURL == nil {
+	if started.Links.Web == "" || started.Links.Native == "" {
 		t.Fatalf("no link before the switch %+v", started)
 	}
 
@@ -71,8 +72,11 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	if got.ConnectionID != first || got.ConnectionActive || got.ConnectionLabel != "box a" || got.Harness != "t3" || got.State != "running" {
 		t.Fatalf("replaced task %+v", got)
 	}
-	if got.T3WebURL != nil || got.T3AppURL != nil || got.T3DeepLink != nil {
-		t.Fatalf("links point at the new T3: %v %v %v", got.T3WebURL, got.T3AppURL, got.T3DeepLink)
+	// A retired connection is never reached again: its links are the stored
+	// observation's, naming the old environment, never the new T3's.
+	if got.Links != started.Links || strings.Contains(got.Links.Web, "env-b") || strings.Contains(got.Links.Native, "env-b") ||
+		got.Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, *started.T3ThreadID) {
+		t.Fatalf("retired links %+v, want the old environment's %+v", got.Links, started.Links)
 	}
 
 	var list struct {
