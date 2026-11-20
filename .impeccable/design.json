@@ -619,7 +619,7 @@
       {
         "name": "active-row",
         "value": "inset 0 0 0 1px var(--line-strong)",
-        "purpose": "Active row box over a Bench Gray fill: the current sidebar row (views and the selected project; no side bar), and the highlighted palette, project combobox and snippet picker result. Inset, so rows never shift."
+        "purpose": "Active row box over a Bench Gray fill: the current sidebar row (views and the selected project; no side bar), and the highlighted palette, combobox and snippet picker result. Inset, so rows never shift."
       },
       {
         "name": "input-focus",

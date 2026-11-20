@@ -6,8 +6,10 @@ import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../.
 import { useApi } from "../../platform/context.tsx";
 import { HARNESS_NAME } from "../../lib/harnesses.ts";
 
+import { Combobox } from "../Combobox.tsx";
+import { ProjectCombobox } from "../ProjectSelect.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel, Select } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, Panel } from "../ui.tsx";
 
 /** Explicit lookup only. Preview never adopts a session. */
 export function AdoptSessionDrawer({
@@ -103,24 +105,25 @@ export function AdoptSessionDrawer({
         >
           <Field label="Harness">
             {(id) => (
-              <Select
+              <Combobox
                 id={id}
                 value={connection}
                 disabled={preview.isPending || adopt.isPending}
-                onChange={(e) => {
-                  setConnection(e.target.value);
+                onChange={(next) => {
+                  setConnection(next);
                   setPicked(null);
                   preview.reset();
                   adopt.reset();
                 }}
-              >
-                <option value="">Choose harness</option>
-                {connections.data?.connections.filter((c) => c.active).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {HARNESS_NAME[c.harness]}
-                  </option>
-                ))}
-              </Select>
+                listLabel="Harnesses"
+                options={[
+                  { value: "", label: "Choose harness" },
+                  ...(connections.data?.connections.filter((c) => c.active) ?? []).map((c) => ({
+                    value: String(c.id),
+                    label: HARNESS_NAME[c.harness],
+                  })),
+                ]}
+              />
             )}
           </Field>
           <Field label="Session link or ID">
@@ -179,18 +182,14 @@ export function AdoptSessionDrawer({
                   </p>
                   <Field label="Project">
                     {(id) => (
-                      <Select
+                      <ProjectCombobox
                         id={id}
+                        projects={projects.data?.projects ?? []}
                         value={projectId}
-                        onChange={(event) => setProjectId(event.target.value)}
-                      >
-                        <option value="">Create new project</option>
-                        {(projects.data?.projects ?? []).map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.title}
-                          </option>
-                        ))}
-                      </Select>
+                        onChange={setProjectId}
+                        pinned="Create new project"
+                        className="w-full"
+                      />
                     )}
                   </Field>
                   {projectId !== "" ? null : (

@@ -1,7 +1,8 @@
 import { useCatalog } from "../api/queries.ts";
 import { type CatalogModel, type ModelOption, type RuntimeMode } from "../api/types.ts";
 import { optionsText } from "../lib/format.ts";
-import { Field, Muted, Select, errorText } from "./ui.tsx";
+import { Combobox } from "./Combobox.tsx";
+import { Field, Muted, errorText } from "./ui.tsx";
 
 export interface ModelConfig {
   providerInstanceId: string | null;
@@ -62,37 +63,38 @@ export function ModelFields({
       )}
       <Field label="Provider">
         {(id) => (
-          <Select id={id} disabled={disabled} value={value.providerInstanceId ?? ""} onChange={(e) => setProvider(e.target.value)}>
-            <option value="">T3 default</option>
-            {providers.map((p) => (
-              <option key={p.providerInstanceId} value={p.providerInstanceId}>
-                {p.displayName}
-              </option>
-            ))}
-            {value.providerInstanceId !== null && provider === undefined ? (
-              <option value={value.providerInstanceId}>{value.providerInstanceId} (not in catalog)</option>
-            ) : null}
-          </Select>
+          <Combobox
+            id={id}
+            disabled={disabled}
+            value={value.providerInstanceId ?? ""}
+            onChange={setProvider}
+            listLabel="Providers"
+            options={[
+              { value: "", label: "T3 default" },
+              ...providers.map((p) => ({ value: p.providerInstanceId, label: p.displayName })),
+              ...(value.providerInstanceId !== null && provider === undefined
+                ? [{ value: value.providerInstanceId, label: `${value.providerInstanceId} (not in catalog)` }]
+                : []),
+            ]}
+          />
         )}
       </Field>
       <Field label="Model">
         {(id) => (
-          <Select
+          <Combobox
             id={id}
             disabled={disabled || value.providerInstanceId === null}
             value={value.model ?? ""}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            <option value="">Provider default</option>
-            {(provider?.models ?? []).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-            {value.model !== null && model === undefined ? (
-              <option value={value.model}>{value.model} (not in catalog)</option>
-            ) : null}
-          </Select>
+            onChange={setModel}
+            listLabel="Models"
+            options={[
+              { value: "", label: "Provider default" },
+              ...(provider?.models ?? []).map((m) => ({ value: m.id, label: m.label })),
+              ...(value.model !== null && model === undefined
+                ? [{ value: value.model, label: `${value.model} (not in catalog)` }]
+                : []),
+            ]}
+          />
         )}
       </Field>
       {model?.options.map((opt) => {
@@ -101,20 +103,17 @@ export function ModelFields({
         return (
           <Field key={opt.id} label={opt.id.replace(/([a-z])([A-Z])/g, "$1 $2")}>
             {(id) => (
-              <Select
+              <Combobox
                 id={id}
                 disabled={disabled}
                 value={index === -1 ? "" : String(index)}
-                onChange={(e) => setOption(opt.id, e.target.value === "" ? undefined : opt.values[Number(e.target.value)])}
-              >
-                {opt.default === null || index === -1 ? <option value="">-</option> : null}
-                {opt.values.map((v, i) => (
-                  <option key={String(v)} value={String(i)}>
-                    {String(v)}
-                    {v === opt.default ? " (default)" : ""}
-                  </option>
-                ))}
-              </Select>
+                onChange={(next) => setOption(opt.id, next === "" ? undefined : opt.values[Number(next)])}
+                listLabel={opt.id}
+                options={[
+                  ...(opt.default === null || index === -1 ? [{ value: "", label: "-" }] : []),
+                  ...opt.values.map((v, i) => ({ value: String(i), label: `${String(v)}${v === opt.default ? " (default)" : ""}` })),
+                ]}
+              />
             )}
           </Field>
         );

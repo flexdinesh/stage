@@ -41,13 +41,14 @@ import { isFullyEditable } from "../lib/tasks.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
+import { Combobox } from "./Combobox.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
 import { HARNESS_NAME } from "../lib/harnesses.ts";
 import type { ModelConfig } from "./ModelFields.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Select, Textarea, errorText } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText } from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
 export const START_MODES = ["now", "backlog", "at", "repeat"] as const;
@@ -503,11 +504,11 @@ function TaskFormDrawer({
               />
             )}
           </Field>
-          <Field label="Harness">{id=><Select id={id} disabled={!full} value={connection || ""} onChange={e=>chooseHarness(Number(e.target.value))}>
-            <option value="">Choose a harness</option>
-            {harnesses.activeList.map(c=><option key={c.id} value={c.id}>{HARNESS_NAME[c.harness]}</option>)}
-            {connection > 0 && harnesses.retired(connection) ? <option value={connection} disabled>{harnesses.name(connection)} (replaced)</option> : null}
-          </Select>}</Field>
+          <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" options={[
+            {value: "", label: "Choose a harness"},
+            ...harnesses.activeList.map(c=>({value: String(c.id), label: HARNESS_NAME[c.harness]})),
+            ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
+          ]}/>}</Field>
         </div>
         <ErrorText error={harnesses.error}/>
         {selectedProject === undefined || !connection || bound ? null : <Alert>
@@ -590,21 +591,17 @@ function TaskFormDrawer({
         {inTree ? (
           <Field label="Tree start" className="md:max-w-sm">
             {(id) => (
-              <Select
+              <Combobox
                 id={id}
                 value={s.treeStart}
-                onChange={(e) => {
-                  const picked = treeStartOptions(inheritedMode).find((o) => o.value === e.target.value);
+                onChange={(next) => {
+                  const picked = treeStartOptions(inheritedMode).find((o) => o.value === next);
                   if (picked !== undefined) set({ treeStart: picked.value });
                 }}
+                listLabel="Tree start modes"
                 className="w-full"
-              >
-                {treeStartOptions(inheritedMode).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
+                options={treeStartOptions(inheritedMode)}
+              />
             )}
           </Field>
         ) : null}
@@ -671,13 +668,14 @@ function ZoneField({ s, set }: FieldsProps) {
   return (
     <Field label="Time zone">
       {(id) => (
-        <Select id={id} value={s.tz} onChange={(e) => set({ tz: e.target.value })} className="w-full font-mono">
-          {zones.map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id={id}
+          value={s.tz}
+          onChange={(tz) => set({ tz })}
+          listLabel="Time zones"
+          className="w-full font-mono"
+          options={zones.map((z) => ({ value: z, label: z }))}
+        />
       )}
     </Field>
   );
@@ -760,13 +758,17 @@ function RepeatFields({
         {r.preset === "weekly" ? (
           <Field label="Day">
             {(id) => (
-              <Select id={id} value={r.weekday} onChange={(e) => setRepeat({ weekday: clampInt(e.target.value, 6) })} className="w-full">
-                {WEEKDAY_ORDER.map((d) => (
-                  <option key={d} value={d}>
-                    {WEEKDAYS[d]}
-                  </option>
-                ))}
-              </Select>
+              <Combobox
+                id={id}
+                value={String(r.weekday)}
+                onChange={(day) => setRepeat({ weekday: clampInt(day, 6) })}
+                listLabel="Weekdays"
+                className="w-full"
+                options={WEEKDAY_ORDER.flatMap((d) => {
+                  const label = WEEKDAYS[d];
+                  return label === undefined ? [] : [{ value: String(d), label }];
+                })}
+              />
             )}
           </Field>
         ) : null}

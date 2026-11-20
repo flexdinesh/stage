@@ -9,7 +9,8 @@ import { useNewTask } from "../components/NewTask.tsx";
 import { ScheduleRows } from "../components/ScheduleList.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
-import { Button, PageHeader, Panel, QueryState, Segmented, Select } from "../components/ui.tsx";
+import { Combobox } from "../components/Combobox.tsx";
+import { Button, PageHeader, Panel, QueryState, Segmented } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -93,19 +94,14 @@ function ProjectDetail({ id }: { id: number }) {
               actions={
                 <div className="flex items-center gap-2">
                   <Segmented label="Task scope" small options={SCOPES} value={scope} onChange={setScope} />
-                  <Select
+                  <Combobox
                     value={stateFilter}
-                    onChange={(e) => setStateFilter(e.target.value)}
+                    onChange={setStateFilter}
                     aria-label="Filter by state"
+                    listLabel="States"
                     small
-                  >
-                    <option value="">All states</option>
-                    {TASK_STATES.map((s) => (
-                      <option key={s} value={s}>
-                        {taskStateLabel(s)}
-                      </option>
-                    ))}
-                  </Select>
+                    options={[{ value: "", label: "All states" }, ...TASK_STATES.map((s) => ({ value: s, label: taskStateLabel(s) }))]}
+                  />
                 </div>
               }
             >
