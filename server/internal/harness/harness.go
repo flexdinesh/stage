@@ -24,6 +24,23 @@ const (
 	Hosted Hosting = "hosted"
 )
 
+// LaunchIdentity is how a launch learns its session's identity.
+type LaunchIdentity string
+
+const (
+	// LaunchReserved: the adapter reserves the session identity before any
+	// external effect (a deterministic id, or one it checkpoints before
+	// starting the work), so replaying Launch reconciles the same session.
+	// The default.
+	LaunchReserved LaunchIdentity = "reserved"
+	// LaunchCorrelated: the harness assigns the identity when it creates the
+	// session and creation is not idempotent. Stage dispatches once, embeds
+	// execution.LaunchMarker(requestId) in the prompt, and after an uncertain
+	// outcome finds the session by that marker (execution.Correlator) instead
+	// of launching again. Not found: Launch unconfirmed until the user links.
+	LaunchCorrelated LaunchIdentity = "correlated"
+)
+
 // Closure is a closure signal the harness reports (execution.Closure) and
 // the copy that names it. Stage infers completion from a known signal only.
 type Closure struct {
@@ -55,7 +72,14 @@ type Descriptor struct {
 	// Attribution is how an agent running on this harness tells Stage its
 	// session.
 	Attribution Attribution `json:"attribution"`
+	// Launch is how a launch learns its session identity ("" is reserved).
+	Launch LaunchIdentity `json:"launch"`
 }
+
+// OwnsProcesses: the harness runs its sessions as processes Stage (or a
+// worker) owns, so it alone may report an execution lost with its owner
+// (execution.ReasonOwnerExited).
+func (d Descriptor) OwnsProcesses() bool { return d.Hosting == Hosted }
 
 // Attribution is how a calling agent's session reaches Stage. Every harness
 // can use the generic channels: an explicit callerSession argument, the
@@ -96,6 +120,12 @@ type Registry struct{ list []Descriptor }
 // NewRegistry validates and orders ds (the server's composition order).
 func NewRegistry(ds ...Descriptor) (*Registry, error) {
 	seen := map[string]bool{}
+	ds = slices.Clone(ds)
+	for i := range ds {
+		if ds[i].Launch == "" {
+			ds[i].Launch = LaunchReserved
+		}
+	}
 	for _, d := range ds {
 		if d.Kind == "" || d.Name == "" {
 			return nil, errors.New("harness descriptor needs a kind and a name")
@@ -107,6 +137,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		if d.Hosting != Connected && d.Hosting != Hosted {
 			return nil, fmt.Errorf("harness %s: unknown hosting %q", d.Kind, d.Hosting)
 		}
+		if d.Launch != LaunchReserved && d.Launch != LaunchCorrelated {
+			return nil, fmt.Errorf("harness %s: unknown launch identity %q", d.Kind, d.Launch)
+		}
 		for _, c := range d.Closures {
 			if p, ok := provenances[c.Signal]; !ok || p != c.Provenance {
 				return nil, fmt.Errorf("harness %s: closure %q needs provenance %q", d.Kind, c.Signal, p)
@@ -116,7 +149,7 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 			return nil, fmt.Errorf("harness %s: %w", d.Kind, err)
 		}
 	}
-	return &Registry{list: slices.Clone(ds)}, nil
+	return &Registry{list: ds}, nil
 }
 
 // MustRegistry is NewRegistry for fixed compositions and tests.

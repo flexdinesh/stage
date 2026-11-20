@@ -139,6 +139,9 @@ type Intent struct {
 	Config       Config    `json:"config"`
 	Workspace    Workspace `json:"workspace"`
 	Images       []Image   `json:"images"`
+	// Marker is LaunchMarker(RequestID) for a correlated launch (also at the
+	// end of Prompt); "" for a reserved one.
+	Marker string `json:"marker,omitempty"`
 }
 
 // Checkpoint is adapter-owned, versioned JSON. It must contain no credentials.
@@ -190,7 +193,15 @@ type Observation struct {
 	Artifacts   []Artifact   `json:"artifacts"`
 	Base        Availability `json:"base"`
 	Closed      *Closure     `json:"closed,omitempty"`
+	// StateReason qualifies State; "" when the state speaks for itself.
+	StateReason string `json:"stateReason,omitempty"`
 }
+
+// ReasonOwnerExited: the process that owned the execution exited without
+// reporting an outcome, so the execution is interrupted. Only a harness that
+// owns its processes may report it (harness.Descriptor.OwnsProcesses; the
+// coordinator enforces it).
+const ReasonOwnerExited = "owner_exited"
 
 // Closure signals. A closure never implies the execution succeeded.
 const (
@@ -224,6 +235,15 @@ func (o Observation) Valid() error {
 	}
 	if o.Active != (o.State == "running" || o.State == "needs_input") {
 		return errors.New("malformed observation: contradictory activity")
+	}
+	switch o.StateReason {
+	case "":
+	case ReasonOwnerExited:
+		if o.State != "interrupted" {
+			return fmt.Errorf("malformed observation: %s with state %q", o.StateReason, o.State)
+		}
+	default:
+		return fmt.Errorf("malformed observation: unknown state reason %q", o.StateReason)
 	}
 	return nil
 }

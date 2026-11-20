@@ -168,8 +168,9 @@ func (s *Service) Run(ctx context.Context) {
 			}
 			refresh := make(chan struct{}, 1)
 			workers[id] = refresh
-			wg.Add(3)
+			wg.Add(4)
 			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id); return err })
+			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.Stream(ctx, id) })
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.pollConnection(ctx, id) })
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchConnection(ctx, id) })
 		}
@@ -353,20 +354,33 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 		_ = s.store.ObservationUnavailable(ctx, *task.Session, e.Error())
 		return harnessErr(e)
 	}
+	return s.apply(ctx, task, o)
+}
+
+// apply records an observation of task's session, polled or pushed, and
+// moves the task to its state.
+func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observation) error {
 	if o.Session != *task.Session {
 		return errors.New("observation returned a different session")
 	}
-	if e = s.store.PutObservation(ctx, o); e != nil {
+	if e := s.checkObservation(task.Harness, o); e != nil {
 		return e
 	}
-	o, e = s.store.Observation(ctx, *task.Session)
+	if e := s.store.PutObservation(ctx, o); e != nil {
+		return e
+	}
+	o, e := s.store.Observation(ctx, *task.Session)
 	if e != nil {
 		return e
 	}
 	if (task.State == db.StateBacklog && !task.Adopted) || o.State == "idle" {
 		return nil
 	}
-	change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: "execution observed " + o.State}
+	detail := "execution observed " + o.State
+	if o.StateReason != "" {
+		detail += " (" + o.StateReason + ")"
+	}
+	change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail}
 	if task.Adopted && task.LaunchedAt == nil {
 		change.ObservedStart = o.StartedAt
 	}
@@ -388,13 +402,68 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	return nil
 }
 
+// checkObservation validates o against kind's policies: only a harness that
+// owns its processes may report an execution lost with its owner.
+func (s *Service) checkObservation(kind string, o execution.Observation) error {
+	if err := o.Valid(); err != nil {
+		return err
+	}
+	if o.StateReason == execution.ReasonOwnerExited {
+		if d, ok := s.descriptor(kind); !ok || !d.OwnsProcesses() {
+			return errors.New("malformed observation: only a harness that owns its processes may report " + execution.ReasonOwnerExited)
+		}
+	}
+	return nil
+}
+
+// descriptor is kind's registered descriptor.
+func (s *Service) descriptor(kind string) (harness.Descriptor, bool) {
+	if s.Harnesses == nil {
+		return harness.Descriptor{}, false
+	}
+	return s.Harnesses.Lookup(kind)
+}
+
+// Stream ingests connection id's pushed observations while its adapter
+// streams them (execution.EventSource); it returns at once for an adapter
+// that does not push. Polling reconciles whatever a stream misses.
+func (s *Service) Stream(ctx context.Context, id int64) error {
+	a, err := s.Adapter(id)
+	if err != nil {
+		return err
+	}
+	src, ok := a.(execution.EventSource)
+	if !ok {
+		return nil
+	}
+	return src.Events(ctx, func(ctx context.Context, o execution.Observation) error {
+		if o.Session.ConnectionID != id {
+			return errors.New("pushed observation names another connection")
+		}
+		return s.Ingest(ctx, o)
+	})
+}
+
+// Ingest applies a pushed observation to the task that owns its session.
+// An unowned session is left to discovery.
+func (s *Service) Ingest(ctx context.Context, o execution.Observation) error {
+	t, err := s.store.TaskBySession(ctx, o.Session)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if t.State == db.StateLaunching {
+		return nil // the launch reconciles its own session
+	}
+	return s.apply(ctx, t, o)
+}
+
 // closure is the harness's declared closure for o's signal.
 func (s *Service) closure(kind string, o execution.Observation) (harness.Closure, bool) {
-	if o.Closed == nil || s.Harnesses == nil {
-		return harness.Closure{}, false
-	}
-	d, ok := s.Harnesses.Lookup(kind)
-	if !ok {
+	d, ok := s.descriptor(kind)
+	if o.Closed == nil || !ok {
 		return harness.Closure{}, false
 	}
 	return d.Closure(o.Closed.Signal)
@@ -402,10 +471,7 @@ func (s *Service) closure(kind string, o execution.Observation) (harness.Closure
 
 // attribution is kind's caller attribution (zero when unknown).
 func (s *Service) attribution(kind string) harness.Attribution {
-	if s.Harnesses == nil {
-		return harness.Attribution{}
-	}
-	d, _ := s.Harnesses.Lookup(kind)
+	d, _ := s.descriptor(kind)
 	return d.Attribution
 }
 
@@ -471,6 +537,11 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	}
 	if op := features.Operations["launch"]; !op.Available {
 		return t, db.Conflict("Launch unavailable: %s", op.Reason)
+	}
+	d, _ := s.descriptor(t.Harness)
+	correlated := d.Launch == harness.LaunchCorrelated
+	if _, ok := a.(execution.Correlator); correlated && !ok {
+		return t, db.Conflict("Launch unavailable: this harness cannot reconcile a launch it does not reserve.")
 	}
 	if t.Workspace.FromPredecessor() {
 		if op := features.Operations["predecessorBase"]; !op.Available {
@@ -563,6 +634,10 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 		return t, e
 	}
 	in := execution.Intent{RequestID: claim.RequestID, ConnectionID: t.ConnectionID, Project: dest.ExternalProjectID, Directory: dest.Workspace, Title: t.Title, Prompt: prompt, Config: *config, Workspace: workspace, Images: []execution.Image{}}
+	if correlated {
+		in.Marker = execution.LaunchMarker(claim.RequestID)
+		in.Prompt += "\n\n" + in.Marker
+	}
 	for _, img := range images {
 		in.Images = append(in.Images, execution.Image{Name: img.Name, MimeType: img.MimeType, Data: img.Data})
 	}
@@ -608,21 +683,26 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	if !verified {
 		return t, db.Conflict("The original launch workspace changed. Restore it before reconciling this attempt.")
 	}
+	save := func(ctx context.Context, cp execution.Checkpoint) error {
+		return s.store.SaveCheckpoint(ctx, &attempt, cp)
+	}
 	var o execution.Observation
-	for retry := 0; retry < 2; retry++ {
-		o, e = a.Launch(call, *attempt.Intent, attempt.Checkpoint, func(ctx context.Context, cp execution.Checkpoint) error {
-			return s.store.SaveCheckpoint(ctx, &attempt, cp)
-		})
-		var rejected *execution.Rejected
-		if e == nil || errors.As(e, &rejected) || call.Err() != nil {
-			break
+	if attempt.Intent.Marker != "" {
+		o, e = s.correlated(call, a, &attempt, save)
+	} else {
+		for retry := 0; retry < 2; retry++ {
+			o, e = a.Launch(call, *attempt.Intent, attempt.Checkpoint, save)
+			var rejected *execution.Rejected
+			if e == nil || errors.As(e, &rejected) || call.Err() != nil {
+				break
+			}
 		}
 	}
 	// Record the outcome even after the external timeout.
 	record, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer done()
 	if e == nil {
-		e = o.Valid()
+		e = s.checkObservation(t.Harness, o)
 	}
 	if e == nil && (o.Session.ConnectionID != attempt.Intent.ConnectionID || o.Project != attempt.Intent.Project) {
 		e = errors.New("launch returned a different destination")
@@ -653,6 +733,28 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	}
 	return s.store.GetTask(record, t.ID)
 }
+// correlated dispatches a correlated launch once: the dispatch is recorded
+// (the attempt leaves prepared) before the harness creates anything. Once
+// dispatched, the outcome is found by the intent's marker and never launched
+// again; not found keeps the attempt unconfirmed until the user links it.
+func (s *Service) correlated(ctx context.Context, a execution.Adapter, attempt *db.Attempt, save execution.SaveCheckpoint) (execution.Observation, error) {
+	if attempt.Phase == "prepared" {
+		if err := save(ctx, attempt.Checkpoint); err != nil {
+			return execution.Observation{}, err
+		}
+		return a.Launch(ctx, *attempt.Intent, attempt.Checkpoint, save)
+	}
+	c, ok := a.(execution.Correlator)
+	if !ok {
+		return execution.Observation{}, errors.New("this harness cannot find a correlated launch; link the session")
+	}
+	o, err := c.Correlate(ctx, *attempt.Intent)
+	if errors.Is(err, execution.ErrNotFound) {
+		return o, errors.New("no session carries this launch's marker; if it started, link the session")
+	}
+	return o, err
+}
+
 func (s *Service) workspace(ctx context.Context, t db.Task, a execution.Adapter) (execution.Workspace, error) {
 	w := execution.Workspace{Kind: t.Workspace.Type, Base: t.Workspace.BaseRef, FromRemote: strings.HasPrefix(t.Workspace.BaseRef, "origin/") || strings.HasPrefix(t.Workspace.BaseRef, "upstream/")}
 	if t.Workspace.Branch != nil {

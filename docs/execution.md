@@ -103,6 +103,41 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
 
 Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. A harness names the caller through its descriptor's attribution (OpenCode attaches its native session ID to each MCP call) or the generic `Stage-Caller-Session` header and `STAGE_CALLER_SESSION` variable; the launch instructions carry the descriptor's caller hint. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
 
+## Execution contract v2
+
+Optional parts of the adapter contract (`internal/execution/optional.go`).
+Product code type-asserts the interface and reads the operation's
+availability; the descriptor states the policies the coordinator enforces.
+The contract tests prove them on fake harnesses (`internal/sync`
+`contract_v2_test.go`): `assigned` (server-assigned ids, non-idempotent
+create) and `hosted` (owns its processes, pushes, loses its owner, answers
+interaction).
+
+- **Launch identity.** The descriptor's `launch` is `reserved` (default): the
+  adapter reserves the session identity before any effect, so replaying
+  `Launch` reconciles the same session (T3's deterministic thread id,
+  OpenCode's checkpointed session). `correlated`: the harness assigns the id
+  and creation is not idempotent. Stage appends `execution.LaunchMarker(requestId)`
+  to the prompt (`Intent.marker`), records the dispatch before calling
+  `Launch` exactly once, and after an uncertain outcome only searches for the
+  marker (`execution.Correlator`). Not found keeps the attempt **Launch
+  unconfirmed** until the user links the session; Stage never launches it
+  again. A correlated harness without a correlator cannot launch.
+- **Lost outcome.** `Observation.stateReason` qualifies the state. Only a
+  harness that owns its processes (`hosted`) may report `interrupted` with
+  `owner_exited`: its process died without an outcome. The coordinator rejects
+  the reason from any other harness as malformed (nothing changes).
+- **Push.** An adapter implementing `execution.EventSource` streams
+  observations of its connection; the coordinator runs the stream per
+  connection and ingests each through the same path as polling (validation,
+  policies, transition, inferred completion). Unowned sessions are left to
+  discovery, launching tasks to their launch. Polling continues as
+  reconciliation, so a lost event only delays; the stream is the shape a
+  worker's upstream channel will take.
+- **Interaction.** `execution.Interactive` (requests, respond, send) behind
+  operations `respond` and `send`. API: [session interaction](api.md#session-interaction-api-v6);
+  no UI or MCP yet. A harness without it answers `operation_unavailable`.
+
 ## Durable launch lifecycle
 
 The launch claim transaction pins acceptance inputs and destination and creates a
