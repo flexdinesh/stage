@@ -43,7 +43,7 @@ import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefr
 import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
-import { AttentionCount, ProjectNav, SideLink, useScopeAttention } from "./Sidebar.tsx";
+import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
 import { Button, Chip, Drawer, Kbd, buttonClass, cx } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
@@ -270,7 +270,7 @@ function Shell() {
 
   const onMorePage = matchPath("/more", location.pathname) !== null;
   const inMoreSection = MORE_DESTINATIONS.some(({ to }) => matchPath({ path: to, end: false }, location.pathname) !== null);
-  const attention = useScopeAttention();
+  const scopeLoad = useScopeLoad();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
 
@@ -302,7 +302,7 @@ function Shell() {
           </Button>
         </div>
         <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
-          <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<AttentionCount need={attention.need} total={attention.total} />} />
+          <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<LoadCount load={scopeLoad} />} />
           <SideLink to="/tasks" icon={<IconTasks />} label="Tasks" />
           <SideLink to="/schedules" icon={<IconSchedules />} label="Schedules" />
         </nav>
