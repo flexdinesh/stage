@@ -77,7 +77,7 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 		}
 		// Only a service on Stage's machine shares its filesystem.
 		if a.local && p.Vcs == "git" {
-			w.Repo = gitmeta.OriginRepo(p.Canonical)
+			w.Repo, w.RepoPath = gitmeta.Checkout(p.Canonical, p.Canonical)
 		}
 		out = append(out, w)
 	}

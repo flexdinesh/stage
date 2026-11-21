@@ -1,6 +1,8 @@
 // Package gitmeta reads repository metadata without a git binary (the
-// release image has none). It is search metadata only: never an identity
-// or proof that two checkouts are the same repository.
+// release image has none). The normalized origin remote plus subproject
+// path is a cross-machine match key for project import; it is never proof
+// that two checkouts on one machine are the same repository
+// (docs/architecture.md "Project import").
 package gitmeta
 
 import (
@@ -47,6 +49,33 @@ func OriginRepo(dir string) string {
 		return ""
 	}
 	return RemoteIdentity(originURL(b))
+}
+
+// Checkout locates the Git checkout containing dir, searching dir and its
+// parents but never above stop. repo is the checkout's normalized origin
+// remote and sub the slash-separated path from the checkout top to dir ("."
+// at the top). Both are "" when stop does not contain dir or the nearest
+// checkout has no usable origin.
+func Checkout(dir, stop string) (repo, sub string) {
+	dir, stop = filepath.Clean(dir), filepath.Clean(stop)
+	if _, ok := beneath(stop, dir); !ok {
+		return "", ""
+	}
+	for top := dir; ; top = filepath.Dir(top) {
+		if _, err := os.Stat(filepath.Join(top, ".git")); err == nil {
+			if repo = OriginRepo(top); repo == "" {
+				return "", ""
+			}
+			rel, err := filepath.Rel(top, dir)
+			if err != nil {
+				return "", ""
+			}
+			return repo, filepath.ToSlash(rel)
+		}
+		if top == stop || top == filepath.Dir(top) {
+			return "", ""
+		}
+	}
 }
 
 // Translate maps a harness-side directory under harnessRoot to the same

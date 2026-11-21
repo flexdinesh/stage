@@ -56,7 +56,9 @@ type ProjectBinding struct {
 	ConnectionActive bool   `json:"connectionActive"`
 	ConnectionLabel  string `json:"connectionLabel"`
 	// Origin: manual (user bound), imported (discovery created the project
-	// for it) or path (discovery bound it to the project at that path).
+	// for it), path (discovery bound it to the project at that path on this
+	// machine) or remote (discovery bound it to the one project with the same
+	// origin remote and subproject on another machine).
 	Origin string `json:"origin"`
 }
 
@@ -65,6 +67,7 @@ const (
 	BindingManual   = "manual"
 	BindingImported = "imported"
 	BindingPath     = "path"
+	BindingRemote   = "remote"
 )
 type ExternalProject struct {
 	ConnectionID int64  `json:"connectionId"`

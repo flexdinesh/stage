@@ -234,11 +234,14 @@ their Stage IDs and migrate to explicit bindings.
 `bindings` contains active `{id, projectId, connectionId, harness,
 externalProjectId, workspace, revision, status, observedWorkspace, origin}` records.
 Status is `available`, `missing` or `changed`. Binding `origin` is `manual`,
-`imported` (discovery created the project for it) or `path` (discovery bound it
-to the project at that path). Project `origin` is `discovered` or null;
+`imported` (discovery created the project for it), `path` (discovery bound it
+to the project at that path on the same machine) or `remote` (discovery bound
+it to the one project bound on another machine to the same Git origin remote
+and subproject). Project `origin` is `discovered` or null;
 `importedAt` is when discovery created it. `repos` lists the distinct
-normalized origin remotes (`host/owner/name`) of its bound workspaces, search
-metadata only. Paths belong to bindings, never to Stage identity. Activity
+normalized origin remotes (`host/owner/name`) of its bound workspaces. The
+remote is a cross-machine match key, never proof within one machine
+([architecture.md](architecture.md#project-import)). Paths belong to bindings, never to Stage identity. Activity
 includes tracked sessions, tasks and journals.
 
 - `GET /api/projects?archived=false|true|all`: `{projects: Project[], imports: [{connectionId, harness, count, at}]}`. `imports` counts, per connection, the projects discovery created in the last 7 days, newest first.
@@ -265,7 +268,7 @@ includes tracked sessions, tasks and journals.
   an existing directory in T3. No directory creation, cloning or provisioning.
   After an uncertain response, refresh discovery before registering again.
 
-Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject can bind. A Git remote match requires confirmation. DELETE the scoped binding to unbind.
+Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject on the same machine can bind. A Git remote match (with the same subproject when both are known) requires confirmation. DELETE the scoped binding to unbind.
 
 OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` (envs `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`, `OPENCODE_WEB_URL`, `OPENCODE_USERNAME`, `OPENCODE_PASSWORD`) and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, environmentFields, and:
 

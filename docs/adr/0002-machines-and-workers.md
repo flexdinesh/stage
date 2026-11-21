@@ -225,9 +225,12 @@ Browser and API access stays behind the authenticating proxy.
   (`gitmeta.RemoteIdentity`) plus the subproject's path relative to the repo,
   never the absolute path. Path rules stay within one machine. When several
   projects match, the match is ambiguous and needs a manual bind. With no
-  remote, there is no cross-machine merge. #346 rewrites the architecture rule
-  that repository metadata is "never identity": the remote becomes a
-  cross-machine match key, and it is never proof within one machine.
+  remote, there is no cross-machine merge. #346 rewrote the architecture rule
+  that repository metadata is "never identity": the remote is a
+  cross-machine match key, and it is never proof within one machine
+  ([architecture.md](../architecture.md#project-import)). A matched project
+  already bound on the importing machine at another path is also left for a
+  manual bind.
 
 ### 8. MCP and the agent gateway
 
