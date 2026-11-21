@@ -132,6 +132,7 @@ Remove a remote machine. 204. Its token hashes are deleted, so its worker gets 4
 Create a one-time pairing code that adds a machine. Body (strict, may be empty) `{ "label"?: string }` (the new machine's name; default: the name the worker suggests, else `Machine <id>`). 201, `Cache-Control: no-store`:
 ```json
 {
+  "id": 12,                      // names the code in GET/DELETE /api/machines/pairings/{id}
   "code": "stage_pc_12_kq3...",
   "label": "desk",
   "expiresAt": "2026-11-22T10:10:00Z",
@@ -143,6 +144,17 @@ Create a one-time pairing code that adds a machine. Body (strict, may be empty) 
 - `link` is `STAGE_PUBLIC_URL` + `/join#` + code: the server address and the code in one value. The code is in the fragment, which browsers and HTTP clients never send, so it stays out of proxy logs.
 - 409 `public_url_required` when `STAGE_PUBLIC_URL` is unset: a worker needs an address it can reach. No code is created.
 - Like every route outside `/api/worker/*`, this sits behind the deployment's authenticating proxy.
+
+### `GET /api/machines/pairings/{id}`
+Where a pairing code stands, so Settings can show when its worker joins. 200 (never the code):
+```jsonc
+{ "id": 12, "state": "waiting", "expiresAt": "2026-11-22T10:10:00Z", "machineId": null }
+// state: waiting (redeemable) | joined (machineId: the machine it added) | expired
+```
+404 unknown, revoked, or pruned (codes used or expired over a day ago are deleted when the next code is created).
+
+### `DELETE /api/machines/pairings/{id}`
+Revoke a code that was not redeemed: it can no longer add a machine. 204. 404 unknown or already revoked. 409 `pairing_redeemed` when it already added a machine (remove the machine instead). Settings revokes a waiting code when its Add machine drawer closes.
 
 ### Worker routes (`/api/worker/*`)
 

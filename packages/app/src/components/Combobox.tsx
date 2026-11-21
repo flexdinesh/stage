@@ -68,6 +68,7 @@ export function Combobox({
   size,
   autoFocus = false,
   leading,
+  showTag = false,
   "aria-label": ariaLabel,
 }: {
   id?: string | undefined;
@@ -93,6 +94,8 @@ export function Combobox({
   autoFocus?: boolean | undefined;
   /** Shown before the selected label in a select-only trigger (e.g. a state marker). */
   leading?: ReactNode;
+  /** A select-only trigger also shows the selected option's tag (e.g. a connection's machine). */
+  showTag?: boolean | undefined;
   "aria-label"?: string | undefined;
 }) {
   const listId = useId();
@@ -387,6 +390,12 @@ export function Combobox({
         >
           {selected === undefined ? (
             <span className="text-muted">{placeholder ?? " "}</span>
+          ) : showTag && selected.tag !== undefined ? (
+            <span className="flex min-w-0 items-baseline gap-2">
+              {leading}
+              <span className="min-w-0 truncate">{selected.label}</span>
+              <span className="ml-auto min-w-0 truncate font-mono text-meta text-muted">{selected.tag}</span>
+            </span>
           ) : leading === undefined ? (
             selected.label
           ) : (

@@ -4,11 +4,13 @@ import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
-import type { HarnessConnection, HarnessDescriptor, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
   connections: ["connections"],
+  machines: ["machines"],
+  pairing: ["pairing"],
   harnesses: ["harnesses"],
   catalog: ["catalog"],
   projects: ["projects"],
@@ -36,6 +38,41 @@ export function useConnections() {
 }
 
 type Connections = { connections: HarnessConnection[] };
+
+const NO_MACHINES: Machine[] = [];
+
+/** Machines not removed, local first (default poll: presence and last seen move on their own). */
+export function useMachines() {
+  const api = useApi();
+  const q = useQuery({ queryKey: keys.machines, queryFn: api.machines });
+  return { ...q, machines: q.data?.machines ?? NO_MACHINES };
+}
+
+export function useRenameMachine() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, label }: { id: number; label: string }) => api.renameMachine(id, label),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.machines }),
+  });
+}
+
+/** Removing a machine retires its connections: everything that names them refreshes. */
+export function useRemoveMachine() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.removeMachine(id),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: keys.machines }),
+        qc.invalidateQueries({ queryKey: keys.connections }),
+        qc.invalidateQueries({ queryKey: keys.projects }),
+        invalidateWork(qc),
+      ]);
+    },
+  });
+}
 
 const NO_CONNECTIONS: HarnessConnection[] = [];
 const NO_DESCRIPTORS: HarnessDescriptor[] = [];

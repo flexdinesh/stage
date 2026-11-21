@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { invalidateWork, keys, useHarnesses, useMe, usePreferences } from "../api/queries.ts";
+import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
 import {
   type ModelDefaults,
   type NotificationEvent,
@@ -10,6 +10,7 @@ import {
 import { DesktopAppCard } from "../components/Host.tsx";
 import { SharedPaths } from "../components/SharedPaths.tsx";
 import { HarnessConnections } from "../components/HarnessConnections.tsx";
+import { MachinesCard } from "../components/Machines.tsx";
 import { ServersCard } from "../components/Servers.tsx";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
@@ -363,14 +364,40 @@ function ThemeCard() {
   );
 }
 
+/**
+ * Harness setup (T3, OpenCode, shared paths) serves this server's machine. With more than one machine it sits under
+ * that machine's name; remote machines list their connections under Machines.
+ */
+function LocalHarnessSetup() {
+  const { machines } = useMachines();
+  const local = machines.find((m) => m.kind === "local");
+  const headingId = useId();
+  const cards = (
+    <>
+      <HarnessConnections />
+      <SharedPaths />
+    </>
+  );
+  if (machines.length < 2 || local === undefined) return cards;
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3.5">
+      <h2 id={headingId} className="mt-2 flex items-baseline gap-2">
+        <span className="text-title font-semibold text-fg">{local.label}</span>
+        <span className="font-mono text-meta text-muted">harness setup · this server</span>
+      </h2>
+      {cards}
+    </section>
+  );
+}
+
 export function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" meta="User, harness connections, defaults, notifications, appearance" />
+      <PageHeader title="Settings" meta="User, machines, harness connections, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
         <div className="flex flex-col gap-3.5 lg:row-span-6">
-          <HarnessConnections />
-          <SharedPaths />
+          <MachinesCard />
+          <LocalHarnessSetup />
           <ServersCard />
         </div>
         <UserCard />

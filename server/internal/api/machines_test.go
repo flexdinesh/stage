@@ -38,6 +38,7 @@ type machineOut struct {
 }
 
 type pairingOut struct {
+	ID        int64  `json:"id"`
 	Code      string `json:"code"`
 	Label     string `json:"label"`
 	ExpiresAt string `json:"expiresAt"`
@@ -295,5 +296,46 @@ func TestWorkerRoutesBehindRequestOriginPolicy(t *testing.T) {
 	}
 	if got := send("stage.example.test", nil); got != 201 {
 		t.Fatalf("worker: %d", got)
+	}
+}
+
+func TestPairingStatusAndRevoke(t *testing.T) {
+	e := newEnv(t, withPublicURL)
+	var p pairingOut
+	e.must("POST", "/api/machines/pairings", map[string]any{}, 201, &p)
+	if p.ID <= 0 {
+		t.Fatalf("pairing id %+v", p)
+	}
+	path := "/api/machines/pairings/" + strconv.FormatInt(p.ID, 10)
+	var st map[string]any
+	rec := raw(t, e.h, "GET", path, nil, nil, &st)
+	if rec.Code != 200 || st["state"] != "waiting" || st["machineId"] != nil || st["expiresAt"] != p.ExpiresAt {
+		t.Fatalf("waiting %d %v", rec.Code, st)
+	}
+	if strings.Contains(rec.Body.String(), "stage_pc_") {
+		t.Fatalf("status reveals the code: %s", rec.Body)
+	}
+	var j joinOut
+	if rec := raw(t, e.h, "POST", "/api/worker/join", workerHeaders(""), map[string]any{"code": p.Code}, &j); rec.Code != 201 {
+		t.Fatalf("join %d", rec.Code)
+	}
+	st = nil
+	e.must("GET", path, nil, 200, &st)
+	if st["state"] != "joined" || st["machineId"] != float64(j.MachineID) {
+		t.Fatalf("joined %v", st)
+	}
+	var out errOut
+	if rec := raw(t, e.h, "DELETE", path, nil, nil, &out); rec.Code != 409 || out.Code != "pairing_redeemed" {
+		t.Fatalf("revoke joined %d %+v", rec.Code, out)
+	}
+
+	var q pairingOut
+	e.must("POST", "/api/machines/pairings", map[string]any{}, 201, &q)
+	qpath := "/api/machines/pairings/" + strconv.FormatInt(q.ID, 10)
+	e.must("DELETE", qpath, nil, 204, nil)
+	e.must("GET", qpath, nil, 404, nil)
+	e.must("DELETE", qpath, nil, 404, nil)
+	if rec := raw(t, e.h, "POST", "/api/worker/join", workerHeaders(""), map[string]any{"code": q.Code}, &out); rec.Code != 401 || out.Code != "pairing_code_invalid" {
+		t.Fatalf("join revoked %d %+v", rec.Code, out)
 	}
 }

@@ -308,3 +308,74 @@ func isInvalid(err error) bool {
 	var invalid *db.InvalidError
 	return errors.As(err, &invalid)
 }
+
+func TestPairingStatus(t *testing.T) {
+	s, ctx := setup(t)
+	p, err := s.CreatePairing(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.PairingStatus(ctx, p.ID)
+	if err != nil || st.State != "waiting" || st.MachineID != nil || !st.ExpiresAt.Equal(p.ExpiresAt) {
+		t.Fatalf("waiting: %+v %v", st, err)
+	}
+	g, err := s.RedeemPairing(ctx, p.Code, "desk", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err = s.PairingStatus(ctx, p.ID)
+	if err != nil || st.State != "joined" || st.MachineID == nil || *st.MachineID != g.MachineID {
+		t.Fatalf("joined: %+v %v", st, err)
+	}
+	// A joined code stays joined after its expiry.
+	if _, err := testDB.Pool.ExecContext(ctx, `UPDATE pairing_codes SET expires_at=strftime('%Y-%m-%dT%H:%M:%f000Z','now','-1 second') WHERE id=?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.PairingStatus(ctx, p.ID); st.State != "joined" {
+		t.Fatalf("joined after expiry: %+v", st)
+	}
+	late, err := s.CreatePairing(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testDB.Pool.ExecContext(ctx, `UPDATE pairing_codes SET expires_at=strftime('%Y-%m-%dT%H:%M:%f000Z','now','-1 second') WHERE id=?`, late.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := s.PairingStatus(ctx, late.ID); err != nil || st.State != "expired" || st.MachineID != nil {
+		t.Fatalf("expired: %+v %v", st, err)
+	}
+	if _, err := s.PairingStatus(ctx, late.ID+100); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+}
+
+func TestRevokePairing(t *testing.T) {
+	s, ctx := setup(t)
+	p, err := s.CreatePairing(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokePairing(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemPairing(ctx, p.Code, "", ""); !errors.Is(err, db.ErrInvalidPairing) {
+		t.Fatalf("redeem after revoke: %v", err)
+	}
+	if _, err := s.PairingStatus(ctx, p.ID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("status after revoke: %v", err)
+	}
+	if err := s.RevokePairing(ctx, p.ID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("revoke twice: %v", err)
+	}
+	used, err := s.CreatePairing(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemPairing(ctx, used.Code, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var conflict *db.ConflictError
+	if err := s.RevokePairing(ctx, used.ID); !errors.As(err, &conflict) || conflict.Code != "pairing_redeemed" {
+		t.Fatalf("revoke redeemed: %v", err)
+	}
+}

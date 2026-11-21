@@ -357,6 +357,8 @@ export interface Machine {
 }
 /** POST /api/machines/pairings: a one-time code (10 minutes) that adds a machine. Shown once. */
 export interface MachinePairing {
+  /** Names the code in GET/DELETE /api/machines/pairings/{id}. */
+  id: number;
   code: string;
   label: string;
   expiresAt: string;
@@ -364,6 +366,14 @@ export interface MachinePairing {
   link: string;
   /** `stage worker join <link>`, run on the machine to add. */
   command: string;
+}
+/** GET /api/machines/pairings/{id}: where a pairing code stands (never the code). */
+export interface PairingStatus {
+  id: number;
+  /** waiting: redeemable; joined: machineId is the machine it added; expired: unused past expiresAt. */
+  state: "waiting" | "joined" | "expired";
+  expiresAt: string;
+  machineId: number | null;
 }
 /** One harness instance; at most one active per harness kind on a machine. */
 export interface HarnessConnection {

@@ -116,3 +116,33 @@ test("setAutoComplete PUTs the flag to the connection and returns it", async () 
   assert.equal(seen.init.method, "PUT");
   assert.deepEqual(JSON.parse(seen.init.body), { autoComplete: true });
 });
+
+test("machine routes: list, rename, remove, pairing create/status/revoke", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body === undefined ? undefined : JSON.parse(init.body) });
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    return Response.json({});
+  });
+  await api.machines();
+  await api.renameMachine(2, "desk");
+  await api.removeMachine(2);
+  await api.createPairing("");
+  await api.createPairing("laptop");
+  await api.pairingStatus(7);
+  await api.revokePairing(7);
+  assert.deepEqual(seen, [
+    { path: "/machines", method: "GET", body: undefined },
+    { path: "/machines/2", method: "PATCH", body: { label: "desk" } },
+    { path: "/machines/2", method: "DELETE", body: undefined },
+    { path: "/machines/pairings", method: "POST", body: {} },
+    { path: "/machines/pairings", method: "POST", body: { label: "laptop" } },
+    { path: "/machines/pairings/7", method: "GET", body: undefined },
+    { path: "/machines/pairings/7", method: "DELETE", body: undefined },
+  ]);
+});
+
+test("createPairing surfaces 409 public_url_required with its code", async () => {
+  const { api } = fakeApi(async () => Response.json({ error: "Set STAGE_PUBLIC_URL", code: "public_url_required" }, { status: 409 }));
+  await assert.rejects(api.createPairing(""), (err) => err instanceof ApiError && err.status === 409 && err.code === "public_url_required");
+});

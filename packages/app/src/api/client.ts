@@ -1,4 +1,5 @@
 import type {
+  Machine, MachinePairing, PairingStatus,
   OpenCodeStatus, OpenCodeStatusWire, Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
@@ -195,6 +196,18 @@ export function createApi(transport: Transport) {
     /** The harness kinds the server knows, their policies and copy, and what this machine can run. */
     harnesses: () => apiFetch<HarnessesReply>("/harnesses"),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
+    /** Machines not removed, local (id 1) first. */
+    machines: () => apiFetch<{machines: Machine[]}>("/machines"),
+    /** 400 blank or over 100 characters; 404 unknown or removed. */
+    renameMachine: (id: number, label: string) => apiFetch<Machine>(`/machines/${id}`, patch({label})),
+    /** Revokes its token and retires its connections as history (409 `local_machine` for machine 1). */
+    removeMachine: (id: number) => apiSend(`/machines/${id}`, del),
+    /** A one-time 10 minute code (409 `public_url_required` without STAGE_PUBLIC_URL). The code appears only here. */
+    createPairing: (label: string) => apiFetch<MachinePairing>("/machines/pairings", post(label === "" ? {} : {label})),
+    /** 404 when unknown, revoked or pruned. */
+    pairingStatus: (id: number) => apiFetch<PairingStatus>(`/machines/pairings/${id}`),
+    /** Revokes a code not yet redeemed (409 `pairing_redeemed` once it added a machine). */
+    revokePairing: (id: number) => apiSend(`/machines/pairings/${id}`, del),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
     /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
