@@ -24,6 +24,9 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 		"GET and POST /api/tasks/{id}/journal or /api/trees/{id}/journal",
 		"HTTP: pass sourceSession {connectionId, externalSessionId} in the journal POST body.",
 		"Before read_journal, use get_context or get_task",
+		"Stage's start mode (auto or manual) and this message's delivery path only decide when and how this session started.",
+		"The user watches this session and answers in it",
+		"including asking the user when they call for it. Don't treat this launch as unattended.",
 	}
 	cases := []struct {
 		name, publicURL string
