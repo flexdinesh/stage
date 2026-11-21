@@ -13,11 +13,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +40,7 @@ type smoke struct {
 	dir     string // .scratch/svctest
 	env     []string
 	unit    string // the unit file in the user's unit dir
+	wunit   string // the worker unit file
 	short   string // short temp dir for foreground sockets
 	dataDir string
 }
@@ -184,6 +188,25 @@ func TestSmoke(t *testing.T) {
 		t.Fatalf("logs: %d %q", code, out)
 	}
 
+	t.Log("worker: join a foreground main server")
+	m := s.startMain("")
+	defer func() { m.stop() }()
+	code, out := s.runEnv([]string{"STAGE_URL=" + m.url}, "machine", "pair", "--label", "smoke", "--json")
+	var pair struct {
+		Link string `json:"link"`
+	}
+	if code != 0 || json.Unmarshal([]byte(out), &pair) != nil || pair.Link == "" {
+		t.Fatalf("pair: %d %s", code, out)
+	}
+	if code, out := s.run("worker", "join", pair.Link); code != 0 {
+		t.Fatalf("worker join: %d %s", code, out)
+	}
+
+	t.Log("worker: refused while the server service is installed")
+	if r := s.workerReport("start", "--json"); r.OK || r.Code != service.CodeInvalid || !strings.Contains(r.Message, "not both") {
+		t.Fatalf("worker start beside the server service: %+v", r)
+	}
+
 	t.Log("uninstall keeps data and config")
 	if r := s.report("uninstall", "--json"); !r.OK || !r.Changes.DefinitionRemoved {
 		t.Fatalf("uninstall: %+v", r)
@@ -198,6 +221,156 @@ func TestSmoke(t *testing.T) {
 		if _, err := os.Stat(f); err != nil {
 			t.Fatalf("%s removed: %v", f, err)
 		}
+	}
+
+	t.Log("worker service: start, online")
+	r := s.workerReport("start", "--json")
+	if !r.OK || r.Status == nil || !r.Status.Ready || r.Status.Worker == nil || !r.Status.Worker.OwnedByService {
+		t.Fatalf("worker start: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "worker.env")); err != nil {
+		t.Fatalf("worker.env: %v", err)
+	}
+	if r := s.report("start", "--json"); r.OK || r.Code != service.CodeInvalid {
+		t.Fatalf("server start beside the worker service: %+v", r)
+	}
+	s.verifyUnitFile(s.wunit)
+	s.waitWorkerOnline()
+
+	t.Log("worker service: crash restart")
+	wpid := r.Status.Process.PID
+	if exe, _ := os.Readlink("/proc/" + itoa(wpid) + "/exe"); exe != s.bin {
+		t.Fatalf("pid %d is %q, not our test binary", wpid, exe)
+	}
+	if err := syscall.Kill(wpid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	ws := s.waitWorkerStatus(20*time.Second, func(st service.Status) bool { return st.Ready && st.Process.PID != wpid })
+	if ws.Process.Restarts < 1 {
+		t.Fatalf("worker restarts %d after crash", ws.Process.Restarts)
+	}
+	s.waitWorkerOnline()
+
+	t.Log("worker service: a foreground worker cannot double-own")
+	if code, out := s.run("worker", "run"); code != 75 || !strings.Contains(out, "worker service stop") {
+		t.Fatalf("foreground worker vs service: %d %s", code, out)
+	}
+
+	t.Log("worker service: survives a main restart")
+	m.stop()
+	s.waitFor(30*time.Second, "worker offline", func() bool { c, _ := s.run("worker", "status"); return c == 1 })
+	m = s.startMain(strings.TrimPrefix(m.url, "http://"))
+	s.waitWorkerOnline()
+
+	t.Log("worker service: logs, stop, uninstall")
+	if code, out := s.run("worker", "service", "logs", "-n", "5"); code != 0 || strings.TrimSpace(out) == "" {
+		t.Fatalf("worker logs: %d %q", code, out)
+	}
+	if r := s.workerReport("stop", "--json"); !r.OK || r.Message != "stopped" {
+		t.Fatalf("worker stop: %+v", r)
+	}
+	if r := s.workerReport("uninstall", "--json"); !r.OK || !r.Changes.DefinitionRemoved {
+		t.Fatalf("worker uninstall: %+v", r)
+	}
+	if _, err := os.Stat(s.wunit); !os.IsNotExist(err) {
+		t.Fatalf("worker unit kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dataDir, "worker", "worker.json")); err != nil {
+		t.Fatalf("worker config removed: %v", err)
+	}
+}
+
+// mainServer is a foreground main server of the test binary on its own
+// data dir (never the service's) and a loopback port.
+type mainServer struct {
+	s    *smoke
+	url  string
+	cmd  *exec.Cmd
+	done chan struct{}
+	env  []string
+	args []string
+}
+
+// startMain on addr ("": a free loopback port).
+func (s *smoke) startMain(addr string) *mainServer {
+	s.t.Helper()
+	if addr == "" {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		addr = l.Addr().String()
+		_ = l.Close()
+	}
+	m := &mainServer{s: s, url: "http://" + addr,
+		env:  append(slices.Clone(s.env), "STAGE_DATA_DIR="+filepath.Join(s.dir, "data", "main"), "STAGE_PUBLIC_URL=http://"+addr, "T3_URL=http://127.0.0.1:9"),
+		args: []string{"serve", "--listen", "unix:" + filepath.Join(s.short, "main.sock") + "," + addr}}
+	m.cmd = exec.Command(s.bin, m.args...)
+	m.cmd.Env = m.env
+	if err := m.cmd.Start(); err != nil {
+		s.t.Fatal(err)
+	}
+	m.done = make(chan struct{})
+	go func() { _ = m.cmd.Wait(); close(m.done) }()
+	s.waitFor(30*time.Second, "main server health", func() bool {
+		res, err := http.Get(m.url + "/api/health")
+		if err != nil {
+			return false
+		}
+		_ = res.Body.Close()
+		return res.StatusCode == 200
+	})
+	return m
+}
+
+func (m *mainServer) stop() {
+	select {
+	case <-m.done:
+		return
+	default:
+	}
+	_ = m.cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-m.done:
+	case <-time.After(30 * time.Second):
+		_ = m.cmd.Process.Kill()
+		<-m.done
+	}
+}
+
+func (s *smoke) waitWorkerOnline() {
+	s.t.Helper()
+	s.waitFor(30*time.Second, "worker online", func() bool { c, _ := s.run("worker", "status"); return c == 0 })
+}
+
+func (s *smoke) workerReport(args ...string) service.Report {
+	return s.report(append([]string{"--worker"}, args...)...)
+}
+
+func (s *smoke) workerStatus() service.Status {
+	s.t.Helper()
+	cmd := exec.Command(s.bin, "worker", "service", "status", "--json")
+	cmd.Env = s.env
+	out, _ := cmd.Output()
+	var st service.Status
+	if err := json.Unmarshal(out, &st); err != nil {
+		s.t.Fatalf("worker status: %v\n%s", err, out)
+	}
+	return st
+}
+
+func (s *smoke) waitWorkerStatus(d time.Duration, ok func(service.Status) bool) service.Status {
+	s.t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		st := s.workerStatus()
+		if ok(st) {
+			return st
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("worker status never matched: %+v", st)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -238,22 +411,29 @@ func newSmoke(t *testing.T) *smoke {
 		cfgHome = p
 	}
 	s.unit = filepath.Join(cfgHome, "systemd", "user", smokeID+".service")
-	if b, err := os.ReadFile(s.unit); err == nil && !bytes.Contains(b, []byte("Generator="+service.Generator)) {
-		t.Fatalf("%s exists and is not ours; refusing to touch it", s.unit)
+	s.wunit = filepath.Join(cfgHome, "systemd", "user", smokeID+"-worker.service")
+	for _, u := range []string{s.unit, s.wunit} {
+		if b, err := os.ReadFile(u); err == nil && !bytes.Contains(b, []byte("Generator="+service.Generator)) {
+			t.Fatalf("%s exists and is not ours; refusing to touch it", u)
+		}
 	}
 	return s
 }
 
 // cleanup removes everything the smoke check may have created, by exact path.
 func (s *smoke) cleanup() {
+	_, _ = s.run("worker", "service", "uninstall", "--wait", "2m")
 	_, _ = s.run("service", "uninstall", "--wait", "2m")
-	if b, err := os.ReadFile(s.unit); err == nil && bytes.Contains(b, []byte("Generator="+service.Generator)) {
-		s.systemctl("stop", smokeID+".service")
-		s.systemctl("disable", smokeID+".service")
-		_ = os.Remove(s.unit)
-		s.systemctl("daemon-reload")
+	for _, u := range []string{s.unit, s.wunit} {
+		name := filepath.Base(u)
+		if b, err := os.ReadFile(u); err == nil && bytes.Contains(b, []byte("Generator="+service.Generator)) {
+			s.systemctl("stop", name)
+			s.systemctl("disable", name)
+			_ = os.Remove(u)
+			s.systemctl("daemon-reload")
+		}
+		s.systemctl("reset-failed", name)
 	}
-	s.systemctl("reset-failed", smokeID+".service")
 	_ = os.RemoveAll(filepath.Join(s.dir, "data"))
 	_ = os.RemoveAll(filepath.Join(s.dir, "config"))
 	if rt := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(rt) {
@@ -261,11 +441,13 @@ func (s *smoke) cleanup() {
 	}
 }
 
-func (s *smoke) run(args ...string) (int, string) {
+func (s *smoke) run(args ...string) (int, string) { return s.runEnv(nil, args...) }
+
+func (s *smoke) runEnv(extra []string, args ...string) (int, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, s.bin, args...)
-	cmd.Env = s.env
+	cmd.Env = append(slices.Clone(s.env), extra...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -283,7 +465,11 @@ func (s *smoke) report(args ...string) service.Report {
 	s.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.bin, append([]string{"service"}, args...)...)
+	prefix := []string{"service"}
+	if len(args) > 0 && args[0] == "--worker" {
+		prefix, args = []string{"worker", "service"}, args[1:]
+	}
+	cmd := exec.CommandContext(ctx, s.bin, append(prefix, args...)...)
 	cmd.Env = s.env
 	out, _ := cmd.Output()
 	var r service.Report
@@ -355,12 +541,14 @@ func (s *smoke) showEnv(key string) string {
 	return ""
 }
 
-func (s *smoke) verifyUnit() {
+func (s *smoke) verifyUnit() { s.verifyUnitFile(s.unit) }
+
+func (s *smoke) verifyUnitFile(unit string) {
 	if _, err := exec.LookPath("systemd-analyze"); err != nil {
 		s.t.Log("systemd-analyze not found; unit not verified")
 		return
 	}
-	out, err := exec.Command("systemd-analyze", "--user", "verify", s.unit).CombinedOutput()
+	out, err := exec.Command("systemd-analyze", "--user", "verify", unit).CombinedOutput()
 	if err != nil {
 		s.t.Fatalf("systemd-analyze verify: %v\n%s", err, out)
 	}

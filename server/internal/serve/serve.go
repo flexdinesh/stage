@@ -35,6 +35,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/webui"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
 // ShutdownTimeout lets in-flight launches (bounded at 90s) record their
@@ -244,13 +245,19 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 
+	// Worker channels end with ctx, so Shutdown does not wait on their
+	// streams (docs/runtime.md "Worker channel").
+	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
+		logger.Warn("machine presence", "err", err)
+	})})
+
 	mux := http.NewServeMux()
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup, Connectors: connectors,
-		Harnesses: harnesses,
+		Harnesses: harnesses, Channels: channels,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

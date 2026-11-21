@@ -41,7 +41,10 @@ type Deps struct {
 	// Identity and Version are this binary's (buildinfo).
 	Identity, Version string
 	Service           ServiceOps
-	Desktop           DesktopOps
+	// WorkerService is this installation's worker service (`stage worker
+	// service`); nil when the platform has none (tests).
+	WorkerService ServiceOps
+	Desktop       DesktopOps
 	// Run runs a command with extra env and returns its combined output.
 	Run       func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 	LookPath  func(name string) (string, error)
@@ -66,24 +69,28 @@ type Options struct {
 
 // Result is what an install did.
 type Result struct {
-	OK       bool     `json:"ok"`
-	Code     int      `json:"code"`
-	Message  string   `json:"message"`
-	Fix      string   `json:"fix,omitempty"`
-	Version  string   `json:"version,omitempty"`
-	Previous string   `json:"previous,omitempty"`
-	Mode     string   `json:"mode,omitempty"`
-	Changed  bool     `json:"changed"`
-	Service  string   `json:"service,omitempty"` // restarted | stopped | not-installed | foreign | unavailable | rolled-back | failed
-	Desktop  string   `json:"desktop,omitempty"` // relaunched | quit | not-running
-	CLI      string   `json:"cli,omitempty"`
-	Link     string   `json:"link,omitempty"`
-	App      string   `json:"app,omitempty"`
-	Backup   string   `json:"backup,omitempty"`
-	Notes    []string `json:"notes"`
-	Warnings []string `json:"warnings"`
-	LogTail  []string `json:"logTail,omitempty"`
-	Retained []string `json:"retained,omitempty"`
+	OK       bool   `json:"ok"`
+	Code     int    `json:"code"`
+	Message  string `json:"message"`
+	Fix      string `json:"fix,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Previous string `json:"previous,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Changed  bool   `json:"changed"`
+	Service  string `json:"service,omitempty"` // restarted | stopped | not-installed | foreign | unavailable | rolled-back | failed
+	// WorkerService is the same for the worker service (restarted,
+	// stopped, not-installed, foreign, unavailable, rolled-back, failed;
+	// uninstall: removed, unavailable, foreign, not-installed).
+	WorkerService string   `json:"workerService,omitempty"`
+	Desktop       string   `json:"desktop,omitempty"` // relaunched | quit | not-running
+	CLI           string   `json:"cli,omitempty"`
+	Link          string   `json:"link,omitempty"`
+	App           string   `json:"app,omitempty"`
+	Backup        string   `json:"backup,omitempty"`
+	Notes         []string `json:"notes"`
+	Warnings      []string `json:"warnings"`
+	LogTail       []string `json:"logTail,omitempty"`
+	Retained      []string `json:"retained,omitempty"`
 }
 
 func (r *Result) note(format string, a ...any) { r.Notes = append(r.Notes, fmt.Sprintf(format, a...)) }
@@ -322,6 +329,13 @@ func install(ctx context.Context, d Deps, o Options, res *Result) error {
 	}
 	ours := serviceOurs(st, l)
 	running := ours && (st.State == "running" || st.State == "starting")
+	var wst service.Status
+	workerOurs, workerRunning := false, false
+	if d.WorkerService != nil {
+		wst = d.WorkerService.Status(ctx)
+		workerOurs = serviceOurs(wst, l)
+		workerRunning = workerOurs && (wst.State == "running" || wst.State == "starting")
+	}
 
 	// Disruption starts here.
 	var desktopPIDs []int
@@ -384,7 +398,7 @@ func install(ctx context.Context, d Deps, o Options, res *Result) error {
 		rep := d.Service.Restart(ctx, l.CLI)
 		ok := rep.Code == 0 && reportVersion(rep) == m.Version
 		if !ok {
-			return activationFailed(ctx, d, l, rec, prior, hadPrev, prevInfo, target, rep, res, relaunch)
+			return activationFailed(ctx, d, l, rec, prior, hadPrev, prevInfo, target, rep, res, relaunch, false)
 		}
 		res.Service = "restarted"
 	case st.State == "not-installed":
@@ -402,6 +416,30 @@ func install(ctx context.Context, d Deps, o Options, res *Result) error {
 	}
 	if h := st.Lock.Holder; h != nil && !st.Lock.OwnedByService {
 		res.note("a foreground stage server (pid %d) holds the data dir; restart it to run %s", h.PID, m.Version)
+	}
+	// The worker service likewise (a machine runs one role's service).
+	if d.WorkerService != nil {
+		switch {
+		case workerRunning:
+			d.logf("restarting the %s worker service", d.Identity)
+			rep := d.WorkerService.Restart(ctx, l.CLI)
+			if rep.Code != 0 || workerVersion(rep) != m.Version {
+				return activationFailed(ctx, d, l, rec, prior, hadPrev, prevInfo, target, rep, res, relaunch, true)
+			}
+			res.WorkerService = "restarted"
+		case wst.State == "not-installed":
+			res.WorkerService = "not-installed"
+		case wst.State == "unknown":
+			res.WorkerService = "unavailable"
+		case !workerOurs && wst.Definition.Present:
+			res.WorkerService = "foreign"
+			res.note("the %s worker service runs %s, not this install; it was not restarted", d.Identity, wst.Definition.Exe)
+		default:
+			res.WorkerService = "stopped"
+		}
+		if wk := wst.Worker; wk != nil && wk.Holder != nil && !wk.OwnedByService {
+			res.note("a foreground stage worker (pid %d) holds the worker dir; restart it to run %s", wk.Holder.PID, m.Version)
+		}
 	}
 
 	rec.State, rec.From, rec.To = StateActive, "", ""
@@ -570,16 +608,37 @@ func serviceOurs(st service.Status, l Layout) bool {
 }
 
 // activationFailed handles a service that did not come back on the new
-// version: the binaries roll back only when the schema did not change.
-func activationFailed(ctx context.Context, d Deps, l Layout, rec *Record, prior *Record, hadPrev bool, prev, target probeInfo, rep service.Report, res *Result, relaunch func()) error {
+// version: the binaries roll back only when the schema did not change (a
+// worker has no database: it always rolls back when a previous version
+// exists).
+func activationFailed(ctx context.Context, d Deps, l Layout, rec *Record, prior *Record, hadPrev bool, prev, target probeInfo, rep service.Report, res *Result, relaunch func(), worker bool) error {
 	res.LogTail = rep.LogTail
+	svc, outcome, cmd := d.Service, &res.Service, "service"
+	if worker {
+		svc, outcome, cmd = d.WorkerService, &res.WorkerService, "worker service"
+	}
 	why := rep.Message
 	if rep.Code == 0 {
-		why = fmt.Sprintf("the server reports version %q, expected %s", reportVersion(rep), target.Version)
+		v := reportVersion(rep)
+		if worker {
+			v = workerVersion(rep)
+		}
+		noun := "server"
+		if worker {
+			noun = "worker"
+		}
+		why = fmt.Sprintf("the %s reports version %q, expected %s", noun, v, target.Version)
 	}
-	safe := hadPrev && prior != nil && prev.Schema > 0 && prev.Schema == target.Schema
+	safe := hadPrev && prior != nil && (worker || (prev.Schema > 0 && prev.Schema == target.Schema))
 	if !safe {
-		res.Service = "failed"
+		*outcome = "failed"
+		if worker {
+			rec.State, rec.From, rec.To = StateActive, "", ""
+			_ = writeRecord(l.Record, rec)
+			relaunch()
+			return newErr(CodeNotRolled, fmt.Sprintf("check `%s worker service logs`; fix the cause and run `%s worker service restart`", filepath.Base(l.Link), filepath.Base(l.Link)),
+				"%s %s is installed but its worker did not start (%s); no previous version to roll back to", l.AppName, target.Version, why)
+		}
 		dataDir := ""
 		if rep.Status != nil {
 			dataDir = rep.Status.DataDir
@@ -611,14 +670,23 @@ func activationFailed(ctx context.Context, d Deps, l Layout, rec *Record, prior 
 	}
 	prior.State, prior.From, prior.To = StateActive, "", ""
 	_ = writeRecord(l.Record, prior)
-	back := d.Service.Restart(ctx, l.CLI)
-	res.Service = "rolled-back"
+	back := svc.Restart(ctx, l.CLI)
+	*outcome = "rolled-back"
 	if back.Code != 0 {
 		res.warn("the previous version did not restart either: %s", back.Message)
 	}
 	relaunch()
-	return newErr(CodeRolledBack, fmt.Sprintf("check `%s service logs` and report it", filepath.Base(l.Link)),
+	return newErr(CodeRolledBack, fmt.Sprintf("check `%s %s logs` and report it", filepath.Base(l.Link), cmd),
 		"%s %s did not start (%s); rolled back to %s", l.AppName, target.Version, why, prior.Version)
+}
+
+// workerVersion is the version of the worker a worker service report's
+// status names ("" when unknown).
+func workerVersion(rep service.Report) string {
+	if rep.Status == nil || rep.Status.Worker == nil || rep.Status.Worker.Holder == nil {
+		return ""
+	}
+	return rep.Status.Worker.Holder.Version
 }
 
 func reportVersion(rep service.Report) string {

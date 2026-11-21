@@ -15,8 +15,8 @@ import {
 
 const NOW = Date.parse("2026-11-22T10:00:00Z");
 const kindName = (k) => ({ t3: "T3", opencode: "OpenCode" })[k] ?? k;
-const local = { id: 1, label: "This computer", kind: "local", online: true, lastSeenAt: null, version: "v1.6.0", connections: [] };
-const desk = { id: 2, label: "desk", kind: "remote", online: false, lastSeenAt: "2026-11-22T09:56:00Z", version: "v1.5.0", connections: [] };
+const local = { id: 1, label: "This computer", kind: "local", online: true, status: "online", lastSeenAt: null, version: "v1.6.0", connections: [] };
+const desk = { id: 2, label: "desk", kind: "remote", online: false, status: "offline", lastSeenAt: "2026-11-22T09:56:00Z", version: "v1.5.0", connections: [] };
 const conn = (id, harness, machineId) => ({ id, harness, machineId });
 
 test("status line: online local, offline remote with last seen, never seen", () => {

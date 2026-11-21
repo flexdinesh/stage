@@ -4,6 +4,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 
 	"github.com/flexdinesh/stage/server/internal/instance"
+	"github.com/flexdinesh/stage/server/internal/worker"
 )
 
 // ReportSchema versions the JSON of Status and Report (docs/service.md).
@@ -48,9 +49,32 @@ type Status struct {
 	// Harnesses is each connected harness as the server sees it (nil while
 	// Stage is not reachable).
 	Harnesses []HarnessStatus `json:"harnesses"`
-	Logs      LogsInfo        `json:"logs"`
-	CLI       CLIStatus       `json:"cli"`
-	Problems  []Problem       `json:"problems"`
+	// Role is "worker" for `stage worker service status`, else omitted.
+	Role string `json:"role,omitempty"`
+	// Worker is the worker service's worker (worker role only); the
+	// socket, stage and harness fields are then empty.
+	Worker   *WorkerStatus `json:"worker,omitempty"`
+	Logs     LogsInfo      `json:"logs"`
+	CLI      CLIStatus     `json:"cli"`
+	Problems []Problem     `json:"problems"`
+}
+
+// WorkerStatus is the worker service's worker: its config and what the
+// running worker last reported (docs/service.md "Worker service").
+type WorkerStatus struct {
+	Config    string `json:"config"`
+	Joined    bool   `json:"joined"`
+	URL       string `json:"url,omitempty"`
+	MachineID int64  `json:"machineId,omitempty"`
+	// Holder is the worker process holding the worker dir.
+	Holder *worker.Holder `json:"holder"`
+	// OwnedByService: the holder is the service's own process.
+	OwnedByService bool `json:"ownedByService"`
+	// State is the holder's channel state (connecting, online,
+	// needs_update), or the last worker's final one (revoked, stopped).
+	State     string `json:"state,omitempty"`
+	LastError string `json:"lastError,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // ManagerStatus is the service manager.

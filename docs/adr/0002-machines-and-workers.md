@@ -176,6 +176,9 @@ Browser and API access stays behind the authenticating proxy.
   (`/api/worker/join`). The main server creates the machine row
   (`created_by_user_id` = the user who created the code) and returns the
   machine id plus a **machine token**.
+- **Plain HTTP.** `stage worker join` accepts an `http://` link without a
+  warning (#343): LAN and loopback mains are common, and a public main sits
+  behind a TLS proxy whose `STAGE_PUBLIC_URL` is `https://` anyway.
 - **Machine token.** Random (at least 256 bits), one per machine, stored hashed
   on the main server and compared in constant time. On the worker it is stored
   0600 in the worker data dir, per identity. It is a **machine principal**, not
@@ -340,9 +343,5 @@ Stage tree 197 (auto start). Each task ships as its own PR.
 
 - Running both the main server and a worker under one identity on one
   machine (#348).
-- Whether `stage worker join` refuses a plain `http://` main server that is
-  not on loopback (#343).
 - How launch image bytes reach the worker: upload references fetched over a
   worker route, or inline in the channel (#344).
-- Exact endpoint paths, intervals and error codes (#341, #343), documented in
-  [api.md](../api.md) and [runtime.md](../runtime.md).

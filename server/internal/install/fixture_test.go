@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/service"
+	"github.com/flexdinesh/stage/server/internal/worker"
 )
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
@@ -171,6 +172,8 @@ type fakeService struct {
 	failVersion string // Restart onto this version fails
 	restarts    []string
 	uninstalled bool
+	// worker: this is the worker service (status carries Worker, not Stage).
+	worker bool
 }
 
 func (f *fakeService) status() service.Status {
@@ -178,7 +181,9 @@ func (f *fakeService) status() service.Status {
 	if f.state != "not-installed" {
 		st.Definition = service.DefinitionStatus{Present: true, Exe: f.exe}
 	}
-	if f.state == "running" {
+	if f.state == "running" && f.worker {
+		st.Worker = &service.WorkerStatus{Joined: true, Holder: &worker.Holder{PID: 1, Version: f.version, Managed: true}, OwnedByService: true}
+	} else if f.state == "running" {
 		st.Stage = service.StageStatus{Reachable: true, Version: f.version, URL: "unix:///fake.sock"}
 	}
 	return st
@@ -249,6 +254,7 @@ type env struct {
 	home string
 	d    Deps
 	svc  *fakeService
+	wsvc *fakeService // the worker service
 	desk *fakeDesktop
 }
 
@@ -258,15 +264,16 @@ func newEnv(t *testing.T, identity string) *env {
 	vars := map[string]string{"PATH": filepath.Join(home, ".local", "bin"), "SHELL": "/bin/bash"}
 	svc := &fakeService{state: "not-installed", dataDir: filepath.Join(home, "data")}
 	desk := &fakeDesktop{}
+	wsvc := &fakeService{state: "not-installed", dataDir: filepath.Join(home, "data"), worker: true}
 	d := Deps{
 		Platform: Platform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Home: home, Getenv: func(k string) string { return vars[k] }},
-		Identity: identity, Service: svc, Desktop: desk, Run: runCmd,
+		Identity: identity, Service: svc, WorkerService: wsvc, Desktop: desk, Run: runCmd,
 		// No host helpers (xdg-mime, update-desktop-database, gh, ldconfig).
 		LookPath:  func(string) (string, error) { return "", exec.ErrNotFound },
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil },
 		Now:       func() time.Time { return time.Unix(1700000000, 0) },
 	}
-	return &env{t: t, home: home, d: d, svc: svc, desk: desk}
+	return &env{t: t, home: home, d: d, svc: svc, wsvc: wsvc, desk: desk}
 }
 
 // install runs Install as the CLI of version.

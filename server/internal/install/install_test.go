@@ -565,3 +565,64 @@ func TestDesktopEntryQuoting(t *testing.T) {
 		t.Fatalf("entry %q", got)
 	}
 }
+
+func TestUpdateRestartsWorkerService(t *testing.T) {
+	e := newEnv(t, "stage")
+	mustOK(t, e.install("1.0.0", makeRelease(t, rel{identity: "stage", version: "1.0.0", schema: 4}), Options{Mode: ModeHeadless}))
+	l := e.layout(ModeHeadless)
+	e.wsvc.state, e.wsvc.exe, e.wsvc.version = "running", l.CLI, "1.0.0"
+	r := e.install("1.1.0", makeRelease(t, rel{identity: "stage", version: "1.1.0", schema: 4}), Options{})
+	mustOK(t, r)
+	if r.WorkerService != "restarted" || r.Service != "not-installed" || e.wsvc.version != "1.1.0" || !slices.Equal(e.wsvc.restarts, []string{"1.1.0"}) || len(e.svc.restarts) != 0 {
+		t.Fatalf("worker %q server %q version %s restarts %v / %v", r.WorkerService, r.Service, e.wsvc.version, e.wsvc.restarts, e.svc.restarts)
+	}
+}
+
+func TestUpdateLeavesStoppedOrForeignWorkerService(t *testing.T) {
+	e := newEnv(t, "stage")
+	mustOK(t, e.install("1.0.0", makeRelease(t, rel{identity: "stage", version: "1.0.0"}), Options{Mode: ModeHeadless}))
+	e.wsvc.state, e.wsvc.exe, e.wsvc.version = "running", "/usr/bin/stage", "0.9.0"
+	r := e.install("1.1.0", makeRelease(t, rel{identity: "stage", version: "1.1.0"}), Options{})
+	mustOK(t, r)
+	if r.WorkerService != "foreign" || len(e.wsvc.restarts) != 0 {
+		t.Fatalf("foreign worker service: %q %v", r.WorkerService, e.wsvc.restarts)
+	}
+	e.wsvc.state, e.wsvc.exe = "stopped", e.layout(ModeHeadless).CLI
+	r = e.install("1.2.0", makeRelease(t, rel{identity: "stage", version: "1.2.0"}), Options{})
+	mustOK(t, r)
+	if r.WorkerService != "stopped" || len(e.wsvc.restarts) != 0 {
+		t.Fatalf("stopped worker service: %q %v", r.WorkerService, e.wsvc.restarts)
+	}
+}
+
+func TestFailedWorkerRestartRollsBack(t *testing.T) {
+	e := newEnv(t, "stage")
+	mustOK(t, e.install("1.0.0", makeRelease(t, rel{identity: "stage", version: "1.0.0", schema: 4}), Options{Mode: ModeHeadless}))
+	l := e.layout(ModeHeadless)
+	e.wsvc.state, e.wsvc.exe, e.wsvc.version = "running", l.CLI, "1.0.0"
+	e.wsvc.failVersion = "1.1.0"
+	// A worker has no database: a schema change does not block the rollback.
+	r := e.install("1.1.0", makeRelease(t, rel{identity: "stage", version: "1.1.0", schema: 5}), Options{})
+	if r.Code != CodeRolledBack || r.WorkerService != "rolled-back" || !strings.Contains(r.Fix, "worker service logs") {
+		t.Fatalf("result %+v", r)
+	}
+	if cliVersion(t, l.CLI) != "1.0.0" || e.record().Version != "1.0.0" || e.wsvc.version != "1.0.0" || e.wsvc.state != "running" {
+		t.Fatalf("not rolled back: app %s record %s worker %s %s", cliVersion(t, l.CLI), e.record().Version, e.wsvc.version, e.wsvc.state)
+	}
+	if !slices.Equal(e.wsvc.restarts, []string{"1.1.0", "1.0.0"}) {
+		t.Fatalf("restarts %v", e.wsvc.restarts)
+	}
+}
+
+func TestUninstallRemovesWorkerService(t *testing.T) {
+	e := newEnv(t, "stage")
+	mustOK(t, e.install("1.0.0", makeRelease(t, rel{identity: "stage", version: "1.0.0"}), Options{Mode: ModeHeadless}))
+	e.wsvc.state, e.wsvc.exe = "running", e.layout(ModeHeadless).CLI
+	d := e.d
+	d.Version = "1.0.0"
+	r := Uninstall(context.Background(), d)
+	mustOK(t, r)
+	if !e.wsvc.uninstalled || r.WorkerService != "removed" || r.Service != "not-installed" {
+		t.Fatalf("worker service %q uninstalled %t", r.WorkerService, e.wsvc.uninstalled)
+	}
+}

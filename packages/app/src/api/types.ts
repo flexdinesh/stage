@@ -346,6 +346,8 @@ export interface Machine {
   kind: "local" | "remote";
   /** Local: always. Remote: its worker channel is live. */
   online: boolean;
+  /** online; offline; needs_update: its worker last connected with an incompatible API version (cleared when it connects again). */
+  status: "online" | "offline" | "needs_update";
   /** Last worker contact; null for the local machine. */
   lastSeenAt: string | null;
   /** The build it runs; null when unknown. */
