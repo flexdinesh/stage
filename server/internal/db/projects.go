@@ -18,11 +18,12 @@ const projectCols = `id,title,archived_at,created_at,updated_at,
  origin,imported_at,
  COALESCE((SELECT json_group_array(repo) FROM (SELECT DISTINCT e.repo FROM project_bindings b JOIN external_projects e
  ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
- WHERE b.project_id=projects.id AND b.active=1 AND e.repo<>'' ORDER BY e.repo)),'[]')`
+ WHERE b.project_id=projects.id AND b.active=1 AND e.repo<>'' ORDER BY e.repo)),'[]'),
+ created_by_user_id`
 
 func scanProject(row rowScanner) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings, &p.Origin, &p.ImportedAt, &p.Repos)
+	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings, &p.Origin, &p.ImportedAt, &p.Repos, &p.CreatedBy)
 	return p, notFound(err)
 }
 func (s *Store) ListProjects(ctx context.Context, archived string) ([]Project, error) {
@@ -57,7 +58,7 @@ func (s *Store) GetProject(ctx context.Context, id int64) (Project, error) {
 // launch destinations or metadata sources after migration 8.
 func insertProject(ctx context.Context, tx *Tx, p Project) (int64, error) {
 	var id int64
-	err := tx.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source) VALUES($1,$2,'','app') RETURNING id`, "stage:"+newUUID(), p.Title).Scan(&id)
+	err := tx.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,created_by_user_id) VALUES($1,$2,'','app',$3) RETURNING id`, "stage:"+newUUID(), p.Title, ActingUser(ctx)).Scan(&id)
 	return id, err
 }
 func (s *Store) InsertProject(ctx context.Context, p Project) (Project, error) {

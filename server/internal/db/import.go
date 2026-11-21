@@ -92,8 +92,8 @@ func (s *Store) importOne(ctx context.Context, tx *Tx, connectionID int64, c imp
 	switch len(owners) {
 	case 0:
 		var id int64
-		if err := tx.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,origin,imported_connection_id,imported_at)
- VALUES($1,$2,'','app','discovered',$3,stage_now()) RETURNING id`, "stage:"+newUUID(), c.title, connectionID).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,origin,imported_connection_id,imported_at,created_by_user_id)
+ VALUES($1,$2,'','app','discovered',$3,stage_now(),$4) RETURNING id`, "stage:"+newUUID(), c.title, connectionID, ActingUser(ctx)).Scan(&id); err != nil {
 			return "", err
 		}
 		b.ProjectID, b.Origin = id, BindingImported

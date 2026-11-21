@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { invalidateWork, keys, useHarnesses, usePreferences } from "../api/queries.ts";
+import { invalidateWork, keys, useHarnesses, useMe, usePreferences } from "../api/queries.ts";
 import {
   type ModelDefaults,
   type NotificationEvent,
@@ -17,7 +17,29 @@ import { Alert, Button, Checkbox, Chip, ErrorText, ExternalButton, Muted, PageHe
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
-import { dateTime } from "../lib/format.ts";
+import { dateTime, shortDate } from "../lib/format.ts";
+
+/** The acting user (GET /api/me). No sign-in: everything is attributed to the default user. */
+function UserCard() {
+  const me = useMe();
+  return (
+    <Panel title="User" meta="no sign-in">
+      <QueryState isPending={me.isPending} error={me.error}>
+        {me.data === undefined ? null : (
+          <div className="flex flex-col gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-small font-medium text-fg">{me.data.displayName}</p>
+              <p className="font-mono text-meta text-muted">
+                user #<span className="tabular">{me.data.id}</span> · since {shortDate(me.data.createdAt)}
+              </p>
+            </div>
+            <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>
+          </div>
+        )}
+      </QueryState>
+    </Panel>
+  );
+}
 
 
 function SyncCard() {
@@ -344,13 +366,14 @@ function ThemeCard() {
 export function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" meta="Harness connections, defaults, notifications, appearance" />
+      <PageHeader title="Settings" meta="User, harness connections, defaults, notifications, appearance" />
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
-        <div className="flex flex-col gap-3.5 lg:row-span-5">
+        <div className="flex flex-col gap-3.5 lg:row-span-6">
           <HarnessConnections />
           <SharedPaths />
           <ServersCard />
         </div>
+        <UserCard />
         <SyncCard />
         <DefaultModelCard />
         <NotificationsCard />

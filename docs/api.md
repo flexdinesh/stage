@@ -6,6 +6,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 - Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
 - IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`externalProjectId`, `externalSessionId`) are strings.
+- `createdBy`: the user id (number) of the row's creator on `Project`, `Task`, `Tree`, `JournalEntry`, `Schedule` and the `GET /api/harnesses` machine. Always emitted; see [Users](#users).
 - Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
@@ -84,6 +85,16 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
 - `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `harnesses[].lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
+
+## Users
+
+Stage has no sign-in and no API auth (browser and API access stay behind the proxy boundary). One user exists, the default user (id 1), and every write is attributed to it ([architecture.md](architecture.md#users)). Sign-in identities will map to users later; machine tokens (ADR 0002) are machine principals, never users.
+
+### `GET /api/me`
+200 `User`, the acting user:
+```json
+{ "id": 1, "displayName": "Default user", "createdAt": "2026-11-22T10:00:00Z" }
+```
 
 ## Harness connections (API v6)
 
@@ -219,7 +230,7 @@ its harness archive until a user archives or unarchives it
 ([architecture.md](architecture.md#project-import)). Existing T3 projects keep
 their Stage IDs and migrate to explicit bindings.
 
-`Project`: `{id, title, bindings, archivedAt, createdAt, updatedAt, lastActivityAt, origin, importedAt, repos}`.
+`Project`: `{id, title, bindings, archivedAt, createdAt, createdBy, updatedAt, lastActivityAt, origin, importedAt, repos}`.
 `bindings` contains active `{id, projectId, connectionId, harness,
 externalProjectId, workspace, revision, status, observedWorkspace, origin}` records.
 Status is `available`, `missing` or `changed`. Binding `origin` is `manual`,
@@ -234,7 +245,7 @@ includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?}, launch, available, reason?, connectable}]}`. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable its agents find their session id in (see [Agent interface](#agent-interface)). `profile.kind`: `desktop` (the managed per-user service), `server` (foreground `stage serve`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
+- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?}, launch, available, reason?, connectable}]}`. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable its agents find their session id in (see [Agent interface](#agent-interface)). `profile.kind`: `desktop` (the managed per-user service), `server` (foreground `stage serve`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
 - `GET /api/connections`: `{connections: [{id, machineId, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. `machineId`: the machine that runs the instance (one local machine today). One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `DELETE /api/connections/:connectionId`: forget a retired connection. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its discovered projects and shared paths are dropped. 204. 404 unknown or already forgotten. 409 the connection is active.
@@ -358,6 +369,7 @@ attempt is consumed.
   "lastWordAt": null,
   "artifactLinks": [],
   "createdAt": "2026-11-08T09:59:00Z",
+  "createdBy": 1,
   "updatedAt": "2026-11-08T10:00:00Z",
   "stateSince": "2026-11-08T10:00:00Z",
   "archivedAt": null,
@@ -526,11 +538,12 @@ API v2 removes task `notes`. Create and adopt accept `initialNote`; PATCH reject
   "fromTreeId": null,
   "toTreeId": null,
   "createdAt": "2026-11-16T10:00:00Z",
+  "createdBy": 1,
   "truncated": false
 }
 ```
 
-`kind` is `note|event`. For notes, exactly one of `taskId` and `treeId` denotes ownership. Task events can also carry a `treeId` snapshot; tree events have `treeId` and optional `sourceTaskId`. Provenance and IDs never change. Empty `category` means uncategorized; `eventType` is empty for notes. Nullable provenance fields are always emitted.
+`kind` is `note|event`. `createdBy`: the note's author, or the user behind an event Stage writes directly (acceptance, duplicate); events written by database triggers carry the default user. For notes, exactly one of `taskId` and `treeId` denotes ownership. Task events can also carry a `treeId` snapshot; tree events have `treeId` and optional `sourceTaskId`. Provenance and IDs never change. Empty `category` means uncategorized; `eventType` is empty for notes. Nullable provenance fields are always emitted.
 
 ### `GET /api/journal/:id`
 
@@ -548,7 +561,7 @@ A tree is a DAG of tasks: each member's `needs` are members that must be complet
 
 `Tree`:
 ```json
-{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
+{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
 ```
 `status`: `open | done | archived` (see "Done, archive and delete"); `closedAt`: when it was marked done or archived (null while open); `deletable`: the tree and every member have no recorded work and no member started (`DELETE` removes the tree and its tasks).
 `TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`), retained temporarily for compatibility. New tree Activity reads the journal.
@@ -610,9 +623,11 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "lastTaskState": "settled",
   "originSession": null,
   "createdAt": "2026-11-08T09:59:00Z",
+  "createdBy": 1,
   "updatedAt": "2026-11-08T10:00:00Z"
 }
 ```
+- `createdBy`: the schedule's creator. Every task it spawns (cron fire or run now) and that task's initial notes are attributed to this user, not the caller.
 - `cron`: standard 5-field expression (minute hour day-of-month month day-of-week; `@hourly|@daily|@weekly|@monthly|@yearly` also accepted). `@every` and `CRON_TZ=`/`TZ=` prefixes are rejected (400). Evaluated in `tz` (IANA), so DST is handled by the zone.
 - `nextRunAt`: next fire (UTC); null while `paused`. `lastRunAt`: fire time of the newest run row (any outcome); null before the first.
 - `lastTaskId` / `lastTaskState`: newest task this schedule spawned (null before the first).

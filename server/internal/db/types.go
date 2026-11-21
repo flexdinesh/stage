@@ -64,6 +64,7 @@ type Project struct {
 	Title      string           `json:"title"`
 	ArchivedAt *time.Time       `json:"archivedAt"`
 	CreatedAt  time.Time        `json:"createdAt"`
+	CreatedBy  int64            `json:"createdBy"` // user who created it
 	UpdatedAt  time.Time        `json:"updatedAt"`
 	// LastActivityAt: latest thread update/settle or task update; nil when none.
 	LastActivityAt *time.Time `json:"lastActivityAt"`
@@ -198,7 +199,10 @@ type Task struct {
 	// PendingQuestionCount: the thread's answerable pending questions.
 	PendingQuestionCount int       `json:"-"`
 	CreatedAt            time.Time `json:"createdAt"`
-	UpdatedAt            time.Time `json:"updatedAt"`
+	// CreatedBy: the user who created the task (a schedule's creator for a
+	// task it spawned).
+	CreatedBy int64     `json:"createdBy"`
+	UpdatedAt time.Time `json:"updatedAt"`
 	// StateSince: when the task entered its current state (latest task event
 	// into it; nil without one).
 	StateSince  *time.Time   `json:"stateSince"`
