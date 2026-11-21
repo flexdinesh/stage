@@ -339,6 +339,32 @@ export interface HarnessStatus<D = unknown> {
 /** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
 export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }
 export interface HarnessesReply { machine: { id: number; label: string; createdBy: number; profile: MachineProfile }; harnesses: HarnessDescriptor[] }
+/** GET /api/machines: a host that runs harnesses. Machine 1 is local (this server); others run `stage worker`. */
+export interface Machine {
+  id: number;
+  label: string;
+  kind: "local" | "remote";
+  /** Local: always. Remote: its worker channel is live. */
+  online: boolean;
+  /** Last worker contact; null for the local machine. */
+  lastSeenAt: string | null;
+  /** The build it runs; null when unknown. */
+  version: string | null;
+  createdBy: number;
+  createdAt: string;
+  /** Its active harness connections. */
+  connections: { id: number; harness: Harness; label: string }[];
+}
+/** POST /api/machines/pairings: a one-time code (10 minutes) that adds a machine. Shown once. */
+export interface MachinePairing {
+  code: string;
+  label: string;
+  expiresAt: string;
+  /** STAGE_PUBLIC_URL/join#<code>. */
+  link: string;
+  /** `stage worker join <link>`, run on the machine to add. */
+  command: string;
+}
 /** One harness instance; at most one active per harness kind on a machine. */
 export interface HarnessConnection {
   id: number;

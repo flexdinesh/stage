@@ -99,6 +99,17 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/harnesses/{kind}/settings", s.harnessSettings)
 	h("POST /api/harnesses/{kind}/actions/{action}", s.harnessAction)
 	h("DELETE /api/harnesses/{kind}/connection", s.harnessDisconnect)
+	h("GET /api/machines", s.listMachines)
+	h("POST /api/machines/pairings", s.createPairing)
+	h("GET /api/machines/{id}", s.getMachine)
+	h("PATCH /api/machines/{id}", s.renameMachine)
+	h("DELETE /api/machines/{id}", s.removeMachine)
+	mux.Handle("POST /api/worker/join", s.worker(false, s.joinWorker))
+	mux.Handle("GET /api/worker/machine", s.worker(true, s.workerMachine))
+	mux.Handle(WorkerPrefix, s.worker(true, func(w http.ResponseWriter, _ *http.Request) error {
+		writeError(w, http.StatusNotFound, "not found")
+		return nil
+	}))
 	h("GET /api/connections", s.connections)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
@@ -188,10 +199,10 @@ func NewRouter(deps Deps) http.Handler {
 	// Every response names the API contract version; clients refuse a
 	// server whose version differs from theirs.
 	apiVersion := strconv.Itoa(buildinfo.APIVersion)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return RejectMachineTokens(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(buildinfo.APIVersionHeader, apiVersion)
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // treeChanged notifies OnTreeChange.
@@ -289,6 +300,9 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		t3Err    *db.HarnessError
 		pushErr  *notify.PushError
 	)
+	if writeAuthErr(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, execution.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "Harness unavailable")

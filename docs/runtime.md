@@ -260,6 +260,44 @@ trusted.
 **Upgrade note:** a proxied hostname that is neither `STAGE_PUBLIC_URL`'s host
 nor listed in `STAGE_ALLOWED_ORIGINS` now gets 403. Add it before upgrading.
 
+## Worker routes
+
+`/api/worker/*` is the one place Stage authenticates requests itself
+([ADR 0002](adr/0002-machines-and-workers.md#5-security-model),
+[api.md](api.md#worker-routes-apiworker)). A remote machine's `stage worker`
+calls it: join with a one-time pairing code, then every other route with its
+machine token. Everything else stays unauthenticated behind the deployment
+boundary.
+
+Order for a worker request:
+
+1. **`guard.Policy`**, unchanged. A worker dials `STAGE_PUBLIC_URL`, so its
+   Host is that URL's host (always allowed), and as a non-browser client it
+   sends no `Origin` or `Sec-Fetch-*` and a JSON body. A DNS-rebinding Host or
+   a cross-site browser request is still refused with 403 before any
+   credential is read.
+2. **API version.** `Stage-Api-Version` must equal the server's: 409
+   `api_version_mismatch` otherwise.
+3. **Credential.** Join takes only the code in its body (an `Authorization`
+   header is 400). Other worker routes need `Authorization: Bearer
+   stage_mt_...`; the machine id it names is the request's principal (a
+   machine, never a user). 401 otherwise.
+
+Machine tokens are refused everywhere else: a Bearer value starting with
+`stage_mt_` on any other `/api` route or on `/mcp` is 401, after the origin
+policy. Other `Authorization` values are ignored, so a proxy that forwards its
+own credentials keeps working. Pairing codes and tokens are stored only as
+SHA-256 (high-entropy secrets need no slow hash) and compared in constant
+time; the id prefix selects the row.
+
+**Behind an authenticating reverse proxy:** the proxy keeps user auth on the
+UI, `/api` and `/mcp`, and passes `/api/worker/*` through without it,
+forwarding the `Authorization` header unchanged. Creating a pairing code
+(`POST /api/machines/pairings`) stays behind user auth. Pairing requires
+`STAGE_PUBLIC_URL` (409 `public_url_required`), the address workers reach.
+Without a proxy, any process that reaches a listener already has full API
+access, and the token adds nothing to or takes nothing from that.
+
 ## OpenCode connection
 
 Settings connect OpenCode three ways: the service on the Stage server's machine (Settings or `stage harness opencode run connect-local`), a remote service through a link from `opencode pair` on its host (`stage harness opencode run pair link=LINK`), or an address with optional HTTP Basic credentials. `stage harness opencode disconnect` (or Disconnect in Settings) forgets the address and credentials; tasks and history stay.

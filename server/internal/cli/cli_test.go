@@ -49,7 +49,7 @@ type harness struct {
 	execs   [][]string
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	h := &harness{t: t, url: "http://127.0.0.1:1"}
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -72,11 +72,15 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.handler = api.NewRouter(api.Deps{
+	deps := api.Deps{
 		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
 		Store:  store, Setup: setup, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 		Harnesses: reg, Connectors: connectors,
-	})
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	h.handler = api.NewRouter(deps)
 	srv := httptest.NewServer(h.handler)
 	t.Cleanup(srv.Close)
 	h.url = srv.URL

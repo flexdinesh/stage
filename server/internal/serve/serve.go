@@ -258,9 +258,11 @@ func Run(ctx context.Context, o Options) error {
 	// Streamable HTTP MCP: the agent tools over this server's own REST API,
 	// served in-process (no dial back to a listener, tcp or unix), so
 	// validation stays in one place. No local file access.
-	mux.Handle("/mcp", policy.Wrap(agenttools.HTTPHandler(&agenttools.Ops{
+	// Machine tokens are worker-route credentials only (api.RejectMachineTokens;
+	// /api applies it itself).
+	mux.Handle("/mcp", policy.Wrap(api.RejectMachineTokens(agenttools.HTTPHandler(&agenttools.Ops{
 		Client: client.NewInProcess(apiHandler, addrs[0].URL()), CLI: cliName,
-	})))
+	}))))
 	mux.Handle("/", webui.Handler())
 
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
