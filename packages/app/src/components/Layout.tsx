@@ -316,9 +316,9 @@ function Shell() {
         </div>
       </aside>
 
-      <div className="min-w-0 pt-[calc(3.25rem+env(safe-area-inset-top))] lg:pt-0">
-      {/* Phone top bar: fixed, not sticky; iOS WebKit can rasterize a sticky bar blurry after a PWA reload. */}
-      <header className="fixed inset-x-0 top-0 z-40 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-bg pt-[env(safe-area-inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] lg:hidden">
+      <div className="min-w-0 pt-[calc(3.25rem+var(--inset-top))] lg:pt-0">
+      {/* Phone top bar: fixed, not sticky (iOS WebKit can rasterize a sticky bar blurry after a PWA reload); --inset-top clears the iOS 26 PWA edge blur. */}
+      <header className="fixed inset-x-0 top-0 z-40 flex h-[calc(3.25rem+var(--inset-top))] items-center gap-2 border-b border-line bg-bg pt-[var(--inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] lg:hidden">
         <Mark needsInput={needsInput} compact />
         <button
           type="button"

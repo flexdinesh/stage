@@ -42,6 +42,19 @@
   --fs-input: 14px;
   --fs-input-mono: 13px;
   --fs-input-sm: 12.5px;
+
+  /* Top chrome offset; edge-anchored bars pad by this, never the raw safe-area inset. */
+  --inset-top: env(safe-area-inset-top);
+}
+
+/* iOS 26+ home-screen apps blur ~40pt under the status bar over the page, even a fixed
+   opaque bar; keep controls below it. min() makes the band 0 when there is no top inset. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    :root {
+      --inset-top: calc(env(safe-area-inset-top) + min(2.5rem, env(safe-area-inset-top) * 1000));
+    }
+  }
 }
 
 @media (max-width: 767px) {

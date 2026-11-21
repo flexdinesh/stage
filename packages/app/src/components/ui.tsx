@@ -496,7 +496,7 @@ export function Drawer({
           wide ? "md:max-w-[680px]" : "md:max-w-[580px]",
         )}
       >
-        <div className="flex h-[calc(3.25rem+env(safe-area-inset-top))] shrink-0 items-center gap-3 border-b border-line pt-[env(safe-area-inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] md:h-12 md:pt-0 md:pr-4 md:pl-4">
+        <div className="flex h-[calc(3.25rem+var(--inset-top))] shrink-0 items-center gap-3 border-b border-line pt-[var(--inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] md:h-12 md:pt-0 md:pr-4 md:pl-4">
           <h2 className="text-title font-semibold">{title}</h2>
           <div className="ml-auto flex items-center gap-3">
             <Kbd className="max-md:hidden">Esc</Kbd>
