@@ -17,6 +17,14 @@ import (
 type checkoutEvidence struct {
 	common             os.FileInfo
 	subproject, remote string
+	// repoPath: slash path from the checkout top, "" when unknown. A remote
+	// suggestion needs equal repoPaths when both sides know theirs.
+	repoPath string
+}
+
+// sameRemote: equal remotes and, when both are known, equal subprojects.
+func (e checkoutEvidence) sameRemote(o checkoutEvidence) bool {
+	return e.remote != "" && e.remote == o.remote && (e.repoPath == "" || o.repoPath == "" || e.repoPath == o.repoPath)
 }
 
 func beneath(root, dir string) (string, bool) {
@@ -172,6 +180,11 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		if proof.remote == "" {
 			proof.remote = remoteIdentity(w.OriginRemote)
 		}
+		if proof.common != nil {
+			proof.repoPath = filepath.ToSlash(proof.subproject)
+		} else if proof.remote != "" && proof.remote == w.Repo {
+			proof.repoPath = w.RepoPath
+		}
 		return proof, true
 	}
 	type owner struct {
@@ -213,7 +226,7 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 					selected = o.binding
 					suggestions[c.ExternalID] = "Shared Git checkout and subproject"
 				}
-			} else if o.binding.ProjectID == id && proof.remote != "" && proof.remote == o.proof.remote {
+			} else if o.binding.ProjectID == id && proof.sameRemote(o.proof) {
 				suggestions[c.ExternalID] = "Same Git remote. Confirm the checkout."
 			}
 		}

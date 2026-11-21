@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -134,24 +135,63 @@ func (t isoTime) ptr() *time.Time {
 	return &v
 }
 
+// wireRepositoryIdentity is T3's resolved repository: the remote it chose
+// (locator) and the checkout top (rootPath). Its "origin" field names a
+// fork's parent, never the origin remote, so Stage ignores it.
+type wireRepositoryIdentity struct {
+	Locator struct {
+		RemoteName string `json:"remoteName"`
+		RemoteURL  string `json:"remoteUrl"`
+	} `json:"locator"`
+	RootPath string `json:"rootPath"`
+}
+
+// originRemote is the origin remote's raw URL, "" when T3 resolved another
+// remote.
+func (r wireRepositoryIdentity) originRemote() string {
+	if r.Locator.RemoteName != "origin" {
+		return ""
+	}
+	return r.Locator.RemoteURL
+}
+
+// repoPath is the slash path from rootPath to workspace ("." at the top),
+// "" when unknown or outside rootPath.
+func (r wireRepositoryIdentity) repoPath(workspace string) string {
+	if r.RootPath == "" || workspace == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(r.RootPath, workspace)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
 type wireProject struct {
-	RepositoryIdentity struct{ Origin struct{ RemoteURL string } } `json:"repositoryIdentity"`
-	ID                 string                                      `json:"id"`
-	Title              string                                      `json:"title"`
-	WorkspaceRoot      string                                      `json:"workspaceRoot"`
-	ArchivedAt         isoTime                                     `json:"archivedAt"`
-	DeletedAt          isoTime                                     `json:"deletedAt"`
-	CreatedAt          isoTime                                     `json:"createdAt"`
-	UpdatedAt          isoTime                                     `json:"updatedAt"`
-	CommitError        string                                      `json:"commitError"` // t3_project_create only
+	RepositoryIdentity wireRepositoryIdentity `json:"repositoryIdentity"`
+	ID                 string                 `json:"id"`
+	Title              string                 `json:"title"`
+	WorkspaceRoot      string                 `json:"workspaceRoot"`
+	ArchivedAt         isoTime                `json:"archivedAt"`
+	DeletedAt          isoTime                `json:"deletedAt"`
+	CreatedAt          isoTime                `json:"createdAt"`
+	UpdatedAt          isoTime                `json:"updatedAt"`
+	CommitError        string                 `json:"commitError"` // t3_project_create only
 }
 
 // toProject: a live T3 project is importable; users add T3 projects
 // deliberately.
 func (w wireProject) toProject() Project {
+	remote := w.RepositoryIdentity.originRemote()
+	repo, repoPath := gitmeta.RemoteIdentity(remote), ""
+	if repo != "" {
+		repoPath = w.RepositoryIdentity.repoPath(w.WorkspaceRoot)
+	}
 	return Project{
-		OriginRemote:  w.RepositoryIdentity.Origin.RemoteURL,
-		Repo:          gitmeta.RemoteIdentity(w.RepositoryIdentity.Origin.RemoteURL),
+		OriginRemote:  remote,
+		Repo:          repo,
+		RepoPath:      repoPath,
 		Importable:    w.ArchivedAt.ptr() == nil && w.DeletedAt.ptr() == nil,
 		ID:            w.ID,
 		Title:         w.Title,

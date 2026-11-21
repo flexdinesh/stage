@@ -292,7 +292,7 @@ func TestDecodeFallsBackToTextContent(t *testing.T) {
 
 func TestProjectImportabilityAndRepo(t *testing.T) {
 	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"projects":[
- {"id":"live","title":"L","workspaceRoot":"/w/l","repositoryIdentity":{"origin":{"remoteUrl":"https://tok@GitHub.com/o/r.git"}}},
+ {"id":"live","title":"L","workspaceRoot":"/w/l","repositoryIdentity":{"canonicalKey":"github.com/o/r","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"https://tok@GitHub.com/o/r.git"},"rootPath":"/w/l","displayName":"o/r","provider":"github","owner":"o","name":"r"}},
  {"id":"archived","title":"A","workspaceRoot":"/w/a","archivedAt":"2026-01-01T00:00:00Z"},
  {"id":"deleted","title":"D","workspaceRoot":"/w/d","deletedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null}`}}}
 	var w wireProjectList
@@ -300,8 +300,40 @@ func TestProjectImportabilityAndRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	live, archived, deleted := w.Projects[0].toProject(), w.Projects[1].toProject(), w.Projects[2].toProject()
-	if !live.Importable || live.Repo != "github.com/o/r" || archived.Importable || deleted.Importable || archived.Repo != "" {
+	if !live.Importable || live.Repo != "github.com/o/r" || live.RepoPath != "." || archived.Importable || deleted.Importable || archived.Repo != "" || archived.RepoPath != "" {
 		t.Fatalf("projects %+v %+v %+v", live, archived, deleted)
+	}
+}
+
+// T3's live repositoryIdentity: locator names the remote T3 chose, rootPath
+// the checkout top; its "origin" field is a fork's parent and never counts.
+func TestProjectRepositoryIdentity(t *testing.T) {
+	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"projects":[
+ {"id":"sub","title":"S","workspaceRoot":"/w/mono/packages/app","repositoryIdentity":{"canonicalKey":"github.com/o/mono","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"git@github.com:o/mono.git"},"rootPath":"/w/mono"}},
+ {"id":"fork","title":"F","workspaceRoot":"/w/fork","repositoryIdentity":{"canonicalKey":"github.com/me/r","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"git@github.com:me/r.git"},"rootPath":"/w/fork","origin":{"canonicalKey":"github.com/o/r"}}},
+ {"id":"upstream","title":"U","workspaceRoot":"/w/u","repositoryIdentity":{"canonicalKey":"github.com/o/u","locator":{"source":"git-remote","remoteName":"upstream","remoteUrl":"git@github.com:o/u.git"},"rootPath":"/w/u"}},
+ {"id":"noroot","title":"N","workspaceRoot":"/w/n","repositoryIdentity":{"canonicalKey":"github.com/o/n","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"git@github.com:o/n.git"}}},
+ {"id":"outside","title":"O","workspaceRoot":"/elsewhere","repositoryIdentity":{"canonicalKey":"github.com/o/x","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"git@github.com:o/x.git"},"rootPath":"/w/x"}},
+ {"id":"local","title":"L","workspaceRoot":"/w/l","repositoryIdentity":{"canonicalKey":"l","locator":{"source":"git-remote","remoteName":"origin","remoteUrl":"/srv/git/l.git"},"rootPath":"/w/l"}},
+ {"id":"none","title":"X","workspaceRoot":"/w/none","repositoryIdentity":null}],"nextCursor":null}`}}}
+	var w wireProjectList
+	if err := decodeToolResult("t3_project_list", res, &w); err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ repo, path string }{
+		{"github.com/o/mono", "packages/app"},
+		{"github.com/me/r", "."},
+		{"", ""},
+		{"github.com/o/n", ""},
+		{"github.com/o/x", ""},
+		{"", ""},
+		{"", ""},
+	}
+	for i, p := range w.Projects {
+		got := p.toProject()
+		if got.Repo != want[i].repo || got.RepoPath != want[i].path {
+			t.Errorf("%s: repo %q path %q, want %q %q", got.ID, got.Repo, got.RepoPath, want[i].repo, want[i].path)
+		}
 	}
 }
 

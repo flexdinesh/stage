@@ -255,8 +255,8 @@ export interface ProjectBinding {
  connectionActive: boolean;
  /** The connection's T3 environment label or OpenCode address. */
  connectionLabel: string;
- /** manual: a user bound it; imported: discovery created the project for it; path: discovery bound it to the project already at that path. */
- origin: "manual" | "imported" | "path";
+ /** manual: a user bound it; imported: discovery created the project for it; path: discovery bound it to the project already at that path on this machine; remote: discovery bound it to the one project with the same Git origin remote and subproject on another machine. */
+ origin: "manual" | "imported" | "path" | "remote";
 }
 export interface ExternalProject {
  connectionId: number;

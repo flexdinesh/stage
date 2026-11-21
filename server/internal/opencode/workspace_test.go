@@ -79,12 +79,12 @@ func TestWorkspacesImportableAndRepo(t *testing.T) {
 		if ws[0].ActiveAt == nil || ws[0].Title != filepath.Base(repo) {
 			t.Fatalf("workspace %+v", ws[0])
 		}
-		want := ""
+		want, wantPath := "", ""
 		if local {
-			want = "github.com/o/r"
+			want, wantPath = "github.com/o/r", "."
 		}
-		if ws[0].Repo != want {
-			t.Fatalf("local=%v repo %q", local, ws[0].Repo)
+		if ws[0].Repo != want || ws[0].RepoPath != wantPath {
+			t.Fatalf("local=%v repo %q path %q", local, ws[0].Repo, ws[0].RepoPath)
 		}
 	}
 }

@@ -154,3 +154,49 @@ func TestMatchNeverProvesACheckoutAcrossMachines(t *testing.T) {
 		t.Fatalf("cross-machine match: %+v", out)
 	}
 }
+
+// A remote suggestion needs the same subproject when both sides know it, so
+// a monorepo sibling is never proposed.
+func TestMatchRemoteSuggestionRequiresSameSubproject(t *testing.T) {
+	var temp dbtest.DB
+	pool := temp.Reset(t)
+	store := db.NewStore(pool)
+	ctx := t.Context()
+	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := store.EnsureOpenCode(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mono := func(id, dir, path string) execution.WorkspaceInfo {
+		return execution.WorkspaceInfo{ID: id, WorkspaceRoot: dir, OriginRemote: "git@host:o/mono.git", Repo: "host/o/mono", RepoPath: path}
+	}
+	source := mono("t3-a", "/w/mono/packages/a", "packages/a")
+	p, err := store.InsertProject(ctx, db.Project{Title: "A", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, sibling, unknown := mono("oc-a", "/l/mono/packages/a", "packages/a"), mono("oc-b", "/l/mono/packages/b", "packages/b"), mono("oc-x", "/l/x", "")
+	service := &server{Deps: Deps{Store: store, Sync: coordinator.NewWithAdapters(store, map[int64]execution.Adapter{
+		1:          workspaceInventory{rows: []execution.WorkspaceInfo{source}},
+		connection: workspaceInventory{rows: []execution.WorkspaceInfo{same, sibling, unknown}},
+	}, nil)}}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("id", strconv.FormatInt(p.ID, 10))
+	req.SetPathValue("connectionId", strconv.FormatInt(connection, 10))
+	rec := httptest.NewRecorder()
+	if err := service.matchWorkspace(rec, req); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Bound       *db.Project
+		Suggestions map[string]string
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Bound != nil || out.Suggestions[same.ID] == "" || out.Suggestions[sibling.ID] != "" || out.Suggestions[unknown.ID] == "" {
+		t.Fatalf("suggestions %+v", out)
+	}
+}

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
-import type { ExternalProject, HarnessConnection, Project } from "../api/types.ts";
+import type { ExternalProject, HarnessConnection, Project, ProjectBinding } from "../api/types.ts";
 import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses } from "../api/queries.ts";
@@ -197,6 +197,14 @@ export function BindWorkspaceDrawer({
 }
 
 /** A connection's workspace inventory (shared by the drawer and the one-click rebind). */
+/** How discovery bound a workspace; manual bindings show no label. */
+const autoOriginLabel: Record<ProjectBinding["origin"], string | null> = {
+  manual: null,
+  imported: "auto · imported",
+  path: "auto · same path",
+  remote: "auto · same Git remote",
+};
+
 function useExternalProjects(connectionId: number, enabled: boolean) {
   const api = useApi();
   return useQuery({
@@ -349,8 +357,8 @@ function ConnectionWorkspace({
       ) : (
         <>
           <p className="break-all font-mono text-meta">{current.workspace}</p>
-          {current.origin === "manual" ? null : (
-            <p className="font-mono text-meta text-muted">{current.origin === "imported" ? "auto · imported" : "auto · same path"}</p>
+          {autoOriginLabel[current.origin] === null ? null : (
+            <p className="font-mono text-meta text-muted">{autoOriginLabel[current.origin]}</p>
           )}
           {current.status === "available" ? null : (
             <Alert>

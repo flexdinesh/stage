@@ -55,8 +55,12 @@ type WorkspaceInfo struct {
 	// sharing one workspace.
 	ActiveAt *time.Time `json:"-"`
 	// Repo: normalized origin remote (host/owner/name), "" when unknown.
-	// Search metadata only; never an identity.
+	// With RepoPath it is the cross-machine match key for project import;
+	// never proof within one machine (docs/architecture.md).
 	Repo string `json:"-"`
+	// RepoPath: slash-separated path from the checkout top to WorkspaceRoot
+	// ("." at the top), "" when unknown. Set only with Repo.
+	RepoPath string `json:"-"`
 }
 type ModelOption struct {
 	ID    string      `json:"id"`

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/gitmeta"
@@ -37,7 +38,10 @@ func (s *Service) inventory(ctx context.Context, id int64, a execution.Adapter) 
 				continue
 			}
 			if dir, ok := gitmeta.Translate(p.HarnessRoot, p.StageRoot, ws[i].WorkspaceRoot); ok {
-				ws[i].Repo = gitmeta.OriginRepo(dir)
+				// The walk to the checkout top stays inside the shared path.
+				if root, err := filepath.EvalSymlinks(p.StageRoot); err == nil {
+					ws[i].Repo, ws[i].RepoPath = gitmeta.Checkout(dir, root)
+				}
 				break
 			}
 		}

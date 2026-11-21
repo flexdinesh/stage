@@ -115,10 +115,14 @@ func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []
 			if live {
 				n++
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,importable,archived,active_at,repo) VALUES($5,$1,$2,$3,$4,$6,$7,$8,$9)
+			repoPath := p.RepoPath
+			if p.Repo == "" {
+				repoPath = ""
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,importable,archived,active_at,repo,repo_path) VALUES($5,$1,$2,$3,$4,$6,$7,$8,$9,$10)
  ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available,
- importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,repo=excluded.repo`,
-				p.ID, p.Title, p.WorkspaceRoot, live, connectionID, p.Importable, p.ArchivedAt != nil, p.ActiveAt, p.Repo); err != nil {
+ importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,repo=excluded.repo,repo_path=excluded.repo_path`,
+				p.ID, p.Title, p.WorkspaceRoot, live, connectionID, p.Importable, p.ArchivedAt != nil, p.ActiveAt, p.Repo, repoPath); err != nil {
 				return err
 			}
 		}
