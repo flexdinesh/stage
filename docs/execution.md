@@ -41,8 +41,7 @@ connection answers `connection_retired` or `connection_unavailable` as
 before), `GET /api/harnesses` reads the local machine's profile, and
 `harness.Connectors` is built from the machines' connectors.
 
-- **LocalMachine.** `machine.Local` is the in-process machine, the only one
-  until workers exist. `serve/localmachine.go` composes it: the T3 client
+- **LocalMachine.** `machine.Local` is the in-process machine (machine 1). `serve/localmachine.go` composes it: the T3 client
   (fake or MCP) and adapter, the T3 and OpenCode setups and their
   connectors. Setup code installs adapters through `Local.Install(old, next,
   adapter)` (the install port; nil disconnects); its change hook moves the
@@ -68,11 +67,68 @@ before), `GET /api/harnesses` reads the local machine's profile, and
   its probe) and `t3setup.Local` (find and run the t3 CLI for auto-pair).
   `machine.StorePorts` backs settings, credentials and identity with the
   store for the local machine. Checkpoint save stays the `Launch` callback.
+- **RemoteMachine.** A joined machine is hosted as `remote.Machine`
+  ([Remote machines](#remote-machines)); `machine.Set` gains and loses
+  remote machines as they join and are removed.
 - **JSON.** Every type that crosses the seam round-trips through JSON
   (`machine/contract_json_test.go`): the adapter contract, connector setup
   states, port payloads and ops. `WorkspaceInfo.OriginRemote` may carry
   credentials; it is never returned to a client. Harness descriptors are
   static and identical on both sides, so a port names a harness by kind.
+
+## Remote machines
+
+`server/internal/remote` is a joined machine over its worker channel
+([runtime.md](runtime.md#worker-channel), ADR 0002). The main server hosts a
+`remote.Machine` per machine that is not removed (`remote.Hosts`: at boot,
+on join, gone on remove or leave); the worker serves a `remote.Host` (an
+in-process `machine.Local` whose adapters setup installs, plus
+`machine.LocalOps`). The coordinator, sync, the runners and the contract
+suite cannot tell a remote machine from the local one.
+
+- **Adapters.** The machine's adapters are proxies (`remote.Adapter`) of the
+  connections the main server records as active on it, so an offline
+  machine's connections still answer, as offline. Every `execution.Adapter`
+  call and optional interface is a channel call (`adapter.*`, the
+  connection in the envelope). `Destinations` makes no call: task lists fall
+  back to the stored observation's links.
+- **Optional interfaces.** The proxy implements all of them in Go and
+  reports which ones the worker's adapter has (`execution.Partial`, traits
+  from `machine.describe`; all assumed until the first describe). Product
+  code reaches them only through `execution.As[T]`, never a type assertion
+  (`execution/as_boundary_test.go`).
+- **Launch.** The intent goes down without image bytes. While the call
+  waits, the worker calls back: `checkpoint.save` runs the coordinator's
+  `SaveCheckpoint` before each external effect (a failure stops the
+  worker's adapter; after the call stopped waiting the save is refused with
+  `call_ended`), and `launch.image` returns one image by index. A lost reply
+  leaves the attempt unconfirmed and the replay reconciles from the saved
+  checkpoint, as for any uncertain launch.
+- **Push.** `Events` is one long-running `adapter.events` call (10 minute
+  window): each pushed observation is an `events.observation` callback,
+  ingested (`sync.Service.Ingest`) before the worker continues; polling
+  reconciles anything missed.
+- **Health.** Offline answers at once with the reason (offline, or needs
+  update); an online answer is reused for 5s.
+- **Ops.** `ops.inventory` and `ops.checkout` run `machine.LocalOps` on the
+  worker with the shared roots the main server loads; evidence is still
+  compared on the main server, within one machine.
+- **Errors.** `execution.ErrUnavailable`, `ErrNotFound`, `ErrNoReply` and
+  `Rejected` keep their meaning (`unavailable`, `not_found`, `no_reply`,
+  `rejected`). Offline, `not_hosted`, `unsupported` and an older worker
+  (`unknown_kind`) are unavailable. A lost reply, a worker timeout or any
+  other error stays uncertain; only the worker adapter's own rejection is
+  `Rejected`.
+- **An offline worker is an offline harness.** Health is unavailable, polls
+  and streams idle, task states and acceptance do not change, a backlog
+  launch is refused as `connection_unavailable`, and an attempt already
+  dispatched stays unconfirmed and retries until the worker is back.
+- **Verification.** Every `TestContract*` in `server/internal/sync` runs
+  twice, in process and behind a real worker channel
+  (`remote/remotetest`: the hub and its HTTP serving on a loopback server
+  and a real `worker.Run`), plus remote-only tests: a lost launch reply, a
+  worker restart mid-launch, an offline machine, refused and late saves,
+  images, traits and ops.
 
 ## Harness registry
 

@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/logfile"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/service"
 	"github.com/flexdinesh/stage/server/internal/worker"
 )
@@ -138,6 +141,15 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 	return st.Definition.Present
 }
 
+// workerHost is what `stage worker run` serves: this machine's adapters
+// (none until connection setup installs them, #345) and its fs and process
+// work (machine.LocalOps), over the worker channel.
+func workerHost(managed bool, getenv func(string) string) func(int64) worker.Host {
+	return func(machineID int64) worker.Host {
+		return remote.NewHost(machine.NewLocal(machineID, harness.ResolveProfile(managed, false, getenv), machine.LocalOps{}))
+	}
+}
+
 // runWorkerRun is `stage worker run [--managed] [--listen ADDR]`. Exit: 0
 // on SIGINT or SIGTERM, 75 when another worker holds the worker dir or
 // another process holds a gateway socket, 78 when not joined, the config
@@ -147,7 +159,7 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, listenFlag string) error {
 	goos := runtime.GOOS
 	logger := slog.New(slog.NewTextHandler(env.Stderr, nil))
-	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv}
+	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv, Host: workerHost(managed, env.Getenv)}
 	var err error
 	listenList := listenFlag
 	if managed {

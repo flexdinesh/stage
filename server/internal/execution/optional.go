@@ -66,3 +66,73 @@ type Interactive interface {
 	Respond(ctx context.Context, ref SessionRef, requestID string, r Response) error
 	Send(context.Context, SessionRef, Message) error
 }
+
+// Traits name the optional interfaces, as a remote machine reports which
+// ones its adapter implements.
+const (
+	TraitLinkResolver      = "linkResolver"
+	TraitWorkspaceFeatures = "workspaceFeatures"
+	TraitCorrelator        = "correlator"
+	TraitEventSource       = "eventSource"
+	TraitInteractive       = "interactive"
+)
+
+// Partial is an adapter that implements every optional interface in Go but
+// forwards to one that may implement only some (a remote machine's proxy).
+// Implements reports whether the forwarded adapter has trait.
+type Partial interface {
+	Implements(trait string) bool
+}
+
+// As is a's optional interface T. Product code uses it instead of a type
+// assertion, so a Partial adapter offers only what it forwards to.
+func As[T any](a Adapter) (T, bool) {
+	t, ok := any(a).(T)
+	if !ok {
+		return t, false
+	}
+	if p, ok := a.(Partial); ok {
+		if trait := traitOf[T](); trait != "" && !p.Implements(trait) {
+			var zero T
+			return zero, false
+		}
+	}
+	return t, true
+}
+
+func traitOf[T any]() string {
+	switch any((*T)(nil)).(type) {
+	case *LinkResolver:
+		return TraitLinkResolver
+	case *WorkspaceFeatures:
+		return TraitWorkspaceFeatures
+	case *Correlator:
+		return TraitCorrelator
+	case *EventSource:
+		return TraitEventSource
+	case *Interactive:
+		return TraitInteractive
+	}
+	return ""
+}
+
+// Traits are the optional interfaces a implements, in a fixed order.
+func Traits(a Adapter) []string {
+	out := []string{}
+	if _, ok := As[LinkResolver](a); ok {
+		out = append(out, TraitLinkResolver)
+	}
+	if _, ok := As[WorkspaceFeatures](a); ok {
+		out = append(out, TraitWorkspaceFeatures)
+	}
+	if _, ok := As[Correlator](a); ok {
+		out = append(out, TraitCorrelator)
+	}
+	if _, ok := As[EventSource](a); ok {
+		out = append(out, TraitEventSource)
+	}
+	if _, ok := As[Interactive](a); ok {
+		out = append(out, TraitInteractive)
+	}
+	return out
+}

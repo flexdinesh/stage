@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +45,28 @@ type Hub struct {
 	sessions map[int64]*Session
 	stale    map[int64]Mismatch
 	seq      atomic.Uint64
+	handlers map[string]Handler
+	onAttach func(machineID int64)
+}
+
+// Callback answers one worker-initiated call that names a pending request
+// (Envelope.Call): it runs only while that request waits for its result.
+// A *RemoteError result keeps its code; any other error is internal.
+type Callback func(ctx context.Context, env Envelope) (any, error)
+
+// Handler answers one worker-initiated call of a kind that names no
+// request (Handle).
+type Handler func(ctx context.Context, machineID int64, env Envelope) (any, error)
+
+// pending is one request waiting for its result. Its callbacks run under
+// ctx, which ends when the request stops waiting; the request returns only
+// after its running callbacks did (running), so a callback never outlives
+// its caller.
+type pending struct {
+	reply    chan Envelope
+	callback Callback
+	ctx      context.Context
+	running  sync.WaitGroup
 }
 
 // Mismatch is a worker that presented a valid token with another API
@@ -83,7 +106,7 @@ type Session struct {
 	once sync.Once
 
 	mu        sync.Mutex
-	pending   map[string]chan Envelope
+	pending   map[string]*pending
 	lastSeen  time.Time
 	persisted time.Time
 }
@@ -102,7 +125,7 @@ func NewHub(ctx context.Context, o Options) *Hub {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	h := &Hub{ctx: ctx, opts: o, sessions: map[int64]*Session{}, stale: map[int64]Mismatch{}}
+	h := &Hub{ctx: ctx, opts: o, sessions: map[int64]*Session{}, stale: map[int64]Mismatch{}, handlers: map[string]Handler{}}
 	go func() {
 		<-ctx.Done()
 		h.mu.Lock()
@@ -116,6 +139,22 @@ func NewHub(ctx context.Context, o Options) *Hub {
 		}
 	}()
 	return h
+}
+
+// Handle answers worker-initiated calls of kind that name no request.
+// Register handlers before workers connect.
+func (h *Hub) Handle(kind string, fn Handler) {
+	h.mu.Lock()
+	h.handlers[kind] = fn
+	h.mu.Unlock()
+}
+
+// OnAttach sets the hook that runs (in its own goroutine) after each new
+// session of a machine starts.
+func (h *Hub) OnAttach(fn func(machineID int64)) {
+	h.mu.Lock()
+	h.onAttach = fn
+	h.mu.Unlock()
 }
 
 // Keepalive is the configured keepalive interval.
@@ -143,12 +182,13 @@ func (h *Hub) AttachGateway(machineID int64, version string, gateway []string) *
 	s := &Session{
 		ID: randomID(), MachineID: machineID, Version: version, Gateway: gateway, hub: h,
 		out: make(chan Envelope, 64), done: make(chan struct{}),
-		pending: map[string]chan Envelope{}, lastSeen: now, persisted: now,
+		pending: map[string]*pending{}, lastSeen: now, persisted: now,
 	}
 	h.mu.Lock()
 	old := h.sessions[machineID]
 	h.sessions[machineID] = s
 	delete(h.stale, machineID)
+	attached := h.onAttach
 	h.mu.Unlock()
 	if old != nil {
 		old.close()
@@ -159,6 +199,9 @@ func (h *Hub) AttachGateway(machineID int64, version string, gateway []string) *
 	}
 	h.seen(machineID, now, version)
 	go h.watch(s)
+	if attached != nil {
+		go attached(machineID)
+	}
 	return s
 }
 
@@ -282,9 +325,11 @@ func (h *Hub) current(machineID int64, sessionID string) *Session {
 // Deliver handles one up message of machineID's session sessionID. A
 // result resolves its call (an unknown or late one is dropped); a
 // heartbeat only counts as liveness; a worker-initiated call is answered
-// with the returned envelope. ErrReplaced when the session is not the
-// machine's live one.
-func (h *Hub) Deliver(machineID int64, sessionID string, env Envelope) (*Envelope, error) {
+// with the returned envelope: a callback of the pending request it names
+// (Envelope.Call; call_ended once that request stopped waiting), else the
+// kind's Handler. ErrReplaced when the session is not the machine's live
+// one.
+func (h *Hub) Deliver(ctx context.Context, machineID int64, sessionID string, env Envelope) (*Envelope, error) {
 	s := h.current(machineID, sessionID)
 	if s == nil {
 		return nil, ErrReplaced
@@ -300,7 +345,57 @@ func (h *Hub) Deliver(machineID int64, sessionID string, env Envelope) (*Envelop
 		body, _ := json.Marshal(Pong{Version: h.opts.Version, Time: h.opts.Now().UTC()})
 		return &Envelope{ID: env.ID, Kind: KindResult, Body: body}, nil
 	}
-	return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: CodeUnknownKind, Message: "unknown kind " + strconv.Quote(env.Kind)}}, nil
+	if env.Call != "" {
+		s.mu.Lock()
+		p, ok := s.pending[env.Call]
+		if ok && p.callback != nil {
+			p.running.Add(1) // under s.mu: the request cannot have stopped waiting
+		}
+		s.mu.Unlock()
+		if !ok || p.callback == nil {
+			return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: CodeCallEnded, Message: "the request " + strconv.Quote(env.Call) + " no longer waits for this worker"}}, nil
+		}
+		defer p.running.Done()
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stop := context.AfterFunc(p.ctx, cancel)
+		defer stop()
+		return answer(ctx, env, func(ctx context.Context) (any, error) { return p.callback(ctx, env) }), nil
+	}
+	h.mu.Lock()
+	fn := h.handlers[env.Kind]
+	h.mu.Unlock()
+	if fn == nil {
+		return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: CodeUnknownKind, Message: "unknown kind " + strconv.Quote(env.Kind)}}, nil
+	}
+	return answer(ctx, env, func(ctx context.Context) (any, error) { return fn(ctx, machineID, env) }), nil
+}
+
+// answer runs a worker-initiated call and wraps its outcome as a result.
+func answer(ctx context.Context, env Envelope, run func(context.Context) (any, error)) *Envelope {
+	res := &Envelope{ID: env.ID, Kind: KindResult}
+	body, err := run(ctx)
+	if err != nil {
+		res.Error = ErrorOf(err)
+		return res
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		res.Error = &Error{Code: CodeInternal, Message: err.Error()}
+		return res
+	}
+	res.Body = b
+	return res
+}
+
+// ErrorOf is err as a result error: a *RemoteError keeps its code, anything
+// else is internal.
+func ErrorOf(err error) *Error {
+	var re *RemoteError
+	if errors.As(err, &re) {
+		return &Error{Code: re.Code, Message: re.Message}
+	}
+	return &Error{Code: CodeInternal, Message: err.Error()}
 }
 
 // Call sends a request to machineID's worker and waits for its result
@@ -309,6 +404,13 @@ func (h *Hub) Deliver(machineID int64, sessionID string, env Envelope) (*Envelop
 // first; *RemoteError when the worker answered with an error. When ctx
 // ends first, a cancel is sent and ctx's error returned.
 func (h *Hub) Call(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration) (json.RawMessage, error) {
+	return h.CallWith(ctx, machineID, kind, connectionID, body, timeout, nil)
+}
+
+// CallWith is Call whose worker may call back while it waits: worker
+// calls naming this request (Envelope.Call) run callback; once CallWith
+// returns, they are refused with call_ended.
+func (h *Hub) CallWith(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration, callback Callback) (json.RawMessage, error) {
 	h.mu.Lock()
 	s := h.sessions[machineID]
 	h.mu.Unlock()
@@ -329,13 +431,17 @@ func (h *Hub) Call(ctx context.Context, machineID int64, kind string, connection
 	}
 	id := s.ID[:6] + ":" + strconv.FormatUint(h.seq.Add(1), 10)
 	reply := make(chan Envelope, 1)
+	waiting, stopWaiting := context.WithCancel(context.WithoutCancel(ctx))
+	p := &pending{reply: reply, callback: callback, ctx: waiting}
 	s.mu.Lock()
-	s.pending[id] = reply
+	s.pending[id] = p
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		delete(s.pending, id)
 		s.mu.Unlock()
+		stopWaiting()
+		p.running.Wait()
 	}()
 	if !s.send(Envelope{ID: id, Kind: kind, Deadline: &deadline, ConnectionID: connectionID, Body: raw}) {
 		return nil, ErrOffline
@@ -416,12 +522,12 @@ func (s *Session) touch() {
 
 func (s *Session) resolve(env Envelope) {
 	s.mu.Lock()
-	ch, ok := s.pending[env.ID]
+	p, ok := s.pending[env.ID]
 	if ok {
 		delete(s.pending, env.ID)
 	}
 	s.mu.Unlock()
 	if ok {
-		ch <- env // buffered 1, sole sender
+		p.reply <- env // buffered 1, sole sender
 	}
 }

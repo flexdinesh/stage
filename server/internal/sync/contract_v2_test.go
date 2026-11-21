@@ -185,22 +185,22 @@ func (f *hostedHarness) Send(_ context.Context, _ execution.SessionRef, m execut
 
 // v2Setup registers connection 3 of kind with a, one bound project and one
 // backlog task.
-func v2Setup(t *testing.T, kind string, a execution.Adapter) (*db.Store, *coordinator.Service, db.Task) {
+func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.Store, *coordinator.Service, db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
-	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness) VALUES(3,$1)", kind); err != nil {
+	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness,machine_id) VALUES(3,$1,$2)", kind, p.machine(t, pool)); err != nil {
 		t.Fatal(err)
 	}
-	p, err := store.InsertProject(t.Context(), db.Project{Title: "V2", Bindings: []db.ProjectBinding{{ConnectionID: 3, ExternalProjectID: "proj", Workspace: "volume://v2"}}})
+	project, err := store.InsertProject(t.Context(), db.Project{Title: "V2", Bindings: []db.ProjectBinding{{ConnectionID: 3, ExternalProjectID: "proj", Workspace: "volume://v2"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{3: a}, nil)
+	svc := p.coordinator(t, store, map[int64]execution.Adapter{3: a}, nil)
 	svc.Harnesses = v2Harnesses
 	return store, svc, task
 }
@@ -213,121 +213,131 @@ func clearRetry(t *testing.T) {
 }
 
 func TestContractCorrelatedLaunchDispatchesOnce(t *testing.T) {
-	f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, loseReply: true}
-	store, svc, task := v2Setup(t, "assigned", f)
-	ctx := t.Context()
-	got, err := svc.StartTask(ctx, task.ID)
-	if err == nil || got.State != db.StateLaunching || f.created != 1 {
-		t.Fatalf("lost reply %+v %v created %d", got, err, f.created)
-	}
-	a, err := store.Attempt(ctx, task.ID, 1)
-	if err != nil || a.Intent == nil || a.Intent.Marker != execution.LaunchMarker(a.Intent.RequestID) || !strings.HasSuffix(a.Intent.Prompt, "\n\n"+a.Intent.Marker) || a.Phase != "unconfirmed" {
-		t.Fatalf("correlated intent %+v %v", a, err)
-	}
-	f.loseReply = false
-	clearRetry(t)
-	if err := svc.PollActive(ctx); err != nil {
-		t.Fatal(err)
-	}
-	got, err = store.GetTask(ctx, task.ID)
-	if err != nil || got.State != db.StateRunning || got.Session == nil || got.Session.ExternalSessionID != "srv-1" || f.created != 1 || f.correlations != 1 {
-		t.Fatalf("correlated recovery %+v %v created %d correlations %d", got, err, f.created, f.correlations)
-	}
-}
-
-func TestContractCorrelatedLaunchNotFoundStaysUnconfirmed(t *testing.T) {
-	f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, failBeforeCreate: true}
-	store, svc, task := v2Setup(t, "assigned", f)
-	ctx := t.Context()
-	if _, err := svc.StartTask(ctx, task.ID); err == nil {
-		t.Fatal("uncertain launch reported success")
-	}
-	f.failBeforeCreate = false
-	for range 2 {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, loseReply: true}
+		store, svc, task := v2Setup(t, p, "assigned", f)
+		ctx := t.Context()
+		got, err := svc.StartTask(ctx, task.ID)
+		if err == nil || got.State != db.StateLaunching || f.created != 1 {
+			t.Fatalf("lost reply %+v %v created %d", got, err, f.created)
+		}
+		a, err := store.Attempt(ctx, task.ID, 1)
+		if err != nil || a.Intent == nil || a.Intent.Marker != execution.LaunchMarker(a.Intent.RequestID) || !strings.HasSuffix(a.Intent.Prompt, "\n\n"+a.Intent.Marker) || a.Phase != "unconfirmed" {
+			t.Fatalf("correlated intent %+v %v", a, err)
+		}
+		f.loseReply = false
 		clearRetry(t)
 		if err := svc.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
-	}
-	got, err := store.GetTask(ctx, task.ID)
-	if err != nil || got.State != db.StateLaunching || got.Session != nil || f.created != 0 || f.correlations != 2 || got.LastError == nil || !strings.Contains(*got.LastError, "link the session") {
-		t.Fatalf("not found must wait for linking, never relaunch: %+v %v created %d correlations %d", got, err, f.created, f.correlations)
-	}
+		got, err = store.GetTask(ctx, task.ID)
+		if err != nil || got.State != db.StateRunning || got.Session == nil || got.Session.ExternalSessionID != "srv-1" || f.created != 1 || f.correlations != 1 {
+			t.Fatalf("correlated recovery %+v %v created %d correlations %d", got, err, f.created, f.correlations)
+		}
+	})
+}
+
+func TestContractCorrelatedLaunchNotFoundStaysUnconfirmed(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, failBeforeCreate: true}
+		store, svc, task := v2Setup(t, p, "assigned", f)
+		ctx := t.Context()
+		if _, err := svc.StartTask(ctx, task.ID); err == nil {
+			t.Fatal("uncertain launch reported success")
+		}
+		f.failBeforeCreate = false
+		for range 2 {
+			clearRetry(t)
+			if err := svc.PollActive(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := store.GetTask(ctx, task.ID)
+		if err != nil || got.State != db.StateLaunching || got.Session != nil || f.created != 0 || f.correlations != 2 || got.LastError == nil || !strings.Contains(*got.LastError, "link the session") {
+			t.Fatalf("not found must wait for linking, never relaunch: %+v %v created %d correlations %d", got, err, f.created, f.correlations)
+		}
+	})
 }
 
 func TestContractCorrelatedLaunchNeedsCorrelator(t *testing.T) {
-	store, _, svc, task := contractSetup(t)
-	d := documentHarnesses.All()[0]
-	d.Launch = harness.LaunchCorrelated
-	svc.Harnesses = harness.MustRegistry(d)
-	if _, err := svc.StartTask(t.Context(), task.ID); err == nil || !strings.Contains(err.Error(), "cannot reconcile") {
-		t.Fatal("correlated launch without a correlator", err)
-	}
-	got, _ := store.GetTask(t.Context(), task.ID)
-	if got.State != db.StateBacklog || got.LaunchAttempt != 0 {
-		t.Fatal("preflight dispatched work", got)
-	}
+	forPlacements(t, func(t *testing.T, p placement) {
+		store, _, svc, task := contractSetup(t, p)
+		d := documentHarnesses.All()[0]
+		d.Launch = harness.LaunchCorrelated
+		svc.Harnesses = harness.MustRegistry(d)
+		if _, err := svc.StartTask(t.Context(), task.ID); err == nil || !strings.Contains(err.Error(), "cannot reconcile") {
+			t.Fatal("correlated launch without a correlator", err)
+		}
+		got, _ := store.GetTask(t.Context(), task.ID)
+		if got.State != db.StateBacklog || got.LaunchAttempt != 0 {
+			t.Fatal("preflight dispatched work", got)
+		}
+	})
 }
 
 func TestContractPushIngest(t *testing.T) {
-	f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
-	store, svc, task := v2Setup(t, "hosted", f)
-	ctx := t.Context()
-	got, err := svc.StartTask(ctx, task.ID)
-	if err != nil || got.State != db.StateRunning || got.Session == nil {
-		t.Fatal(got, err)
-	}
-	before := f.observed
-	done := f.snapshot(*got.Session)
-	done.State, done.Active = "done", false
-	done.UpdatedAt = done.UpdatedAt.Add(time.Second)
-	unowned := f.snapshot(execution.SessionRef{ConnectionID: 3, ExternalSessionID: "elsewhere"})
-	f.pushes = []execution.Observation{unowned, done}
-	if err := svc.Stream(ctx, 3); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = store.GetTask(ctx, task.ID)
-	if got.State != db.StateDone || f.observed != before {
-		t.Fatalf("push not ingested without polling: %s observed %d->%d", got.State, before, f.observed)
-	}
-	other := done
-	other.Session.ConnectionID = 2
-	f.pushes = []execution.Observation{other}
-	if err := svc.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
-		t.Fatal("pushed observation crossed connections", err)
-	}
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
+		store, svc, task := v2Setup(t, p, "hosted", f)
+		ctx := t.Context()
+		got, err := svc.StartTask(ctx, task.ID)
+		if err != nil || got.State != db.StateRunning || got.Session == nil {
+			t.Fatal(got, err)
+		}
+		before := f.observed
+		done := f.snapshot(*got.Session)
+		done.State, done.Active = "done", false
+		done.UpdatedAt = done.UpdatedAt.Add(time.Second)
+		unowned := f.snapshot(execution.SessionRef{ConnectionID: 3, ExternalSessionID: "elsewhere"})
+		f.pushes = []execution.Observation{unowned, done}
+		if err := svc.Stream(ctx, 3); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = store.GetTask(ctx, task.ID)
+		if got.State != db.StateDone || f.observed != before {
+			t.Fatalf("push not ingested without polling: %s observed %d->%d", got.State, before, f.observed)
+		}
+		other := done
+		other.Session.ConnectionID = 2
+		f.pushes = []execution.Observation{other}
+		if err := svc.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
+			t.Fatal("pushed observation crossed connections", err)
+		}
+	})
 }
 
 func TestContractOwnerExitedOnlyFromHostedHarness(t *testing.T) {
-	f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
-	store, svc, task := v2Setup(t, "hosted", f)
-	ctx := t.Context()
-	got, err := svc.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.state, f.reason = "interrupted", execution.ReasonOwnerExited
-	if err := svc.PollTask(ctx, got); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateInterrupted {
-		t.Fatal("hosted owner exit", got.State)
-	}
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
+		store, svc, task := v2Setup(t, p, "hosted", f)
+		ctx := t.Context()
+		got, err := svc.StartTask(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.state, f.reason = "interrupted", execution.ReasonOwnerExited
+		if err := svc.PollTask(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateInterrupted {
+			t.Fatal("hosted owner exit", got.State)
+		}
 
-	// A connected harness never owns the process: the claim is malformed.
-	dstore, doc, dsvc, dtask := contractSetup(t)
-	running, err := dsvc.StartTask(ctx, dtask.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dsvc2 := coordinator.NewWithAdapters(dstore, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
-	dsvc2.Harnesses = documentHarnesses
-	if err := dsvc2.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
-		t.Fatal("connected harness reported owner_exited", err)
-	}
-	if got, _ := dstore.GetTask(ctx, dtask.ID); got.State != db.StateRunning {
-		t.Fatal("malformed owner exit changed execution", got.State)
-	}
+		// A connected harness never owns the process: the claim is malformed.
+		dstore, doc, dsvc, dtask := contractSetup(t, p)
+		running, err := dsvc.StartTask(ctx, dtask.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dsvc2 := p.coordinator(t, dstore, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
+		dsvc2.Harnesses = documentHarnesses
+		if err := dsvc2.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
+			t.Fatal("connected harness reported owner_exited", err)
+		}
+		if got, _ := dstore.GetTask(ctx, dtask.ID); got.State != db.StateRunning {
+			t.Fatal("malformed owner exit changed execution", got.State)
+		}
+	})
 }
 
 // lostOwner claims the process owner exited.
@@ -341,44 +351,46 @@ func (l lostOwner) Observe(ctx context.Context, ref execution.SessionRef) (execu
 }
 
 func TestContractInteraction(t *testing.T) {
-	f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, requests: []execution.Request{{ID: "q1", Kind: "approval", Title: "Run tests?", Options: []execution.Choice{{ID: "yes"}, {ID: "no"}}}}}
-	_, svc, task := v2Setup(t, "hosted", f)
-	ctx := t.Context()
-	if _, err := svc.Requests(ctx, task.ID); err == nil {
-		t.Fatal("requests without a session")
-	}
-	if _, err := svc.StartTask(ctx, task.ID); err != nil {
-		t.Fatal(err)
-	}
-	rs, err := svc.Requests(ctx, task.ID)
-	if err != nil || len(rs) != 1 || rs[0].ID != "q1" {
-		t.Fatal(rs, err)
-	}
-	var invalid *db.InvalidError
-	if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
-		t.Fatal("empty response accepted", err)
-	}
-	if _, err := svc.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
-		t.Fatal("unknown request", err)
-	}
-	if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
-		t.Fatal(err, f.responses)
-	}
-	if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
-		t.Fatal(err, f.messages)
-	}
-	f.respondOff = "read-only session"
-	var ce *db.ConflictError
-	if _, err := svc.Requests(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "operation_unavailable" || !strings.Contains(ce.Msg, "read-only session") {
-		t.Fatal("unavailable operation", err)
-	}
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, requests: []execution.Request{{ID: "q1", Kind: "approval", Title: "Run tests?", Options: []execution.Choice{{ID: "yes"}, {ID: "no"}}}}}
+		_, svc, task := v2Setup(t, p, "hosted", f)
+		ctx := t.Context()
+		if _, err := svc.Requests(ctx, task.ID); err == nil {
+			t.Fatal("requests without a session")
+		}
+		if _, err := svc.StartTask(ctx, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		rs, err := svc.Requests(ctx, task.ID)
+		if err != nil || len(rs) != 1 || rs[0].ID != "q1" {
+			t.Fatal(rs, err)
+		}
+		var invalid *db.InvalidError
+		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
+			t.Fatal("empty response accepted", err)
+		}
+		if _, err := svc.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
+			t.Fatal("unknown request", err)
+		}
+		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
+			t.Fatal(err, f.responses)
+		}
+		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
+			t.Fatal(err, f.messages)
+		}
+		f.respondOff = "read-only session"
+		var ce *db.ConflictError
+		if _, err := svc.Requests(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "operation_unavailable" || !strings.Contains(ce.Msg, "read-only session") {
+			t.Fatal("unavailable operation", err)
+		}
 
-	// A harness without the interface: operation_unavailable, nothing else limited.
-	_, _, dsvc, dtask := contractSetup(t)
-	if _, err := dsvc.StartTask(ctx, dtask.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := dsvc.Send(ctx, dtask.ID, execution.Message{Text: "hi"}); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
-		t.Fatal("non-interactive harness", err)
-	}
+		// A harness without the interface: operation_unavailable, nothing else limited.
+		_, _, dsvc, dtask := contractSetup(t, p)
+		if _, err := dsvc.StartTask(ctx, dtask.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := dsvc.Send(ctx, dtask.ID, execution.Message{Text: "hi"}); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
+			t.Fatal("non-interactive harness", err)
+		}
+	})
 }

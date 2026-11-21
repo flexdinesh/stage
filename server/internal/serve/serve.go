@@ -30,6 +30,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -179,8 +180,8 @@ func Run(ctx context.Context, o Options) error {
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
 	}
-	// The machine-runtime seam: the in-process local machine is the only
-	// machine until workers exist (ADR 0002).
+	// The machine-runtime seam: the in-process local machine, plus a remote
+	// machine per joined worker (below, ADR 0002).
 	local, err = newLocalMachine(ctx, &wg, store, cfg, o.T3, profile, logger)
 	if err != nil {
 		return err
@@ -231,6 +232,36 @@ func Run(ctx context.Context, o Options) error {
 	}, logger); err != nil {
 		return err
 	}
+	// Worker channels end with ctx, so Shutdown does not wait on their
+	// streams (docs/runtime.md "Worker channel").
+	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
+		logger.Warn("machine presence", "err", err)
+	})})
+	syncSvc.Gateways = channels.Gateways
+	// Remote machines: each joined machine's connections are proxied over
+	// its worker channel (ADR 0002, docs/execution.md "Remote machines").
+	hosts := remote.NewHosts(machines, channels, func(machineID int64) []int64 {
+		var ids []int64
+		for _, c := range store.ActiveConnections() {
+			if c.Machine == machineID {
+				ids = append(ids, c.ID)
+			}
+		}
+		return ids
+	}, func() {
+		syncSvc.Kick()
+		releases.Resync()
+		schedules.Resync()
+	}, logger)
+	remotes, err := store.ListMachines(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range remotes {
+		if m.ID != db.LocalMachine {
+			hosts.Join(m.ID)
+		}
+	}
 	connectors, err := machines.Connectors(harnesses)
 	if err != nil {
 		return err
@@ -245,14 +276,6 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 
-	// Worker channels end with ctx, so Shutdown does not wait on their
-	// streams (docs/runtime.md "Worker channel").
-	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
-		logger.Warn("machine presence", "err", err)
-	})})
-
-	syncSvc.Gateways = channels.Gateways
-
 	mux := http.NewServeMux()
 	// The MCP handler serves through the API router, and the router's agent
 	// gateway route serves MCP: bound once both exist, before serving.
@@ -262,7 +285,7 @@ func Run(ctx context.Context, o Options) error {
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup, Connectors: connectors,
-		Harnesses: harnesses, Channels: channels,
+		Harnesses: harnesses, Channels: channels, Machines: hosts,
 		MCP: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHandler.ServeHTTP(w, r) }),
 	})
 	mcpHandler = agenttools.HTTPHandler(&agenttools.Ops{

@@ -24,7 +24,7 @@ func (s *Service) interactive(ctx context.Context, id int64, op string) (db.Task
 	if err != nil {
 		return t, nil, err
 	}
-	in, ok := a.(execution.Interactive)
+	in, ok := execution.As[execution.Interactive](a)
 	if !ok {
 		return t, nil, unavailable(op, "this harness does not support it")
 	}

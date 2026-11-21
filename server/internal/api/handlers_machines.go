@@ -134,6 +134,9 @@ func (s *server) removeMachine(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Revocation is immediate: its open channel ends now.
 	s.Channels.Close(id)
+	if s.Machines != nil {
+		s.Machines.Leave(id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -233,6 +236,9 @@ func (s *server) joinWorker(w http.ResponseWriter, r *http.Request) error {
 	g, err := s.Store.RedeemPairing(r.Context(), body.Code, body.Label, body.Version)
 	if err != nil {
 		return err
+	}
+	if s.Machines != nil {
+		s.Machines.Join(g.MachineID)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, joinJSON{MachineID: g.MachineID, Label: g.Label, Token: g.Token})

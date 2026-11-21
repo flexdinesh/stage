@@ -306,8 +306,10 @@ A worker dials out; the main server never dials a worker. One channel per
 machine: an SSE stream down (`GET /api/worker/channel`) and one POST per
 message up (`POST /api/worker/channel`), both worker routes
 ([api.md](api.md#get-apiworkerchannel), [ADR 0002](adr/0002-machines-and-workers.md)).
-Code: `server/internal/workerchan` (protocol, hub), `server/internal/api`
-(routes), `server/internal/worker` (client).
+Code: `server/internal/workerchan` (protocol, hub, stream and POST
+serving), `server/internal/api` (routes and auth), `server/internal/worker`
+(client), `server/internal/remote` (the remote machine's calls,
+[execution.md](execution.md#remote-machines)).
 
 - **Session.** Each stream gets a session id in its `hello` event; up POSTs
   name it in `Stage-Channel-Session`. A newer stream of the same machine
@@ -322,8 +324,18 @@ Code: `server/internal/workerchan` (protocol, hub), `server/internal/api`
   and returns. Outcomes: a body, the worker's typed error, offline (no live
   channel when called) or lost reply (deadline passed or the channel dropped
   in flight: unknown outcome, never failure). Results after that are dropped.
-  This task's only call is `ping` (`POST /api/machines/{id}/ping`,
-  `stage machine ping ID`).
+  Calls: `ping` (`POST /api/machines/{id}/ping`, `stage machine ping ID`)
+  and the remote machine's adapter, ops and describe calls.
+- **Worker-initiated calls.** An up POST may carry a call; its result is the
+  POST's response. A callback names the waiting request (`call`) and runs
+  only while that request waits (`checkpoint.save`, `launch.image`,
+  `events.observation`); after that it gets `call_ended`. A callback still
+  running when its request stops waiting is cancelled, and the request
+  returns only after it ended. `machine.changed`
+  names no request. An up message is at most 32 MiB (launch images travel
+  down one per `launch.image` reply).
+- **Attach.** Each new session is described (`machine.describe`) and the
+  coordinator polls the machine's connections at once.
 - **Presence.** Online means a live channel, kept in memory, so a main
   restart shows every worker offline until it reconnects (seconds).
   `machines.last_seen_at` and `version` are written on connect, on
@@ -341,7 +353,7 @@ Code: `server/internal/workerchan` (protocol, hub), `server/internal/api`
 | Command | Does |
 | --- | --- |
 | `stage worker join <link> [--label L]` | Redeems the pairing link's code (`POST /api/worker/join`) and writes the worker config. Refuses when already joined (`stage worker leave` first). Plain `http://` links are accepted (LAN and loopback mains). |
-| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. |
+| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. Over the channel it serves this machine's adapters and fs/process work (`remote.Host`; no harness until connection setup installs one, #345). |
 | `stage worker status` | Config, the server's view of this machine and the running process. Exit 0 the server says online, 1 not online (or unreachable, or an invalid config), 4 not joined, 7 revoked. |
 | `stage worker leave [--local]` | Removes this machine on the main server (`POST /api/worker/leave`), then deletes the local config and state. A revoked token counts as already removed. `--local` only deletes locally. |
 | `stage worker service ...` | The worker service ([service.md](service.md#worker-service)). |

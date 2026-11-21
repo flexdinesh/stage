@@ -351,5 +351,7 @@ Stage tree 197 (auto start). Each task ships as its own PR.
 
 - Running both the main server and a worker under one identity on one
   machine (#348).
-- How launch image bytes reach the worker: upload references fetched over a
-  worker route, or inline in the channel (#344).
+- ~~How launch image bytes reach the worker~~: resolved in #344. The launch
+  call carries image metadata only; the worker fetches each image with a
+  `launch.image` callback while the launch waits
+  ([execution.md](../execution.md#remote-machines)).

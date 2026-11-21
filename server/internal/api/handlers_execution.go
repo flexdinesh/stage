@@ -35,7 +35,7 @@ func (s *server) capabilities(ctx context.Context, id, projectID int64) (executi
 	if err != nil {
 		return empty, err
 	}
-	if scoped, ok := a.(execution.WorkspaceFeatures); ok && projectID != 0 {
+	if scoped, ok := execution.As[execution.WorkspaceFeatures](a); ok && projectID != 0 {
 		p, err := s.Store.GetProject(ctx, projectID)
 		if err != nil {
 			return empty, err

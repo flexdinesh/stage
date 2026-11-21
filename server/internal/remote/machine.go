@@ -1,0 +1,254 @@
+package remote
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"slices"
+	"sync"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
+)
+
+// Connections lists a machine's active harness connections as the main
+// server records them (db.Store.ActiveConnections).
+type Connections func(machineID int64) []int64
+
+// Machine is a remote machine as the main server hosts it: a proxy adapter
+// for each of its active connections (the main server's record, so an
+// offline machine's connections still answer, as offline) and its ops,
+// over the machine's worker channel. Connector setup arrives with #345.
+type Machine struct {
+	id    int64
+	hub   *workerchan.Hub
+	conns Connections
+
+	mu       sync.Mutex
+	desc     *Description
+	adapters map[int64]*Adapter
+}
+
+var _ machine.Machine = (*Machine)(nil)
+
+// NewMachine hosts machine id over hub.
+func NewMachine(id int64, hub *workerchan.Hub, conns Connections) *Machine {
+	return &Machine{id: id, hub: hub, conns: conns, adapters: map[int64]*Adapter{}}
+}
+
+func (m *Machine) ID() int64 { return m.id }
+
+// Online: its worker's channel is live.
+func (m *Machine) Online() bool { return m.hub.Presence(m.id).Online }
+
+// offline is why the machine cannot be reached now (false when online).
+func (m *Machine) offline() (string, bool) {
+	p := m.hub.Presence(m.id)
+	switch {
+	case p.Online:
+		return "", false
+	case p.NeedsUpdate != nil:
+		return "Its machine needs an update: the Stage worker there speaks another API version.", true
+	}
+	return "Its machine is offline: the Stage worker there is not connected.", true
+}
+
+// Profile is the worker's hosting policy as it last described it (a
+// foreground server's until then).
+func (m *Machine) Profile() harness.Profile {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.desc == nil {
+		return harness.Profile{Kind: harness.ProfileServer}
+	}
+	return m.desc.Profile
+}
+
+func (m *Machine) active(connection int64) bool {
+	return slices.Contains(m.conns(m.id), connection)
+}
+
+func (m *Machine) adapter(connection int64) *Adapter {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a := m.adapters[connection]
+	if a == nil {
+		a = &Adapter{m: m, conn: connection}
+		m.adapters[connection] = a
+	}
+	return a
+}
+
+func (m *Machine) Adapter(connection int64) (execution.Adapter, bool) {
+	if !m.active(connection) {
+		return nil, false
+	}
+	return m.adapter(connection), true
+}
+
+func (m *Machine) Adapters() map[int64]execution.Adapter {
+	out := map[int64]execution.Adapter{}
+	for _, id := range m.conns(m.id) {
+		out[id] = m.adapter(id)
+	}
+	return out
+}
+
+// Connector: remote connection setup is #345's.
+func (m *Machine) Connector(string) (harness.Connector, bool) { return nil, false }
+
+func (m *Machine) Connectors() map[string]harness.Connector { return map[string]harness.Connector{} }
+
+func (m *Machine) Ops() machine.Ops { return ops{m} }
+
+// traits are the optional interfaces the worker's adapter for connection
+// implements; known is false until the worker described the machine.
+func (m *Machine) traits(connection int64) (traits []string, known bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.desc == nil {
+		return nil, false
+	}
+	for _, h := range m.desc.Connections {
+		if h.ConnectionID == connection {
+			return h.Traits, true
+		}
+	}
+	return nil, true
+}
+
+// Described reports whether the worker described the machine since this
+// server started.
+func (m *Machine) Described() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.desc != nil
+}
+
+// Describe asks the worker what it hosts (machine.describe) and keeps the
+// answer: traits and profile.
+func (m *Machine) Describe(ctx context.Context) error {
+	raw, err := m.hub.Call(ctx, m.id, KindDescribe, 0, nil, CallTimeout)
+	if err = decodeError(err); err != nil {
+		return err
+	}
+	var d Description
+	if err := jsonUnmarshal(raw, &d); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.desc = &d
+	m.mu.Unlock()
+	return nil
+}
+
+// ops runs machine.Ops on the worker.
+type ops struct{ m *Machine }
+
+func (o ops) Inventory(ctx context.Context, ws []execution.WorkspaceInfo, roots []machine.SharedRoot) ([]execution.WorkspaceInfo, error) {
+	var out []execution.WorkspaceInfo
+	err := o.call(ctx, KindInventory, InventoryRequest{Workspaces: ws, Roots: roots}, &out)
+	return out, err
+}
+
+func (o ops) Checkout(ctx context.Context, roots []machine.SharedRoot, dir string) (machine.CheckoutEvidence, error) {
+	var e machine.CheckoutEvidence
+	err := o.call(ctx, KindCheckout, CheckoutRequest{Roots: roots, Directory: dir}, &e)
+	return e, err
+}
+
+func (o ops) call(ctx context.Context, kind string, body, out any) error {
+	raw, err := o.m.hub.Call(ctx, o.m.id, kind, 0, body, CallTimeout)
+	if err = decodeError(err); err != nil {
+		return err
+	}
+	return jsonUnmarshal(raw, out)
+}
+
+// Hosts keeps a machine.Set's remote machines in step with the main
+// server's record: a machine that joins is hosted, a removed one is not,
+// and each worker that connects (or reports a change) is described.
+type Hosts struct {
+	set   *machine.Set
+	hub   *workerchan.Hub
+	conns Connections
+	log   *slog.Logger
+	// changed runs after the hosted machines, or what a worker hosts,
+	// changed (the coordinator and runners follow the connections).
+	changed func()
+}
+
+// NewHosts hosts remote machines in set over hub and registers the hub's
+// attach hook and machine.changed handler. changed may be nil.
+func NewHosts(set *machine.Set, hub *workerchan.Hub, conns Connections, changed func(), log *slog.Logger) *Hosts {
+	if log == nil {
+		log = slog.Default()
+	}
+	if changed == nil {
+		changed = func() {}
+	}
+	h := &Hosts{set: set, hub: hub, conns: conns, log: log, changed: changed}
+	hub.OnAttach(h.describe)
+	hub.Handle(KindChanged, func(_ context.Context, id int64, _ workerchan.Envelope) (any, error) {
+		go h.describe(id)
+		return Empty{}, nil
+	})
+	return h
+}
+
+// Join hosts remote machine id (no-op when hosted).
+func (h *Hosts) Join(id int64) {
+	if _, ok := h.set.Get(id); ok {
+		return
+	}
+	if err := h.set.Add(NewMachine(id, h.hub, h.conns)); err != nil {
+		h.log.Warn("host remote machine", "machine", id, "err", err)
+		return
+	}
+	h.changed()
+	if h.hub.Presence(id).Online {
+		go h.describe(id)
+	}
+}
+
+// Leave stops hosting remote machine id (it was removed).
+func (h *Hosts) Leave(id int64) {
+	if h.set.Remove(id) {
+		h.changed()
+	}
+}
+
+// Machine is hosted remote machine id.
+func (h *Hosts) Machine(id int64) (*Machine, bool) {
+	m, ok := h.set.Get(id)
+	if !ok {
+		return nil, false
+	}
+	r, ok := m.(*Machine)
+	return r, ok
+}
+
+func (h *Hosts) describe(id int64) {
+	m, ok := h.Machine(id)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), CallTimeout)
+	defer cancel()
+	if err := m.Describe(ctx); err != nil {
+		h.log.Warn("describe remote machine", "machine", id, "err", err)
+	}
+	// Reconnected or changed: poll its connections now.
+	h.changed()
+}
+
+// jsonUnmarshal decodes a worker reply.
+func jsonUnmarshal(raw []byte, out any) error {
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("malformed worker reply: %w", err)
+	}
+	return nil
+}

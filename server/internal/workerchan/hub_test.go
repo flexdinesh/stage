@@ -54,7 +54,7 @@ func serve(s *Session, answer func(Envelope) *Envelope) {
 				return
 			case env := <-s.Outbound():
 				if r := answer(env); r != nil {
-					_, _ = s.hub.Deliver(s.MachineID, s.ID, *r)
+					_, _ = s.hub.Deliver(context.Background(), s.MachineID, s.ID, *r)
 				}
 			}
 		}
@@ -109,10 +109,10 @@ func TestCallDeadlineIsLostReplyAndLateReplyDropped(t *testing.T) {
 	}
 	env := <-reqs
 	// A late or unknown reply is ignored, not an error.
-	if r, err := h.Deliver(7, s.ID, Envelope{ID: env.ID, Kind: KindResult}); r != nil || err != nil {
+	if r, err := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: env.ID, Kind: KindResult}); r != nil || err != nil {
 		t.Fatalf("late reply: %v %v", r, err)
 	}
-	if r, err := h.Deliver(7, s.ID, Envelope{ID: "nope", Kind: KindResult}); r != nil || err != nil {
+	if r, err := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "nope", Kind: KindResult}); r != nil || err != nil {
 		t.Fatalf("unknown reply: %v %v", r, err)
 	}
 }
@@ -177,7 +177,7 @@ func TestReplaceEndsOlderSession(t *testing.T) {
 	default:
 		t.Fatal("old session still live")
 	}
-	if _, err := h.Deliver(7, old.ID, Envelope{Kind: KindHeartbeat}); !errors.Is(err, ErrReplaced) {
+	if _, err := h.Deliver(context.Background(), 7, old.ID, Envelope{Kind: KindHeartbeat}); !errors.Is(err, ErrReplaced) {
 		t.Fatalf("deliver on old: %v", err)
 	}
 	// Detaching the old one leaves the new one in place.
@@ -185,7 +185,7 @@ func TestReplaceEndsOlderSession(t *testing.T) {
 	if p := h.Presence(7); !p.Online || p.Version != "2" {
 		t.Fatalf("presence %+v", p)
 	}
-	if _, err := h.Deliver(7, next.ID, Envelope{Kind: KindHeartbeat}); err != nil {
+	if _, err := h.Deliver(context.Background(), 7, next.ID, Envelope{Kind: KindHeartbeat}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -215,7 +215,7 @@ func TestPresenceAndPersistThrottle(t *testing.T) {
 	}
 	for range 5 {
 		c.add(10 * time.Second)
-		if _, err := h.Deliver(7, s.ID, Envelope{Kind: KindHeartbeat}); err != nil {
+		if _, err := h.Deliver(context.Background(), 7, s.ID, Envelope{Kind: KindHeartbeat}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -223,7 +223,7 @@ func TestPresenceAndPersistThrottle(t *testing.T) {
 		t.Fatalf("persisted %d times within a minute", seen.n())
 	}
 	c.add(20 * time.Second)
-	_, _ = h.Deliver(7, s.ID, Envelope{Kind: KindHeartbeat})
+	_, _ = h.Deliver(context.Background(), 7, s.ID, Envelope{Kind: KindHeartbeat})
 	if seen.n() != 2 {
 		t.Fatalf("not persisted after a minute: %d", seen.n())
 	}
@@ -280,7 +280,7 @@ func TestCloseAndContextEnd(t *testing.T) {
 func TestWorkerInitiatedPingAndUnknownKind(t *testing.T) {
 	h, _ := newTestHub(t, Options{Version: "9.9"})
 	s := h.Attach(7, "")
-	r, err := h.Deliver(7, s.ID, Envelope{ID: "w1", Kind: KindPing})
+	r, err := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: KindPing})
 	if err != nil || r == nil || r.ID != "w1" || r.Kind != KindResult {
 		t.Fatalf("ping reply %+v %v", r, err)
 	}
@@ -288,7 +288,7 @@ func TestWorkerInitiatedPingAndUnknownKind(t *testing.T) {
 	if err := json.Unmarshal(r.Body, &p); err != nil || p.Version != "9.9" {
 		t.Fatalf("pong %s", r.Body)
 	}
-	r, _ = h.Deliver(7, s.ID, Envelope{ID: "w2", Kind: "nope"})
+	r, _ = h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w2", Kind: "nope"})
 	if r == nil || r.Error == nil || r.Error.Code != CodeUnknownKind {
 		t.Fatalf("unknown kind reply %+v", r)
 	}
@@ -325,5 +325,83 @@ func TestSSERoundTrip(t *testing.T) {
 	}
 	if _, err := NewReader(strings.NewReader("event: x\ndata: 1")).Next(); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("truncated: %v", err)
+	}
+}
+
+func TestCallbacksRunOnlyWhileTheirCallWaits(t *testing.T) {
+	h, _ := newTestHub(t, Options{})
+	s := h.Attach(7, "")
+	var during, after *Envelope
+	serve(s, func(env Envelope) *Envelope {
+		during, _ = h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: "save", Call: env.ID, Body: json.RawMessage(`2`)})
+		return &Envelope{ID: env.ID, Kind: KindResult, Body: json.RawMessage(`"done"`)}
+	})
+	var seen []string
+	raw, err := h.CallWith(context.Background(), 7, "launch", 3, nil, time.Second, func(_ context.Context, env Envelope) (any, error) {
+		seen = append(seen, env.Kind+string(env.Body))
+		if string(env.Body) == "3" {
+			return nil, &RemoteError{Code: "custom", Message: "refused"}
+		}
+		return map[string]bool{"saved": true}, nil
+	})
+	if err != nil || string(raw) != `"done"` || len(seen) != 1 || seen[0] != "save2" || during == nil || during.Error != nil || !strings.Contains(string(during.Body), "saved") {
+		t.Fatalf("callback %s %v %v %+v", raw, err, seen, during)
+	}
+	after, _ = h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w2", Kind: "save", Call: during.ID})
+	if after == nil || after.Error == nil || after.Error.Code != CodeCallEnded {
+		t.Fatalf("late callback %+v", after)
+	}
+}
+
+func TestHandlersAndAttachHook(t *testing.T) {
+	h, _ := newTestHub(t, Options{})
+	attached := make(chan int64, 1)
+	h.OnAttach(func(id int64) { attached <- id })
+	h.Handle("changed", func(_ context.Context, id int64, env Envelope) (any, error) {
+		if id != 7 {
+			return nil, errors.New("wrong machine")
+		}
+		return "ok", nil
+	})
+	s := h.Attach(7, "")
+	select {
+	case id := <-attached:
+		if id != 7 {
+			t.Fatal(id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("attach hook not called")
+	}
+	r, err := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: "changed"})
+	if err != nil || r == nil || r.Error != nil || string(r.Body) != `"ok"` {
+		t.Fatalf("handler %+v %v", r, err)
+	}
+}
+
+func TestCallReturnsOnlyAfterItsCallbacks(t *testing.T) {
+	h, _ := newTestHub(t, Options{})
+	s := h.Attach(7, "")
+	inCallback := make(chan struct{})
+	delivered := make(chan *Envelope, 1)
+	serve(s, func(env Envelope) *Envelope {
+		go func() {
+			r, _ := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: "save", Call: env.ID})
+			delivered <- r
+		}()
+		return nil // the result is lost: the caller's deadline ends the call
+	})
+	var finished bool
+	_, err := h.CallWith(context.Background(), 7, "launch", 3, nil, 100*time.Millisecond, func(ctx context.Context, env Envelope) (any, error) {
+		close(inCallback)
+		<-ctx.Done() // the call stopped waiting: the callback's context ends
+		finished = true
+		return nil, ctx.Err()
+	})
+	if !errors.Is(err, ErrLostReply) || !finished {
+		t.Fatalf("call returned before its callback: %v finished %v", err, finished)
+	}
+	<-inCallback
+	if r := <-delivered; r == nil || r.Error == nil {
+		t.Fatalf("cancelled callback answered %+v", r)
 	}
 }

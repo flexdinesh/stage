@@ -466,7 +466,7 @@ func (s *Service) Stream(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	src, ok := a.(execution.EventSource)
+	src, ok := execution.As[execution.EventSource](a)
 	if !ok {
 		return nil
 	}
@@ -586,7 +586,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	}
 	d, _ := s.descriptor(t.Harness)
 	correlated := d.Launch == harness.LaunchCorrelated
-	if _, ok := a.(execution.Correlator); correlated && !ok {
+	if _, ok := execution.As[execution.Correlator](a); correlated && !ok {
 		return t, db.Conflict("Launch unavailable: this harness cannot reconcile a launch it does not reserve.")
 	}
 	if t.Workspace.FromPredecessor() {
@@ -786,7 +786,7 @@ func (s *Service) correlated(ctx context.Context, a execution.Adapter, attempt *
 		}
 		return a.Launch(ctx, *attempt.Intent, attempt.Checkpoint, save)
 	}
-	c, ok := a.(execution.Correlator)
+	c, ok := execution.As[execution.Correlator](a)
 	if !ok {
 		return execution.Observation{}, errors.New("this harness cannot find a correlated launch; link the session")
 	}
