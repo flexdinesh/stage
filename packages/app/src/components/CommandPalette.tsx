@@ -178,7 +178,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="absolute inset-0 flex flex-col bg-surface pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:inset-auto md:p-0 md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+        className="absolute inset-0 flex flex-col bg-surface pt-[var(--inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:inset-auto md:p-0 md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
       >
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="text-muted">

@@ -185,7 +185,7 @@ export function ServerMenu({ className }: { className?: string }) {
       {open ? (
         <div
           id={panelId}
-          className="z-50 border border-line-strong bg-surface text-fg max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+env(safe-area-inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
+          className="z-50 border border-line-strong bg-surface text-fg max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
         >
           <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
             <span className="label-caps text-fg">Servers</span>
