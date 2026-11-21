@@ -59,7 +59,7 @@ func TestMatchProposesRemoteAndBindsVerifiedFamily(t *testing.T) {
 	var temp dbtest.DB
 	store := db.NewStore(temp.Reset(t))
 	ctx := t.Context()
-	connection, err := store.EnsureOpenCode(ctx)
+	connection, err := store.EnsureOpenCode(ctx, db.LocalMachine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,5 +103,54 @@ func TestMatchProposesRemoteAndBindsVerifiedFamily(t *testing.T) {
 	check(true)
 	if err := service.chooseConnection(req, &taskConfigReq{ProjectID: &p.ID}); err == nil {
 		t.Fatal("dual-bound project accepted an implicit destination")
+	}
+}
+
+// Checkout proof holds within one machine: the same directory seen through
+// shared paths on another machine's connection only suggests by remote.
+func TestMatchNeverProvesACheckoutAcrossMachines(t *testing.T) {
+	var temp dbtest.DB
+	pool := temp.Reset(t)
+	store := db.NewStore(pool)
+	ctx := t.Context()
+	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := store.EnsureOpenCode(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := execution.WorkspaceInfo{ID: "t3-project", WorkspaceRoot: "/t3/repo", OriginRemote: "git@host:owner/repo.git"}
+	target := execution.WorkspaceInfo{ID: "oc-project", WorkspaceRoot: "/oc/repo", OriginRemote: "https://host/owner/repo"}
+	p, err := store.InsertProject(ctx, db.Project{Title: "Matched", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if output, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", output, err)
+	}
+	for _, m := range []db.SharedPath{{ConnectionID: 1, HarnessRoot: source.WorkspaceRoot, StageRoot: root}, {ConnectionID: connection, HarnessRoot: target.WorkspaceRoot, StageRoot: root}} {
+		if err := store.SetSharedPath(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &server{Deps: Deps{Store: store, Sync: coordinator.NewWithAdapters(store, map[int64]execution.Adapter{1: workspaceInventory{rows: []execution.WorkspaceInfo{source}}, connection: workspaceInventory{rows: []execution.WorkspaceInfo{target}}}, nil)}}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("id", strconv.FormatInt(p.ID, 10))
+	req.SetPathValue("connectionId", strconv.FormatInt(connection, 10))
+	rec := httptest.NewRecorder()
+	if err := service.matchWorkspace(rec, req); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Bound       *db.Project
+		Suggestions map[string]string
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Bound != nil || out.Suggestions[target.ID] != "Same Git remote. Confirm the checkout." {
+		t.Fatalf("cross-machine match: %+v", out)
 	}
 }

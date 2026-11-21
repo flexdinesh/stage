@@ -27,13 +27,12 @@ const lateAfter = time.Minute
 
 // Runner fires due schedules, then launches due one-shot tasks. Serialized.
 type Runner struct {
-	ConnectionID int64 // zero reconciles every connection
-	// Harness, when set, reconciles that harness's active connection (it
-	// changes when the instance is replaced) and wins over ConnectionID.
-	Harness  string
-	store    *db.Store
-	launcher Launcher
-	log      *slog.Logger
+	// ConnectionID is the connection this runner reconciles (zero: every
+	// connection). The server runs one runner per active connection.
+	ConnectionID int64
+	store        *db.Store
+	launcher     Launcher
+	log          *slog.Logger
 
 	// Every is the tick interval.
 	Every time.Duration
@@ -76,7 +75,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 	defer r.mu.Unlock()
 	now := r.Now()
 	var errs []error
-	due, err := r.store.DueSchedules(ctx, now, r.connection())
+	due, err := r.store.DueSchedules(ctx, now, r.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -90,7 +89,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 			r.log.Info("schedule fired", "schedule", id, "outcome", res.Outcome)
 		}
 	}
-	tasks, err := r.store.DueForConnection(ctx, now, r.connection())
+	tasks, err := r.store.DueForConnection(ctx, now, r.ConnectionID)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
@@ -138,15 +137,4 @@ func compact(d time.Duration) string {
 		}
 		return fmt.Sprintf("%dd%dh", h/24, h%24)
 	}
-}
-
-// connection is the connection this runner reconciles (0: all).
-func (r *Runner) connection() int64 {
-	if r.Harness != "" {
-		if id := r.store.ActiveID(r.Harness); id != 0 {
-			return id
-		}
-		return -1 // no connection yet: nothing to reconcile
-	}
-	return r.ConnectionID
 }

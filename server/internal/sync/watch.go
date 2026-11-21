@@ -68,7 +68,7 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 			continue
 		}
 		if s.store.IsT3(connection) {
-			_ = s.store.SetObservedState(ctx, ref.ExternalSessionID, db.TaskState(o.State))
+			_ = s.store.SetObservedState(ctx, ref, db.TaskState(o.State))
 		}
 		if !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {
 			continue

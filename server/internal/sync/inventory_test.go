@@ -24,14 +24,14 @@ func TestInventoryReadsRepoThroughSharedPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/o/app.git\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetSharedPath(t.Context(), db.SharedPath{ConnectionID: store.T3ID(), HarnessRoot: "/harness", StageRoot: stageRoot}); err != nil {
+	if err := store.SetSharedPath(t.Context(), db.SharedPath{ConnectionID: store.LegacyT3ID(), HarnessRoot: "/harness", StageRoot: stageRoot}); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()
 	fake.AddProject("app", "/harness/app")
 	fake.AddProject("other", "/elsewhere/other")
 	svc := t3sync.New(store, t3.NewAdapter(fake), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ws, err := svc.Inventory(t.Context(), store.T3ID())
+	ws, err := svc.Inventory(t.Context(), store.LegacyT3ID())
 	if err != nil {
 		t.Fatal(err)
 	}

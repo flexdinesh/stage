@@ -32,7 +32,7 @@ func newHarness(t *testing.T, env config.OpenCodeSettings) *setupHarness {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var temp dbtest.DB
 	h := &setupHarness{store: db.NewStore(temp.Reset(t))}
-	s, err := New(t.Context(), h.store, env, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s, err := New(t.Context(), h.store.OnMachine(db.LocalMachine), env, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func register(t *testing.T, url, password string) {
 
 func (h *setupHarness) saved(t *testing.T) (config.OpenCodeSettings, string) {
 	t.Helper()
-	c, verified, err := h.store.OpenCodeSettings(t.Context())
+	c, verified, err := h.store.OpenCodeSettings(t.Context(), db.LocalMachine)
 	if err != nil {
 		t.Fatal(err)
 	}

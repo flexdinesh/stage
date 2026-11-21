@@ -2,39 +2,48 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// EnsureOpenCode is the active OpenCode connection, created on first use.
-func (s *Store) EnsureOpenCode(ctx context.Context) (int64, error) {
+// EnsureOpenCode is machine's active OpenCode connection, created on first
+// use.
+func (s *Store) EnsureOpenCode(ctx context.Context, machine int64) (int64, error) {
 	var id int64
-	if _, err := s.pool.Exec(ctx, `INSERT INTO harness_connections(harness) SELECT 'opencode' WHERE NOT EXISTS(SELECT 1 FROM harness_connections WHERE harness='opencode' AND active=1)`); err != nil {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO harness_connections(machine_id,harness) SELECT $1,'opencode' WHERE NOT EXISTS(SELECT 1 FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active=1)`, machine); err != nil {
 		return 0, err
 	}
 	s.dropConnections()
-	err := s.pool.QueryRow(ctx, `SELECT id FROM harness_connections WHERE harness='opencode' AND active=1`).Scan(&id)
+	err := s.pool.QueryRow(ctx, `SELECT id FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active=1`, machine).Scan(&id)
 	return id, err
 }
 
-// OpenCodeSettings are the settings of the active OpenCode connection and
-// the address its service was verified at ("" before the first).
-func (s *Store) OpenCodeSettings(ctx context.Context) (config.OpenCodeSettings, string, error) {
-	var c config.OpenCodeSettings
+// OpenCodeSettings are the settings of machine's active OpenCode connection
+// (migration 0018: one row per machine; none reads the defaults) and the
+// address its service was verified at ("" before the first).
+func (s *Store) OpenCodeSettings(ctx context.Context, machine int64) (config.OpenCodeSettings, string, error) {
+	c := config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}
 	var verified string
-	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at,
- COALESCE((SELECT identity FROM harness_connections WHERE harness='opencode' AND active=1),'') FROM opencode_settings WHERE id=1`).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &c.Auth, &c.TokenIssuedAt, &verified)
+	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at FROM opencode_settings WHERE machine_id=$1`, machine).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &c.Auth, &c.TokenIssuedAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return c, "", err
+	}
+	err = s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT identity FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active=1),'')`, machine).Scan(&verified)
 	return c, verified, err
 }
 
-// SaveOpenCodeSettings saves the active connection's settings. Its identity
-// changes only through SwitchInstance or SetConnectionIdentity.
-func (s *Store) SaveOpenCodeSettings(ctx context.Context, c config.OpenCodeSettings) error {
+// SaveOpenCodeSettings saves machine's OpenCode settings. Its active
+// connection's identity changes only through SwitchInstance or
+// SetConnectionIdentity.
+func (s *Store) SaveOpenCodeSettings(ctx context.Context, machine int64, c config.OpenCodeSettings) error {
 	if c.Auth == "" {
 		c.Auth = config.OpenCodeAuthNone
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE opencode_settings SET endpoint=$1,browser_endpoint=$2,web_client=$3,username=$4,password=$5,auth=$6,token_issued_at=$7 WHERE id=1`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, c.Auth, c.TokenIssuedAt)
+	_, err := s.pool.Exec(ctx, `INSERT INTO opencode_settings(machine_id,endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at) VALUES($8,$1,$2,$3,$4,$5,$6,$7)
+ ON CONFLICT(machine_id) DO UPDATE SET endpoint=excluded.endpoint,browser_endpoint=excluded.browser_endpoint,web_client=excluded.web_client,username=excluded.username,password=excluded.password,auth=excluded.auth,token_issued_at=excluded.token_issued_at`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, c.Auth, c.TokenIssuedAt, machine)
 	return err
 }
 

@@ -150,7 +150,7 @@ SELECT th.t3_thread_id FROM threads th
 WHERE (th.observed_state IN ('running', 'needs_input', 'done') OR (`+threadStateSQL+`) IN ('running','needs_input'))
   AND th.relationship IS NOT 'subagent'
   AND (th.session_id IN (SELECT id FROM session_identities WHERE connection_id=$1)
-    OR (th.session_id IS NULL AND $1=`+activeT3SQL+`))
+    OR (th.session_id IS NULL AND $1=`+legacyT3SQL+`))
 ORDER BY th.created_at`, connection)
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ type ThreadObservation struct {
 // ThreadObservations returns an entry for every id.
 func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.connection_id=`+activeT3SQL+` AND tk.t3_thread_id = i.id)
+SELECT i.id, th.observed_state, EXISTS (SELECT 1 FROM tasks tk WHERE tk.connection_id=`+legacyT3SQL+` AND tk.t3_thread_id = i.id)
 FROM (SELECT value AS id FROM json_each($1)) AS i LEFT JOIN threads th ON th.t3_thread_id = i.id`, jsonArray(ids))
 	if err != nil {
 		return nil, err
@@ -194,8 +194,12 @@ FROM (SELECT value AS id FROM json_each($1)) AS i LEFT JOIN threads th ON th.t3_
 	return out, rows.Err()
 }
 
-// SetObservedState records the watcher's mapped state for a mirrored thread.
-func (s *Store) SetObservedState(ctx context.Context, threadID string, st TaskState) error {
-	_, err := s.pool.Exec(ctx, `UPDATE threads SET observed_state = $2 WHERE t3_thread_id = $1`, threadID, string(st))
+// SetObservedState records the watcher's mapped state for a mirrored thread
+// of ref's connection (scoped like WatchedThreadIDs: another T3 connection's
+// thread is never touched).
+func (s *Store) SetObservedState(ctx context.Context, ref SessionRef, st TaskState) error {
+	_, err := s.pool.Exec(ctx, `UPDATE threads SET observed_state = $2 WHERE t3_thread_id = $1
+ AND (session_id IN (SELECT id FROM session_identities WHERE connection_id=$3)
+   OR (session_id IS NULL AND $3=`+legacyT3SQL+`))`, ref.ExternalSessionID, string(st), ref.ConnectionID)
 	return err
 }

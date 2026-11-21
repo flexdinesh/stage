@@ -24,7 +24,7 @@ func (s *Service) inventory(ctx context.Context, id int64, a execution.Adapter) 
 	if err != nil {
 		return nil, err
 	}
-	paths, err := s.store.SharedPaths(ctx)
+	paths, err := s.store.MachineSharedPaths(ctx, s.store.ConnectionMachine(id))
 	if err != nil {
 		return nil, err
 	}

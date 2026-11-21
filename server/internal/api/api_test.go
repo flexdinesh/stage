@@ -164,7 +164,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// Tests complete tasks explicitly; inference tests turn auto-complete on.
-	if _, err := store.SetAutoComplete(context.Background(), store.T3ID(), false); err != nil {
+	if _, err := store.SetAutoComplete(context.Background(), store.LegacyT3ID(), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()
@@ -184,13 +184,13 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 		opt(&deps)
 	}
 	if deps.Setup == nil {
-		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Store: store, Client: client, Fake: true, Logger: log})
+		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Store: store.OnMachine(db.LocalMachine), Client: client, Fake: true, Logger: log})
 	}
-	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(deps.Setup, func() t3setup.SyncProgress {
-		p := svc.Progress()
+	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(deps.Setup, func(connection int64) t3setup.SyncProgress {
+		p := svc.Progress(connection)
 		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
 	})}
-	if c, ok := deps.Connectors.Get(opencode.Kind); ok {
+	if c, ok := deps.Connectors.Get(db.LocalMachine, opencode.Kind); ok {
 		connectors[opencode.Kind] = c
 	}
 	deps.Connectors = mustConnectors(connectors)
@@ -1398,7 +1398,7 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		if err = e.store.PutObservation(ctx, o); err != nil {
 			t.Fatal(err)
 		}
-		if err := e.store.SetObservedState(ctx, id, st); err != nil {
+		if err := e.store.SetObservedState(ctx, db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, st); err != nil {
 			t.Fatal(err)
 		}
 	}

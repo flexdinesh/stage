@@ -124,7 +124,7 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 		}
 		sourceID = &id
 	} else if in.SourceThreadID != nil {
-		t3, err := activeT3(ctx, tx)
+		t3, err := legacyT3(ctx, tx)
 		if err != nil {
 			return JournalEntry{}, err
 		}

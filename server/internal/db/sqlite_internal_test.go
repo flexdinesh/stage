@@ -26,7 +26,7 @@ func TestInTxRollsBackOnPanic(t *testing.T) {
 			}
 		}()
 		_ = s.inTx(ctx, func(tx *Tx) error {
-			if _, err := tx.Exec(ctx, `UPDATE t3_connection SET last_error = 'in tx' WHERE id = 1`); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE t3_connection SET last_error = 'in tx' WHERE machine_id = 1`); err != nil {
 				return err
 			}
 			panic("boom")
@@ -34,10 +34,10 @@ func TestInTxRollsBackOnPanic(t *testing.T) {
 	}()
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := s.SetLastError(wctx, "after"); err != nil {
+	if err := s.SetLastError(wctx, LocalMachine, "after"); err != nil {
 		t.Fatalf("write after panicked tx: %v", err)
 	}
-	c, err := s.GetConnection(ctx)
+	c, err := s.GetConnection(ctx, LocalMachine)
 	if err != nil || c.LastError == nil || *c.LastError != "after" {
 		t.Fatalf("connection %+v, %v", c, err)
 	}

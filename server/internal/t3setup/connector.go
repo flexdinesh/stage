@@ -59,11 +59,11 @@ type AutoPairRef struct {
 type Connector struct {
 	svc *Service
 	// Progress reports the server's full sync (nil: none).
-	progress func() SyncProgress
+	progress func(connection int64) SyncProgress
 }
 
-// NewConnector wraps s; progress may be nil.
-func NewConnector(s *Service, progress func() SyncProgress) *Connector {
+// NewConnector wraps s; progress (the full sync of a connection) may be nil.
+func NewConnector(s *Service, progress func(connection int64) SyncProgress) *Connector {
 	return &Connector{svc: s, progress: progress}
 }
 
@@ -128,7 +128,7 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		d.T3 = &IdentityRef{EnvironmentID: id.EnvironmentID, Label: id.Label, ServerVersion: id.ServerVersion}
 	}
 	if c.progress != nil {
-		d.Sync = c.progress()
+		d.Sync = c.progress(conn.ConnectionID)
 	}
 	out := harness.Status{
 		Summary: harness.Summary{ConnectionID: conn.ConnectionID, Configured: configured(st), Connected: st.Conn.Connected},

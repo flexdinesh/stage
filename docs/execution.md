@@ -35,7 +35,8 @@ plugin registration or service installation framework.
 Each harness package declares a `harness.Descriptor`: kind, name, hosting,
 whether its instance identity is stable, and the closure signals it reports
 with their copy. `serve` composes a fixed `harness.Registry` (T3, OpenCode)
-and builds one release and schedule runner per kind from it. The database
+and runs one release and one schedule runner per active connection, on
+every machine (`serve/runners.go` follows instance switches). The database
 stores kinds as text; the registry, not a schema CHECK, decides which exist.
 
 - **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any

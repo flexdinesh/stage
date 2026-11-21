@@ -126,7 +126,7 @@ func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int6
 		var sid *int64
 		ref := n.Session
 		if ref == nil && n.T3ThreadID != nil {
-			ref = &SessionRef{ConnectionID: s.T3ID(), ExternalSessionID: *n.T3ThreadID}
+			ref = &SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: *n.T3ThreadID}
 		}
 		if ref != nil {
 			value, err := sessionIdentity(ctx, tx, *ref)
@@ -307,7 +307,7 @@ type WaitingSession struct {
 func (s *Store) WaitingWithoutNotifications(ctx context.Context, upToID int64) ([]WaitingSession, error) {
 	rows, err := s.pool.Query(ctx, `SELECT connection_id, external_id, title, project_title FROM (
  SELECT 1 AS connection_id, th.t3_thread_id AS external_id, th.title, p.title AS project_title, th.updated_at AS updated_at
- FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),`+activeT3SQL+`) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
+ FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),`+legacyT3SQL+`) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
  LEFT JOIN tasks tk ON tk.session_id = th.session_id
  WHERE `+externalNeedsInput+` AND NOT EXISTS (
  SELECT 1 FROM notifications n WHERE n.session_id = th.session_id AND n.id <= $1)

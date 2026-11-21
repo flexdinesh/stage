@@ -11,6 +11,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
@@ -19,7 +20,7 @@ import (
 
 func withOpenCode(t *testing.T, env config.OpenCodeSettings) func(*api.Deps) {
 	return func(d *api.Deps) {
-		s, err := opencodesetup.New(t.Context(), d.Store, env, d.Sync.SwapAdapter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		s, err := opencodesetup.New(t.Context(), d.Store.OnMachine(db.LocalMachine), env, d.Sync.SwapAdapter, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +111,7 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 }
 
 func (e *env) openCodeID(t *testing.T) int64 {
-	id, err := e.store.EnsureOpenCode(t.Context())
+	id, err := e.store.EnsureOpenCode(t.Context(), db.LocalMachine)
 	if err != nil {
 		t.Fatal(err)
 	}

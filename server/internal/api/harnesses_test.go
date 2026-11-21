@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -76,9 +77,10 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 	}
 }
 
-// mustConnectors validates m against testHarnesses.
+// mustConnectors validates m, the local machine's connectors, against
+// testHarnesses.
 func mustConnectors(m map[string]harness.Connector) harness.Connectors {
-	c, err := harness.NewConnectors(testHarnesses, m)
+	c, err := harness.NewConnectors(testHarnesses, map[int64]map[string]harness.Connector{db.LocalMachine: m})
 	if err != nil {
 		panic(err)
 	}
@@ -127,7 +129,7 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 		Details      map[string]any `json:"details"`
 	}
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
-	if st.Kind != "t3" || st.Name != "T3" || st.ConnectionID != e.store.T3ID() || !st.Connected || !st.Configured || st.State != "connected" ||
+	if st.Kind != "t3" || st.Name != "T3" || st.ConnectionID != e.store.LegacyT3ID() || !st.Connected || !st.Configured || st.State != "connected" ||
 		len(st.Fields) != 1 || st.Fields[0].ID != "url" || st.Fields[0].Source != "default" || st.Fields[0].Locked ||
 		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || st.Actions[1].Reason != "fake" || st.Details["publicUrl"] != publicURL {
 		t.Fatalf("status %+v", st)
@@ -146,7 +148,7 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || h.Harnesses[0].ConnectionID != e.store.T3ID() {
+	if len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || h.Harnesses[0].ConnectionID != e.store.LegacyT3ID() {
 		t.Fatalf("health harnesses %+v", h.Harnesses)
 	}
 }

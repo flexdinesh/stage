@@ -83,12 +83,12 @@ func newEnv(t *testing.T, cfg config.Config, fake bool) *env {
 	}
 	e.client.SetProbe(reachable("env-a"))
 	ctx := context.Background()
-	conn, err := e.store.GetConnection(ctx)
+	conn, err := e.store.GetConnection(ctx, db.LocalMachine)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.svc = t3setup.New(t3setup.Options{
-		Config: cfg, Store: e.store, Client: e.client, Endpoint: t3setup.Resolve(cfg, conn.T3URL), Fake: fake,
+		Config: cfg, Store: e.store.OnMachine(db.LocalMachine), Client: e.client, Endpoint: t3setup.Resolve(cfg, conn.T3URL), Fake: fake,
 		OnPaired:   func() { e.kicks.Add(1) },
 		OnSwitched: func(sw db.Switch) { e.switches = append(e.switches, sw) },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -122,7 +122,7 @@ func defaultCfg() config.Config {
 
 func (e *env) bound() string {
 	e.t.Helper()
-	c, err := e.store.GetConnection(context.Background())
+	c, err := e.store.GetConnection(context.Background(), db.LocalMachine)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestAutoPairFailures(t *testing.T) {
 // instance retires it instead of restamping it.
 func (e *env) bind(workspace string) {
 	e.t.Helper()
-	_, err := e.store.InsertProject(context.Background(), db.Project{Title: workspace, Bindings: []db.ProjectBinding{{ConnectionID: e.store.T3ID(), ExternalProjectID: "p-" + workspace, Workspace: workspace}}})
+	_, err := e.store.InsertProject(context.Background(), db.Project{Title: workspace, Bindings: []db.ProjectBinding{{ConnectionID: e.store.LegacyT3ID(), ExternalProjectID: "p-" + workspace, Workspace: workspace}}})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -304,16 +304,16 @@ func TestPairRecordsEnvironment(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, " "); !errors.As(err, &te) || !strings.Contains(err.Error(), "pairing failed: empty pairing code") {
 		t.Fatalf("bad code: %v", err)
 	}
-	first := e.store.T3ID()
+	first := e.store.LegacyT3ID()
 	paired, err := e.svc.Pair(ctx, "CODE-1")
 	if err != nil || paired.Replaced != nil {
 		t.Fatalf("pair: %v %+v", err, paired)
 	}
-	if e.bound() != "env-a" || e.kicks.Load() != 1 || e.store.T3ID() != first || len(e.switches) != 0 {
-		t.Fatalf("bound %q kicks %d id %d switches %v", e.bound(), e.kicks.Load(), e.store.T3ID(), e.switches)
+	if e.bound() != "env-a" || e.kicks.Load() != 1 || e.store.LegacyT3ID() != first || len(e.switches) != 0 {
+		t.Fatalf("bound %q kicks %d id %d switches %v", e.bound(), e.kicks.Load(), e.store.LegacyT3ID(), e.switches)
 	}
 	// Same T3 again: same connection.
-	if paired, err := e.svc.Pair(ctx, "CODE-2"); err != nil || paired.Replaced != nil || e.bound() != "env-a" || e.store.T3ID() != first {
+	if paired, err := e.svc.Pair(ctx, "CODE-2"); err != nil || paired.Replaced != nil || e.bound() != "env-a" || e.store.LegacyT3ID() != first {
 		t.Fatalf("re-pair: %v %+v %q", err, paired, e.bound())
 	}
 }
@@ -324,21 +324,21 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
 		t.Fatal(err)
 	}
-	first := e.store.T3ID()
+	first := e.store.LegacyT3ID()
 	e.bind("/w/a")
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Disconnect keeps the environment: the connection is unchanged.
-	if e.bound() != "env-a" || e.store.T3ID() != first {
-		t.Fatalf("unpair changed the connection: %q %d", e.bound(), e.store.T3ID())
+	if e.bound() != "env-a" || e.store.LegacyT3ID() != first {
+		t.Fatalf("unpair changed the connection: %q %d", e.bound(), e.store.LegacyT3ID())
 	}
 	e.client.SetProbe(reachable("env-b"))
 	paired, err := e.svc.Pair(ctx, "CODE-2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := e.store.T3ID()
+	second := e.store.LegacyT3ID()
 	if second == first || e.bound() != "env-b" {
 		t.Fatalf("not replaced: %d -> %d bound %q", first, second, e.bound())
 	}
@@ -362,8 +362,8 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.store.T3ID() != first || len(e.switches) != 2 || !e.switches[1].Revived {
-		t.Fatalf("not revived: %d %+v", e.store.T3ID(), e.switches)
+	if e.store.LegacyT3ID() != first || len(e.switches) != 2 || !e.switches[1].Revived {
+		t.Fatalf("not revived: %d %+v", e.store.LegacyT3ID(), e.switches)
 	}
 	// env-b held nothing: deleted rather than kept as a replaced connection.
 	if paired.Replaced != nil {
@@ -380,14 +380,14 @@ func TestPairingAnotherEnvironmentRestampsAnEmptyConnection(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
 		t.Fatal(err)
 	}
-	first := e.store.T3ID()
+	first := e.store.LegacyT3ID()
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.client.SetProbe(reachable("env-b"))
 	paired, err := e.svc.Pair(ctx, "CODE-2")
-	if err != nil || paired.Replaced != nil || e.bound() != "env-b" || e.store.T3ID() != first || len(e.switches) != 0 {
-		t.Fatalf("restamp: %v %+v %q %d %v", err, paired, e.bound(), e.store.T3ID(), e.switches)
+	if err != nil || paired.Replaced != nil || e.bound() != "env-b" || e.store.LegacyT3ID() != first || len(e.switches) != 0 {
+		t.Fatalf("restamp: %v %+v %q %d %v", err, paired, e.bound(), e.store.LegacyT3ID(), e.switches)
 	}
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)
@@ -428,11 +428,11 @@ func TestSetURL(t *testing.T) {
 	if ep := e.svc.Endpoint(); ep != want || e.client.BaseURL != want.URL || e.client.PublicURL != want.PublicURL {
 		t.Fatalf("endpoint %+v, client %q %q", ep, e.client.BaseURL, e.client.PublicURL)
 	}
-	if c, _ := e.store.GetConnection(ctx); c.T3URL == nil || *c.T3URL != want.URL {
+	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); c.T3URL == nil || *c.T3URL != want.URL {
 		t.Fatalf("saved %v", c.T3URL)
 	}
 	// A restart resolves the saved URL.
-	if c, _ := e.store.GetConnection(ctx); t3setup.Resolve(defaultCfg(), c.T3URL) != want {
+	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); t3setup.Resolve(defaultCfg(), c.T3URL) != want {
 		t.Fatal("saved URL not resolved at startup")
 	}
 
@@ -464,7 +464,7 @@ func TestSetURL(t *testing.T) {
 	if ep := e.svc.Endpoint(); ep.URL != config.DefaultT3URL || ep.Source != "default" || e.client.BaseURL != config.DefaultT3URL {
 		t.Fatalf("reset %+v", ep)
 	}
-	if c, _ := e.store.GetConnection(ctx); c.T3URL != nil {
+	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); c.T3URL != nil {
 		t.Fatalf("reset kept %q", *c.T3URL)
 	}
 	// Disconnected: the URL may point at another T3 (pairing it replaces).

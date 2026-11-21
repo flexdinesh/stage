@@ -50,11 +50,11 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	if c := cs[1]; c.ID != 2 || c.Harness != HarnessOpenCode || !c.Active || c.AutoComplete || c.Label != "http://oc:4096" {
 		t.Fatalf("opencode %+v", c)
 	}
-	conn, err := s.GetConnection(ctx)
+	conn, err := s.GetConnection(ctx, LocalMachine)
 	if err != nil || conn.EnvironmentID == nil || *conn.EnvironmentID != "env-a" || conn.ConnectionID != 1 {
 		t.Fatalf("t3 connection %+v %v", conn, err)
 	}
-	if _, verified, err := s.OpenCodeSettings(ctx); err != nil || verified != "http://oc:4096" {
+	if _, verified, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || verified != "http://oc:4096" {
 		t.Fatalf("verified %q %v", verified, err)
 	}
 	task, err := s.GetTask(ctx, 2)
@@ -74,12 +74,12 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 
 func TestLegacyThreadIdsMapToTheActiveT3Connection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	first := s.T3ID()
+	first := s.LegacyT3ID()
 	project := projectWithBinding(t, s, first, "/w/a")
-	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
-	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed || sw.Old != first {
 		t.Fatalf("switch %+v %v", sw, err)
 	}
@@ -108,9 +108,9 @@ func projectWithBinding(t *testing.T, s *Store, connection int64, workspace stri
 
 func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	first := s.T3ID()
+	first := s.LegacyT3ID()
 	// First pairing stamps the connection in place.
-	if sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil || sw.Changed || s.T3ID() != first {
+	if sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil || sw.Changed || s.LegacyT3ID() != first {
 		t.Fatalf("stamp %+v %v", sw, err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
@@ -124,13 +124,13 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed || sw.Revived || sw.Old != first || sw.New == first {
 		t.Fatalf("replace %+v %v", sw, err)
 	}
 	second := sw.New
-	if s.T3ID() != second || s.ConnectionActive(first) || !s.IsT3(first) {
-		t.Fatalf("active %d", s.T3ID())
+	if s.LegacyT3ID() != second || s.ConnectionActive(first) || !s.IsT3(first) {
+		t.Fatalf("active %d", s.LegacyT3ID())
 	}
 	ran, err := s.TaskBySession(ctx, SessionRef{ConnectionID: first, ExternalSessionID: "thread-a"})
 	if err != nil || ran.ConnectionID != first || ran.ConnectionActive || ran.ConnectionLabel != "box a" || ran.State != StateRunning {
@@ -158,7 +158,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 
 	// env-a again: its connection comes back; env-b held only moved work,
 	// so it is deleted rather than kept.
-	sw, err = s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0)
+	sw, err = s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0)
 	if err != nil || !sw.Revived || sw.New != first || sw.Old != second {
 		t.Fatalf("revive %+v %v", sw, err)
 	}
@@ -175,8 +175,8 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 
 func TestForgetConnection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	first := s.T3ID()
-	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0); err != nil {
+	first := s.LegacyT3ID()
+	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
@@ -186,7 +186,7 @@ func TestForgetConnection(t *testing.T) {
 	if err := s.ForgetConnection(ctx, first); !errors.As(err, &conflict) {
 		t.Fatalf("forgot the active connection: %v", err)
 	}
-	sw, err := s.SwitchInstance(ctx, t3.Descriptor, "env-b", "box b", 0)
+	sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed {
 		t.Fatal(sw, err)
 	}
@@ -210,14 +210,14 @@ func TestForgetConnection(t *testing.T) {
 		t.Fatalf("forgot twice: %v", err)
 	}
 	// Pairing env-a again starts a new connection: forgotten is final.
-	sw, err = s.SwitchInstance(ctx, t3.Descriptor, "env-a", "box a", 0)
+	sw, err = s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0)
 	if err != nil || sw.Revived || sw.New == first {
 		t.Fatalf("forgotten revived %+v %v", sw, err)
 	}
 	// A replaced connection nothing references is deleted outright.
 	empty := sw.Old
 	projectWithBinding(t, s, empty, "/w/b")
-	if _, err := s.SwitchInstance(ctx, t3.Descriptor, "env-c", "box c", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-c", "box c", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ForgetConnection(ctx, empty); err != nil {

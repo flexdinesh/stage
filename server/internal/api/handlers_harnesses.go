@@ -49,7 +49,7 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 		if d.Setup.Actions == nil {
 			d.Setup.Actions = []harness.Action{}
 		}
-		_, connectable := s.Connectors.Get(d.Kind)
+		_, connectable := s.Connectors.Get(db.LocalMachine, d.Kind)
 		out = append(out, harnessJSON{Descriptor: d, Availability: profile.Allows(d), Connectable: connectable})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"machine": machineJSON{Machine: m, Profile: profile}, "harnesses": out})
@@ -72,7 +72,7 @@ func (s *server) connector(r *http.Request) (harness.Descriptor, harness.Connect
 	if !ok {
 		return d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
 	}
-	c, ok := s.Connectors.Get(d.Kind)
+	c, ok := s.Connectors.Get(db.LocalMachine, d.Kind)
 	if !ok {
 		return d, nil, db.Conflict("%s has no connection setup on this server.", d.Name)
 	}

@@ -14,7 +14,7 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 	// so a fresh server with one harness set up syncs only that one.
 	var skip []int64
 	configured := false
-	s.Connectors.Each(func(_ harness.Descriptor, c harness.Connector) {
+	s.Connectors.Each(func(_ int64, _ harness.Descriptor, c harness.Connector) {
 		sum := c.Summary(r.Context())
 		if sum.Configured {
 			configured = true

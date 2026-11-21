@@ -9,7 +9,8 @@ import (
 )
 
 // LocalMachine is the machine this server runs on (migration 0015). Every
-// connection belongs to it until workers exist.
+// connection belongs to it until workers exist; legacy T3 thread ids belong
+// to its active T3 connection.
 const LocalMachine int64 = 1
 
 // Harness names.
@@ -18,14 +19,17 @@ const (
 	HarnessOpenCode = "opencode"
 )
 
-// SQL for the active T3 connection id, and for every T3 connection id.
+// SQL for the legacy T3 connection id (the local machine's active T3: the
+// owner of session-less thread ids written before connections existed), and
+// for every T3 connection id on any machine.
 const (
-	activeT3SQL      = `(SELECT id FROM harness_connections WHERE harness='t3' AND active=1)`
+	legacyT3SQL      = `(SELECT id FROM harness_connections WHERE machine_id=1 AND harness='t3' AND active=1)`
 	t3ConnectionsSQL = `(SELECT id FROM harness_connections WHERE harness='t3')`
 )
 
 type connectionRow struct {
 	id      int64
+	machine int64
 	harness string
 	active  bool
 }
@@ -36,13 +40,13 @@ func (s *Store) snapshot() connectionSnapshot {
 	if c := s.conns.Load(); c != nil {
 		return *c
 	}
-	rows, err := s.pool.Query(context.Background(), `SELECT id,harness,active FROM harness_connections ORDER BY id`)
+	rows, err := s.pool.Query(context.Background(), `SELECT id,machine_id,harness,active FROM harness_connections ORDER BY id`)
 	if err != nil {
 		return connectionSnapshot{}
 	}
 	list, err := collectRows(rows, func(r rowScanner) (connectionRow, error) {
 		var c connectionRow
-		err := r.Scan(&c.id, &c.harness, &c.active)
+		err := r.Scan(&c.id, &c.machine, &c.harness, &c.active)
 		return c, err
 	})
 	if err != nil {
@@ -56,19 +60,47 @@ func (s *Store) snapshot() connectionSnapshot {
 // dropConnections forgets the cached connections after a write.
 func (s *Store) dropConnections() { s.conns.Store(nil) }
 
-// ActiveID is the active connection of a harness (0 when none).
-func (s *Store) ActiveID(harness string) int64 {
+// ActiveID is the active connection of a harness on a machine (0 when none).
+func (s *Store) ActiveID(machine int64, harness string) int64 {
 	for _, c := range s.snapshot().rows {
-		if c.harness == harness && c.active {
+		if c.machine == machine && c.harness == harness && c.active {
 			return c.id
 		}
 	}
 	return 0
 }
 
-// T3ID is the active T3 connection: the default for legacy thread ids and
-// requests that name no connection.
-func (s *Store) T3ID() int64 { return s.ActiveID(HarnessT3) }
+// LegacyT3ID is the local machine's active T3 connection: the default for
+// legacy thread ids and requests that name no connection.
+func (s *Store) LegacyT3ID() int64 { return s.ActiveID(LocalMachine, HarnessT3) }
+
+// ActiveConnection is one active harness connection.
+type ActiveConnection struct {
+	ID, Machine int64
+	Harness     string
+}
+
+// ActiveConnections lists the active connection of every harness on every
+// machine, by id.
+func (s *Store) ActiveConnections() []ActiveConnection {
+	var out []ActiveConnection
+	for _, c := range s.snapshot().rows {
+		if c.active {
+			out = append(out, ActiveConnection{ID: c.id, Machine: c.machine, Harness: c.harness})
+		}
+	}
+	return out
+}
+
+// ConnectionMachine is the machine of a connection (0 when unknown).
+func (s *Store) ConnectionMachine(id int64) int64 {
+	for _, c := range s.snapshot().rows {
+		if c.id == id {
+			return c.machine
+		}
+	}
+	return 0
+}
 
 // Harness of a connection ("" when unknown).
 func (s *Store) Harness(id int64) string {
@@ -110,15 +142,16 @@ type activeConnection struct {
 }
 
 // SwitchInstance makes the instance with identity the active connection of
-// harness. The same identity keeps the connection. A connection with no
+// harness on machine. The same identity keeps the connection. A connection with no
 // identity yet, or holding no relations, is restamped in place. Otherwise
 // the active connection retires and keeps its relations, and the instance
 // gets a retired connection with that identity back when the harness's
 // identity is stable (or revive, a retired connection the caller matched),
 // else a new connection. Unlaunched backlog
 // tasks and schedules follow the active connection; they launch only after
-// the user binds the project there.
-func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identity, label string, revive int64) (Switch, error) {
+// the user binds the project there. A connection of another machine is never
+// revived.
+func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Descriptor, identity, label string, revive int64) (Switch, error) {
 	kind := d.Kind
 	if identity == "" && revive == 0 {
 		return Switch{}, Invalid("an instance identity is required")
@@ -129,9 +162,9 @@ func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identi
 	var out Switch
 	err := s.inTx(ctx, func(tx *Tx) error {
 		var cur activeConnection
-		err := tx.QueryRow(ctx, `SELECT id,identity,auto_complete FROM harness_connections WHERE machine_id=$2 AND harness=$1 AND active=1`, kind, LocalMachine).Scan(&cur.id, &cur.identity, &cur.autoComplete)
+		err := tx.QueryRow(ctx, `SELECT id,identity,auto_complete FROM harness_connections WHERE machine_id=$2 AND harness=$1 AND active=1`, kind, machine).Scan(&cur.id, &cur.identity, &cur.autoComplete)
 		if errors.Is(err, sql.ErrNoRows) {
-			return tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,stable_identity) VALUES($4,$1,$2,$3,$5) RETURNING id`, kind, identity, label, LocalMachine, d.StableIdentity).Scan(&out.New)
+			return tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,stable_identity) VALUES($4,$1,$2,$3,$5) RETURNING id`, kind, identity, label, machine, d.StableIdentity).Scan(&out.New)
 		}
 		if err != nil {
 			return err
@@ -140,7 +173,7 @@ func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identi
 		target := revive
 		if target != 0 {
 			var ok bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2 AND active=0 AND forgotten_at IS NULL)`, target, kind).Scan(&ok); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND machine_id=$3 AND harness=$2 AND active=0 AND forgotten_at IS NULL)`, target, kind, machine).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {
@@ -152,7 +185,7 @@ func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identi
 				return err
 			}
 			if d.StableIdentity {
-				err := tx.QueryRow(ctx, `SELECT id FROM harness_connections WHERE machine_id=$3 AND harness=$2 AND active=0 AND identity=$1`, identity, kind, LocalMachine).Scan(&target)
+				err := tx.QueryRow(ctx, `SELECT id FROM harness_connections WHERE machine_id=$3 AND harness=$2 AND active=0 AND identity=$1`, identity, kind, machine).Scan(&target)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
@@ -179,7 +212,7 @@ func (s *Store) SwitchInstance(ctx context.Context, d harness.Descriptor, identi
 				return err
 			}
 			out.New, out.Revived = target, true
-		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,auto_complete,stable_identity) VALUES($5,$1,$2,$3,$4,$6) RETURNING id`, kind, identity, label, cur.autoComplete, LocalMachine, d.StableIdentity).Scan(&out.New); err != nil {
+		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,auto_complete,stable_identity) VALUES($5,$1,$2,$3,$4,$6) RETURNING id`, kind, identity, label, cur.autoComplete, machine, d.StableIdentity).Scan(&out.New); err != nil {
 			return err
 		}
 		out.Changed = true
@@ -234,9 +267,9 @@ func (s *Store) SetConnectionIdentity(ctx context.Context, id int64, identity, l
 }
 
 // RetiredConnections lists the retired, not forgotten connections of a
-// harness, newest first.
-func (s *Store) RetiredConnections(ctx context.Context, harness string) ([]int64, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM harness_connections WHERE harness=$1 AND active=0 AND forgotten_at IS NULL ORDER BY retired_at DESC,id DESC`, harness)
+// harness on machine, newest first.
+func (s *Store) RetiredConnections(ctx context.Context, machine int64, harness string) ([]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM harness_connections WHERE machine_id=$2 AND harness=$1 AND active=0 AND forgotten_at IS NULL ORDER BY retired_at DESC,id DESC`, harness, machine)
 	if err != nil {
 		return nil, err
 	}
@@ -297,10 +330,10 @@ func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
 // legacyT3ConnectionID owns rows written before connections existed.
 const legacyT3ConnectionID int64 = 1
 
-// activeT3 is the active T3 connection inside a transaction.
-func activeT3(ctx context.Context, tx *Tx) (int64, error) {
+// legacyT3 is the legacy T3 connection (LegacyT3ID) inside a transaction.
+func legacyT3(ctx context.Context, tx *Tx) (int64, error) {
 	var id int64
-	err := tx.QueryRow(ctx, `SELECT COALESCE(`+activeT3SQL+`,0)`).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(`+legacyT3SQL+`,0)`).Scan(&id)
 	if err == nil && id == 0 {
 		err = Invalid("no T3 connection; pair T3 in Settings")
 	}
