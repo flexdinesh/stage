@@ -123,6 +123,12 @@ Usage:
                                       run a setup action, e.g. t3: pair code=CODE, auto-pair;
                                       opencode: connect-local, pair link=LINK [newInstance=true]
   stage harness KIND disconnect       forget KIND's connection credentials (tasks stay)
+  stage machine [ls]                  the machines that run harnesses: kind, status, connections
+  stage machine pair [--label L]      a one-time code (10 min) and the stage worker join command
+                                      that adds a machine; needs STAGE_PUBLIC_URL on the server
+  stage machine rename ID LABEL
+  stage machine rm ID                 remove a remote machine: revokes its token, keeps its
+                                      connections as history (the local machine stays)
   stage version [--json]              this binary: version, identity, commit, API version, schema,
                                       and its installation (mode, location) when installed
   stage update [--check] [--version X] [--from DIR]
@@ -305,6 +311,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runStatus(ctx, env, sub)
 	case "harness":
 		return runHarness(ctx, env, sub)
+	case "machine", "machines":
+		return runMachine(ctx, env, sub)
 	case "version":
 		return runVersion(env, sub)
 	case "service":

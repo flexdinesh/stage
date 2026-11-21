@@ -6,19 +6,20 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 - Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
 - IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`externalProjectId`, `externalSessionId`) are strings.
-- `createdBy`: the user id (number) of the row's creator on `Project`, `Task`, `Tree`, `JournalEntry`, `Schedule` and the `GET /api/harnesses` machine. Always emitted; see [Users](#users).
+- `createdBy`: the user id (number) of the row's creator on `Project`, `Task`, `Tree`, `JournalEntry`, `Schedule`, `Machine` and the `GET /api/harnesses` machine. Always emitted; see [Users](#users).
 - Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
 - Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
-- Errors: non-2xx responses have body `{ "error": string }`. Some 409s add a machine-readable `"code"`.
-- Every response carries `Stage-Api-Version: <n>` (currently `5`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
+- Errors: non-2xx responses have body `{ "error": string }`. Some 409s and the worker routes' 401s add a machine-readable `"code"`.
+- Every response carries `Stage-Api-Version: <n>` (currently `6`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
 - Request origin policy (`/api` and `/mcp`; [runtime.md](runtime.md#request-origin-policy)): requests with a Host that is not allowed, cross-site requests and untrusted cross-origin writes get 403; a non-empty write body that is not `application/json` (or `multipart/form-data` for uploads) gets 415.
 
 | Status | Meaning |
 |---|---|
 | 400 | invalid body or query (bad enum, missing required field, bad JSON) |
+| 401 | worker routes only: bad, used or expired pairing code, missing, invalid or revoked machine token; any route: a machine token outside `/api/worker/*` ([Machines](#machines)) |
 | 403 | rejected by the request origin policy (Host, cross-site, cross-origin) |
 | 404 | resource not found |
 | 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (URL locked, other T3 environment, auto-pair unavailable) |
@@ -95,6 +96,72 @@ Stage has no sign-in and no API auth (browser and API access stay behind the pro
 ```json
 { "id": 1, "displayName": "Default user", "createdAt": "2026-11-22T10:00:00Z" }
 ```
+
+## Machines
+
+A machine runs harnesses ([ADR 0002](adr/0002-machines-and-workers.md)). Machine 1 is the local machine, inside this server's process. A remote machine runs `stage worker` and is added by pairing. Hierarchy: user, machines, harness connections, sessions.
+
+```jsonc
+// Machine
+{
+  "id": 2,
+  "label": "work laptop",
+  "kind": "remote",              // local (id 1) | remote
+  "online": false,               // local: always true; remote: its worker channel is live (until that lands, false)
+  "lastSeenAt": "2026-11-22T10:00:00Z",  // null for the local machine; remote: last worker contact (join, later the channel)
+  "version": "v1.5.0",           // the build it runs: the server's for local; null when unknown
+  "createdBy": 1,                // the user who created its pairing code
+  "createdAt": "2026-11-22T10:00:00Z",
+  "connections": [{ "id": 7, "harness": "t3", "label": "env a" }]   // its active harness connections
+}
+```
+
+### `GET /api/machines`
+200 `{ "machines": [Machine] }`, machines not removed, by id (local first).
+
+### `GET /api/machines/{id}`
+200 `Machine`. 404 unknown or removed.
+
+### `PATCH /api/machines/{id}`
+Body (strict) `{ "label": string }`: trimmed, nonblank, at most 100 characters. 200 `Machine`. 400 invalid. 404 unknown or removed.
+
+### `DELETE /api/machines/{id}`
+Remove a remote machine. 204. Its token hashes are deleted, so its worker gets 401 on its next request. Its active connections retire as history under the rules of a replaced instance ([architecture.md](architecture.md#project-and-session-identity)): a connection something references (a binding, a session, a task or a schedule) keeps its tasks, sessions and bindings, never polled or launched on (409 `connection_retired`), and can be forgotten (`DELETE /api/connections/{id}`); an unreferenced one is deleted. Unlaunched tasks and schedules stay on the retired connection until moved. The row is kept, hidden, so history keeps its label. 409 `local_machine` for machine 1. 404 unknown or already removed.
+
+### `POST /api/machines/pairings`
+Create a one-time pairing code that adds a machine. Body (strict, may be empty) `{ "label"?: string }` (the new machine's name; default: the name the worker suggests, else `Machine <id>`). 201, `Cache-Control: no-store`:
+```json
+{
+  "code": "stage_pc_12_kq3...",
+  "label": "desk",
+  "expiresAt": "2026-11-22T10:10:00Z",
+  "link": "https://stage.example.com/join#stage_pc_12_kq3...",
+  "command": "stage worker join https://stage.example.com/join#stage_pc_12_kq3..."
+}
+```
+- The code works once, for 10 minutes. Only its SHA-256 is stored; this response is the only place it appears. The creating user (`GET /api/me`) becomes the machine's `createdBy`.
+- `link` is `STAGE_PUBLIC_URL` + `/join#` + code: the server address and the code in one value. The code is in the fragment, which browsers and HTTP clients never send, so it stays out of proxy logs.
+- 409 `public_url_required` when `STAGE_PUBLIC_URL` is unset: a worker needs an address it can reach. No code is created.
+- Like every route outside `/api/worker/*`, this sits behind the deployment's authenticating proxy.
+
+### Worker routes (`/api/worker/*`)
+
+Called by `stage worker` on a remote machine, never by the UI. They are the only routes an authenticating reverse proxy passes through without user auth: the pairing code or machine token is their auth ([runtime.md](runtime.md#worker-routes)). They still pass the request origin policy. Every worker route:
+
+- requires `Stage-Api-Version` equal to the server's `apiVersion`; missing or different: 409 `{error, code: "api_version_mismatch"}` (also on join, so a machine is never created for a worker that cannot connect);
+- except join, requires `Authorization: Bearer <machine token>`. Missing: 401 `machine_token_required` with `WWW-Authenticate: Bearer realm="stage-worker"`. Malformed, wrong, or its machine removed: 401 `machine_token_invalid` with `error="invalid_token"`. An unknown worker path needs a token before it gets 404.
+
+A machine token (`stage_mt_<id>_<secret>`, 256 random bits) is a machine principal, not a user. One exists per machine; the server stores only its SHA-256 and compares in constant time. It is accepted only here: `Authorization: Bearer stage_mt_...` on any other `/api` route or on `/mcp` gets 401 `machine_token_not_accepted`. Other `Authorization` values (a proxy's own) are ignored there.
+
+#### `POST /api/worker/join`
+Redeem a pairing code. Body (strict) `{ "code": string, "label"?: string, "version"?: string }` (`label`: the worker's suggested name, used when the pairing has none; `version`: its build). No `Authorization` header (400 if sent). 201, `Cache-Control: no-store`:
+```json
+{ "machineId": 2, "label": "desk", "token": "stage_mt_5_x7m..." }
+```
+Creates the machine (`lastSeenAt` now, `version` as sent) and its token; the token appears only here. 401 `pairing_code_invalid` when the code is malformed, wrong, already used or expired (indistinguishable; a failed attempt does not use the code up). Concurrent redeems of one code: exactly one succeeds.
+
+#### `GET /api/worker/machine`
+The machine the token names: 200 `Machine`. A worker uses it to check its token (401 `machine_token_invalid` means revoked).
 
 ## Harness connections (API v6)
 
