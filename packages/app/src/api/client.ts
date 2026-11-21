@@ -59,6 +59,7 @@ import type {
   UnreadNotificationTags,
   UpdateTaskRequest,
   UpdateSnippetRequest,
+  User,
 } from "./types.ts";
 import type { Transport } from "../platform/index.ts";
 
@@ -311,6 +312,8 @@ export function createApi(transport: Transport) {
     createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),
     updateSnippet: (id: number, body: UpdateSnippetRequest) => apiFetch<Snippet>(`/snippets/${id}`, patch(body)),
     deleteSnippet: (id: number) => apiSend(`/snippets/${id}`, del),
+
+    me: () => apiFetch<User>("/me"),
 
     preferences: () => apiFetch<Preferences>("/preferences"),
     setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),

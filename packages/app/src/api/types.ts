@@ -198,6 +198,15 @@ export interface Catalog {
   fetchedAt: string | null;
 }
 
+// ---- Users ----
+
+/** GET /api/me: the acting user. No sign-in yet: always the default user (id 1). */
+export interface User {
+  id: number;
+  displayName: string;
+  createdAt: string;
+}
+
 // ---- Projects ----
 
 export interface Project {
@@ -206,6 +215,8 @@ export interface Project {
   bindings: ProjectBinding[];
   archivedAt: string | null;
   createdAt: string;
+  /** User id of its creator. */
+  createdBy: number;
   updatedAt: string;
   /** Latest thread update/settle or task update; null when none. */
   lastActivityAt: string | null;
@@ -327,7 +338,7 @@ export interface HarnessStatus<D = unknown> {
 }
 /** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
 export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }
-export interface HarnessesReply { machine: { id: number; label: string; profile: MachineProfile }; harnesses: HarnessDescriptor[] }
+export interface HarnessesReply { machine: { id: number; label: string; createdBy: number; profile: MachineProfile }; harnesses: HarnessDescriptor[] }
 /** One harness instance; at most one active per harness kind on a machine. */
 export interface HarnessConnection {
   id: number;
@@ -485,6 +496,8 @@ export interface Task {
   /** Pull requests of the task's thread (T3 mirror); empty without a thread. */
   /** Answerable questions the task's thread is waiting on (approvals excluded). */
   createdAt: string;
+  /** User id of its creator (a schedule's creator for a task the schedule spawned). */
+  createdBy: number;
   updatedAt: string;
   /** When the task entered its current state (latest event into it); null without one. */
   stateSince: string | null;
@@ -628,6 +641,8 @@ export interface Tree {
   /** When it was marked done or archived; null while open. */
   closedAt: string | null;
   createdAt: string;
+  /** User id of its creator. */
+  createdBy: number;
   updatedAt: string;
   /** Server eligibility: deletion must not discard recorded work, including departed members. */
   deletable: boolean;
@@ -805,6 +820,8 @@ export interface JournalEntry {
   fromTreeId: number | null;
   toTreeId: number | null;
   createdAt: string;
+  /** User id of the note's author or of the user behind the event (trigger-written events: the default user). */
+  createdBy: number;
   truncated: boolean;
 }
 
@@ -859,6 +876,8 @@ export interface Schedule {
   lastTaskId: number | null;
   lastTaskState: TaskState | null;
   createdAt: string;
+  /** User id of its creator; the tasks it spawns inherit it. */
+  createdBy: number;
   updatedAt: string;
 }
 

@@ -43,6 +43,18 @@ test("uploads pass FormData through and leave the multipart boundary to the tran
   assert.equal(seen.init.headers["Content-Type"], undefined);
 });
 
+test("me reads the acting user from /me", async () => {
+  let seen;
+  const user = { id: 1, displayName: "Default user", createdAt: "2026-11-22T10:00:00Z" };
+  const { api } = fakeApi(async (path, init) => {
+    seen = { path, init };
+    return Response.json(user);
+  });
+  assert.deepEqual(await api.me(), user);
+  assert.equal(seen.path, "/me");
+  assert.equal(seen.init.method, "GET");
+});
+
 test("204 endpoints resolve without reading a body", async () => {
   const { api } = fakeApi(async () => new Response(null, { status: 204 }));
   assert.equal(await api.deleteTask(3), undefined);

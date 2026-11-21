@@ -81,6 +81,7 @@ func NewRouter(deps Deps) http.Handler {
 	}
 
 	mux.HandleFunc("GET /api/health", s.health)
+	h("GET /api/me", s.me)
 
 	h("POST /api/sync", s.runSync)
 	h("GET /api/catalog", s.catalog)

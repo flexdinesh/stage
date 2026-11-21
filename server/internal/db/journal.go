@@ -35,7 +35,10 @@ type JournalEntry struct {
 	FromTreeID     *int64      `json:"fromTreeId"`
 	ToTreeID       *int64      `json:"toTreeId"`
 	CreatedAt      time.Time   `json:"createdAt"`
-	Truncated      bool        `json:"truncated"`
+	// CreatedBy: the user who wrote the note or caused the Go-written event;
+	// trigger-written events carry the default user.
+	CreatedBy int64 `json:"createdBy"`
+	Truncated bool  `json:"truncated"`
 }
 
 type JournalQuery struct {
@@ -58,11 +61,11 @@ type AppendNoteInput struct {
 	SourceThreadID *string `json:"-"`
 }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id)`
+const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id`
 
 func scanJournal(r rowScanner) (JournalEntry, error) {
 	var e JournalEntry
-	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.SourceThreadID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt, &e.SourceSession)
+	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.SourceThreadID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt, &e.SourceSession, &e.CreatedBy)
 	return e, notFound(err)
 }
 
@@ -169,7 +172,7 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 			return JournalEntry{}, Conflict("source task is no longer a member of this tree")
 		}
 	}
-	return scanJournal(tx.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id,source_session_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID, sourceID))
+	return scanJournal(tx.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id,source_session_id,created_by_user_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID, sourceID, ActingUser(ctx)))
 }
 
 func equalPtr[T comparable](a, b *T) bool {

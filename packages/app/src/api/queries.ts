@@ -17,6 +17,7 @@ export const keys = {
   thread: ["thread"],
   snippets: ["snippets"],
   preferences: ["preferences"],
+  me: ["me"],
   badge: ["badge"],
   notifications: ["notifications"],
   schedules: ["schedules"],
@@ -273,6 +274,12 @@ export const useSnippets = () => {
 export const usePreferences = () => {
   const api = useApi();
   return useQuery({ queryKey: keys.preferences, queryFn: api.preferences, refetchInterval: false, staleTime: 30_000 });
+};
+
+// The acting user (GET /api/me); fixed until sign-in exists, so no polling.
+export const useMe = () => {
+  const api = useApi();
+  return useQuery({ queryKey: keys.me, queryFn: api.me, refetchInterval: false, staleTime: Infinity });
 };
 
 /** Task mutations can change any task, thread, stat or prefill view: refresh them all. */

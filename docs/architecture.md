@@ -114,6 +114,12 @@ T3 synchronization refreshes external workspace discovery and tracked task sessi
 
 Stage owns task acceptance separately from observed execution. SQLite stores immutable accepted evidence and idempotent acceptance requests; a launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [API v4 acceptance](api.md#user-acceptance-api-v4).
 
+## Users
+
+Hierarchy: User -> Machines -> Harness connections -> Sessions ([ADR 0002](adr/0002-machines-and-workers.md#6-identity)). Migration 0017 adds `users`, seeded with the default user (id 1, `db.DefaultUser`), and an empty `identities(user_id, provider, subject)` table, unique per `(provider, subject)`, for future sign-in. `created_by_user_id` (NOT NULL, default 1, references `users`) is on `projects`, `tasks`, `task_trees`, `journal_entries`, `schedules` and `machines`; existing rows got the default user. The API exposes it as `createdBy` and `GET /api/me` returns the acting user ([api.md](api.md#users)).
+
+There is no sign-in and no auth. Every Go write resolves its creator through one function, `db.ActingUser(ctx)`: the user `db.WithUser` put on the context, else `db.DefaultUser`. Nothing else names the default user. Today no request sets a principal, so writes from the API, MCP, CLI and background jobs (project import, acceptance) attribute to the default user. Sign-in will set the request principal in one API middleware with `db.WithUser`. A task a schedule spawns, on a cron fire or run now, and its initial notes attribute to the schedule's creator (`spawnTask`). Journal events written by SQLite triggers take the column default (the default user). Machine tokens are machine principals, not users.
+
 ## Project and session identity
 
 Stage project IDs and metadata are independent of harness data. Migration 0008
