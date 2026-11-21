@@ -5,6 +5,7 @@ import type { TreeSummary } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
+import { RowCopyLink } from "../StageLinks.tsx";
 import { Button, Chip, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
@@ -76,7 +77,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]">
+    <div className="group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]">
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <Link to={to} className="min-w-0 text-body font-medium break-words hover:underline">
@@ -110,7 +111,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1.5">
         {closed ? (
           <Link to={to} className={buttonClass("secondary", true)}>
             Open
@@ -128,6 +129,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
             Open
           </Link>
         )}
+        <RowCopyLink subject={{ kind: "tree", id: tree.id, title: tree.title }} />
       </div>
 
       {error === null ? null : (

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseStageRef, splitStageRefs, taskMarkdown, taskUrl } from "../src/lib/refs.ts";
+import { parseStageRef, splitStageRefs, taskMarkdown, taskUrl, treeMarkdown, treeUrl } from "../src/lib/refs.ts";
 
 const origin = "http://localhost:7380";
 const link = (path) => origin + path;
@@ -10,6 +10,9 @@ test("copied links name themselves and escape brackets in titles", () => {
   assert.equal(taskUrl(link, 12), "http://localhost:7380/tasks/12");
   assert.equal(taskMarkdown(link, 12, "Fix [login] flake"), "[stage task #12: Fix \\[login\\] flake](http://localhost:7380/tasks/12)");
   assert.equal(taskMarkdown(link, 3, "a\\b\n  c"), "[stage task #3: a\\\\b c](http://localhost:7380/tasks/3)");
+  assert.equal(treeUrl(link, 4), "http://localhost:7380/trees/4");
+  assert.equal(treeMarkdown(link, 4, "Ship [auth]"), "[stage tree #4: Ship \\[auth\\]](http://localhost:7380/trees/4)");
+  assert.equal(treeMarkdown(deep, 4, "Ship"), "[stage tree #4: Ship](stage://trees/4)");
 });
 
 test("stage links match by path on any host", () => {

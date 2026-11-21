@@ -10,6 +10,8 @@ import {
   splitStageRefs,
   taskMarkdown,
   taskUrl,
+  treeMarkdown,
+  treeUrl,
   type StageLink,
   type StageRef,
 } from "../lib/refs.ts";
@@ -40,10 +42,11 @@ export function useCopy(): [CopyStatus, (text: string) => void] {
   return [status, copy];
 }
 
-/** What a copied link points at: a task, or a session (T3 thread). */
-export type LinkSubject = { kind: "task"; id: number; title: string };
+/** What a copied link points at: a task or a tree. */
+export type LinkSubject = { kind: "task" | "tree"; id: number; title: string };
 
 export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: string; url: string; name: string } {
+  if (s.kind === "tree") return { markdown: treeMarkdown(link, s.id, s.title), url: treeUrl(link, s.id), name: `tree #${s.id}` };
   return { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` };
 }
 

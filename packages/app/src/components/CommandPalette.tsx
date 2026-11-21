@@ -110,6 +110,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           hint: treeMeta(tr),
           badge: <ClosedBadge label={tr.status === "open" ? null : tr.status} />,
           run: go(`/trees/${tr.id}`),
+          link: { kind: "tree", id: tr.id, title: tr.title },
         });
       for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
         out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: projectWorkspace(p), run: go(`/projects/${p.id}`) });

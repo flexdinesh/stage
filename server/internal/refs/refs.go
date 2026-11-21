@@ -1,5 +1,5 @@
-// Package refs parses references to stage tasks and sessions: the links the
-// web UI copies (and their markdown form), the desktop's deep links
+// Package refs parses references to stage tasks, trees and sessions: the links
+// the web UI copies (and their markdown form), the desktop's deep links
 // (stage://tasks/12, one scheme per installation identity), T3 web and app
 // links, "#12" and bare ids. Agents pass whatever the user pasted; the host of a stage link
 // is ignored because the same stage is reached at many addresses (loopback,
@@ -19,20 +19,22 @@ type Kind string
 
 const (
 	KindTask    Kind = "task"
+	KindTree    Kind = "tree"
 	KindSession Kind = "session"
 )
 
-// Ref is a parsed reference: TaskID for a task, ThreadID (T3 thread id) for
-// a session.
+// Ref is a parsed reference: TaskID for a task, TreeID for a tree, ThreadID
+// (T3 thread id) for a session.
 type Ref struct {
 	ConnectionID int64
 	Kind         Kind
 	TaskID       int64
+	TreeID       int64
 	ThreadID     string
 }
 
-// ErrInvalid: the input names no task or session.
-var ErrInvalid = errors.New("not a stage task or session reference: want a stage link (/tasks/<id>, /sessions/<id>, stage://tasks/<id>), a T3 thread link, #<task id> or a thread id")
+// ErrInvalid: the input names no task, tree or session.
+var ErrInvalid = errors.New("not a stage task, tree or session reference: want a stage link (/tasks/<id>, /trees/<id>, /sessions/<id>, stage://tasks/<id>), a T3 thread link, #<task id> or a thread id")
 
 // mdLink matches a whole markdown link, as "Copy link" produces.
 var mdLink = regexp.MustCompile(`^\[.*\]\((\S+)\)$`)
@@ -82,11 +84,28 @@ func Parse(s, t3PublicURL string) (Ref, error) {
 }
 
 func taskRef(digits string) (Ref, error) {
-	id, err := strconv.ParseInt(digits, 10, 64)
-	if err != nil || id <= 0 {
-		return Ref{}, ErrInvalid
+	id, err := positiveID(digits)
+	if err != nil {
+		return Ref{}, err
 	}
 	return Ref{Kind: KindTask, TaskID: id}, nil
+}
+
+func treeRef(digits string) (Ref, error) {
+	id, err := positiveID(digits)
+	if err != nil {
+		return Ref{}, err
+	}
+	return Ref{Kind: KindTree, TreeID: id}, nil
+}
+
+// positiveID reads a task or tree id above zero.
+func positiveID(digits string) (int64, error) {
+	id, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, ErrInvalid
+	}
+	return id, nil
 }
 
 // segments splits u's path into unescaped, non-empty segments.
@@ -105,7 +124,8 @@ func segments(u *url.URL) ([]string, bool) {
 	return out, true
 }
 
-// stagePath matches a stage page path ending in tasks/<id> or sessions/<id>;
+// stagePath matches a stage page path ending in tasks/<id>, trees/<id> or
+// sessions/<id>;
 // any prefix (a proxy sub-path), query and fragment are ignored.
 func stagePath(u *url.URL) (Ref, bool) {
 	segs, ok := segments(u)
@@ -116,6 +136,9 @@ func stagePath(u *url.URL) (Ref, bool) {
 	switch kind {
 	case "tasks":
 		r, err := taskRef(id)
+		return r, err == nil
+	case "trees":
+		r, err := treeRef(id)
 		return r, err == nil
 	case "sessions":
 		if len(segs) >= 4 && segs[len(segs)-4] == "connections" {
@@ -130,8 +153,9 @@ func stagePath(u *url.URL) (Ref, bool) {
 	return Ref{}, false
 }
 
-// parseDeepLink reads stage://tasks/<id> and stage://sessions/<id> (the
-// host is the kind), or the same paths under stage://localhost/.
+// parseDeepLink reads stage://tasks/<id>, stage://trees/<id> and
+// stage://sessions/<id> (the host is the kind), or the same paths under
+// stage://localhost/.
 func parseDeepLink(s string) (Ref, error) {
 	u, err := url.Parse(s)
 	if err != nil {
@@ -157,6 +181,8 @@ func parseDeepLink(s string) (Ref, error) {
 	switch segs[0] {
 	case "tasks":
 		return taskRef(segs[1])
+	case "trees":
+		return treeRef(segs[1])
 	case "sessions":
 		return Ref{Kind: KindSession, ThreadID: segs[1]}, nil
 	}

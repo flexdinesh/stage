@@ -12,6 +12,7 @@ import (
 type resolved struct {
 	Kind    string      `json:"kind"`
 	TaskID  *int64      `json:"taskId"`
+	TreeID  *int64      `json:"treeId"`
 	Session *sessionRef `json:"session"`
 }
 
@@ -78,4 +79,29 @@ func TestResolveRef(t *testing.T) {
 		t.Fatalf("offline %+v", got)
 	}
 	e.resolve("never-seen", 404)
+}
+
+func TestResolveTreeRef(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+	a := e.task(p.ID, "a", nil)
+	var tr treeDetail
+	e.must("POST", "/api/trees", map[string]any{"title": "Ship [auth]", "tasks": []any{map[string]any{"taskId": a.ID}}}, 201, &tr)
+	for _, ref := range []string{
+		fmt.Sprintf("https://phone.lan/trees/%d?task=%d", tr.ID, a.ID),
+		fmt.Sprintf("[stage tree #%d: Ship \\[auth\\]](http://localhost:7380/trees/%d)", tr.ID, tr.ID),
+		fmt.Sprintf("stage://trees/%d", tr.ID),
+	} {
+		got := e.resolve(ref, 200)
+		if got.Kind != "tree" || got.TreeID == nil || *got.TreeID != tr.ID || got.TaskID != nil || got.Session != nil {
+			t.Fatalf("%q -> %+v", ref, got)
+		}
+	}
+	// A connection selection leaves a tree link alone.
+	var out resolved
+	e.must("GET", fmt.Sprintf("/api/refs/resolve?connectionId=1&ref=%s", url.QueryEscape(fmt.Sprintf("http://localhost:7380/trees/%d", tr.ID))), nil, 200, &out)
+	if out.Kind != "tree" || out.TreeID == nil || *out.TreeID != tr.ID {
+		t.Fatalf("with connection %+v", out)
+	}
+	e.resolve("http://localhost:7380/trees/9999", 404)
 }

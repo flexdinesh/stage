@@ -73,9 +73,9 @@ Needs-input tasks and notifications open the source harness for questions and ap
 
 ## References
 
-- Task detail headers have Copy link (a self-describing markdown link, `[stage task #12: Title](…/tasks/12)`, for prompts) and URL (the bare link). Rows on laptop-width screens show a link icon on hover or keyboard focus, and Alt C in the Ctrl K palette copies the highlighted task.
-- Paste a link into a prompt in stage or T3 and ask the agent to read it: `read_ref` / `stage show LINK` returns the task and/or session ([References](/docs/agents#references)).
-- Pasted stage links (any host) render as live chips (number or "session", title, state) in prompts, last word and handoff text; unknown ones stay plain links.
+- Task and tree detail headers have Copy link (a self-describing markdown link, `[stage task #12: Title](…/tasks/12)` or `[stage tree #4: Title](…/trees/4)`, for prompts) and URL (the bare link). Task and tree rows on laptop-width screens show a link icon on hover or keyboard focus, and Alt C in the Ctrl K palette copies the highlighted task or tree.
+- Paste a link into a prompt in stage or T3 and ask the agent to read it: `read_ref` / `stage show LINK` returns the task and/or session, or the tree for a tree link, so an agent can add or edit its tasks ([References](/docs/agents#references)).
+- Pasted stage task and session links (any host) render as live chips (number or "session", title, state) in prompts, last word and handoff text; tree and unknown links stay plain links.
 
 ## Notifications
 

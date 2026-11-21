@@ -985,18 +985,20 @@ func (o *Ops) PreviewSchedule(ctx context.Context, a PreviewArgs) (PreviewOut, e
 // RefArgs accepts one pasted reference or a connection-scoped session.
 type RefArgs struct {
 	Session *db.SessionRef `json:"session,omitempty" jsonschema:"explicit scoped session instead of ref"`
-	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
+	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task, tree or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
 }
 
-// RefOut is read_ref: the task and/or session a reference names. A task
-// reference includes its session (once launched); a session reference
-// includes the task that owns it (if any).
+// RefOut is read_ref: the task, tree and/or session a reference names. A
+// task reference includes its session (once launched); a session reference
+// includes the task that owns it (if any); a tree reference carries only the
+// tree.
 type RefOut struct {
 	SessionRef   *db.SessionRef       `json:"sessionRef,omitempty"`
 	Links        execution.Links      `json:"links"`
 	SessionTitle string               `json:"sessionTitle,omitempty"`
-	Kind         string               `json:"kind"` // task | session
+	Kind         string               `json:"kind"` // task | tree | session
 	Task         *client.TaskDetail   `json:"task"`
+	Tree         *client.TreeDetail   `json:"tree,omitempty"`
 	Session      *client.ThreadDetail `json:"session"`
 	// Next: how to read the full conversation.
 	Next string `json:"next,omitempty"`
@@ -1015,6 +1017,15 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 		return RefOut{}, err
 	}
 	out := RefOut{Kind: r.Kind, SessionRef: r.Session, SessionTitle: r.SessionTitle, Links: r.Links}
+	if r.TreeID != nil {
+		t, err := o.Client.Tree(ctx, *r.TreeID)
+		if err != nil {
+			return out, err
+		}
+		out.Tree = &t
+		out.Next = fmt.Sprintf("Edit tree %d with create_task or add_to_tree (treeId %d), update_tree or start_tree (id %d), set_needs or remove_from_tree.", t.ID, t.ID, t.ID)
+		return out, nil
+	}
 	if r.TaskID != nil {
 		t, err := o.Client.Task(ctx, *r.TaskID)
 		if err != nil {

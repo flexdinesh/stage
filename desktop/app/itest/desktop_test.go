@@ -220,7 +220,7 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		cmd.Env = e.vars
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			if strings.Contains(string(out), "not a stage task or session reference") {
+			if strings.Contains(string(out), "not a stage task, tree or session reference") {
 				t.Skipf("refs.Parse does not accept %s:// yet: %s", identity, out)
 			}
 			t.Fatalf("stage show %s: %v\n%s", ref, err, out)

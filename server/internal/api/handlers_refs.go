@@ -15,7 +15,7 @@ import (
 
 // refJSON is GET /api/refs/resolve: what a pasted reference names. A task's
 // session is null before launch; a session's taskId is the task that owns it
-// (null for sessions started outside stage).
+// (null for sessions started outside stage). A tree carries only treeId.
 type refJSON struct {
 	State        *db.TaskState   `json:"state,omitempty"`
 	Links        execution.Links `json:"links"`
@@ -23,6 +23,7 @@ type refJSON struct {
 	Session      *db.SessionRef  `json:"session"`
 	Kind         refs.Kind       `json:"kind"`
 	TaskID       *int64          `json:"taskId"`
+	TreeID       *int64          `json:"treeId,omitempty"`
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
@@ -37,7 +38,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		if ref.ConnectionID != 0 && ref.ConnectionID != id {
 			return db.Invalid("session link belongs to a different connection")
 		}
-		if ref.Kind != refs.KindTask && ref.ConnectionID == 0 {
+		if ref.Kind != refs.KindTask && ref.Kind != refs.KindTree && ref.ConnectionID == 0 {
 			if err == nil && !strings.ContainsAny(raw, "/<>[]") {
 				ref.ConnectionID = id
 			} else {
@@ -85,6 +86,12 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		}
 		out.TaskID = &t.ID
 		out.Session = t.Session
+	case refs.KindTree:
+		t, err := s.Store.GetTree(ctx, ref.TreeID)
+		if err != nil {
+			return notFoundAs(err, fmt.Sprintf("tree %d not found", ref.TreeID))
+		}
+		out.TreeID = &t.ID
 	case refs.KindSession:
 		id := ref.ConnectionID
 		if id == 0 {

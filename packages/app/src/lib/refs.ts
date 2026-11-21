@@ -1,5 +1,5 @@
 /**
- * Stage links: copyable task references and recognition of task and historical session links. Agents resolve the same
+ * Stage links: copyable task and tree references and recognition of task and historical session links. Agents resolve the same
  * links with `read_ref` (server/internal/refs); the host is ignored there and here, because one stage is reached
  * at several addresses (loopback, tailnet, phone). The desktop's deep links (`stage://tasks/12`, one scheme per
  * installation identity) read the same.
@@ -12,12 +12,18 @@ export type StageLink = (path: string) => string;
 
 export const taskUrl = (link: StageLink, id: number) => link(`/tasks/${id}`);
 
+export const treeUrl = (link: StageLink, id: number) => link(`/trees/${id}`);
+
 /** Escape text for a markdown link label. */
 const label = (text: string) => text.replace(/[\\[\]]/g, (c) => `\\${c}`).replace(/\s+/g, " ").trim();
 
 /** `[stage task #12: Title](url)`: names itself, so an agent knows what it is even without stage's instructions. */
 export const taskMarkdown = (link: StageLink, id: number, title: string) =>
   `[stage task #${id}: ${label(title)}](${taskUrl(link, id)})`;
+
+/** `[stage tree #4: Title](url)`: an agent reads it with `read_ref` or edits it with the tree tools (id 4). */
+export const treeMarkdown = (link: StageLink, id: number, title: string) =>
+  `[stage tree #${id}: ${label(title)}](${treeUrl(link, id)})`;
 
 /** Desktop deep-link schemes: `stage:` and developer identities' `stage-<suffix>:`. */
 const DEEP_LINK = /^stage(-[a-z0-9-]+)?:$/;
