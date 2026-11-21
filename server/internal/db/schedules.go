@@ -42,7 +42,10 @@ type Schedule struct {
 	OriginThreadID     *string                 `json:"-"` // T3 session that created the schedule; spawned tasks inherit it
 	CreatedAt          time.Time               `json:"createdAt"`
 	CreatedBy          int64                   `json:"createdBy"` // user who created it; spawned tasks inherit it
-	UpdatedAt          time.Time               `json:"updatedAt"`
+	// SourceMachineID: the machine whose agent gateway forwarded the create
+	// (nil: not through a gateway). Spawned tasks do not inherit it.
+	SourceMachineID *int64    `json:"sourceMachineId"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // Schedule run outcomes.
@@ -73,7 +76,7 @@ SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
   COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), s.created_at, s.updated_at,
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config,s.created_by_user_id
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config,s.created_by_user_id,s.source_machine_id
 FROM schedules s
 JOIN projects p ON p.id = s.project_id`
 
@@ -82,7 +85,7 @@ func scanSchedule(row rowScanner) (Schedule, error) {
 	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
 		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Notes, &s.Cron, &s.Tz,
 		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.OriginThreadID, &s.CreatedAt, &s.UpdatedAt,
-		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig, &s.CreatedBy)
+		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig, &s.CreatedBy, &s.SourceMachineID)
 	if err != nil {
 		return Schedule{}, notFound(err)
 	}
@@ -192,12 +195,12 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		}
 		err := tx.QueryRow(ctx, `
 INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id,created_by_user_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id,created_by_user_id,source_machine_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 			in.RuntimeMode, in.InteractionMode, in.Workspace, in.Notes,
 			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, s.defaultConnection(in.ConnectionID),
-			ActingUser(ctx),
+			ActingUser(ctx), ActingMachine(ctx),
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -466,7 +469,9 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 	if err != nil {
 		return 0, notFound(err)
 	}
-	ctx = WithUser(ctx, creator)
+	// The schedule spawns the task, not the request that ran it: no source
+	// machine.
+	ctx = withoutMachine(WithUser(ctx, creator))
 	in.ScheduleID = &id
 	if startAt != nil {
 		in.StartAt, in.StartTz = startAt, &tz

@@ -246,6 +246,13 @@ Browser and API access stays behind the authenticating proxy.
   (`Stage-Caller-Session`, `STAGE_CALLER_SESSION`) passes through.
 - Launch instructions for sessions on a remote machine point at the gateway,
   not at `STAGE_PUBLIC_URL`.
+- #347 fixed the names: the forwarding route is
+  `/api/worker/gateway/{api/...|mcp}` (machine management refused with 403
+  `gateway_forbidden`), the listen list is `stage worker run --listen` or
+  `STAGE_WORKER_LISTEN` (default and required item `unix`), and the worker
+  reports its gateway URLs in the channel's `Stage-Worker-Gateway` header
+  ([runtime.md](../runtime.md#agent-gateway),
+  [api.md](../api.md#apiworkergatewayapi-and-apiworkergatewaymcp)).
 
 ### 9. Failure semantics
 
@@ -277,7 +284,8 @@ completion.
    machine principal from the token. It records that machine on writes
    (journal entries, created tasks, adopted sessions), next to the caller
    session attribution and the default user, and exposes it on the API shapes
-   (#347).
+   (#347: `source_machine_id` / `sourceMachineId` on projects, tasks, trees,
+   journal entries and schedules, [architecture.md](../architecture.md#users)).
 
 ## Rejected alternatives
 

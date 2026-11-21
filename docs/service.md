@@ -305,10 +305,14 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   the config the service will use, and validates `worker.env` before
   starting.
 - **worker.env:** `0600` `KEY=VALUE`, created from a template on first
-  `start`, never overwritten. One allowed key, `STAGE_WORKER_CONFIG` (an
-  absolute path to another worker config); default: `worker/worker.json` in
-  the identity's default data dir. `--managed` ignores `STAGE_DATA_DIR` and
-  `STAGE_WORKER_CONFIG` in the inherited environment, like the server.
+  `start`, never overwritten. Allowed keys: `STAGE_WORKER_CONFIG` (an
+  absolute path to another worker config; default: `worker/worker.json` in
+  the identity's default data dir) and `STAGE_WORKER_LISTEN` (the agent
+  gateway's listeners, default `unix`, which is required; add a loopback
+  `host:port` for HTTP MCP clients;
+  [runtime.md](runtime.md#agent-gateway)). `--managed` ignores
+  `STAGE_DATA_DIR`, `STAGE_WORKER_CONFIG` and `STAGE_WORKER_LISTEN` in the
+  inherited environment, like the server, and refuses `--listen`.
 - **One role per identity.** `start` and `restart` refuse (exit 7) while the
   other role's generated definition exists; `status` reports
   `role_conflict`. Uninstall one first (#348 may lift this).
@@ -325,7 +329,7 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   `version_differs`, `role_conflict`, `service_env_invalid`.
 - **Exits** 75 and 78 are not restarted (`RestartPreventExitStatus`); a
   revoked token is 78, so a removed machine's worker stops instead of
-  looping. On macOS they exit 0.
+  looping, and a gateway socket held by another process is 75. On macOS they exit 0.
 - `stage update` restarts a running worker service it owns and rolls back
   when the new worker does not become ready; `stage uninstall` removes it
   ([install.md](install.md#update)). `uninstall` keeps the worker config and

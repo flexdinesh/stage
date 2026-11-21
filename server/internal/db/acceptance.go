@@ -284,7 +284,7 @@ func recordAcceptance(ctx context.Context, tx *Tx, id, revision int64, acceptanc
 	if _, err := tx.Exec(ctx, `UPDATE task_trees SET recorded_work=1 WHERE id=(SELECT tree_id FROM tasks WHERE id=$1)`, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text,created_by_user_id) SELECT 'event',id,tree_id,$2,$3,$4 FROM tasks WHERE id=$1`, id, event, detail, ActingUser(ctx)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text,created_by_user_id,source_machine_id) SELECT 'event',id,tree_id,$2,$3,$4,$5 FROM tasks WHERE id=$1`, id, event, detail, ActingUser(ctx), ActingMachine(ctx)); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE tasks SET ready_at=NULL WHERE id IN (SELECT task_id FROM task_needs WHERE need_id=$1) AND state='backlog'`, id)

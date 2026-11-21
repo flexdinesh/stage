@@ -49,6 +49,9 @@ type Deps struct {
 	// Channels is the worker channel hub (nil: a private hub that
 	// persists presence through Store).
 	Channels *workerchan.Hub
+	// MCP is the streamable HTTP MCP handler (no origin policy of its own)
+	// that worker agent gateways reach through GatewayPrefix/mcp (nil: 404).
+	MCP http.Handler
 }
 
 // registry is Harnesses, or an empty registry.
@@ -62,6 +65,8 @@ func (s *server) registry() *harness.Registry {
 type server struct {
 	Deps
 	log *slog.Logger
+	// mux is the /api route table (what the agent gateway route serves).
+	mux *http.ServeMux
 }
 
 // NewRouter returns the /api handler.
@@ -77,6 +82,7 @@ func NewRouter(deps Deps) http.Handler {
 		s.Channels = newChannelHub(context.Background(), s.Store)
 	}
 	mux := http.NewServeMux()
+	s.mux = mux
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if err := fn(w, r); err != nil {
@@ -119,6 +125,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.Handle("GET /api/worker/channel", s.worker(true, s.workerChannelStream))
 	mux.Handle("POST /api/worker/channel", s.worker(true, s.workerChannelPost))
 	mux.Handle("POST /api/worker/leave", s.worker(true, s.workerLeave))
+	mux.Handle(GatewayPrefix+"/", s.worker(true, s.workerGateway))
 	mux.Handle(WorkerPrefix, s.worker(true, func(w http.ResponseWriter, _ *http.Request) error {
 		writeError(w, http.StatusNotFound, "not found")
 		return nil

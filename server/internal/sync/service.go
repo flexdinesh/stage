@@ -38,10 +38,11 @@ type Service struct {
 	log                                                                          *slog.Logger
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
-	OnAccepted                                                                   func()            // a completion was inferred (tree release may follow)
-	Harnesses                                                                    *harness.Registry // descriptors by kind; completion is inferred only from a declared closure
-	PublicURL                                                                    string            // STAGE_PUBLIC_URL, named in launch journal instructions when set
-	CLI                                                                          string            // installed CLI name (install.CLIName), named in launch journal instructions
+	OnAccepted                                                                   func()                         // a completion was inferred (tree release may follow)
+	Harnesses                                                                    *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
+	PublicURL                                                                    string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                                          string                         // installed CLI name (install.CLIName), named in launch journal instructions
+	Gateways                                                                     func(machineID int64) []string // a remote machine's agent gateway URLs (workerchan.Hub.Gateways), named in its launch journal instructions; nil: none known
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	syncs                                                                        gosync.Map // connection ID to *syncState (T3 full syncs)
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
@@ -502,6 +503,18 @@ func (s *Service) closure(kind string, o execution.Observation) (harness.Closure
 	return d.Closure(o.Closed.Signal)
 }
 
+// httpAPI names the HTTP API for a session on connection's machine: the
+// public URL locally, the worker's agent gateway on a remote machine.
+func (s *Service) httpAPI(connection int64) string {
+	m := s.store.ConnectionMachine(connection)
+	remote := m != 0 && m != db.LocalMachine
+	var gateway []string
+	if remote && s.Gateways != nil {
+		gateway = s.Gateways(m)
+	}
+	return httpAPI(s.PublicURL, remote, gateway)
+}
+
 // attribution is kind's caller attribution (zero when unknown).
 func (s *Service) attribution(kind string) harness.Attribution {
 	d, _ := s.descriptor(kind)
@@ -648,7 +661,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
-	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, s.attribution(t.Harness), s.PublicURL, s.CLI))
+	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, s.attribution(t.Harness), s.httpAPI(t.ConnectionID), s.CLI))
 	if e != nil {
 		return t, e
 	}

@@ -7,6 +7,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - Timestamps: ISO 8601 strings (UTC, e.g. `"2026-11-08T10:00:00Z"`). Nullable fields are `null`, never omitted.
 - IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`externalProjectId`, `externalSessionId`) are strings.
 - `createdBy`: the user id (number) of the row's creator on `Project`, `Task`, `Tree`, `JournalEntry`, `Schedule`, `Machine` and the `GET /api/harnesses` machine. Always emitted; see [Users](#users).
+- `sourceMachineId`: the machine whose worker agent gateway forwarded the create, on `Project`, `Task`, `Tree`, `JournalEntry` and `Schedule`; `null` when not through a gateway. Always emitted; see [Users](#users).
 - Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
@@ -90,6 +91,8 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ## Users
 
 Stage has no sign-in and no API auth (browser and API access stay behind the proxy boundary). One user exists, the default user (id 1), and every write is attributed to it ([architecture.md](architecture.md#users)). Sign-in identities will map to users later; machine tokens (ADR 0002) are machine principals, never users.
+
+**Source machine.** A write that arrived through a worker's agent gateway ([Agent gateway route](#apiworkergatewayapi-and-apiworkergatewaymcp)) also records the forwarding machine: `sourceMachineId` on `Task`, `Tree`, `JournalEntry`, `Schedule` and `Project`, next to `createdBy` (still the acting user). `null` when the write did not come through a gateway (the UI, an agent on the main server's machine, background work), for trigger-written journal events, discovered projects and schedule-spawned tasks (the schedule spawns them, also on Run now). The machine may since have been removed.
 
 ### `GET /api/me`
 200 `User`, the acting user:
@@ -183,7 +186,7 @@ The machine the token names: 200 `Machine`. A worker uses it to check its token 
 The machine removes itself (`stage worker leave`): 204, with the effects of `DELETE /api/machines/{id}` (token revoked, open channel closed, connections retired).
 
 #### `GET /api/worker/channel`
-The worker channel's down half ([runtime.md](runtime.md#worker-channel), [ADR 0002](adr/0002-machines-and-workers.md)): a `text/event-stream` that stays open. Request headers: `Stage-Version` (the worker's build, recorded as the machine's `version`). Events:
+The worker channel's down half ([runtime.md](runtime.md#worker-channel), [ADR 0002](adr/0002-machines-and-workers.md)): a `text/event-stream` that stays open. Request headers: `Stage-Version` (the worker's build, recorded as the machine's `version`) and `Stage-Worker-Gateway` (its agent gateway listener URLs, comma-separated, e.g. `unix:///run/user/1000/stage/stage.sock,http://127.0.0.1:7381`; kept in memory for the session and named in launch instructions, see [Agent interface](#agent-interface)). Events:
 
 - `hello` first: `{ "session": "...", "machineId": 2, "heartbeatSec": 15, "timeoutSec": 45 }`.
 - `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "body"?, "error"? }`. `kind` is a call (`ping`) or `cancel` (the caller gave up on call `id`).
@@ -193,6 +196,12 @@ A newer stream of the same machine replaces this one (the old stream ends). Remo
 
 #### `POST /api/worker/channel`
 The up half: one envelope per request, header `Stage-Channel-Session: <hello.session>` (400 without it). `kind`: `heartbeat` (about every 15s) or `result` (a reply to an `rpc` call, by `id`; late, duplicate or unknown ids are dropped): 204. `ping` (worker-initiated): 200 with a `result` envelope. A session that was replaced or ended: 409 `channel_replaced` (reconnect the stream). Any message counts as contact.
+
+#### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
+A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
+
+- Machine management is refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`) work.
+- `/api/worker/*` and any path that is neither `/api/...` nor `/mcp`: 404.
 
 ## Harness connections (API v6)
 
@@ -328,7 +337,7 @@ its harness archive until a user archives or unarchives it
 ([architecture.md](architecture.md#project-import)). Existing T3 projects keep
 their Stage IDs and migrate to explicit bindings.
 
-`Project`: `{id, title, bindings, archivedAt, createdAt, createdBy, updatedAt, lastActivityAt, origin, importedAt, repos}`.
+`Project`: `{id, title, bindings, archivedAt, createdAt, createdBy, sourceMachineId, updatedAt, lastActivityAt, origin, importedAt, repos}`.
 `bindings` contains active `{id, projectId, connectionId, harness,
 externalProjectId, workspace, revision, status, observedWorkspace, origin}` records.
 Status is `available`, `missing` or `changed`. Binding `origin` is `manual`,
@@ -471,6 +480,7 @@ attempt is consumed.
   "artifactLinks": [],
   "createdAt": "2026-11-08T09:59:00Z",
   "createdBy": 1,
+  "sourceMachineId": null,        // the forwarding machine when created through a worker's agent gateway
   "updatedAt": "2026-11-08T10:00:00Z",
   "stateSince": "2026-11-08T10:00:00Z",
   "archivedAt": null,
@@ -640,6 +650,7 @@ API v2 removes task `notes`. Create and adopt accept `initialNote`; PATCH reject
   "toTreeId": null,
   "createdAt": "2026-11-16T10:00:00Z",
   "createdBy": 1,
+  "sourceMachineId": null,
   "truncated": false
 }
 ```
@@ -662,7 +673,7 @@ A tree is a DAG of tasks: each member's `needs` are members that must be complet
 
 `Tree`:
 ```json
-{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
+{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "sourceMachineId": null, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
 ```
 `status`: `open | done | archived` (see "Done, archive and delete"); `closedAt`: when it was marked done or archived (null while open); `deletable`: the tree and every member have no recorded work and no member started (`DELETE` removes the tree and its tasks).
 `TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`), retained temporarily for compatibility. New tree Activity reads the journal.
@@ -725,6 +736,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "originSession": null,
   "createdAt": "2026-11-08T09:59:00Z",
   "createdBy": 1,
+  "sourceMachineId": null,
   "updatedAt": "2026-11-08T10:00:00Z"
 }
 ```
@@ -1081,6 +1093,7 @@ A session batch is the set of tasks one session created (`originSession`), usual
 `stage` CLI, stdio MCP and HTTP MCP expose tasks, trees, journals, schedules, explicit adoption and reference resolution through REST. `get_task` returns the final reply and grouped `batch`; `list_tasks {originSession}` (CLI `task ls --origin-connection ID --origin-session ID`) lists the creator session's tasks. `read_ref` returns task details and/or explicit session metadata with available native links, or for a tree link the tree (`get_tree` shape) and a `next` naming the tree tools. Conversation reads and actions belong to the source harness. Removed tools and commands are listed under API v3 retirement.
 
 - A caller-aware tool takes `callerSession: {connectionId, externalSessionId}`. Besides it, three generic channels name the caller, each in the form `<connectionId>:<externalSessionId>`: the `Stage-Caller-Session` header on an HTTP MCP request (malformed: 400), the `STAGE_CALLER_SESSION` environment variable for the CLI (one process, one session; a stdio MCP server ignores it, being shareable across sessions), and harness request metadata: a harness descriptor's `attribution.metaKeys` (OpenCode: `ai.opencode/sessionID`) in an MCP request's `_meta`, resolved to that harness's configured connection. A per-call claim (metadata or header) wins over the environment; an explicit caller that disagrees with it is an error. Unknown context leaves the origin empty. CLI also takes `--caller-connection ID --caller-session ID`. The launch instructions tell an agent how its harness names its session (the descriptor's caller hint).
+- Agents on a remote machine use the same interfaces unchanged through the worker's agent gateway ([runtime.md](runtime.md#agent-gateway)): it owns that machine's default socket, so `stage` and `stage mcp` find it with no `--url`, and an opt-in TCP listener serves HTTP MCP. Caller attribution works as above; the main server also records the forwarding machine (`sourceMachineId`). The launch instructions of a session on a remote machine name the gateway, never `STAGE_PUBLIC_URL`: its TCP listener when the worker reported one (`the HTTP API at http://127.0.0.1:7381/api (MCP at …/mcp) on this machine's Stage agent gateway`), else its socket with a `curl --unix-socket` hint, else the gateway without an address. Sessions on the main server's machine keep `STAGE_PUBLIC_URL`.
 - `GET /api/connections/:connectionId/sessions/:id/context` returns session, owning task, current project, title and available links. The owner path reads Stage storage. An unowned session requires explicit lookup and a verified workspace binding to infer its project.
 - Task and schedule creates accept an optional destination `connectionId` and distinct `originSession`. Agent creation uses the sole project binding. Multiple bindings require a choice except for identifiable legacy T3 calls. Unbound projects use the caller's connection or sole configured connection. Starting requires a binding.
 - `list_projects` includes configured connections. `list_models {connectionId}` returns capabilities. `executionConfig` uses the connection's model, option values, permission and mode. A bare `list_models` retains the T3 catalog.

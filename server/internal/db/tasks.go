@@ -30,7 +30,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
- hc.harness,hc.active,hc.label,t.created_by_user_id
+ hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 JOIN harness_connections hc ON hc.id = t.connection_id
@@ -51,7 +51,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
 	if err != nil {
 		return Task{}, notFound(err)
 	}
@@ -277,12 +277,12 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config,created_by_user_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18,$19) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config,created_by_user_id,source_machine_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18,$19,$20) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
 		in.RuntimeMode, in.InteractionMode, in.Workspace,
 		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID, in.ExecutionConfig,
-		ActingUser(ctx),
+		ActingUser(ctx), ActingMachine(ctx),
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -595,7 +595,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 		if err := copyAttachments(ctx, tx, src.ID, dst); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2, $3)`, dst, src.ID, ActingUser(ctx))
+		_, err := tx.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id, source_machine_id) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2, $3, $4)`, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
 		return err
 	}
 	return s.createTask(ctx, NewTask{

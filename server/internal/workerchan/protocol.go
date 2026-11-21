@@ -33,6 +33,11 @@ const (
 	KindResult = "result"
 )
 
+// GatewayPath is the worker route a worker's agent gateway forwards local
+// /api and /mcp requests under: GatewayPath+"/api/..." and
+// GatewayPath+"/mcp" (docs/runtime.md "Agent gateway").
+const GatewayPath = "/api/worker/gateway"
+
 // Headers.
 const (
 	// SessionHeader names the channel session on an up POST (the hello
@@ -41,6 +46,9 @@ const (
 	// VersionHeader carries the worker's build version (buildinfo.Version)
 	// on the stream request and join.
 	VersionHeader = "Stage-Version"
+	// GatewayHeader lists the worker's agent gateway listener URLs
+	// (comma-separated, listen.Addr.URL form) on the stream request.
+	GatewayHeader = "Stage-Worker-Gateway"
 )
 
 // SSE event names on the down stream.
