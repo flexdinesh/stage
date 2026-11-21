@@ -356,7 +356,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		shaped := s.createdTasks(env, batch)
 		out.Batch = &shaped
 	}
-	if task.ConnectionID == s.Store.T3ID() && task.T3ThreadID != nil {
+	if s.Store.IsT3(task.ConnectionID) && s.Store.ConnectionActive(task.ConnectionID) && task.T3ThreadID != nil {
 		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
 		if err == nil {
 			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)

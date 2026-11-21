@@ -249,7 +249,11 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		h.PublicURL = &u
 	}
 	h.Harnesses = []HealthHarness{}
-	s.Connectors.Each(func(d harness.Descriptor, c harness.Connector) {
+	// The harness setup API serves the local machine's connectors.
+	s.Connectors.Each(func(machine int64, d harness.Descriptor, c harness.Connector) {
+		if machine != db.LocalMachine {
+			return
+		}
 		sum := c.Summary(r.Context())
 		hh := HealthHarness{Kind: d.Kind, ConnectionID: sum.ConnectionID, Configured: sum.Configured, Connected: sum.Connected}
 		if sum.LastError != "" {

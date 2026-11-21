@@ -153,3 +153,76 @@ func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
+	pool := testDB.Reset(t)
+	store := db.NewStore(pool)
+	ctx := context.Background()
+	// The laptop (machine 2) has its own active T3 beside the local one.
+	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
+		t.Fatal(err)
+	}
+	var laptop int64
+	if err := pool.QueryRowContext(ctx, `INSERT INTO harness_connections(machine_id,harness) VALUES(2,'t3') RETURNING id`).Scan(&laptop); err != nil {
+		t.Fatal(err)
+	}
+	local := store.LegacyT3ID()
+	if store.ActiveID(2, db.HarnessT3) != laptop || store.ActiveID(db.LocalMachine, db.HarnessT3) != local {
+		t.Fatal("one active T3 per machine")
+	}
+	p, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{
+		{ConnectionID: local, ExternalProjectID: "p", Workspace: "/w/p"},
+		{ConnectionID: laptop, ExternalProjectID: "p", Workspace: "/w/p"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedules := map[int64]db.Schedule{}
+	for _, id := range []int64{local, laptop} {
+		sc, err := store.CreateSchedule(ctx, db.NewSchedule{
+			ProjectID: p.ID, ConnectionID: id, Title: "nightly", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+			Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		schedules[id] = sc
+	}
+	now := schedules[local].NextRunAt.Add(10 * time.Second)
+	launcher := &fakeLauncher{store: store}
+	runner := func(id int64) *schedule.Runner {
+		r := schedule.NewRunner(store, launcher, nil)
+		r.ConnectionID = id
+		r.Now = func() time.Time { return now }
+		return r
+	}
+	launchedOn := func() []int64 {
+		launcher.mu.Lock()
+		defer launcher.mu.Unlock()
+		var out []int64
+		for _, l := range launcher.got {
+			task, err := store.GetTask(ctx, l.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, task.ConnectionID)
+		}
+		return out
+	}
+	// The laptop's runner fires and launches only the laptop's schedule.
+	if err := runner(laptop).Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := launchedOn(); !slices.Equal(got, []int64{laptop}) {
+		t.Fatalf("laptop runner launched on %v", got)
+	}
+	if sc, _ := store.GetSchedule(ctx, schedules[local].ID); sc.LastTaskID != nil {
+		t.Fatal("laptop runner fired the local schedule")
+	}
+	if err := runner(local).Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := launchedOn(); !slices.Equal(got, []int64{laptop, local}) {
+		t.Fatalf("launched on %v", got)
+	}
+}

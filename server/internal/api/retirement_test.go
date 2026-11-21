@@ -42,7 +42,7 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/silent")
 	id := runningSession(t, e, p.T3ProjectID, "Waiting before startup")
-	if err := e.store.SetObservedState(t.Context(), id, db.StateNeedsInput); err != nil {
+	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateNeedsInput); err != nil {
 		t.Fatal(err)
 	}
 	var inbox struct {
@@ -59,14 +59,14 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	if len(inbox.Waiting) != 1 || inbox.Waiting[0].ID != id || inbox.Waiting[0].Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, id) || inbox.Waiting[0].Links.Web == "" || inbox.Unread != 0 || inbox.Latest != 0 || len(inbox.Groups) != 0 {
 		t.Fatalf("silent inbox %+v", inbox)
 	}
-	if err := e.store.SetObservedState(t.Context(), id, db.StateRunning); err != nil {
+	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateRunning); err != nil {
 		t.Fatal(err)
 	}
 	read()
 	if len(inbox.Waiting) != 0 {
 		t.Fatalf("resolved session still waiting %+v", inbox)
 	}
-	if err := e.store.SetObservedState(t.Context(), id, db.StateNeedsInput); err != nil {
+	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateNeedsInput); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: db.StateNeedsInput, T3ThreadID: &id, Title: "Waiting", URL: "/?inbox"}); err != nil {

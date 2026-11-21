@@ -21,6 +21,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/guard"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/install"
@@ -170,7 +171,7 @@ func Run(ctx context.Context, o Options) error {
 	}()
 
 	// T3_URL wins over the URL saved in Settings, which wins over the default.
-	conn, err := store.GetConnection(ctx)
+	conn, err := store.GetConnection(ctx, db.LocalMachine)
 	if err != nil {
 		return err
 	}
@@ -190,7 +191,7 @@ func Run(ctx context.Context, o Options) error {
 	default:
 		mc := t3.NewMCPClient(t3.Options{
 			BaseURL: endpoint.URL, AdminToken: cfg.T3AdminToken, PublicURL: endpoint.PublicURL, ClientName: cfg.T3ClientName,
-			Store: store, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
+			Store: store.OnMachine(db.LocalMachine), HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
 		})
 		closeT3 = mc.Close
 		wg.Add(1)
@@ -208,77 +209,77 @@ func Run(ctx context.Context, o Options) error {
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
 	}
-	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.T3ID()), logger)
+	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.ActiveID(db.LocalMachine, t3.Kind)), logger)
 	syncSvc.Harnesses = harnesses
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
-	openCode, err := opencodesetup.New(ctx, store, cfg.OpenCode, syncSvc.SwapAdapter, logger)
+	notifier := notify.New(store, cfg.PublicURL, logger)
+	// One release and one schedule runner per active connection, on every
+	// machine; the sets follow instance switches.
+	releases := newPerConnection(store, func(id int64) *release.Runner {
+		r := release.NewRunner(store, syncSvc, logger)
+		r.ConnectionID = id
+		r.OnReady = notifier.OnReady
+		return r
+	})
+	schedules := newPerConnection(store, func(id int64) *schedule.Runner {
+		sc := schedule.NewRunner(store, syncSvc, logger)
+		sc.ConnectionID = id
+		return sc
+	})
+	resyncRunners := func() {
+		releases.Resync()
+		schedules.Resync()
+	}
+	kickTrees := func() {
+		releases.Each(func(r *release.Runner) { r.Kick() })
+	}
+	openCode, err := opencodesetup.New(ctx, store.OnMachine(db.LocalMachine), cfg.OpenCode, func(old, next int64, a execution.Adapter) {
+		syncSvc.SwapAdapter(old, next, a)
+		resyncRunners()
+	}, logger)
 	if err != nil {
 		return err
 	}
-	var releases []*release.Runner
-	var schedules []*schedule.Runner
-	// One runner per harness kind, following its active connection.
-	for _, kind := range harnesses.Kinds() {
-		r := release.NewRunner(store, syncSvc, logger)
-		r.Harness = kind
-		releases = append(releases, r)
-		sc := schedule.NewRunner(store, syncSvc, logger)
-		sc.Harness = kind
-		schedules = append(schedules, sc)
-	}
-	kickTrees := func() {
-		for _, runner := range releases {
-			runner.Kick()
-		}
-	}
-	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One inbox hub wakes notification streams on inserts (notifier), reads
 	// (API), prunes and task transitions (badge). Streams end with ctx.
 	inbox := notify.NewHub(ctx)
 	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	syncSvc.OnTransition = func(ctx context.Context, c t3sync.Change) {
-		for _, runner := range releases {
-			runner.OnTransition(ctx, c)
-		}
+		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
 	syncSvc.OnAccepted = kickTrees
 	setup := t3setup.New(t3setup.Options{
-		Config: cfg, Store: store, Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
+		Config: cfg, Store: store.OnMachine(db.LocalMachine), Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
 		OnPaired: syncSvc.Kick, Logger: logger,
 		// A different T3 environment moved T3 to another connection.
 		OnSwitched: func(sw db.Switch) {
 			syncSvc.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(t3Client, sw.New))
+			resyncRunners()
 		},
 	})
-	connectors, err := harness.NewConnectors(harnesses, map[string]harness.Connector{
-		t3.Kind: t3setup.NewConnector(setup, func() t3setup.SyncProgress {
-			p := syncSvc.Progress()
+	// The local machine's connectors (the only machine until workers exist).
+	connectors, err := harness.NewConnectors(harnesses, map[int64]map[string]harness.Connector{db.LocalMachine: {
+		t3.Kind: t3setup.NewConnector(setup, func(connection int64) t3setup.SyncProgress {
+			p := syncSvc.Progress(connection)
 			return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
 		}),
 		opencode.Kind: opencodesetup.NewConnector(openCode),
-	})
+	}})
 	if err != nil {
 		return err
-	}
-	for _, runner := range releases {
-		runner.OnReady = notifier.OnReady
 	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
 	wg.Add(4)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
-	for _, runner := range releases {
-		wg.Go(func() { runner.Run(ctx) })
-	}
-	for _, scheduler := range schedules {
-		wg.Go(func() { scheduler.Run(ctx) })
-	}
+	wg.Go(func() { releases.Run(ctx) })
+	wg.Go(func() { schedules.Run(ctx) })
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 

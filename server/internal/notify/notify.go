@@ -277,7 +277,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	if err != nil {
 		return Payload{}, rec, err
 	}
-	return PayloadFor(notificationFrom(rec, n.store.T3ID()), badge), rec, nil
+	return PayloadFor(notificationFrom(rec, n.store.LegacyT3ID()), badge), rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

@@ -57,7 +57,7 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
-	t3 := s.Store.T3ID()
+	t3 := s.Store.LegacyT3ID()
 	if r.PathValue("connectionId") != strconv.FormatInt(t3, 10) {
 		return s.sessionContext(w, r)
 	}

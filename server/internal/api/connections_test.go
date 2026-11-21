@@ -26,16 +26,16 @@ type connection struct {
 
 func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		a, err := d.Sync.Adapter(d.Store.T3ID())
+		a, err := d.Sync.Adapter(d.Store.LegacyT3ID())
 		if err != nil {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
-		d.Setup = t3setup.New(t3setup.Options{Config: d.Config, Store: d.Store, Client: client, Fake: true, Logger: d.Logger,
+		d.Setup = t3setup.New(t3setup.Options{Config: d.Config, Store: d.Store.OnMachine(db.LocalMachine), Client: client, Fake: true, Logger: d.Logger,
 			OnSwitched: func(sw db.Switch) { d.Sync.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New)) }})
 	})
-	first := e.store.T3ID()
-	if _, err := e.store.SwitchInstance(t.Context(), t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
+	first := e.store.LegacyT3ID()
+	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
 		t.Fatal(err)
 	}
 	p := e.project("/w/app")
@@ -56,7 +56,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	if paired.Replaced == nil || paired.Replaced.ID != first || paired.Replaced.Active || paired.Replaced.Label != "box a" {
 		t.Fatalf("replaced %+v", paired.Replaced)
 	}
-	second := e.store.T3ID()
+	second := e.store.LegacyT3ID()
 	if second == first || paired.ConnectionID != second {
 		t.Fatalf("connection %d -> %d (status %d)", first, second, paired.ConnectionID)
 	}

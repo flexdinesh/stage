@@ -99,7 +99,7 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 // UpsertT3Projects refreshes discovery, never imports or edits Stage metadata.
 // The caller supplies a complete successful list; failures never mark missing.
 func (s *Store) UpsertT3Projects(ctx context.Context, ps []execution.WorkspaceInfo) (int, error) {
-	return s.RefreshWorkspaces(ctx, s.T3ID(), ps)
+	return s.RefreshWorkspaces(ctx, s.LegacyT3ID(), ps)
 }
 func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo) (int, error) {
 	n := 0

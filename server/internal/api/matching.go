@@ -127,7 +127,10 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	paths, err := s.Store.SharedPaths(ctx)
+	// Path translation and checkout proof hold only within one machine: the
+	// matched connection's.
+	machine := s.Store.ConnectionMachine(connection)
+	paths, err := s.Store.MachineSharedPaths(ctx, machine)
 	if err != nil {
 		return err
 	}
@@ -162,7 +165,10 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return checkoutEvidence{}, false
 		}
-		proof := checkout(ctx, paths, id, key.dir)
+		var proof checkoutEvidence
+		if s.Store.ConnectionMachine(id) == machine {
+			proof = checkout(ctx, paths, id, key.dir)
+		}
 		if proof.remote == "" {
 			proof.remote = remoteIdentity(w.OriginRemote)
 		}

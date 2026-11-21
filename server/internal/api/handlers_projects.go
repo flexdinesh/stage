@@ -19,11 +19,11 @@ func (s *server) plannedConnection(ctx context.Context, id int64) error {
 	return err
 }
 
-// connectionPath is the {connectionId} path value; none means the active
-// T3 connection.
+// connectionPath is the {connectionId} path value; none means the legacy T3
+// connection (the local machine's active T3).
 func (s *server) connectionPath(r *http.Request) (int64, error) {
 	if r.PathValue("connectionId") == "" {
-		return s.Store.T3ID(), nil
+		return s.Store.LegacyT3ID(), nil
 	}
 	id, err := strconv.ParseInt(r.PathValue("connectionId"), 10, 64)
 	if err != nil || id < 1 {
@@ -209,7 +209,7 @@ func (s *server) registerWorkspace(w http.ResponseWriter, r *http.Request) error
 	if in.Title == "" || in.Workspace == "" {
 		return db.Invalid("title and an existing directory are required")
 	}
-	t3 := s.Store.T3ID()
+	t3 := s.Store.LegacyT3ID()
 	adapter, err := s.Sync.Adapter(t3)
 	if err != nil {
 		return err

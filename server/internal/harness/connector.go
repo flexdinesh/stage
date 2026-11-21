@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // FieldKind is how a setup field's value is entered and shown.
@@ -132,50 +133,65 @@ func UnknownAction(d Descriptor, action string) error {
 	return fmt.Errorf("%w %q for %s", ErrUnknownAction, action, d.Name)
 }
 
-// Connectors is the server's connector per kind, checked against the
-// registry: every connector names a registered connected kind.
+// Connectors is the server's connector per machine and kind, checked
+// against the registry: every connector names a registered connected kind.
+// A machine has at most one connector per kind, serving that kind's active
+// connection on the machine.
 type Connectors struct {
 	reg *Registry
-	m   map[string]Connector
+	m   map[int64]map[string]Connector
 }
 
-// NewConnectors validates m against reg.
-func NewConnectors(reg *Registry, m map[string]Connector) (Connectors, error) {
-	for kind := range m {
-		d, ok := reg.Lookup(kind)
-		if !ok {
-			return Connectors{}, fmt.Errorf("connector for unregistered harness %q", kind)
+// NewConnectors validates m (machine id to kind to connector) against reg.
+func NewConnectors(reg *Registry, m map[int64]map[string]Connector) (Connectors, error) {
+	for machine, kinds := range m {
+		if machine <= 0 {
+			return Connectors{}, fmt.Errorf("connectors for invalid machine %d", machine)
 		}
-		if d.Hosting != Connected {
-			return Connectors{}, fmt.Errorf("connector for %s, which is not a connected harness", d.Name)
+		for kind := range kinds {
+			d, ok := reg.Lookup(kind)
+			if !ok {
+				return Connectors{}, fmt.Errorf("connector for unregistered harness %q", kind)
+			}
+			if d.Hosting != Connected {
+				return Connectors{}, fmt.Errorf("connector for %s, which is not a connected harness", d.Name)
+			}
 		}
 	}
 	return Connectors{reg: reg, m: m}, nil
 }
 
-// Get is kind's connector.
-func (c Connectors) Get(kind string) (Connector, bool) {
-	k, ok := c.m[kind]
+// Get is machine's connector for kind.
+func (c Connectors) Get(machine int64, kind string) (Connector, bool) {
+	k, ok := c.m[machine][kind]
 	return k, ok
 }
 
-// Each calls fn for each connector in registry order.
-func (c Connectors) Each(fn func(Descriptor, Connector)) {
+// Each calls fn for each connector: machines in id order, kinds in
+// registry order.
+func (c Connectors) Each(fn func(machine int64, d Descriptor, k Connector)) {
 	if c.reg == nil {
 		return
 	}
-	for _, d := range c.reg.All() {
-		if k, ok := c.m[d.Kind]; ok {
-			fn(d, k)
+	machines := make([]int64, 0, len(c.m))
+	for machine := range c.m {
+		machines = append(machines, machine)
+	}
+	slices.Sort(machines)
+	for _, machine := range machines {
+		for _, d := range c.reg.All() {
+			if k, ok := c.m[machine][d.Kind]; ok {
+				fn(machine, d, k)
+			}
 		}
 	}
 }
 
-// Owner is the connector whose active connection is id.
+// Owner is the connector whose active connection is id, on any machine.
 func (c Connectors) Owner(ctx context.Context, id int64) (Descriptor, Connector, bool) {
 	var od Descriptor
 	var oc Connector
-	c.Each(func(d Descriptor, k Connector) {
+	c.Each(func(_ int64, d Descriptor, k Connector) {
 		if oc == nil && id != 0 && k.Summary(ctx).ConnectionID == id {
 			od, oc = d, k
 		}

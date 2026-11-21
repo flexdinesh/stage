@@ -53,7 +53,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// These tests complete settled tasks explicitly.
-	if _, err := store.SetAutoComplete(t.Context(), store.T3ID(), false); err != nil {
+	if _, err := store.SetAutoComplete(t.Context(), store.LegacyT3ID(), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()
@@ -72,7 +72,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	h := api.NewRouter(api.Deps{
 		Config:    config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store, Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store.OnMachine(db.LocalMachine), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -100,7 +100,7 @@ func (e *env) project(root string) db.Project {
 // session launches a running external thread in project p.
 // t3 is session id s on the T3 connection.
 func (e *env) t3(s string) *db.SessionRef {
-	return &db.SessionRef{ConnectionID: e.store.T3ID(), ExternalSessionID: s}
+	return &db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: s}
 }
 
 func (e *env) session(p db.Project, title string) string {

@@ -44,9 +44,8 @@ type Service struct {
 	PublicURL                                                                    string            // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	CLI                                                                          string            // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
-	progress                                                                     atomic.Pointer[Progress]
+	syncs                                                                        gosync.Map // connection ID to *syncState (T3 full syncs)
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
-	syncing                                                                      atomic.Bool
 	catalog                                                                      atomic.Pointer[CatalogSnapshot]
 	kickSync, kickCatalog                                                        chan struct{}
 	locks                                                                        gosync.Map
@@ -55,7 +54,7 @@ type Service struct {
 }
 
 func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service {
-	return NewWithAdapters(store, map[int64]execution.Adapter{store.T3ID(): adapter}, log)
+	return NewWithAdapters(store, map[int64]execution.Adapter{store.LegacyT3ID(): adapter}, log)
 }
 func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
 	if log == nil {
@@ -131,8 +130,21 @@ type Progress struct {
 	Projects, Threads int
 }
 
-func (s *Service) Progress() Progress {
-	if p := s.progress.Load(); p != nil {
+// syncState is one connection's full sync: at most one runs per connection.
+type syncState struct {
+	running  atomic.Bool
+	progress atomic.Pointer[Progress]
+}
+
+func (s *Service) syncState(id int64) *syncState {
+	v, _ := s.syncs.LoadOrStore(id, &syncState{})
+	st, _ := v.(*syncState)
+	return st
+}
+
+// Progress is connection id's full sync progress (T3 connections report it).
+func (s *Service) Progress(id int64) Progress {
+	if p := s.syncState(id).progress.Load(); p != nil {
 		return *p
 	}
 	return Progress{}
@@ -245,12 +257,13 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 
 func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) {
 	now := time.Now().UTC()
+	st := s.syncState(id)
 	if s.store.IsT3(id) {
-		if !s.syncing.CompareAndSwap(false, true) {
+		if !st.running.CompareAndSwap(false, true) {
 			return Result{}, ErrSyncRunning
 		}
-		s.progress.Store(&Progress{Running: true, StartedAt: &now})
-		defer func() { s.progress.Store(&Progress{}); s.syncing.Store(false) }()
+		st.progress.Store(&Progress{Running: true, StartedAt: &now})
+		defer func() { st.progress.Store(&Progress{}); st.running.Store(false) }()
 	}
 	a, err := s.Adapter(id)
 	if err != nil {
@@ -266,7 +279,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 	}
 	r := Result{Projects: n}
 	if s.store.IsT3(id) {
-		s.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
+		st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
 	}
 	var errs []error
 	// Import only after a complete, successful inventory refresh. A failed
@@ -292,7 +305,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 	}
 	r.FinishedAt = time.Now().UTC()
 	if s.store.IsT3(id) && len(errs) == 0 {
-		errs = append(errs, s.store.SetLastFullSync(ctx, r.FinishedAt))
+		errs = append(errs, s.store.SetLastFullSync(ctx, s.store.ConnectionMachine(id), r.FinishedAt))
 	}
 	return r, errors.Join(errs...)
 }
@@ -475,9 +488,9 @@ func (s *Service) attribution(kind string) harness.Attribution {
 }
 
 func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {
-	// The legacy catalog is the active T3 connection's (GET /api/catalog),
-	// wherever T3 moved after a replaced instance.
-	a, e := s.Adapter(s.store.T3ID())
+	// The legacy catalog is the local machine's active T3 connection's (GET
+	// /api/catalog), wherever T3 moved after a replaced instance.
+	a, e := s.Adapter(s.store.LegacyT3ID())
 	if e != nil {
 		return nil, e
 	}

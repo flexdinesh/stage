@@ -53,16 +53,16 @@ func newHarness(t *testing.T) *harness {
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
-	openCode, err := opencodesetup.New(t.Context(), store, config.OpenCodeSettings{}, h.sync.SwapAdapter, log)
+	openCode, err := opencodesetup.New(t.Context(), store.OnMachine(db.LocalMachine), config.OpenCodeSettings{}, h.sync.SwapAdapter, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store, Client: h.fake, Fake: true, Logger: log})
+	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store.OnMachine(db.LocalMachine), Client: h.fake, Fake: true, Logger: log})
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
 	h.sync.Harnesses = reg
-	connectors, err := stageharness.NewConnectors(reg, map[string]stageharness.Connector{
+	connectors, err := stageharness.NewConnectors(reg, map[int64]map[string]stageharness.Connector{db.LocalMachine: {
 		t3.Kind: t3setup.NewConnector(setup, nil), opencode.Kind: opencodesetup.NewConnector(openCode),
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

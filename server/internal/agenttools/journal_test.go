@@ -156,7 +156,7 @@ func TestContextTracksCurrentTreeAndNoteSource(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/context-journal")
 	threadID := e.session(p, "Contributor")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: e.store.T3ID(), ExternalSessionID: threadID}}})
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: threadID}}})
 	var adopted agenttools.AdoptOut
 	mustCall(t, cs, "adopt_session", nil, &adopted)
 	var first client.TreeDetail

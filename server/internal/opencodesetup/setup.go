@@ -38,7 +38,7 @@ type Service struct {
 	ctx        context.Context // background refresh and renewal end with it
 	log        *slog.Logger
 	id         int64
-	store      *db.Store
+	store      db.MachineStore // the machine this OpenCode setup runs on
 	env, saved config.OpenCodeSettings
 	verified   string
 	problem    string
@@ -67,7 +67,7 @@ type pairing struct {
 	at                    time.Time
 }
 
-func New(ctx context.Context, store *db.Store, env config.OpenCodeSettings, install func(old, next int64, a execution.Adapter), log *slog.Logger) (*Service, error) {
+func New(ctx context.Context, store db.MachineStore, env config.OpenCodeSettings, install func(old, next int64, a execution.Adapter), log *slog.Logger) (*Service, error) {
 	id, err := store.EnsureOpenCode(ctx)
 	if err != nil {
 		return nil, err

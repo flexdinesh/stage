@@ -69,17 +69,17 @@ func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Hosting: harness.Connected, StableIdentity: true}
 	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Hosting: harness.Connected}
 	for _, d := range []harness.Descriptor{stable, loose} {
-		first, err := s.SwitchInstance(ctx, d, "id-a", "a", 0)
+		first, err := s.SwitchInstance(ctx, LocalMachine, d, "id-a", "a", 0)
 		if err != nil || first.New == 0 {
 			t.Fatalf("%s first %+v %v", d.Kind, first, err)
 		}
 		projectWithBinding(t, s, first.New, "/w/"+d.Kind)
-		second, err := s.SwitchInstance(ctx, d, "id-b", "b", 0)
+		second, err := s.SwitchInstance(ctx, LocalMachine, d, "id-b", "b", 0)
 		if err != nil || !second.Changed || second.Old != first.New {
 			t.Fatalf("%s replace %+v %v", d.Kind, second, err)
 		}
 		projectWithBinding(t, s, second.New, "/w/"+d.Kind+"-b")
-		back, err := s.SwitchInstance(ctx, d, "id-a", "a", 0)
+		back, err := s.SwitchInstance(ctx, LocalMachine, d, "id-a", "a", 0)
 		if err != nil || !back.Changed {
 			t.Fatalf("%s back %+v %v", d.Kind, back, err)
 		}
@@ -88,12 +88,12 @@ func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 		if revived := back.New == first.New; revived != d.StableIdentity || back.Revived != d.StableIdentity {
 			t.Fatalf("%s back %+v (first %d)", d.Kind, back, first.New)
 		}
-		if s.ActiveID(d.Kind) != back.New {
-			t.Fatalf("%s active %d", d.Kind, s.ActiveID(d.Kind))
+		if s.ActiveID(LocalMachine, d.Kind) != back.New {
+			t.Fatalf("%s active %d", d.Kind, s.ActiveID(LocalMachine, d.Kind))
 		}
 	}
 	var conflict *ConflictError
-	if _, err := s.SwitchInstance(ctx, loose, "", "", 99); !errors.As(err, &conflict) {
+	if _, err := s.SwitchInstance(ctx, LocalMachine, loose, "", "", 99); !errors.As(err, &conflict) {
 		t.Fatalf("unknown revive: %v", err)
 	}
 }

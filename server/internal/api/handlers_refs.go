@@ -58,7 +58,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	} else if err != nil {
-		s.Connectors.Each(func(_ harness.Descriptor, c harness.Connector) {
+		s.Connectors.Each(func(_ int64, _ harness.Descriptor, c harness.Connector) {
 			if err == nil {
 				return
 			}
@@ -95,7 +95,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 	case refs.KindSession:
 		id := ref.ConnectionID
 		if id == 0 {
-			id = s.Store.T3ID()
+			id = s.Store.LegacyT3ID()
 		}
 		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
 		out.Session = &target
@@ -110,7 +110,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		obs, err := s.Store.Observation(ctx, target)
-		if errors.Is(err, db.ErrNotFound) && id == s.Store.T3ID() {
+		if errors.Is(err, db.ErrNotFound) && id == s.Store.LegacyT3ID() {
 			th, e := s.Store.GetThread(ctx, target.ExternalSessionID)
 			if e == nil {
 				out.SessionTitle = th.Title

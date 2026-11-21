@@ -12,13 +12,23 @@ type SharedPath struct {
 	StageRoot    string `json:"stageRoot"`
 }
 
+// SharedPaths lists every machine's shared paths.
 func (s *Store) SharedPaths(ctx context.Context) ([]SharedPath, error) {
-	return sharedPaths(ctx, s.pool)
+	return sharedPaths(ctx, s.pool, 0)
 }
+
+// MachineSharedPaths lists the shared paths of machine's connections: path
+// translation and checkout proof hold only within one machine.
+func (s *Store) MachineSharedPaths(ctx context.Context, machine int64) ([]SharedPath, error) {
+	return sharedPaths(ctx, s.pool, machine)
+}
+
+// sharedPaths lists machine's shared paths (0: every machine).
 func sharedPaths(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (*rowSet, error)
-}) ([]SharedPath, error) {
-	rows, err := q.Query(ctx, `SELECT connection_id,harness_root,stage_root FROM shared_paths ORDER BY connection_id,length(harness_root) DESC,harness_root`)
+}, machine int64) ([]SharedPath, error) {
+	rows, err := q.Query(ctx, `SELECT p.connection_id,p.harness_root,p.stage_root FROM shared_paths p JOIN harness_connections c ON c.id=p.connection_id
+ WHERE $1=0 OR c.machine_id=$1 ORDER BY p.connection_id,length(p.harness_root) DESC,p.harness_root`, machine)
 	if err != nil {
 		return nil, err
 	}
@@ -45,10 +55,16 @@ func (s *Store) SetSharedPath(ctx context.Context, p SharedPath) error {
 	return err
 }
 
-// AutoBind cannot replace a manual choice or act on a retired source revision.
+// AutoBind cannot replace a manual choice or act on a retired source
+// revision. expected is the MachineSharedPaths of b's connection's machine
+// the match was proved with.
 func (s *Store) AutoBind(ctx context.Context, source int64, b ProjectBinding, expected []SharedPath) (Project, error) {
 	err := s.inTx(ctx, func(tx *Tx) error {
-		current, err := sharedPaths(ctx, tx)
+		var machine int64
+		if err := tx.QueryRow(ctx, `SELECT machine_id FROM harness_connections WHERE id=$1`, b.ConnectionID).Scan(&machine); err != nil {
+			return notFound(err)
+		}
+		current, err := sharedPaths(ctx, tx, machine)
 		if err != nil {
 			return err
 		}

@@ -47,7 +47,7 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
 	if in.ThreadID != "" {
-		t3, err := activeT3(ctx, tx)
+		t3, err := legacyT3(ctx, tx)
 		if err != nil {
 			return 0, false, err
 		}

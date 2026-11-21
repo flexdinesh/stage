@@ -1,6 +1,7 @@
 package harness_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -77,26 +78,80 @@ func TestProfilePolicy(t *testing.T) {
 
 type nopConnector struct{ harness.Connector }
 
+// idConnector serves one active connection.
+type idConnector struct {
+	harness.Connector
+	id int64
+}
+
+func (c idConnector) Summary(context.Context) harness.Summary {
+	return harness.Summary{ConnectionID: c.id}
+}
+
 func TestConnectorsAreCheckedAgainstTheRegistry(t *testing.T) {
 	conn := harness.Descriptor{Kind: "svc", Name: "Svc", Hosting: harness.Connected}
 	hosted := harness.Descriptor{Kind: "proc", Name: "Proc", Hosting: harness.Hosted}
 	reg := harness.MustRegistry(conn, hosted)
-	if _, err := harness.NewConnectors(reg, map[string]harness.Connector{"nope": nopConnector{}}); err == nil {
+	one := func(kind string) map[int64]map[string]harness.Connector {
+		return map[int64]map[string]harness.Connector{1: {kind: nopConnector{}}}
+	}
+	if _, err := harness.NewConnectors(reg, one("nope")); err == nil {
 		t.Fatal("connector for an unregistered kind accepted")
 	}
-	if _, err := harness.NewConnectors(reg, map[string]harness.Connector{"proc": nopConnector{}}); err == nil {
+	if _, err := harness.NewConnectors(reg, one("proc")); err == nil {
 		t.Fatal("connector for a hosted kind accepted")
 	}
-	cs, err := harness.NewConnectors(reg, map[string]harness.Connector{"svc": nopConnector{}})
+	if _, err := harness.NewConnectors(reg, map[int64]map[string]harness.Connector{0: {"svc": nopConnector{}}}); err == nil {
+		t.Fatal("connector for machine 0 accepted")
+	}
+	cs, err := harness.NewConnectors(reg, one("svc"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cs.Get("svc"); !ok {
+	if _, ok := cs.Get(1, "svc"); !ok {
 		t.Fatal("svc connector missing")
 	}
-	if _, ok := cs.Get("proc"); ok {
+	if _, ok := cs.Get(1, "proc"); ok {
 		t.Fatal("proc has no connector")
 	}
+	if _, ok := cs.Get(2, "svc"); ok {
+		t.Fatal("machine 2 has no connector")
+	}
 	var zero harness.Connectors
-	zero.Each(func(harness.Descriptor, harness.Connector) { t.Fatal("zero Connectors has none") })
+	zero.Each(func(int64, harness.Descriptor, harness.Connector) { t.Fatal("zero Connectors has none") })
+}
+
+func TestConnectorsServeEachMachinesActiveConnection(t *testing.T) {
+	a := harness.Descriptor{Kind: "a", Name: "A", Hosting: harness.Connected}
+	b := harness.Descriptor{Kind: "b", Name: "B", Hosting: harness.Connected}
+	reg := harness.MustRegistry(a, b)
+	cs, err := harness.NewConnectors(reg, map[int64]map[string]harness.Connector{
+		2: {"a": idConnector{id: 21}, "b": idConnector{id: 22}},
+		1: {"b": idConnector{id: 12}, "a": idConnector{id: 11}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Machines in id order, kinds in registry order.
+	var seen []int64
+	cs.Each(func(machine int64, d harness.Descriptor, k harness.Connector) {
+		if want := machine*10 + map[string]int64{"a": 1, "b": 2}[d.Kind]; k.Summary(t.Context()).ConnectionID != want {
+			t.Fatalf("machine %d %s serves %d", machine, d.Kind, k.Summary(t.Context()).ConnectionID)
+		}
+		seen = append(seen, k.Summary(t.Context()).ConnectionID)
+	})
+	if len(seen) != 4 || seen[0] != 11 || seen[1] != 12 || seen[2] != 21 || seen[3] != 22 {
+		t.Fatalf("order %v", seen)
+	}
+	// The same kind on two machines: each machine's connector owns its own
+	// active connection.
+	if d, k, ok := cs.Owner(t.Context(), 21); !ok || d.Kind != "a" || k.Summary(t.Context()).ConnectionID != 21 {
+		t.Fatalf("owner of 21: %v %+v", ok, d)
+	}
+	if d, k, ok := cs.Owner(t.Context(), 11); !ok || d.Kind != "a" || k.Summary(t.Context()).ConnectionID != 11 {
+		t.Fatalf("owner of 11: %v %+v", ok, d)
+	}
+	if _, _, ok := cs.Owner(t.Context(), 99); ok {
+		t.Fatal("unknown connection owned")
+	}
 }

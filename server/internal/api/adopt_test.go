@@ -23,12 +23,12 @@ type agentTask struct {
 
 // t3Session is a T3 session reference body (needsSession, originSession).
 func (e *env) t3Session(id string) map[string]any {
-	return map[string]any{"connectionId": e.store.T3ID(), "externalSessionId": id}
+	return map[string]any{"connectionId": e.store.LegacyT3ID(), "externalSessionId": id}
 }
 
 // isT3Session reports whether ref names T3 session id.
 func (e *env) isT3Session(ref *sessionRef, id string) bool {
-	return ref != nil && ref.ConnectionID == e.store.T3ID() && ref.ExternalSessionID == id
+	return ref != nil && ref.ConnectionID == e.store.LegacyT3ID() && ref.ExternalSessionID == id
 }
 
 func (e *env) agentTask(projectID int64, title string, extra map[string]any, want int) agentTask {
@@ -327,7 +327,7 @@ func TestSessionBatchByTree(t *testing.T) {
 		Tasks []task `json:"tasks"`
 	}
 	e.must("GET", "/api/tasks?originThreadId="+s, nil, 400, nil)
-	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.T3ID(), url.QueryEscape(s)), nil, 200, &rows)
+	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.LegacyT3ID(), url.QueryEscape(s)), nil, 200, &rows)
 	if len(rows.Tasks) != 3 {
 		t.Fatalf("batch filter %+v", rows)
 	}

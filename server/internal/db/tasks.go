@@ -117,7 +117,7 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
 	}
 	if f.OriginThreadID != "" {
-		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + activeT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + legacyT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
 	}
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
@@ -255,7 +255,7 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	}
 	var originID *int64
 	if in.ConnectionID == 0 {
-		t3, err := activeT3(ctx, tx)
+		t3, err := legacyT3(ctx, tx)
 		if err != nil {
 			return 0, err
 		}

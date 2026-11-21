@@ -150,7 +150,7 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, store, config.OpenCodeSettings{}, in.install, nil)
+	s, err := New(ctx, store.OnMachine(db.LocalMachine), config.OpenCodeSettings{}, in.install, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA2}); err != nil || s.ID() != first {
 		t.Fatalf("moved address: %v id %d", err, s.ID())
 	}
-	if _, verified, _ := store.OpenCodeSettings(ctx); verified != addrA2 {
+	if _, verified, _ := store.OpenCodeSettings(ctx, db.LocalMachine); verified != addrA2 {
 		t.Fatalf("verified %q", verified)
 	}
 
@@ -226,7 +226,7 @@ func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, store, config.OpenCodeSettings{}, in.install, nil)
+	s, err := New(ctx, store.OnMachine(db.LocalMachine), config.OpenCodeSettings{}, in.install, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
 	if other.redeems != 1 {
 		t.Fatalf("link redeemed %d times", other.redeems)
 	}
-	saved, _, err := store.OpenCodeSettings(ctx)
+	saved, _, err := store.OpenCodeSettings(ctx, db.LocalMachine)
 	if err != nil || s.ID() == first || saved.Auth != config.OpenCodeAuthPaired || saved.Password != "tok-once" || saved.Endpoint != addrB {
 		t.Fatalf("paired %+v id %d %v", saved, s.ID(), err)
 	}

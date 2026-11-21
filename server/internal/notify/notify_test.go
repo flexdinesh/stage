@@ -316,7 +316,7 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetObservedState(ctx, "ext-1", db.StateDone); err != nil {
+	if err := store.SetObservedState(ctx, db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: "ext-1"}, db.StateDone); err != nil {
 		t.Fatal(err)
 	}
 

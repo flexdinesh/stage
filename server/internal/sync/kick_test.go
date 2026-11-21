@@ -94,7 +94,7 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	if err != nil || r.Threads != 0 || r.Projects != 1 || client.pages.Load() != 0 {
 		t.Fatalf("sync=%+v pages=%d err=%v", r, client.pages.Load(), err)
 	}
-	if pr := svc.Progress(); pr.Running || pr.Threads != 0 {
+	if pr := svc.Progress(store.LegacyT3ID()); pr.Running || pr.Threads != 0 {
 		t.Fatalf("after sync %+v", pr)
 	}
 	// The sync pass imports the discovered project once.
