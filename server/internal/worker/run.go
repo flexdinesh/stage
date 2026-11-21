@@ -10,8 +10,10 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
@@ -46,6 +48,18 @@ type RunOptions struct {
 	Listen []listen.Addr
 	// Getenv resolves the gateway's default socket (os.Getenv).
 	Getenv func(string) string
+	// Host builds what the worker serves for its machine (remote.Host): its
+	// call handlers beside ping, and changes to report. Nil serves ping only.
+	Host func(machineID int64) Host
+}
+
+// Host is what a worker serves over its channel.
+type Host interface {
+	// Handlers answer the main server's calls by kind.
+	Handlers() map[string]workerchan.WorkerHandler
+	// Changes signals that what the host serves changed (reported to the
+	// main server as machine.changed).
+	Changes() <-chan struct{}
 }
 
 // Run is `stage worker run`: lock the worker directory, open the agent
@@ -100,6 +114,19 @@ func Run(ctx context.Context, o RunOptions) error {
 	}
 	defer gw.close()
 	w := &runner{o: o, cfg: cfg, dir: dir, log: log, api: newAPI(cfg.URL, cfg.Token, o.HTTP), gateway: gw.URLs}
+	w.handlers = map[string]workerchan.WorkerHandler{
+		workerchan.KindPing: func(context.Context, workerchan.Envelope, workerchan.Upcall) (any, error) {
+			return workerchan.Pong{Version: buildinfo.Version, Time: time.Now().UTC()}, nil
+		},
+	}
+	if o.Host != nil {
+		w.host = o.Host(cfg.MachineID)
+		for kind, h := range w.host.Handlers() {
+			if kind != workerchan.KindPing {
+				w.handlers[kind] = h
+			}
+		}
+	}
 	w.set(State{State: StateConnecting})
 	if err := instance.Notify("READY=1"); err != nil {
 		log.Warn("readiness notification", "err", err)
@@ -127,6 +154,9 @@ type runner struct {
 	api *api
 	// gateway is the agent gateway's listener URLs.
 	gateway []string
+	// handlers answer the main server's calls by kind; host may be nil.
+	handlers map[string]workerchan.WorkerHandler
+	host     Host
 
 	mu    sync.Mutex
 	state State
@@ -283,6 +313,9 @@ func (w *runner) session(parent context.Context) error {
 	w.log.Info("worker channel online", "session", hello.Session)
 
 	wg.Go(func() { sess.heartbeats(heartbeat) })
+	if w.host != nil {
+		wg.Go(func() { sess.changes(w.host.Changes()) })
+	}
 	defer sess.cancelAll()
 	for {
 		ev, err := rd.Next()
@@ -326,13 +359,21 @@ type channel struct {
 
 	mu    sync.Mutex
 	calls map[string]context.CancelFunc
+	seq   atomic.Uint64
 }
 
 // post sends one up message; a worker-initiated call's reply is decoded
 // into reply. A refused session or token ends the session.
 func (c *channel) post(env workerchan.Envelope, reply *workerchan.Envelope) error {
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	return c.postCtx(c.ctx, env, reply)
+}
+
+// postCtx is post bounded by ctx as well as the session.
+func (c *channel) postCtx(ctx context.Context, env workerchan.Envelope, reply *workerchan.Envelope) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	stop := context.AfterFunc(c.ctx, cancel)
+	defer stop()
 	req, err := c.w.api.request(ctx, "POST", "/api/worker/channel", env)
 	if err != nil {
 		return err
@@ -372,11 +413,46 @@ func (c *channel) heartbeats(every time.Duration) {
 	}
 }
 
-// handlers answer the main server's calls by kind.
-var handlers = map[string]func(ctx context.Context, env workerchan.Envelope) (any, error){
-	workerchan.KindPing: func(context.Context, workerchan.Envelope) (any, error) {
-		return workerchan.Pong{Version: buildinfo.Version, Time: time.Now().UTC()}, nil
-	},
+// changes reports each change of what the host serves.
+func (c *channel) changes(ch <-chan struct{}) {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ch:
+			if err := c.post(workerchan.Envelope{ID: c.nextID(), Kind: remoteChanged}, nil); err != nil && c.ctx.Err() == nil {
+				c.w.log.Warn("worker change report", "err", err)
+			}
+		}
+	}
+}
+
+// remoteChanged is remote.KindChanged (the worker package does not import
+// the remote machine's protocol).
+const remoteChanged = "machine.changed"
+
+// nextID is a fresh id for a worker-initiated call.
+func (c *channel) nextID() string {
+	return "w" + c.id[:min(6, len(c.id))] + ":" + strconv.FormatUint(c.seq.Add(1), 10)
+}
+
+// upcall sends a worker-initiated call belonging to request parent and
+// returns its reply body.
+func (c *channel) upcall(parent workerchan.Envelope) workerchan.Upcall {
+	return func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		var reply workerchan.Envelope
+		if err := c.postCtx(ctx, workerchan.Envelope{ID: c.nextID(), Kind: kind, Call: parent.ID, ConnectionID: parent.ConnectionID, Body: raw}, &reply); err != nil {
+			return nil, err
+		}
+		if reply.Error != nil {
+			return nil, &workerchan.RemoteError{Code: reply.Error.Code, Message: reply.Error.Message}
+		}
+		return reply.Body, nil
+	}
 }
 
 // handle runs one call under its deadline and posts its result.
@@ -397,11 +473,12 @@ func (c *channel) handle(env workerchan.Envelope) {
 		cancel()
 	}()
 	res := workerchan.Envelope{ID: env.ID, Kind: workerchan.KindResult}
-	h, ok := handlers[env.Kind]
+	h, ok := c.w.handlers[env.Kind]
 	if !ok {
 		res.Error = &workerchan.Error{Code: workerchan.CodeUnknownKind, Message: "this worker does not handle " + env.Kind}
 	} else {
-		body, err := h(ctx, env)
+		body, err := h(ctx, env, c.upcall(env))
+		var re *workerchan.RemoteError
 		switch {
 		case err == nil:
 			b, merr := json.Marshal(body)
@@ -410,6 +487,8 @@ func (c *channel) handle(env workerchan.Envelope) {
 			} else {
 				res.Body = b
 			}
+		case errors.As(err, &re):
+			res.Error = &workerchan.Error{Code: re.Code, Message: re.Message}
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			res.Error = &workerchan.Error{Code: workerchan.CodeTimeout, Message: err.Error()}
 		case errors.Is(ctx.Err(), context.Canceled):

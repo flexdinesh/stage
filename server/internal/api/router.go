@@ -52,6 +52,16 @@ type Deps struct {
 	// MCP is the streamable HTTP MCP handler (no origin policy of its own)
 	// that worker agent gateways reach through GatewayPrefix/mcp (nil: 404).
 	MCP http.Handler
+	// Machines hosts remote machines as they join and are removed (nil:
+	// none are hosted).
+	Machines MachineHosts
+}
+
+// MachineHosts follows the remote machines the server hosts
+// (remote.Hosts).
+type MachineHosts interface {
+	Join(machineID int64)
+	Leave(machineID int64)
 }
 
 // registry is Harnesses, or an empty registry.

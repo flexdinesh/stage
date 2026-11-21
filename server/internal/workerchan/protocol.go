@@ -11,6 +11,7 @@ package workerchan
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,9 +75,12 @@ type Envelope struct {
 	Deadline *time.Time `json:"deadline,omitempty"`
 	// ConnectionID names the harness connection the call is for (0: the
 	// machine itself).
-	ConnectionID int64           `json:"connectionId,omitempty"`
-	Body         json.RawMessage `json:"body,omitempty"`
-	Error        *Error          `json:"error,omitempty"`
+	ConnectionID int64 `json:"connectionId,omitempty"`
+	// Call names the main server's pending request a worker-initiated call
+	// belongs to (a callback while that request runs, Hub.CallWith).
+	Call  string          `json:"call,omitempty"`
+	Body  json.RawMessage `json:"body,omitempty"`
+	Error *Error          `json:"error,omitempty"`
 }
 
 // Error is a failed call's result.
@@ -91,6 +95,9 @@ const (
 	CodeCancelled   = "cancelled"
 	CodeTimeout     = "timeout"
 	CodeInternal    = "internal"
+	// CodeCallEnded: a callback named a request that no longer waits (it
+	// returned, timed out or its stream ended).
+	CodeCallEnded = "call_ended"
 )
 
 // Hello is the first event of a stream.
@@ -212,3 +219,12 @@ func (rd *Reader) Next() (Event, error) {
 		}
 	}
 }
+
+// Upcall sends a worker-initiated call that belongs to the request being
+// handled (Envelope.Call) and returns its reply body; an error reply is a
+// *RemoteError.
+type Upcall func(ctx context.Context, kind string, body any) (json.RawMessage, error)
+
+// WorkerHandler answers one of the main server's calls on the worker. A
+// *RemoteError keeps its code in the result.
+type WorkerHandler func(ctx context.Context, env Envelope, up Upcall) (any, error)

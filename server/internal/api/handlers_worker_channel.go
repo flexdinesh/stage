@@ -33,88 +33,23 @@ func TouchMachineFunc(store *db.Store, onErr func(error)) func(int64, time.Time,
 	}
 }
 
-// workerChannelStream is GET /api/worker/channel: hello, then one rpc
-// event per request or cancel, and a comment every keepalive. A newer
-// stream of the same machine ends this one.
+// workerChannelStream is GET /api/worker/channel (workerchan.Hub.ServeStream).
 func (s *server) workerChannelStream(w http.ResponseWriter, r *http.Request) error {
 	id, ok := workerMachineID(r.Context())
 	if !ok {
 		return db.ErrInvalidMachineToken
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
-		return nil
-	}
-	sess := s.Channels.AttachGateway(id, r.Header.Get(workerchan.VersionHeader), workerchan.ParseGateway(r.Header.Get(workerchan.GatewayHeader)))
-	defer s.Channels.Detach(sess)
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-store")
-	h.Set("X-Accel-Buffering", "no")
-	h.Set(workerchan.VersionHeader, buildinfo.Version)
-	w.WriteHeader(http.StatusOK)
-	hello := workerchan.Hello{Session: sess.ID, MachineID: id,
-		HeartbeatSec: int(s.Channels.Keepalive() / time.Second), TimeoutSec: int(s.Channels.Timeout() / time.Second)}
-	if err := workerchan.WriteEvent(w, workerchan.EventHello, hello); err != nil {
-		return nil
-	}
-	flusher.Flush()
-	s.log.Info("worker channel open", "machine", id, "session", sess.ID, "version", sess.Version)
-	defer s.log.Info("worker channel closed", "machine", id, "session", sess.ID)
-	t := time.NewTicker(s.Channels.Keepalive())
-	defer t.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return nil
-		case <-sess.Done():
-			return nil
-		case env := <-sess.Outbound():
-			if err := workerchan.WriteEvent(w, workerchan.EventRPC, env); err != nil {
-				return nil
-			}
-		case <-t.C:
-			if err := workerchan.WriteComment(w, "keepalive"); err != nil {
-				return nil
-			}
-		}
-		flusher.Flush()
-	}
+	s.Channels.ServeStream(w, r, id, buildinfo.Version, s.log)
+	return nil
 }
 
-// workerChannelPost is POST /api/worker/channel: one up message of the
-// session named by Stage-Channel-Session. 204 for a result or heartbeat;
-// 200 with the reply envelope for a worker-initiated call; 409
-// channel_replaced when the session is not the machine's live one.
+// workerChannelPost is POST /api/worker/channel (workerchan.Hub.ServePost).
 func (s *server) workerChannelPost(w http.ResponseWriter, r *http.Request) error {
 	id, ok := workerMachineID(r.Context())
 	if !ok {
 		return db.ErrInvalidMachineToken
 	}
-	session := r.Header.Get(workerchan.SessionHeader)
-	if session == "" {
-		return db.Invalid("missing %s header", workerchan.SessionHeader)
-	}
-	var env workerchan.Envelope
-	if err := decodeStrict(r, &env); err != nil {
-		return err
-	}
-	if env.Kind == "" {
-		return db.Invalid("kind is required")
-	}
-	reply, err := s.Channels.Deliver(id, session, env)
-	if errors.Is(err, workerchan.ErrReplaced) {
-		return &db.ConflictError{Code: "channel_replaced", Msg: "this channel session was replaced or ended; reconnect the stream"}
-	}
-	if err != nil {
-		return err
-	}
-	if reply == nil {
-		w.WriteHeader(http.StatusNoContent)
-		return nil
-	}
-	writeJSON(w, http.StatusOK, reply)
+	s.Channels.ServePost(w, r, id)
 	return nil
 }
 
@@ -129,6 +64,9 @@ func (s *server) workerLeave(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.Channels.Close(id)
+	if s.Machines != nil {
+		s.Machines.Leave(id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

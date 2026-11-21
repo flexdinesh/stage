@@ -130,8 +130,12 @@ func (l *Local) SetConnector(kind string, c harness.Connector) {
 	l.mu.Unlock()
 }
 
-// Set is the server's machines, in id order.
-type Set struct{ list []Machine }
+// Set is the server's machines, in id order. Remote machines join and
+// leave while the server runs (Add, Remove). Safe for concurrent use.
+type Set struct {
+	mu   sync.RWMutex
+	list []Machine
+}
 
 // NewSet validates ms: positive, unique ids.
 func NewSet(ms ...Machine) (*Set, error) {
@@ -157,9 +161,43 @@ func MustSet(ms ...Machine) *Set {
 	return s
 }
 
+// Add hosts m (a machine that joined); an error when its id is invalid or
+// already hosted.
+func (s *Set) Add(m Machine) error {
+	if m.ID() <= 0 {
+		return fmt.Errorf("machine with invalid id %d", m.ID())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i, found := slices.BinarySearchFunc(s.list, m.ID(), func(x Machine, id int64) int { return cmp.Compare(x.ID(), id) })
+	if found {
+		return fmt.Errorf("machine %d hosted twice", m.ID())
+	}
+	s.list = slices.Insert(s.list, i, m)
+	return nil
+}
+
+// Remove stops hosting machine id (it was removed); the in-process machine
+// stays. False when no remote machine id was hosted.
+func (s *Set) Remove(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, m := range s.list {
+		if m.ID() != id {
+			continue
+		}
+		if _, local := m.(*Local); local {
+			return false
+		}
+		s.list = slices.Delete(s.list, i, i+1)
+		return true
+	}
+	return false
+}
+
 // Get is the host of machine id.
 func (s *Set) Get(id int64) (Machine, bool) {
-	for _, m := range s.list {
+	for _, m := range s.All() {
 		if m.ID() == id {
 			return m, true
 		}
@@ -178,11 +216,15 @@ func (s *Set) Local(id int64) (*Local, bool) {
 }
 
 // All machines in id order.
-func (s *Set) All() []Machine { return slices.Clone(s.list) }
+func (s *Set) All() []Machine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.list)
+}
 
 // Adapter is connection's installed adapter, on whichever machine hosts it.
 func (s *Set) Adapter(connection int64) (execution.Adapter, bool) {
-	for _, m := range s.list {
+	for _, m := range s.All() {
 		if a, ok := m.Adapter(connection); ok {
 			return a, true
 		}
@@ -193,7 +235,7 @@ func (s *Set) Adapter(connection int64) (execution.Adapter, bool) {
 // Adapters are every machine's installed adapters by connection.
 func (s *Set) Adapters() map[int64]execution.Adapter {
 	out := map[int64]execution.Adapter{}
-	for _, m := range s.list {
+	for _, m := range s.All() {
 		maps.Copy(out, m.Adapters())
 	}
 	return out
@@ -203,7 +245,7 @@ func (s *Set) Adapters() map[int64]execution.Adapter {
 // each names a registered connected kind.
 func (s *Set) Connectors(reg *harness.Registry) (harness.Connectors, error) {
 	m := map[int64]map[string]harness.Connector{}
-	for _, mc := range s.list {
+	for _, mc := range s.All() {
 		if cs := mc.Connectors(); len(cs) > 0 {
 			m[mc.ID()] = cs
 		}

@@ -46,7 +46,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 				if e != nil {
 					return e
 				}
-				resolver, ok := a.(execution.LinkResolver)
+				resolver, ok := execution.As[execution.LinkResolver](a)
 				if !ok {
 					return db.Invalid("this connection cannot resolve native session links")
 				}
@@ -66,7 +66,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			if e != nil {
 				return
 			}
-			if resolver, ok := a.(execution.LinkResolver); ok {
+			if resolver, ok := execution.As[execution.LinkResolver](a); ok {
 				if native, e := resolver.ResolveLink(r.Context(), raw); e == nil {
 					ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, ThreadID: native.ExternalSessionID}, nil
 				}

@@ -38,7 +38,7 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if err != nil {
 		return p, err
 	}
-	resolver, ok := adapter.(execution.LinkResolver)
+	resolver, ok := execution.As[execution.LinkResolver](adapter)
 	if !ok {
 		return p, db.Conflict("This harness cannot resolve session links.")
 	}
