@@ -25,7 +25,9 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	f.Tag = strings.TrimSpace(q.Get("tag"))
+	if q.Has("tag") {
+		return db.Invalid("tag was removed: tasks have no tags")
+	}
 	f.Q = strings.TrimSpace(q.Get("q"))
 	if q.Has("originThreadId") {
 		return db.Invalid("originThreadId was removed in API v6; supply originConnectionId and originSessionId")
@@ -80,7 +82,6 @@ type taskConfigReq struct {
 	RuntimeMode        *string                 `json:"runtimeMode"`
 	InteractionMode    *string                 `json:"interactionMode"`
 	Workspace          *db.Workspace           `json:"workspace"`
-	Tags               []string                `json:"tags"`
 	TreeID             *int64                  `json:"treeId"`
 	Needs              []int64                 `json:"needs"`
 	StartMode          *db.StartMode           `json:"startMode"`
@@ -144,7 +145,6 @@ func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
 		RuntimeMode:        "full-access",
 		InteractionMode:    "default",
 		Workspace:          db.Workspace{Type: "root"},
-		Tags:               cleanTags(req.Tags),
 		TreeID:             req.TreeID,
 		Needs:              req.Needs,
 		StartMode:          req.StartMode,
@@ -409,7 +409,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if err := validateConfigPatch(configPatch{
 		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
-		Workspace: &p.Workspace, Tags: &p.Tags, AttachmentIDs: &p.AttachmentIDs,
+		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
 	}, s.Store.IsT3); err != nil {
 		return err
 	}
@@ -457,7 +457,6 @@ type configPatch struct {
 	RuntimeMode        *db.Optional[string]
 	InteractionMode    *db.Optional[string]
 	Workspace          *db.Optional[db.Workspace]
-	Tags               *db.Optional[[]string]
 	AttachmentIDs      *db.Optional[[]int64]
 }
 
@@ -497,9 +496,6 @@ func validateConfigPatch(c configPatch, isT3 func(int64) bool) error {
 		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID, isT3); err != nil {
 			return err
 		}
-	}
-	if c.Tags.Set {
-		c.Tags.V, c.Tags.Null = cleanTags(c.Tags.V), false
 	}
 	if c.AttachmentIDs.Set {
 		if err := attachmentIDs(c.AttachmentIDs.V); err != nil {

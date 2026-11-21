@@ -15,7 +15,7 @@ func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int6
 	t.Helper()
 	sc, err := s.CreateSchedule(ctx, db.NewSchedule{
 		ProjectID: projectID, Title: "nightly", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Tags: []string{"deps"},
+		InteractionMode: "default", Workspace: db.Workspace{Type: "root"},
 		Cron: cron, Tz: "UTC",
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestFireSchedule(t *testing.T) {
 	}
 	if task.State != db.StateBacklog || task.StartAt == nil || !task.StartAt.Equal(fire) || task.StartTz == nil || *task.StartTz != "UTC" ||
 		task.ScheduleID == nil || *task.ScheduleID != sc.ID || task.ScheduleTitle == nil || *task.ScheduleTitle != "nightly" ||
-		task.Title != "nightly" || len(task.Tags) != 1 {
+		task.Title != "nightly" {
 		t.Fatalf("spawned = %+v", task)
 	}
 	got, _ := s.GetSchedule(ctx, sc.ID)

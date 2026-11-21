@@ -40,7 +40,7 @@ type configFlags struct {
 	executionConfig                                             *agenttools.ConfigInput
 	project, title, prompt, promptFile, provider, model, effort string
 	runtime, mode, baseRef, branch, base, workspace             string
-	options, tags, images                                       list
+	options, images                                             list
 }
 
 func (f *configFlags) configInputFlag(c *cmd) {
@@ -75,7 +75,6 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
 	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; unavailable predecessors block launch)")
 	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
-	c.fs.Var(&f.tags, "tag", "tag (repeatable)")
 	c.fs.Var(&f.images, "image", "image file (repeatable)")
 }
 
@@ -124,7 +123,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	return agenttools.ConfigArgs{
 		WorkspaceType: f.workspace, ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
 		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
-		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, Tags: f.tags, ImagePaths: f.images,
+		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, ImagePaths: f.images,
 	}, nil
 }
 
@@ -164,9 +163,6 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 	}
 	if promptSet {
 		a.Prompt = &prompt
-	}
-	if c.set("tag") {
-		a.Tags = f.tags
 	}
 	return a, nil
 }
@@ -246,7 +242,6 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		var states string
 		c.fs.StringVar(&a.Project, "project", "", "project")
 		c.fs.StringVar(&states, "state", "", "states")
-		c.fs.StringVar(&a.Tag, "tag", "", "tag")
 		c.fs.StringVar(&a.Query, "q", "", "search")
 		c.fs.StringVar(&a.Closed, "closed", "", "false|true|all (default false: open tasks only)")
 		c.fs.IntVar(&a.Limit, "limit", 50, "max rows")
@@ -605,11 +600,9 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 		var projectID int64
 		c.fs.Int64Var(&projectID, "project", 0, "bind to this Stage project ID")
 		c.fs.StringVar(&a.NewProjectTitle, "new-project", "", "bind to a new project")
-		var tags list
 		var tree int64
 		c.fs.StringVar(&a.Title, "title", "", "task title (default: the session title)")
 		c.fs.StringVar(&a.InitialNote, "initial-note", "", "initial journal note")
-		c.fs.Var(&tags, "tag", "tag (repeatable)")
 		c.fs.Int64Var(&tree, "tree", 0, "also put the task in this tree")
 		if err := c.parse(rest); err != nil {
 			return err
@@ -627,7 +620,7 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		a.ProjectID = int64Flag(c, "project", projectID)
-		a.Tags, a.TreeID = tags, int64Flag(c, "tree", tree)
+		a.TreeID = int64Flag(c, "tree", tree)
 		res, err := c.ops().AdoptSession(ctx, a)
 		if err != nil {
 			return err

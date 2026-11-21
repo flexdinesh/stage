@@ -15,7 +15,6 @@ import {
   type UpdateTaskRequest,
   type Workspace,
 } from "../api/types.ts";
-import { parseTags } from "../lib/format.ts";
 import {
   DEFAULT_REPEAT,
   REPEAT_PRESETS,
@@ -46,7 +45,7 @@ import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessF
 import { prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText } from "./ui.tsx";
+import { Alert, Button, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText } from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
 export const START_MODES = ["now", "backlog", "at", "repeat"] as const;
@@ -77,7 +76,6 @@ interface FormState {
   workspaceType: WorkspaceChoice;
   baseRef: string;
   branch: string;
-  tags: string;
   notes: string;
   mode: StartMode;
   /** Append each need's handoff at launch (a task with needs). */
@@ -110,7 +108,6 @@ type Template = Pick<
   | "title"
   | "prompt"
   | "workspace"
-  | "tags"
 >;
 
 function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeStart" | "startLocal" | "repeat" | "tz"> {
@@ -121,7 +118,6 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeSt
     workspaceType: workspaceChoice(t.workspace),
     baseRef: t.workspace.type === "worktree" ? t.workspace.baseRef : "origin/main",
     branch: t.workspace.type === "worktree" ? (t.workspace.branch ?? "") : "",
-    tags: t.tags.join(", "),
     notes: "",
   };
 }
@@ -186,7 +182,6 @@ function initialState(
     workspaceType: "root",
     baseRef: "origin/main",
     branch: "",
-    tags: "",
     notes: "",
     mode: defaultMode ?? newModes(tree)[0] ?? "now",
   };
@@ -331,7 +326,6 @@ function TaskFormDrawer({
       connectionId: connection,
       executionConfig: effectiveConfig,
       workspace,
-      tags: parseTags(s.tags),
     };
   }
 
@@ -344,8 +338,7 @@ function TaskFormDrawer({
       }
       const timed = mode === "at" ? { startLocal: s.startLocal, startTz: s.tz } : null;
       if (task !== undefined) {
-        const tags = parseTags(s.tags);
-        const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim(), tags };
+        const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim() };
         if (full) {
           if (needs.length > 0 && s.handoff !== task.handoff) body.handoff = s.handoff;
           if (inTree && s.treeStart !== (task.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
@@ -438,7 +431,7 @@ function TaskFormDrawer({
       <form onSubmit={submit} onKeyDown={onKeyDown} className="flex flex-col gap-3.5">
         {task === undefined || full ? null : (
           <Alert tone="plain">
-            Task is <TaskStateBadge state={task.state} />; only title and tags can change. Add notes in its journal.
+            Task is <TaskStateBadge state={task.state} />; only the title can change. Add notes in its journal.
           </Alert>
         )}
         {!isNew || defaultTree === undefined ? null : (
@@ -587,22 +580,6 @@ function TaskFormDrawer({
             error={previewError}
           />
         ) : null}
-        <Field
-          label="Tags"
-          hint={
-            parseTags(s.tags).length === 0 ? (
-              "Comma separated."
-            ) : (
-              <span className="flex flex-wrap gap-1">
-                {parseTags(s.tags).map((t) => (
-                  <Chip key={t}>#{t}</Chip>
-                ))}
-              </span>
-            )
-          }
-        >
-          {(id) => <Input id={id} value={s.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="smoke, refactor" />}
-        </Field>
         {task === undefined ? (
           <Field
             label={mode === "repeat" ? "Notes template" : "Initial note"}

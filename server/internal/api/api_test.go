@@ -266,7 +266,6 @@ type task struct {
 	Prompt        string         `json:"prompt"`
 	Config        *execConfig    `json:"executionConfig"`
 	Workspace     map[string]any `json:"workspace"`
-	Tags          []string       `json:"tags"`
 	State         string         `json:"state"`
 	T3ThreadID    *string        `json:"externalSessionId"`
 	TreeID        *int64         `json:"treeId"`
@@ -403,12 +402,11 @@ func TestTaskLifecycle(t *testing.T) {
 	tk := e.task(p.ID, "Say OK", map[string]any{
 		"providerInstanceId": "claude", "model": "claude-haiku-5-5",
 		"modelOptions": []map[string]any{{"id": "effort", "value": "low"}},
-		"tags":         []string{"smoke", " smoke ", ""},
 	})
 	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
 		t.Fatalf("created %+v", tk)
 	}
-	if len(tk.Tags) != 1 || tk.Workspace["type"] != "root" {
+	if tk.Workspace["type"] != "root" {
 		t.Fatalf("defaults %+v", tk)
 	}
 	// Legacy model input is accepted and reported only as executionConfig.
@@ -569,7 +567,9 @@ func TestTaskActions(t *testing.T) {
 		t.Fatalf("branch %q", d.Branch)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"prompt": "x"}, 409, nil)
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": "B", "tags": []string{"t"}}, 200, &patched)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"tags": []string{"t"}}, 400, nil)
+	e.must("GET", "/api/tasks?tag=t", nil, 400, nil)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": "B"}, 200, &patched)
 	if patched.Title != "B" {
 		t.Fatalf("title %q", patched.Title)
 	}
@@ -609,7 +609,7 @@ func TestTaskActions(t *testing.T) {
 	var list struct {
 		Tasks []task `json:"tasks"`
 	}
-	e.must("GET", "/api/tasks?state=running,backlog&tag=t&q=b", nil, 200, &list)
+	e.must("GET", "/api/tasks?state=running,backlog&q=b", nil, 200, &list)
 	if len(list.Tasks) != 1 || list.Tasks[0].ID != tk.ID {
 		t.Fatalf("filtered %+v", list.Tasks)
 	}

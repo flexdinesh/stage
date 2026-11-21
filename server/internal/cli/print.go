@@ -196,9 +196,6 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 		fmt.Fprintf(w, "artifact  %s %s\n", link.Label, link.URL)
 	}
 	printTask(w, d.Task)
-	if len(d.Tags) > 0 {
-		fmt.Fprintf(w, "  tags     %s\n", strings.Join(d.Tags, ", "))
-	}
 	printHandoff(w, d)
 	printLaunchBase(w, d.CurrentLaunchBase)
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))

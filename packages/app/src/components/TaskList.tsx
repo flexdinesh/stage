@@ -264,9 +264,6 @@ export function TaskRow({
               <span className="max-w-[24ch] truncate">{chip.label}</span>
             </Link>
           )}
-          {task.tags.map((tag) => (
-            <span key={tag}>#{tag}</span>
-          ))}
         </div>
         <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
       </div>

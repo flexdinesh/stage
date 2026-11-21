@@ -151,7 +151,7 @@ Usage:
                                       #TASK_ID or thread id names (with its session/task)
   stage projects ls
   stage models ls [--connection ID]
-  stage task ls [--project P] [--state S,..] [--tag T] [-q TEXT] [--closed true|all] [--limit N]
+  stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
                    [--start-mode auto|manual|inherit] [--base-task ID]
@@ -179,14 +179,14 @@ Usage:
   stage schedule rm|run|pause|resume ID
   stage schedule preview --cron CRON --tz ZONE
   stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT]
-                       [--tag T]... [--tree ID]   track a session as a task (default: your session)
+                       [--tree ID]   track a session as a task (default: your session)
   stage mcp                           the agent tools over stdio MCP
   stage setup mcp [--claude] [--codex] [--http]
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
 
 Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
-        --mode default|plan --base-ref REF --branch NAME --tag T...
+        --mode default|plan --base-ref REF --branch NAME
         --prompt-file PATH --image PATH...
 Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
 Trees: joining a tree without --needs makes a parallel root; --needs ID runs it after

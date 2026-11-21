@@ -69,9 +69,6 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceText(s.workspace)}</Chip>
-        {s.tags.map((t) => (
-          <Chip key={t}>#{t}</Chip>
-        ))}
       </div>
 
       <div className="flex flex-col gap-3.5">
@@ -192,7 +189,6 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
         <Detail label="Permission">{executionModes(s).permission || "Harness default"}</Detail>
         <Detail label="Mode">{executionModes(s).mode || "Harness default"}</Detail>
         <Detail label="Workspace">{workspaceText(s.workspace)}</Detail>
-        <Detail label="Tags">{s.tags.length === 0 ? "-" : s.tags.map((t) => `#${t}`).join(" ")}</Detail>
         <Detail label="Created">
           <span title={dateTime(s.createdAt)}>{relativeTime(s.createdAt)}</span>
         </Detail>

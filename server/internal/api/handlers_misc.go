@@ -12,7 +12,7 @@ import (
 
 // ---- explicit session lookup and adoption ----
 
-// adoptThread: POST /api/connections/1/sessions/{id}/adopt {title?, initialNote?, tags?,
+// adoptThread: POST /api/connections/1/sessions/{id}/adopt {title?, initialNote?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
 // task already owns it.
 func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
@@ -26,7 +26,6 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 		NewProjectTitle string         `json:"newProjectTitle"`
 		Title           *string        `json:"title"`
 		InitialNote     *string        `json:"initialNote"`
-		Tags            []string       `json:"tags"`
 		TreeID          *int64         `json:"treeId"`
 	}
 	if err := decodeStrict(r, &req); err != nil {
@@ -41,7 +40,7 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	}
 	task, created, err := s.Store.AdoptThread(r.Context(), db.AdoptInput{
 		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Binding: binding,
-		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, Tags: cleanTags(req.Tags), TreeID: req.TreeID,
+		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, TreeID: req.TreeID,
 	})
 	if err != nil {
 		return err

@@ -439,7 +439,6 @@ export interface Task {
   title: string;
   prompt: string;
   workspace: Workspace;
-  tags: string[];
   state: TaskState;
   externalSessionId: string | null;
   /** The task's tree; null outside one. */
@@ -724,7 +723,6 @@ export interface AdoptSessionRequest {
   newProjectTitle?: string;
   title?: string;
   initialNote?: string;
-  tags?: string[];
   treeId?: number;
 }
 
@@ -744,7 +742,6 @@ export interface CreateTaskRequest {
   runtimeMode?: RuntimeMode;
   interactionMode?: InteractionMode;
   workspace?: Workspace;
-  tags?: string[];
   initialNote?: string;
   /** Join this tree (default: the needs' tree, else a new tree when there are needs). */
   treeId?: number;
@@ -776,7 +773,6 @@ export interface UpdateTaskRequest {
   runtimeMode?: RuntimeMode;
   interactionMode?: InteractionMode;
   workspace?: Workspace;
-  tags?: string[];
   /** Backlog only: null inherits the tree's. */
   startMode?: StartMode | null;
   /** Backlog only: append each need's handoff at launch. */
@@ -851,7 +847,6 @@ export interface Schedule {
   title: string;
   prompt: string;
   workspace: Workspace;
-  tags: string[];
   notes: string;
   attachments: Attachment[];
   /** Standard 5-field cron, evaluated in tz. */
@@ -906,7 +901,6 @@ export interface CreateScheduleRequest {
   runtimeMode?: RuntimeMode;
   interactionMode?: InteractionMode;
   workspace?: Workspace;
-  tags?: string[];
   notes?: string;
   attachmentIds?: number[];
   cron: string;
@@ -929,7 +923,6 @@ export interface SchedulePreview {
 export interface TaskListQuery {
   project?: number;
   state?: TaskState[];
-  tag?: string;
   q?: string;
   from?: string;
   to?: string;

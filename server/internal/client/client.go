@@ -291,7 +291,6 @@ type CreateTask struct {
 	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
 	InteractionMode    *string                 `json:"interactionMode,omitempty"`
 	Workspace          *db.Workspace           `json:"workspace,omitempty"`
-	Tags               []string                `json:"tags,omitempty"`
 	InitialNote        *string                 `json:"initialNote,omitempty"`
 	TreeID             *int64                  `json:"treeId,omitempty"`
 	Needs              []int64                 `json:"needs,omitempty"`
@@ -317,7 +316,6 @@ type CreateSchedule struct {
 	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
 	InteractionMode    *string                 `json:"interactionMode,omitempty"`
 	Workspace          *db.Workspace           `json:"workspace,omitempty"`
-	Tags               []string                `json:"tags,omitempty"`
 	Notes              *string                 `json:"notes,omitempty"`
 	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
 	Cron               string                  `json:"cron"`
@@ -331,11 +329,10 @@ type Patch map[string]any
 
 // Followup is the POST /api/tasks/:id/followup body.
 type TaskQuery struct {
-	OriginSession  *db.SessionRef
-	ProjectID      *int64
-	States         []string
-	Tag            string
-	Q              string
+	OriginSession *db.SessionRef
+	ProjectID     *int64
+	States        []string
+	Q             string
 	// Closed: "" (open only), "true" (archived or in a done/archived tree)
 	// or "all".
 	Closed string
@@ -500,9 +497,6 @@ func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	if len(f.States) > 0 {
 		q.Set("state", strings.Join(f.States, ","))
 	}
-	if f.Tag != "" {
-		q.Set("tag", f.Tag)
-	}
 	if f.Q != "" {
 		q.Set("q", f.Q)
 	}
@@ -627,7 +621,6 @@ type AdoptSession struct {
 	NewProjectTitle string         `json:"newProjectTitle,omitempty"`
 	Title           *string        `json:"title,omitempty"`
 	InitialNote     *string        `json:"initialNote,omitempty"`
-	Tags            []string       `json:"tags,omitempty"`
 	TreeID          *int64         `json:"treeId,omitempty"`
 }
 
