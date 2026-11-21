@@ -38,7 +38,9 @@ type Service struct {
 	ctx        context.Context // background refresh and renewal end with it
 	log        *slog.Logger
 	id         int64
-	store      db.MachineStore // the machine this OpenCode setup runs on
+	settings   Settings // the machine this OpenCode setup runs on
+	identity   Identity
+	local      Local
 	env, saved config.OpenCodeSettings
 	verified   string
 	problem    string
@@ -67,19 +69,72 @@ type pairing struct {
 	at                    time.Time
 }
 
-func New(ctx context.Context, store db.MachineStore, env config.OpenCodeSettings, install func(old, next int64, a execution.Adapter), log *slog.Logger) (*Service, error) {
-	id, err := store.EnsureOpenCode(ctx)
+// Settings persists the machine's OpenCode setup and credential, saved
+// together in one call. On the local machine both live in the store; a
+// worker keeps the credential in its own file (ADR 0002).
+type Settings interface {
+	// OpenCodeSettings is the saved setup and credential, and the address
+	// the active connection's service was verified at ("" before the first).
+	OpenCodeSettings(ctx context.Context) (config.OpenCodeSetup, config.OpenCodeCredential, string, error)
+	SaveOpenCodeSettings(ctx context.Context, setup config.OpenCodeSetup, cred config.OpenCodeCredential) error
+}
+
+// Identity is the main server's record of the machine's OpenCode
+// connections: their identities, instance switches and the stored evidence
+// a service must prove it serves.
+type Identity interface {
+	// EnsureOpenCode is the machine's active OpenCode connection.
+	EnsureOpenCode(ctx context.Context) (int64, error)
+	SetConnectionIdentity(ctx context.Context, id int64, identity, label string) error
+	SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error)
+	RetiredConnections(ctx context.Context, kind string) ([]int64, error)
+	ConnectionEvidence(ctx context.Context, id int64) ([]db.ProjectBinding, []execution.Observation, bool, error)
+}
+
+// Local is the machine-local work: the OpenCode service registered on the
+// machine (service.json) and its version probe.
+type Local interface {
+	Registration() (opencode.Registration, error)
+	Probe(ctx context.Context, r opencode.Registration) (string, error)
+}
+
+// LocalService reads this process's machine's registration.
+type LocalService struct{}
+
+func (LocalService) Registration() (opencode.Registration, error) { return opencode.ReadRegistration() }
+func (LocalService) Probe(ctx context.Context, r opencode.Registration) (string, error) {
+	return opencode.Probe(ctx, r)
+}
+
+// Ports are what the OpenCode setup needs from its machine and the main
+// server; never the store itself.
+type Ports struct {
+	Settings Settings
+	Identity Identity
+	// Install moves the OpenCode adapter from connection old to next (equal
+	// unless the service was replaced); a nil adapter disconnects.
+	Install func(old, next int64, a execution.Adapter)
+	// Local: nil is LocalService.
+	Local Local
+}
+
+func New(ctx context.Context, p Ports, env config.OpenCodeSettings, log *slog.Logger) (*Service, error) {
+	if p.Local == nil {
+		p.Local = LocalService{}
+	}
+	id, err := p.Identity.EnsureOpenCode(ctx)
 	if err != nil {
 		return nil, err
 	}
-	saved, verified, err := store.OpenCodeSettings(ctx)
+	setup, cred, verified, err := p.Settings.OpenCodeSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
+	saved := config.JoinOpenCode(setup, cred)
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{ctx: ctx, log: log, id: id, store: store, env: env, saved: saved, verified: verified, install: install, now: time.Now}
+	s := &Service{ctx: ctx, log: log, id: id, settings: p.Settings, identity: p.Identity, local: p.Local, env: env, saved: saved, verified: verified, install: p.Install, now: time.Now}
 	cfg, _, err := s.resolve(saved)
 	switch {
 	case err != nil:
@@ -90,7 +145,7 @@ func New(ctx context.Context, store db.MachineStore, env config.OpenCodeSettings
 	default:
 		// A moved local service is reconciled by the first health check.
 		if cfg.Auth == config.OpenCodeAuthLocal {
-			if reg, err := opencode.ReadRegistration(); err == nil {
+			if reg, err := s.local.Registration(); err == nil {
 				cfg.Username, cfg.Password = localCredentials(reg)
 			}
 		}
@@ -101,7 +156,7 @@ func New(ctx context.Context, store db.MachineStore, env config.OpenCodeSettings
 		}
 		// Record the original address before any task can acquire its adapter.
 		if verified == "" {
-			if err := store.SetConnectionIdentity(ctx, id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
+			if err := p.Identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
 				return nil, err
 			}
 			s.verified = cfg.Endpoint
@@ -125,6 +180,12 @@ func (s *Service) activate(old int64, a *opencode.Adapter, cfg config.OpenCodeSe
 	a.OnHealth(s.checked)
 	s.active, s.current = a, cfg
 	s.install(old, s.id, a)
+}
+
+// save persists next's setup and credential together.
+func (s *Service) save(ctx context.Context, next config.OpenCodeSettings) error {
+	setup, cred := next.Split()
+	return s.settings.SaveOpenCodeSettings(ctx, setup, cred)
 }
 
 func localCredentials(reg opencode.Registration) (string, string) {
@@ -156,7 +217,7 @@ func (s *Service) refreshLocal(ctx context.Context) {
 	if s.active == nil || s.current.Auth != config.OpenCodeAuthLocal {
 		return
 	}
-	reg, err := opencode.ReadRegistration()
+	reg, err := s.local.Registration()
 	if err != nil {
 		return
 	}
@@ -199,14 +260,14 @@ func (s *Service) refreshLocal(ctx context.Context) {
 			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
 			return
 		}
-		if err := s.store.SetConnectionIdentity(ctx, s.id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
+		if err := s.identity.SetConnectionIdentity(ctx, s.id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
 			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
 			return
 		}
 		s.verified = cfg.Endpoint
 	}
 	if next.Endpoint != s.saved.Endpoint {
-		if err := s.store.SaveOpenCodeSettings(ctx, next); err != nil {
+		if err := s.save(ctx, next); err != nil {
 			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
 			return
 		}
@@ -255,7 +316,7 @@ func (s *Service) useToken(ctx context.Context, token string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.SaveOpenCodeSettings(ctx, next); err != nil {
+	if err := s.save(ctx, next); err != nil {
 		return err
 	}
 	s.saved = next
@@ -346,7 +407,7 @@ func (s *Service) localStatus(ctx context.Context) config.OpenCodeLocal {
 		return s.localState
 	}
 	out := config.OpenCodeLocal{}
-	reg, err := opencode.ReadRegistration()
+	reg, err := s.local.Registration()
 	var unusable *opencode.RegistrationError
 	switch {
 	case errors.As(err, &unusable):
@@ -356,7 +417,7 @@ func (s *Service) localStatus(ctx context.Context) config.OpenCodeLocal {
 	default:
 		out.URL, out.Version = reg.URL, reg.Version
 		call, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-		version, err := opencode.Probe(call, reg)
+		version, err := s.local.Probe(call, reg)
 		cancel()
 		if err != nil {
 			out.Reason = "unreachable"
@@ -491,7 +552,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 		return db.Conflict("%s", errManaged)
 	}
 	next := config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}
-	if err := s.store.SaveOpenCodeSettings(ctx, next); err != nil {
+	if err := s.save(ctx, next); err != nil {
 		return err
 	}
 	s.saved, s.problem, s.skipLocal, s.renewFailed, s.redeemed = next, "", "", time.Time{}, pairing{}
@@ -511,7 +572,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		return err
 	}
 	if cfg.Auth == config.OpenCodeAuthLocal {
-		reg, err := opencode.ReadRegistration()
+		reg, err := s.local.Registration()
 		if err != nil {
 			return &db.ConflictError{Code: CodeLocalUnavailable, Msg: err.Error()}
 		}
@@ -537,7 +598,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 	id, label := s.id, publicAddress(cfg.Endpoint)
 	switch {
 	case s.verified == "":
-		if err := s.store.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
+		if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
 			return err
 		}
 	case cfg.Endpoint != s.verified:
@@ -548,7 +609,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		}
 		if continuity == nil && held {
 			// The same service at a new address.
-			if err := s.store.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
+			if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
 				return err
 			}
 			break
@@ -559,7 +620,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		}
 		if continuity == nil && revive == 0 {
 			// Nothing stored to prove either way, and no earlier service.
-			if err := s.store.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
+			if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
 				return err
 			}
 			break
@@ -574,7 +635,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 			}
 			return &db.ConflictError{Code: "instance_changed", Msg: msg}
 		}
-		sw, err := s.store.SwitchInstance(ctx, opencode.Descriptor, cfg.Endpoint, label, revive)
+		sw, err := s.identity.SwitchInstance(ctx, opencode.Kind, cfg.Endpoint, label, revive)
 		if err != nil {
 			return err
 		}
@@ -585,7 +646,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 			id = sw.New
 		}
 	}
-	if err := s.store.SaveOpenCodeSettings(ctx, next); err != nil {
+	if err := s.save(ctx, next); err != nil {
 		return err
 	}
 	old := s.id
@@ -597,19 +658,19 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 // holds reports whether a connection stores anything a service must prove
 // it serves (bindings, sessions, or a launch without a known session).
 func (s *Service) holds(ctx context.Context, id int64) (bool, error) {
-	bindings, sessions, unknown, err := s.store.ConnectionEvidence(ctx, id)
+	bindings, sessions, unknown, err := s.identity.ConnectionEvidence(ctx, id)
 	return unknown || len(bindings)+len(sessions) > 0, err
 }
 
 // previous is the replaced OpenCode connection the candidate service proves
 // to be (0 when none): it serves that connection's workspaces and sessions.
 func (s *Service) previous(ctx context.Context, a *opencode.Adapter) (int64, error) {
-	ids, err := s.store.RetiredConnections(ctx, opencode.Kind)
+	ids, err := s.identity.RetiredConnections(ctx, opencode.Kind)
 	if err != nil {
 		return 0, err
 	}
 	for _, id := range ids {
-		bindings, sessions, unknown, err := s.store.ConnectionEvidence(ctx, id)
+		bindings, sessions, unknown, err := s.identity.ConnectionEvidence(ctx, id)
 		if err != nil {
 			return 0, err
 		}
@@ -624,7 +685,7 @@ func (s *Service) previous(ctx context.Context, a *opencode.Adapter) (int64, err
 }
 
 func (s *Service) verifyContinuity(ctx context.Context, a *opencode.Adapter, id int64) error {
-	bindings, sessions, unknown, err := s.store.ConnectionEvidence(ctx, id)
+	bindings, sessions, unknown, err := s.identity.ConnectionEvidence(ctx, id)
 	if err != nil {
 		return err
 	}

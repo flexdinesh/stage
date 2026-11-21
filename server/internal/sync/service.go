@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 	gosync "sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
@@ -33,9 +33,8 @@ type CatalogSnapshot struct {
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
-	adapterMu                                                                    gosync.RWMutex
 	store                                                                        *db.Store
-	adapters                                                                     map[int64]execution.Adapter
+	machines                                                                     *machine.Set // every machine's adapters, connectors and ops
 	log                                                                          *slog.Logger
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
@@ -56,17 +55,60 @@ type Service struct {
 func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service {
 	return NewWithAdapters(store, map[int64]execution.Adapter{store.LegacyT3ID(): adapter}, log)
 }
+
+// NewWithAdapters hosts adapters on in-process machines, each on its
+// connection's machine (tests and fixed compositions).
 func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
+	locals := map[int64]*machine.Local{}
+	for id, a := range adapters {
+		m := store.ConnectionMachine(id)
+		if m == 0 {
+			m = db.LocalMachine
+		}
+		if locals[m] == nil {
+			locals[m] = machine.NewLocal(m, harness.Profile{}, nil)
+		}
+		locals[m].Install(id, id, a)
+	}
+	if locals[db.LocalMachine] == nil {
+		locals[db.LocalMachine] = machine.NewLocal(db.LocalMachine, harness.Profile{}, nil)
+	}
+	ms := make([]machine.Machine, 0, len(locals))
+	for _, l := range locals {
+		ms = append(ms, l)
+	}
+	s := NewForMachines(store, machine.MustSet(ms...), log)
+	for _, l := range locals {
+		l.OnChange(s.ConnectionsChanged)
+	}
+	return s
+}
+
+// NewForMachines coordinates the harnesses machines host. Each in-process
+// machine's change hook must call ConnectionsChanged.
+func NewForMachines(store *db.Store, machines *machine.Set, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: store, adapters: adapters, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, CatalogEvery: 10 * time.Minute, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), kickCatalog: make(chan struct{}, 1), started: time.Now()}
+	return &Service{store: store, machines: machines, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, CatalogEvery: 10 * time.Minute, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), kickCatalog: make(chan struct{}, 1), started: time.Now()}
 }
+
+// Machines are the machines this coordinator drives.
+func (s *Service) Machines() *machine.Set { return s.machines }
+
+// Ops is the fs and process work of machine id (false when no host serves
+// it).
+func (s *Service) Ops(id int64) (machine.Ops, bool) {
+	m, ok := s.machines.Get(id)
+	if !ok {
+		return nil, false
+	}
+	return m.Ops(), true
+}
+
 func (s *Service) Adapter(id int64) (execution.Adapter, error) {
-	s.adapterMu.RLock()
-	defer s.adapterMu.RUnlock()
-	a := s.adapters[id]
-	if a == nil {
+	a, ok := s.machines.Adapter(id)
+	if !ok {
 		// A replaced instance keeps its history but is never reached again.
 		if s.store.Harness(id) != "" && !s.store.ConnectionActive(id) {
 			return nil, db.ConnectionRetired()
@@ -76,38 +118,17 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 	return a, nil
 }
 
-// SetAdapter installs a connection's adapter; nil uninstalls it.
-func (s *Service) SetAdapter(id int64, a execution.Adapter) {
-	s.adapterMu.Lock()
-	if a == nil {
-		delete(s.adapters, id)
-	} else {
-		s.adapters[id] = a
-	}
-	s.adapterMu.Unlock()
-	s.Kick()
-}
-
-// SwapAdapter moves a harness to a new connection after its instance
-// changed: old is no longer polled, watched or launched on.
-func (s *Service) SwapAdapter(old, next int64, a execution.Adapter) {
-	s.adapterMu.Lock()
+// ConnectionsChanged follows a machine's adapters after its harness moved
+// from connection old to next (an install, a replaced instance or a
+// disconnect): old is no longer polled, watched or launched on.
+func (s *Service) ConnectionsChanged(old, next int64) {
 	if old != next {
-		delete(s.adapters, old)
 		s.watchSeeded.Delete(old)
 	}
-	if a == nil {
-		delete(s.adapters, next) // disconnected
-	} else {
-		s.adapters[next] = a
-	}
-	s.adapterMu.Unlock()
 	s.Kick()
 }
 func (s *Service) connections() map[int64]execution.Adapter {
-	s.adapterMu.RLock()
-	defer s.adapterMu.RUnlock()
-	return maps.Clone(s.adapters)
+	return s.machines.Adapters()
 }
 func (s *Service) lock(id int64) func() {
 	value, _ := s.locks.LoadOrStore(id, &gosync.Mutex{})

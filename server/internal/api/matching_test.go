@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -16,32 +14,8 @@ import (
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
-func TestCheckoutRequiresExplicitSharedRoots(t *testing.T) {
-	root := t.TempDir()
-	if output, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %s %v", output, err)
-	}
-	sub := filepath.Join(root, "app")
-	if err := os.Mkdir(sub, 0700); err != nil {
-		t.Fatal(err)
-	}
-	paths := []db.SharedPath{{ConnectionID: 1, HarnessRoot: "/t3", StageRoot: root}, {ConnectionID: 2, HarnessRoot: "/oc", StageRoot: root}}
-	a, b := checkout(t.Context(), paths, 1, "/t3/app"), checkout(t.Context(), paths, 2, "/oc/app")
-	if a.common == nil || b.common == nil || !os.SameFile(a.common, b.common) || a.subproject != "app" || a.subproject != b.subproject {
-		t.Fatal(a, b)
-	}
-	if checkout(t.Context(), paths, 2, "/oc").subproject == a.subproject {
-		t.Fatal("different subproject matched")
-	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(root, "escape")); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{sub, "/t3/app", "/oc/escape"} {
-		if checkout(t.Context(), paths, 2, dir).common != nil {
-			t.Errorf("unexpected proof for %s", dir)
-		}
-	}
-	if remoteIdentity("git@host:owner/repo.git") != remoteIdentity("https://host/owner/repo") || remoteIdentity(root) != "" {
+func TestRemoteIdentityNormalizes(t *testing.T) {
+	if remoteIdentity("git@host:owner/repo.git") != remoteIdentity("https://host/owner/repo") || remoteIdentity(t.TempDir()) != "" {
 		t.Fatal("remote normalization")
 	}
 }

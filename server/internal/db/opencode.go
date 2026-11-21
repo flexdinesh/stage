@@ -22,23 +22,27 @@ func (s *Store) EnsureOpenCode(ctx context.Context, machine int64) (int64, error
 }
 
 // OpenCodeSettings are the settings of machine's active OpenCode connection
-// (migration 0018: one row per machine; none reads the defaults) and the
-// address its service was verified at ("" before the first).
-func (s *Store) OpenCodeSettings(ctx context.Context, machine int64) (config.OpenCodeSettings, string, error) {
+// (migration 0018: one row per machine; none reads the defaults), split
+// into setup and credential, and the address its service was verified at
+// ("" before the first).
+func (s *Store) OpenCodeSettings(ctx context.Context, machine int64) (config.OpenCodeSetup, config.OpenCodeCredential, string, error) {
 	c := config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}
 	var verified string
 	err := s.pool.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at FROM opencode_settings WHERE machine_id=$1`, machine).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &c.Auth, &c.TokenIssuedAt)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return c, "", err
+		setup, cred := c.Split()
+		return setup, cred, "", err
 	}
 	err = s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT identity FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active=1),'')`, machine).Scan(&verified)
-	return c, verified, err
+	setup, cred := c.Split()
+	return setup, cred, verified, err
 }
 
-// SaveOpenCodeSettings saves machine's OpenCode settings. Its active
-// connection's identity changes only through SwitchInstance or
-// SetConnectionIdentity.
-func (s *Store) SaveOpenCodeSettings(ctx context.Context, machine int64, c config.OpenCodeSettings) error {
+// SaveOpenCodeSettings saves machine's OpenCode setup and credential in one
+// write. Its active connection's identity changes only through
+// SwitchInstance or SetConnectionIdentity.
+func (s *Store) SaveOpenCodeSettings(ctx context.Context, machine int64, setup config.OpenCodeSetup, cred config.OpenCodeCredential) error {
+	c := config.JoinOpenCode(setup, cred)
 	if c.Auth == "" {
 		c.Auth = config.OpenCodeAuthNone
 	}

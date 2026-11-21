@@ -40,27 +40,31 @@ type Links struct {
 	Command string `json:"command,omitempty"`
 }
 type WorkspaceInfo struct {
-	OriginRemote  string `json:"-"`
-	ID            string
-	Title         string
-	WorkspaceRoot string
-	ArchivedAt    *time.Time
-	DeletedAt     *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// OriginRemote: the raw origin remote URL the harness reports ("" when
+	// none). It may carry credentials: only its normalized form
+	// (gitmeta.RemoteIdentity) is compared, and it is never returned to a
+	// client.
+	OriginRemote  string     `json:"originRemote,omitempty"`
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	WorkspaceRoot string     `json:"workspaceRoot"`
+	ArchivedAt    *time.Time `json:"archivedAt,omitempty"`
+	DeletedAt     *time.Time `json:"deletedAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 	// Importable: the harness treats it as a deliberate project, so
 	// discovery may import it as a Stage project (docs/architecture.md).
-	Importable bool `json:"-"`
+	Importable bool `json:"importable"`
 	// ActiveAt: last harness activity, when reported; picks among IDs
 	// sharing one workspace.
-	ActiveAt *time.Time `json:"-"`
+	ActiveAt *time.Time `json:"activeAt,omitempty"`
 	// Repo: normalized origin remote (host/owner/name), "" when unknown.
 	// With RepoPath it is the cross-machine match key for project import;
 	// never proof within one machine (docs/architecture.md).
-	Repo string `json:"-"`
+	Repo string `json:"repo,omitempty"`
 	// RepoPath: slash-separated path from the checkout top to WorkspaceRoot
 	// ("." at the top), "" when unknown. Set only with Repo.
-	RepoPath string `json:"-"`
+	RepoPath string `json:"repoPath,omitempty"`
 }
 type ModelOption struct {
 	ID    string      `json:"id"`
@@ -233,9 +237,9 @@ type Source interface{ Observation() Observation }
 func (o Observation) Observation() Observation { return o }
 
 type Credential struct {
-	ClientID  string
-	Token     string
-	ExpiresAt time.Time
+	ClientID  string    `json:"clientId"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 func (o Observation) Valid() error {

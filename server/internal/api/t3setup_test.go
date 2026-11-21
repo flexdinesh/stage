@@ -15,6 +15,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -73,16 +75,19 @@ func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 		a, _ := d.Sync.Adapter(d.Store.LegacyT3ID())
 		client := a.(*t3.Adapter).Client
 		d.Setup = t3setup.New(t3setup.Options{
-			Config: cfg, Store: d.Store.OnMachine(db.LocalMachine), Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: cfg, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 			OnPaired: func() { s.paired.Add(1) },
-			Run: func(context.Context, string, []string) ([]byte, error) {
-				return []byte(s.runOut), s.runErr
-			},
-			LookPath: func(file string) (string, error) {
-				if s.cli {
-					return "/usr/bin/t3", nil
-				}
-				return "", errors.New("not found")
+			Local: &t3setup.LocalCLI{
+				Bin: cfg.T3Bin,
+				Exec: func(context.Context, string, []string) ([]byte, error) {
+					return []byte(s.runOut), s.runErr
+				},
+				LookPath: func(file string) (string, error) {
+					if s.cli {
+						return "/usr/bin/t3", nil
+					}
+					return "", errors.New("not found")
+				},
 			},
 			ProbeURL: func(context.Context, string) t3.Probe {
 				env := t3.FakeEnvironmentID

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -37,7 +38,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := res.ThreadID
-	if err := svc.RefreshSession(ctx, id); err != nil {
+	if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}}); err != nil {
@@ -54,7 +55,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	}
 	refresh := func(wantCalls int) {
 		t.Helper()
-		if err := svc.RefreshSession(ctx, id); err != nil {
+		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
 			t.Fatal(err)
 		}
 		if client.calls != wantCalls {

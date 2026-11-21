@@ -106,7 +106,7 @@ type Status struct {
 // Result is an action's or setting change's outcome.
 type Result struct {
 	// Replaced is the connection the change retired (0: none).
-	Replaced int64
+	Replaced int64 `json:"replaced"`
 }
 
 // Connector is one harness kind's connection setup on one machine. Each

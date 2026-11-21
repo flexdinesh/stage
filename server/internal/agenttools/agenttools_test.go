@@ -24,6 +24,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
@@ -72,7 +73,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	h := api.NewRouter(api.Deps{
 		Config:    config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Store: store.OnMachine(db.LocalMachine), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -110,7 +111,7 @@ func (e *env) session(p db.Project, title string) string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.sync.RefreshSession(ctx, out.ThreadID); err != nil {
+	if err := e.sync.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
 		e.t.Fatal(err)
 	}
 	return out.ThreadID
@@ -702,7 +703,7 @@ func TestLastWordTools(t *testing.T) {
 	}
 	_ = e.fake.SetStatus(id, t3.StatusCompleted)
 
-	if err := e.sync.RefreshSession(t.Context(), id); err != nil {
+	if err := e.sync.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	var got client.TaskDetail

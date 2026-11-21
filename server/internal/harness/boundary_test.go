@@ -43,8 +43,6 @@ var pending = map[string]bool{
 	"internal/db/types.go":               true,
 	"internal/notify/notify.go":          true,
 	"internal/sync/service.go":           true,
-	"internal/sync/session.go":           true,
-	"internal/sync/watch.go":             true,
 }
 
 func TestProductCodeDoesNotBranchOnHarnessNames(t *testing.T) {

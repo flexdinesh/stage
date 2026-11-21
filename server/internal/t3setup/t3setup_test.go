@@ -16,6 +16,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -88,23 +90,26 @@ func newEnv(t *testing.T, cfg config.Config, fake bool) *env {
 		t.Fatal(err)
 	}
 	e.svc = t3setup.New(t3setup.Options{
-		Config: cfg, Store: e.store.OnMachine(db.LocalMachine), Client: e.client, Endpoint: t3setup.Resolve(cfg, conn.T3URL), Fake: fake,
+		Config: cfg, Settings: e.store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(e.store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: e.client, Endpoint: t3setup.Resolve(cfg, conn.T3URL), Fake: fake,
 		OnPaired:   func() { e.kicks.Add(1) },
 		OnSwitched: func(sw db.Switch) { e.switches = append(e.switches, sw) },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Home:       "/home/u",
-		Run: func(_ context.Context, bin string, args []string) ([]byte, error) {
-			e.runs = append(e.runs, append([]string{bin}, args...))
-			return e.runOut, e.runErr
-		},
-		LookPath: func(file string) (string, error) {
-			if e.paths[file] {
-				if !strings.Contains(file, "/") {
-					return "/usr/bin/" + file, nil
+		Local: &t3setup.LocalCLI{
+			Bin:  cfg.T3Bin,
+			Home: "/home/u",
+			Exec: func(_ context.Context, bin string, args []string) ([]byte, error) {
+				e.runs = append(e.runs, append([]string{bin}, args...))
+				return e.runOut, e.runErr
+			},
+			LookPath: func(file string) (string, error) {
+				if e.paths[file] {
+					if !strings.Contains(file, "/") {
+						return "/usr/bin/" + file, nil
+					}
+					return file, nil
 				}
-				return file, nil
-			}
-			return "", errors.New("not found")
+				return "", errors.New("not found")
+			},
 		},
 		ProbeURL: func(_ context.Context, base string) t3.Probe {
 			if p, ok := e.candidates[base]; ok {

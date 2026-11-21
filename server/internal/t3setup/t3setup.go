@@ -26,7 +26,6 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -47,11 +46,17 @@ type Endpoint struct {
 	Source    string // SourceEnv | SourceSettings | SourceDefault
 }
 
-// Store is the persisted part (db.Store).
-type Store interface {
+// Settings is the machine's saved T3 setup (non-secret: the URL setting
+// and the active connection's environment). The T3 token is the client's
+// credential store (t3.TokenStore).
+type Settings interface {
 	GetConnection(ctx context.Context) (db.Connection, error)
 	SetT3URL(ctx context.Context, u string) error
-	SwitchInstance(ctx context.Context, d harness.Descriptor, identity, label string, revive int64) (db.Switch, error)
+}
+
+// Identity is the main server's record of the machine's T3 connections.
+type Identity interface {
+	SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error)
 	GetHarnessConnection(ctx context.Context, id int64) (db.HarnessConnection, error)
 }
 
@@ -107,7 +112,8 @@ func NormalizeURL(raw string) (string, error) {
 // Options configure New.
 type Options struct {
 	Config   config.Config
-	Store    Store
+	Settings Settings
+	Identity Identity
 	Client   t3.Client
 	Endpoint Endpoint // the endpoint the client was built with (Resolve)
 	// Fake: Client is the in-memory fake (no auto-pair; any URL is it).
@@ -119,13 +125,9 @@ type Options struct {
 	// adapter must follow before OnPaired). Must not block.
 	OnSwitched func(db.Switch)
 	Logger     *slog.Logger
-	// Run executes the t3 CLI; nil = os/exec.
-	Run Runner
-	// LookPath resolves a command name or path to an executable; nil =
-	// exec.LookPath.
-	LookPath func(file string) (string, error)
-	// Home is the user's home for the t3 CLI search; "" = os.UserHomeDir.
-	Home string
+	// Local finds and runs the t3 CLI on the machine T3 runs on; nil is
+	// LocalCLI with Config.T3Bin.
+	Local Local
 	// ProbeURL probes a candidate URL; nil = t3.ProbeURL with a 3s client.
 	ProbeURL func(ctx context.Context, base string) t3.Probe
 }
@@ -150,11 +152,8 @@ func New(o Options) *Service {
 	if o.Endpoint.URL == "" {
 		o.Endpoint = Resolve(o.Config, nil)
 	}
-	if o.Run == nil {
-		o.Run = execRunner
-	}
-	if o.LookPath == nil {
-		o.LookPath = execLookPath
+	if o.Local == nil {
+		o.Local = &LocalCLI{Bin: o.Config.T3Bin}
 	}
 	if o.ProbeURL == nil {
 		hc := &http.Client{Timeout: StatusProbeTimeout}
@@ -213,7 +212,7 @@ func (s *Service) SetURL(ctx context.Context, raw *string) error {
 	if err := s.checkBinding(ctx, target); err != nil {
 		return err
 	}
-	if err := s.o.Store.SetT3URL(ctx, saved); err != nil {
+	if err := s.o.Settings.SetT3URL(ctx, saved); err != nil {
 		return err
 	}
 	ep := Endpoint{URL: target, PublicURL: publicURL(s.o.Config, target), Source: source}
@@ -245,7 +244,7 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 	}
 	var out Paired
 	if p := s.o.Client.Probe(ctx); p.Identity != nil {
-		sw, err := s.o.Store.SwitchInstance(ctx, t3.Descriptor, p.Identity.EnvironmentID, p.Identity.Label, 0)
+		sw, err := s.o.Identity.SwitchInstance(ctx, t3.Kind, p.Identity.EnvironmentID, p.Identity.Label, 0)
 		if err != nil {
 			return out, err
 		}
@@ -254,7 +253,7 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 			if s.o.OnSwitched != nil {
 				s.o.OnSwitched(sw)
 			}
-			if old, err := s.o.Store.GetHarnessConnection(ctx, sw.Old); err == nil {
+			if old, err := s.o.Identity.GetHarnessConnection(ctx, sw.Old); err == nil {
 				out.Replaced = &old
 			}
 		}
@@ -286,7 +285,7 @@ func (s *Service) Unpair(ctx context.Context) error {
 // bound is the active T3 connection's environment ("" when none yet) and
 // its label (the probed T3's label when it is that environment, else the id).
 func (s *Service) bound(ctx context.Context) (string, string, error) {
-	conn, err := s.o.Store.GetConnection(ctx)
+	conn, err := s.o.Settings.GetConnection(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -308,11 +307,11 @@ func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if !st.Connected || st.Probe.Identity == nil {
 		return
 	}
-	conn, err := s.o.Store.GetConnection(ctx)
+	conn, err := s.o.Settings.GetConnection(ctx)
 	if err != nil || (conn.EnvironmentID != nil && *conn.EnvironmentID != "") {
 		return
 	}
-	if _, err := s.o.Store.SwitchInstance(ctx, t3.Descriptor, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
+	if _, err := s.o.Identity.SwitchInstance(ctx, t3.Kind, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
 		s.log.Warn("stamp t3 environment", "err", err)
 	}
 }

@@ -3,81 +3,13 @@ package api
 import (
 	"context"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/gitmeta"
+	"github.com/flexdinesh/stage/server/internal/machine"
 )
-
-type checkoutEvidence struct {
-	common             os.FileInfo
-	subproject, remote string
-	// repoPath: slash path from the checkout top, "" when unknown. A remote
-	// suggestion needs equal repoPaths when both sides know theirs.
-	repoPath string
-}
-
-// sameRemote: equal remotes and, when both are known, equal subprojects.
-func (e checkoutEvidence) sameRemote(o checkoutEvidence) bool {
-	return e.remote != "" && e.remote == o.remote && (e.repoPath == "" || o.repoPath == "" || e.repoPath == o.repoPath)
-}
-
-func beneath(root, dir string) (string, bool) {
-	rel, err := filepath.Rel(root, dir)
-	return rel, err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func checkout(ctx context.Context, paths []db.SharedPath, connection int64, directory string) checkoutEvidence {
-	for _, p := range paths {
-		if p.ConnectionID != connection {
-			continue
-		}
-		sub, ok := beneath(p.HarnessRoot, directory)
-		if !ok {
-			continue
-		}
-		root, err := filepath.EvalSymlinks(p.StageRoot)
-		if err != nil {
-			return checkoutEvidence{}
-		}
-		dir, err := filepath.EvalSymlinks(filepath.Join(root, sub))
-		if err != nil {
-			return checkoutEvidence{}
-		}
-		if _, ok = beneath(root, dir); !ok {
-			return checkoutEvidence{}
-		}
-		git := func(args ...string) string {
-			c := exec.CommandContext(ctx, "git", args...)
-			c.Dir = dir
-			c.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_OPTIONAL_LOCKS=0"}
-			out, err := c.Output()
-			if err != nil {
-				return ""
-			}
-			return strings.TrimSpace(string(out))
-		}
-		top := git("rev-parse", "--show-toplevel")
-		if top == "" {
-			return checkoutEvidence{}
-		}
-		sub, ok = beneath(top, dir)
-		if !ok {
-			return checkoutEvidence{}
-		}
-		common, err := os.Stat(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-		if err != nil {
-			return checkoutEvidence{}
-		}
-		return checkoutEvidence{common: common, subproject: sub, remote: remoteIdentity(git("config", "--local", "--no-includes", "--get", "remote.origin.url"))}
-	}
-	return checkoutEvidence{}
-}
 
 // Only repository hosts and paths enter comparisons. Credentials and local
 // directory remotes are never returned to a client or treated as proof.
@@ -136,11 +68,31 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// Path translation and checkout proof hold only within one machine: the
-	// matched connection's.
-	machine := s.Store.ConnectionMachine(connection)
-	paths, err := s.Store.MachineSharedPaths(ctx, machine)
+	// matched connection's, through its machine's ops.
+	machineID := s.Store.ConnectionMachine(connection)
+	paths, err := s.Store.MachineSharedPaths(ctx, machineID)
 	if err != nil {
 		return err
+	}
+	ops, hosted := s.Sync.Ops(machineID)
+	checkout := func(id int64, dir string) machine.CheckoutEvidence {
+		if !hosted {
+			return machine.CheckoutEvidence{}
+		}
+		var roots []machine.SharedRoot
+		for _, p := range paths {
+			if p.ConnectionID == id {
+				roots = append(roots, machine.SharedRoot{HarnessRoot: p.HarnessRoot, StageRoot: p.StageRoot})
+			}
+		}
+		if len(roots) == 0 {
+			return machine.CheckoutEvidence{}
+		}
+		proof, err := ops.Checkout(ctx, roots, dir)
+		if err != nil {
+			return machine.CheckoutEvidence{}
+		}
+		return proof
 	}
 	// Cached availability cannot confirm a source whose harness changed paths.
 	type location struct{ id, dir string }
@@ -155,7 +107,7 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		return out
 	}
 	inventories[connection] = index(inventory)
-	evidence := func(id int64, key location) (checkoutEvidence, bool) {
+	evidence := func(id int64, key location) (machine.CheckoutEvidence, bool) {
 		items, loaded := inventories[id]
 		if !loaded {
 			inventories[id] = nil
@@ -171,25 +123,25 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		}
 		w, ok := items[key]
 		if !ok {
-			return checkoutEvidence{}, false
+			return machine.CheckoutEvidence{}, false
 		}
-		var proof checkoutEvidence
-		if s.Store.ConnectionMachine(id) == machine {
-			proof = checkout(ctx, paths, id, key.dir)
+		var proof machine.CheckoutEvidence
+		if s.Store.ConnectionMachine(id) == machineID {
+			proof = checkout(id, key.dir)
 		}
-		if proof.remote == "" {
-			proof.remote = remoteIdentity(w.OriginRemote)
+		if proof.Remote == "" {
+			proof.Remote = remoteIdentity(w.OriginRemote)
 		}
-		if proof.common != nil {
-			proof.repoPath = filepath.ToSlash(proof.subproject)
-		} else if proof.remote != "" && proof.remote == w.Repo {
-			proof.repoPath = w.RepoPath
+		// A proven checkout carries its own subproject; otherwise the
+		// harness's, when it reported the same remote.
+		if proof.Common == "" && proof.Remote != "" && proof.Remote == w.Repo {
+			proof.RepoPath = w.RepoPath
 		}
 		return proof, true
 	}
 	type owner struct {
 		binding db.ProjectBinding
-		proof   checkoutEvidence
+		proof   machine.CheckoutEvidence
 	}
 	var owners []owner
 	already := false
@@ -220,13 +172,13 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		matches := 0
 		var selected db.ProjectBinding
 		for _, o := range owners {
-			if proof.common != nil && o.proof.common != nil && proof.subproject == o.proof.subproject && os.SameFile(proof.common, o.proof.common) {
+			if proof.SameCheckout(o.proof) {
 				matches++
 				if o.binding.ProjectID == id {
 					selected = o.binding
 					suggestions[c.ExternalID] = "Shared Git checkout and subproject"
 				}
-			} else if o.binding.ProjectID == id && proof.sameRemote(o.proof) {
+			} else if o.binding.ProjectID == id && proof.SameRemote(o.proof) {
 				suggestions[c.ExternalID] = "Same Git remote. Confirm the checkout."
 			}
 		}

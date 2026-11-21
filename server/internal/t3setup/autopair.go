@@ -31,6 +31,36 @@ const AutoPairTimeout = 15 * time.Second
 // carries its stderr.
 type Runner func(ctx context.Context, bin string, args []string) ([]byte, error)
 
+// Local is auto-pair's machine-local work: finding and running the t3 CLI
+// on the machine T3 runs on.
+type Local interface {
+	// FindCLI is the t3 CLI ("" when none).
+	FindCLI() string
+	// Run runs bin with args (see Runner).
+	Run(ctx context.Context, bin string, args []string) ([]byte, error)
+}
+
+// LocalCLI is Local on this process's machine.
+type LocalCLI struct {
+	// Bin is T3_BIN: the only CLI considered when set.
+	Bin string
+	// Exec runs the CLI; nil = os/exec.
+	Exec Runner
+	// LookPath resolves a command name or path to an executable; nil =
+	// exec.LookPath.
+	LookPath func(file string) (string, error)
+	// Home is the user's home for the CLI search; "" = os.UserHomeDir.
+	Home string
+}
+
+// Run runs bin with args.
+func (l *LocalCLI) Run(ctx context.Context, bin string, args []string) ([]byte, error) {
+	if l.Exec == nil {
+		return execRunner(ctx, bin, args)
+	}
+	return l.Exec(ctx, bin, args)
+}
+
 // AutoPair is whether the auto-pair setup action can work.
 type AutoPair struct {
 	Available bool
@@ -47,7 +77,7 @@ func (s *Service) autoPair() AutoPair {
 	case !IsLoopbackURL(s.Endpoint().URL):
 		return AutoPair{Reason: ReasonNotLocal}
 	}
-	bin := s.findCLI()
+	bin := s.o.Local.FindCLI()
 	if bin == "" {
 		return AutoPair{Reason: ReasonCLINotFound}
 	}
@@ -81,25 +111,29 @@ func cliDirs(home string) []string {
 	return append(dirs, "/usr/local/bin", "/opt/homebrew/bin")
 }
 
-// findCLI is the t3 CLI: T3_BIN (only it, when set), else PATH, else the
+// FindCLI is the t3 CLI: Bin (only it, when set), else PATH, else the
 // usual install dirs. "" when none.
-func (s *Service) findCLI() string {
-	if b := s.o.Config.T3Bin; b != "" {
-		p, err := s.o.LookPath(b)
+func (l *LocalCLI) FindCLI() string {
+	look := l.LookPath
+	if look == nil {
+		look = execLookPath
+	}
+	if l.Bin != "" {
+		p, err := look(l.Bin)
 		if err != nil {
 			return ""
 		}
 		return p
 	}
-	if p, err := s.o.LookPath("t3"); err == nil {
+	if p, err := look("t3"); err == nil {
 		return p
 	}
-	home := s.o.Home
+	home := l.Home
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
 	for _, d := range cliDirs(home) {
-		if p, err := s.o.LookPath(filepath.Join(d, "t3")); err == nil {
+		if p, err := look(filepath.Join(d, "t3")); err == nil {
 			return p
 		}
 	}
@@ -128,7 +162,7 @@ func (s *Service) AutoPair(ctx context.Context) (Paired, error) {
 		return Paired{}, pairErr("no T3 server answered at %s (%s); start it and try again", s.Endpoint().URL, orNoAnswer(p.Err))
 	}
 	rctx, cancel := context.WithTimeout(ctx, AutoPairTimeout)
-	out, err := s.o.Run(rctx, ap.Bin, PairingArgs(s.o.Config.T3ClientName))
+	out, err := s.o.Local.Run(rctx, ap.Bin, PairingArgs(s.o.Config.T3ClientName))
 	cancel()
 	if err != nil {
 		return Paired{}, pairErr("t3 auth pairing create failed: %v", err)
