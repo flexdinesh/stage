@@ -19,12 +19,16 @@ plugin registration or service installation framework.
   `internal/harness/boundary_test.go` fails on harness names outside the
   adapters, their connection setup and the server composition (its pending
   list only shrinks).
-- **Worker-ready placement.** A future deployment runs Stage in the cloud and
-  a worker on each machine that syncs its harnesses upstream. So adapters and
-  connection setup take narrow ports (settings, checkpoint save, event sink),
-  never the store; contract types stay JSON-serializable; connections,
-  workspace paths and hosting policy belong to a machine; and pushed
-  observations are the shape a worker's upstream channel will take.
+- **Worker-ready placement.** Remote machines run a thin worker with no
+  database ([ADR 0002](adr/0002-machines-and-workers.md)). The main server
+  keeps the store, coordinator and acceptance, and drives each machine through
+  the machine-runtime seam: in process for the local machine, through a
+  remote adapter proxy over the worker channel for a remote one. So adapters
+  and connection setup take narrow ports (settings, credentials, checkpoint
+  save, event sink, identity), never the store; contract types stay
+  JSON-serializable; connections, workspace paths, machine-local fs work and
+  hosting policy belong to a machine; and pushed observations are the shape
+  the worker channel carries.
 
 ## Harness registry
 
