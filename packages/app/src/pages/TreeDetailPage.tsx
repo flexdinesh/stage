@@ -26,10 +26,15 @@ const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "manual", label: "Manual" },
 ];
 
-const VIEW_OPTIONS: { value: "tasks" | "notes"; label: string }[] = [
+type TreeTab = "tasks" | "notes" | "activity";
+
+const VIEW_OPTIONS: { value: TreeTab; label: string }[] = [
   { value: "tasks", label: "Tasks" },
   { value: "notes", label: "Notes" },
+  { value: "activity", label: "Activity" },
 ];
+
+const treeTab = (value: string | null): TreeTab => (value === "notes" || value === "activity" ? value : "tasks");
 
 const LAYOUT_OPTIONS: { value: "list" | "graph"; label: string }[] = [
   { value: "list", label: "List" },
@@ -174,11 +179,11 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const invalidate = useInvalidateWork();
   const newTask = useNewTask();
   const [params, setParams] = useSearchParams();
-  const view = params.get("view") === "notes" ? "notes" : "tasks";
-  const setView = (next: "tasks" | "notes") => {
+  const view = treeTab(params.get("view"));
+  const setView = (next: TreeTab) => {
     const updated = new URLSearchParams(params);
-    if (next === "notes") updated.set("view", "notes");
-    else updated.delete("view");
+    if (next === "tasks") updated.delete("view");
+    else updated.set("view", next);
     setParams(updated);
   };
   const layout = params.get("layout") === "graph" ? "graph" : "list";
@@ -355,8 +360,9 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
         <div hidden={view !== "notes"}>
           <JournalPanel owner={{ treeId: tree.id }} tasks={tree.tasks} active={view === "notes"} />
         </div>
+        {view === "activity" ? <TreeActivity tree={tree} /> : null}
         <div hidden={view !== "tasks"}>
-        <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className={cx("grid grid-cols-1 items-start gap-3.5", selected !== null && "lg:grid-cols-[minmax(0,1fr)_340px]")}>
           <Panel
             title="Tree"
             flush
@@ -376,14 +382,11 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               <TreeView tree={tree} selected={picked} onSelect={(id) => setPicked(picked === id ? null : id)} />
             )}
           </Panel>
-          <TreeActivity tree={tree} className="lg:hidden" />
-          <div className="flex min-w-0 flex-col gap-3.5 max-lg:hidden">
-            {selected === null ? (
-              <TreeActivity tree={tree} />
-            ) : (
+          {selected === null ? null : (
+            <div className="flex min-w-0 flex-col gap-3.5 max-lg:hidden">
               <TreeNodePanel key={selected.id} tree={tree} task={selected} onSelect={setPicked} onClose={() => setPicked(null)} />
-            )}
-          </div>
+            </div>
+          )}
         </div>
         </div>
       </div>
