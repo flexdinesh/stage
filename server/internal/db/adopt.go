@@ -124,8 +124,8 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 		}
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,t3_thread_id,
-	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at,created_by_user_id)
-	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11,$12) RETURNING id`, projectID, title, state, ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished, ActingUser(ctx)).Scan(&id)
+	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11,$12,$13) RETURNING id`, projectID, title, state, ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished, ActingUser(ctx), ActingMachine(ctx)).Scan(&id)
 	if err != nil {
 		return 0, false, err
 	}

@@ -124,6 +124,8 @@ type State struct {
 	Session string `json:"session,omitempty"`
 	// ServerVersion is the main server's build, when known.
 	ServerVersion string `json:"serverVersion,omitempty"`
+	// Gateway is the agent gateway's listener URLs (listen.Addr.URL).
+	Gateway []string `json:"gateway,omitempty"`
 }
 
 // ReadState reads dir/worker.state.json (nil when missing).

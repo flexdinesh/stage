@@ -120,6 +120,8 @@ Hierarchy: User -> Machines -> Harness connections -> Sessions ([ADR 0002](adr/0
 
 There is no sign-in and no user auth (the only credentials are machine tokens on worker routes, below). Every Go write resolves its creator through one function, `db.ActingUser(ctx)`: the user `db.WithUser` put on the context, else `db.DefaultUser`. Nothing else names the default user. Today no request sets a principal, so writes from the API, MCP, CLI and background jobs (project import, acceptance) attribute to the default user. Sign-in will set the request principal in one API middleware with `db.WithUser`. A task a schedule spawns, on a cron fire or run now, and its initial notes attribute to the schedule's creator (`spawnTask`). Journal events written by SQLite triggers take the column default (the default user). Machine tokens are machine principals, not users.
 
+Migration 0021 adds `source_machine_id` (nullable, references `machines`) beside `created_by_user_id` on `projects`, `tasks`, `task_trees`, `journal_entries` and `schedules`: the machine whose worker agent gateway forwarded the write ([runtime.md](runtime.md#agent-gateway)). It resolves through one function, `db.ActingMachine(ctx)`: the machine the gateway route put on the context with `db.WithMachine` (from the bearer token), else none. Every Go insert that sets `created_by_user_id` sets it too, except project import; schedule spawns clear it (`spawnTask`), and trigger-written events leave it null. The acting user stays the default user, so a gateway write carries both. The API exposes it as `sourceMachineId` ([api.md](api.md#users)).
+
 ## Project and session identity
 
 Stage project IDs and metadata are independent of harness data. Migration 0008

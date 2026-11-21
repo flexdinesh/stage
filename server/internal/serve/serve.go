@@ -251,13 +251,22 @@ func Run(ctx context.Context, o Options) error {
 		logger.Warn("machine presence", "err", err)
 	})})
 
+	syncSvc.Gateways = channels.Gateways
+
 	mux := http.NewServeMux()
+	// The MCP handler serves through the API router, and the router's agent
+	// gateway route serves MCP: bound once both exist, before serving.
+	var mcpHandler http.Handler
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup, Connectors: connectors,
 		Harnesses: harnesses, Channels: channels,
+		MCP: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHandler.ServeHTTP(w, r) }),
+	})
+	mcpHandler = agenttools.HTTPHandler(&agenttools.Ops{
+		Client: client.NewInProcess(apiHandler, addrs[0].URL()), CLI: cliName,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.
@@ -267,9 +276,7 @@ func Run(ctx context.Context, o Options) error {
 	// validation stays in one place. No local file access.
 	// Machine tokens are worker-route credentials only (api.RejectMachineTokens;
 	// /api applies it itself).
-	mux.Handle("/mcp", policy.Wrap(api.RejectMachineTokens(agenttools.HTTPHandler(&agenttools.Ops{
-		Client: client.NewInProcess(apiHandler, addrs[0].URL()), CLI: cliName,
-	}))))
+	mux.Handle("/mcp", policy.Wrap(api.RejectMachineTokens(mcpHandler)))
 	mux.Handle("/", webui.Handler())
 
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}

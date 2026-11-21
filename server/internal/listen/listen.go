@@ -199,7 +199,7 @@ func (a Addr) Listen() (*Listener, error) {
 	}
 	lock, err := filelock.Acquire(LockPath(a.Address), lockMode)
 	if errors.Is(err, filelock.ErrLocked) {
-		return nil, fmt.Errorf("%s is in use by another stage server (%s held)", a.Address, LockPath(a.Address))
+		return nil, &InUseError{Path: a.Address}
 	}
 	if err != nil {
 		return nil, err
@@ -219,6 +219,14 @@ func (a Addr) Listen() (*Listener, error) {
 		return nil, err
 	}
 	return &Listener{Listener: l, Spec: a, lock: lock}, nil
+}
+
+// InUseError: another process holds a unix socket's lock (a live server or
+// worker gateway owns the path).
+type InUseError struct{ Path string }
+
+func (e *InUseError) Error() string {
+	return fmt.Sprintf("%s is in use by another stage server (%s held)", e.Path, LockPath(e.Path))
 }
 
 // OpenAll opens addrs in order. On any failure it closes those already

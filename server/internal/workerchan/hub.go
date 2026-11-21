@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,6 +73,9 @@ type Session struct {
 	ID        string
 	MachineID int64
 	Version   string
+	// Gateway is the worker's agent gateway listener URLs (fixed for the
+	// session).
+	Gateway []string
 
 	hub  *Hub
 	out  chan Envelope
@@ -128,9 +133,15 @@ func randomID() string {
 // Attach starts a session for machineID, replacing (ending) any older one.
 // The caller streams Outbound until Done and then calls Detach.
 func (h *Hub) Attach(machineID int64, version string) *Session {
+	return h.AttachGateway(machineID, version, nil)
+}
+
+// AttachGateway is Attach for a worker that reported its agent gateway
+// listener URLs.
+func (h *Hub) AttachGateway(machineID int64, version string, gateway []string) *Session {
 	now := h.opts.Now()
 	s := &Session{
-		ID: randomID(), MachineID: machineID, Version: version, hub: h,
+		ID: randomID(), MachineID: machineID, Version: version, Gateway: gateway, hub: h,
 		out: make(chan Envelope, 64), done: make(chan struct{}),
 		pending: map[string]chan Envelope{}, lastSeen: now, persisted: now,
 	}
@@ -226,6 +237,29 @@ func (h *Hub) Presence(machineID int64) Presence {
 	p.Version = s.Version
 	p.Online = s.alive() && h.opts.Now().Sub(p.LastSeen) <= h.opts.Timeout
 	return p
+}
+
+// Gateways is the agent gateway listener URLs machineID's live worker
+// reported (nil when offline or none).
+func (h *Hub) Gateways(machineID int64) []string {
+	h.mu.Lock()
+	s := h.sessions[machineID]
+	h.mu.Unlock()
+	if s == nil || !s.alive() {
+		return nil
+	}
+	return slices.Clone(s.Gateway)
+}
+
+// ParseGateway reads GatewayHeader's comma list (empty items dropped).
+func ParseGateway(v string) []string {
+	var out []string
+	for item := range strings.SplitSeq(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (h *Hub) seen(machineID int64, at time.Time, version string) {

@@ -285,7 +285,9 @@ Order for a worker request:
 
 Machine tokens are refused everywhere else: a Bearer value starting with
 `stage_mt_` on any other `/api` route or on `/mcp` is 401, after the origin
-policy. Other `Authorization` values are ignored, so a proxy that forwards its
+policy. Agents on a worker's machine reach `/api` and `/mcp` only through
+the worker route `/api/worker/gateway/...` ([Agent gateway](#agent-gateway)),
+so the proxy bypass stays the one prefix. Other `Authorization` values are ignored, so a proxy that forwards its
 own credentials keeps working. Pairing codes and tokens are stored only as
 SHA-256 (high-entropy secrets need no slow hash) and compared in constant
 time; the id prefix selects the row.
@@ -339,7 +341,7 @@ Code: `server/internal/workerchan` (protocol, hub), `server/internal/api`
 | Command | Does |
 | --- | --- |
 | `stage worker join <link> [--label L]` | Redeems the pairing link's code (`POST /api/worker/join`) and writes the worker config. Refuses when already joined (`stage worker leave` first). Plain `http://` links are accepted (LAN and loopback mains). |
-| `stage worker run` | The foreground worker: holds the worker dir, connects the channel and reconnects until stopped. |
+| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. |
 | `stage worker status` | Config, the server's view of this machine and the running process. Exit 0 the server says online, 1 not online (or unreachable, or an invalid config), 4 not joined, 7 revoked. |
 | `stage worker leave [--local]` | Removes this machine on the main server (`POST /api/worker/leave`), then deletes the local config and state. A revoked token counts as already removed. `--local` only deletes locally. |
 | `stage worker service ...` | The worker service ([service.md](service.md#worker-service)). |
@@ -359,19 +361,79 @@ All take `--config PATH` and `--json`. Worker commands never use
   and names the holder (the worker service: `stage worker service stop`).
 - **`worker.state.json`:** the channel state the process last reached
   (`connecting`, `online`, `needs_update`, `revoked`, `stopped`), its last
-  error and when (the service's readiness and status read it). `stage worker
+  error and when, and its gateway listener URLs (`gateway`; the service's
+  readiness and status read it). `stage worker
   status` shows it while a process holds the lock, and asks the main server
   (`GET /api/worker/machine`) whether this machine is online or revoked.
 - **Reconnect:** exponential backoff 1s to 60s with jitter, reset after a
   stream that stayed up 30s. `api_version_mismatch` waits the maximum
   interval. 401 (the machine was removed) ends the run as revoked, without
   a retry loop.
-- **Exit status:** 0 on SIGINT/SIGTERM; 75 the worker dir is held; 78 not
-  joined, invalid config or revoked; 1 otherwise. Managed on macOS, 75 and
+- **Exit status:** 0 on SIGINT/SIGTERM; 75 the worker dir or a gateway
+  socket is held; 78 not joined, invalid config (including the gateway
+  listen list) or revoked; 1 otherwise. Managed on macOS, 75 and
   78 exit 0 (launchd cannot exclude exit codes). Managed, it sends
   `READY=1` once it holds the dir and `STOPPING=1` on shutdown; readiness
   does not wait for the channel.
 - One identity runs the main server or a worker service, not both (#348).
+
+## Agent gateway
+
+A worker serves agents on its machine the main server's `/api` and `/mcp`
+([ADR 0002](adr/0002-machines-and-workers.md#8-mcp-and-the-agent-gateway)),
+so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
+`server/internal/worker/gateway.go` (worker), `server/internal/api/handlers_worker_gateway.go`
+(main).
+
+- **Listeners.** `stage worker run --listen ADDR` (repeatable or a comma
+  list), else `STAGE_WORKER_LISTEN`; the worker service reads only
+  `worker.env`'s `STAGE_WORKER_LISTEN` ([service.md](service.md#worker-service))
+  and refuses `--listen`. Same syntax as `STAGE_LISTEN`. Default `unix`, and
+  `unix` is required: the private default socket of this identity's data dir
+  (`STAGE_DATA_DIR` or the default, [Identity and paths](#identity-and-paths)),
+  `0600` in a `0700` dir, locked like a server's socket. Client resolution
+  finds it because its lock is held. TCP is opt-in
+  (`unix,127.0.0.1:7381`) for HTTP MCP clients; a wildcard host is reachable
+  from the network with full agent access, so prefer loopback. A bad list
+  exits 78.
+- **Startup.** The listeners open after the worker dir is locked and before
+  readiness and the channel, and stay open while the channel reconnects or
+  the main server is down (requests then get 502). A socket held by another
+  process (the main server or another worker of this identity) exits 75
+  naming it; one identity runs the main server or a worker (#348). They
+  close on shutdown and when the worker stops as revoked.
+- **Origin policy.** Each request first passes `guard.Policy` as on a
+  server listener, with no extra trusted origins: Host `stage` on the socket,
+  an IP literal or `localhost` over TCP; cross-site browser requests and
+  form-encodable bodies are refused. Only `/api/...` and `/mcp` are
+  forwarded; other paths are 404.
+- **Forwarding.** To `<worker config url>/api/worker/gateway<path>`, query
+  and body unchanged, with `Authorization: Bearer <machine token>`,
+  `Stage-Api-Version` and `Stage-Version`, the main server's Host, and
+  without `Origin`, `Referer`, `Cookie`, `Sec-Fetch-*` or the caller's own
+  `Authorization`. `Stage-Caller-Session` passes. Responses stream through
+  unbuffered (SSE, streamable MCP). Main unreachable: 502 `{error, code:
+  "gateway_unreachable"}`. The main server's answers (including 401
+  `machine_token_invalid` after removal and 409 `api_version_mismatch`)
+  pass through.
+- **Main server.** The worker route `/api/worker/gateway/{api/...|mcp}`
+  checks the API version and the token, then serves the inner path with the
+  same `/api` router or MCP handler as a direct request, with the machine
+  on the request context (`db.WithMachine`): writes record it as
+  `source_machine_id` ([architecture.md](architecture.md#users)). The outer
+  request already passed `guard.Policy`; the MCP SDK's loopback Host check
+  is skipped for it (a proxy on the same host forwards the public Host).
+  Machine management routes are 403 `gateway_forbidden`; `/api/worker/*`
+  and other paths 404 ([api.md](api.md#apiworkergatewayapi-and-apiworkergatewaymcp)).
+- **Reported addresses.** The worker sends its listener URLs in the channel
+  connect's `Stage-Worker-Gateway` header; the main server keeps them in
+  memory for that session and names them in the launch instructions of
+  sessions on that machine instead of `STAGE_PUBLIC_URL`
+  ([api.md](api.md#agent-interface)). `stage worker status` shows them.
+- **Trust.** A machine token grants agent-level API access through the
+  gateway. Without a proxy this matches direct access; behind one it is the
+  only way past user auth, which is why machine management is refused.
+  Removing the machine revokes it at once.
 
 ## OpenCode connection
 

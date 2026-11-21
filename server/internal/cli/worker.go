@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/logfile"
 	"github.com/flexdinesh/stage/server/internal/service"
 	"github.com/flexdinesh/stage/server/internal/worker"
@@ -39,11 +41,13 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 	asJSON := fs.Bool("json", false, "JSON output")
 	var label string
 	var managed, local bool
+	var listenFlags listFlag
 	switch verb {
 	case "join":
 		fs.StringVar(&label, "label", "", "name this machine suggests (default: its host name)")
 	case "run":
-		fs.BoolVar(&managed, "managed", false, "run as the worker service (`stage worker service`): config path from worker.env only")
+		fs.BoolVar(&managed, "managed", false, "run as the worker service (`stage worker service`): config path and gateway listeners from worker.env only")
+		fs.Var(&listenFlags, "listen", "agent gateway listen address (repeatable or a comma list; env "+config.WorkerListenEnv+"; default and required: unix)")
 	case "leave":
 		fs.BoolVar(&local, "local", false, "only delete the local worker config (the server is unreachable or already removed the machine)")
 	}
@@ -66,7 +70,10 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 		if managed && *cfgFlag != "" {
 			return usagef("worker run: --managed takes the worker config from worker.env (%s); drop --config", config.WorkerConfigEnv)
 		}
-		return runWorkerRun(ctx, env, *cfgFlag, managed)
+		if managed && len(listenFlags) > 0 {
+			return usagef("worker run: --managed takes the gateway listeners from worker.env (%s); drop --listen", config.WorkerListenEnv)
+		}
+		return runWorkerRun(ctx, env, *cfgFlag, managed, strings.Join(listenFlags, ","))
 	}
 	path, err := worker.ResolveConfigPath(*cfgFlag, env.Getenv)
 	if err != nil {
@@ -131,19 +138,30 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 	return st.Definition.Present
 }
 
-// runWorkerRun is `stage worker run [--managed]`. Exit: 0 on SIGINT or
-// SIGTERM, 75 when another worker holds the worker dir, 78 when not joined,
-// the config is invalid or the machine was removed, 1 otherwise. A managed
+// runWorkerRun is `stage worker run [--managed] [--listen ADDR]`. Exit: 0
+// on SIGINT or SIGTERM, 75 when another worker holds the worker dir or
+// another process holds a gateway socket, 78 when not joined, the config
+// is invalid or the machine was removed, 1 otherwise. A managed
 // worker on macOS exits 0 instead of 75 and 78 (launchd cannot exclude exit
 // codes from KeepAlive).
-func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool) error {
+func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, listenFlag string) error {
 	goos := runtime.GOOS
 	logger := slog.New(slog.NewTextHandler(env.Stderr, nil))
-	opts := worker.RunOptions{Logger: logger, Managed: managed}
+	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv}
 	var err error
+	listenList := listenFlag
 	if managed {
 		opts.Manager, opts.Service = service.ManagerKind(goos), service.NameFor(goos, service.RoleWorker)
-		opts.ConfigPath, err = managedWorkerConfig(env.Getenv, goos)
+		opts.ConfigPath, listenList, err = managedWorkerConfig(env.Getenv, goos)
+		// The gateway socket is the identity default data dir's, like the
+		// managed server's: STAGE_DATA_DIR in the inherited environment is
+		// ignored.
+		opts.Getenv = func(k string) string {
+			if k == "STAGE_DATA_DIR" {
+				return ""
+			}
+			return env.Getenv(k)
+		}
 		if err == nil && goos == "darwin" {
 			if l := managedWorkerLog(env.Getenv, env.Stderr); l != nil {
 				opts.Logger, logger = l, l
@@ -151,6 +169,14 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool) er
 		}
 	} else {
 		opts.ConfigPath, err = worker.ResolveConfigPath(cfgFlag, env.Getenv)
+		if listenList == "" {
+			listenList = env.Getenv(config.WorkerListenEnv)
+		}
+	}
+	if err == nil {
+		if opts.Listen, err = config.ParseWorkerListen(listenList); err != nil {
+			err = config.Invalid(err)
+		}
 	}
 	if err == nil {
 		err = worker.Run(ctx, opts)
@@ -160,9 +186,10 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool) er
 	}
 	var le *worker.LockedError
 	var ie *config.InvalidError
+	var ue *listen.InUseError
 	code := 1
 	switch {
-	case errors.As(err, &le):
+	case errors.As(err, &le), errors.As(err, &ue):
 		code = service.ExitConflict
 	case errors.As(err, &ie):
 		code = service.ExitConfig
@@ -174,21 +201,22 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool) er
 	return exitError{code}
 }
 
-// managedWorkerConfig is the worker service's config path (worker.env).
-func managedWorkerConfig(getenv func(string) string, goos string) (string, error) {
+// managedWorkerConfig is the worker service's config path and gateway
+// listen list (worker.env; the shell environment is never used).
+func managedWorkerConfig(getenv func(string) string, goos string) (string, string, error) {
 	envPath, err := config.WorkerEnvPath(getenv, goos)
 	if err != nil {
-		return "", config.Invalid(err)
+		return "", "", config.Invalid(err)
 	}
 	vals, err := config.ReadWorkerEnv(envPath)
 	if err != nil {
-		return "", config.Invalid(err)
+		return "", "", config.Invalid(err)
 	}
 	p, err := worker.ManagedConfigPath(getenv, goos, vals)
 	if err != nil {
-		return "", config.Invalid(err)
+		return "", "", config.Invalid(err)
 	}
-	return p, nil
+	return p, vals[config.WorkerListenEnv], nil
 }
 
 // managedWorkerLog (macOS) logs to ~/Library/Logs/<id>/worker.log, rotated,
@@ -246,6 +274,9 @@ func printWorkerStatus(w io.Writer, st worker.Status) {
 			mode = "worker service"
 		}
 		fmt.Fprintf(w, "  process     pid %d (%s, %s), channel %s\n", p.PID, mode, p.Version, orNone(p.State))
+		if len(p.Gateway) > 0 {
+			fmt.Fprintf(w, "  gateway     %s\n", strings.Join(p.Gateway, ", "))
+		}
 		if p.LastError != "" {
 			fmt.Fprintf(w, "  last error  %s\n", p.LastError)
 		}

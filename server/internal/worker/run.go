@@ -17,6 +17,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/instance"
+	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -40,12 +41,18 @@ type RunOptions struct {
 	Ready func()
 	// OnState is called on every state change (tests).
 	OnState func(State)
+	// Listen is the agent gateway's listen list (config.ParseWorkerListen;
+	// nil: unix, the default socket).
+	Listen []listen.Addr
+	// Getenv resolves the gateway's default socket (os.Getenv).
+	Getenv func(string) string
 }
 
-// Run is `stage worker run`: lock the worker directory, then keep a
-// channel to the main server open until ctx ends, reconnecting with
-// backoff. Errors: config.InvalidError wrapping ErrNotJoined or a bad
-// config, or ErrRevoked (exit 78); *LockedError (exit 75).
+// Run is `stage worker run`: lock the worker directory, open the agent
+// gateway, then keep a channel to the main server open until ctx ends,
+// reconnecting with backoff. Errors: config.InvalidError wrapping
+// ErrNotJoined or a bad config, or ErrRevoked (exit 78); *LockedError or a
+// gateway socket's *listen.InUseError (exit 75).
 func Run(ctx context.Context, o RunOptions) error {
 	log := o.Logger
 	if log == nil {
@@ -71,7 +78,28 @@ func Run(ctx context.Context, o RunOptions) error {
 	if err != nil {
 		return config.Invalid(err)
 	}
-	w := &runner{o: o, cfg: cfg, dir: dir, log: log, api: newAPI(cfg.URL, cfg.Token, o.HTTP)}
+	if o.Listen == nil {
+		if o.Listen, err = config.ParseWorkerListen(""); err != nil {
+			return config.Invalid(err)
+		}
+	}
+	if o.Getenv == nil {
+		o.Getenv = os.Getenv
+	}
+	var transport http.RoundTripper
+	if o.HTTP != nil {
+		transport = o.HTTP.Transport
+	}
+	h, err := NewGateway(cfg, transport, log)
+	if err != nil {
+		return config.Invalid(err)
+	}
+	gw, err := openGateway(o.Listen, o.Getenv, h, log)
+	if err != nil {
+		return err
+	}
+	defer gw.close()
+	w := &runner{o: o, cfg: cfg, dir: dir, log: log, api: newAPI(cfg.URL, cfg.Token, o.HTTP), gateway: gw.URLs}
 	w.set(State{State: StateConnecting})
 	if err := instance.Notify("READY=1"); err != nil {
 		log.Warn("readiness notification", "err", err)
@@ -97,6 +125,8 @@ type runner struct {
 	dir string
 	log *slog.Logger
 	api *api
+	// gateway is the agent gateway's listener URLs.
+	gateway []string
 
 	mu    sync.Mutex
 	state State
@@ -105,7 +135,7 @@ type runner struct {
 // set records a state change in worker.state.json.
 func (w *runner) set(s State) {
 	w.mu.Lock()
-	s.PID, s.Managed, s.URL, s.MachineID = os.Getpid(), w.o.Managed, w.cfg.URL, w.cfg.MachineID
+	s.PID, s.Managed, s.URL, s.MachineID, s.Gateway = os.Getpid(), w.o.Managed, w.cfg.URL, w.cfg.MachineID, w.gateway
 	if s.ServerVersion == "" {
 		s.ServerVersion = w.state.ServerVersion
 	}
@@ -181,6 +211,7 @@ func (w *runner) session(parent context.Context) error {
 		return err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set(workerchan.GatewayHeader, strings.Join(w.gateway, ","))
 	res, err := w.api.http.Do(req)
 	if err != nil {
 		return err

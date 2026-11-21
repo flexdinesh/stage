@@ -7,6 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/flexdinesh/stage/server/internal/listen"
 )
 
 // WorkerEnvFile is the worker service's config file, in ServiceConfigDir
@@ -15,22 +18,51 @@ import (
 const WorkerEnvFile = "worker.env"
 
 // WorkerConfigEnv names the worker config file (worker.json) for `stage
-// worker` commands, and is the only key worker.env may set.
+// worker` commands.
 const WorkerConfigEnv = "STAGE_WORKER_CONFIG"
 
+// WorkerListenEnv is the worker's agent gateway listen list (STAGE_LISTEN
+// syntax; `stage worker run --listen` overrides it). Default and required
+// item: unix (docs/runtime.md "Agent gateway").
+const WorkerListenEnv = "STAGE_WORKER_LISTEN"
+
 // WorkerEnvKeys are the keys worker.env may set.
-var WorkerEnvKeys = []string{WorkerConfigEnv}
+var WorkerEnvKeys = []string{WorkerConfigEnv, WorkerListenEnv}
 
 // WorkerEnvTemplate is the worker.env `stage worker service start` creates.
 const WorkerEnvTemplate = `# Stage worker service configuration (docs/service.md). Read by
 # ` + "`stage worker run --managed`" + ` at start; apply changes with
-# ` + "`stage worker service restart`" + `. KEY=VALUE per line. Only the key
-# below is allowed; the shell environment is never used.
+# ` + "`stage worker service restart`" + `. KEY=VALUE per line. Only the keys
+# below are allowed; the shell environment is never used.
 
 # The worker config ` + "`stage worker join`" + ` wrote (absolute path). Default:
 # worker/worker.json in this installation's default data dir.
 # STAGE_WORKER_CONFIG=
+
+# The agent gateway's listeners: agents on this machine reach Stage through
+# them (STAGE_LISTEN syntax). unix (this installation's default socket, which
+# the CLI and stage mcp find) is required; add host:port for HTTP MCP clients.
+# STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
 `
+
+// ParseWorkerListen parses a gateway listen list (WorkerListenEnv, or
+// `--listen` items joined by commas); empty means unix. It must include
+// unix, which stays unresolved (Config.ResolveSockets resolves it).
+func ParseWorkerListen(v string) ([]listen.Addr, error) {
+	if strings.TrimSpace(v) == "" {
+		v = listen.DefaultSocket
+	}
+	addrs, err := listen.ParseList(v)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range addrs {
+		if a.Private {
+			return addrs, nil
+		}
+	}
+	return nil, fmt.Errorf("agent gateway listen %q must include unix (the default socket the CLI and stage mcp find)", v)
+}
 
 // WorkerEnvPath is ServiceConfigDir/worker.env.
 func WorkerEnvPath(getenv func(string) string, goos string) (string, error) {
@@ -49,6 +81,11 @@ func ParseWorkerEnv(r io.Reader) (map[string]string, error) {
 	}
 	if v := vals[WorkerConfigEnv]; v != "" && !filepath.IsAbs(v) {
 		return nil, fmt.Errorf("%s: %s must be an absolute path, got %q", WorkerEnvFile, WorkerConfigEnv, v)
+	}
+	if v, ok := vals[WorkerListenEnv]; ok {
+		if _, err := ParseWorkerListen(v); err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", WorkerEnvFile, WorkerListenEnv, err)
+		}
 	}
 	return vals, nil
 }

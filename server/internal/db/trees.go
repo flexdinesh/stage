@@ -78,7 +78,10 @@ type Tree struct {
 	ClosedAt  *time.Time `json:"closedAt"`
 	CreatedAt time.Time  `json:"createdAt"`
 	CreatedBy int64      `json:"createdBy"` // user who created it
-	UpdatedAt time.Time  `json:"updatedAt"`
+	// SourceMachineID: the machine whose agent gateway forwarded the create
+	// (nil: not through a gateway).
+	SourceMachineID *int64    `json:"sourceMachineId"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 	// Deletable: no recorded work, including from members that left.
 	Deletable         bool      `json:"deletable"`
 	JournalActivityAt time.Time `json:"-"`
@@ -209,12 +212,12 @@ type TreePatch struct {
 	Status Optional[TreeStatus] `json:"status"`
 }
 
-const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.created_by_user_id, tr.updated_at,
+const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.created_by_user_id, tr.source_machine_id, tr.updated_at,
   (tr.recorded_work = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL
 
 func scanTree(row rowScanner) (Tree, error) {
 	var t Tree
-	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.CreatedBy, &t.UpdatedAt, &t.Deletable, &t.JournalActivityAt)
+	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.CreatedBy, &t.SourceMachineID, &t.UpdatedAt, &t.Deletable, &t.JournalActivityAt)
 	return t, notFound(err)
 }
 
@@ -283,7 +286,7 @@ func (s *Store) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) 
 	}
 	var id int64
 	err := s.inTx(ctx, func(tx *Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title, start_mode, created_by_user_id) VALUES ($1, $2, $3) RETURNING id`, in.Title, mode, ActingUser(ctx)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title, start_mode, created_by_user_id, source_machine_id) VALUES ($1, $2, $3, $4) RETURNING id`, in.Title, mode, ActingUser(ctx), ActingMachine(ctx)).Scan(&id); err != nil {
 			return err
 		}
 		for _, m := range in.Tasks {
@@ -813,7 +816,7 @@ func resolveTree(ctx context.Context, tx *Tx, tree *int64, needs []int64) (int64
 	case len(trees) == 1:
 		target = trees[0]
 	default:
-		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title,start_mode,created_by_user_id) VALUES ($1,'auto',$2) RETURNING id`, found[needs[0]].title, ActingUser(ctx)).Scan(&target); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO task_trees (title,start_mode,created_by_user_id,source_machine_id) VALUES ($1,'auto',$2,$3) RETURNING id`, found[needs[0]].title, ActingUser(ctx), ActingMachine(ctx)).Scan(&target); err != nil {
 			return 0, err
 		}
 	}

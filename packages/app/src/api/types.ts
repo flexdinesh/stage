@@ -217,6 +217,8 @@ export interface Project {
   createdAt: string;
   /** User id of its creator. */
   createdBy: number;
+  /** Machine whose agent gateway forwarded the create; null when not through a gateway. */
+  sourceMachineId: number | null;
   updatedAt: string;
   /** Latest thread update/settle or task update; null when none. */
   lastActivityAt: string | null;
@@ -536,6 +538,8 @@ export interface Task {
   createdAt: string;
   /** User id of its creator (a schedule's creator for a task the schedule spawned). */
   createdBy: number;
+  /** Machine whose agent gateway forwarded the create or adoption; null when not through a gateway or spawned by a schedule. */
+  sourceMachineId: number | null;
   updatedAt: string;
   /** When the task entered its current state (latest event into it); null without one. */
   stateSince: string | null;
@@ -681,6 +685,8 @@ export interface Tree {
   createdAt: string;
   /** User id of its creator. */
   createdBy: number;
+  /** Machine whose agent gateway forwarded the create; null when not through a gateway. */
+  sourceMachineId: number | null;
   updatedAt: string;
   /** Server eligibility: deletion must not discard recorded work, including departed members. */
   deletable: boolean;
@@ -860,6 +866,8 @@ export interface JournalEntry {
   createdAt: string;
   /** User id of the note's author or of the user behind the event (trigger-written events: the default user). */
   createdBy: number;
+  /** Machine whose agent gateway forwarded the write; null when not through a gateway (and for trigger-written events). */
+  sourceMachineId: number | null;
   truncated: boolean;
 }
 
@@ -916,6 +924,8 @@ export interface Schedule {
   createdAt: string;
   /** User id of its creator; the tasks it spawns inherit it. */
   createdBy: number;
+  /** Machine whose agent gateway forwarded the create; null when not through a gateway. Spawned tasks do not inherit it. */
+  sourceMachineId: number | null;
   updatedAt: string;
 }
 

@@ -46,7 +46,7 @@ func (s *server) workerChannelStream(w http.ResponseWriter, r *http.Request) err
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return nil
 	}
-	sess := s.Channels.Attach(id, r.Header.Get(workerchan.VersionHeader))
+	sess := s.Channels.AttachGateway(id, r.Header.Get(workerchan.VersionHeader), workerchan.ParseGateway(r.Header.Get(workerchan.GatewayHeader)))
 	defer s.Channels.Detach(sess)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")

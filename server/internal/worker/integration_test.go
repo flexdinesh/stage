@@ -2,21 +2,28 @@ package worker_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/serve"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/worker"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // isolate points every path Stage derives at temp dirs (never the user's
@@ -336,4 +343,198 @@ func TestLeaveRemovesMachine(t *testing.T) {
 			t.Fatalf("machine %d still listed after leave", x.ID)
 		}
 	}
+}
+
+// TestAgentThroughGateway: an agent on the worker machine uses the CLI
+// (default socket resolution, no --url) and HTTP MCP (the opt-in TCP
+// listener) unchanged; the main server records the forwarding machine and
+// the caller session.
+func TestAgentThroughGateway(t *testing.T) {
+	short := isolate(t)
+	t.Setenv("STAGE_URL", "")
+	t.Setenv(agentctx.CallerEnv, "1:agent-cli")
+	m := newMain(t, short)
+	ctx := context.Background()
+	p, err := m.client().PairMachine(ctx, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(t.TempDir(), worker.ConfigFile)
+	c, err := worker.Join(ctx, worker.JoinOptions{Link: p.Link, ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcp := freePort(t)
+	addrs, err := config.ParseWorkerListen("unix," + tcp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	online := make(chan worker.State, 1)
+	runCtx, stopWorker := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- worker.Run(runCtx, worker.RunOptions{ConfigPath: cfgPath, Logger: quiet(), Listen: addrs, MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond,
+			OnState: func(s worker.State) {
+				if s.State == worker.StateOnline {
+					select {
+					case online <- s:
+					default:
+					}
+				}
+			}})
+	}()
+	t.Cleanup(func() {
+		stopWorker()
+		<-done
+	})
+	var st worker.State
+	select {
+	case st = <-online:
+	case err := <-done:
+		t.Fatalf("worker exited: %v", err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("worker not online")
+	}
+	sock, err := config.DefaultSocket(os.Getenv, mustDataDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Gateway) != 2 || st.Gateway[0] != "unix://"+sock || st.Gateway[1] != "http://"+tcp {
+		t.Fatalf("gateway %v, want the default socket %s and %s", st.Gateway, sock, tcp)
+	}
+
+	// The project lives on the main server.
+	var proj struct{ ID int64 }
+	mainJSON(t, m, "POST", "/api/projects", `{"title":"Remote work"}`, 201, &proj)
+
+	// CLI: no --url and no STAGE_URL, so it resolves this machine's default
+	// socket, which the gateway owns.
+	if r := client.Resolve("", os.Getenv); r.Source != "default socket" || r.URL != "unix://"+sock {
+		t.Fatalf("resolution %+v", r)
+	}
+	stage := func(args ...string) string {
+		t.Helper()
+		var out, errb strings.Builder
+		env := cli.Env{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Getenv: os.Getenv, Caller: agentctx.FromEnv(), Home: os.Getenv("HOME")}
+		if code := cli.Run(ctx, args, env); code != 0 {
+			t.Fatalf("stage %v: exit %d: %s", args, code, errb.String())
+		}
+		return out.String()
+	}
+	_ = stage("task", "add", "--project", fmt.Sprint(proj.ID), "--title", "from the laptop", "--prompt", "p")
+	tasks, err := m.client().Tasks(ctx, client.TaskQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var taskID int64
+	for _, x := range tasks {
+		if x.Title == "from the laptop" {
+			taskID = x.ID
+		}
+	}
+	if taskID == 0 {
+		t.Fatalf("task not created on main: %+v", tasks)
+	}
+	var task struct {
+		SourceMachineID *int64 `json:"sourceMachineId"`
+		CreatedBy       int64  `json:"createdBy"`
+	}
+	mainJSON(t, m, "GET", fmt.Sprintf("/api/tasks/%d", taskID), "", 200, &task)
+	if task.SourceMachineID == nil || *task.SourceMachineID != c.MachineID || task.CreatedBy != 1 {
+		t.Fatalf("task %+v, want source machine %d", task, c.MachineID)
+	}
+	_ = stage("task", "notes", fmt.Sprint(taskID), "add", "--text", "cli note", "--request-id", "cli-1")
+
+	// HTTP MCP on the opt-in TCP listener, caller by header.
+	tr := &mcp.StreamableClientTransport{Endpoint: "http://" + tcp + "/mcp", HTTPClient: &http.Client{Transport: callerHeader{"1:agent-mcp"}}}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "agent", Version: "1"}, nil).Connect(ctx, tr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "append_note", Arguments: map[string]any{"taskId": taskID, "text": "mcp note", "requestId": "mcp-1"}})
+	if err != nil || res.IsError {
+		t.Fatalf("append_note: %v %+v", err, res)
+	}
+
+	var page struct {
+		Entries []struct {
+			Text            string `json:"text"`
+			SourceMachineID *int64 `json:"sourceMachineId"`
+			SourceSession   *struct {
+				ConnectionID      int64  `json:"connectionId"`
+				ExternalSessionID string `json:"externalSessionId"`
+			} `json:"sourceSession"`
+		} `json:"entries"`
+	}
+	mainJSON(t, m, "GET", fmt.Sprintf("/api/tasks/%d/journal?kind=notes", taskID), "", 200, &page)
+	want := map[string]string{"cli note": "agent-cli", "mcp note": "agent-mcp"}
+	for _, e := range page.Entries {
+		session, ok := want[e.Text]
+		if !ok {
+			continue
+		}
+		delete(want, e.Text)
+		if e.SourceMachineID == nil || *e.SourceMachineID != c.MachineID || e.SourceSession == nil || e.SourceSession.ConnectionID != 1 || e.SourceSession.ExternalSessionID != session {
+			t.Errorf("%q: machine %v session %+v", e.Text, e.SourceMachineID, e.SourceSession)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("notes missing %v in %+v", want, page.Entries)
+	}
+
+	// A second worker under this identity cannot take the gateway socket.
+	p2, err := m.client().PairMachine(ctx, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := filepath.Join(t.TempDir(), worker.ConfigFile)
+	if _, err := worker.Join(ctx, worker.JoinOptions{Link: p2.Link, ConfigPath: cfg2}); err != nil {
+		t.Fatal(err)
+	}
+	var ue *listen.InUseError
+	if err := worker.Run(ctx, worker.RunOptions{ConfigPath: cfg2, Logger: quiet()}); !errors.As(err, &ue) {
+		t.Fatalf("second gateway on the default socket: %v", err)
+	}
+}
+
+func mustDataDir(t *testing.T) string {
+	t.Helper()
+	d, err := config.DataDirFrom(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// mainJSON calls the main server directly (not through a gateway).
+func mainJSON(t *testing.T, m *mainServer, method, path, body string, want int, out any) {
+	t.Helper()
+	req, _ := http.NewRequest(method, m.url+path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != want {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("%s %s: %d %s", method, path, res.StatusCode, b)
+	}
+	if out != nil {
+		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// callerHeader is an HTTP MCP client naming its session.
+type callerHeader struct{ value string }
+
+func (c callerHeader) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set(agentctx.CallerHeader, c.value)
+	return http.DefaultTransport.RoundTrip(r)
 }

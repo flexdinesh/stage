@@ -19,6 +19,27 @@ func TestParseWorkerEnv(t *testing.T) {
 	}
 }
 
+func TestWorkerListen(t *testing.T) {
+	for v, want := range map[string]int{"": 1, "unix": 1, "unix, 127.0.0.1:7381": 2} {
+		addrs, err := ParseWorkerListen(v)
+		if err != nil || len(addrs) != want || !addrs[0].Private || addrs[0].Address != "" {
+			t.Errorf("%q: %+v %v", v, addrs, err)
+		}
+	}
+	for _, bad := range []string{"127.0.0.1:7381", "unix:/tmp/x.sock", "unix,unix", "nope"} {
+		if _, err := ParseWorkerListen(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	vals, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=unix,127.0.0.1:7381\n"))
+	if err != nil || vals[WorkerListenEnv] != "unix,127.0.0.1:7381" {
+		t.Fatalf("%v %v", vals, err)
+	}
+	if _, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=127.0.0.1:7381\n")); err == nil || !strings.Contains(err.Error(), "must include unix") {
+		t.Fatalf("gateway without unix accepted: %v", err)
+	}
+}
+
 func TestReadWorkerEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), WorkerEnvFile)
 	if vals, err := ReadWorkerEnv(path); err != nil || len(vals) != 0 {

@@ -65,7 +65,10 @@ type Project struct {
 	ArchivedAt *time.Time       `json:"archivedAt"`
 	CreatedAt  time.Time        `json:"createdAt"`
 	CreatedBy  int64            `json:"createdBy"` // user who created it
-	UpdatedAt  time.Time        `json:"updatedAt"`
+	// SourceMachineID: the machine whose agent gateway forwarded the create
+	// (nil: not through a gateway).
+	SourceMachineID *int64    `json:"sourceMachineId"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 	// LastActivityAt: latest thread update/settle or task update; nil when none.
 	LastActivityAt *time.Time `json:"lastActivityAt"`
 	// Origin is "discovered" for a project discovery imported, else nil.
@@ -201,8 +204,11 @@ type Task struct {
 	CreatedAt            time.Time `json:"createdAt"`
 	// CreatedBy: the user who created the task (a schedule's creator for a
 	// task it spawned).
-	CreatedBy int64     `json:"createdBy"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedBy int64 `json:"createdBy"`
+	// SourceMachineID: the machine whose agent gateway forwarded the create
+	// or adoption (nil: not through a gateway, or spawned by a schedule).
+	SourceMachineID *int64    `json:"sourceMachineId"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 	// StateSince: when the task entered its current state (latest task event
 	// into it; nil without one).
 	StateSince  *time.Time   `json:"stateSince"`
