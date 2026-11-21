@@ -15,7 +15,7 @@ func TestEnvironmentCredentialsStayOnTheirConfiguredService(t *testing.T) {
 	var temp dbtest.DB
 	store := db.NewStore(temp.Reset(t))
 	cfg := config.OpenCodeSettings{Endpoint: "https://user:private@example.com", BrowserEndpoint: "https://example.com?secret=private", Username: "user", Password: "private"}
-	s, err := New(t.Context(), store.OnMachine(db.LocalMachine), cfg, func(int64, int64, execution.Adapter) { t.Fatal("invalid connection installed") }, nil)
+	s, err := New(t.Context(), storePorts(store, func(int64, int64, execution.Adapter) { t.Fatal("invalid connection installed") }), cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestEnvironmentCredentialsStayOnTheirConfiguredService(t *testing.T) {
 	if err := s.Save(t.Context(), config.OpenCodeEdit{Endpoint: &address}); err == nil {
 		t.Fatal("changed environment-managed endpoint")
 	}
-	saved, verified, err := store.OpenCodeSettings(t.Context(), db.LocalMachine)
+	saved, verified, err := savedSettings(store)
 	if err != nil || saved != (config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}) || verified != "" {
 		t.Fatal("failed edit changed stored settings")
 	}

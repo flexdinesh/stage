@@ -24,8 +24,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	stageharness "github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
@@ -42,6 +44,7 @@ type harness struct {
 	handler http.Handler // the /api router
 	fake    *t3.Fake
 	sync    *t3sync.Service
+	store   *db.Store
 	caller  agentctx.Caller
 	execs   [][]string
 }
@@ -50,14 +53,17 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, url: "http://127.0.0.1:1"}
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
+	h.store = store
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
-	openCode, err := opencodesetup.New(t.Context(), store.OnMachine(db.LocalMachine), config.OpenCodeSettings{}, h.sync.SwapAdapter, log)
+	local, _ := h.sync.Machines().Local(db.LocalMachine)
+	ocPorts := machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(opencode.Descriptor))
+	openCode, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ocPorts, Identity: ocPorts, Install: local.Install}, config.OpenCodeSettings{}, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Store: store.OnMachine(db.LocalMachine), Client: h.fake, Fake: true, Logger: log})
+	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(t3.Descriptor)), Client: h.fake, Fake: true, Logger: log})
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
 	h.sync.Harnesses = reg
 	connectors, err := stageharness.NewConnectors(reg, map[int64]map[string]stageharness.Connector{db.LocalMachine: {
@@ -142,7 +148,7 @@ func TestTaskCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
+	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
@@ -208,7 +214,7 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
+	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID)}
@@ -322,7 +328,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := h.sync.RefreshSession(context.Background(), out.ThreadID); err != nil {
+		if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
 			t.Fatal(err)
 		}
 		return out.ThreadID

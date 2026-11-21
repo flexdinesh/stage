@@ -35,8 +35,8 @@ func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
 	if err != nil || c.T3URL == nil || *c.T3URL != "http://t3:3773" || c.LastFullSyncAt == nil || c.LastError == nil || *c.LastError != "boom" || c.EnvironmentID == nil || *c.EnvironmentID != "env-a" || c.ConnectionID != 1 {
 		t.Fatalf("t3 setup %+v %v", c, err)
 	}
-	oc, verified, err := s.OpenCodeSettings(ctx, LocalMachine)
-	if err != nil || oc.Endpoint != "http://oc:4096" || oc.Username != "u" || oc.Password != "p" || oc.Auth != config.OpenCodeAuthBasic || verified != "http://oc:4096" {
+	oc, cred, verified, err := s.OpenCodeSettings(ctx, LocalMachine)
+	if err != nil || oc.Endpoint != "http://oc:4096" || cred.Username != "u" || cred.Password != "p" || oc.Auth != config.OpenCodeAuthBasic || verified != "http://oc:4096" {
 		t.Fatalf("opencode %+v %q %v", oc, verified, err)
 	}
 }
@@ -153,13 +153,13 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 	if again, _ := m.EnsureOpenCode(ctx); again != ocLaptop {
 		t.Fatalf("second ensure %d", again)
 	}
-	if err := m.SaveOpenCodeSettings(ctx, config.OpenCodeSettings{Endpoint: "http://laptop:4096", Auth: config.OpenCodeAuthBasic, Password: "secret"}); err != nil {
+	if err := m.SaveOpenCodeSettings(ctx, config.OpenCodeSetup{Endpoint: "http://laptop:4096", Auth: config.OpenCodeAuthBasic}, config.OpenCodeCredential{Password: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if c, _, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || c.Endpoint != "" || c.Password != "" || c.Auth != config.OpenCodeAuthNone {
+	if c, cred, _, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || c.Endpoint != "" || cred.Password != "" || c.Auth != config.OpenCodeAuthNone {
 		t.Fatalf("local opencode %+v %v", c, err)
 	}
-	if c, _, err := m.OpenCodeSettings(ctx); err != nil || c.Endpoint != "http://laptop:4096" || c.Password != "secret" {
+	if c, cred, _, err := m.OpenCodeSettings(ctx); err != nil || c.Endpoint != "http://laptop:4096" || cred.Password != "secret" {
 		t.Fatalf("laptop opencode %+v %v", c, err)
 	}
 

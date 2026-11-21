@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -65,7 +66,7 @@ func launchSession(t *testing.T, e *env, project, title string) string {
 func runningSession(t *testing.T, e *env, project, title string) string {
 	t.Helper()
 	id := launchSession(t, e, project, title)
-	if err := e.sync.RefreshSession(context.Background(), id); err != nil {
+	if err := e.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	return id

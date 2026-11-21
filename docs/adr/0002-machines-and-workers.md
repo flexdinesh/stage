@@ -299,9 +299,9 @@ Found in #336. Each one is fixed by the task named here.
 | `SwitchInstance` writes only `LocalMachine` | `server/internal/db/connections.go` | #339 (takes a machine id) |
 | One release and one schedule runner per harness kind | `server/internal/serve/serve.go` ("One runner per harness kind") | #339 (per active connection) |
 | Sync treats T3 as global (`IsT3`, `T3ID`) | `server/internal/sync/watch.go`, `session.go`, `service.go` | #339 |
-| `sync.Service` and `opencodesetup.New` take `*db.Store`. `t3setup`'s store is `db.Store` | `server/internal/sync/service.go`, `server/internal/opencodesetup/setup.go`, `server/internal/t3setup/t3setup.go` | #340 (narrow ports) |
-| Server-host fs and process work: gitmeta `.git/config` reads, shared-path translation (`sync.Service.Inventory`), `git rev-parse` matching, OpenCode `service.json`, T3 auto-pair | `server/internal/sync/inventory.go`, `server/internal/api/matching.go`, `server/internal/opencode/pairing.go`, T3 setup | #340 (machine-local ops), #344 (runs on the worker) |
-| The harness profile is read from the local machine only | `server/internal/api/handlers_harnesses.go` (`GetMachine(LocalMachine)`) | #340, #344 (per machine) |
+| `sync.Service` and `opencodesetup.New` take `*db.Store`. `t3setup`'s store is `db.Store` | `server/internal/sync/service.go`, `server/internal/opencodesetup/setup.go`, `server/internal/t3setup/t3setup.go` | #340: setups take ports (`opencodesetup.Ports`, `t3setup` Settings/Identity/Local), `machine.StorePorts` backs them locally; sync reaches adapters through `machine.Set` and keeps the store as the coordinator |
+| Server-host fs and process work: gitmeta `.git/config` reads, shared-path translation (`sync.Service.Inventory`), `git rev-parse` matching, OpenCode `service.json`, T3 auto-pair | `server/internal/sync/inventory.go`, `server/internal/api/matching.go`, `server/internal/opencode/pairing.go`, T3 setup | #340: `machine.Ops` (Inventory, Checkout), `opencodesetup.Local`, `t3setup.Local`; #344 (runs on the worker) |
+| The harness profile is read from the local machine only | `server/internal/api/handlers_harnesses.go` (`GetMachine(LocalMachine)`) | #340: read from the local machine's host (`Machine.Profile`); #344 (per machine) |
 
 ## Phased tasks
 

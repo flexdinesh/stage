@@ -64,7 +64,7 @@ func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
 
 	id := r.PathValue("id")
 	if s.connected(r.Context(), t3) {
-		if err := s.Sync.RefreshSession(r.Context(), id); err != nil {
+		if err := s.Sync.RefreshScopedSession(r.Context(), execution.SessionRef{ConnectionID: t3, ExternalSessionID: id}); err != nil {
 			return err
 		}
 	}

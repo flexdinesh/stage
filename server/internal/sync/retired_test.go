@@ -81,7 +81,8 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 		t.Fatalf("switch %+v %v", sw, err)
 	}
 	b := &readsT3{Fake: t3.NewFake()}
-	svc.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(b, sw.New))
+	local, _ := svc.Machines().Local(db.LocalMachine)
+	local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(b, sw.New))
 	if err := a.SetStatus(thread, t3.StatusIdle); err != nil {
 		t.Fatal(err)
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
@@ -184,7 +185,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 		opt(&deps)
 	}
 	if deps.Setup == nil {
-		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Store: store.OnMachine(db.LocalMachine), Client: client, Fake: true, Logger: log})
+		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: log})
 	}
 	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(deps.Setup, func(connection int64) t3setup.SyncProgress {
 		p := svc.Progress(connection)

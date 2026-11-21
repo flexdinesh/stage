@@ -21,15 +21,14 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/guard"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
-	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
@@ -161,44 +160,14 @@ func Run(ctx context.Context, o Options) error {
 	store := db.NewStore(pool)
 
 	var wg sync.WaitGroup
-	var closeT3 func()
+	var local *localMachine
 	defer func() {
 		stop()
 		wg.Wait() // background loops exit once ctx ends
-		if closeT3 != nil {
-			closeT3()
+		if local != nil && local.close != nil {
+			local.close()
 		}
 	}()
-
-	// T3_URL wins over the URL saved in Settings, which wins over the default.
-	conn, err := store.GetConnection(ctx, db.LocalMachine)
-	if err != nil {
-		return err
-	}
-	endpoint := t3setup.Resolve(cfg, conn.T3URL)
-	t3Client := o.T3
-	switch {
-	case t3Client != nil:
-	case cfg.T3Fake:
-		// T3_FAKE=1 forces the in-memory fake (dev/demo without a T3 server).
-		fake := t3.NewFake()
-		// T3_FAKE_SEED=1 seeds demo threads waiting on questions (UI work).
-		if cfg.T3FakeSeed {
-			fake.SeedDemo()
-		}
-		t3Client = fake
-		logger.Info("using fake T3 client")
-	default:
-		mc := t3.NewMCPClient(t3.Options{
-			BaseURL: endpoint.URL, AdminToken: cfg.T3AdminToken, PublicURL: endpoint.PublicURL, ClientName: cfg.T3ClientName,
-			Store: store.OnMachine(db.LocalMachine), HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: logger,
-		})
-		closeT3 = mc.Close
-		wg.Add(1)
-		go func() { defer wg.Done(); mc.Run(ctx) }()
-		t3Client = mc
-		logger.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
-	}
 
 	// Agent instructions name the CLI this identity installed on PATH.
 	home, _ := os.UserHomeDir()
@@ -209,7 +178,14 @@ func Run(ctx context.Context, o Options) error {
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
 	}
-	syncSvc := t3sync.New(store, t3.NewConnectionAdapter(t3Client, store.ActiveID(db.LocalMachine, t3.Kind)), logger)
+	// The machine-runtime seam: the in-process local machine is the only
+	// machine until workers exist (ADR 0002).
+	local, err = newLocalMachine(ctx, &wg, store, cfg, o.T3, profile, logger)
+	if err != nil {
+		return err
+	}
+	machines := machine.MustSet(local)
+	syncSvc := t3sync.NewForMachines(store, machines, logger)
 	syncSvc.Harnesses = harnesses
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
@@ -227,20 +203,15 @@ func Run(ctx context.Context, o Options) error {
 		sc.ConnectionID = id
 		return sc
 	})
-	resyncRunners := func() {
-		releases.Resync()
-		schedules.Resync()
-	}
 	kickTrees := func() {
 		releases.Each(func(r *release.Runner) { r.Kick() })
 	}
-	openCode, err := opencodesetup.New(ctx, store.OnMachine(db.LocalMachine), cfg.OpenCode, func(old, next int64, a execution.Adapter) {
-		syncSvc.SwapAdapter(old, next, a)
-		resyncRunners()
-	}, logger)
-	if err != nil {
-		return err
-	}
+	// The coordinator and runners follow the machine's adapters.
+	local.OnChange(func(old, next int64) {
+		syncSvc.ConnectionsChanged(old, next)
+		releases.Resync()
+		schedules.Resync()
+	})
 	// One inbox hub wakes notification streams on inserts (notifier), reads
 	// (API), prunes and task transitions (badge). Streams end with ctx.
 	inbox := notify.NewHub(ctx)
@@ -253,23 +224,13 @@ func Run(ctx context.Context, o Options) error {
 	}
 	syncSvc.OnThreadChange = notifier.OnThreadChange
 	syncSvc.OnAccepted = kickTrees
-	setup := t3setup.New(t3setup.Options{
-		Config: cfg, Store: store.OnMachine(db.LocalMachine), Client: t3Client, Endpoint: endpoint, Fake: t3setup.IsFake(t3Client),
-		OnPaired: syncSvc.Kick, Logger: logger,
-		// A different T3 environment moved T3 to another connection.
-		OnSwitched: func(sw db.Switch) {
-			syncSvc.SwapAdapter(sw.Old, sw.New, t3.NewConnectionAdapter(t3Client, sw.New))
-			resyncRunners()
-		},
-	})
-	// The local machine's connectors (the only machine until workers exist).
-	connectors, err := harness.NewConnectors(harnesses, map[int64]map[string]harness.Connector{db.LocalMachine: {
-		t3.Kind: t3setup.NewConnector(setup, func(connection int64) t3setup.SyncProgress {
-			p := syncSvc.Progress(connection)
-			return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
-		}),
-		opencode.Kind: opencodesetup.NewConnector(openCode),
-	}})
+	if err := local.compose(ctx, store, cfg, harnesses, syncSvc.Kick, func(connection int64) t3setup.SyncProgress {
+		p := syncSvc.Progress(connection)
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+	}, logger); err != nil {
+		return err
+	}
+	connectors, err := machines.Connectors(harnesses)
 	if err != nil {
 		return err
 	}
@@ -288,8 +249,8 @@ func Run(ctx context.Context, o Options) error {
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
-		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: setup, Connectors: connectors,
-		Harnesses: harnesses, Profile: profile,
+		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup, Connectors: connectors,
+		Harnesses: harnesses,
 	})
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.

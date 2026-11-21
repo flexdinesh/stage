@@ -55,3 +55,33 @@ type OpenCodeLocal struct {
 	Version   string `json:"version"`
 	Reason    string `json:"reason"`
 }
+
+// OpenCodeSetup is the non-secret part of a machine's saved OpenCode
+// settings: the main server may hold it.
+type OpenCodeSetup struct {
+	Endpoint        string `json:"endpoint"`
+	BrowserEndpoint string `json:"browserEndpoint"`
+	WebClient       string `json:"webClient"`
+	Auth            string `json:"auth"`
+}
+
+// OpenCodeCredential is the secret part of a machine's saved OpenCode
+// settings: HTTP Basic credentials or a paired session token and when it
+// was issued. It stays where the harness runs (ADR 0002).
+type OpenCodeCredential struct {
+	Username      string     `json:"username"`
+	Password      string     `json:"password"`
+	TokenIssuedAt *time.Time `json:"tokenIssuedAt,omitempty"`
+}
+
+// Split is c's setup and credential.
+func (c OpenCodeSettings) Split() (OpenCodeSetup, OpenCodeCredential) {
+	return OpenCodeSetup{Endpoint: c.Endpoint, BrowserEndpoint: c.BrowserEndpoint, WebClient: c.WebClient, Auth: c.Auth},
+		OpenCodeCredential{Username: c.Username, Password: c.Password, TokenIssuedAt: c.TokenIssuedAt}
+}
+
+// JoinOpenCode is the settings made of s and c.
+func JoinOpenCode(s OpenCodeSetup, c OpenCodeCredential) OpenCodeSettings {
+	return OpenCodeSettings{Endpoint: s.Endpoint, BrowserEndpoint: s.BrowserEndpoint, WebClient: s.WebClient, Auth: s.Auth,
+		Username: c.Username, Password: c.Password, TokenIssuedAt: c.TokenIssuedAt}
+}

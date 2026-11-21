@@ -45,8 +45,6 @@ type Deps struct {
 	Connectors harness.Connectors
 	// Harnesses is the server's fixed harness composition (nil: none).
 	Harnesses *harness.Registry
-	// Profile is this machine's hosting profile (GET /api/harnesses).
-	Profile harness.Profile
 }
 
 // registry is Harnesses, or an empty registry.

@@ -83,7 +83,7 @@ func configured(st Status) bool {
 
 func (c *Connector) Summary(ctx context.Context) harness.Summary {
 	st := c.svc.Status(ctx, false)
-	conn, _ := c.svc.o.Store.GetConnection(ctx)
+	conn, _ := c.svc.o.Settings.GetConnection(ctx)
 	out := harness.Summary{ConnectionID: conn.ConnectionID, Configured: configured(st), Connected: st.Conn.Connected, LastError: st.Conn.LastError}
 	if out.LastError == "" && conn.LastError != nil {
 		out.LastError = *conn.LastError
@@ -93,7 +93,7 @@ func (c *Connector) Summary(ctx context.Context) harness.Summary {
 
 func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, error) {
 	st := c.svc.Status(ctx, refresh)
-	conn, err := c.svc.o.Store.GetConnection(ctx)
+	conn, err := c.svc.o.Settings.GetConnection(ctx)
 	if err != nil {
 		return harness.Status{}, err
 	}

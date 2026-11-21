@@ -13,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
@@ -20,7 +21,9 @@ import (
 
 func withOpenCode(t *testing.T, env config.OpenCodeSettings) func(*api.Deps) {
 	return func(d *api.Deps) {
-		s, err := opencodesetup.New(t.Context(), d.Store.OnMachine(db.LocalMachine), env, d.Sync.SwapAdapter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		local, _ := d.Sync.Machines().Local(db.LocalMachine)
+		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(opencode.Descriptor))
+		s, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ports, Identity: ports, Install: local.Install}, env, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatal(err)
 		}

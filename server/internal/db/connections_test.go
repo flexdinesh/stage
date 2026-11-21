@@ -54,7 +54,7 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	if err != nil || conn.EnvironmentID == nil || *conn.EnvironmentID != "env-a" || conn.ConnectionID != 1 {
 		t.Fatalf("t3 connection %+v %v", conn, err)
 	}
-	if _, verified, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || verified != "http://oc:4096" {
+	if _, _, verified, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || verified != "http://oc:4096" {
 		t.Fatalf("verified %q %v", verified, err)
 	}
 	task, err := s.GetTask(ctx, 2)

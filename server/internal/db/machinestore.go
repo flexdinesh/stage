@@ -74,12 +74,13 @@ func (m MachineStore) EnsureOpenCode(ctx context.Context) (int64, error) {
 	return m.Store.EnsureOpenCode(ctx, m.machine)
 }
 
-// OpenCodeSettings reads the machine's OpenCode settings.
-func (m MachineStore) OpenCodeSettings(ctx context.Context) (config.OpenCodeSettings, string, error) {
+// OpenCodeSettings reads the machine's OpenCode setup, credential and
+// verified address.
+func (m MachineStore) OpenCodeSettings(ctx context.Context) (config.OpenCodeSetup, config.OpenCodeCredential, string, error) {
 	return m.Store.OpenCodeSettings(ctx, m.machine)
 }
 
-// SaveOpenCodeSettings saves the machine's OpenCode settings.
-func (m MachineStore) SaveOpenCodeSettings(ctx context.Context, c config.OpenCodeSettings) error {
-	return m.Store.SaveOpenCodeSettings(ctx, m.machine, c)
+// SaveOpenCodeSettings saves the machine's OpenCode setup and credential.
+func (m MachineStore) SaveOpenCodeSettings(ctx context.Context, setup config.OpenCodeSetup, cred config.OpenCodeCredential) error {
+	return m.Store.SaveOpenCodeSettings(ctx, m.machine, setup, cred)
 }

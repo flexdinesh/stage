@@ -31,7 +31,11 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	profile := s.Profile
+	// The local machine's hosting profile (its host in the machine set).
+	var profile harness.Profile
+	if lm, ok := s.Sync.Machines().Get(db.LocalMachine); ok {
+		profile = lm.Profile()
+	}
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
 	}

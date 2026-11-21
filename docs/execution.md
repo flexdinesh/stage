@@ -30,6 +30,50 @@ plugin registration or service installation framework.
   hosting policy belong to a machine; and pushed observations are the shape
   the worker channel carries.
 
+## Machine-runtime seam
+
+`internal/machine` is the per-machine host of harness code; it names no
+harness. A `machine.Machine` has an id, `Online`, a hosting `Profile`, the
+adapters of its active connections, a connector per kind and `Ops`.
+`machine.Set` holds the server's machines: `sync.Service` resolves every
+connection's adapter through it (`Adapter(id)`; a retired or unhosted
+connection answers `connection_retired` or `connection_unavailable` as
+before), `GET /api/harnesses` reads the local machine's profile, and
+`harness.Connectors` is built from the machines' connectors.
+
+- **LocalMachine.** `machine.Local` is the in-process machine, the only one
+  until workers exist. `serve/localmachine.go` composes it: the T3 client
+  (fake or MCP) and adapter, the T3 and OpenCode setups and their
+  connectors. Setup code installs adapters through `Local.Install(old, next,
+  adapter)` (the install port; nil disconnects); its change hook moves the
+  coordinator (`sync.Service.ConnectionsChanged`) and resyncs the runners.
+- **Ops.** `machine.Ops` is the harness-neutral fs and process work that
+  must run where the harness runs: `Inventory` fills `WorkspaceInfo.Repo`
+  and `RepoPath` through the connection's shared roots (`gitmeta.Checkout`,
+  never walking above a root), and `Checkout` returns
+  `machine.CheckoutEvidence` (the Git common directory as a device:inode
+  key, the subproject and its slash path, and the normalized remote) for
+  workspace matching. The
+  main server loads shared paths and compares evidence; only evidence from
+  the same machine proves a checkout. `machine.LocalOps` runs them here.
+- **Setup ports.** `opencodesetup.Ports` and the `t3setup.Options` ports
+  replace the store. Settings: OpenCode's `config.OpenCodeSetup`
+  (non-secret) and `config.OpenCodeCredential` (secret), loaded and saved
+  together in one call; T3's URL setting and environment. Credentials: the
+  OpenCode credential, and the T3 token through `t3.TokenStore`. Identity:
+  ensure, identity stamps, instance switches by kind (the main server
+  applies its own registry's policy), retired connections, stored evidence.
+  Event sink: the install port, `OnSwitched`/`OnPaired`. Harness-specific
+  machine-local work is its own port: `opencodesetup.Local` (service.json and
+  its probe) and `t3setup.Local` (find and run the t3 CLI for auto-pair).
+  `machine.StorePorts` backs settings, credentials and identity with the
+  store for the local machine. Checkpoint save stays the `Launch` callback.
+- **JSON.** Every type that crosses the seam round-trips through JSON
+  (`machine/contract_json_test.go`): the adapter contract, connector setup
+  states, port payloads and ops. `WorkspaceInfo.OriginRemote` may carry
+  credentials; it is never returned to a client. Harness descriptors are
+  static and identical on both sides, so a port names a harness by kind.
+
 ## Harness registry
 
 Each harness package declares a `harness.Descriptor`: kind, name, hosting,
@@ -52,8 +96,9 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   schema (settings fields with their locking environment variable, typed
   actions, disconnect). Its setup package implements `harness.Connector`
   (memory-only summary, status with harness details, configure, run,
-  disconnect) over narrow ports; `serve` composes one per kind
-  (`harness.Connectors`, checked against the registry). The API exposes them
+  disconnect) over narrow ports ([machine-runtime seam](#machine-runtime-seam));
+  each machine hosts one per kind (`harness.Connectors`, built from the
+  machines and checked against the registry). The API exposes them
   generically under `/api/harnesses/{kind}/...`; health, sync skipping and
   connection lists read connector summaries. Hosts render the schema, or a
   panel registered for the kind (UI `CONNECTION_PANELS`, CLI `slots_*.go`).
