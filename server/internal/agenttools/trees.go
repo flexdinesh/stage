@@ -97,7 +97,7 @@ type TreeTaskArgs struct {
 // CreateTreeArgs is create_tree.
 type CreateTreeArgs struct {
 	Title     string         `json:"title" jsonschema:"tree title"`
-	StartMode string         `json:"startMode,omitempty" jsonschema:"auto (default; omit unless asked: members launch when prerequisites are completed) | manual (explicit: members read ready; the user starts them)"`
+	StartMode string         `json:"startMode,omitempty" jsonschema:"auto (default; omit unless the user asks: roots never start on their own, other members launch once the user completes their needs) | manual (only when the user asks: members read ready; the user starts them)"`
 	Tasks     []TreeTaskArgs `json:"tasks" jsonschema:"existing tasks to put in the tree, with the needs between them"`
 }
 

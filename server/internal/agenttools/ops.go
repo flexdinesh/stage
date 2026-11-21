@@ -528,7 +528,7 @@ type WaitArgs struct {
 	TreeID     *int64  `json:"treeId,omitempty" jsonschema:"join this tree as a parallel root unless needs are given (default: the needs' tree, else a new tree when there are needs)"`
 	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task runs after (same tree): it starts once all of them settle; tasks sharing a need run in parallel"`
 	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task waits for its user completion in Stage (needs your session id)"`
-	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit to follow the tree). Set shared policy on the tree; auto (launch when needs are completed) or manual (reads ready) only for a per-task exception, preserved when the tree mode changes"`
+	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit unless the user asks). In an auto tree the task launches once its needs are completed, at once if they already are: expected, not a reason for manual. auto or manual (reads ready) only for a user-requested per-task exception, preserved when the tree mode changes"`
 	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from (default: the sole need)"`
 	StartLocal string  `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
 	StartTz    string  `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`

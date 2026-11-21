@@ -404,6 +404,9 @@ func TestTreeDefaultsToAutoAndTasksInherit(t *testing.T) {
 	if strings.Contains(agenttools.Guide("stage"), "default to manual") {
 		t.Fatal("guide must not steer agents to manual")
 	}
+	if !strings.Contains(agenttools.Guide("stage"), "Do not pick manual to avoid launches") {
+		t.Fatal("guide must tell agents not to pick manual to avoid launches")
+	}
 }
 
 func TestTreeStartModeDefaultsToInherit(t *testing.T) {
