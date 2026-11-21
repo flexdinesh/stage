@@ -252,24 +252,26 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
       className={cx(
-        "toast-in pointer-events-auto flex flex-col gap-1.5 border border-line-strong bg-surface py-2.5 pr-3",
+        "toast-in pointer-events-auto flex flex-col gap-1 border border-line-strong bg-surface py-2 pr-3",
         sticky ? "border-l-2 border-l-need pl-[11px]" : "pl-3",
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <NotificationEventBadge event={n.event} />
-        <Button variant="ghost" small onClick={onDismiss} aria-label="Dismiss notification" className="-mr-1.5 w-6 px-0">
+        <Link to={notificationPath(n)} onClick={onDismiss} title={n.title} className="min-w-0 truncate text-body font-medium hover:underline">
+          {n.title}
+        </Link>
+        <Button variant="ghost" small onClick={onDismiss} aria-label="Dismiss notification" className="-my-1 -mr-1.5 w-6 shrink-0 px-0">
           <IconClose />
         </Button>
       </div>
-      <Link to={notificationPath(n)} onClick={onDismiss} className="line-clamp-2 text-body font-medium break-words hover:underline">
-        {n.title}
-      </Link>
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
-        <span className="min-w-0 truncate font-mono text-meta text-muted">
-          {project === "" ? "" : `${project} · `}
-          <span className="tabular">{relativeTime(n.createdAt)}</span>
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <NotificationEventBadge event={n.event} />
+          <span className="min-w-0 truncate font-mono text-meta text-muted">
+            {project === "" ? "" : `${project} · `}
+            <span className="tabular">{relativeTime(n.createdAt)}</span>
+          </span>
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           <ToastView n={n} onDismiss={onDismiss} />
@@ -418,14 +420,14 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
         {items.length === 0 && silent.length === 0 ? (
           <Muted>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</Muted>
         ) : (
-          <div className="flex flex-col gap-3.5">
+          <div className="flex flex-col gap-2">
             {silent.length === 0 ? null : <section className="border border-line">
-              <h3 className="label-caps flex min-h-8 justify-between border-b border-line bg-panel px-3 py-1">Waiting in T3 <span className="tabular text-muted">{silent.length}</span></h3>
+              <h3 className="label-caps flex min-h-7 items-center justify-between border-b border-line bg-panel px-3 py-1">Waiting in T3 <span className="tabular text-muted">{silent.length}</span></h3>
               <ul>{silent.map((session) => <li key={`${session.connectionId}:${session.externalSessionId}`} className="border-b border-line last:border-b-0"><SilentWaitingRow session={session} /></li>)}</ul>
             </section>}
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
-                <h3 className="label-caps flex min-h-8 items-center justify-between gap-3 border-b border-line bg-panel px-3 py-1 text-fg">
+                <h3 className="label-caps flex min-h-7 items-center justify-between gap-3 border-b border-line bg-panel px-3 py-1 text-fg">
                   {g.label}
                   <span className="tabular text-muted">{g.items.length}</span>
                 </h3>
@@ -481,14 +483,15 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   const ready = startable(n);
   const changed = n.currentState !== null && n.currentState !== n.event && !ready;
   return (
-    <div className={cx("border-l-2 px-3 py-2.5", waiting ? "border-l-need" : "border-l-transparent")}>
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="flex min-w-0 items-baseline gap-2">
-          {unread ? <span className="size-1.5 shrink-0 translate-y-[-1px] bg-fg" role="img" aria-label="Unread" /> : null}
+    <div className={cx("border-l-2 px-3 py-2", waiting ? "border-l-need" : "border-l-transparent")}>
+      <div className="flex items-center justify-between gap-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          {unread ? <span className="size-1.5 shrink-0 bg-fg" role="img" aria-label="Unread" /> : null}
           <Link
             to={notificationPath(n)}
             onClick={onNavigate}
-            className={cx("min-w-0 text-body break-words hover:underline", unread ? "font-semibold" : "font-medium")}
+            title={n.title}
+            className={cx("min-w-0 truncate text-body hover:underline", unread ? "font-semibold" : "font-medium")}
           >
             {n.title}
           </Link>
@@ -503,32 +506,43 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           )}
         </div>
       </div>
-      <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
-        {project === "" ? null : <span>{project}</span>}
-        <span title={dateTime(n.createdAt)} className="tabular">
-          latest notification {relativeTime(n.createdAt)}
-        </span>
-      </div>
-      {changed || n.currentState === null ? (
-        <p className="mt-1 text-small text-muted">
-          {n.currentState === null ? "Current status unavailable. " : ""}Last notification: <NotificationEventLabel event={n.event} />
-        </p>
-      ) : null}
-      <div className="mt-1.5 flex items-start justify-between gap-2.5">
-        <Button
-          small
-          variant="ghost"
-          className="-ml-2 gap-1"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-controls={historyId}
-          aria-label={`${expanded ? "Hide" : "Show"} notification history for ${n.title}`}
-        >
-          <span className={cx("inline-flex", !expanded && "-rotate-90")}>
-            <IconChevronDown size={14} />
+      <div className="mt-1 flex items-center justify-between gap-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-meta text-muted">
+          <span className="flex min-w-0 items-center gap-2">
+            {project === "" ? null : <><span className="min-w-0 truncate">{project}</span><MetaDot /></>}
+            <span title={dateTime(n.createdAt)} className="shrink-0 tabular">
+              {relativeTime(n.createdAt)}
+            </span>
           </span>
-          <span className="font-mono">{n.eventCount} {n.eventCount === 1 ? "update" : "updates"}</span>
-        </Button>
+          {changed || n.currentState === null ? (
+            <>
+              {/* Phone: the historical event starts its own line, so no separator dangles. */}
+              <span aria-hidden="true" className="basis-full md:hidden" />
+              <span className="flex items-center gap-2">
+                <MetaDot className="max-md:hidden" />
+                <span>
+                  was <NotificationEventLabel event={n.event} />
+                </span>
+              </span>
+            </>
+          ) : null}
+          {n.eventCount > 1 ? (
+            <Button
+              small
+              variant="ghost"
+              className="-ml-1 gap-0.5 px-1 md:px-1"
+              onClick={onToggle}
+              aria-expanded={expanded}
+              aria-controls={historyId}
+              aria-label={`${expanded ? "Hide" : "Show"} notification history for ${n.title}`}
+            >
+              <span className={cx("inline-flex", !expanded && "-rotate-90")}>
+                <IconChevronDown size={14} />
+              </span>
+              <span className="font-mono tabular">{n.eventCount} updates</span>
+            </Button>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
           {destination(n) === null ? null : (
@@ -543,6 +557,10 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
       </div>
     </div>
   );
+}
+
+function MetaDot({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={className}>·</span>;
 }
 
 function NotificationEventLabel({ event }: { event: NotificationEvent }) {
@@ -603,9 +621,15 @@ function SilentWaitingRow({ session }: { session: WaitingSession }) {
   const destination = useNotificationDestination();
   const { name } = useHarnesses();
   const href = destination(session);
-  return <div className="flex flex-col gap-2 border-l-2 border-l-need px-3 py-3">
-    <p className="text-body font-medium break-words">{session.title}</p>
-    <div className="flex flex-wrap items-center gap-2"><TaskStateBadge state="needs_input" /><span className="font-mono text-meta text-muted">{session.projectTitle ?? name(session.connectionId)}</span></div>
-    {href === null ? <Muted>Open in {name(session.connectionId)}: {session.externalSessionId}</Muted> : <AppButton href={href} variant="primary" className="self-start">Open in {name(session.connectionId)}</AppButton>}
+  const fallback = `Open in ${name(session.connectionId)}: ${session.externalSessionId}`;
+  return <div className="border-l-2 border-l-need px-3 py-2">
+    <div className="flex items-center justify-between gap-2.5">
+      <p title={session.title} className="min-w-0 truncate text-body font-medium">{session.title}</p>
+      <div className="shrink-0"><TaskStateBadge state="needs_input" /></div>
+    </div>
+    <div className="mt-1 flex items-center justify-between gap-2.5">
+      <span className="min-w-0 truncate font-mono text-meta text-muted">{session.projectTitle ?? name(session.connectionId)}</span>
+      {href === null ? <span title={fallback} className="min-w-0 truncate text-small text-muted">{fallback}</span> : <AppButton small href={href} variant="primary">Open in {name(session.connectionId)}</AppButton>}
+    </div>
   </div>;
 }
