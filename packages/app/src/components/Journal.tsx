@@ -115,7 +115,7 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
   );
 }
 
-export function JournalRow({ entry, anchored = false, compact = false }: { entry: JournalEntry; anchored?: boolean; compact?: boolean }) {
+export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; anchored?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const full = useJournalEntry(entry.id, expanded && entry.truncated);
   const shown = expanded ? full.data ?? entry : entry;
@@ -124,7 +124,7 @@ export function JournalRow({ entry, anchored = false, compact = false }: { entry
     if (anchored) root.current?.scrollIntoView({ block: "start" });
   }, [anchored]);
   return (
-    <article ref={root} id={compact ? undefined : `journal-${entry.id}`} className="min-w-0 scroll-mt-20 border-b border-line p-3 last:border-b-0">
+    <article ref={root} id={`journal-${entry.id}`} className="min-w-0 scroll-mt-20 border-b border-line p-3 last:border-b-0">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta text-muted">
         <Link to={journalEntryPath(entry)} className={linkClass} aria-label={`Link to journal entry ${entry.id}`}>#{entry.id}</Link>
         <time dateTime={entry.createdAt} title={dateTime(entry.createdAt)}>{relativeTime(entry.createdAt)}</time>
@@ -132,12 +132,12 @@ export function JournalRow({ entry, anchored = false, compact = false }: { entry
         {entry.taskId === null ? <span>tree {entry.kind}</span> : <Link to={`/tasks/${entry.taskId}`} className={linkClass}>task #{entry.taskId}</Link>}
         {entry.attempt === null ? null : <span>attempt {entry.attempt}</span>}
       </div>
-      <div className={compact && !expanded ? "line-clamp-3 min-w-0 break-words" : "min-w-0 break-words"}>
+      <div className="min-w-0 break-words">
         <Suspense fallback={<p className="text-small whitespace-pre-wrap">{shown.text}</p>}>
           <Markdown text={shown.text} refs />
         </Suspense>
       </div>
-      {entry.truncated || compact ? (
+      {entry.truncated ? (
         <div className="mt-2 flex flex-col items-start gap-2">
           <Button small variant="ghost" busy={full.isFetching} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
             {expanded ? "Show preview" : "Read full entry"}
@@ -170,8 +170,8 @@ function JournalSkeleton() {
   );
 }
 
-/** Shared paginated notes/events, also used by the compact tree Activity panel. */
-export function JournalFeed({ owner, query, linkedId = null, compact = false }: { owner: JournalOwner; query: Omit<JournalQuery, "cursor">; linkedId?: number | null; compact?: boolean }) {
+/** Shared paginated notes/events, also used by the tree Activity tab. */
+export function JournalFeed({ owner, query, linkedId = null }: { owner: JournalOwner; query: Omit<JournalQuery, "cursor">; linkedId?: number | null }) {
   const journal = useJournal(owner, query);
   const linked = useJournalEntry(linkedId);
   const qc = useQueryClient();
@@ -200,7 +200,7 @@ export function JournalFeed({ owner, query, linkedId = null, compact = false }: 
           {query.kind === "events" ? "No events match these filters." : "No entries match. Append a note or change the filters."}
         </p>
       ) : null}
-      <div>{entries.filter((entry) => entry.id !== linkedId).map((entry) => <JournalRow key={entry.id} entry={entry} compact={compact} />)}</div>
+      <div>{entries.filter((entry) => entry.id !== linkedId).map((entry) => <JournalRow key={entry.id} entry={entry} />)}</div>
       {journal.hasNextPage ? (
         <div className="border-t border-line p-3">
           <Button small busy={journal.isFetchingNextPage} disabled={stale} onClick={() => void journal.fetchNextPage()}>Load older entries</Button>
