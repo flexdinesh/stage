@@ -1,7 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { useConnections, useHarnesses, useInvalidateWork, useProjects } from "../../api/queries.ts";
+import { useConnections, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../../api/queries.ts";
+import { connectionOptions } from "../../lib/machines.ts";
 import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 
@@ -24,6 +25,7 @@ export function AdoptSessionDrawer({
   const projects = useProjects();
   const connections = useConnections();
   const harnessNames = useHarnesses();
+  const { machines } = useMachines();
   const [chosen, setConnection] = useState("");
   const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
@@ -116,12 +118,10 @@ export function AdoptSessionDrawer({
                   adopt.reset();
                 }}
                 listLabel="Harnesses"
+                showTag
                 options={[
                   { value: "", label: "Choose harness" },
-                  ...(connections.data?.connections.filter((c) => c.active) ?? []).map((c) => ({
-                    value: String(c.id),
-                    label: harnessNames.kindName(c.harness),
-                  })),
+                  ...connectionOptions(connections.data?.connections.filter((c) => c.active) ?? [], machines, harnessNames.kindName),
                 ]}
               />
             )}

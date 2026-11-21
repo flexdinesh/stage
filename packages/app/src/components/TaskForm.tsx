@@ -2,7 +2,8 @@ import { Link } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useHarnesses, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { connectionOptions } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
   type CreateScheduleRequest,
@@ -243,6 +244,7 @@ function TaskFormDrawer({
   const invalidate = useInvalidateWork();
   const selectedProject = projects.data?.projects.find((project) => String(project.id) === s.projectId);
   const harnesses = useHarnesses();
+  const { machines } = useMachines();
   const existing = task ?? schedule;
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
   // Bindings on replaced connections are history: they never pick the destination.
@@ -466,9 +468,10 @@ function TaskFormDrawer({
               />
             )}
           </Field>
-          <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" options={[
+          <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" showTag options={[
             {value: "", label: "Choose a harness"},
-            ...harnesses.activeList.map(c=>({value: String(c.id), label: harnesses.kindName(c.harness)})),
+            // Machine > Harness: the machine is the tag once there is more than one; a chosen project's bindings list first.
+            ...connectionOptions(harnesses.activeList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId))),
             ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
           ]}/>}</Field>
         </div>

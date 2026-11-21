@@ -111,6 +111,8 @@ func (s *server) removeMachine(w http.ResponseWriter, r *http.Request) error {
 
 // pairingJSON is POST /api/machines/pairings. Code is shown only here.
 type pairingJSON struct {
+	// ID names the code in GET/DELETE /api/machines/pairings/{id}.
+	ID        int64     `json:"id"`
 	Code      string    `json:"code"`
 	Label     string    `json:"label"`
 	ExpiresAt time.Time `json:"expiresAt"`
@@ -143,7 +145,42 @@ func (s *server) createPairing(w http.ResponseWriter, r *http.Request) error {
 	}
 	link := PairingLink(public, p.Code)
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, pairingJSON{Code: p.Code, Label: p.Label, ExpiresAt: p.ExpiresAt, Link: link, Command: "stage worker join " + link})
+	writeJSON(w, http.StatusCreated, pairingJSON{ID: p.ID, Code: p.Code, Label: p.Label, ExpiresAt: p.ExpiresAt, Link: link, Command: "stage worker join " + link})
+	return nil
+}
+
+// pairingStatusJSON is GET /api/machines/pairings/{id}: never the code.
+type pairingStatusJSON struct {
+	ID int64 `json:"id"`
+	// State is waiting (redeemable), joined or expired.
+	State     string    `json:"state"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	// MachineID is the machine a joined code added (null otherwise).
+	MachineID *int64 `json:"machineId"`
+}
+
+func (s *server) pairingStatus(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	p, err := s.Store.PairingStatus(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, pairingStatusJSON{ID: p.ID, State: p.State, ExpiresAt: p.ExpiresAt, MachineID: p.MachineID})
+	return nil
+}
+
+func (s *server) revokePairing(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.RevokePairing(r.Context(), id); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

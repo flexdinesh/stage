@@ -101,6 +101,8 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/harnesses/{kind}/connection", s.harnessDisconnect)
 	h("GET /api/machines", s.listMachines)
 	h("POST /api/machines/pairings", s.createPairing)
+	h("GET /api/machines/pairings/{id}", s.pairingStatus)
+	h("DELETE /api/machines/pairings/{id}", s.revokePairing)
 	h("GET /api/machines/{id}", s.getMachine)
 	h("PATCH /api/machines/{id}", s.renameMachine)
 	h("DELETE /api/machines/{id}", s.removeMachine)

@@ -136,6 +136,59 @@ func (s *Store) CreatePairing(ctx context.Context, label string) (Pairing, error
 	return p, nil
 }
 
+// PairingState is where a pairing code stands: waiting (redeemable),
+// joined (redeemed; MachineID is the machine it added) or expired.
+type PairingState struct {
+	ID        int64
+	State     string
+	ExpiresAt time.Time
+	MachineID *int64
+}
+
+// PairingStatus reads a pairing code's state by its id (ErrNotFound when
+// unknown, revoked or pruned). It never reveals the code.
+func (s *Store) PairingStatus(ctx context.Context, id int64) (PairingState, error) {
+	p := PairingState{ID: id}
+	var live bool
+	err := s.pool.QueryRow(ctx, `SELECT expires_at,machine_id,expires_at>stage_now() FROM pairing_codes WHERE id=$1`, id).Scan(&p.ExpiresAt, &p.MachineID, &live)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PairingState{}, ErrNotFound
+	}
+	if err != nil {
+		return PairingState{}, err
+	}
+	switch {
+	case p.MachineID != nil:
+		p.State = "joined"
+	case live:
+		p.State = "waiting"
+	default:
+		p.State = "expired"
+	}
+	return p, nil
+}
+
+// RevokePairing deletes a pairing code that was not redeemed, so it can no
+// longer add a machine (ErrNotFound when unknown; a redeemed code is a
+// conflict: remove its machine instead).
+func (s *Store) RevokePairing(ctx context.Context, id int64) error {
+	return s.inTx(ctx, func(tx *Tx) error {
+		var machine *int64
+		err := tx.QueryRow(ctx, `SELECT machine_id FROM pairing_codes WHERE id=$1`, id).Scan(&machine)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if machine != nil {
+			return &ConflictError{Msg: "This pairing code already added a machine. Remove the machine instead.", Code: "pairing_redeemed"}
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM pairing_codes WHERE id=$1 AND redeemed_at IS NULL`, id)
+		return err
+	})
+}
+
 // MachineGrant is a redeemed pairing: the new machine and its token. Token
 // is shown once and never stored.
 type MachineGrant struct {

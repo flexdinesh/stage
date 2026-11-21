@@ -4,7 +4,8 @@ import { Link } from "react-router";
 import type { ExternalProject, HarnessConnection, Project, ProjectBinding } from "../api/types.ts";
 import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
-import { keys, useHarnesses } from "../api/queries.ts";
+import { keys, useHarnesses, useMachines } from "../api/queries.ts";
+import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { Alert, Button, Drawer, ErrorText, Field, Input, Panel, QueryState } from "./ui.tsx";
 
@@ -27,7 +28,8 @@ export function BindWorkspaceDrawer({
   const [workspace, setWorkspace] = useState("");
   const [registrationAttempted, setRegistrationAttempted] = useState(false);
   const harnesses = useHarnesses();
-  const name = harnesses.name(connectionId);
+  const { machines } = useMachines();
+  const name = withMachine(harnesses.name(connectionId), machineTag(machines, harnesses.connection(connectionId)?.machineId ?? 0));
   const harness = harnesses.harness(connectionId);
   // The replaced binding's path is marked, never preselected.
   const samePath = harness === null ? new Set<string>() : replacedPaths(project, harness);
@@ -332,7 +334,8 @@ function ConnectionWorkspace({
 }) {
   const api = useApi();
   const [confirmUnbind, setConfirmUnbind] = useState(false);
-  const name = useHarnesses().kindName(c.harness);
+  const { machines } = useMachines();
+  const name = withMachine(useHarnesses().kindName(c.harness), machineTag(machines, c.machineId));
   const current = project.bindings.find((b) => b.connectionId === c.id);
   const previous = retiredBindings(project, c.harness);
   // Only an unbound project with a replaced binding looks for the same path on this connection.
