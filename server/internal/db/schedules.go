@@ -30,7 +30,6 @@ type Schedule struct {
 	RuntimeMode        string                  `json:"-"`
 	InteractionMode    string                  `json:"-"`
 	Workspace          Workspace               `json:"workspace"`
-	Tags               []string                `json:"tags"`
 	Notes              string                  `json:"notes"`
 	Attachments        []Attachment            `json:"attachments"`
 	Cron               string                  `json:"cron"`
@@ -67,7 +66,7 @@ type ScheduleRun struct {
 
 const scheduleSelect = `
 SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s.model, s.model_options,
-  s.runtime_mode, s.interaction_mode, s.workspace, s.tags, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
+  s.runtime_mode, s.interaction_mode, s.workspace, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
   (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
   (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
@@ -80,14 +79,13 @@ JOIN projects p ON p.id = s.project_id`
 func scanSchedule(row rowScanner) (Schedule, error) {
 	var s Schedule
 	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
-		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Tags, &s.Notes, &s.Cron, &s.Tz,
+		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Notes, &s.Cron, &s.Tz,
 		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.OriginThreadID, &s.CreatedAt, &s.UpdatedAt,
 		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig)
 	if err != nil {
 		return Schedule{}, notFound(err)
 	}
 	s.ModelOptions = nonNilOptions(s.ModelOptions)
-	s.Tags = nonNilStrings(s.Tags)
 	if s.Workspace.Type == "" {
 		s.Workspace.Type = "root"
 	}
@@ -143,7 +141,6 @@ type NewSchedule struct {
 	RuntimeMode        string
 	InteractionMode    string
 	Workspace          Workspace
-	Tags               []string
 	Notes              string
 	AttachmentIDs      []int64
 	Cron               string
@@ -194,10 +191,10 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		}
 		err := tx.QueryRow(ctx, `
 INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
 			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-			in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags), in.Notes,
+			in.RuntimeMode, in.InteractionMode, in.Workspace, in.Notes,
 			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, s.defaultConnection(in.ConnectionID),
 		).Scan(&id)
 		if err != nil {
@@ -230,7 +227,6 @@ type SchedulePatch struct {
 	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
 	InteractionMode     Optional[string]                  `json:"interactionMode"`
 	Workspace           Optional[Workspace]               `json:"workspace"`
-	Tags                Optional[[]string]                `json:"tags"`
 	Notes               Optional[string]                  `json:"notes"`
 	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
 	Cron                Optional[string]                  `json:"cron"`
@@ -330,9 +326,6 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		}
 		if p.Workspace.Set {
 			set("workspace", p.Workspace.V)
-		}
-		if p.Tags.Set {
-			set("tags", nonNilStrings(p.Tags.V))
 		}
 		if p.Notes.Set {
 			set("notes", p.Notes.V)
@@ -463,9 +456,9 @@ func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64
 	var tz, notes string
 	err := tx.QueryRow(ctx, `
 SELECT project_id, title, prompt, provider_instance_id, model, model_options, runtime_mode,
-  interaction_mode, workspace, tags, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config FROM schedules WHERE id = $1`, id).
+  interaction_mode, workspace, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config FROM schedules WHERE id = $1`, id).
 		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.ProviderInstanceID, &in.Model, &in.ModelOptions,
-			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &in.Tags, &notes, &tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig)
+			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &notes, &tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig)
 	if err != nil {
 		return 0, notFound(err)
 	}

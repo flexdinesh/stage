@@ -162,7 +162,6 @@ type Task struct {
 	RuntimeMode        string                  `json:"-"`
 	InteractionMode    string                  `json:"-"`
 	Workspace          Workspace               `json:"workspace"`
-	Tags               []string                `json:"tags"`
 	State              TaskState               `json:"state"`
 	T3ThreadID         *string                 `json:"externalSessionId"`
 	TreeID             *int64                  `json:"treeId"` // the task's tree (docs/api.md "Trees")
@@ -313,13 +312,6 @@ func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
 		return []execution.ModelOption{}
 	}
 	return o
-}
-
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 // LegacyModel is the row's legacy model columns as JSON, the input of

@@ -182,10 +182,9 @@ func TestUpdateTaskRestrictions(t *testing.T) {
 	}
 	got, err := s.UpdateTask(ctx, task.ID, db.TaskPatch{
 		Title: db.Optional[string]{Set: true, V: "renamed"},
-		Tags:  db.Optional[[]string]{Set: true, V: []string{"x"}},
 	})
-	if err != nil || got.Title != "renamed" || len(got.Tags) != 1 {
-		t.Fatalf("title/tags edit: %+v %v", got, err)
+	if err != nil || got.Title != "renamed" {
+		t.Fatalf("title edit: %+v %v", got, err)
 	}
 	if err := s.DeleteTask(ctx, task.ID); !errors.As(err, &conflict) {
 		t.Fatalf("delete running: %v", err)

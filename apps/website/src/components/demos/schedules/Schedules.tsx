@@ -181,13 +181,9 @@ function Drawer({ s, compact }: { s: S; compact: boolean }) {
             </div>
           </div>
         </Collapse>
-        {/* Below Start the form runs on (tags, notes); the repeat fields take
+        {/* Below Start the form runs on (notes); the repeat fields take
             their room, as the body would scroll them out of view */}
         <Collapse open={!repeat}>
-          <div className="sch-field sch-after">
-            <div className="sch-label">Tags</div>
-            <div className="sch-input sch-placeholder">smoke, refactor</div>
-          </div>
           <div className="sch-field sch-after">
             <div className="sch-label">Notes</div>
             <div className="sch-input sch-textarea" />

@@ -216,7 +216,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 
 	var tk client.Task
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high", "tags": []string{"agent"}}, &tk)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high"}, &tk)
 	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || len(tk.Needs) != 1 || tk.Readiness == nil || *tk.Readiness != db.ReadinessBlocked ||
 		tk.OriginSession == nil || *tk.OriginSession != *e.t3(s) || tk.ExecutionConfig == nil || len(tk.ExecutionConfig.Options) != 1 || tk.ExecutionConfig.Options[0].ID != "effort" {
 		t.Fatalf("task %+v", tk)
@@ -631,9 +631,9 @@ func TestAdoptSessionTool(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: e.t3(me)}})
 
 	var out agenttools.AdoptOut
-	mustCall(t, cs, "adopt_session", map[string]any{"tags": []string{"plan"}}, &out)
+	mustCall(t, cs, "adopt_session", map[string]any{}, &out)
 	if !out.Created || !out.Task.Adopted || out.Task.T3ThreadID == nil || *out.Task.T3ThreadID != me ||
-		out.Task.Title != "Planner" || out.Task.Prompt != "" || !slices.Equal(out.Task.Tags, []string{"plan"}) {
+		out.Task.Title != "Planner" || out.Task.Prompt != "" {
 		t.Fatalf("adopt own session %+v", out)
 	}
 	mine := out.Task

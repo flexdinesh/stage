@@ -199,9 +199,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
         {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
         <Chip>{workspaceChip(task)}</Chip>
-        {task.tags.map((t) => (
-          <Chip key={t}>#{t}</Chip>
-        ))}
       </div>
 
       <div className="flex flex-col gap-3.5">

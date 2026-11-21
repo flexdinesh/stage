@@ -148,11 +148,6 @@ export function workspaceText(w: Workspace): string {
   return `worktree from ${w.baseRef}${w.branch === null ? "" : ` → ${w.branch}`}`;
 }
 
-/** "a, b , ,c" → ["a","b","c"] (deduped). */
-export function parseTags(text: string): string[] {
-  return [...new Set(text.split(",").map((t) => t.trim()).filter((t) => t !== ""))];
-}
-
 /** Local midnight `daysAgo` days before today, as an ISO datetime. */
 export function localMidnight(daysAgo: number): string {
   const d = new Date();

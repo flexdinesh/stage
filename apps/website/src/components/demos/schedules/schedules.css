@@ -597,10 +597,6 @@
     }
   }
 
-  .sch-placeholder {
-    color: color-mix(in srgb, var(--st-muted) 70%, var(--st-bg));
-  }
-
   .sch-textarea {
     height: 128px;
   }

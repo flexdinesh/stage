@@ -207,17 +207,6 @@ func validateOptions(opts []execution.ModelOption) ([]execution.ModelOption, err
 	return opts, nil
 }
 
-func cleanTags(tags []string) []string {
-	out := []string{}
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t != "" && !slices.Contains(out, t) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // trimmedPtr trims; "" becomes nil.
 func trimmedPtr(s *string) *string {
 	if s == nil {

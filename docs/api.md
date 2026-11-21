@@ -325,7 +325,6 @@ attempt is consumed.
   "harness": "t3",
   "executionConfig": { "model": "[\"claude\",\"claude-haiku-5-5\"]", "options": [{ "id": "effort", "value": "low" }], "permission": "full-access", "mode": "" },
   "workspace": { "type": "root" },
-  "tags": ["smoke"],
   "state": "running",
   "externalSessionId": "thread_abc",
   "session": { "connectionId": 1, "externalSessionId": "thread_abc" },
@@ -392,7 +391,7 @@ attempt is consumed.
 `TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "thread": Thread | null, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null }`. `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originSession` is null. `thread.lastWord` carries the reply excerpt.
 
 ### `GET /api/tasks`
-Query (all optional): `originConnectionId` with `originSessionId` (the creator session; `originThreadId` is 400 since v6), `project` (project id), `state` (repeatable TaskState), `tag` (has tag), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
+Query (all optional): `originConnectionId` with `originSessionId` (the creator session; `originThreadId` is 400 since v6), `project` (project id), `state` (repeatable TaskState), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
 200 `{ "tasks": Task[] }` ordered by `updatedAt` desc.
 
 ### `POST /api/tasks`
@@ -405,7 +404,6 @@ Body `CreateTaskRequest`:
   "connectionId": 1,             // optional: the harness connection (default: the project's only active binding)
   "executionConfig": { "model": "", "options": [], "permission": "", "mode": "" }, // optional; "" = harness default
   "workspace": { "type": "root" },// optional
-  "tags": [],                    // optional
   "initialNote": "",             // optional: first task journal note
   "treeId": null,                // optional: join this tree (tree rules)
   "needs": [],                   // optional: tasks this one needs (tree rules)
@@ -425,8 +423,8 @@ Body `CreateTaskRequest`:
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace tags` (or the legacy T3 model inputs) `attachmentIds` `startLocal` `startTz` `handoff` `startMode`.
-In `backlog` all fields are editable; otherwise only `title`, `tags` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
+Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace` (or the legacy T3 model inputs) `attachmentIds` `startLocal` `startTz` `handoff` `startMode`.
+In `backlog` all fields are editable; otherwise only `title` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it; a task with needs cannot have one (400). `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`). `startMode`: `auto|manual`, `null` inherits the tree's (backlog only). Needs change with `PUT /api/tasks/:id/needs`; tree membership with the tree endpoints.
 200 `Task`. 404.
 
@@ -500,7 +498,7 @@ yet; no UI or MCP tool uses them yet.
 - `POST /api/tasks/:id/messages` body `{"text": string}` (nonblank): sends the session a message, then polls once. 200 `Task`; 400.
 
 ### `POST /api/tasks/:id/duplicate`
-New `backlog` task with the same project, title, prompt, images (copied), model config, workspace, tags; no copied notes, no tree, no needs, no start time, no schedule.
+New `backlog` task with the same project, title, prompt, images (copied), model config, workspace; no copied notes, no tree, no needs, no start time, no schedule.
 201 `Task`. 404. 409 for an adopted task.
 
 ## Journals
@@ -601,7 +599,6 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "connectionId": 1,
   "executionConfig": { "model": "[\"claude\",\"claude-sonnet-5-5\"]", "options": [], "permission": "full-access", "mode": "" },
   "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null, "base": "ref" },
-  "tags": ["deps"],
   "notes": "",
   "attachments": [],
   "cron": "0 2 * * *",
@@ -635,7 +632,7 @@ Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: 
 200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
 
 ### `POST /api/schedules`
-Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig workspace tags attachmentIds originSession`, or the legacy T3 model inputs), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSession`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
+Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig workspace attachmentIds originSession`, or the legacy T3 model inputs), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSession`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
 201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
 
 ### `GET /api/schedules/:id`
@@ -682,7 +679,7 @@ Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the
 
 `GET /api/connections/:connectionId/sessions/:id` returns `{thread, task}` for an explicitly supplied T3 thread ID. It refreshes execution identity, title, project, state, model/workspace and native links when T3 is connected, or uses cached metadata offline. No child-session list, created-task browser, transcript, question payload, PR state or run history. `task` is the owner or null. Task detail separately includes `thread.lastWord`.
 
-`POST /api/connections/:connectionId/sessions/:id/adopt` accepts `{title?, initialNote?, tags?, treeId?, projectId?, newProjectTitle?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. The UI previews before confirming. See Adopt session below.
+`POST /api/connections/:connectionId/sessions/:id/adopt` accepts `{title?, initialNote?, treeId?, projectId?, newProjectTitle?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. The UI previews before confirming. See Adopt session below.
 
 ### `GET /api/tasks/:id/opening-prompt`
 
@@ -697,6 +694,8 @@ Added: [session interaction](#session-interaction-api-v6) routes, descriptor `la
 T3 legacy fields are gone from responses: tasks, threads, notifications and waiting sessions drop `t3WebUrl`, `t3AppUrl` and `t3DeepLink` (use `links`); tasks and schedules drop `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` (use `executionConfig`, now always present for T3 rows) and `originThreadId` (use `originSession`); the task's `originThreadTitle` is `originSessionTitle`; resolved references drop `threadId` (use `session`). Inputs removed: `needsSessionId` and `originThreadId` on task and schedule create (use `needsSession` and `originSession`; strict decoding answers 400), the `originThreadId` task list query (400; use `originConnectionId` and `originSessionId`), MCP `list_tasks {originThreadId}` and CLI `task ls --origin-thread`. `artifactLinks` now include harness-reported artifacts for every harness. The legacy T3 model inputs on create and update stay accepted for now.
 
 Caller attribution is generic: removed `callerThreadId` (MCP tools), journal `sourceThreadId` input, adoption `threadId`, CLI `--thread`, `sessions adopt THREAD` (use `--target-connection` and `--target-session`) and `mcp --t3-session-env`; Stage no longer reads `T3CODE_THREAD_ID`. Use `callerSession`, the `Stage-Caller-Session` header or `STAGE_CALLER_SESSION` ([Agent interface](#agent-interface)); a dedicated T3 stdio registration sets `STAGE_CALLER_SESSION=<connectionId>:$T3CODE_THREAD_ID` in the agent's environment instead.
+
+Free-form tags are gone (migration 0016 drops the columns and their values): tasks and schedules drop `tags`; `tags` on task create and update, schedule create and session adoption is an unknown field (400; schedule update ignores unknown fields); the `tag` task list query is 400. MCP `create_task`, `update_task`, `create_schedule` and `adopt_session` drop `tags`, `list_tasks` drops `tag` and its rows drop `tags`; CLI `--tag` is removed from `task add|edit|ls`, `schedule add|edit` and `sessions adopt`.
 
 ## API v3 retirement
 
@@ -978,7 +977,7 @@ A session batch is the set of tasks one session created (`originSession`), usual
 - `afterMe` submits the scoped caller as `needsSession`. Owner reuse, adoption, tree placement and the dependent task commit together.
 - Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
 - Close work: `archive_task {id, archived?}` (default archives; CLI `task archive ID [--undo]`), `list_tasks {closed?}` (`true|all`; CLI `task ls --closed true|all`; rows carry `treeStatus` and `archived`), `delete_task` only for a task that never started and has no recorded work. See "Done, archive and delete".
-- `adopt_session {session?, callerSession?, projectId?, newProjectTitle?, title?, initialNote?, tags?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [--target-connection ID --target-session ID] [--title --initial-note --tag --tree]`).
+- `adopt_session {session?, callerSession?, projectId?, newProjectTitle?, title?, initialNote?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [--target-connection ID --target-session ID] [--title --initial-note --tree]`).
 - `start_task` on a blocked task fails until the user completes its needs in Stage.
 - `create_task` and `update_task` take optional `handoff` (CLI `task add --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoffs`; `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records, plus `tree` and `readiness` lines.
 - `create_task`, `create_schedule`, `update_task` and `update_schedule` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (retained for an explicit ref choice); on `update_task` without `baseRef` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.

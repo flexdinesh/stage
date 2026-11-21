@@ -86,12 +86,12 @@ func TestAdoptSession(t *testing.T) {
 	}
 
 	var a agentTask
-	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"initialNote": "n", "tags": []string{" plan ", ""}}, 201, &a)
+	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"initialNote": "n"}, 201, &a)
 	if c := a.Config; c == nil || c.Model != t3.ModelKey("codex", "model-from-session") || c.Permission != "auto" || c.Mode != "plan" {
 		t.Fatalf("adoption lost the session's execution config: %+v", a.Config)
 	}
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
-		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || !slices.Equal(a.Tags, []string{"plan"}) || a.TreeID != nil {
+		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)
 	}
 	var again agentTask

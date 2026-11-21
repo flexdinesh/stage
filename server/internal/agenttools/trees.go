@@ -220,7 +220,6 @@ type AdoptSessionArgs struct {
 	NewProjectTitle string         `json:"newProjectTitle,omitempty"`
 	Title           string         `json:"title,omitempty" jsonschema:"task title; default: the session title"`
 	InitialNote     string         `json:"initialNote,omitempty"`
-	Tags            []string       `json:"tags,omitempty"`
 	TreeID          *int64         `json:"treeId,omitempty" jsonschema:"also put the task in this tree (no needs)"`
 	CallerArgs
 }
@@ -250,7 +249,7 @@ func (o *Ops) AdoptSession(ctx context.Context, a AdoptSessionArgs) (AdoptOut, e
 		return AdoptOut{}, errors.New("session is required outside a harness session; pass the target session {connectionId, externalSessionId}")
 	}
 	t, created, err := o.Client.AdoptScoped(ctx, *ref, client.AdoptSession{
-		CallerSession: c.Session, ProjectID: a.ProjectID, NewProjectTitle: a.NewProjectTitle, Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), Tags: a.Tags, TreeID: a.TreeID,
+		CallerSession: c.Session, ProjectID: a.ProjectID, NewProjectTitle: a.NewProjectTitle, Title: strPtr(a.Title), InitialNote: strPtr(a.InitialNote), TreeID: a.TreeID,
 	})
 	return AdoptOut{Task: t, Created: created}, err
 }

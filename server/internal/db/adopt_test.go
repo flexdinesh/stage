@@ -27,14 +27,14 @@ func TestAdoptThread(t *testing.T) {
 	}
 	thread("planner-1", func(d *t3.ThreadDetail) { d.Title = "Planner" })
 
-	task, created, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "planner-1", Tags: []string{"plan"}})
+	task, created, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "planner-1"})
 	if err != nil || !created {
 		t.Fatalf("adopt: %+v %v %v", task, created, err)
 	}
 	if !task.Adopted || task.Prompt != "" || task.Title != "Planner" || task.State != db.StateRunning || task.ProjectID != p.ID ||
 		task.T3ThreadID == nil || *task.T3ThreadID != "planner-1" || task.LaunchAttempt != 1 || task.LaunchedAt == nil ||
 		task.ExecutionConfig == nil || task.ExecutionConfig.Model != t3.ModelKey("codex", "gpt") || task.RuntimeMode != "auto" || task.InteractionMode != "plan" ||
-		!slices.Equal(task.Tags, []string{"plan"}) || task.TreeID != nil {
+		task.TreeID != nil {
 		t.Fatalf("adopted task %+v", task)
 	}
 	events, err := s.TaskEvents(ctx, task.ID)

@@ -148,13 +148,13 @@ func TestTaskCommands(t *testing.T) {
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
 
 	// Prompt from stdin; flags after the subcommand; session picks the project.
-	code, stdout, stderr := h.run("multi\nline prompt\n", "task", "add", "--project", "1", "--title", "From agent", "--prompt", "-", "--after-me", "--tag", "a", "--tag", "b", "--json")
+	code, stdout, stderr := h.run("multi\nline prompt\n", "task", "add", "--project", "1", "--title", "From agent", "--prompt", "-", "--after-me", "--json")
 	if code != 0 {
 		t.Fatalf("add: %d %s", code, stderr)
 	}
 	tk := decode[client.Task](t, stdout)
 	if tk.ProjectID != p.ID || tk.Prompt != "multi\nline prompt\n" || len(tk.Needs) != 1 ||
-		tk.OriginSession == nil || *tk.OriginSession != *t3Session(out.ThreadID) || len(tk.Tags) != 2 {
+		tk.OriginSession == nil || *tk.OriginSession != *t3Session(out.ThreadID) {
 		t.Fatalf("task %+v", tk)
 	}
 
@@ -331,13 +331,13 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		t.Fatalf("bare session id: %d %s", code, stderr)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(me)}
-	code, stdout, stderr := h.run("", "sessions", "adopt", "--tag", "x")
+	code, stdout, stderr := h.run("", "sessions", "adopt")
 	if code != 0 || !strings.Contains(stdout, "adopted session as a task") || !strings.Contains(stdout, "adopted  tracks an existing session") {
 		t.Fatalf("adopt own: %d %s %s", code, stdout, stderr)
 	}
 	code, stdout, _ = h.run("", "sessions", "adopt", "--json")
 	mine := decode[agenttools.AdoptOut](t, stdout)
-	if code != 0 || mine.Created || !mine.Task.Adopted || mine.Task.T3ThreadID == nil || *mine.Task.T3ThreadID != me || !slices.Equal(mine.Task.Tags, []string{"x"}) {
+	if code != 0 || mine.Created || !mine.Task.Adopted || mine.Task.T3ThreadID == nil || *mine.Task.T3ThreadID != me {
 		t.Fatalf("adopt own again: %s", stdout)
 	}
 	code, stdout, stderr = h.run("", "tree", "new", "--title", "T", fmt.Sprint(mine.Task.ID), "--json")

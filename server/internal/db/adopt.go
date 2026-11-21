@@ -21,7 +21,6 @@ type AdoptInput struct {
 	Binding         *ProjectBinding
 	Title           *string
 	InitialNote     *string
-	Tags            []string
 	TreeID          *int64
 }
 
@@ -124,9 +123,9 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 			mode = o.Config.Mode
 		}
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,tags,connection_id,session_id,t3_thread_id,
+	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,t3_thread_id,
 	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at)
-	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,$10,1,1,$11,$12) RETURNING id`, projectID, title, state, nonNilStrings(in.Tags), ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished).Scan(&id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11) RETURNING id`, projectID, title, state, ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished).Scan(&id)
 	if err != nil {
 		return 0, false, err
 	}

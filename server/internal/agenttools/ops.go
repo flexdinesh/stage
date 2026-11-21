@@ -162,7 +162,6 @@ type ConfigArgs struct {
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
 	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only)"`
-	Tags            []string          `json:"tags,omitempty"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
 
@@ -451,7 +450,6 @@ type TaskRow struct {
 	Adopted    bool           `json:"adopted,omitempty"` // tracks an existing session
 	StartAt    *time.Time     `json:"startAt,omitempty"`
 	ScheduleID *int64         `json:"scheduleId,omitempty"`
-	Tags       []string       `json:"tags,omitempty"`
 	// LastWordPreview is the thread's latest assistant reply, one plain line
 	// (get_task has the excerpt in thread.lastWord).
 	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
@@ -464,7 +462,7 @@ func taskRow(t client.Task) TaskRow {
 		ID:           t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
 		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
 		Archived: t.ArchivedAt != nil, Adopted: t.Adopted,
-		StartAt: t.StartAt, ScheduleID: t.ScheduleID, Tags: t.Tags, LastWordPreview: t.LastWordPreview,
+		StartAt: t.StartAt, ScheduleID: t.ScheduleID, LastWordPreview: t.LastWordPreview,
 		UpdatedAt: t.UpdatedAt,
 	}
 }
@@ -474,7 +472,6 @@ type ListTasksArgs struct {
 	OriginSession *db.SessionRef `json:"originSession,omitempty"`
 	Project       string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
 	States        []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
-	Tag           string         `json:"tag,omitempty"`
 	Query         string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
 	Closed        string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
 	Limit         int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
@@ -495,7 +492,7 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 		}
 		q.ProjectID = &p.ID
 	}
-	q.States, q.Tag, q.Q = a.States, a.Tag, a.Query
+	q.States, q.Q = a.States, a.Query
 	q.OriginSession = a.OriginSession
 	switch a.Closed {
 	case "", "false":
@@ -585,14 +582,14 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		Tags: a.Tags, InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
+		InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
 }
 
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
-// only title and tags change.
+// only the title changes.
 type UpdateArgs struct {
 	WorkspaceType   *string           `json:"workspaceType,omitempty"`
 	ConnectionID    int64             `json:"connectionId,omitempty"`
@@ -610,7 +607,6 @@ type UpdateArgs struct {
 	BaseRef         *string           `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
 	Branch          *string           `json:"branch,omitempty"`
 	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; unavailable predecessors block launch; choose base=ref explicitly to use baseRef); without baseRef keeps the current worktree"`
-	Tags            []string          `json:"tags,omitempty" jsonschema:"replaces tags"`
 }
 
 // workspacePatch is the workspace baseRef/branch/base set (ok false without
@@ -736,9 +732,6 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 	}
 	if w, ok := a.workspacePatch(); ok {
 		p["workspace"] = w
-	}
-	if a.Tags != nil {
-		p["tags"] = a.Tags
 	}
 	return p, nil
 }
@@ -928,7 +921,7 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
 		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
 		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		Tags: a.Tags, Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
+		Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})
 }

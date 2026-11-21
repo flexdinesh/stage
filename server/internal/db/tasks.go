@@ -13,7 +13,7 @@ import (
 
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt, t.provider_instance_id,
-  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace, t.tags,
+  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace,
   t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
   COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
@@ -44,7 +44,7 @@ func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.Tags, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.Workspace, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
@@ -59,7 +59,6 @@ func scanTask(row rowScanner) (Task, error) {
 		t.T3ThreadID = &t.Session.ExternalSessionID
 	}
 	t.ModelOptions = nonNilOptions(t.ModelOptions)
-	t.Tags = nonNilStrings(t.Tags)
 	t.PullRequests = nonNilPRs(t.PullRequests)
 	t.Needs = nonNilIDs(t.Needs)
 	t.Dependents = nonNilIDs(t.Dependents)
@@ -101,7 +100,6 @@ type TaskFilter struct {
 	OriginSession  *SessionRef
 	ProjectID      *int64
 	States         []string
-	Tag            string
 	Q              string
 	From, To       *time.Time
 	SettledFrom    *time.Time // settled_at >= SettledFrom
@@ -126,9 +124,6 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	}
 	if len(f.States) > 0 {
 		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
-	}
-	if f.Tag != "" {
-		w.add("EXISTS (SELECT 1 FROM json_each(t.tags) WHERE value = " + w.arg(f.Tag) + ")")
 	}
 	if f.Q != "" {
 		p := w.arg(likePattern(f.Q))
@@ -206,7 +201,6 @@ type NewTask struct {
 	RuntimeMode        string
 	InteractionMode    string
 	Workspace          Workspace
-	Tags               []string
 	InitialNote        string
 	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 	StartAt            *time.Time
@@ -283,10 +277,10 @@ func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id i
 	var id int64
 	err := tx.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, tags, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15, true),$16,$17,$18,$19) RETURNING id`,
+  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-		in.RuntimeMode, in.InteractionMode, in.Workspace, nonNilStrings(in.Tags),
+		in.RuntimeMode, in.InteractionMode, in.Workspace,
 		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID, in.ExecutionConfig,
 	).Scan(&id)
 	if err != nil {
@@ -369,7 +363,6 @@ type TaskPatch struct {
 	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
 	InteractionMode     Optional[string]                  `json:"interactionMode"`
 	Workspace           Optional[Workspace]               `json:"workspace"`
-	Tags                Optional[[]string]                `json:"tags"`
 	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
 	Handoff             Optional[bool]                    `json:"handoff"`       // append the needs' handoff at launch
 	StartMode           Optional[StartMode]               `json:"startMode"`     // null = inherit the tree's
@@ -387,7 +380,7 @@ func (p TaskPatch) restrictedSet() bool {
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
-// UpdateTask applies a validated patch. Outside backlog only title and tags
+// UpdateTask applies a validated patch. Outside backlog only the title
 // may change (Conflict otherwise).
 func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, error) {
 	err := s.inTx(ctx, func(tx *Tx) error {
@@ -406,10 +399,10 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if state != StateBacklog && p.restrictedSet() {
-			return Conflict("task is %s: only title and tags are editable outside backlog", state)
+			return Conflict("task is %s: only the title is editable outside backlog", state)
 		}
 		if adopted && p.restrictedSet() {
-			return Conflict("only title and tags are editable for an adopted session")
+			return Conflict("only the title is editable for an adopted session")
 		}
 		if p.ProviderInstanceID.Set {
 			provider = p.ProviderInstanceID.Ptr()
@@ -490,9 +483,6 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		}
 		if p.Workspace.Set {
 			set("workspace", p.Workspace.V)
-		}
-		if p.Tags.Set {
-			set("tags", nonNilStrings(p.Tags.V))
 		}
 		if p.Handoff.Set {
 			set("handoff", p.Handoff.V)
@@ -611,7 +601,6 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
 		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
 		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: ws,
-		Tags: src.Tags,
 	}, copyImages)
 }
 
