@@ -11,6 +11,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
 // Machines and worker auth (docs/api.md "Machines", docs/runtime.md
@@ -25,8 +26,12 @@ type machineInfoJSON struct {
 	Label string `json:"label"`
 	// Kind is local (this server's machine, id 1) or remote (a worker).
 	Kind string `json:"kind"`
-	// Online: local always; remote once its worker channel is live.
-	Online     bool       `json:"online"`
+	// Online: local always; remote while its worker channel is live.
+	Online bool `json:"online"`
+	// Status is online, offline or needs_update (its worker presented a
+	// valid token with another API version and none matching connected
+	// since).
+	Status     string     `json:"status"`
 	LastSeenAt *time.Time `json:"lastSeenAt"`
 	// Version is the build the machine runs (null when unknown).
 	Version     *string                `json:"version"`
@@ -35,14 +40,36 @@ type machineInfoJSON struct {
 	Connections []db.MachineConnection `json:"connections"`
 }
 
-func toMachineJSON(m db.MachineInfo) machineInfoJSON {
+// Machine statuses.
+const (
+	machineOnline      = "online"
+	machineOffline     = "offline"
+	machineNeedsUpdate = "needs_update"
+)
+
+func (s *server) toMachineJSON(m db.MachineInfo) machineInfoJSON {
 	out := machineInfoJSON{
-		ID: m.ID, Label: m.Label, Kind: "remote", LastSeenAt: m.LastSeenAt,
+		ID: m.ID, Label: m.Label, Kind: "remote", Status: machineOffline, LastSeenAt: m.LastSeenAt,
 		CreatedBy: m.CreatedBy, CreatedAt: m.CreatedAt, Connections: m.Connections,
 	}
 	version := m.Version
 	if m.ID == db.LocalMachine {
-		out.Kind, out.Online, version = "local", true, buildinfo.Version
+		out.Kind, out.Online, out.Status, version = "local", true, machineOnline, buildinfo.Version
+	} else {
+		p := s.Channels.Presence(m.ID)
+		if !p.LastSeen.IsZero() && (out.LastSeenAt == nil || p.LastSeen.After(*out.LastSeenAt)) {
+			t := p.LastSeen.UTC()
+			out.LastSeenAt = &t
+		}
+		switch {
+		case p.Online:
+			out.Online, out.Status = true, machineOnline
+			if p.Version != "" {
+				version = p.Version
+			}
+		case p.NeedsUpdate != nil:
+			out.Status = machineNeedsUpdate
+		}
 	}
 	if version != "" {
 		out.Version = &version
@@ -57,7 +84,7 @@ func (s *server) listMachines(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]machineInfoJSON, len(ms))
 	for i, m := range ms {
-		out[i] = toMachineJSON(m)
+		out[i] = s.toMachineJSON(m)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"machines": out})
 	return nil
@@ -68,7 +95,7 @@ func (s *server) writeMachine(w http.ResponseWriter, r *http.Request, id int64) 
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, toMachineJSON(m))
+	writeJSON(w, http.StatusOK, s.toMachineJSON(m))
 	return nil
 }
 
@@ -105,6 +132,8 @@ func (s *server) removeMachine(w http.ResponseWriter, r *http.Request) error {
 	if err := s.Store.RemoveMachine(r.Context(), id); err != nil {
 		return err
 	}
+	// Revocation is immediate: its open channel ends now.
+	s.Channels.Close(id)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -263,6 +292,12 @@ func (s *server) worker(authed bool, fn func(http.ResponseWriter, *http.Request)
 	want := strconv.Itoa(buildinfo.APIVersion)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get(buildinfo.APIVersionHeader); got != want {
+			// A machine whose worker holds a valid token "needs update".
+			if authed {
+				if id, err := s.Store.AuthenticateMachine(r.Context(), bearer(r)); err == nil {
+					s.Channels.MarkNeedsUpdate(id, got, r.Header.Get(workerchan.VersionHeader))
+				}
+			}
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error": fmt.Sprintf("API version mismatch: this server speaks %s, the worker sent %q; install the same Stage version on both", want, got),
 				"code":  "api_version_mismatch",

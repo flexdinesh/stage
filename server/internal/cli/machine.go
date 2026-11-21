@@ -17,11 +17,11 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "machine "+v)
 	var label string
 	switch v {
-	case "ls", "list", "rename", "rm":
+	case "ls", "list", "rename", "rm", "ping":
 	case "pair":
 		c.fs.StringVar(&label, "label", "", "name for the machine it adds (default: the worker's host name)")
 	default:
-		return usagef("machine %s: unknown (want ls, rename, rm or pair)", v)
+		return usagef("machine %s: unknown (want ls, rename, rm, ping or pair)", v)
 	}
 	if err := c.parse(rest); err != nil {
 		return err
@@ -61,6 +61,18 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 		return c.out(map[string]any{"id": id, "removed": true}, func(w io.Writer) {
 			fmt.Fprintf(w, "machine %d removed: its token is revoked and its connections retire as history\n", id)
 		})
+	case "ping":
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		p, err := cl.PingMachine(ctx, id)
+		if err != nil {
+			return err
+		}
+		return c.out(p, func(w io.Writer) {
+			fmt.Fprintf(w, "machine %d answered in %d ms (stage %s)\n", p.MachineID, p.LatencyMs, p.Version)
+		})
 	default: // pair
 		if len(c.pos) > 0 {
 			return usagef("machine pair: unexpected argument %q (name it with --label)", c.pos[0])
@@ -76,9 +88,12 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 func printMachines(w io.Writer, ms []client.Machine) {
 	table(w, "ID\tLABEL\tKIND\tSTATUS\tVERSION\tLAST SEEN\tCONNECTIONS", func(tw io.Writer) {
 		for _, m := range ms {
-			status := "offline"
-			if m.Online {
-				status = "online"
+			status := strings.ReplaceAll(m.Status, "_", " ")
+			if status == "" {
+				status = "offline"
+				if m.Online {
+					status = "online"
+				}
 			}
 			conns := make([]string, len(m.Connections))
 			for i, c := range m.Connections {

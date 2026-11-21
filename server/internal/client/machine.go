@@ -12,6 +12,7 @@ type Machine struct {
 	Label       string     `json:"label"`
 	Kind        string     `json:"kind"` // local | remote
 	Online      bool       `json:"online"`
+	Status      string     `json:"status"` // online | offline | needs_update
 	LastSeenAt  *time.Time `json:"lastSeenAt"`
 	Version     *string    `json:"version"`
 	CreatedBy   int64      `json:"createdBy"`
@@ -59,5 +60,19 @@ func (c *Client) RemoveMachine(ctx context.Context, id int64) error {
 func (c *Client) PairMachine(ctx context.Context, label string) (Pairing, error) {
 	var out Pairing
 	err := c.do(ctx, "POST", "/api/machines/pairings", map[string]string{"label": label}, &out)
+	return out, err
+}
+
+// Ping is POST /api/machines/{id}/ping.
+type Ping struct {
+	MachineID int64  `json:"machineId"`
+	LatencyMs int64  `json:"latencyMs"`
+	Version   string `json:"version"`
+}
+
+// PingMachine round-trips through a machine's worker channel.
+func (c *Client) PingMachine(ctx context.Context, id int64) (Ping, error) {
+	var out Ping
+	err := c.do(ctx, "POST", machinePath(id)+"/ping", nil, &out)
 	return out, err
 }

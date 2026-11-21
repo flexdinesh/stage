@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -113,6 +114,12 @@ STAGE_LISTEN=unix
 // escapes). Keys outside ServiceEnvKeys, STAGE_DATA_DIR, STAGE_ENV and
 // duplicates are errors.
 func ParseServiceEnv(r io.Reader) (map[string]string, error) {
+	return parseEnvFile(r, ServiceEnvFile, ServiceEnvKeys, true)
+}
+
+// parseEnvFile parses a KEY=VALUE env file named name (for errors) that
+// may set only allowed; fixed refuses managedFixedKeys with their reason.
+func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[string]string, error) {
 	out := map[string]string{}
 	sc := bufio.NewScanner(r)
 	for n := 1; sc.Scan(); n++ {
@@ -127,20 +134,22 @@ func ParseServiceEnv(r io.Reader) (map[string]string, error) {
 		k, v, ok := strings.Cut(line, "=")
 		k = strings.TrimSpace(k)
 		if !ok || k == "" {
-			return nil, fmt.Errorf("service.env line %d: want KEY=VALUE", n)
+			return nil, fmt.Errorf("%s line %d: want KEY=VALUE", name, n)
 		}
-		for _, f := range managedFixedKeys {
-			if k == f {
-				return nil, fmt.Errorf("service.env line %d: %s cannot be set for the service (its data dir is always this installation's default)", n, k)
+		if fixed {
+			for _, f := range managedFixedKeys {
+				if k == f {
+					return nil, fmt.Errorf("%s line %d: %s cannot be set for the service (its data dir is always this installation's default)", name, n, k)
+				}
 			}
 		}
-		if !allowedServiceKey(k) {
-			keys := append([]string(nil), ServiceEnvKeys...)
+		if !slices.Contains(allowed, k) {
+			keys := append([]string(nil), allowed...)
 			sort.Strings(keys)
-			return nil, fmt.Errorf("service.env line %d: unknown key %s (allowed: %s)", n, k, strings.Join(keys, ", "))
+			return nil, fmt.Errorf("%s line %d: unknown key %s (allowed: %s)", name, n, k, strings.Join(keys, ", "))
 		}
 		if _, dup := out[k]; dup {
-			return nil, fmt.Errorf("service.env line %d: %s set twice", n, k)
+			return nil, fmt.Errorf("%s line %d: %s set twice", name, n, k)
 		}
 		v = strings.TrimSpace(v)
 		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
@@ -149,7 +158,7 @@ func ParseServiceEnv(r io.Reader) (map[string]string, error) {
 		out[k] = v
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("service.env: %w", err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return out, nil
 }

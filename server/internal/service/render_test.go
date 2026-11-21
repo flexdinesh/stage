@@ -38,12 +38,20 @@ var awkward = Spec{
 
 func TestRenderUnitGolden(t *testing.T) {
 	golden(t, "stage.service", RenderUnit(Spec{Identity: "stage", Name: "stage.service", Exe: "/usr/bin/stage"}))
+	w := RenderUnit(Spec{Identity: "stage", Name: "stage-worker.service", Exe: "/usr/bin/stage", Role: RoleWorker})
+	golden(t, "stage-worker.service", w)
+	if m := ParseDefinition("linux", w); !m.Generated || m.Exe != "/usr/bin/stage" {
+		t.Fatalf("worker marker %+v", m)
+	}
 	golden(t, "awkward.service", RenderUnit(awkward))
 }
 
 func TestRenderPlistGolden(t *testing.T) {
 	s := Spec{Identity: "stage", Name: "io.github.flexdinesh.stage", Exe: "/Applications/Stage.app/Contents/MacOS/stage", StderrPath: "/Users/u/Library/Logs/stage/launchd.stderr.log"}
 	golden(t, "stage.plist", RenderPlist(s))
+	ws := s
+	ws.Name, ws.Role, ws.StderrPath = "io.github.flexdinesh.stage.worker", RoleWorker, "/Users/u/Library/Logs/stage/worker.launchd.stderr.log"
+	golden(t, "stage-worker.plist", RenderPlist(ws))
 	a := awkward
 	a.Name, a.Exe = "io.github.flexdinesh.stage-dev", "/Users/u/A & B <x>/stage"
 	b := RenderPlist(a)
@@ -110,9 +118,20 @@ func TestResolvePaths(t *testing.T) {
 		DataDir: "/h/.local/share/stage", DataLock: "/h/.local/share/stage/stage.lock",
 		ConfigDir: "/h/.config/stage", ServiceEnv: "/h/.config/stage/service.env", ServiceLock: "/h/.config/stage/service.lock",
 		Socket: "/run/user/1000/stage/stage.sock", Definition: "/h/.config/systemd/user/stage.service",
+		OtherDefinition: "/h/.config/systemd/user/stage-worker.service",
 	}
 	if !equalPaths(p, want) {
 		t.Fatalf("linux:\n got %+v\nwant %+v", p, want)
+	}
+	pw, err := ResolvePathsFor(RoleWorker, "linux", get, nil, "/h/.config/systemd/user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.Role, want.Unit, want.Name, want.Label = RoleWorker, "stage-worker.service", "stage-worker.service", "io.github.flexdinesh.stage.worker"
+	want.ServiceEnv = "/h/.config/stage/worker.env"
+	want.Definition, want.OtherDefinition = "/h/.config/systemd/user/stage-worker.service", "/h/.config/systemd/user/stage.service"
+	if !equalPaths(pw, want) {
+		t.Fatalf("linux worker:\n got %+v\nwant %+v", pw, want)
 	}
 	pins := []KV{{"XDG_DATA_HOME", "/d"}, {"XDG_CONFIG_HOME", "/c"}}
 	p, _ = ResolvePaths("linux", get, pins, "/h/.config/systemd/user")
@@ -125,11 +144,21 @@ func TestResolvePaths(t *testing.T) {
 		GOOS: "darwin", Identity: "stage", Label: "io.github.flexdinesh.stage", Unit: "stage.service", Name: "io.github.flexdinesh.stage",
 		DataDir: lib, DataLock: lib + "/stage.lock", ConfigDir: lib, ServiceEnv: lib + "/service.env", ServiceLock: lib + "/service.lock",
 		Socket: lib + "/run/stage.sock", Definition: lib + "/io.github.flexdinesh.stage.plist",
-		LoginCopy: "/h/Library/LaunchAgents/io.github.flexdinesh.stage.plist",
-		LogDir:    "/h/Library/Logs/stage", LogFile: "/h/Library/Logs/stage/stage.log", StderrFile: "/h/Library/Logs/stage/launchd.stderr.log",
+		LoginCopy:       "/h/Library/LaunchAgents/io.github.flexdinesh.stage.plist",
+		OtherDefinition: lib + "/io.github.flexdinesh.stage.worker.plist",
+		LogDir:          "/h/Library/Logs/stage", LogFile: "/h/Library/Logs/stage/stage.log", StderrFile: "/h/Library/Logs/stage/launchd.stderr.log",
 	}
 	if !equalPaths(p, want) {
 		t.Fatalf("darwin:\n got %+v\nwant %+v", p, want)
+	}
+	pw, _ = ResolvePathsFor(RoleWorker, "darwin", get, nil, "")
+	want.Role, want.Label, want.Name, want.Unit = RoleWorker, "io.github.flexdinesh.stage.worker", "io.github.flexdinesh.stage.worker", "stage-worker.service"
+	want.ServiceEnv = lib + "/worker.env"
+	want.Definition, want.OtherDefinition = lib+"/io.github.flexdinesh.stage.worker.plist", lib+"/io.github.flexdinesh.stage.plist"
+	want.LoginCopy = "/h/Library/LaunchAgents/io.github.flexdinesh.stage.worker.plist"
+	want.LogFile, want.StderrFile = "/h/Library/Logs/stage/worker.log", "/h/Library/Logs/stage/worker.launchd.stderr.log"
+	if !equalPaths(pw, want) {
+		t.Fatalf("darwin worker:\n got %+v\nwant %+v", pw, want)
 	}
 }
 

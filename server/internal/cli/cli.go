@@ -129,6 +129,22 @@ Usage:
   stage machine rename ID LABEL
   stage machine rm ID                 remove a remote machine: revokes its token, keeps its
                                       connections as history (the local machine stays)
+  stage machine ping ID               a round trip through the machine's worker channel
+  stage worker join LINK [--label L]  join this machine to the server in LINK (from stage machine pair)
+                                      as a remote worker; writes the worker config and token (0600)
+  stage worker run                    run the worker in the foreground: keep a channel to the server
+                                      open, reconnecting (exit 75 worker dir in use, 78 not joined,
+                                      invalid config or machine removed)
+  stage worker status                 the worker config, the local worker process and what the server
+                                      reports (exit 0 online, 1 not online, 4 not joined, 7 revoked)
+  stage worker leave [--local]        remove this machine on the server, then delete the worker config
+                                      (--local: only delete it here)
+                                      worker commands take --config PATH (env STAGE_WORKER_CONFIG;
+                                      default worker/worker.json in the data dir) and --json
+  stage worker service start|restart|stop|status|logs|enable|disable|uninstall
+                                      the per-user worker service (stage worker run --managed), same
+                                      flags and exit codes as stage service; a machine runs the server
+                                      service or the worker service under one identity, not both
   stage version [--json]              this binary: version, identity, commit, API version, schema,
                                       and its installation (mode, location) when installed
   stage update [--check] [--version X] [--from DIR]
@@ -313,6 +329,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runHarness(ctx, env, sub)
 	case "machine", "machines":
 		return runMachine(ctx, env, sub)
+	case "worker":
+		return runWorker(ctx, env, sub)
 	case "version":
 		return runVersion(env, sub)
 	case "service":

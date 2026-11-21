@@ -67,6 +67,26 @@ func uninstall(ctx context.Context, d Deps, res *Result) error {
 	default:
 		res.Service = "not-installed"
 	}
+	if d.WorkerService != nil {
+		wst := d.WorkerService.Status(ctx)
+		switch {
+		case serviceOurs(wst, l):
+			rep := d.WorkerService.Uninstall(ctx)
+			switch rep.Code {
+			case 0:
+				res.WorkerService = "removed"
+			case 6:
+				res.WorkerService = "unavailable"
+			default:
+				return newErr(CodeFailed, rep.Fix, "could not remove the %s worker service: %s; nothing else was removed", d.Identity, rep.Message)
+			}
+		case wst.Definition.Present:
+			res.WorkerService = "foreign"
+			res.note("the %s worker service runs %s, not this install; it was left in place", d.Identity, wst.Definition.Exe)
+		default:
+			res.WorkerService = "not-installed"
+		}
+	}
 
 	for _, path := range []string{l.Link, l.Entry} {
 		if path == "" {

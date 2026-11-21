@@ -109,7 +109,11 @@ uninstalled service stays so (the desktop starts it on launch; headless:
 another executable is left alone, with a note to restart it. A running
 desktop app is quit with SIGTERM (a normal Quit: it flushes its notification
 cursor) and reopened afterwards when this session has a display; otherwise
-reopen it. Login startup (`stage service enable`, "Open Stage at login"),
+reopen it. The worker service ([service.md](service.md#worker-service))
+follows the same rule: restarted only when it ran this install's CLI and
+was running, then checked for the new version; when it does not come up,
+the update rolls back (a worker has no database, so a schema change never
+blocks that). Login startup (`stage service enable`, "Open Stage at login"),
 pairing and all data are untouched.
 
 **Locking.** One install, update or uninstall runs at a time per identity
@@ -151,11 +155,11 @@ executable and server version (`version_differs`, `exe_differs`).
 stage uninstall
 ```
 
-Quits the desktop app, removes the service definition (`stage service
-uninstall`), the app and the previous version, the CLI link and desktop
+Quits the desktop app, removes the service definitions (`stage service
+uninstall`, `stage worker service uninstall`), the app and the previous version, the CLI link and desktop
 entry (only if unchanged), MyGo's URL-handler and login entries that point
-into the app, and the install root. It keeps and lists the data dir, config
-(`service.env`), logs, database backups and desktop preferences; delete
+into the app, and the install root. It keeps and lists the data dir (with a worker's
+config, `worker/`), config (`service.env`, `worker.env`), logs, database backups and desktop preferences; delete
 them yourself to remove everything. On macOS 13+, remove a leftover login
 item in System Settings > General > Login Items.
 
@@ -190,7 +194,7 @@ authenticating proxy: [runtime.md](runtime.md#request-origin-policy)).
 | 13 | the new version did not start; kept (migrated), see [recovery](#recovery) |
 
 All three take `--json` and print one result document
-(`{ok, code, message, fix, version, previous, mode, changed, service, desktop, cli, link, app, backup, notes, warnings, logTail, retained}`).
+(`{ok, code, message, fix, version, previous, mode, changed, service, workerService, desktop, cli, link, app, backup, notes, warnings, logTail, retained}`).
 
 ## Verification
 

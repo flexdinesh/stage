@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/worker"
 )
 
 // fakeServer is the "server process" a fake manager runs: it really holds
@@ -25,6 +27,7 @@ type fakeServer struct {
 	instance string
 	owner    *instance.Owner
 	sock     *filelock.Lock
+	wlock    *filelock.Lock // worker role: the worker dir lock
 }
 
 // world is one test's isolated environment plus a fake manager.
@@ -66,6 +69,12 @@ type world struct {
 	llastExit     string
 	bootstrapCode int // nonzero: bootstrap "fails" with it (but still loads when bootstrapLoads)
 	bootstrapLoad bool
+
+	// role is the service under test (zero: the server).
+	role Role
+	// workerState, when set, is the channel state a started worker
+	// reports.
+	workerState string
 
 	// onStart decides what a start does (default: a healthy server).
 	onStart func(w *world)
@@ -109,7 +118,7 @@ func newWorld(t *testing.T, goos string) *world {
 
 func (w *world) deps() Deps {
 	return Deps{
-		GOOS: w.goos, UID: 1000, Getenv: func(k string) string { return w.env[k] },
+		Role: w.role, GOOS: w.goos, UID: 1000, Getenv: func(k string) string { return w.env[k] },
 		Runner: w, Health: w.health,
 		Probe: func(_ context.Context, exe string) (BuildInfo, error) {
 			return BuildInfo{Identity: buildinfo.Identity, Version: buildinfo.Version}, nil
@@ -120,9 +129,47 @@ func (w *world) deps() Deps {
 
 func (w *world) ctl() *Controller { return New(w.deps()) }
 
-// run starts a healthy server (call with mu held).
+// workerDir is the worker service's default worker dir.
+func (w *world) workerDir() string { return filepath.Join(w.dataDir, worker.DirName) }
+
+// join writes a worker config at the default path.
+func (w *world) join() {
+	w.t.Helper()
+	c := worker.Config{Schema: worker.ConfigSchema, URL: "https://main.example", MachineID: 2, Label: "l", Token: "stage_mt_1_x"}
+	if err := worker.SaveConfig(filepath.Join(w.workerDir(), worker.ConfigFile), c); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
+// lockWorkerDir takes the worker dir lock as a worker process pid would.
+func (w *world) lockWorkerDir(pid int, managed bool) *filelock.Lock {
+	_ = os.MkdirAll(w.workerDir(), 0o700)
+	l, err := filelock.Acquire(filepath.Join(w.workerDir(), worker.LockFile), 0o600)
+	if err != nil {
+		w.t.Errorf("worker lock: %v", err)
+		return nil
+	}
+	b, _ := json.Marshal(worker.Holder{PID: pid, Version: buildinfo.Version, StartedAt: time.Now().UTC(), Managed: managed})
+	_ = l.File().Truncate(0)
+	_, _ = l.File().WriteAt(b, 0)
+	return l
+}
+
+// run starts a healthy server or worker (call with mu held).
 func (w *world) run() {
 	w.kill()
+	if w.role == RoleWorker {
+		w.nextPID++
+		w.srv = &fakeServer{pid: w.nextPID, wlock: w.lockWorkerDir(w.nextPID, true)}
+		if w.workerState != "" {
+			b, _ := json.Marshal(worker.State{Schema: 1, PID: w.nextPID, Managed: true, State: w.workerState, LastError: "dial tcp: connection refused"})
+			_ = os.WriteFile(filepath.Join(w.workerDir(), worker.StateFile), b, 0o600)
+		}
+		w.active, w.sub, w.result = "active", "running", "success"
+		w.lstate, w.lruns = "running", w.lruns+1
+		w.invocation++
+		return
+	}
 	o, err := instance.Lock(w.dataDir)
 	if err != nil {
 		w.t.Errorf("fake server lock: %v", err)
@@ -153,7 +200,12 @@ func (w *world) run() {
 // kill ends the fake server (call with mu held).
 func (w *world) kill() {
 	if w.srv != nil {
-		w.srv.owner.Release()
+		if w.srv.owner != nil {
+			w.srv.owner.Release()
+		}
+		if w.srv.wlock != nil {
+			w.srv.wlock.Release()
+		}
 		if w.srv.sock != nil {
 			w.srv.sock.Release()
 		}
@@ -206,7 +258,7 @@ func (w *world) callLog() string {
 }
 
 func (w *world) unitPath() string {
-	return filepath.Join(w.home, ".config", "systemd", "user", "stage.service")
+	return filepath.Join(w.home, ".config", "systemd", "user", UnitNameFor(w.role))
 }
 
 func (w *world) Run(_ context.Context, c Cmd) (Result, error) {
@@ -301,7 +353,7 @@ func (w *world) systemctl(a []string) Result {
 }
 
 func (w *world) launchctl(a []string) Result {
-	target := "gui/1000/" + buildinfo.Label()
+	target := "gui/1000/" + LabelFor(w.role)
 	switch a[0] {
 	case "print":
 		if a[1] == "gui/1000" {
@@ -321,7 +373,7 @@ func (w *world) launchctl(a []string) Result {
 		if last == "" {
 			last = "(never exited)"
 		}
-		return Result{Stdout: fmt.Sprintf("%s = {\n\tpath = %s\n\tstate = %s\n\truns = %d\n%s\tlast exit code = %s\n}\n", target, filepath.Join(w.dataDir, buildinfo.Label()+".plist"), w.lstate, w.lruns, pid, last)}
+		return Result{Stdout: fmt.Sprintf("%s = {\n\tpath = %s\n\tstate = %s\n\truns = %d\n%s\tlast exit code = %s\n}\n", target, filepath.Join(w.dataDir, LabelFor(w.role)+".plist"), w.lstate, w.lruns, pid, last)}
 	case "enable":
 	case "bootstrap":
 		if w.lloaded {

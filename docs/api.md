@@ -107,8 +107,9 @@ A machine runs harnesses ([ADR 0002](adr/0002-machines-and-workers.md)). Machine
   "id": 2,
   "label": "work laptop",
   "kind": "remote",              // local (id 1) | remote
-  "online": false,               // local: always true; remote: its worker channel is live (until that lands, false)
-  "lastSeenAt": "2026-11-22T10:00:00Z",  // null for the local machine; remote: last worker contact (join, later the channel)
+  "online": false,               // local: always true; remote: its worker channel is live
+  "status": "offline",           // online | offline | needs_update (its worker last connected with another apiVersion; cleared when it connects again)
+  "lastSeenAt": "2026-11-22T10:00:00Z",  // null for the local machine; remote: last worker contact (join, channel connect and disconnect, at most once a minute while connected)
   "version": "v1.5.0",           // the build it runs: the server's for local; null when unknown
   "createdBy": 1,                // the user who created its pairing code
   "createdAt": "2026-11-22T10:00:00Z",
@@ -127,6 +128,9 @@ Body (strict) `{ "label": string }`: trimmed, nonblank, at most 100 characters. 
 
 ### `DELETE /api/machines/{id}`
 Remove a remote machine. 204. Its token hashes are deleted, so its worker gets 401 on its next request. Its active connections retire as history under the rules of a replaced instance ([architecture.md](architecture.md#project-and-session-identity)): a connection something references (a binding, a session, a task or a schedule) keeps its tasks, sessions and bindings, never polled or launched on (409 `connection_retired`), and can be forgotten (`DELETE /api/connections/{id}`); an unreferenced one is deleted. Unlaunched tasks and schedules stay on the retired connection until moved. The row is kept, hidden, so history keeps its label. 409 `local_machine` for machine 1. 404 unknown or already removed.
+
+### `POST /api/machines/{id}/ping`
+A round trip through the machine's worker channel. 200 `{ "machineId": 2, "latencyMs": 3, "version": "v1.5.0" }` (`version`: the build the worker reports). Machine 1 answers at once (`latencyMs` 0, the server's version). 409 `machine_offline` without a live channel; 504 `lost_reply` when no reply came within 10s (the channel dropped or the worker did not answer); 502 with the worker's error `code` when it answered with an error. 404 unknown or removed.
 
 ### `POST /api/machines/pairings`
 Create a one-time pairing code that adds a machine. Body (strict, may be empty) `{ "label"?: string }` (the new machine's name; default: the name the worker suggests, else `Machine <id>`). 201, `Cache-Control: no-store`:
@@ -174,6 +178,21 @@ Creates the machine (`lastSeenAt` now, `version` as sent) and its token; the tok
 
 #### `GET /api/worker/machine`
 The machine the token names: 200 `Machine`. A worker uses it to check its token (401 `machine_token_invalid` means revoked).
+
+#### `POST /api/worker/leave`
+The machine removes itself (`stage worker leave`): 204, with the effects of `DELETE /api/machines/{id}` (token revoked, open channel closed, connections retired).
+
+#### `GET /api/worker/channel`
+The worker channel's down half ([runtime.md](runtime.md#worker-channel), [ADR 0002](adr/0002-machines-and-workers.md)): a `text/event-stream` that stays open. Request headers: `Stage-Version` (the worker's build, recorded as the machine's `version`). Events:
+
+- `hello` first: `{ "session": "...", "machineId": 2, "heartbeatSec": 15, "timeoutSec": 45 }`.
+- `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "body"?, "error"? }`. `kind` is a call (`ping`) or `cancel` (the caller gave up on call `id`).
+- `: keepalive` comments every 15s.
+
+A newer stream of the same machine replaces this one (the old stream ends). Removing the machine ends it at once.
+
+#### `POST /api/worker/channel`
+The up half: one envelope per request, header `Stage-Channel-Session: <hello.session>` (400 without it). `kind`: `heartbeat` (about every 15s) or `result` (a reply to an `rpc` call, by `id`; late, duplicate or unknown ids are dropped): 204. `ping` (worker-initiated): 200 with a `result` envelope. A session that was replaced or ended: 409 `channel_replaced` (reconnect the stream). Any message counts as contact.
 
 ## Harness connections (API v6)
 

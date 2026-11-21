@@ -282,6 +282,14 @@ func (s *Store) AuthenticateMachine(ctx context.Context, token string) (int64, e
 	return machine, nil
 }
 
+// TouchMachine records that a remote machine's worker was heard from at
+// at (never moving last_seen_at back) and, when version is not empty, the
+// build it runs. Removed machines and the local machine are left alone.
+func (s *Store) TouchMachine(ctx context.Context, id int64, at time.Time, version string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE machines SET last_seen_at=CASE WHEN last_seen_at IS NULL OR last_seen_at<$2 THEN $2 ELSE last_seen_at END, version=CASE WHEN $3<>'' THEN $3 ELSE version END WHERE id=$1 AND id<>1 AND removed_at IS NULL`, id, at, strings.TrimSpace(version))
+	return err
+}
+
 // MachineInfo is a machine as listed: its row, what its worker last
 // reported, and its active connections.
 type MachineInfo struct {

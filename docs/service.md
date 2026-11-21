@@ -282,6 +282,55 @@ Login startup is off by default and separate from the running state.
 
 Surviving a desktop Quit is not a promise to run while logged out.
 
+## Worker service
+
+`stage worker service start|stop|restart|status|logs|enable|disable|uninstall`
+supervises the worker (`stage worker run --managed`, [runtime.md](runtime.md#worker-process))
+the same way: same flags, `--json`, command lock, pinned environment,
+executable rules, shadowing and rewrite rules, exits and manager handling as
+above. What differs:
+
+| What | Linux | macOS |
+| --- | --- | --- |
+| Definition | `<user unit dir>/<id>-worker.service` | `~/Library/Application Support/<id>/<label>.worker.plist`, label `<label>.worker` |
+| Config | `<config dir>/worker.env` | same |
+| Command | `<exe> worker run --managed` | same |
+| Stop | `TimeoutStopSec=30s` | `ExitTimeOut 30` |
+| Logs | journald, `SyslogIdentifier=<id>-worker` | `~/Library/Logs/<id>/worker.log` (+ `.1`, `.2`), `worker.launchd.stderr.log` |
+
+The unit adds `[X-Stage] Role=worker`. Golden copies:
+`server/internal/service/testdata/stage-worker.*`.
+
+- **Join first.** `start` refuses (exit 7) until `stage worker join` wrote
+  the config the service will use, and validates `worker.env` before
+  starting.
+- **worker.env:** `0600` `KEY=VALUE`, created from a template on first
+  `start`, never overwritten. One allowed key, `STAGE_WORKER_CONFIG` (an
+  absolute path to another worker config); default: `worker/worker.json` in
+  the identity's default data dir. `--managed` ignores `STAGE_DATA_DIR` and
+  `STAGE_WORKER_CONFIG` in the inherited environment, like the server.
+- **One role per identity.** `start` and `restart` refuse (exit 7) while the
+  other role's generated definition exists; `status` reports
+  `role_conflict`. Uninstall one first (#348 may lift this).
+- **Readiness:** the service is running and the holder record of
+  `worker.lock` names its pid (the worker locked its dir and loaded its
+  config, then sent `READY=1`). The channel being offline does not fail
+  `start`: it is a note, and `status` shows `worker_offline`.
+- **Managed vs foreground:** both take `worker.lock`. `start` refuses
+  (exit 5) when a foreground `stage worker run` holds it; a foreground
+  worker against the service exits 75 and says `stage worker service stop`.
+- **Status problems:** `worker_not_joined`, `worker_config_invalid`,
+  `foreground_holder`, `worker_revoked` (the machine was removed: leave
+  `--local`, join again), `api_mismatch`, `worker_offline`,
+  `version_differs`, `role_conflict`, `service_env_invalid`.
+- **Exits** 75 and 78 are not restarted (`RestartPreventExitStatus`); a
+  revoked token is 78, so a removed machine's worker stops instead of
+  looping. On macOS they exit 0.
+- `stage update` restarts a running worker service it owns and rolls back
+  when the new worker does not become ready; `stage uninstall` removes it
+  ([install.md](install.md#update)). `uninstall` keeps the worker config and
+  `worker.env`; `stage worker leave` removes the machine.
+
 ## Logs
 
 - Linux: journald, rotated by journald. `stage service logs` runs

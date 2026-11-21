@@ -71,3 +71,44 @@ func TestMachinePairNeedsPublicURL(t *testing.T) {
 		t.Fatalf("pair %d %q", code, errb)
 	}
 }
+
+func TestMachinePing(t *testing.T) {
+	h := newHarness(t)
+	code, out, errb := h.run("", "machine", "ping", "1")
+	if code != 0 || !strings.Contains(out, "machine 1") {
+		t.Fatalf("ping local %d %q %q", code, out, errb)
+	}
+	if code, _, errb := h.run("", "machine", "ping", "99"); code != 1 || !strings.Contains(errb, "not found") {
+		t.Fatalf("ping unknown %d %q", code, errb)
+	}
+	if code, _, _ := h.run("", "machine", "ping"); code != 2 {
+		t.Fatalf("ping without id: %d", code)
+	}
+}
+
+func TestWorkerCommandsWithoutJoin(t *testing.T) {
+	h := newHarness(t)
+	cfg := t.TempDir() + "/worker.json"
+	if code, _, _ := h.run("", "worker"); code != 2 {
+		t.Fatalf("worker without verb: %d", code)
+	}
+	if code, _, _ := h.run("", "worker", "nope"); code != 2 {
+		t.Fatalf("unknown verb: %d", code)
+	}
+	if code, _, _ := h.run("", "worker", "join", "--config", cfg); code != 2 {
+		t.Fatalf("join without link: %d", code)
+	}
+	if code, _, _ := h.run("", "worker", "run", "--managed", "--config", cfg); code != 2 {
+		t.Fatalf("run --managed --config: %d", code)
+	}
+	code, out, _ := h.run("", "worker", "status", "--config", cfg)
+	if code != 4 || !strings.Contains(out, "not joined") {
+		t.Fatalf("status %d %q", code, out)
+	}
+	if code, _, errb := h.run("", "worker", "run", "--config", cfg); code != 78 || !strings.Contains(errb, "not joined") {
+		t.Fatalf("run not joined %d %q", code, errb)
+	}
+	if code, _, errb := h.run("", "worker", "join", "--config", cfg, "https://h.example/other#c"); code == 0 || errb == "" {
+		t.Fatalf("join bad link %d %q", code, errb)
+	}
+}

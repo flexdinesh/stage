@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
 // Deps are the API's collaborators.
@@ -45,6 +46,9 @@ type Deps struct {
 	Connectors harness.Connectors
 	// Harnesses is the server's fixed harness composition (nil: none).
 	Harnesses *harness.Registry
+	// Channels is the worker channel hub (nil: a private hub that
+	// persists presence through Store).
+	Channels *workerchan.Hub
 }
 
 // registry is Harnesses, or an empty registry.
@@ -68,6 +72,9 @@ func NewRouter(deps Deps) http.Handler {
 	}
 	if s.Inbox == nil {
 		s.Inbox = notify.NewHub(context.Background())
+	}
+	if s.Channels == nil {
+		s.Channels = newChannelHub(context.Background(), s.Store)
 	}
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
@@ -106,8 +113,12 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/machines/{id}", s.getMachine)
 	h("PATCH /api/machines/{id}", s.renameMachine)
 	h("DELETE /api/machines/{id}", s.removeMachine)
+	h("POST /api/machines/{id}/ping", s.pingMachine)
 	mux.Handle("POST /api/worker/join", s.worker(false, s.joinWorker))
 	mux.Handle("GET /api/worker/machine", s.worker(true, s.workerMachine))
+	mux.Handle("GET /api/worker/channel", s.worker(true, s.workerChannelStream))
+	mux.Handle("POST /api/worker/channel", s.worker(true, s.workerChannelPost))
+	mux.Handle("POST /api/worker/leave", s.worker(true, s.workerLeave))
 	mux.Handle(WorkerPrefix, s.worker(true, func(w http.ResponseWriter, _ *http.Request) error {
 		writeError(w, http.StatusNotFound, "not found")
 		return nil

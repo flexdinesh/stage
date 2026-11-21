@@ -298,6 +298,81 @@ forwarding the `Authorization` header unchanged. Creating a pairing code
 Without a proxy, any process that reaches a listener already has full API
 access, and the token adds nothing to or takes nothing from that.
 
+## Worker channel
+
+A worker dials out; the main server never dials a worker. One channel per
+machine: an SSE stream down (`GET /api/worker/channel`) and one POST per
+message up (`POST /api/worker/channel`), both worker routes
+([api.md](api.md#get-apiworkerchannel), [ADR 0002](adr/0002-machines-and-workers.md)).
+Code: `server/internal/workerchan` (protocol, hub), `server/internal/api`
+(routes), `server/internal/worker` (client).
+
+- **Session.** Each stream gets a session id in its `hello` event; up POSTs
+  name it in `Stage-Channel-Session`. A newer stream of the same machine
+  replaces the older (the old stream ends, its POSTs get 409
+  `channel_replaced`).
+- **Liveness.** The server writes a `: keepalive` comment every 15s and the
+  worker POSTs a heartbeat every 15s. Either side treats 45s of silence as a
+  dead channel: the server closes the session, the worker reconnects.
+- **RPC.** The hub sends a call as an `rpc` event with an absolute deadline
+  (the caller's context deadline, else 45s) and waits for the `result` by id.
+  When the caller's context ends first the hub sends `cancel` (best effort)
+  and returns. Outcomes: a body, the worker's typed error, offline (no live
+  channel when called) or lost reply (deadline passed or the channel dropped
+  in flight: unknown outcome, never failure). Results after that are dropped.
+  This task's only call is `ping` (`POST /api/machines/{id}/ping`,
+  `stage machine ping ID`).
+- **Presence.** Online means a live channel, kept in memory, so a main
+  restart shows every worker offline until it reconnects (seconds).
+  `machines.last_seen_at` and `version` are written on connect, on
+  disconnect and at most once a minute while connected (never moved back).
+  A worker refused with `api_version_mismatch` while presenting a valid token
+  shows `status: needs_update` until it connects again (memory only).
+- **Shutdown.** Server shutdown closes every stream; workers reconnect to the
+  next instance with backoff.
+
+## Worker process
+
+`stage worker` makes this machine a worker of a main server
+(`server/internal/worker`, `server/internal/cli/worker.go`).
+
+| Command | Does |
+| --- | --- |
+| `stage worker join <link> [--label L]` | Redeems the pairing link's code (`POST /api/worker/join`) and writes the worker config. Refuses when already joined (`stage worker leave` first). Plain `http://` links are accepted (LAN and loopback mains). |
+| `stage worker run` | The foreground worker: holds the worker dir, connects the channel and reconnects until stopped. |
+| `stage worker status` | Config, the server's view of this machine and the running process. Exit 0 the server says online, 1 not online (or unreachable, or an invalid config), 4 not joined, 7 revoked. |
+| `stage worker leave [--local]` | Removes this machine on the main server (`POST /api/worker/leave`), then deletes the local config and state. A revoked token counts as already removed. `--local` only deletes locally. |
+| `stage worker service ...` | The worker service ([service.md](service.md#worker-service)). |
+
+All take `--config PATH` and `--json`. Worker commands never use
+`--url`/`STAGE_URL`: the main server's URL comes from the config.
+
+- **Worker dir:** `<data dir>/worker` (the identity's data dir, runtime
+  defaults above; `STAGE_DATA_DIR` moves it), mode `0700`. Config path:
+  `--config`, else `STAGE_WORKER_CONFIG`, else `<worker dir>/worker.json`;
+  the dir is the config's dir.
+- **`worker.json`** (`0600`; group or other bits are refused):
+  `{schema, url, machineId, label, token, joinedAt}`. The token never leaves
+  this file and the `Authorization` header.
+- **`worker.lock`:** flock held for the process lifetime plus a holder record
+  (`pid, version, managed, startedAt`). A second worker on the dir exits 75
+  and names the holder (the worker service: `stage worker service stop`).
+- **`worker.state.json`:** the channel state the process last reached
+  (`connecting`, `online`, `needs_update`, `revoked`, `stopped`), its last
+  error and when (the service's readiness and status read it). `stage worker
+  status` shows it while a process holds the lock, and asks the main server
+  (`GET /api/worker/machine`) whether this machine is online or revoked.
+- **Reconnect:** exponential backoff 1s to 60s with jitter, reset after a
+  stream that stayed up 30s. `api_version_mismatch` waits the maximum
+  interval. 401 (the machine was removed) ends the run as revoked, without
+  a retry loop.
+- **Exit status:** 0 on SIGINT/SIGTERM; 75 the worker dir is held; 78 not
+  joined, invalid config or revoked; 1 otherwise. Managed on macOS, 75 and
+  78 exit 0 (launchd cannot exclude exit codes). Managed, it sends
+  `READY=1` once it holds the dir and `STOPPING=1` on shutdown; readiness
+  does not wait for the channel.
+- One identity runs the main server or a worker service, not both (#348).
+
 ## OpenCode connection
 
 Settings connect OpenCode three ways: the service on the Stage server's machine (Settings or `stage harness opencode run connect-local`), a remote service through a link from `opencode pair` on its host (`stage harness opencode run pair link=LINK`), or an address with optional HTTP Basic credentials. `stage harness opencode disconnect` (or Disconnect in Settings) forgets the address and credentials; tasks and history stay.

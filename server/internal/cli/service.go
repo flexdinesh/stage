@@ -73,22 +73,34 @@ func writeJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-func (e Env) serviceDeps() service.Deps {
+func (e Env) serviceDeps(role service.Role) service.Deps {
+	d := service.OSDeps()
 	if e.Service != nil {
-		return e.Service()
+		d = e.Service()
 	}
-	return service.OSDeps()
+	d.Role = role
+	return d
 }
 
 // runService is `stage service VERB`: the per-user OS service of this
 // installation (docs/service.md). It always targets the local identity:
 // --url and STAGE_URL do not apply.
 func runService(ctx context.Context, env Env, args []string) error {
+	return runRoleService(ctx, env, args, service.RoleServer)
+}
+
+// runRoleService is `stage service VERB` (server) or `stage worker
+// service VERB` (worker).
+func runRoleService(ctx context.Context, env Env, args []string, role service.Role) error {
+	name := "service"
+	if role == service.RoleWorker {
+		name = "worker service"
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return usagef("service: want start|stop|restart|status|logs|enable|disable|uninstall")
+		return usagef("%s: want start|stop|restart|status|logs|enable|disable|uninstall", name)
 	}
 	verb, rest := args[0], args[1:]
-	fs := flag.NewFlagSet("service "+verb, flag.ContinueOnError)
+	fs := flag.NewFlagSet(name+" "+verb, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	asJSON := fs.Bool("json", false, "JSON output")
 	var exe string
@@ -104,7 +116,7 @@ func runService(ctx context.Context, env Env, args []string) error {
 		fs.StringVar(&exe, "exe", "", "executable the service runs (default this CLI)")
 		fs.DurationVar(&wait, "wait", def, "wait this long for readiness (0: return once requested)")
 	case "stop", "uninstall":
-		fs.DurationVar(&wait, "wait", service.DefaultStopWait, "wait this long for the server to exit")
+		fs.DurationVar(&wait, "wait", service.DefaultStopWait, "wait this long for the process to exit")
 	case "enable":
 		fs.StringVar(&exe, "exe", "", "executable the service runs (default this CLI)")
 	case "logs":
@@ -112,19 +124,19 @@ func runService(ctx context.Context, env Env, args []string) error {
 		fs.BoolVar(&follow, "f", false, "follow")
 	case "status", "disable":
 	default:
-		return usagef("service %s: unknown (want start|stop|restart|status|logs|enable|disable|uninstall)", verb)
+		return usagef("%s %s: unknown (want start|stop|restart|status|logs|enable|disable|uninstall)", name, verb)
 	}
 	if err := fs.Parse(rest); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(env.Stdout, usage)
 			return err
 		}
-		return usagef("service %s: %v (service commands target this installation; --url/STAGE_URL do not apply)", verb, err)
+		return usagef("%s %s: %v (service commands target this installation; --url/STAGE_URL do not apply)", name, verb, err)
 	}
 	if fs.NArg() > 0 {
-		return usagef("service %s: unexpected argument %q", verb, fs.Arg(0))
+		return usagef("%s %s: unexpected argument %q", name, verb, fs.Arg(0))
 	}
-	c := service.New(env.serviceDeps())
+	c := service.New(env.serviceDeps(role))
 	switch verb {
 	case "status":
 		st, code := c.Status(ctx)
@@ -138,7 +150,7 @@ func runService(ctx context.Context, env Env, args []string) error {
 		return codeErr(code)
 	case "logs":
 		if *asJSON {
-			return usagef("service logs: --json is not supported")
+			return usagef("%s logs: --json is not supported", name)
 		}
 		if err := c.Logs(ctx, env.Stdout, n, follow); err != nil {
 			return err
@@ -168,6 +180,46 @@ func runService(ctx context.Context, env Env, args []string) error {
 		printReport(env.Stdout, env.Stderr, rep)
 	}
 	return codeErr(rep.Code)
+}
+
+// printWorkerServiceStatus is the rest of `stage worker service status`.
+func printWorkerServiceStatus(w io.Writer, s service.Status, wk *service.WorkerStatus) {
+	if wk.Joined {
+		fmt.Fprintf(w, "  machine     %d at %s\n", wk.MachineID, wk.URL)
+	} else {
+		fmt.Fprintln(w, "  machine     not joined")
+	}
+	if wk.State != "" {
+		fmt.Fprintf(w, "  channel     %s\n", wk.State)
+	}
+	login := "off"
+	if s.Definition.LoginStartup {
+		login = "on"
+	}
+	fmt.Fprintf(w, "  login start %s\n", login)
+	if s.Manager.Linger != nil {
+		fmt.Fprintf(w, "  linger      %t\n", *s.Manager.Linger)
+	}
+	if s.Definition.Present {
+		fmt.Fprintf(w, "  definition  %s\n", s.Definition.Path)
+		fmt.Fprintf(w, "  exe         %s\n", s.Definition.Exe)
+	}
+	fmt.Fprintf(w, "  worker      %s\n", wk.Config)
+	fmt.Fprintf(w, "  config      %s\n", s.ServiceEnv.Path)
+	if s.Logs.Kind == "journald" {
+		fmt.Fprintf(w, "  logs        journalctl --user -u %s (stage worker service logs)\n", s.Logs.Unit)
+	} else {
+		fmt.Fprintf(w, "  logs        %s (stage worker service logs)\n", s.Logs.Path)
+	}
+	if h := wk.Holder; h != nil && !wk.OwnedByService {
+		fmt.Fprintf(w, "  worker dir held by pid %d (managed %t)\n", h.PID, h.Managed)
+	}
+	for _, p := range s.Problems {
+		fmt.Fprintf(w, "problem: %s\n", p.Message)
+		if p.Fix != "" {
+			fmt.Fprintf(w, "  fix: %s\n", p.Fix)
+		}
+	}
 }
 
 func codeErr(code int) error {
@@ -201,13 +253,21 @@ func printReport(out, errw io.Writer, r service.Report) {
 }
 
 func printServiceStatus(w io.Writer, s service.Status) {
-	fmt.Fprintf(w, "%s service (%s %s): %s", s.Identity, s.Manager.Kind, s.Definition.Name, s.State)
+	kind := "service"
+	if s.Worker != nil {
+		kind = "worker service"
+	}
+	fmt.Fprintf(w, "%s %s (%s %s): %s", s.Identity, kind, s.Manager.Kind, s.Definition.Name, s.State)
 	if s.Ready {
 		fmt.Fprint(w, ", ready")
 	}
 	fmt.Fprintln(w)
 	if s.Process.PID != 0 {
 		fmt.Fprintf(w, "  pid         %d (restarts %d)\n", s.Process.PID, s.Process.Restarts)
+	}
+	if wk := s.Worker; wk != nil {
+		printWorkerServiceStatus(w, s, wk)
+		return
 	}
 	if s.Stage.Reachable {
 		fmt.Fprintf(w, "  stage       %s at %s (db %s)\n", s.Stage.Version, s.Stage.URL, s.Stage.DB)

@@ -24,9 +24,10 @@ func OSDeps(log io.Writer, svc func() service.Deps) Deps {
 	return Deps{
 		Platform: Platform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Home: home, Getenv: os.Getenv},
 		Identity: buildinfo.Identity, Version: buildinfo.Version,
-		Service: osService{deps: svc},
-		Desktop: osDesktop{goos: runtime.GOOS, getenv: os.Getenv, home: home},
-		Run:     runCmd, LookPath: exec.LookPath, FreeSpace: freeSpace,
+		Service:       osService{deps: svc},
+		WorkerService: osService{deps: svc, role: service.RoleWorker},
+		Desktop:       osDesktop{goos: runtime.GOOS, getenv: os.Getenv, home: home},
+		Run:           runCmd, LookPath: exec.LookPath, FreeSpace: freeSpace,
 		Log: log, Now: time.Now, PID: os.Getpid(),
 	}
 }
@@ -53,13 +54,18 @@ func isNoSpace(err error) bool {
 
 // osService drives the per-user service through its controller (a new
 // controller per operation).
-type osService struct{ deps func() service.Deps }
+type osService struct {
+	deps func() service.Deps
+	role service.Role
+}
 
 func (s osService) d() service.Deps {
+	d := service.OSDeps()
 	if s.deps != nil {
-		return s.deps()
+		d = s.deps()
 	}
-	return service.OSDeps()
+	d.Role = s.role
+	return d
 }
 
 func (s osService) Status(ctx context.Context) service.Status {
