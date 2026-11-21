@@ -401,10 +401,12 @@ func printSessionDetail(w io.Writer, d client.ThreadDetail) {
 
 }
 
-// printRef prints what a reference names: a task (with its session id) or
-// a session (with its task), then how to read the full conversation.
+// printRef prints what a reference names: a task (with its session id), a
+// tree, or a session (with its task), then how to read the full conversation.
 func printRef(w io.Writer, r agenttools.RefOut) {
 	switch {
+	case r.Tree != nil:
+		printTree(w, *r.Tree)
 	case r.Kind == "session" && r.Session != nil:
 		printSessionDetail(w, *r.Session)
 	case r.Task != nil:

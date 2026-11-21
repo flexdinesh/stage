@@ -994,11 +994,24 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatalf("external ref %+v", r)
 	}
 
-	if msg := call(t, cs, "read_ref", map[string]any{"ref": "https://github.com/o/r/pull/3"}, nil); !strings.Contains(msg, "not a stage task or session reference") {
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": "https://github.com/o/r/pull/3"}, nil); !strings.Contains(msg, "not a stage task, tree or session reference") {
 		t.Fatalf("bad ref error %q", msg)
 	}
 	if msg := call(t, cs, "read_ref", map[string]any{"ref": "#99999"}, nil); !strings.Contains(msg, "task 99999 not found") {
 		t.Fatalf("missing task error %q", msg)
+	}
+
+	// Tree link: the tree, ready for the tree tools.
+	var tr client.TreeDetail
+	mustCall(t, cs, "create_tree", map[string]any{"title": "Ship", "tasks": []any{map[string]any{"id": tk.ID}}}, &tr)
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("[stage tree #%d: Ship](http://phone.lan:7380/trees/%d)", tr.ID, tr.ID)}, &r)
+	if r.Kind != "tree" || r.Tree == nil || r.Tree.ID != tr.ID || len(r.Tree.Tasks) != 1 || r.Task != nil || r.Session != nil ||
+		!strings.Contains(r.Next, fmt.Sprintf("add_to_tree (treeId %d)", tr.ID)) {
+		t.Fatalf("tree ref %+v", r)
+	}
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": "http://phone.lan:7380/trees/99999"}, nil); !strings.Contains(msg, "tree 99999 not found") {
+		t.Fatalf("missing tree error %q", msg)
 	}
 }
 

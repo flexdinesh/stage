@@ -862,11 +862,13 @@ type Ref struct {
 	Links        execution.Links `json:"links"`
 	SessionTitle string          `json:"sessionTitle,omitempty"`
 	Session      *db.SessionRef  `json:"session"`
-	Kind         string          `json:"kind"` // task | session
+	Kind         string          `json:"kind"` // task | tree | session
 	TaskID       *int64          `json:"taskId"`
+	TreeID       *int64          `json:"treeId,omitempty"`
 }
 
-// ResolveRef reads a stage link, T3 thread link, #task id or thread id.
+// ResolveRef reads a stage task, tree or session link, T3 thread link, #task
+// id or thread id.
 func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
 	var out Ref
 	err := c.do(ctx, http.MethodGet, withQuery("/api/refs/resolve", url.Values{"ref": {ref}}), nil, &out)

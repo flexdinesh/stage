@@ -187,8 +187,7 @@ func appPath(u *url.URL) string {
 var taskNum = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
 
 // DeepLink maps an <identity>:// link to an app path: tasks/<n> →
-// /tasks/<n>, sessions/<id> → /sessions/<escaped id>, and the bare scheme
-// → /. The kind may be the host (`stage://tasks/12`) or follow a
+// /tasks/<n>, trees/<n> → /trees/<n>, and the bare scheme → /. The kind may be the host (`stage://tasks/12`) or follow a
 // `localhost` host (`stage://localhost/tasks/12`); query and fragment are
 // ignored.
 func (p Policy) DeepLink(raw string) (string, bool) {
@@ -218,6 +217,8 @@ func (p Policy) DeepLink(raw string) (string, bool) {
 		return "/", true
 	case len(segs) == 2 && segs[0] == "tasks" && taskNum.MatchString(segs[1]):
 		return "/tasks/" + segs[1], true
+	case len(segs) == 2 && segs[0] == "trees" && taskNum.MatchString(segs[1]):
+		return "/trees/" + segs[1], true
 	}
 	return "", false
 }

@@ -196,11 +196,11 @@ Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin`
 | In-app routes | stay in the webview (`mygo://localhost`) |
 | `http(s)` | the default browser |
 | `t3code://threads/<env>/<thread>` | the OS (T3 app); if no handler opens it, the T3 web URL (`/api/harnesses/t3/status` `details.publicUrl` + `/<env>/<thread>`) in the browser |
-| `<identity>://tasks/<n>` | shows the app at that page |
+| `<identity>://tasks/<n>`, `<identity>://trees/<n>` | shows the app at that page |
 | attachment images (`/api/attachments/<id>`, new tab) | a child window without bindings |
 | anything else | refused and logged |
 
-- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12` (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `packages/app/src/lib/refs.ts`).
+- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12` or `stage://trees/4` (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `packages/app/src/lib/refs.ts`); tree links resolve for agents but render as plain links, not chips.
 - Markdown stays sanitized (DOMPurify); its URI allowlist adds `t3code:` and `stage(-x):`, and bare `stage://` links autolink.
 - Only app-owned content calls Go: MyGo trusts only the top frame on `mygo://` (or the dev server), and the navigation lock keeps foreign pages out of the main frame.
 

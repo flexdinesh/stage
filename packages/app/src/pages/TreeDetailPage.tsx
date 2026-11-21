@@ -18,6 +18,7 @@ import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, bu
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
+import { CopyLinkPair, type LinkSubject } from "../components/StageLinks.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
@@ -203,6 +204,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const settled = treeSettled(tree.tasks);
   const closed = treeClosed(tree);
   const closedChip = closedLabel(tree, countMembers(tree.tasks));
+  const linkSubject: LinkSubject = { kind: "tree", id: tree.id, title: tree.title };
 
   const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
   const mode = useMutation({ mutationFn: (startMode: StartMode) => api.updateTree(tree.id, { startMode }), onSettled: invalidate });
@@ -269,6 +271,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
         actions={
           closed ? (
             <>
+              <CopyLinkPair subject={linkSubject} />
               <TreeMenu tree={tree} onPick={onMenu} />
               <Button busy={status.isPending} onClick={() => status.mutate("open")}>
                 {tree.status === "archived" ? "Unarchive" : "Reopen"}
@@ -276,6 +279,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             </>
           ) : (
             <>
+              <CopyLinkPair subject={linkSubject} />
               <Segmented label="Tree start mode" options={MODE_OPTIONS} value={tree.startMode} onChange={(m) => m !== tree.startMode && mode.mutate(m)} />
               <TreeMenu tree={tree} onPick={onMenu} />
               <Button onClick={addTask} title={selected === null ? "New parallel root. Select a task to add after it." : `New task that runs after #${selected.id}`}>

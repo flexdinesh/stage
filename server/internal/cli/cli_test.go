@@ -264,6 +264,10 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 			t.Fatalf("tree show missing %q:\n%s", want, stdout)
 		}
 	}
+	code, stdout, _ = h.run("", "show", fmt.Sprintf("https://phone.lan/trees/%d", tree.ID))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("tree %d  Stack  (manual)", tree.ID)) || !strings.Contains(stdout, "add_to_tree") {
+		t.Fatalf("show tree link:\n%s", stdout)
+	}
 	code, stdout, _ = h.run("", "tree", "ls")
 	if code != 0 || !strings.Contains(stdout, "Stack") || !strings.Contains(stdout, "ready 1, blocked 1") {
 		t.Fatalf("tree ls:\n%s", stdout)
