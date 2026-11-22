@@ -90,8 +90,9 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
           </div>
         </QueryState>
         {picked === null ? null : (
-          <fieldset disabled={!canNeed} className="min-w-0 disabled:opacity-55">
-            <FieldGroup
+          <FieldGroup
+              disabled={!canNeed}
+              className="disabled:opacity-55"
               label="Runs after"
               hint={
                 canNeed
@@ -110,7 +111,6 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
                 ))}
               </div>
             </FieldGroup>
-          </fieldset>
         )}
         <ErrorText error={add.error} />
       </div>

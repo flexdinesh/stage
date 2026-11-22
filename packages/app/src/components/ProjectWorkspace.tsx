@@ -6,7 +6,7 @@ import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
 import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { Alert, Button, Drawer, EmptyState, ErrorText, Field, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
+import { Alert, Button, Drawer, EmptyState, ErrorText, Field, Hint, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
 
 export function BindWorkspaceDrawer({
   project,
@@ -125,7 +125,7 @@ export function BindWorkspaceDrawer({
                             "Choose the directory you want this project to use.")}
                       </span>
                       {!unavailable && samePath.has(candidate.workspace) ? (
-                        <span className="block font-mono text-meta text-muted">Same path as the replaced binding</span>
+                        <Hint inline className="block">Same path as the replaced binding</Hint>
                       ) : null}
                     </span>
                   </label>

@@ -19,6 +19,7 @@ import {
   Button,
   Checkbox,
   ChoiceRow,
+  FieldGroup,
   Chip,
   ErrorText,
   ExternalButton,
@@ -216,11 +217,7 @@ function EventFilter() {
   const toggle = (event: NotificationEvent, on: boolean) =>
     save.mutate(EVENTS.map((e) => e.event).filter((e) => (e === event ? on : enabled.includes(e))));
   return (
-    <fieldset className="flex min-w-0 flex-col gap-2" aria-busy={pending > 0}>
-      <legend className="mb-2 flex items-baseline gap-2">
-        <span className="label-caps">Events</span>
-        <span className="font-mono text-meta-sm text-muted">all devices</span>
-      </legend>
+    <FieldGroup label="Events" meta="all devices" aria-busy={pending > 0}>
       <QueryState isPending={prefs.isPending} error={prefs.error}>
         <Muted>
           {enabled.length === 0
@@ -231,6 +228,7 @@ function EventFilter() {
           {EVENTS.map(({ event, label, hint }) => (
             <Row key={event} bare>
               <ChoiceRow
+                inset
                 control={
                   <>
                     <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
@@ -246,7 +244,7 @@ function EventFilter() {
         </RowList>
       </QueryState>
       <ErrorText error={save.error} />
-    </fieldset>
+    </FieldGroup>
   );
 }
 

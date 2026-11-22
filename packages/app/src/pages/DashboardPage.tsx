@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { Link } from "react-router";
 import { useProjects, useSchedules, useT3Status, useOpenCodeStatus, useHarnesses, useTasks } from "../api/queries.ts";
@@ -36,8 +36,8 @@ type InFlightCell = { key: GroupKey; label: string; tone: ChipTone; count: numbe
 /** Work in motion that asks nothing: counts that open the Tasks view filtered to them. A null count is loading. */
 function InFlight({ cells }: { cells: InFlightCell[] }) {
   return (
-    <section aria-label="In flight" className="mt-6">
-      <SectionHeading title="In flight" meta="no action needed" />
+    <section aria-labelledby="in-flight-heading" className="mt-6">
+      <SectionHeading id="in-flight-heading" title="In flight" meta="no action needed" />
       <ul className="grid grid-cols-3 border border-line bg-surface">
         {cells.map((c) => (
           <li key={c.key} className="border-r border-line last:border-r-0">
@@ -56,14 +56,6 @@ function InFlight({ cells }: { cells: InFlightCell[] }) {
 }
 
 /** A harness connection notice above the dashboard, spaced like T3Alert. */
-function Notice({ children }: { children: ReactNode }) {
-  return (
-    <div className="mb-3.5">
-      <Alert tone="need">{children}</Alert>
-    </div>
-  );
-}
-
 /** Planning remains available before pairing and during connection failures. */
 export function DashboardPage() {
   const t3 = useT3Status();
@@ -76,19 +68,19 @@ export function DashboardPage() {
       {t3Configured ? (
         <T3Alert status={t3.data} />
       ) : openCode.data?.state === "unconfigured" ? (
-        <Notice>
+        <Alert tone="need" className="mb-3.5">
           <TextLink variant="rest" to="/settings">Connect a harness</TextLink> to start tasks in T3 or OpenCode.
-        </Notice>
+        </Alert>
       ) : null}
       {openCode.data?.state === "unavailable" ? (
-        <Notice>
+        <Alert tone="need" className="mb-3.5">
           OpenCode is unavailable. <TextLink variant="rest" to="/settings">Check connection</TextLink>
-        </Notice>
+        </Alert>
       ) : null}
       {openCode.data?.state === "rejected" ? (
-        <Notice>
+        <Alert tone="need" className="mb-3.5">
           OpenCode no longer accepts Stage's sign-in. <TextLink variant="rest" to="/settings">Reconnect</TextLink>
-        </Notice>
+        </Alert>
       ) : null}
       <CompletionLinger>
         <Dashboard />

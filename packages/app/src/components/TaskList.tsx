@@ -263,7 +263,7 @@ export function TaskRow({
         {showProject ? (
           <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
         ) : null}
-        <IdTag id={task.id} className="mr-1.5" />
+        <IdTag id={task.id} title={`Task #${task.id}`} className="mr-1.5" />
         <TextLink to={`/tasks/${task.id}`} className="text-body font-medium break-words">
           {task.title}
         </TextLink>

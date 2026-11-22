@@ -95,6 +95,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
           <>
             <Field label="Title">{(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}</Field>
             <FieldGroup
+              start
               label="Start mode"
               hint={mode === "auto" ? "A task starts on its own once every need is completed." : "A task reads ready when its needs are completed; you start it."}
             >

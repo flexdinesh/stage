@@ -60,6 +60,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
       <div className="flex flex-col gap-4">
         <Field label="Title">{(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <FieldGroup
+          start
           label="Shape"
           hint={shape === "parallel" ? "Every task is a root: none waits on another." : "Each task needs the one above it, so they run one after another."}
         >
@@ -97,6 +98,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
           ))}
         </ol>
         <FieldGroup
+          start
           label="Start mode"
           hint={mode === "auto" ? "A task starts on its own once every need is completed. Roots wait for you." : "A task reads ready when its needs are completed; you start it."}
         >

@@ -529,15 +529,13 @@ function TaskFormDrawer({
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
         </> : null}
         <fieldset disabled={!full || !connection} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
-          <FieldGroup label="Workspace">
-            <div className="self-start">
-              <Segmented
-                label="Workspace"
-                options={workspaces}
-                value={wsChoice}
-                onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
-              />
-            </div>
+          <FieldGroup label="Workspace" start>
+            <Segmented
+              label="Workspace"
+              options={workspaces}
+              value={wsChoice}
+              onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
+            />
           </FieldGroup>
           {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
           {!harnessWorktree && wsChoice !== "root" ? (
