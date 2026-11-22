@@ -78,6 +78,46 @@ export function Field({
   );
 }
 
+/**
+ * A labelled group of controls that is not one input (a Segmented, a set of choices): fieldset and legend with
+ * Field's layout, so the label names the group for screen readers.
+ */
+export function FieldGroup({ label, hint, className, children }: { label: string; hint?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <fieldset className={cx("min-w-0", className)}>
+      <legend className="label-caps mb-1.5">{label}</legend>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {children}
+        {hint === undefined ? null : <p className="text-meta text-muted">{hint}</p>}
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * A checkbox or radio with its label (and optional detail) as one target: 44px on phone, a faint hover fill.
+ * `control` is the `Checkbox` or `Radio`.
+ */
+export function ChoiceRow({
+  control,
+  detail,
+  className,
+  children,
+}: {
+  control: ReactNode;
+  detail?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className={cx("-mx-1.5 flex min-h-11 cursor-pointer items-center gap-2.5 px-1.5 py-1 transition-colors duration-150 hover:bg-panel md:min-h-8", className)}>
+      {control}
+      <span className="min-w-0 flex-1 text-small">{children}</span>
+      {detail === undefined ? null : <span className="shrink-0 font-mono text-meta text-muted">{detail}</span>}
+    </label>
+  );
+}
+
 /** Joined button group for small enumerations (runtime mode, time window). */
 export function Segmented<T extends string>({
   options,

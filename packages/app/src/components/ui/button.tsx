@@ -1,6 +1,9 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "./cx.ts";
 
+/** An icon from components/icons.tsx: `size` in px; decorative unless labelled. */
+export type IconComponent = (props: { size?: number; label?: string }) => ReactNode;
+
 export type Variant = "primary" | "secondary" | "danger" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
@@ -10,12 +13,16 @@ const VARIANTS: Record<Variant, string> = {
   ghost: "border-transparent text-muted hover:bg-panel hover:text-fg",
 };
 
+const BUTTON_BASE =
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap border font-medium transition-[background-color,opacity,color] duration-150 disabled:pointer-events-none disabled:opacity-45";
+
 export function buttonClass(variant: Variant = "secondary", small = false): string {
-  return cx(
-    "inline-flex items-center justify-center gap-1.5 whitespace-nowrap border font-medium transition-[background-color,opacity,color] duration-150 disabled:pointer-events-none disabled:opacity-45",
-    small ? "h-control-sm px-2.5 text-meta md:px-2" : "h-control px-3.5 text-small md:px-3",
-    VARIANTS[variant],
-  );
+  return cx(BUTTON_BASE, small ? "h-control-sm px-2.5 text-meta md:px-2" : "h-control px-3.5 text-small md:px-3", VARIANTS[variant]);
+}
+
+/** A square icon-only button's box: control height on both axes. */
+export function iconButtonClass(variant: Variant = "ghost", small = false): string {
+  return cx(BUTTON_BASE, "shrink-0", small ? "size-control-sm" : "size-control", VARIANTS[variant]);
 }
 
 type ButtonProps = ComponentProps<"button"> & { variant?: Variant; small?: boolean; busy?: boolean };
@@ -32,6 +39,34 @@ export function Button({ variant, small, busy = false, className, disabled, type
       {busy ? <span className="size-3 animate-spin border-[1.5px] border-current border-t-transparent" /> : null}
       {children}
     </button>
+  );
+}
+
+type IconButtonProps = Omit<ComponentProps<"button">, "children" | "aria-label"> & {
+  /** Accessible name; also the tooltip unless `title` is given. */
+  label: string;
+  icon: IconComponent;
+  variant?: Variant;
+  small?: boolean;
+};
+
+/** Square icon-only button. Icons draw at 16px (14px small); the label names it for screen readers and the tooltip. */
+export function IconButton({ label, icon: Icon, variant, small = false, className, title, type, ...rest }: IconButtonProps) {
+  return (
+    <button type={type ?? "button"} aria-label={label} title={title ?? label} className={cx(iconButtonClass(variant, small), className)} {...rest}>
+      <Icon size={small ? 14 : 16} />
+    </button>
+  );
+}
+
+/** Text that acts (a tree node title, a snippet name): inherits type, underlines on hover. */
+export function TextButton({ className, type, ...rest }: ComponentProps<"button">) {
+  return (
+    <button
+      type={type ?? "button"}
+      className={cx("min-w-0 text-left underline-offset-2 hover:underline disabled:no-underline disabled:opacity-45", className)}
+      {...rest}
+    />
   );
 }
 

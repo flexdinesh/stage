@@ -29,15 +29,59 @@ export function Panel({
   const hasHeader = title !== undefined || actions !== undefined || meta !== undefined;
   return (
     <section className={cx("min-w-0 border border-line bg-surface", fill && "flex flex-col", className)}>
-      {hasHeader ? (
-        <div className={cx("relative flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", !collapsed && "border-b border-line")}>
-          {title === undefined ? null : <h2 className="label-caps text-fg [text-box:trim-both_cap_alphabetic]">{title}</h2>}
-          {meta === undefined ? null : <span className="block font-mono text-meta-sm text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
-          {actions === undefined ? null : <div className="relative ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
-        </div>
-      ) : null}
+      {hasHeader ? <PanelHeader title={title} meta={meta} actions={actions} ruled={!collapsed} /> : null}
       {collapsed ? null : <div className={cx(!flush && "p-3", fill && "flex flex-1 flex-col")}>{children}</div>}
     </section>
+  );
+}
+
+/**
+ * The Bench Gray header bar of a Panel (or of a panel-like surface: a popover, a drawer section): uppercase mono
+ * title in Ink, mono meta beside it, actions right. `ruled` draws the hairline under it.
+ */
+export function PanelHeader({
+  title,
+  meta,
+  actions,
+  ruled = true,
+  as: Heading = "h2",
+  className,
+}: {
+  title?: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  ruled?: boolean;
+  as?: "h2" | "h3";
+  className?: string;
+}) {
+  return (
+    <div className={cx("relative flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 bg-panel px-3 py-1", ruled && "border-b border-line", className)}>
+      {title === undefined ? null : <Heading className="label-caps text-fg [text-box:trim-both_cap_alphabetic]">{title}</Heading>}
+      {meta === undefined ? null : <span className="block font-mono text-meta-sm text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
+      {actions === undefined ? null : <div className="relative ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
+    </div>
+  );
+}
+
+/** A page section's heading outside a Panel (Dashboard "In flight"): title size, mono meta beside it, actions right. */
+export function SectionHeading({ title, meta, actions, className }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; className?: string }) {
+  return (
+    <div className={cx("mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1", className)}>
+      <h2 className="text-title font-semibold">{title}</h2>
+      {meta === undefined ? null : <span className="font-mono text-meta text-muted">{meta}</span>}
+      {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+/** A group's label inside a panel body or drawer ("Needs", "Add note", "This device"): uppercase mono Slate. */
+export function SubHeading({ title, meta, actions, className }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; className?: string }) {
+  return (
+    <div className={cx("flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1", className)}>
+      <h3 className="label-caps">{title}</h3>
+      {meta === undefined ? null : <span className="font-mono text-meta-sm text-muted">{meta}</span>}
+      {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
+    </div>
   );
 }
 

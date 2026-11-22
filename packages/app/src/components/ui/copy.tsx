@@ -22,34 +22,18 @@ export function useCopy(): [CopyStatus, (text: string) => void] {
   return [status, copy];
 }
 
-export function CopyButton({ text, label }: { text: string; label: string }) {
-  const { clipboard } = usePlatform();
-  const [status, setStatus] = useState<CopyStatus>("idle");
-  return (
-    <Button
-      variant="secondary"
-      small
-      title={text}
-      onClick={() => {
-        clipboard.writeText(text).then(
-          () => setStatus("copied"),
-          () => setStatus("failed"),
-        );
-      }}
-      onMouseLeave={() => setStatus("idle")}
-    >
-      {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
-    </Button>
-  );
+/** A copy control's label for its status: "Copied", "Copy failed", else the idle label. */
+export function copyStatusText(status: CopyStatus, idle: string): string {
+  return status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : idle;
 }
 
-/** Copy button whose label confirms the copy (announced politely). */
-export function CopyAction({ text, label, small = true }: { text: string; label: string; small?: boolean }) {
+/** Copy button whose label confirms the copy for 1.5s; the result is announced politely. */
+export function CopyButton({ text, label, small = true, title }: { text: string; label: string; small?: boolean; title?: string }) {
   const [status, copy] = useCopy();
   return (
     <>
-      <Button small={small} onClick={() => copy(text)}>
-        {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
+      <Button small={small} title={title} onClick={() => copy(text)}>
+        {copyStatusText(status, label)}
       </Button>
       <span className="sr-only" aria-live="polite">
         {status === "copied" ? `${label}: copied` : status === "failed" ? `${label}: copy failed` : ""}
@@ -63,7 +47,7 @@ export function CommandBox({ command }: { command: string }) {
   return (
     <div className="flex items-start gap-2 border border-line bg-panel px-3 py-2">
       <code className="min-w-0 flex-1 font-mono text-detail break-all text-fg">{command}</code>
-      <CopyAction text={command} label="Copy" />
+      <CopyButton text={command} label="Copy" />
     </div>
   );
 }

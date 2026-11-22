@@ -30,7 +30,7 @@ import { useApi, usePlatform } from "../platform/context.tsx";
 import { Marker } from "./Machines.tsx";
 import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx, CommandBox, CopyAction } from "./ui.tsx";
+import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx, CommandBox, CopyButton } from "./ui.tsx";
 
 /** Delay before the starting screen appears, so a fast start shows no flash. */
 const STARTING_DELAY_MS = 400;
@@ -134,7 +134,7 @@ function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] 
         <Button variant="ghost" small aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((o) => !o)}>
           {open ? "Hide details" : "Show details"}
         </Button>
-        {report.data === undefined ? null : <CopyAction text={report.data} label="Copy diagnostics" />}
+        {report.data === undefined ? null : <CopyButton text={report.data} label="Copy diagnostics" />}
       </div>
       {open ? (
         <div id={panelId} className="flex flex-col gap-2">
@@ -651,7 +651,7 @@ export function DesktopAppCard() {
         </Details>
         {diagnostics.data === undefined || diagnostics.data === "" ? null : (
           <div>
-            <CopyAction text={diagnostics.data} label="Copy diagnostics" small={false} />
+            <CopyButton text={diagnostics.data} label="Copy diagnostics" small={false} />
           </div>
         )}
       </div>
