@@ -91,7 +91,8 @@ export function EmptyState({ inset = false, action, className, children }: { ins
 /**
  * Inline confirmation for an irreversible or wide action (delete, disconnect, complete all): a Waiting Yellow Alert
  * naming what happens, the confirm button (red for destructive, Ink otherwise) and Cancel, which takes focus so a
- * stray Enter never confirms.
+ * stray Enter never confirms. `alternative` is an extra secondary action between them (e.g. a local-only fallback);
+ * `disabled` locks every button while that alternative runs.
  */
 export function ConfirmInline({
   confirmLabel,
@@ -99,6 +100,8 @@ export function ConfirmInline({
   onCancel,
   danger = false,
   busy = false,
+  disabled = false,
+  alternative,
   error,
   children,
 }: {
@@ -107,6 +110,8 @@ export function ConfirmInline({
   onCancel: () => void;
   danger?: boolean;
   busy?: boolean;
+  disabled?: boolean;
+  alternative?: ReactNode;
   error?: unknown;
   children: ReactNode;
 }) {
@@ -116,10 +121,11 @@ export function ConfirmInline({
         tone="need"
         actions={
           <>
-            <Button small variant={danger ? "danger" : "primary"} busy={busy} onClick={onConfirm}>
+            <Button small variant={danger ? "danger" : "primary"} busy={busy} disabled={disabled} onClick={onConfirm}>
               {confirmLabel}
             </Button>
-            <Button small variant="ghost" autoFocus disabled={busy} onClick={onCancel}>
+            {alternative}
+            <Button small variant="ghost" autoFocus disabled={busy || disabled} onClick={onCancel}>
               Cancel
             </Button>
           </>

@@ -29,6 +29,7 @@ import {
   TextLink,
   cx,
   needEdgeClass,
+  ConfirmInline,
 } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
@@ -54,7 +55,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
-  const [armed, setArmed] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const run = useMutation({ mutationFn: () => api.runSchedule(s.id), onSettled: invalidate });
   const pause = useMutation({ mutationFn: () => api.updateSchedule(s.id, { paused: !s.paused }), onSettled: invalidate });
   const remove = useMutation({
@@ -100,16 +101,15 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
             {s.paused ? "Resume" : "Pause"}
           </Button>
           <Button onClick={() => setEditing(true)}>Edit</Button>
-          <Button
-            variant="danger"
-            className="ml-auto"
-            busy={remove.isPending}
-            onClick={() => (armed ? remove.mutate() : setArmed(true))}
-            onBlur={() => setArmed(false)}
-          >
-            {armed ? "Confirm delete · started tasks are kept" : "Delete"}
+          <Button variant="danger" className="ml-auto" disabled={confirmingDelete} onClick={() => setConfirmingDelete(true)}>
+            Delete
           </Button>
         </div>
+        {confirmingDelete ? (
+          <ConfirmInline danger confirmLabel="Delete" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmingDelete(false)}>
+            Delete this schedule? No more runs start. Tasks it already started are kept.
+          </ConfirmInline>
+        ) : null}
 
         <ErrorText error={actionError} />
         {run.data === undefined ? null : (

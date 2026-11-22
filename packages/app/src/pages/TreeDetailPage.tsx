@@ -1,11 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { useInvalidateWork, useTree } from "../api/queries.ts";
 import type { StartMode, TreeDetail, TreeStatus } from "../api/types.ts";
 import { useApi } from "../platform/context.tsx";
-import { IconBack, IconChevronDown, IconPlus } from "../components/icons.tsx";
+import { IconBack, IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer.tsx";
 import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
@@ -14,7 +14,7 @@ import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeGraph } from "../components/trees/TreeGraph.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { Alert, Button, Chip, EmptyState, ErrorText, Hint, Input, PageHeader, Panel, Segmented, SkeletonBar, buttonClass, cx } from "../components/ui.tsx";
+import { Alert, Button, Chip, ConfirmInline, EmptyState, ErrorText, Hint, Input, Menu, MenuItem, MenuSeparator, Muted, PageHeader, Panel, PickerButton, Segmented, SkeletonBar, buttonClass, cx, useMenu } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
@@ -72,9 +72,7 @@ function TreeNotFound({ id }: { id: number }) {
   return (
     <>
       <PageHeader title="Tree not found" meta={`tree ${id}`} />
-      <p className="mb-3 text-ui text-muted">
-        This tree was deleted or does not exist. Empty and dissolved trees remain under Closed in Trees.
-      </p>
+      <Muted className="mb-3">This tree was deleted or does not exist. Empty and dissolved trees remain under Closed in Trees.</Muted>
       <Link to="/trees" className={buttonClass("secondary")}>
         <IconBack /> Back to trees
       </Link>
@@ -84,60 +82,46 @@ function TreeNotFound({ id }: { id: number }) {
 
 type Drawer = "existing" | "session" | null;
 
-type MenuItem = "rename" | "existing" | "session" | "done" | "archive" | "dissolve" | "delete";
+type TreeAction = "rename" | "existing" | "session" | "done" | "archive" | "dissolve" | "delete";
 
 /**
  * Overflow menu (popover): Rename, Add existing task, Add session, then Mark done, Archive tree, Dissolve tree and
  * Delete tree (only when no member started). Done and archive are disabled with the reason while a member is in
  * progress; a closed tree drops the structural items and the status it already has.
  */
-function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: MenuItem) => void }) {
-  const menuId = useId();
-  const menu = useRef<HTMLDivElement>(null);
+function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: TreeAction) => void }) {
+  const menu = useMenu();
   const closed = treeClosed(tree);
   const blocker = closeBlocker(tree.tasks);
-  const item = (key: MenuItem, label: string, opts: { danger?: boolean; reason?: string | null } = {}) => (
-    <button
-      type="button"
-      disabled={opts.reason !== undefined && opts.reason !== null}
-      onClick={() => {
-        menu.current?.hidePopover();
-        onPick(key);
-      }}
-      className={cx(
-        "flex flex-col border-b border-line px-3 py-row text-left text-ui last:border-b-0 hover:bg-panel disabled:hover:bg-transparent",
-        opts.danger === true && "text-bad",
-      )}
-    >
-      <span className={cx(opts.reason !== undefined && opts.reason !== null && "opacity-45")}>{label}</span>
-      {opts.reason === undefined || opts.reason === null ? null : (
-        <span className="font-mono text-meta-sm text-muted">{opts.reason}</span>
-      )}
-    </button>
-  );
   return (
     <>
-      <button type="button" popoverTarget={menuId} className={cx(buttonClass("secondary"), "[anchor-name:--tree-more]")}>
-        More
-        <IconChevronDown size={12} />
-      </button>
-      <div
-        ref={menu}
-        id={menuId}
-        popover="auto"
-        className="m-0 mt-1 w-52 border border-line-strong bg-surface text-fg [position-anchor:--tree-more] [top:anchor(bottom)] [right:anchor(right)] [left:auto]"
-      >
-        <div className="flex flex-col">
-          {item("rename", "Rename")}
-          {closed ? null : item("existing", "Add existing task")}
-          {closed ? null : item("session", "Add session")}
-          <div aria-hidden className="-mt-px h-px bg-line-strong" />
-          {tree.status === "done" ? null : item("done", "Mark done", { reason: blocker })}
-          {tree.status === "archived" ? null : item("archive", "Archive tree", { reason: blocker })}
-          {tree.tasks.length === 0 ? null : item("dissolve", "Dissolve tree", { danger: true })}
-          {tree.deletable ? item("delete", "Delete tree", { danger: true }) : null}
-        </div>
-      </div>
+      <PickerButton {...menu.triggerProps}>More</PickerButton>
+      <Menu menu={menu} label="Tree actions" align="right" className="w-52">
+        <MenuItem onSelect={() => onPick("rename")}>Rename</MenuItem>
+        {closed ? null : <MenuItem onSelect={() => onPick("existing")}>Add existing task</MenuItem>}
+        {closed ? null : <MenuItem onSelect={() => onPick("session")}>Add session</MenuItem>}
+        <MenuSeparator />
+        {tree.status === "done" ? null : (
+          <MenuItem reason={blocker} onSelect={() => onPick("done")}>
+            Mark done
+          </MenuItem>
+        )}
+        {tree.status === "archived" ? null : (
+          <MenuItem reason={blocker} onSelect={() => onPick("archive")}>
+            Archive tree
+          </MenuItem>
+        )}
+        {tree.tasks.length === 0 ? null : (
+          <MenuItem danger onSelect={() => onPick("dissolve")}>
+            Dissolve tree
+          </MenuItem>
+        )}
+        {tree.deletable ? (
+          <MenuItem danger onSelect={() => onPick("delete")}>
+            Delete tree
+          </MenuItem>
+        ) : null}
+      </Menu>
     </>
   );
 }
@@ -239,7 +223,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
     });
   };
 
-  const onMenu = (item: MenuItem) => {
+  const onMenu = (item: TreeAction) => {
     if (item === "rename") setRenaming(true);
     else if (item === "done") status.mutate("done");
     else if (item === "archive") status.mutate("archived");
@@ -313,38 +297,14 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
 
       <div className="flex flex-col gap-3.5">
         {confirming === "dissolve" ? (
-          <Alert
-            tone="bad"
-            actions={
-              <>
-                <Button variant="danger" small busy={dissolve.isPending} onClick={() => dissolve.mutate()}>
-                  Dissolve
-                </Button>
-                <Button variant="ghost" small onClick={() => setConfirming(null)}>
-                  Cancel
-                </Button>
-              </>
-            }
-          >
+          <ConfirmInline danger confirmLabel="Dissolve" busy={dissolve.isPending} onConfirm={() => dissolve.mutate()} onCancel={() => setConfirming(null)}>
             Dissolve this tree? Its {tree.tasks.length} tasks stay in stage; their needs and tree membership go. The tree is archived and its history stays here.
-          </Alert>
+          </ConfirmInline>
         ) : confirming === "delete" ? (
-          <Alert
-            tone="bad"
-            actions={
-              <>
-                <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()}>
-                  Delete
-                </Button>
-                <Button variant="ghost" small onClick={() => setConfirming(null)}>
-                  Cancel
-                </Button>
-              </>
-            }
-          >
+          <ConfirmInline danger confirmLabel="Delete" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirming(null)}>
             Delete this tree and its {tree.tasks.length} task{tree.tasks.length === 1 ? "" : "s"}? None has started. This can&apos;t
             be undone.
-          </Alert>
+          </ConfirmInline>
         ) : null}
         <ErrorText error={mode.error ?? start.error ?? status.error ?? dissolve.error ?? remove.error} />
         {startFailures.length === 0 ? null : (

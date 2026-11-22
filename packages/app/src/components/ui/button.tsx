@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { IconChevronDown } from "../icons.tsx";
 import { cx } from "./cx.ts";
 
 /** An icon from components/icons.tsx: `size` in px; decorative unless labelled. */
@@ -14,10 +15,10 @@ const VARIANTS: Record<Variant, string> = {
 };
 
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap border font-medium transition-[background-color,opacity,color] duration-150 disabled:pointer-events-none disabled:opacity-45";
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap border transition-[background-color,opacity,color] duration-150 disabled:pointer-events-none disabled:opacity-45";
 
 export function buttonClass(variant: Variant = "secondary", small = false): string {
-  return cx(BUTTON_BASE, small ? "h-control-sm px-2.5 text-meta md:px-2" : "h-control px-3.5 text-small md:px-3", VARIANTS[variant]);
+  return cx(BUTTON_BASE, small ? "h-control-sm px-2.5 text-meta font-medium md:px-2" : "h-control px-3.5 text-small font-medium md:px-3", VARIANTS[variant]);
 }
 
 /** A square icon-only button's box: control height on both axes. */
@@ -67,6 +68,29 @@ export function TextButton({ className, type, ...rest }: ComponentProps<"button"
       className={cx("min-w-0 text-left underline-offset-2 hover:underline disabled:no-underline disabled:opacity-45", className)}
       {...rest}
     />
+  );
+}
+
+/**
+ * A secondary button that opens a choice (project scope, server, a "More" menu): its label, then a chevron.
+ * `mono` sets the label as metadata (a project or server name).
+ */
+export function PickerButton({
+  mono = false,
+  className,
+  type,
+  children,
+  ...rest
+}: Omit<ComponentProps<"button">, "className"> & { mono?: boolean; className?: string }) {
+  return (
+    <button
+      type={type ?? "button"}
+      className={cx(BUTTON_BASE, VARIANTS.secondary, "h-control", mono ? "px-2.5 font-mono text-meta" : "px-3.5 text-small font-medium md:px-3", className)}
+      {...rest}
+    >
+      {children}
+      <IconChevronDown size={12} />
+    </button>
   );
 }
 

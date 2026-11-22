@@ -19,6 +19,7 @@ import {
   TextButton,
   Textarea,
   CopyButton,
+  ConfirmInline,
 } from "../components/ui.tsx";
 
 type Editing = { mode: "create" } | { mode: "edit"; snippet: Snippet };
@@ -143,6 +144,7 @@ function SnippetRow({
   const api = useApi();
   const qc = useQueryClient();
   const bodyId = useId();
+  const [confirming, setConfirming] = useState(false);
   const remove = useMutation({
     mutationFn: () => api.deleteSnippet(s.id),
     onSettled: () => qc.invalidateQueries({ queryKey: keys.snippets }),
@@ -182,19 +184,18 @@ function SnippetRow({
           <Button small onClick={onEdit}>
             Edit
           </Button>
-          <Button
-            small
-            variant="danger"
-            busy={remove.isPending}
-            onClick={() => {
-              if (window.confirm(`Delete snippet "${s.name}"?`)) remove.mutate();
-            }}
-          >
+          <Button small variant="danger" disabled={confirming} onClick={() => setConfirming(true)}>
             Delete
           </Button>
         </div>
       </div>
-      {remove.error === null ? null : (
+      {confirming ? (
+        <div className="mt-2">
+          <ConfirmInline danger confirmLabel="Delete" busy={remove.isPending} error={remove.error} onConfirm={() => remove.mutate()} onCancel={() => setConfirming(false)}>
+            Delete snippet &ldquo;{s.name}&rdquo;? This can&apos;t be undone.
+          </ConfirmInline>
+        </div>
+      ) : remove.error === null ? null : (
         <div className="mt-2">
           <ErrorText error={remove.error} />
         </div>

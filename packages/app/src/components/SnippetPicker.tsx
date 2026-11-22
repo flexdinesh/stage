@@ -1,11 +1,10 @@
 import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type Ref } from "react";
-import { createPortal } from "react-dom";
 import { useProjects, useSnippets } from "../api/queries.ts";
 import type { Snippet } from "../api/types.ts";
 import { anchorBox, anchorRoom, type AnchorInput } from "../lib/snippet-placement.ts";
 import { findTrigger, matchSnippets, snippetsFor } from "../lib/snippets.ts";
 import { IconClose } from "./icons.tsx";
-import { Button, Chip, Kbd, Textarea, activeRowClass, cx } from "./ui.tsx";
+import { Button, Chip, FloatingPortal, KeyHints, Textarea, activeRowClass, cx, rovingIndex, surfaceClass } from "./ui.tsx";
 
 const MIRRORED = [
   "box-sizing",
@@ -236,8 +235,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
     if (open && trigger !== null && current !== undefined && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const step = e.key === "ArrowDown" ? 1 : -1;
-        setActive((index + step + matches.length) % matches.length);
+        setActive(rovingIndex(e.key, index, matches.length) ?? index);
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -261,7 +259,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
     <div
       ref={pickerRef}
       style={placement.style}
-      className="fixed z-[60] flex min-h-0 flex-col border border-line-strong bg-surface"
+      className={cx("fixed z-[60] flex min-h-0 flex-col", surfaceClass)}
       // Keep focus (and the caret, and the phone keyboard) in the textarea while picking.
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -310,17 +308,13 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
           </div>
         ))}
       </div>
-      <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
-        <span>
-          <Kbd>↑↓</Kbd> move
-        </span>
-        <span>
-          <Kbd>↵</Kbd> insert
-        </span>
-        <span>
-          <Kbd>Esc</Kbd> close
-        </span>
-      </div>
+      <KeyHints
+        hints={[
+          ["↑↓", "move"],
+          ["↵", "insert"],
+          ["Esc", "close"],
+        ]}
+      />
     </div>
   );
 
@@ -354,7 +348,7 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
         }}
         onKeyDown={handleKeyDown}
       />
-      {open && pos !== null ? createPortal(renderPicker(pos), document.body) : null}
+      {open && pos !== null ? <FloatingPortal>{renderPicker(pos)}</FloatingPortal> : null}
     </>
   );
 }

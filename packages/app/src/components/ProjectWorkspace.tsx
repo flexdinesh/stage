@@ -6,7 +6,7 @@ import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
 import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { Alert, Button, Drawer, EmptyState, ErrorText, Field, Hint, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
+import { Alert, Button, ConfirmInline, Drawer, EmptyState, ErrorText, Field, Hint, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
 
 export function BindWorkspaceDrawer({
   project,
@@ -399,16 +399,10 @@ function ConnectionWorkspace({
       </div>
       <ErrorText error={rebind.error ?? unbind.error} />
       {confirmUnbind ? (
-        <Alert>
-          Unbind this workspace? Planning and history remain available. New launches need a
-          binding. Discovery won't bind this workspace again; bind it here to undo.
-          <div className="mt-2 flex gap-2">
-            <Button busy={unbind.isPending} onClick={() => unbind.mutate()}>
-              Unbind workspace
-            </Button>
-            <Button onClick={() => setConfirmUnbind(false)}>Cancel</Button>
-          </div>
-        </Alert>
+        <ConfirmInline confirmLabel="Unbind workspace" busy={unbind.isPending} onConfirm={() => unbind.mutate()} onCancel={() => setConfirmUnbind(false)}>
+          Unbind this workspace? Planning and history remain available. New launches need a binding. Discovery won&apos;t bind this workspace
+          again; bind it here to undo.
+        </ConfirmInline>
       ) : null}
     </section>
   );

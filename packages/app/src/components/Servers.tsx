@@ -1,18 +1,19 @@
 // Server switching on desktop (platform.host.servers): the Settings SERVERS panel and its Add/Edit drawer, the
 // top-bar server menu (more than one server saved) and the Switch server drawer of the connection screen and
 // banner. A host without server switching (the browser) renders none of it. Logic: lib/host.ts.
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useId, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { serverStatus, serverTestSteps, serverWhere, type ServerTone } from "../lib/host.ts";
 import { useHostServers, useHostState } from "../lib/hostState.ts";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostServers, HostServerTest, HostState } from "../platform/index.ts";
-import { IconCheck, IconChevronDown } from "./icons.tsx";
+import { IconCheck } from "./icons.tsx";
 import { Step, Steps } from "./Steps.tsx";
 import {
   Alert,
   Button,
   Chip,
+  ConfirmInline,
   Drawer,
   ErrorText,
   Field,
@@ -22,13 +23,15 @@ import {
   Muted,
   Panel,
   PanelHeader,
+  PickerButton,
+  PopoverPanel,
   Row,
   RowButton,
   RowList,
   SkeletonRows,
-  buttonClass,
   cx,
   rowButtonClass,
+  usePopover,
   CommandBox,
 } from "./ui.tsx";
 
@@ -125,95 +128,49 @@ const UNKNOWN: { tone: ServerTone; note: string } = { tone: "idle", note: "" };
 export function ServerMenu({ className }: { className?: string }) {
   const state = useHostState();
   const switchable = useSwitchable();
-  const [open, setOpen] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const wrap = useRef<HTMLDivElement>(null);
-  const panelId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      setOpen(false);
-      button.current?.focus();
-    }
-    function onPointer(e: PointerEvent) {
-      if (e.target instanceof Node && wrap.current?.contains(e.target) === true) return;
-      setOpen(false);
-    }
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onPointer);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onPointer);
-    };
-  }, [open]);
+  const popover = usePopover(useCallback(() => setError(null), []));
 
   if (switchable === null || state === null) return null;
   const { api, servers } = switchable;
   const active = servers.find((s) => s.active);
   const status = active === undefined ? UNKNOWN : serverStatus(active, state);
-  const close = () => {
-    setOpen(false);
-    setError(null);
-  };
   const pick = (entry: HostServerEntry) => {
     if (entry.active) {
-      close();
+      popover.close();
       return;
     }
     setError(null);
-    api.switch(entry.id).then(close, (err: unknown) => setError(err));
+    api.switch(entry.id).then(popover.close, (err: unknown) => setError(err));
   };
   return (
-    <div
-      ref={wrap}
-      className={cx("relative min-w-0", className)}
-      onBlur={(e) => {
-        // Focus moved elsewhere (Tab). A click leaves no related target (WebKit does not focus clicked buttons), so
-        // outside clicks are the pointer handler's.
-        if (e.relatedTarget instanceof Node && wrap.current?.contains(e.relatedTarget) !== true) setOpen(false);
-      }}
-    >
-      <button
-        ref={button}
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
+    <div {...popover.wrapProps} className={cx("relative min-w-0", className)}>
+      <PickerButton
+        mono
+        {...popover.triggerProps}
         title={`Server: ${state.target.name}${status.note === "" ? "" : ` (${status.note})`}`}
-        onClick={() => setOpen((o) => !o)}
-        className={cx(buttonClass("secondary"), "w-full max-w-[11rem] gap-1.5 px-2 font-mono text-meta font-normal max-md:max-w-[7.5rem] md:gap-2 md:px-2.5")}
+        className="w-full max-w-[11rem] px-2 max-md:max-w-[7.5rem] md:gap-2 md:px-2.5"
       >
         <Marker tone={status.tone} />
         <span className="sr-only">Server: </span>
-        <span className="min-w-0 truncate">{state.target.name}</span>
-        <span className="flex shrink-0 max-md:hidden">
-          <IconChevronDown size={12} />
-        </span>
-      </button>
-      {open ? (
-        <div
-          id={panelId}
-          className="z-50 border border-line-strong bg-surface text-fg max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
-        >
-          <PanelHeader title="Servers" meta={servers.length} />
-          <ServerChoices servers={servers} state={state} onPick={pick} />
-          {error === null ? null : (
-            <div className="border-t border-line p-2">
-              <ErrorText error={error} />
-            </div>
-          )}
-          <Link
-            to="/settings"
-            onClick={close}
-            className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}
-          >
-            Manage servers
-          </Link>
-        </div>
-      ) : null}
+        <span className="min-w-0 flex-1 truncate text-left">{state.target.name}</span>
+      </PickerButton>
+      <PopoverPanel
+        popover={popover}
+        label="Servers"
+        className="max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
+      >
+        <PanelHeader title="Servers" meta={servers.length} />
+        <ServerChoices servers={servers} state={state} onPick={pick} />
+        {error === null ? null : (
+          <div className="border-t border-line p-2">
+            <ErrorText error={error} />
+          </div>
+        )}
+        <Link to="/settings" onClick={popover.close} className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}>
+          Manage servers
+        </Link>
+      </PopoverPanel>
     </div>
   );
 }
@@ -311,21 +268,15 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
         </div>
       </div>
       {confirm ? (
-        <Alert
-          tone="bad"
-          actions={
-            <>
-              <Button small variant="danger" busy={busy === "remove"} onClick={() => run("remove", () => api.remove(entry.id))}>
-                Remove
-              </Button>
-              <Button small variant="ghost" disabled={busy !== null} onClick={() => setConfirm(false)}>
-                Cancel
-              </Button>
-            </>
-          }
+        <ConfirmInline
+          danger
+          confirmLabel="Remove"
+          busy={busy === "remove"}
+          onConfirm={() => run("remove", () => api.remove(entry.id))}
+          onCancel={() => setConfirm(false)}
         >
           Remove {entry.name}?{entry.active ? " Stage switches to this machine first." : ""} Its notifications stop on this device; the server keeps its data.
-        </Alert>
+        </ConfirmInline>
       ) : null}
       <ErrorText error={error} />
     </Row>

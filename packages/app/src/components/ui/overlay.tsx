@@ -254,8 +254,21 @@ export function usePopover(onClose?: () => void): PopoverState {
 }
 
 /** The panel of a `usePopover`: rendered only while open. Position it with `className`. */
-export function PopoverPanel({ popover, label, className, children }: { popover: PopoverState; label?: string; className?: string; children: ReactNode }) {
-  if (!popover.open) return null;
+export function PopoverPanel({
+  popover,
+  open,
+  label,
+  className,
+  children,
+}: {
+  popover: PopoverState;
+  /** Shows the panel regardless of the popover's own state (a hover preview). */
+  open?: boolean;
+  label?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  if (!(open ?? popover.open)) return null;
   return (
     <div id={popover.panelId} aria-label={label} className={cx("z-50", surfaceClass, className)}>
       {children}
@@ -295,10 +308,11 @@ export function useMenu(): MenuState {
   };
 }
 
+// Each side flips when it would overflow the viewport (a right-aligned menu near the left edge on a phone).
 const MENU_ALIGN = {
-  left: "[top:anchor(bottom)] [left:anchor(left)] mt-1",
-  right: "[top:anchor(bottom)] [right:anchor(right)] [left:auto] mt-1",
-  above: "[bottom:anchor(top)] [left:anchor(left)] [top:auto] mb-1",
+  left: "[top:anchor(bottom)] [left:anchor(left)] mt-1 [position-try-fallbacks:flip-inline]",
+  right: "[top:anchor(bottom)] [right:anchor(right)] [left:auto] mt-1 [position-try-fallbacks:flip-inline]",
+  above: "[bottom:anchor(top)] [left:anchor(left)] [top:auto] mb-1 [position-try-fallbacks:flip-inline]",
 } as const;
 
 /**
@@ -383,6 +397,11 @@ export function MenuItem({
 
 export function MenuSeparator() {
   return <div role="separator" className="my-1 h-px bg-line-strong" />;
+}
+
+/** Renders a floating layer (a caret-anchored picker) into the document body, above the page. */
+export function FloatingPortal({ children }: { children: ReactNode }) {
+  return createPortal(children, document.body);
 }
 
 // ---- Shared list chrome ----

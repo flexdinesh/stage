@@ -42,6 +42,7 @@ import {
   SkeletonBar,
   TextLink,
   cx,
+  ConfirmInline,
 } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
@@ -182,6 +183,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
   const duplicate = useMutation({
@@ -331,15 +333,17 @@ function TaskBody({ task }: { task: TaskDetail }) {
               className={cx(!archived && task.treeId !== null && "ml-auto")}
               disabled={isActive(task)}
               title={isActive(task) ? "Stop the task first" : undefined}
-              busy={remove.isPending}
-              onClick={() => {
-                if (window.confirm(`Delete task "${task.title}"?`)) remove.mutate();
-              }}
+              onClick={() => setConfirmingDelete(true)}
             >
               Delete
             </Button>
           ) : null}
         </div>
+        {confirmingDelete && task.deletable ? (
+          <ConfirmInline danger confirmLabel="Delete" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmingDelete(false)}>
+            Delete task &ldquo;{task.title}&rdquo;? It never started; this can&apos;t be undone.
+          </ConfirmInline>
+        ) : null}
 
         <StatePanel task={task} className="lg:hidden" />
         <ErrorText error={actionError} />
