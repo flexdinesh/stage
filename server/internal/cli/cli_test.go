@@ -47,6 +47,10 @@ type harness struct {
 	store   *db.Store
 	caller  agentctx.Caller
 	execs   [][]string
+	// env is the CLI's environment besides STAGE_URL; home is its HOME
+	// (default: a new temp dir per run).
+	env  map[string]string
+	home string
 }
 
 func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
@@ -91,15 +95,19 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 func (h *harness) run(stdin string, args ...string) (int, string, string) {
 	h.t.Helper()
 	var out, errb bytes.Buffer
+	home := h.home
+	if home == "" {
+		home = h.t.TempDir()
+	}
 	env := cli.Env{
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb,
 		Getenv: func(k string) string {
 			if k == cli.URLEnv {
 				return h.url
 			}
-			return ""
+			return h.env[k]
 		},
-		Caller: h.caller, Home: h.t.TempDir(), Executable: "/usr/local/bin/stage",
+		Caller: h.caller, Home: home, Executable: "/usr/local/bin/stage",
 		Exec: func(name string, args ...string) error {
 			h.execs = append(h.execs, append([]string{name}, args...))
 			return nil
@@ -463,7 +471,7 @@ func TestSetupInstructionsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	if strings.Count(s, "<!-- stage:begin -->") != 1 || !strings.HasPrefix(s, "# Mine\n\nkeep this\n\n") || !strings.Contains(s, "afterMe") {
+	if strings.Count(s, "<!-- stage:begin -->") != 1 || !strings.HasPrefix(s, "# Mine\n\nkeep this\n\n") || !strings.Contains(s, "`stage guide`") || strings.Contains(s, "afterMe") {
 		t.Fatalf("file:\n%s", s)
 	}
 	if code, stdout, _ := h.run("", "setup", "instructions", "--file", path); code != 0 || !strings.Contains(stdout, "unchanged") {

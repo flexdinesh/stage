@@ -51,14 +51,14 @@ Then open Settings and connect an existing T3 service, an OpenCode 2.3.0 service
 
 ## For agents
 
-Register stage with your agents once:
+Set up your agents once per machine:
 
 ```sh
-stage setup mcp            # stdio MCP for Claude Code and Codex (--http registers /mcp instead)
-stage setup instructions   # usage block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
+stage setup                # the Stage skill for Claude Code, Codex and OpenCode, then a check
+stage setup --mcp          # optional: also register stdio MCP (Claude Code, Codex)
 ```
 
-Then a session can queue and link work itself, over MCP (`create_task`, `create_tree`, `start_tree`, ...) or the CLI:
+Then a session can queue and link work itself through the CLI (`stage call TOOL JSON` runs any MCP tool by name) or over MCP (`create_task`, `create_tree`, `start_tree`, ...):
 
 ```sh
 stage task add --title "Add sessions table" --prompt "..." --effort high   # backlog

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
@@ -23,8 +24,17 @@ import (
 // Ops runs agent operations against the REST API.
 type Ops struct {
 	Client *client.Client
-	// Caller is process-local only for the CLI or dedicated T3 stdio.
+	// Caller is the process's own caller context: the CLI's
+	// STAGE_CALLER_SESSION and working directory. Empty for MCP servers.
 	Caller agentctx.Caller
+	// HarnessEnv reads this process's environment for the harness session
+	// variable (harness.Attribution.Env, e.g. T3CODE_THREAD_ID): the
+	// weakest caller source, for the CLI and stdio MCP (an agent's own
+	// child process). Nil disables it (HTTP /mcp).
+	HarnessEnv func(string) string
+
+	harnessMu     sync.Mutex
+	harnessCaller *harnessCaller
 	// LocalFiles allows imagePaths (reads files on this host). False for
 	// HTTP /mcp: the server cannot read the agent's files.
 	LocalFiles bool
@@ -53,7 +63,73 @@ type claimKey struct{}
 
 func (o *Ops) caller(ctx context.Context, a CallerArgs) (agentctx.Caller, error) {
 	claim, _ := ctx.Value(claimKey{}).(*db.SessionRef)
-	return o.Caller.Resolve(a.CallerSession, a.Cwd, claim)
+	c, err := o.Caller.Resolve(a.CallerSession, a.Cwd, claim)
+	if err != nil || c.Session != nil {
+		return c, err
+	}
+	h, err := o.fromHarnessEnv(ctx)
+	if err != nil {
+		return c, err
+	}
+	if h.session != nil {
+		c.Session, c.Source = h.session, h.source
+	}
+	return c, nil
+}
+
+// harnessCaller is the caller derived from a harness's session variable,
+// or why none was (warning).
+type harnessCaller struct {
+	session *db.SessionRef
+	source  string
+	warning string
+}
+
+// fromHarnessEnv derives the caller from the one harness session variable
+// set in this process's environment (harness.Attribution.Env), on that
+// harness's active connection on this machine (resolved by the server). A
+// derived session is cached for the process; none set, several set, or no
+// connection leave the caller unknown with a warning.
+func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
+	if o.HarnessEnv == nil {
+		return harnessCaller{}, nil
+	}
+	o.harnessMu.Lock()
+	defer o.harnessMu.Unlock()
+	if o.harnessCaller != nil {
+		return *o.harnessCaller, nil
+	}
+	hs, err := o.Client.Harnesses(ctx)
+	if err != nil {
+		return harnessCaller{}, err
+	}
+	var kinds, names, ids []string
+	for _, d := range hs.Harnesses {
+		if d.Attribution.Env == "" {
+			continue
+		}
+		if id := strings.TrimSpace(o.HarnessEnv(d.Attribution.Env)); id != "" {
+			kinds, names, ids = append(kinds, d.Kind), append(names, d.Attribution.Env), append(ids, id)
+		}
+	}
+	switch len(kinds) {
+	case 0:
+		return harnessCaller{}, nil
+	case 1:
+	default:
+		return harnessCaller{warning: fmt.Sprintf("several harness session variables are set (%s); pass the caller explicitly", strings.Join(names, ", "))}, nil
+	}
+	c, err := o.Client.ResolveConnection(ctx, kinds[0])
+	var apiErr *client.Error
+	if errors.As(err, &apiErr) && apiErr.Status == 404 {
+		return harnessCaller{warning: fmt.Sprintf("%s is set but there is %s", names[0], apiErr.Msg)}, nil
+	}
+	if err != nil {
+		return harnessCaller{}, err
+	}
+	h := harnessCaller{session: &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: ids[0]}, source: names[0]}
+	o.harnessCaller = &h
+	return h, nil
 }
 
 // IDArgs names one task or schedule.
@@ -75,6 +151,11 @@ type ContextOut struct {
 	TreeID       *int64  `json:"treeId"`
 	TreeTitle    *string `json:"treeTitle"`
 	APIURL       string  `json:"apiUrl"`
+	// SessionSource: where session came from (request, argument,
+	// STAGE_CALLER_SESSION or a harness variable such as T3CODE_THREAD_ID).
+	SessionSource string `json:"sessionSource,omitempty"`
+	// CallerWarning: why a harness session variable named no caller.
+	CallerWarning string `json:"callerWarning,omitempty"`
 }
 
 // Context resolves the caller's session, directory and project.
@@ -83,8 +164,13 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 	if err != nil {
 		return ContextOut{}, err
 	}
-	out := ContextOut{Session: c.Session, Cwd: c.Cwd, APIURL: o.Client.BaseURL}
+	out := ContextOut{Session: c.Session, Cwd: c.Cwd, APIURL: o.Client.BaseURL, SessionSource: c.Source}
 	if c.Session == nil {
+		h, err := o.fromHarnessEnv(ctx)
+		if err != nil {
+			return out, err
+		}
+		out.CallerWarning = h.warning
 		out.ProjectError = "No caller session. Pass callerSession or specify a project on creation."
 		return out, nil
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,6 +69,41 @@ func (s *server) connections(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
 	return nil
 }
+
+// resolveConnection is GET /api/connections/resolve?harness=KIND: the
+// active configured connection of KIND on the request's machine (the
+// forwarding machine of an agent gateway request, else the local machine).
+// Agents use it to name their session from the harness's environment
+// (harness.Attribution.Env). 404 no_active_connection when there is none.
+func (s *server) resolveConnection(w http.ResponseWriter, r *http.Request) error {
+	kind := r.URL.Query().Get("harness")
+	d, ok := s.registry().Lookup(kind)
+	if !ok {
+		return &db.InvalidError{Msg: fmt.Sprintf("harness: unknown kind %q", kind)}
+	}
+	machine := db.LocalMachine
+	if m := db.ActingMachine(r.Context()); m != nil {
+		machine = *m
+	}
+	cs, err := s.Store.Connections(r.Context())
+	if err != nil {
+		return err
+	}
+	for _, c := range cs {
+		if c.Active && c.Harness == d.Kind && c.MachineID == machine {
+			if c = s.configured(r.Context(), c); c.Configured {
+				writeJSON(w, http.StatusOK, c)
+				return nil
+			}
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{
+		"error": fmt.Sprintf("no configured %s connection on machine %d: set it up in Stage", d.Name, machine),
+		"code":  "no_active_connection",
+	})
+	return nil
+}
+
 func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.HarnessConnection {
 	if !c.Active {
 		c.Configured = false

@@ -16,22 +16,26 @@ Agents can create work, read accepted results and contribute journal notes throu
   - `stage schedule ls|show|add|edit|rm|run|pause|resume|preview`
   - `stage sessions adopt` (explicit link or ID)
   - `stage show REF` (a stage link, T3 thread link, `#ID` or thread id), `stage projects ls`, `stage models ls`, `stage context`, `stage guide` (the agent workflow guide)
+  - `stage tools [NAME]` lists every MCP tool (or one tool's input schema) and `stage call TOOL '{"id": 12}'` runs one by name (`-` reads the JSON from stdin), printing its JSON result exactly as over MCP
 
-  Human output by default, `--json` for agents and scripts. `stage help` lists everything.
+  Human output by default, `--json` for agents and scripts. `stage help` lists everything. Coding agents with a shell use the CLI by default: it costs no context until used, while a registered MCP server loads every tool schema into every session.
 - **stdio MCP**: `stage mcp`.
 - **HTTP MCP**: `POST /mcp` on the running server (streamable HTTP, stateless, served in-process; no install). It cannot read local files, so no `imagePaths`. It is reachable directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address reached by its network address. A request that arrives on loopback with another Host gets a 403 (`Forbidden: invalid Host header`, even when the origin policy trusts that host), so a reverse proxy forwarding to `127.0.0.1:7380` cannot serve it: through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
 ## Install and register
 
-The CLI comes with every stage install: the desktop app and the headless install both put `stage` in `~/.local/bin` ([Install](/docs/install)). Install it on the machine where your T3 agents run, then register it:
+The CLI comes with every stage install: the desktop app and the headless install both put `stage` in `~/.local/bin` ([Install](/docs/install)). Install it on each machine where your agents run (the server's, or a worker's), then set up the agents there:
 
 ```sh
-stage setup mcp              # claude mcp add --scope user + codex mcp add (stdio); --http registers /mcp instead
-stage setup instructions     # idempotent usage block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
+stage setup                  # the Stage skill and an instruction pointer for every agent found, then a check
+stage setup --mcp            # also register stdio MCP with Claude Code and Codex
+stage setup --check          # report only: CLI on PATH, server, caller detection, per-agent skill/MCP (exit 1 on problems)
 ```
 
-- `--claude` or `--codex` limits either command to one agent (default both). `setup instructions --file PATH` writes another file. An agent that is not installed, or a missing config directory, is skipped.
-- Rerunning `stage setup instructions` replaces the block in place with the current guide. The guide tells agents to use whichever Stage interface they have (MCP tools, the CLI or the HTTP API) and never install one.
+- Agents found: Claude Code, Codex and OpenCode, by their command on `PATH` or their config directory. `--claude`, `--codex` or `--opencode` picks agents instead.
+- The skill is `SKILL.md` in `~/.claude/skills/stage/` (Claude Code) and `~/.agents/skills/stage/` (Codex and OpenCode; OpenCode also reads `~/.claude/skills`). It teaches the CLI and the workflow guide, and loads only when a session works with Stage. `stage setup skill` writes only the skill.
+- The instruction pointer is a two-line block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` naming the skill and `stage guide`; rerunning replaces an older full-guide block. `stage setup instructions [--file PATH]` writes just that block.
+- `stage setup mcp [--claude] [--codex] [--http]` registers only MCP (`claude mcp add --scope user`, `codex mcp add`; `--http` registers `/mcp` instead). The guide tells agents to use whichever Stage interface they have (the CLI, MCP tools or the HTTP API) and never install one.
 - `STAGE_URL` (or `--url`) points the CLI and stdio MCP at the server: an `http(s)` URL, or `unix:///abs/path.sock` for a socket. Unset, they use the private default socket when a server owns it, else `http://127.0.0.1:7380`. `stage status` shows which server the CLI reaches.
 - `stage setup mcp` passes an explicit `STAGE_URL` to the stdio server. `--http` needs an `http(s)` URL, so use stdio with a socket.
 
@@ -54,7 +58,7 @@ Invoke `get_context` from a conversation. Check the session, project and owning 
 
 OpenCode 2.3.0 sends native caller identity per MCP call. To expose named Stage tools directly in its MCP server configuration, use `"codemode": false` and `"protocol": "legacy"` alongside the Stage HTTP URL.
 
-Every harness can name its session as `<connectionId>:<externalSessionId>`: the CLI reads `STAGE_CALLER_SESSION`, and an HTTP MCP request can send the `Stage-Caller-Session` header. A shared MCP process uses per-call identity. T3 sets the session id in `T3CODE_THREAD_ID`, so a T3 agent exports `STAGE_CALLER_SESSION=<connectionId>:$T3CODE_THREAD_ID` or passes `callerSession`. Launch instructions name the connection id.
+The CLI and `stage mcp` detect the calling session themselves: they run as the agent's child processes and read the harness's session variable (T3 sets `T3CODE_THREAD_ID`, OpenCode `OPENCODE_SESSION_ID`), on that harness's connection on this machine. `stage context` shows the session and where it came from. Explicit names still win: every harness can name its session as `<connectionId>:<externalSessionId>`, the CLI reads `STAGE_CALLER_SESSION`, and an HTTP MCP request can send the `Stage-Caller-Session` header (HTTP MCP never reads an environment). A shared MCP process uses per-call identity. Launch instructions name the connection id.
 
 Intermediaries can pass `callerSession` with `connectionId` and `externalSessionId`. The CLI equivalent is `--caller-connection ID --caller-session ID`. A conflicting OpenCode claim returns an error. Without session context, supply a project or journal owner explicitly. Stage leaves the author session empty.
 

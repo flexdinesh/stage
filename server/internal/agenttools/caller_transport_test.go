@@ -76,7 +76,7 @@ func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // transportClient connects over HTTP MCP (caller is its Stage-Caller-Session
 // header) or stdio (caller is the subprocess's STAGE_CALLER_SESSION, which a
 // shared MCP server ignores).
-func transportClient(t *testing.T, e *env, transport, caller string) (*mcp.ClientSession, error) {
+func transportClient(t *testing.T, e *env, transport, caller string, extraEnv ...string) (*mcp.ClientSession, error) {
 	t.Helper()
 	var tr mcp.Transport
 	if transport == "http" {
@@ -89,10 +89,11 @@ func transportClient(t *testing.T, e *env, transport, caller string) (*mcp.Clien
 		tr = st
 	} else {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestMCPSubprocess$")
-		cmd.Env = append(os.Environ(), "STAGE_TEST_CALLER_STDIO=1", "STAGE_URL="+e.url)
+		cmd.Env = append(scrubbedEnv(), "STAGE_TEST_CALLER_STDIO=1", "STAGE_URL="+e.url)
 		if caller != "" {
 			cmd.Env = append(cmd.Env, agentctx.CallerEnv+"="+caller)
 		}
+		cmd.Env = append(cmd.Env, extraEnv...)
 		tr = &mcp.CommandTransport{Command: cmd}
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "caller-test", Version: "1"}, nil).Connect(t.Context(), tr, nil)
@@ -101,6 +102,18 @@ func transportClient(t *testing.T, e *env, transport, caller string) (*mcp.Clien
 	}
 	t.Cleanup(func() { cs.Close() })
 	return cs, nil
+}
+
+// scrubbedEnv is this process's environment without the harness session
+// variables an agent running the tests may have (the stdio server reads them).
+func scrubbedEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "T3CODE_THREAD_ID=") && !strings.HasPrefix(kv, "OPENCODE_SESSION_ID=") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func mustTransport(t *testing.T, e *env, transport, caller string) *mcp.ClientSession {
@@ -237,6 +250,50 @@ func TestScopedCallerTransports(t *testing.T) {
 				t.Fatal("accepted malformed caller header", err)
 			}
 		})
+	}
+}
+
+// A stdio server spawned by an agent names that agent from its harness's
+// session variable (T3CODE_THREAD_ID) on the harness's connection on this
+// machine; per-call metadata and explicit callers still win.
+func TestStdioHarnessEnvCaller(t *testing.T) {
+	e := harnessEnv(t, &callerHarness{})
+	t3project := e.project("/w/env")
+	id := e.session(t3project, "T3 env")
+	cs, err := transportClient(t, e, "stdio", "", "T3CODE_THREAD_ID="+id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ctx agenttools.ContextOut
+	mustCall(t, cs, "get_context", nil, &ctx)
+	if ctx.Session == nil || *ctx.Session != (db.SessionRef{ConnectionID: 1, ExternalSessionID: id}) || ctx.SessionSource != "T3CODE_THREAD_ID" || ctx.Project == nil || ctx.Project.ID != t3project.ID {
+		t.Fatalf("harness env caller: %+v", ctx)
+	}
+	var entry db.JournalEntry
+	var task client.Task
+	mustCall(t, cs, "create_task", map[string]any{"title": "child", "prompt": "work"}, &task)
+	mustCall(t, cs, "append_note", map[string]any{"taskId": task.ID, "requestId": "env", "text": "x"}, &entry)
+	if task.OriginSession == nil || task.OriginSession.ExternalSessionID != id || entry.SourceSession == nil || entry.SourceSession.ExternalSessionID != id {
+		t.Fatal("harness env caller not recorded", task.OriginSession, entry.SourceSession)
+	}
+	ctx = agenttools.ContextOut{}
+	if msg := callMeta(t, cs, "get_context", nil, mcp.Meta{"ai.opencode/sessionID": "oc"}, &ctx); msg != "" || ctx.Session == nil || ctx.Session.ConnectionID != 7 || ctx.SessionSource != agentctx.SourceRequest {
+		t.Fatal("metadata must win over the environment", ctx, msg)
+	}
+	ctx = agenttools.ContextOut{}
+	mustCall(t, cs, "get_context", map[string]any{"callerSession": db.SessionRef{ConnectionID: 7, ExternalSessionID: "explicit"}}, &ctx)
+	if ctx.Session == nil || ctx.Session.ExternalSessionID != "explicit" || ctx.SessionSource != agentctx.SourceArgument {
+		t.Fatal("explicit caller must win over the environment", ctx)
+	}
+
+	both, err := transportClient(t, e, "stdio", "", "T3CODE_THREAD_ID="+id, "OPENCODE_SESSION_ID=oc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = agenttools.ContextOut{}
+	mustCall(t, both, "get_context", nil, &ctx)
+	if ctx.Session != nil || !strings.Contains(ctx.CallerWarning, "several harness session variables") {
+		t.Fatal("ambiguous harness env must name no caller", ctx)
 	}
 }
 

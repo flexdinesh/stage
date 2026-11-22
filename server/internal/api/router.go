@@ -168,6 +168,7 @@ func NewRouter(deps Deps) http.Handler {
 		return nil
 	}))
 	h("GET /api/connections", s.connections)
+	h("GET /api/connections/resolve", s.resolveConnection)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
 	h("DELETE /api/connections/{connectionId}", s.forgetConnection)

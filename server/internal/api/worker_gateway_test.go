@@ -174,3 +174,25 @@ func TestWorkerGatewayMCPKeepsCallerAndMachine(t *testing.T) {
 		t.Fatalf("token error leaked: %+v", res.Content)
 	}
 }
+
+// GET /api/connections/resolve names the harness's active connection on the
+// caller's machine: the server's own for a direct request, the forwarding
+// machine's through a gateway (which has none here).
+func TestResolveConnectionUsesCallerMachine(t *testing.T) {
+	e := gatewayEnv(t)
+	j := e.join("laptop")
+	var local struct {
+		ID        int64  `json:"id"`
+		MachineID int64  `json:"machineId"`
+		Harness   string `json:"harness"`
+	}
+	e.must("GET", "/api/connections/resolve?harness=t3", nil, 200, &local)
+	if local.ID != e.store.LegacyT3ID() || local.MachineID != 1 || local.Harness != "t3" {
+		t.Fatalf("local resolve %+v", local)
+	}
+	var out errOut
+	if rec := e.gw(j.Token, "GET", "/api/connections/resolve?harness=t3", nil, &out); rec.Code != 404 || out.Code != "no_active_connection" {
+		t.Fatalf("gateway resolve: %d %+v", rec.Code, out)
+	}
+	e.must("GET", "/api/connections/resolve?harness=nope", nil, 400, nil)
+}

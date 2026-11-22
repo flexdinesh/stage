@@ -41,6 +41,8 @@ type Env struct {
 	Exec func(name string, args ...string) error
 	// LookPath reports whether a command is installed.
 	LookPath func(name string) error
+	// Which is a command's path on PATH (setup --check); nil: unknown.
+	Which func(name string) (string, error)
 	// Service is the `stage service` environment; nil is the real one.
 	Service func() service.Deps
 	// Install is the installer's environment; nil is the real one.
@@ -68,6 +70,7 @@ func OSEnv() Env {
 			return cmd.Run()
 		},
 		LookPath: func(name string) error { _, err := exec.LookPath(name); return err },
+		Which:    exec.LookPath,
 	}
 }
 
@@ -205,7 +208,16 @@ Usage:
   stage schedule preview --cron CRON --tz ZONE
   stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT]
                        [--tree ID]   track a session as a task (default: your session)
+  stage tools [NAME]                  the agent tools (MCP tools); NAME: its description and input schema
+  stage call TOOL [JSON|-]            run one agent tool with JSON arguments (- reads stdin); prints
+                                      its result as JSON, exactly as over MCP (exit 1 tool error)
   stage mcp                           the agent tools over stdio MCP
+  stage setup [--claude] [--codex] [--opencode] [--mcp] [--check]
+                                      set up agents on this machine (default: those found): the
+                                      Stage skill and an instruction pointer (--mcp: also stdio MCP for
+                                      Claude Code and Codex), then check CLI, server and caller;
+                                      --check writes nothing (exit 1 on problems)
+  stage setup skill [--claude] [--codex] [--opencode]   the Stage skill only
   stage setup mcp [--claude] [--codex] [--http]
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
@@ -226,8 +238,10 @@ Start mode: tasks inherit their tree by default (auto: roots wait for a start, o
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
 Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID,
-        else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>. Harness MCP metadata
-        (OpenCode) and the Stage-Caller-Session header on HTTP MCP name the caller per call.
+        else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, else the harness's session
+        variable (T3CODE_THREAD_ID, OPENCODE_SESSION_ID; stage mcp too) on its connection on this
+        machine. Harness MCP metadata (OpenCode) and the Stage-Caller-Session header on HTTP MCP name
+        the caller per call.
 Creation: --connection ID selects the destination. --execution-config JSON sets harness options.
 References/adoption: --target-connection ID --target-session ID names a scoped session.
 Creator filter: task ls --origin-connection ID --origin-session ID.
@@ -297,7 +311,7 @@ func (c *cmd) set(name string) bool {
 
 func (c *cmd) ops() *agenttools.Ops {
 	u := client.Resolve(c.url, c.env.Getenv).URL
-	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, LocalFiles: true, CLI: c.env.cliName()}
+	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, HarnessEnv: c.env.Getenv, LocalFiles: true, CLI: c.env.cliName()}
 }
 
 // out prints v as JSON (--json) or with human.
@@ -360,8 +374,12 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runSessions(ctx, env, sub)
 	case "mcp":
 		return runMCP(ctx, env, sub)
+	case "tools":
+		return runTools(ctx, env, sub)
+	case "call":
+		return runCall(ctx, env, sub)
 	case "setup":
-		return runSetup(env, sub)
+		return runSetup(ctx, env, sub)
 	}
 	return usagef("unknown command %q", args[0])
 }
@@ -470,7 +488,9 @@ func runMCP(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	// A stdio MCP process may serve several sessions: callers come per call
-	// (harness metadata or callerSession), never from the environment.
+	// (harness metadata or callerSession), never from STAGE_CALLER_SESSION.
+	// A harness session variable (T3CODE_THREAD_ID) in its environment, set
+	// by the harness for the agent that spawned it, is the fallback.
 	ops := c.ops()
 	ops.Caller = agentctx.Caller{}
 	return agenttools.NewServer(ops).Run(ctx, &mcp.StdioTransport{})
