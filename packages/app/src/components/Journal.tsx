@@ -191,8 +191,9 @@ function JournalSkeleton() {
 }
 
 /** Shared paginated notes/events, also used by the tree Activity tab. */
-export function JournalFeed({ owner, query, linkedId = null }: { owner: JournalOwner; query: Omit<JournalQuery, "cursor">; linkedId?: number | null }) {
-  const journal = useJournal(owner, query);
+export function JournalFeed({ owner, query, linkedId = null, active = true }: { owner: JournalOwner; query: Omit<JournalQuery, "cursor">; linkedId?: number | null; active?: boolean }) {
+  // A hidden feed (a tab not shown) keeps its pages but stops polling.
+  const journal = useJournal(owner, query, { active });
   const linked = useJournalEntry(linkedId);
   const qc = useQueryClient();
   const stale = journal.error instanceof ApiError && journal.error.status === 409;
@@ -274,7 +275,7 @@ export function JournalPanel({ owner, projectId = null, tasks = [], active = tru
         </div>
         {invalidTask ? <InlineError>Enter a positive task ID.</InlineError> : null}
       </form>
-      <JournalFeed owner={owner} query={{ ...filters, kind }} linkedId={active ? journalEntryId(params.get("entry")) : null} />
+      <JournalFeed owner={owner} query={{ ...filters, kind }} linkedId={active ? journalEntryId(params.get("entry")) : null} active={active} />
     </Panel>
   );
 }

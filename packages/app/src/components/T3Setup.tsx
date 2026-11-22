@@ -3,7 +3,7 @@
 // disconnect controls Settings shares. Logic lives in lib/onboarding.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { keys, useT3Status } from "../api/queries.ts";
+import { invalidateConnectionChange, keys, useT3Status } from "../api/queries.ts";
 import type { ReplacedConnection, T3Status } from "../api/types.ts";
 import { replacedNotice } from "../lib/harnesses.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
@@ -18,10 +18,10 @@ import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
   const qc = useQueryClient();
-  const key = useScopedKey()(keys.t3Status);
+  const scoped = useScopedKey();
   return (s) => {
-    qc.setQueryData(key, s);
-    void qc.invalidateQueries({ queryKey: keys.connections });
+    qc.setQueryData(scoped(keys.t3Status), s);
+    void invalidateConnectionChange(qc, scoped);
   };
 }
 

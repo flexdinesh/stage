@@ -5,6 +5,7 @@ import { ApiError, type ArchivedFilter } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
+import { POLL, pollFirstPage } from "../lib/polling.ts";
 import type { HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
@@ -34,20 +35,20 @@ export const keys = {
   journalEntry: ["journalEntry"],
 } as const;
 
-/** Default poll; 1s while a full sync runs so its counts tick. */
+/** Harness connections (live: sync counts and activity move on their own). */
 export function useConnections() {
   const api = useApi();
-  return useQuery({queryKey:keys.connections, queryFn: api.connections});
+  return useQuery({ queryKey: keys.connections, queryFn: api.connections, refetchInterval: POLL.live });
 }
 
 type Connections = { connections: HarnessConnection[] };
 
 const NO_MACHINES: Machine[] = [];
 
-/** Machines not removed, local first (default poll: presence and last seen move on their own). */
+/** Machines not removed, local first (polled: presence and last seen move on their own). */
 export function useMachines() {
   const api = useApi();
-  const q = useQuery({ queryKey: keys.machines, queryFn: api.machines });
+  const q = useQuery({ queryKey: keys.machines, queryFn: api.machines, refetchInterval: POLL.slow });
   return { ...q, machines: q.data?.machines ?? NO_MACHINES };
 }
 
@@ -91,7 +92,8 @@ export function useScopedHarnessDescriptors() {
   const api = useHarnessApi();
   const key = useScopedKey();
   const local = useHarnessScope().machineId === null;
-  return useQuery({ queryKey: key(keys.harnesses), queryFn: api.harnesses, staleTime: local ? Infinity : 0 });
+  // A remote machine's kinds follow what its worker hosts: re-read after a while, refreshed by connection changes.
+  return useQuery({ queryKey: key(keys.harnesses), queryFn: api.harnesses, staleTime: local ? Infinity : 30_000 });
 }
 
 /** Harness lookups by connection id (name, harness, active, label), by kind (descriptor) and the active connection per harness. */
@@ -184,9 +186,16 @@ export const useCatalog = () => {
   return useQuery({ queryKey: keys.catalog, queryFn: api.catalog, refetchInterval: false, staleTime: 60_000, retry: false });
 };
 
-export const useProjects = (archived: ArchivedFilter = "false") => {
+/** `enabled: false` reads only what is cached (a picker that needs the list once it opens). */
+export const useProjects = (archived: ArchivedFilter = "false", { enabled = true }: { enabled?: boolean } = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.projects, "list", archived], queryFn: () => api.projects(archived), placeholderData: keepPreviousData });
+  return useQuery({
+    queryKey: [...keys.projects, "list", archived],
+    queryFn: () => api.projects(archived),
+    placeholderData: keepPreviousData,
+    refetchInterval: POLL.slow,
+    enabled,
+  });
 };
 
 /** The server answered 404: the record was deleted or never existed. */
@@ -197,22 +206,36 @@ const retryUnlessNotFound = (count: number, error: unknown): boolean => !isNotFo
 
 export const useProject = (id: number) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.projects, "one", id], queryFn: () => api.project(id), retry: retryUnlessNotFound });
+  return useQuery({ queryKey: [...keys.projects, "one", id], queryFn: () => api.project(id), retry: retryUnlessNotFound, refetchInterval: POLL.slow });
 };
 
-export const useTasks = (q: TaskListQuery = {}) => {
+/** `live: false` (a picker's one-off list): read once, re-read after 30s, no polling. */
+export const useTasks = (q: TaskListQuery = {}, { live = true }: { live?: boolean } = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.tasks, q], queryFn: () => api.tasks(q), placeholderData: keepPreviousData });
+  return useQuery({
+    queryKey: [...keys.tasks, q],
+    queryFn: () => api.tasks(q),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? POLL.live : false,
+    staleTime: live ? 0 : 30_000,
+  });
 };
 
 export const useTask = (id: number) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id) });
+  return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id), refetchInterval: POLL.live });
 };
 
-export const useTrees = (q: TreeListQuery = {}) => {
+/** `live: false` (a picker's one-off list): read once, re-read after 30s, no polling. */
+export const useTrees = (q: TreeListQuery = {}, { live = true }: { live?: boolean } = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.trees, q], queryFn: () => api.trees(q), placeholderData: keepPreviousData });
+  return useQuery({
+    queryKey: [...keys.trees, q],
+    queryFn: () => api.trees(q),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? POLL.live : false,
+    staleTime: live ? 0 : 30_000,
+  });
 };
 
 export const useTree = (id: number, enabled = true) => {
@@ -223,21 +246,25 @@ export const useTree = (id: number, enabled = true) => {
     queryKey: [...keys.tree, id],
     queryFn: () => api.tree(id),
     retry: retryUnlessNotFound,
+    refetchInterval: POLL.live,
   });
 };
 
 export const useSchedules = (q: ScheduleListQuery = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q), placeholderData: keepPreviousData });
+  return useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q), placeholderData: keepPreviousData, refetchInterval: POLL.slow });
 };
 
-export const useJournal = (owner: JournalOwner, q: Omit<JournalQuery, "cursor"> = {}) => {
+/** `active: false` (a hidden tab): keeps its cache but stops polling and refetching. */
+export const useJournal = (owner: JournalOwner, q: Omit<JournalQuery, "cursor"> = {}, { active = true }: { active?: boolean } = {}) => {
   const api = useApi();
   return useInfiniteQuery({
     queryKey: [...keys.journal, owner, q],
     queryFn: ({ pageParam }) => api.journal(owner, { ...q, ...(pageParam === "" ? {} : { cursor: pageParam }) }),
     initialPageParam: "",
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    refetchInterval: (query) => pollFirstPage(query.state.data?.pages.length, POLL.live),
+    subscribed: active,
     retry: false,
   });
 };
@@ -259,7 +286,7 @@ export const useJournalEntry = (id: number | null, enabled = true) => {
 
 export const useSchedule = (id: number) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.schedule, id], queryFn: () => api.schedule(id), retry: retryUnlessNotFound });
+  return useQuery({ queryKey: [...keys.schedule, id], queryFn: () => api.schedule(id), retry: retryUnlessNotFound, refetchInterval: POLL.slow });
 };
 
 /** Next fires for a cron + zone; null input disables the query. Errors carry the parse message. */
@@ -284,13 +311,14 @@ export const useThread = (id: string) => {
     queryKey: [...keys.thread, t3, id],
     queryFn: () => (t3 === null ? Promise.reject(new Error("T3 is not connected")) : api.thread(t3, id)),
     enabled: id !== "" && t3 !== null,
+    refetchInterval: POLL.live,
   });
 };
 
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => {
   const api = useApi();
-  return useQuery({ queryKey: keys.badge, queryFn: api.badge });
+  return useQuery({ queryKey: keys.badge, queryFn: api.badge, refetchInterval: POLL.live });
 };
 
 export const latestNotificationsKey = [...keys.notifications, "latest"];
@@ -298,7 +326,7 @@ export const latestNotificationsKey = [...keys.notifications, "latest"];
 /** Latest notifications + unread count (bell, toasts). Polled. */
 export const useNotifications = () => {
   const api = useApi();
-  return useQuery({ queryKey: latestNotificationsKey, queryFn: () => api.notifications({ limit: 50 }) });
+  return useQuery({ queryKey: latestNotificationsKey, queryFn: () => api.notifications({ limit: 50 }), refetchInterval: POLL.live });
 };
 
 /** Notifications drawer: current needs input first, then recent task/thread groups. */
@@ -309,10 +337,11 @@ export const useNotificationInbox = () => {
     queryFn: ({ pageParam }) => api.notificationGroups({ limit: 50, cursor: pageParam === "" ? undefined : pageParam }),
     initialPageParam: "",
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    refetchInterval: (query) => pollFirstPage(query.state.data?.pages.length, POLL.live),
   });
 };
 
-/** Mounted on expansion; history is notification events, not a run lifecycle. */
+/** Mounted on expansion; history is notification events, not a run lifecycle. Not polled: it only grows, and read/prune invalidate it. */
 export const useNotificationHistory = (group: string) => {
   const api = useApi();
   return useInfiniteQuery({
@@ -358,6 +387,27 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
       qc.invalidateQueries({ queryKey }),
     ),
   ).then(() => undefined);
+}
+
+/**
+ * A harness connection changed (connect, pair, disconnect, settings). Everything that names connections or depends on
+ * what tasks can start refreshes in the background; the returned promise waits only for the `awaited` setup queries
+ * in the harness scope (`scopedKey`), so a setup action finishes when its own status is fresh.
+ */
+export function invalidateConnectionChange(
+  qc: QueryClient,
+  scopedKey: (key: readonly unknown[]) => readonly unknown[],
+  awaited: readonly (readonly unknown[])[] = [],
+): Promise<void> {
+  void Promise.all([
+    qc.invalidateQueries({ queryKey: keys.connections }),
+    qc.invalidateQueries({ queryKey: keys.machines }),
+    qc.invalidateQueries({ queryKey: keys.projects }),
+    qc.invalidateQueries({ queryKey: keys.catalog }),
+    qc.invalidateQueries({ queryKey: scopedKey(keys.harnesses) }),
+    invalidateWork(qc),
+  ]);
+  return Promise.all(awaited.map((key) => qc.invalidateQueries({ queryKey: scopedKey(key) }))).then(() => undefined);
 }
 
 export function useInvalidateWork(): () => Promise<void> {

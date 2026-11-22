@@ -128,7 +128,6 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
   const el = useRef<HTMLTextAreaElement | null>(null);
   const listId = useId();
   const snippets = useSnippets();
-  const projects = useProjects("all");
   /** Caret index while focused; null when blurred. */
   const [caret, setCaret] = useState<number | null>(null);
   /** Trigger start the user dismissed with Esc (stays closed until the token ends). */
@@ -142,6 +141,8 @@ export function SnippetTextarea({ value, onValueChange, projectId, ref, onKeyDow
   const trigger = caret === null || scope.length === 0 ? null : findTrigger(value, caret);
   const matches = trigger === null ? [] : matchSnippets(scope, trigger.query);
   const open = trigger !== null && trigger.start !== dismissed && matches.length > 0;
+  // Project titles label the open picker's chips only: fetched while it is open, not on every textarea.
+  const projects = useProjects("all", { enabled: open });
   const index = Math.min(active, matches.length - 1);
   const current = matches[index];
   const triggerStart = trigger?.start ?? null;

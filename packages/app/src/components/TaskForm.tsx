@@ -277,6 +277,8 @@ function TaskFormDrawer({
     queryKey: ["capabilities", connection, s.projectId, bound],
     enabled: connection > 0 && bound,
     queryFn: () => api.capabilities(connection, Number(s.projectId)),
+    // What the harness can do changes rarely; the form reads it once, not on a poll.
+    staleTime: 60_000,
     retry: false,
   });
   // Until the harness answers, nothing is ruled out: the server checks the launch.
@@ -394,8 +396,9 @@ function TaskFormDrawer({
       };
       return { kind: "task", task: await api.createTask(body) };
     },
-    onSuccess: async (saved) => {
-      await invalidate();
+    // Closes at once; the views behind the drawer refresh in the background.
+    onSuccess: (saved) => {
+      void invalidate();
       onSaved?.(saved);
       onClose();
     },

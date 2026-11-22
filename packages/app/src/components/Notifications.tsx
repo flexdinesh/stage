@@ -55,11 +55,13 @@ const startable = (n: Notification): n is Notification & { taskId: number } =>
 /** Start for a ready notification (POST start); the error shows in the title and as a red line. */
 function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => void }) {
   const api = useApi();
+  const qc = useQueryClient();
   const invalidate = useInvalidateWork();
   const start = useMutation({
     mutationFn: () => api.startTask(taskId),
     onSuccess: () => onStarted?.(),
-    onSettled: invalidate,
+    // The task's state names it startable here: the notification views refresh with the work.
+    onSettled: () => Promise.all([invalidate(), qc.invalidateQueries({ queryKey: keys.notifications })]),
   });
   const error = errorText(start.error);
   return (

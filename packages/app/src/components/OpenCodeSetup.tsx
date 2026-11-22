@@ -4,20 +4,21 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { OpenCodeStatus } from "../api/types.ts";
-import { useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
+import { invalidateConnectionChange, keys, useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
 import { activeOn, isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
 import { PreviousConnections } from "./PreviousConnections.tsx";
 import { usePlatform } from "../platform/context.tsx";
-import { useHarnessApi, useScopeMachineId, useSetupCopy } from "../api/harnessScope.tsx";
+import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
 
-/** Connect, pair and disconnect change the status, connections and what tasks can start: refetch everything. */
+/** Connect, pair and disconnect change the status, connections and what tasks can start: waits for the status, the rest refreshes behind. */
 function useRefresh(): () => Promise<void> {
   const qc = useQueryClient();
-  return () => qc.invalidateQueries();
+  const key = useScopedKey();
+  return () => invalidateConnectionChange(qc, key, [keys.openCodeStatus]);
 }
 
 /**
