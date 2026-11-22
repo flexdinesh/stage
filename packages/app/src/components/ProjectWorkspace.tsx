@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { ExternalProject, HarnessConnection, Project, ProjectBinding } from "../api/types.ts";
 import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
-import { keys, useHarnesses, useMachines } from "../api/queries.ts";
+import { invalidateWork, keys, useHarnesses, useMachines } from "../api/queries.ts";
 import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { Alert, Button, ConfirmInline, Drawer, EmptyState, ErrorText, Field, Hint, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
@@ -220,8 +220,10 @@ export function ProjectWorkspace({ project }: { project: Project }) {
   const [matched, setMatched] = useState("");
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(project.title);
+  // Bindings change the project and its workspace lookups (awaited) and what its tasks can start (behind).
   const refresh = async () => {
-    await qc.invalidateQueries();
+    void invalidateWork(qc);
+    await Promise.all([qc.invalidateQueries({ queryKey: keys.projects }), qc.invalidateQueries({ queryKey: ["external-projects"] })]);
   };
   const update = useMutation({
     // Archive sends the live title, never the draft: the endpoint takes both fields.

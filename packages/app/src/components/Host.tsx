@@ -623,6 +623,8 @@ export function DesktopAppCard() {
     queryFn: () => host?.connection.diagnostics() ?? Promise.resolve(""),
     enabled: host !== undefined,
     refetchInterval: false,
+    // Collected per Settings visit for the Copy button, not on every window focus.
+    refetchOnWindowFocus: false,
   });
   if (host === undefined || state === null) return null;
   const toggle = (enabled: boolean) => {

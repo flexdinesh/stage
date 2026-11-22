@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
-import { keys, useScopedHarnessDescriptors } from "../api/queries.ts";
+import { invalidateConnectionChange, keys, useScopedHarnessDescriptors } from "../api/queries.ts";
 import type { HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
@@ -58,10 +58,10 @@ export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }
 
 function useApply(kind: string) {
   const qc = useQueryClient();
-  const key = useScopedKey()([...keys.harnessStatus, kind]);
+  const scoped = useScopedKey();
   return (s: HarnessStatus) => {
-    qc.setQueryData(key, s);
-    void qc.invalidateQueries({ queryKey: keys.connections });
+    qc.setQueryData(scoped([...keys.harnessStatus, kind]), s);
+    void invalidateConnectionChange(qc, scoped);
   };
 }
 

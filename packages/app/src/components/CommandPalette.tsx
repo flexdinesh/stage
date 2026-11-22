@@ -72,9 +72,9 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const [copiedName, setCopiedName] = useState("");
 
   const q = query.trim().toLowerCase();
-  const tasks = useTasks({ closed: "all" });
+  const tasks = useTasks({ closed: "all" }, { live: false });
   const projects = useProjects();
-  const trees = useTrees({ status: "all" });
+  const trees = useTrees({ status: "all" }, { live: false });
   const items = useMemo<Item[]>(() => {
     const go = (to: string) => () => {
       onClose();

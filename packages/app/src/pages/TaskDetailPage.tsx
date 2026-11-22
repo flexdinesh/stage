@@ -187,8 +187,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
   const duplicate = useMutation({
     mutationFn: () => api.duplicateTask(task.id),
+    // The copy's page fetches itself; the rest refreshes behind the navigation.
     onSuccess: async (t) => {
-      await invalidate();
+      void invalidate();
       await navigate(`/tasks/${t.id}`);
     },
   });

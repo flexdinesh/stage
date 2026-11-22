@@ -11,7 +11,8 @@ import { isServerSwitch } from "./lib/host.ts";
 /** The whole Stage UI. A host renders it with its platform adapters and the app stylesheet (`@stage/app/index.css`). */
 export function StageApp({ platform }: { platform: Platform }) {
   const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { refetchInterval: 5000, refetchOnWindowFocus: true } } }),
+    // No default poll: live hooks in api/queries.ts declare their interval (lib/polling.ts).
+    () => new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: true } } }),
   );
   // Deep links and menu items from a native host open their page.
   useEffect(() => platform.host?.onNavigate((path) => void router.navigate(path)), [platform]);
