@@ -20,6 +20,7 @@ import {
   Hint,
   Input,
   Marker,
+  Meta,
   Muted,
   Panel,
   PanelHeader,
@@ -235,9 +236,9 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Marker tone={status.tone} />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="min-w-0 truncate text-body font-medium text-fg">{entry.name}</span>
-            {entry.active ? <Chip>active</Chip> : null}
+            {entry.active ? <Meta>active</Meta> : null}
             {needs > 0 ? (
               <Chip tone="need" dot className="tabular">
                 {needs} need input

@@ -102,7 +102,7 @@ Stage has no sign-in and no API auth (browser and API access stay behind the pro
 
 ## Machines
 
-A machine runs harnesses ([ADR 0002](adr/0002-machines-and-workers.md)). Machine 1 is the local machine, inside this server's process. A remote machine runs `stage worker` and is added by pairing. Hierarchy: user, machines, harness connections, sessions.
+A machine runs harnesses ([ADR 0002](adr/0002-machines-and-workers.md)). Machine 1 is the local machine, inside this server's process; its default label names where the server runs (the hostname, or the `STAGE_PUBLIC_URL` host in a container, else `Stage server`; [runtime.md](runtime.md#machine-profile-and-hosted-harnesses)), set once and kept across renames. A remote machine runs `stage worker` and is added by pairing. Hierarchy: user, machines, harness connections, sessions.
 
 ```jsonc
 // Machine

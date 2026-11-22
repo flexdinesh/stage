@@ -353,6 +353,7 @@ Compact, flat, and ink-led.
 ### Chips
 - **Style:** inline mono label (`text-meta`, 1.5 line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
 - **State:** task and thread states map onto the six tones; plain chips (Slate border, Ink Text) carry model, runtime, workspace, `tracked session`, `manual`, needs and the tree link.
+- **Not a chip:** a role or identity tag beside a row title ("this server" on Machines, "active" on Servers) is Slate mono `Meta` with no box; boxed beside row buttons it reads as a control.
 - **Pull request:** a PR's state is a state, so it takes a tone, never a seventh: open Running Sky (in flight), merged Settled Green (landed), closed, draft and any unknown state Idle Gray (an unmerged close reads like cancelled, not a fault). The row chip is the `dot` variant labelled `repo#num` (repository name without the owner, tabular), `owner/repo #num · state` in its title, and it opens the PR in a new tab.
 
 ### Cards / Containers (Panel)

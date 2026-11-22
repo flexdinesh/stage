@@ -29,8 +29,8 @@ const (
 	PairingTTL = 10 * time.Minute
 	// pairingKeep is how long used or expired codes stay before pruning.
 	pairingKeep = 24 * time.Hour
-	// maxMachineLabel caps a machine label, in characters.
-	maxMachineLabel = 100
+	// MaxMachineLabel caps a machine label, in characters.
+	MaxMachineLabel = 100
 )
 
 var (
@@ -93,8 +93,8 @@ func machineLabel(label string, optional bool) (string, error) {
 	switch {
 	case label == "" && !optional:
 		return "", Invalid("A machine needs a name.")
-	case utf8.RuneCountInString(label) > maxMachineLabel:
-		return "", Invalid("A machine name can be at most %d characters.", maxMachineLabel)
+	case utf8.RuneCountInString(label) > MaxMachineLabel:
+		return "", Invalid("A machine name can be at most %d characters.", MaxMachineLabel)
 	}
 	return label, nil
 }
@@ -363,6 +363,21 @@ func (s *Store) machineInfos(ctx context.Context, id int64) ([]MachineInfo, erro
 		}
 	}
 	return ms, nil
+}
+
+// SetDefaultLocalLabel names the local machine only while its label is
+// unset (empty, migration 0022); a name the user gave is kept. It reports
+// whether it set the label.
+func (s *Store) SetDefaultLocalLabel(ctx context.Context, label string) (bool, error) {
+	label, err := machineLabel(label, false)
+	if err != nil {
+		return false, err
+	}
+	res, err := s.pool.Exec(ctx, `UPDATE machines SET label=$2 WHERE id=$1 AND label=''`, LocalMachine, label)
+	if err != nil {
+		return false, err
+	}
+	return res.RowsAffected() > 0, nil
 }
 
 // RenameMachine sets a machine's label.

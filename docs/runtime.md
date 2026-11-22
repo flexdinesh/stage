@@ -45,7 +45,11 @@ local processes.
 available here with the reason when not. The profile is not stored: it is
 computed at each start. Every connection belongs to a machine
 (`harness_connections.machine_id`); one local machine (`machines` id 1)
-exists until workers do.
+exists until workers do. While its label is unset (migration 0022 unsets the
+old `This computer` seed), each start names it from where the server runs:
+the host of `STAGE_PUBLIC_URL` in the `container` profile (a container's
+hostname is a random id), the hostname otherwise, else `Stage server`. A
+rename is never replaced.
 
 ## Identity and paths
 
