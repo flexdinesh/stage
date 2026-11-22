@@ -297,6 +297,7 @@ UI, `/api` and `/mcp`, and passes `/api/worker/*` through without it,
 forwarding the `Authorization` header unchanged. Creating a pairing code
 (`POST /api/machines/pairings`) stays behind user auth. Pairing requires
 `STAGE_PUBLIC_URL` (409 `public_url_required`), the address workers reach.
+The full proxy rules: [Remote main server and workers](#remote-main-server-and-workers).
 Without a proxy, any process that reaches a listener already has full API
 access, and the token adds nothing to or takes nothing from that.
 
@@ -448,6 +449,62 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   gateway. Without a proxy this matches direct access; behind one it is the
   only way past user auth, which is why machine management is refused.
   Removing the machine revokes it at once.
+
+## Remote main server and workers
+
+The distributed deployment: one main server on a host or cluster behind an
+authenticating HTTPS proxy, and workers on the machines that run harnesses
+([ADR 0002](adr/0002-machines-and-workers.md)). Example:
+`examples/kubernetes/`. User guide: website `/docs/deploy` (Main server and
+workers).
+
+**Main server.**
+
+- **One replica.** One server owns one data dir ([Ownership and
+  locks](#ownership-and-locks)); a second server on the same volume exits 75.
+  Under an orchestrator: one replica, stop the old instance before starting
+  the new one (Kubernetes `strategy: Recreate`), no autoscaling.
+- **Local volume.** `stage.db`, its backups and `stage.lock` live on a local
+  (block-backed) filesystem. `flock` and SQLite locking are unreliable on NFS
+  and other network filesystems, so they are not supported.
+- **Shutdown.** Allow more than the 100s drain ([Shutdown](#shutdown)) before
+  a forced kill (Kubernetes `terminationGracePeriodSeconds: 120`, compose
+  `stop_grace_period: 2m`).
+- **Probes.** `GET /api/health` ([Health and version](#health-and-version)):
+  200 while the server and its database work, whatever harnesses or workers
+  do. A probe that sends the pod IP as Host passes the origin policy. Pending
+  migrations (with a backup first) run before serving, so a startup probe
+  needs room for them.
+- **`STAGE_PUBLIC_URL`** is the proxy's HTTPS URL. It is required for pairing
+  (409 `public_url_required`): pairing links are built from it and workers
+  dial it.
+- **Image.** The Docker image sets `STAGE_MACHINE_PROFILE=container`: the main
+  server's own machine never runs local-process harnesses
+  ([Machine profile](#machine-profile-and-hosted-harnesses)). It reports
+  build version `dev`; the worker and the main server need the same API
+  version, not the same build.
+
+**Proxy.** In front of every listener a network can reach:
+
+- User authentication on the UI, `/api` and `/mcp`, including
+  `POST /api/machines/pairings`.
+- `/api/worker/*` passes through without user authentication, with
+  `Authorization` forwarded unchanged ([Worker routes](#worker-routes)). It
+  is the only bypass: the channel, join, leave and the agent gateway route.
+- Keep the request's Host, or rewrite it to an IP literal or a host in
+  `STAGE_ALLOWED_ORIGINS`. Workers send no `Origin`, so a rewrite to any other
+  hostname is 403.
+- No response buffering on `GET /api/worker/channel` and
+  `/api/notifications/stream` (both send `X-Accel-Buffering: no`), and an
+  idle timeout above 15s: the channel's keepalive and heartbeat run every
+  15s and 45s of silence ends it ([Worker channel](#worker-channel)).
+- Request bodies of at least 32 MiB on `POST /api/worker/channel` (the
+  largest up message).
+
+**Workers.** A remote machine joins with `stage worker join <link>` and runs
+the worker service ([service.md](service.md#worker-service)); its agents use
+the [agent gateway](#agent-gateway). One identity runs the main server or a
+worker, not both.
 
 ## OpenCode connection
 

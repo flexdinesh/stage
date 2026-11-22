@@ -1,0 +1,17 @@
+# In-cluster address of the Stage main server. Keep it ClusterIP: Stage has
+# no authentication of its own, so only your authenticating HTTPS proxy (or
+# ingress) should reach it. See README.md for the proxy rules.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stage
+  labels:
+    app.kubernetes.io/name: stage
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: stage
+  ports:
+    - name: http
+      port: 7380
+      targetPort: http
