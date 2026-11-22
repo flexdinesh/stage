@@ -13,7 +13,7 @@ import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
+import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
@@ -225,21 +225,11 @@ export function DisconnectT3({ status }: { status: T3Status }) {
         </Button>
       </div>
       {confirm ? (
-        <Alert tone="bad">
-          <p>
-            {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing. Pair this T3 again to
-            resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.
-            {expires === null ? null : ` The token stays valid in T3 until ${shortDate(expires)}.`}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button small variant="danger" busy={disconnect.isPending} onClick={() => disconnect.mutate()}>
-              Disconnect
-            </Button>
-            <Button small variant="ghost" autoFocus disabled={disconnect.isPending} onClick={() => setConfirm(false)}>
-              Cancel
-            </Button>
-          </div>
-        </Alert>
+        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
+          {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing. Pair this T3 again to
+          resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.
+          {expires === null ? null : ` The token stays valid in T3 until ${shortDate(expires)}.`}
+        </ConfirmInline>
       ) : null}
       <ErrorText error={disconnect.error} />
     </div>

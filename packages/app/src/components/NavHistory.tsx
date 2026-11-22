@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router";
 import {
   backList,
@@ -13,7 +13,7 @@ import {
 } from "../lib/history.ts";
 import { IconBack, IconForward } from "./icons.tsx";
 import { NavLabelContext } from "./navContext.ts";
-import { buttonClass, cx } from "./ui.tsx";
+import { IconButton, Menu, MenuItem, cx, useMenu } from "./ui.tsx";
 
 interface NavHistoryValue {
   canBack: boolean;
@@ -69,32 +69,13 @@ export function useCanGoBack(): boolean {
 
 const LONG_PRESS_MS = 500;
 
-/** Static anchor names (Tailwind needs literal classes); one per arrow on screen. */
-const ANCHORS = {
-  back: { anchor: "[anchor-name:--nav-back]", menu: "[position-anchor:--nav-back]" },
-  forward: { anchor: "[anchor-name:--nav-forward]", menu: "[position-anchor:--nav-forward]" },
-  phoneBack: { anchor: "[anchor-name:--nav-back-phone]", menu: "[position-anchor:--nav-back-phone]" },
-} as const;
-
 /**
- * One arrow: a click goes one step; right-click or a long press opens the history list that way. The list is a popover
+ * One arrow: a click goes one step; right-click or a long press opens the history list that way. The list is a menu
  * anchored under the arrow; arrow keys move through it, Esc or an outside click closes it.
  */
-function NavArrow({
-  dir,
-  anchor,
-  className,
-  iconSize,
-}: {
-  dir: "back" | "forward";
-  anchor: keyof typeof ANCHORS;
-  className: string;
-  iconSize: number;
-}) {
+function NavArrow({ dir, variant, className }: { dir: "back" | "forward"; variant: "ghost" | "secondary"; className?: string }) {
   const nav = useNavHistory();
-  const menuId = useId();
-  const menu = useRef<HTMLDivElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
+  const menu = useMenu();
   const press = useRef<number | null>(null);
   const pressed = useRef(false);
   const [jumps, setJumps] = useState<HistoryJump[]>([]);
@@ -109,33 +90,21 @@ function NavArrow({
     const list = dir === "back" ? nav.backList() : nav.forwardList();
     if (list.length === 0) return;
     setJumps(list);
-    menu.current?.showPopover();
-    requestAnimationFrame(() => menu.current?.querySelector<HTMLButtonElement>("button")?.focus());
+    menu.show();
   };
   const cancelPress = () => {
     if (press.current !== null) window.clearTimeout(press.current);
     press.current = null;
   };
-  const pick = (delta: number) => {
-    menu.current?.hidePopover();
-    nav.go(delta);
-  };
-  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const items = [...(menu.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
-    const at = items.findIndex((b) => b === document.activeElement);
-    const next = e.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
-    items[next]?.focus();
-  };
 
   return (
     <>
-      <button
-        ref={button}
-        type="button"
+      <IconButton
+        {...menu.anchorProps}
+        variant={variant}
+        icon={dir === "back" ? IconBack : IconForward}
         disabled={!enabled}
-        aria-label={label}
+        label={label}
         title={`${label} (right-click for history)`}
         onClick={() => {
           if (pressed.current) {
@@ -162,55 +131,30 @@ function NavArrow({
         onPointerUp={cancelPress}
         onPointerLeave={cancelPress}
         onPointerCancel={cancelPress}
-        className={cx(className, ANCHORS[anchor].anchor, "[-webkit-touch-callout:none] select-none")}
-      >
-        {dir === "back" ? <IconBack size={iconSize} /> : <IconForward size={iconSize} />}
-      </button>
-      <div
-        ref={menu}
-        id={menuId}
-        popover="auto"
-        aria-label={`${label} history`}
-        onKeyDown={onMenuKey}
-        onToggle={(e) => {
-          if (e.newState === "closed" && menu.current?.contains(document.activeElement) === true) button.current?.focus();
-        }}
-        className={cx(
-          "m-0 mt-1 w-64 border border-line-strong bg-surface text-fg [top:anchor(bottom)] [left:anchor(left)]",
-          ANCHORS[anchor].menu,
-        )}
-      >
-        <div className="flex flex-col py-1">
-          {jumps.map((j) => (
-            <button
-              key={j.delta}
-              type="button"
-              onClick={() => pick(j.delta)}
-              className="flex min-h-11 min-w-0 items-center gap-2 px-3 text-left text-ui outline-none hover:bg-panel focus-visible:bg-panel focus-visible:shadow-[inset_0_0_0_1px_var(--line-strong)] md:min-h-8"
-            >
-              {j.kind === null ? null : <span className="shrink-0 font-mono text-meta-sm text-muted">{j.kind}</span>}
-              <span className="min-w-0 truncate">{j.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+        className={cx(className, "[-webkit-touch-callout:none] select-none")}
+      />
+      <Menu menu={menu} label={`${label} history`} className="w-64">
+        {jumps.map((j) => (
+          <MenuItem key={j.delta} leading={j.kind ?? undefined} onSelect={() => nav.go(j.delta)}>
+            {j.label}
+          </MenuItem>
+        ))}
+      </Menu>
     </>
   );
 }
-
-const laptopArrow = cx(buttonClass("ghost"), "w-8 px-0 enabled:text-fg");
 
 /** Laptop content bar arrows. */
 export function BackForward() {
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      <NavArrow dir="back" anchor="back" iconSize={16} className={laptopArrow} />
-      <NavArrow dir="forward" anchor="forward" iconSize={16} className={laptopArrow} />
+      <NavArrow dir="back" variant="ghost" className="enabled:text-fg" />
+      <NavArrow dir="forward" variant="ghost" className="enabled:text-fg" />
     </div>
   );
 }
 
 /** Phone top bar Back; long-press lists the pages behind. */
 export function PhoneBack() {
-  return <NavArrow dir="back" anchor="phoneBack" iconSize={18} className={cx(buttonClass("secondary"), "w-10 px-0")} />;
+  return <NavArrow dir="back" variant="secondary" />;
 }

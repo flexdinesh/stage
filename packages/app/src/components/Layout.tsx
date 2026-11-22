@@ -9,7 +9,6 @@ import { MORE_DESTINATIONS } from "../pages/MorePage.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
-  IconChevronDown,
   IconDashboard,
   IconMoon,
   IconMore,
@@ -32,7 +31,7 @@ import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
 import { StatusRow, useStatusAlert } from "./StatusRow.tsx";
-import { Drawer, IconButton, Kbd, buttonClass, cx, toneClass, type IconComponent } from "./ui.tsx";
+import { Drawer, IconButton, Kbd, PickerButton, cx, toneClass, type IconComponent } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -213,15 +212,14 @@ function Shell() {
         <div className="flex w-10 shrink-0 items-center">
           {showBack ? <PhoneBack /> : <Mark needsInput={needsInput} compact />}
         </div>
-        <button
-          type="button"
+        <PickerButton
+          mono
           onClick={() => setScopeSheet(true)}
           aria-label={`Project: ${scope.project?.title ?? "All projects"}`}
-          className={cx(buttonClass("secondary"), "h-10 min-w-0 gap-1.5 px-2.5 font-mono text-meta font-normal")}
+          className="min-w-0"
         >
           <span className="min-w-0 truncate">{scope.project?.title ?? "All projects"}</span>
-          <IconChevronDown size={12} />
-        </button>
+        </PickerButton>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <NotificationsBell onOpen={openInbox} />
           <ServerMenu />

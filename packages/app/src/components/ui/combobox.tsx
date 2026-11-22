@@ -1,12 +1,12 @@
 import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SEARCH_THRESHOLD, edgeIndex, filterOptions, stepIndex, typeaheadIndex, type ComboboxOption } from "../../lib/combobox.ts";
-import type { MatchRange } from "../../lib/projects.ts";
 import { IconCheck } from "../icons.tsx";
 import { cx } from "./cx.ts";
 import { controlClass } from "./form.tsx";
 import { activeRowClass } from "./list.tsx";
-import { Chip, Kbd } from "./tone.tsx";
+import { Highlight, KeyHints, surfaceClass } from "./overlay.tsx";
+import { Chip } from "./tone.tsx";
 
 export type { ComboboxOption };
 
@@ -38,16 +38,6 @@ function placement(anchor: HTMLElement): CSSProperties {
   return { left, width, top: rect.bottom + GAP, maxHeight: Math.min(MAX_HEIGHT, spaceBelow) };
 }
 
-function Mark({ text, range }: { text: string; range: MatchRange | null | undefined }) {
-  if (range === null || range === undefined) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, range.start)}
-      <b className="font-semibold text-fg">{text.slice(range.start, range.end)}</b>
-      {text.slice(range.end)}
-    </>
-  );
-}
 
 /**
  * The one dropdown (ARIA 1.2 combobox). Searchable: an input where focus or click opens the list with the text
@@ -254,7 +244,7 @@ export function Combobox({
     <div
       ref={panelRef}
       style={style ?? undefined}
-      className="fixed z-[60] flex min-h-0 flex-col border border-line-strong bg-surface"
+      className={cx("fixed z-[60] flex min-h-0 flex-col", surfaceClass)}
       // Keep focus (and any phone keyboard) on the control while picking.
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -288,14 +278,14 @@ export function Combobox({
             <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
               <span className="flex min-w-0 items-center gap-2">
                 <span className={cx("min-w-0 truncate text-ui", o.disabled === true ? "text-muted" : "text-fg")}>
-                  <Mark text={o.label} range={o.labelMatch} />
+                  <Highlight text={o.label} range={o.labelMatch} />
                 </span>
                 {o.chip === undefined && o.tag === undefined ? null : (
                   <span className="ml-auto flex shrink-0 items-center gap-2">
                     {o.chip === undefined ? null : <Chip>{o.chip}</Chip>}
                     {o.tag === undefined ? null : (
                       <span className="font-mono text-meta text-muted">
-                        <Mark text={o.tag} range={o.tagMatch} />
+                        <Highlight text={o.tag} range={o.tagMatch} />
                       </span>
                     )}
                   </span>
@@ -303,7 +293,7 @@ export function Combobox({
               </span>
               {o.detail === undefined ? null : (
                 <span className="truncate font-mono text-meta text-muted">
-                  <Mark text={o.detail} range={o.detailMatch} />
+                  <Highlight text={o.detail} range={o.detailMatch} />
                 </span>
               )}
             </span>
@@ -311,17 +301,13 @@ export function Combobox({
         ))}
       </div>
       {items.length === 0 ? <p className="px-3 py-3 text-small text-muted md:py-2">{emptyText}</p> : null}
-      <div className="hidden shrink-0 gap-3 border-t border-line bg-panel px-3 py-1.5 font-mono text-meta-sm text-muted md:flex">
-        <span>
-          <Kbd>↑↓</Kbd> move
-        </span>
-        <span>
-          <Kbd>↵</Kbd> select
-        </span>
-        <span>
-          <Kbd>Esc</Kbd> close
-        </span>
-      </div>
+      <KeyHints
+        hints={[
+          ["↑↓", "move"],
+          ["↵", "select"],
+          ["Esc", "close"],
+        ]}
+      />
     </div>
   );
 

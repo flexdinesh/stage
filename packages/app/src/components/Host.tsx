@@ -34,6 +34,7 @@ import {
   Button,
   Checkbox,
   ChoiceRow,
+  ConfirmInline,
   Detail,
   Details,
   ErrorText,
@@ -329,26 +330,25 @@ function LeaveConfirm({
   };
   const [question, detail] = leavePrompt(worker, onThisMachine);
   return (
-    <div className="flex flex-col gap-2">
-      <Alert tone="bad">
-        <p className="font-medium">{question}</p>
-        <p className="mt-1">{detail}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button small variant="danger" busy={busy === "server"} disabled={busy !== null} onClick={() => leave(false)}>
-            Leave {worker.serverName}
+    <ConfirmInline
+      danger
+      confirmLabel={`Leave ${worker.serverName}`}
+      busy={busy === "server"}
+      disabled={busy !== null}
+      onConfirm={() => leave(false)}
+      onCancel={onCancel}
+      error={error}
+      alternative={
+        error === null ? null : (
+          <Button small busy={busy === "local"} disabled={busy !== null} onClick={() => leave(true)}>
+            Forget it on this machine only
           </Button>
-          {error === null ? null : (
-            <Button small busy={busy === "local"} disabled={busy !== null} onClick={() => leave(true)}>
-              Forget it on this machine only
-            </Button>
-          )}
-          <Button small variant="ghost" autoFocus disabled={busy !== null} onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
-      </Alert>
-      <ErrorText error={error} />
-    </div>
+        )
+      }
+    >
+      <p className="font-medium">{question}</p>
+      <p className="mt-1">{detail}</p>
+    </ConfirmInline>
   );
 }
 

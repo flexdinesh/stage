@@ -12,7 +12,7 @@ import { useHarnessApi, useScopeMachineId, useSetupCopy } from "../api/harnessSc
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
+import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: refetch everything. */
 function useRefresh(): () => Promise<void> {
@@ -46,17 +46,9 @@ function ConnectOutcome({ address, connect, confirm }: { address: string; connec
   const { mutation, returned, confirming } = connect;
   if (!confirming) return <ErrorText error={mutation.error} />;
   return (
-    <Alert tone="bad">
-      <p>{returned ? returnedServicePrompt(address, current) : newServicePrompt(address, current)}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <Button small variant="primary" busy={mutation.isPending} onClick={confirm}>
-          {returned ? "Connect again" : "Connect as new service"}
-        </Button>
-        <Button small variant="ghost" autoFocus disabled={mutation.isPending} onClick={() => mutation.reset()}>
-          Cancel
-        </Button>
-      </div>
-    </Alert>
+    <ConfirmInline confirmLabel={returned ? "Connect again" : "Connect as new service"} busy={mutation.isPending} onConfirm={confirm} onCancel={() => mutation.reset()}>
+      {returned ? returnedServicePrompt(address, current) : newServicePrompt(address, current)}
+    </ConfirmInline>
   );
 }
 
@@ -360,17 +352,9 @@ function ConnectionActions({ info, checking, check, advanced }: { info: OpenCode
         </div>
       </div>
       {confirm ? (
-        <Alert tone="bad">
-          <p>Disconnect OpenCode? Tasks and history stay. You can connect again any time.</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button small variant="danger" busy={disconnect.isPending} onClick={() => disconnect.mutate()}>
-              Disconnect
-            </Button>
-            <Button small variant="ghost" autoFocus disabled={disconnect.isPending} onClick={() => setConfirm(false)}>
-              Cancel
-            </Button>
-          </div>
-        </Alert>
+        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
+          Disconnect OpenCode? Tasks and history stay. You can connect again any time.
+        </ConfirmInline>
       ) : null}
       <ErrorText error={disconnect.error} />
     </div>
@@ -521,17 +505,14 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
           </div>
         )}
         {changed ? (
-          <Alert tone="bad">
-            <p>{returned ? returnedServicePrompt(urls.endpoint.trim(), current) : newServicePrompt(urls.endpoint.trim(), current)}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button small variant="primary" busy={save.isPending} onClick={() => save.mutate(true)}>
-                {returned ? "Connect again" : "Connect as new service"}
-              </Button>
-              <Button small variant="ghost" autoFocus disabled={save.isPending} onClick={() => save.reset()}>
-                Cancel
-              </Button>
-            </div>
-          </Alert>
+          <ConfirmInline
+            confirmLabel={returned ? "Connect again" : "Connect as new service"}
+            busy={save.isPending}
+            onConfirm={() => save.mutate(true)}
+            onCancel={() => save.reset()}
+          >
+            {returned ? returnedServicePrompt(urls.endpoint.trim(), current) : newServicePrompt(urls.endpoint.trim(), current)}
+          </ConfirmInline>
         ) : (
           <ErrorText error={save.error} />
         )}

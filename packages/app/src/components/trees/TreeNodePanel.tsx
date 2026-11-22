@@ -10,7 +10,7 @@ import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconArrowRight, IconChainLink, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
-import { Button, EmptyState, ErrorText, Hint, IconButton, IdTag, MetaLine, Muted, Panel, Segmented, Combobox, SubHeading, TextButton, TextLink, cx, rowClass } from "../ui.tsx";
+import { Button, ConfirmInline, EmptyState, ErrorText, Hint, IconButton, IdTag, MetaLine, Muted, Panel, Segmented, Combobox, SubHeading, TextButton, TextLink, cx, rowClass } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeAction, NodeChip } from "./TreeNode.tsx";
 
@@ -305,29 +305,18 @@ export function TreeNodeEditor({
       {closed && error === null ? null : (
         <div className="flex flex-col gap-2 px-3 py-3">
           <ErrorText error={error} />
-          {closed ? null : (
+          {closed ? null : confirmRemove ? (
+            <ConfirmInline danger confirmLabel="Remove from tree" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmRemove(false)}>
+              Remove this task from the tree?{" "}
+              {dependents.length === 0 ? "The task stays, outside the tree." : "The task stays; its dependents take over its needs."}
+            </ConfirmInline>
+          ) : (
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {confirmRemove ? (
-                <>
-                  <Button variant="danger" small busy={remove.isPending} onClick={() => remove.mutate()}>
-                    Confirm remove
-                  </Button>
-                  <Button variant="ghost" small onClick={() => setConfirmRemove(false)}>
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <Button variant="danger" small onClick={() => setConfirmRemove(true)}>
-                  Remove from tree
-                </Button>
-              )}
+              <Button variant="danger" small onClick={() => setConfirmRemove(true)}>
+                Remove from tree
+              </Button>
             </div>
           )}
-          {confirmRemove ? (
-            <p className="font-mono text-meta text-muted">
-              {dependents.length === 0 ? "The task stays, outside the tree." : "The task stays; its dependents take over its needs."}
-            </p>
-          ) : null}
         </div>
       )}
     </>

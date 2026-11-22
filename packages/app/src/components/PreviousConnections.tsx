@@ -3,7 +3,7 @@ import { useScopeMachineId } from "../api/harnessScope.tsx";
 import { useForgetConnection, useHarnesses } from "../api/queries.ts";
 import type { Harness } from "../api/types.ts";
 import { forgetPrompt, previousConnections, usageText } from "../lib/harnesses.ts";
-import { Alert, Button, ErrorText, MetaLine, RelTime, Row, RowList, SubHeading, cx } from "./ui.tsx";
+import { Button, ConfirmInline, MetaLine, RelTime, Row, RowList, SubHeading, cx } from "./ui.tsx";
 
 /** Settings: a harness's replaced, not forgotten connections on the harness scope's machine, each with Forget behind an inline confirm. Hidden when none. */
 export function PreviousConnections({ harness, className }: { harness: Harness; className?: string }) {
@@ -34,24 +34,17 @@ export function PreviousConnections({ harness, className }: { harness: Harness; 
               </Button>
             </div>
             {confirm === c.id ? (
-              <Alert tone="bad">
-                <p>{forgetPrompt(c)}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    small
-                    variant="danger"
-                    busy={forget.isPending}
-                    onClick={() => forget.mutate(c.id, { onSuccess: () => setConfirm(null) })}
-                  >
-                    Forget
-                  </Button>
-                  <Button small variant="ghost" autoFocus disabled={forget.isPending} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              </Alert>
+              <ConfirmInline
+                danger
+                confirmLabel="Forget"
+                busy={forget.isPending}
+                error={forget.error}
+                onConfirm={() => forget.mutate(c.id, { onSuccess: () => setConfirm(null) })}
+                onCancel={() => setConfirm(null)}
+              >
+                {forgetPrompt(c)}
+              </ConfirmInline>
             ) : null}
-            {confirm === c.id ? <ErrorText error={forget.error} /> : null}
           </Row>
         ))}
       </RowList>

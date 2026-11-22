@@ -11,7 +11,7 @@ import { dateTime } from "../lib/format.ts";
 import { countdown, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Hint, Input, Marker, Muted, Panel, QueryState, Row, RowList, SubHeading, buttonClass, CommandBox } from "./ui.tsx";
+import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, Input, Marker, Muted, Panel, QueryState, Row, RowList, SubHeading, buttonClass, CommandBox } from "./ui.tsx";
 
 export function MachinesCard() {
   const machines = useMachines();
@@ -109,23 +109,21 @@ function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; s
         </div>
       )}
       {mode === "remove" ? (
-        <Alert tone="bad">
+        <ConfirmInline
+          danger
+          confirmLabel="Remove machine"
+          busy={remove.isPending}
+          error={remove.error}
+          onConfirm={() => remove.mutate(m.id)}
+          onCancel={() => setMode("view")}
+        >
           {removePrompt(m, usage, harnesses.kindName).map((line, i) => (
             <p key={i} className={i === 0 ? "font-medium" : "mt-1"}>
               {line}
             </p>
           ))}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button small variant="danger" busy={remove.isPending} onClick={() => remove.mutate(m.id)}>
-              Remove machine
-            </Button>
-            <Button small variant="ghost" autoFocus disabled={remove.isPending} onClick={() => setMode("view")}>
-              Cancel
-            </Button>
-          </div>
-        </Alert>
+        </ConfirmInline>
       ) : null}
-      {mode === "remove" ? <ErrorText error={remove.error} /> : null}
     </Row>
   );
 }

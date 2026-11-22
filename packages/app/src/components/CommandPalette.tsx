@@ -1,7 +1,6 @@
 import { projectWorkspace } from "../lib/projects.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -11,7 +10,7 @@ import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, type LinkSubject } from "./StageLinks.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { Chip, Kbd, activeRowClass, cx, useCopy } from "./ui.tsx";
+import { Button, Chip, EmptyState, Highlight, KeyHints, ModalLayer, activeRowClass, cx, rovingIndex, useCopy } from "./ui.tsx";
 
 /** A closed item's plain chip (archived, done, tree done) beside its other badge. */
 function ClosedBadge({ label, children }: { label: string | null; children?: ReactNode }) {
@@ -52,17 +51,10 @@ const PAGES: [string, string][] = [
 
 const has = (text: string, q: string) => text.toLowerCase().includes(q);
 
-/** Bold the first case-insensitive occurrence of `q` in `text`. */
-function Highlight({ text, q }: { text: string; q: string }) {
+/** The first case-insensitive occurrence of `q` in `text`, for `Highlight`. */
+function matchOf(text: string, q: string): { start: number; end: number } | null {
   const i = q === "" ? -1 : text.toLowerCase().indexOf(q);
-  if (i < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, i)}
-      <b className="font-semibold text-fg">{text.slice(i, i + q.length)}</b>
-      {text.slice(i + q.length)}
-    </>
-  );
+  return i < 0 ? null : { start: i, end: i + q.length };
 }
 
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
@@ -135,22 +127,13 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
 
   const found = items.findIndex((item) => item.key === activeKey);
   const active = found < 0 ? 0 : found;
-  const move = (delta: number) => {
-    const next = items[Math.min(Math.max(active + delta, 0), items.length - 1)];
-    if (next !== undefined) setActiveKey(next.key);
-  };
-
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    const step = e.key === "ArrowDown" || e.key === "ArrowUp" ? rovingIndex(e.key, active, items.length) : null;
+    if (step !== null) {
       e.preventDefault();
-      onClose();
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      move(1);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      move(-1);
+      const next = items[step];
+      if (next !== undefined) setActiveKey(next.key);
     } else if (e.altKey && e.code === "KeyC") {
       // e.code: Option+C on macOS types "ç" in e.key.
       e.preventDefault();
@@ -172,15 +155,13 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   }
 
   let lastGroup = "";
-  return createPortal(
-    <div className="fixed inset-0 z-50" onKeyDown={onKey}>
-      <div className="absolute inset-0 bg-scrim" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        className="absolute inset-0 flex flex-col bg-surface pt-[var(--inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:inset-auto md:p-0 md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
-      >
+  return (
+    <ModalLayer
+      label="Command palette"
+      onClose={onClose}
+      className="inset-0 flex flex-col bg-surface pt-[var(--inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:inset-auto md:p-0 md:top-[72px] md:left-1/2 md:max-h-[70vh] md:w-[660px] md:-translate-x-1/2 md:border md:border-line-strong md:shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+    >
+      <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKey}>
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="text-muted">
             <IconSearch size={14} />
@@ -192,6 +173,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
               setActiveKey(null);
             }}
             autoFocus
+            data-autofocus
             placeholder="Search tasks, trees, projects"
             aria-label="Search"
             role="combobox"
@@ -200,15 +182,13 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             aria-activedescendant={items[active]?.key}
             className="min-w-0 flex-1 bg-transparent text-input outline-none"
           />
-          <button type="button" onClick={onClose} className="-mr-2 h-10 px-2 text-small text-muted md:hidden">
+          <Button variant="ghost" onClick={onClose} className="-mr-2 md:hidden">
             Cancel
-          </button>
+          </Button>
         </div>
         <div id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
           {items.length === 0 ? (
-            <p className="px-4 py-6 text-small text-muted">
-              {`Nothing matches "${query.trim()}".`}
-            </p>
+            <EmptyState className="px-4 py-6">{`Nothing matches "${query.trim()}".`}</EmptyState>
           ) : (
             items.map((item, i) => {
               const header = item.group !== lastGroup ? item.group : null;
@@ -234,7 +214,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                     <div className="flex items-center gap-2.5">
                       {item.badge}
                       <span className="min-w-0 truncate text-fg/90">
-                        <Highlight text={item.label} q={q} />
+                        <Highlight text={item.label} range={matchOf(item.label, q)} />
                       </span>
                       {hint === null && tag === null ? null : (
                         <span className="ml-auto flex max-w-[40%] min-w-0 shrink-0 pl-3 font-mono text-meta whitespace-nowrap text-muted md:max-w-none">
@@ -245,7 +225,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                     </div>
                     {typeof item.detail !== "string" ? null : (
                       <div className="mt-0.5 truncate font-mono text-meta text-muted">
-                        <Highlight text={item.detail} q={q} />
+                        <Highlight text={item.detail} range={matchOf(item.detail, q)} />
                       </div>
                     )}
                   </div>
@@ -254,28 +234,20 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             })
           )}
         </div>
-        <div className="hidden shrink-0 gap-4 border-t border-line bg-panel px-4 py-2 font-mono text-meta-sm whitespace-nowrap text-muted md:flex">
-          <span>
-            <Kbd>↑↓</Kbd> move
-          </span>
-          <span>
-            <Kbd>↵</Kbd> open
-          </span>
-          <span>
-            <Kbd>Ctrl ↵</Kbd> open session
-          </span>
-          <span>
-            <Kbd>Alt C</Kbd> copy link
-          </span>
-          <span>
-            <Kbd>Esc</Kbd> close
-          </span>
-          <span className="ml-auto min-w-0 truncate" aria-live="polite">
+        <KeyHints
+          hints={[
+            ["↑↓", "move"],
+            ["↵", "open"],
+            ["Ctrl ↵", "open session"],
+            ["Alt C", "copy link"],
+            ["Esc", "close"],
+          ]}
+        >
+          <span aria-live="polite">
             {copyStatus === "copied" ? <span className="text-fg">Copied {copiedName}</span> : copyStatus === "failed" ? <span className="text-bad">Copy failed</span> : null}
           </span>
-        </div>
+        </KeyHints>
       </div>
-    </div>,
-    document.body,
+    </ModalLayer>
   );
 }
