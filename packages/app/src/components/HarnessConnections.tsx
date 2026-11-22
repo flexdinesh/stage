@@ -25,7 +25,7 @@ export function HarnessConnections() {
   const descriptors = useScopedHarnessDescriptors();
   const connectable = (descriptors.data?.harnesses ?? []).filter((d) => d.connectable);
   return (
-    <QueryState isPending={descriptors.isPending} error={descriptors.error}>
+    <QueryState isPending={descriptors.isPending} error={descriptors.error} hasData={descriptors.data !== undefined}>
       {connectable.map((d) => {
         const Own = CONNECTION_PANELS[d.kind];
         return Own === undefined ? <ConnectionCard key={d.kind} descriptor={d} /> : <Own key={d.kind} />;
@@ -49,7 +49,7 @@ export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }
         )
       }
     >
-      <QueryState isPending={status.isPending} error={status.error}>
+      <QueryState isPending={status.isPending} error={status.error} hasData={status.data !== undefined}>
         {status.data === undefined ? null : <ConnectionBody descriptor={descriptor} status={status.data} />}
       </QueryState>
     </Panel>
@@ -138,8 +138,10 @@ function SettingsForm({ descriptor, status }: { descriptor: HarnessDescriptor; s
   const apply = useApply(descriptor.kind);
   const fields = descriptor.setup.fields;
   const [values, setValues] = useState<Values>(() => initialValues(fields, status.fields));
+  // Compared with the fields as the form opened, not the live poll: an untouched field never reverts a change made elsewhere.
+  const [opened] = useState(status.fields);
   const save = useMutation({
-    mutationFn: () => api.configureHarness(descriptor.kind, settingsBody(fields, status.fields, values)),
+    mutationFn: () => api.configureHarness(descriptor.kind, settingsBody(fields, opened, values)),
     onSuccess: apply,
   });
   const submit = (e: FormEvent) => {

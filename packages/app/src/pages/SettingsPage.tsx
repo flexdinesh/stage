@@ -46,7 +46,7 @@ function UserCard() {
   const me = useMe();
   return (
     <Panel title="User" meta="no sign-in">
-      <QueryState isPending={me.isPending} error={me.error}>
+      <QueryState isPending={me.isPending} error={me.error} hasData={me.data !== undefined}>
         {me.data === undefined ? null : (
           <div className="flex flex-col gap-3">
             <div className="min-w-0">
@@ -117,7 +117,7 @@ function DefaultModelCard() {
   const pinned = prefs.data?.pinned != null;
   return (
     <Panel title="T3 default model" {...(prefs.data === undefined ? {} : { meta: pinned ? "pinned" : "last used" })}>
-      <QueryState isPending={prefs.isPending} error={prefs.error}>
+      <QueryState isPending={prefs.isPending} error={prefs.error} hasData={prefs.data !== undefined}>
         {prefs.data === undefined ? null : <DefaultModelForm prefs={prefs.data} />}
       </QueryState>
     </Panel>
@@ -218,7 +218,7 @@ function EventFilter() {
     save.mutate(EVENTS.map((e) => e.event).filter((e) => (e === event ? on : enabled.includes(e))));
   return (
     <FieldGroup label="Events" meta="all devices" aria-busy={pending > 0}>
-      <QueryState isPending={prefs.isPending} error={prefs.error}>
+      <QueryState isPending={prefs.isPending} error={prefs.error} hasData={prefs.data !== undefined}>
         <Muted>
           {enabled.length === 0
             ? "All events off. Nothing is recorded or pushed."
@@ -300,7 +300,7 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
         <section className="flex flex-col gap-3 border-t border-line pt-4" aria-label="This device">
           <SubHeading title="This device" />
           <Muted>{copy.intro}</Muted>
-          <QueryState isPending={state.isPending} error={state.error}>
+          <QueryState isPending={state.isPending} error={state.error} hasData={state.data !== undefined}>
             {state.data === "insecure" ? (
               <Alert
                 tone="plain"

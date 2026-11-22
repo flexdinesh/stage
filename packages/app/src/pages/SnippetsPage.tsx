@@ -85,6 +85,7 @@ export function SnippetsPage() {
       <QueryState
         isPending={snippets.isPending}
         error={snippets.error}
+        hasData={snippets.data !== undefined}
         empty={list.length === 0}
         emptyText="No snippets yet. Create one, then type / in a task prompt to insert it."
       >

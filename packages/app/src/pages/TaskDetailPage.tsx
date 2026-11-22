@@ -72,8 +72,7 @@ function TaskDetailView({ id }: { id: number }) {
     markViewed([`task:${id}`]);
   }, [notifications, id, markViewed]);
   return (
-    <QueryState isPending={task.isPending} error={task.data === undefined ? task.error : null} skeleton={<TaskDetailSkeleton />}>
-      {task.data === undefined ? null : <ErrorText error={task.error} />}
+    <QueryState isPending={task.isPending} error={task.error} hasData={task.data !== undefined} skeleton={<TaskDetailSkeleton />}>
       {task.data === undefined ? null : <TaskBody key={id} task={task.data} />}
     </QueryState>
   );

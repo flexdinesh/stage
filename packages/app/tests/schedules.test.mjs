@@ -8,6 +8,8 @@ import {
   defaultStartLocal,
   localToInstant,
   parseCron,
+  parsePreviewKey,
+  previewKey,
   repeatSummary,
   toLocalInput,
   until,
@@ -94,4 +96,11 @@ test("lastRun flags only failed or fire-blocking runs", () => {
   assert.deepEqual(lastRun(214, "needs_input"), { kind: "flag", skip: "skips until #214 is answered" });
   assert.deepEqual(lastRun(190, "failed"), { kind: "flag", skip: null });
   assert.deepEqual(lastRun(190, "interrupted"), { kind: "flag", skip: null });
+});
+
+test("a preview key is stable by value and round-trips its input", () => {
+  // The debounced preview input compares by value; an object made each render would never settle.
+  assert.equal(previewKey("0 9 * * *", "Europe/Paris"), previewKey("0 9 * * *", "Europe/Paris"));
+  assert.deepEqual(parsePreviewKey(previewKey("*/5 * * * *", "UTC")), { cron: "*/5 * * * *", tz: "UTC" });
+  assert.equal(parsePreviewKey(null), null);
 });

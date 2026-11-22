@@ -20,7 +20,7 @@ export function MachinePage() {
   if (id === null) return <NotFoundPage />;
   const m = machines.machines.find((x) => x.id === id);
   return (
-    <QueryState isPending={machines.isPending} error={machines.error}>
+    <QueryState isPending={machines.isPending} error={machines.error} hasData={machines.data !== undefined}>
       {machines.data === undefined ? null : m === undefined ? (
         <NotFoundPage />
       ) : m.kind === "local" ? (

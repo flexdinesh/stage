@@ -24,6 +24,8 @@ import {
   defaultStartLocal,
   localToInstant,
   parseCron,
+  parsePreviewKey,
+  previewKey,
   repeatSummary,
   timeZones,
   toLocalInput,
@@ -35,7 +37,7 @@ import {
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
 import { choiceToWorkspace, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
-import { isFullyEditable } from "../lib/tasks.ts";
+import { isFullyEditable, taskEditBaseline, taskEditChanges } from "../lib/tasks.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
@@ -205,8 +207,8 @@ function initialState(
 }
 
 
-/** Value that settles `ms` after its last change (preview requests while typing a cron). */
-function useDebounced<T>(value: T, ms: number): T {
+/** Value that settles `ms` after its last change (preview requests while typing a cron). Pass a primitive: a new object each render never settles. */
+function useDebounced<T extends string | null>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setSettled(value), ms);
@@ -255,6 +257,8 @@ function TaskFormDrawer({
 }: TaskFormProps & { prefill: { defaults: ModelDefaults; source: DefaultsSource } | null }) {
   const api = useApi();
   const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, defaultTree));
+  // The task and form state as the form opened: a save sends only what differs from them.
+  const [opened] = useState(() => (task === undefined ? null : { task, state: s }));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const projects = useProjects();
   const invalidate = useInvalidateWork();
@@ -328,7 +332,7 @@ function TaskFormDrawer({
   const startPast = startMs !== null && startMs <= now;
 
   const cron = buildCron(s.repeat);
-  const previewInput = useDebounced(mode === "repeat" && cron !== "" && tzValid ? { cron, tz: s.tz } : null, 300);
+  const previewInput = parsePreviewKey(useDebounced(mode === "repeat" && cron !== "" && tzValid ? previewKey(cron, s.tz) : null, 300));
   const preview = useSchedulePreview(previewInput);
   const previewStale = previewInput === null || previewInput.cron !== cron || previewInput.tz !== s.tz;
   const previewError = mode === "repeat" && !previewStale && preview.isError ? errorText(preview.error) : null;
@@ -356,18 +360,27 @@ function TaskFormDrawer({
       }
       const timed = mode === "at" ? { startLocal: s.startLocal, startTz: s.tz } : null;
       if (task !== undefined) {
-        const body: UpdateTaskRequest = full ? { ...template(), attachmentIds: images.ids } : { title: s.title.trim() };
+        // Compared with the task and form as they opened, so untouched fields never revert another client's change.
+        const before = opened?.task ?? task;
+        const body: UpdateTaskRequest = full
+          ? taskEditChanges(taskEditBaseline(before), { ...template(), attachmentIds: images.ids })
+          : { title: s.title.trim() };
         if (full) {
-          if (needs.length > 0 && s.handoff !== task.handoff) body.handoff = s.handoff;
-          if (inTree && s.treeStart !== (task.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
+          if (needs.length > 0 && s.handoff !== before.handoff) body.handoff = s.handoff;
+          if (inTree && s.treeStart !== (before.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
           if (timed !== null) {
-            body.startLocal = timed.startLocal;
-            body.startTz = timed.startTz;
-          } else if (task.startAt !== null) {
+            const sameStart = opened !== null && opened.state.mode === "at" && opened.state.startLocal === timed.startLocal && opened.state.tz === timed.startTz;
+            if (!sameStart) {
+              body.startLocal = timed.startLocal;
+              body.startTz = timed.startTz;
+            }
+          } else if (before.startAt !== null) {
             body.startLocal = null;
             body.startTz = null;
           }
         }
+        // Nothing changed: no request, so nothing on the server is touched.
+        if (Object.keys(body).length === 0) return { kind: "task", task };
         return { kind: "task", task: await api.updateTask(task.id, body) };
       }
       const body: CreateTaskRequest = {

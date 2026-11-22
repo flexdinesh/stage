@@ -137,6 +137,7 @@ function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: G
     <QueryState
       isPending={live.isPending || settled.isPending}
       error={live.error ?? settled.error}
+      hasData={live.data !== undefined && settled.data !== undefined}
       stale={live.isPlaceholderData || settled.isPlaceholderData}
       skeleton={
         <>
@@ -200,6 +201,7 @@ function ClosedTasks({ view, tree }: { view: "closed" | "all"; tree: TreeFilter 
     <QueryState
       isPending={tasks.isPending}
       error={tasks.error}
+      hasData={tasks.data !== undefined}
       stale={tasks.isPlaceholderData}
       skeleton={
         <Panel flush title="Tasks">

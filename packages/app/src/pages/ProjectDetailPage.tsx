@@ -2,7 +2,7 @@ import { ProjectWorkspace } from "../components/ProjectWorkspace.tsx";
 import { projectWorkspace } from "../lib/projects.ts";
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { useProject, useSchedules, useTasks } from "../api/queries.ts";
+import { isNotFound, useProject, useSchedules, useTasks } from "../api/queries.ts";
 import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
@@ -12,7 +12,7 @@ import { TaskRows } from "../components/TaskList.tsx";
 import { Button, PageHeader, Panel, QueryState, Segmented, Combobox } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
-import { NotFoundPage } from "./NotFoundPage.tsx";
+import { NotFoundPage, RecordNotFound } from "./NotFoundPage.tsx";
 
 /** Open: not archived and not in a done or archived tree; Closed: done or archived. */
 type Scope = "open" | "closed" | "all";
@@ -25,7 +25,8 @@ const SCOPES: { value: Scope; label: string }[] = [
 
 export function ProjectDetailPage() {
   const id = useIdParam();
-  return id === null ? <NotFoundPage /> : <ProjectDetail id={id} />;
+  // Keyed: another project's drafts, filters and drawers never carry over (Back/Forward reuses the route element).
+  return id === null ? <NotFoundPage /> : <ProjectDetail key={id} id={id} />;
 }
 
 function ProjectDetail({ id }: { id: number }) {
@@ -44,8 +45,11 @@ function ProjectDetail({ id }: { id: number }) {
   const schedules = useSchedules({ project: id });
   const scheduleList = schedules.data?.schedules ?? [];
 
+  if (isNotFound(project.error)) {
+    return <RecordNotFound title="Project not found" meta={`project ${id}`} text="This project was deleted or does not exist." back={{ to: "/projects", label: "Back to projects" }} />;
+  }
   return (
-    <QueryState isPending={project.isPending} error={project.error}>
+    <QueryState isPending={project.isPending} error={project.error} hasData={project.data !== undefined}>
       {project.data === undefined ? null : (
         <>
           <PageHeader
@@ -82,7 +86,7 @@ function ProjectDetail({ id }: { id: number }) {
                   </Button>
                 }
               >
-                <QueryState isPending={false} error={schedules.error}>
+                <QueryState isPending={false} error={schedules.error} hasData={schedules.data !== undefined}>
                   <ScheduleRows schedules={scheduleList} />
                 </QueryState>
               </Panel>
@@ -105,7 +109,7 @@ function ProjectDetail({ id }: { id: number }) {
                 </div>
               }
             >
-              <QueryState isPending={tasks.isPending} error={tasks.error} stale={tasks.isPlaceholderData}>
+              <QueryState isPending={tasks.isPending} error={tasks.error} hasData={tasks.data !== undefined} stale={tasks.isPlaceholderData}>
                 <TaskRows
                   tasks={tasks.data?.tasks ?? []}
                   emptyText={

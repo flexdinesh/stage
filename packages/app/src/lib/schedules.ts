@@ -110,6 +110,21 @@ export function timeZones(include: string): string[] {
   return [...out].toSorted();
 }
 
+/**
+ * A schedule preview input as one string, so a debounced copy compares by value and stays stable between renders
+ * (a fresh object each render would restart the debounce forever). Neither a cron nor a zone holds a newline.
+ */
+export function previewKey(cron: string, tz: string): string {
+  return `${cron}\n${tz}`;
+}
+
+/** The preview input a `previewKey` names; null for none. */
+export function parsePreviewKey(key: string | null): { cron: string; tz: string } | null {
+  if (key === null) return null;
+  const at = key.indexOf("\n");
+  return at < 0 ? null : { cron: key.slice(0, at), tz: key.slice(at + 1) };
+}
+
 export function validTimeZone(tz: string): boolean {
   if (tz === "") return false;
   try {

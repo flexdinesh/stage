@@ -87,7 +87,7 @@ export function BindWorkspaceDrawer({
             />
           )}
         </Field>
-        <QueryState isPending={external.isPending} error={external.error}>
+        <QueryState isPending={external.isPending} error={external.error} hasData={external.data !== undefined}>
           <Panel title={`${name} workspaces`} flush>
             {candidates.length === 0 ? (
               <EmptyState inset>No matching workspaces. Open the project in {name} and refresh.</EmptyState>
@@ -224,8 +224,8 @@ export function ProjectWorkspace({ project }: { project: Project }) {
     await qc.invalidateQueries();
   };
   const update = useMutation({
-    mutationFn: (archived: boolean) =>
-      api.updateProject(project.id, { title: title.trim(), archived }),
+    // Archive sends the live title, never the draft: the endpoint takes both fields.
+    mutationFn: (body: { title: string; archived: boolean }) => api.updateProject(project.id, body),
     onSuccess: async () => {
       setEditing(false);
       await refresh();
@@ -248,7 +248,15 @@ export function ProjectWorkspace({ project }: { project: Project }) {
       <Panel
         title="Workspace"
         actions={
-          <Button small variant="ghost" onClick={() => setEditing(!editing)}>
+          <Button
+            small
+            variant="ghost"
+            onClick={() => {
+              // The draft starts from the current title each time editing opens.
+              if (!editing) setTitle(project.title);
+              setEditing(!editing);
+            }}
+          >
             Edit project
           </Button>
         }
@@ -265,13 +273,13 @@ export function ProjectWorkspace({ project }: { project: Project }) {
                 <Button
                   disabled={title.trim() === ""}
                   busy={update.isPending}
-                  onClick={() => update.mutate(project.archivedAt !== null)}
+                  onClick={() => update.mutate({ title: title.trim(), archived: project.archivedAt !== null })}
                 >
                   Save title
                 </Button>
                 <Button
                   busy={update.isPending}
-                  onClick={() => update.mutate(project.archivedAt === null)}
+                  onClick={() => update.mutate({ title: project.title, archived: project.archivedAt === null })}
                 >
                   {project.archivedAt === null ? "Archive project" : "Unarchive project"}
                 </Button>

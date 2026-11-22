@@ -390,7 +390,7 @@ const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${
 export function T3ConnectionPanel() {
   const status = useT3Status();
   return (
-    <QueryState isPending={status.isPending} error={status.error}>
+    <QueryState isPending={status.isPending} error={status.error} hasData={status.data !== undefined}>
       {status.data === undefined ? null : (
         <>
           <StatusCard status={status.data} />

@@ -5,6 +5,7 @@ import type { Platform } from "./platform/index.ts";
 import { PlatformProvider } from "./platform/context.tsx";
 import { router } from "./router.tsx";
 import { HostGate } from "./components/Host.tsx";
+import { AppErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { isServerSwitch } from "./lib/host.ts";
 
 /** The whole Stage UI. A host renders it with its platform adapters and the app stylesheet (`@stage/app/index.css`). */
@@ -30,13 +31,15 @@ export function StageApp({ platform }: { platform: Platform }) {
   }, [platform, queryClient]);
   return (
     <StrictMode>
-      <PlatformProvider platform={platform}>
-        <QueryClientProvider client={queryClient}>
-          <HostGate>
-            <RouterProvider router={router} />
-          </HostGate>
-        </QueryClientProvider>
-      </PlatformProvider>
+      <AppErrorBoundary>
+        <PlatformProvider platform={platform}>
+          <QueryClientProvider client={queryClient}>
+            <HostGate>
+              <RouterProvider router={router} />
+            </HostGate>
+          </QueryClientProvider>
+        </PlatformProvider>
+      </AppErrorBoundary>
     </StrictMode>
   );
 }

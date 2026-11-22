@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
+import { isNotFound, useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { RefText } from "../components/StageLinks.tsx";
 import { ImageStrip } from "../components/Images.tsx";
@@ -34,17 +34,21 @@ import {
 import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { cronSummary, wallTime } from "../lib/schedules.ts";
-import { NotFoundPage } from "./NotFoundPage.tsx";
+import { NotFoundPage, RecordNotFound } from "./NotFoundPage.tsx";
 
 export function ScheduleDetailPage() {
   const id = useIdParam();
-  return id === null ? <NotFoundPage /> : <ScheduleDetailView id={id} />;
+  // Keyed: another schedule's edit, delete confirm and run result never carry over.
+  return id === null ? <NotFoundPage /> : <ScheduleDetailView key={id} id={id} />;
 }
 
 function ScheduleDetailView({ id }: { id: number }) {
   const schedule = useSchedule(id);
+  if (isNotFound(schedule.error)) {
+    return <RecordNotFound title="Schedule not found" meta={`schedule ${id}`} text="This schedule was deleted or does not exist." back={{ to: "/schedules", label: "Back to schedules" }} />;
+  }
   return (
-    <QueryState isPending={schedule.isPending} error={schedule.error}>
+    <QueryState isPending={schedule.isPending} error={schedule.error} hasData={schedule.data !== undefined}>
       {schedule.data === undefined ? null : <ScheduleBody schedule={schedule.data} />}
     </QueryState>
   );

@@ -1,4 +1,5 @@
-import type { Task, TaskState } from "../api/types.ts";
+import type { Task, TaskState, UpdateTaskRequest } from "../api/types.ts";
+import { changedFields } from "./changes.ts";
 import { isRetired } from "./harnesses.ts";
 
 const STARTABLE: readonly TaskState[] = ["backlog", "failed", "interrupted", "cancelled"];
@@ -52,3 +53,34 @@ export function moveItem<T>(items: readonly T[], from: number, by: number): T[] 
 /** Number of tasks in a batch. */
 export const batchSize = (b: { trees: readonly { tasks: readonly Task[] }[]; independent: readonly Task[] }) =>
   b.trees.reduce((n, t) => n + t.tasks.length, 0) + b.independent.length;
+
+// ---- Editing ----
+
+/** A task's editable fields as an edit form opened, in update-body shape: what `taskEditChanges` compares against. */
+export function taskEditBaseline(task: Task): UpdateTaskRequest {
+  const config = task.executionConfig;
+  return {
+    projectId: task.projectId,
+    title: task.title,
+    prompt: task.prompt,
+    connectionId: task.connectionId,
+    ...(config === null || config === undefined ? {} : { executionConfig: { ...config, options: config.options ?? [] } }),
+    workspace: task.workspace,
+    attachmentIds: task.attachments.map((a) => a.id),
+  };
+}
+
+/**
+ * The update body for a full edit: only the fields that differ from the baseline, so an untouched field never
+ * reverts a change another client made while the form was open. A new project or harness also carries the
+ * execution config and workspace, which the server checks against them.
+ */
+export function taskEditChanges(baseline: UpdateTaskRequest, next: UpdateTaskRequest): UpdateTaskRequest {
+  const body = changedFields(baseline, next);
+  if (body.projectId === undefined && body.connectionId === undefined) return body;
+  return {
+    ...body,
+    ...(next.executionConfig === undefined ? {} : { executionConfig: next.executionConfig }),
+    ...(next.workspace === undefined ? {} : { workspace: next.workspace }),
+  };
+}

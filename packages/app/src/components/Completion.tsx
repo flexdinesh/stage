@@ -83,7 +83,7 @@ export function CompletionDrawer({ task, reopen, to, onClose }: { task: Task; re
   const invalidate = useInvalidateWork();
   const [note, setNote] = useState("");
   const pendingRequest = useRef<AcceptanceRequest | null>(null);
-  const preview = useQuery({ queryKey: ["completion-preview", task.id], queryFn: () => api.completionPreview(task.id), staleTime: 0, refetchOnWindowFocus: false });
+  const preview = useQuery({ queryKey: ["completion-preview", task.id], queryFn: () => api.completionPreview(task.id), staleTime: 0, refetchOnWindowFocus: false, refetchInterval: false });
   const change = useMutation({
     mutationFn: async () => {
       const p = preview.data;
@@ -105,7 +105,7 @@ export function CompletionDrawer({ task, reopen, to, onClose }: { task: Task; re
     <div className="flex flex-col gap-4">
       <p className="text-body font-medium break-words">#{task.id} {task.title}</p>
       <StateChange task={task} to={to} />
-      <QueryState isPending={preview.isPending} error={preview.error}>
+      <QueryState isPending={preview.isPending} error={preview.error} hasData={preview.data !== undefined}>
         {p === undefined ? null : <>
           {reopen ? <p className="text-small">Remove current acceptance. Previous results stay in the journal and accepted-result history. This does not start execution.</p> : <><Evidence evidence={p.evidence} /><Field label="Acceptance note (optional)">{(id) => <Textarea id={id} value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder="Why you accept this work" />}</Field>{tooLong ? <InlineError>Keep the note under 16 KiB.</InlineError> : null}</>}
           {task.treeStatus !== null && task.treeStatus !== "open" ? <Alert>The tree stays closed. Reopen the tree separately to resume scheduling.</Alert> : null}

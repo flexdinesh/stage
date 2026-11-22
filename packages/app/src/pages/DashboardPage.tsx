@@ -149,6 +149,7 @@ function Dashboard() {
       <QueryState
         isPending={tasks.isPending}
         error={tasks.error}
+        hasData={tasks.data !== undefined}
         stale={tasks.isPlaceholderData}
         skeleton={
           <>
