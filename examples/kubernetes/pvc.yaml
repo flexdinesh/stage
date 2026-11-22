@@ -1,0 +1,17 @@
+# Data dir for the Stage main server: stage.db, its backups and stage.lock.
+# Use a block-backed storage class (a cloud disk, local-path, Longhorn, Ceph
+# RBD), never NFS or another network filesystem: the data-dir flock and SQLite
+# both need a local filesystem. ReadWriteOnce: one pod mounts it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stage-data
+  labels:
+    app.kubernetes.io/name: stage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # storageClassName: <block-backed class>
+  resources:
+    requests:
+      storage: 1Gi

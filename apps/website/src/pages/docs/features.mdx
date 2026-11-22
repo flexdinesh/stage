@@ -104,6 +104,16 @@ T3 tasks prefill provider, model, effort, runtime and mode from a pinned default
 
 Agents create, start and manage tasks and trees, and read and write journals, via the `stage` CLI or MCP (stdio or HTTP). See [Agents](/docs/agents).
 
+## Machines
+
+Run harnesses on more than one machine with one main server ([Main server and workers](/docs/deploy#main-server-and-workers)).
+
+- **Settings > Machines** lists every machine, this server first, with online or offline, last seen, its build (flagged when it differs from the server's) and its harness connections. Rename inline; remove a remote machine behind a confirm that says what happens to its worker, connections and tasks.
+- **Add machine** creates a one-time pairing link (10 minutes) and the copyable `stage worker join <link>` command, counts down, and shows when the worker joins. Closing it while waiting revokes the code.
+- **Per-machine harnesses**: a remote machine's page (Settings > Machines > its name) has the same T3, OpenCode and connection panels, run on that machine through its worker. Credentials stay on the machine. Offline, the page says why and lists its connections read-only.
+- **Pickers**: with more than one machine, connection pickers (task and schedule Harness, shared paths, adopt session, project workspaces) tag each harness with its machine. The task and schedule Harness picker lists a chosen project's bound connections first.
+- **Projects across machines**: the same Git origin remote and subproject on another machine joins the one project that has it; ambiguous matches wait for a manual bind.
+
 ## Settings
 
 The current user (Stage has no sign-in: everything is attributed to one default user), independent T3 and OpenCode connection diagnostics, T3 pairing (Pair with T3 or a pairing code), OpenCode connection (one click for the service on this machine, an `opencode pair` link for another, Disconnect), the T3 URL (locked when `T3_URL` sets it), sync now (a full sync also runs every 5 min), the default model, the notification event filter, and theme. The desktop app adds its saved servers and login startup.

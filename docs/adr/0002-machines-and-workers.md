@@ -344,7 +344,8 @@ Stage tree 197 (auto start). Each task ships as its own PR.
 - An embedded install is unchanged. Phases 1 and 2 are refactors with no
   behavior change.
 - Stage gains its first authentication, scoped to `/api/worker/*`. Proxy
-  deployments must let that prefix through (#349 documents it).
+  deployments must let that prefix through
+  ([runtime.md](../runtime.md#remote-main-server-and-workers), #349).
 - A machine token is a credential with agent-level access through the
   gateway. Removing the machine revokes it.
 - The main server stays a single replica: data-dir lock, SQLite on a local

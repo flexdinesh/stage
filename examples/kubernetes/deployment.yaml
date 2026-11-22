@@ -1,0 +1,100 @@
+# The Stage main server: the database, scheduling, journals, the UI, /api and
+# /mcp. Harnesses run on workers (laptops) that dial out to STAGE_PUBLIC_URL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stage
+  labels:
+    app.kubernetes.io/name: stage
+spec:
+  # Exactly one: one server owns one data dir (flock on stage.lock) and its
+  # SQLite database. A second pod on the same volume exits at startup (status
+  # 75); on a network filesystem, where flock is unreliable, two servers could
+  # run on one database.
+  replicas: 1
+  # Stop the old pod before starting the new one, so an update never has two
+  # servers on the volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stage
+    spec:
+      # Above the server's 100s drain for in-flight requests.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        # distroless nonroot; fsGroup makes the volume writable for it.
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: stage
+          # Built from the repository Dockerfile at the release tag your
+          # workers run (README.md), pushed to your registry.
+          image: registry.example.com/stage:VERSION
+          ports:
+            - name: http
+              containerPort: 7380
+          env:
+            # The HTTPS URL users and workers reach (your auth proxy). Its
+            # origin is trusted, pairing links are built from it, and workers
+            # dial it.
+            - name: STAGE_PUBLIC_URL
+              value: https://stage.example.com
+            # The image's defaults, stated for clarity.
+            - name: STAGE_LISTEN
+              value: 0.0.0.0:7380
+            - name: STAGE_DATA_DIR
+              value: /data
+            # Optional: a T3 the main server's own machine connects to. Usually
+            # harnesses run on workers instead and these stay unset.
+            # - name: T3_URL
+            #   value: http://t3.example.internal:3773
+            # - name: T3_ADMIN_TOKEN
+            #   valueFrom:
+            #     secretKeyRef: {name: stage-t3, key: admin-token}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # /api/health answers 200 while the server and its database work,
+          # whatever a harness or worker is doing. The kubelet's Host is the
+          # pod IP, which the request origin policy allows.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            # Migrations (with a backup first) run before serving.
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: stage-data

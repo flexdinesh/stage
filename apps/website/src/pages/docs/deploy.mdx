@@ -1,12 +1,12 @@
 ---
 title: Headless server
-description: Run the stage server as a per-user service or in the foreground, configure listeners and T3, secure it, and set up HTTPS for the PWA and push notifications.
+description: Run the stage server as a per-user service or in the foreground, configure listeners and T3, secure it, set up HTTPS for the PWA and push notifications, and run a main server with workers on your own machines.
 showAskAi: false
 ---
 
 # Headless server
 
-On a headless install (or any machine where you want stage without the desktop app), the `stage` CLI runs the server. One server owns one data dir and talks to one T3. Install first: [Install](/docs/install) with `--headless`.
+On a headless install (or any machine where you want stage without the desktop app), the `stage` CLI runs the server. One server owns one data dir. To run it on another host (a VM, a home server, a cluster) while harnesses run on your own machines, see [Main server and workers](#main-server-and-workers). Install first: [Install](/docs/install) with `--headless`.
 
 ## Run as a service
 
@@ -108,6 +108,7 @@ stage has no authentication. Anyone who can reach a listener can read tasks and 
 - `/api` and `/mcp` reject requests browsers send on behalf of other sites: a Host other than an IP, `localhost` or a trusted origin's host (DNS rebinding), cross-site and same-site requests (`Sec-Fetch-Site`, `Origin`), and form-encodable bodies (`text/plain`, urlencoded). Trusted origins are `STAGE_PUBLIC_URL`'s and those in `STAGE_ALLOWED_ORIGINS`; any other hostname gets `403 host … not allowed`.
 - That policy is not authentication. Any process or person that can reach a listener directly has full access. A private socket (`unix`, mode `0600`) limits that to your user.
 - Before exposing stage to a network, put an authenticating HTTPS reverse proxy in front and keep stage itself unreachable except through it. A tailnet limits who can connect, not what they can do.
+- The one exception is `/api/worker/*`: workers authenticate there themselves, with a one-time pairing code and then a revocable machine token. Your proxy passes that prefix through without user auth ([Auth proxy](#auth-proxy)).
 - `service.env` may hold `T3_ADMIN_TOKEN`; keep it private.
 
 ## HTTPS and push notifications
@@ -154,6 +155,99 @@ The notifications inbox uses a Server-Sent Events stream (`/api/notifications/st
 - Settings > Notifications > Send test checks the device.
 
 Which events notify (needs input, failed, ready, done, settled) is a global filter in Settings that applies to every device. See [Notifications](/docs/features#notifications). On the desktop app, notifications are native instead ([Desktop app](/docs/desktop#notifications)).
+
+## Main server and workers
+
+By default one stage install is one machine: the server runs your harnesses on the machine it runs on. You can also run one **main server** on a host every device can reach (a VM, a home server, a Kubernetes cluster) and join your laptops and desktops to it as **workers**. The main server keeps the database, the backlog, journals, scheduling, the UI, `/api` and `/mcp`. A worker has no database: it runs that machine's T3 and OpenCode connections, keeps their credentials, and does the machine-local work (Git checkouts, workspace matching). Settings > Machines lists every machine.
+
+A worker always dials out to the main server, so laptops need no open ports and can sleep or change networks. An offline worker is an offline harness: its tasks keep their state, and launches wait until it is back.
+
+### Main server
+
+- Run it as a [service](#run-as-a-service), with [Docker](https://github.com/flexdinesh/stage/blob/main/compose.yaml), or on [Kubernetes](#kubernetes), behind HTTPS.
+- Set `STAGE_PUBLIC_URL` to the HTTPS URL users and workers reach. Pairing needs it: links are built from it and workers dial it.
+- One server per data dir, on a local disk. The Docker image never runs harnesses as local processes; T3 and OpenCode on your workers do the work.
+- Workers and the main server need the same API version: update them together (`stage update` on each machine, and the main server's image).
+
+### Auth proxy
+
+stage has no user sign-in, so a main server on a network sits behind an authenticating HTTPS reverse proxy ([Security](#security)). Configure it to:
+
+- Require user authentication for everything (the UI, `/api`, `/mcp`), including creating pairing links.
+- Pass `/api/worker/*` through **without** user authentication, forwarding the `Authorization` header unchanged. Workers use it to join, for their channel, and for the [agent gateway](#agent-gateway). The pairing code or machine token is the authentication there; every other route refuses machine tokens.
+- Keep the request's Host header (or rewrite it to an IP address or a host in `STAGE_ALLOWED_ORIGINS`). Workers send no `Origin`, so any other hostname gets 403.
+- Not buffer responses and keep idle connections open past 15s: the worker channel is a long-lived Server-Sent Events stream with a keepalive every 15s ([Reverse proxy and SSE](#reverse-proxy-and-sse)).
+- Accept request bodies up to 32 MiB: one message from a worker can be that large.
+
+### Workers
+
+On each machine that runs harnesses, install stage with `--headless` ([Install](/docs/install)), then:
+
+:::steps
+
+#### Pair
+
+In Settings > Machines, click **Add machine** (or run `stage machine pair [--label NAME]` where the CLI reaches the main server, such as its host). It shows a one-time link, valid for 10 minutes, and the command to run.
+
+#### Join
+
+```sh
+stage worker join 'https://stage.example.com/join#…'   # redeem the link; --label names the machine
+```
+
+This saves the main server's URL and a revocable machine token (`worker.json`, mode `0600`) in the worker dir. A plain `http://` link works for a LAN or loopback main server.
+
+#### Start the worker service
+
+```sh
+stage worker service start     # the per-user worker service; waits until it runs
+stage worker service enable    # optional: start at login
+```
+
+Settings > Machines shows the machine online within seconds.
+
+#### Set up harnesses
+
+Click the machine's **Harnesses** link (or **Set up harnesses** after it joins): the same T3, OpenCode and connection panels as this server's Settings, run on that machine through its worker. Credentials stay on the machine (`credentials.json`, `0600`, next to `worker.json`); the main server keeps only the connection and its status.
+
+:::
+
+| Command | Does |
+|---|---|
+| `stage worker join <link> [--label L]` | redeem a pairing link; refuses when already joined |
+| `stage worker run [--listen ADDR]` | the worker in the foreground (instead of the service) |
+| `stage worker status` | config, the main server's view of this machine, the running process and its gateway addresses |
+| `stage worker leave [--local]` | remove this machine on the main server, then delete the local config; `--local` deletes only locally |
+| `stage worker service start\|stop\|restart\|status\|logs\|enable\|disable\|uninstall` | the worker service, like `stage service` |
+
+- **Config**: the worker service reads only `worker.env` next to `service.env` (`~/.config/stage/worker.env` on Linux, `~/Library/Application Support/stage/worker.env` on macOS), never your shell. It takes `STAGE_WORKER_LISTEN` ([Agent gateway](#agent-gateway)) and the T3 and OpenCode settings (`T3_URL`, `T3_ADMIN_TOKEN`, …), which lock those settings for that machine. A foreground `stage worker run` reads its shell.
+- **One role per install**: a machine runs either this install's server or its worker, not both. A laptop that runs the desktop app's server cannot also be a worker of another main server.
+- **Remove**: removing a machine in Settings > Machines revokes its token at once; its worker stops, and `stage worker status` says it was revoked. Its connections become history; its tasks stay.
+- `stage update` restarts a running worker service and rolls back if the new one does not start.
+
+### Agent gateway
+
+Agents on a worker's machine use stage as usual: the `stage` CLI, `stage mcp` and HTTP MCP ([Agents](/docs/agents)). The worker serves a local gateway that forwards `/api` and `/mcp` to the main server with its machine token, so agents need no credentials or proxy access. Launch instructions for sessions on that machine name the gateway. The main server records which machine each agent write came from.
+
+- By default it listens on this install's private socket, which the CLI and `stage mcp` find by themselves.
+- For HTTP MCP clients, add a loopback TCP address in `worker.env`, then `stage worker service restart`:
+
+  ```sh
+  STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
+  ```
+
+  Avoid a wildcard host: anything that reaches the gateway has agent access to the main server.
+- The gateway cannot manage machines or change any machine's harness setup (403). If the main server is unreachable it answers 502.
+
+### Kubernetes
+
+A minimal example lives in [`examples/kubernetes`](https://github.com/flexdinesh/stage/tree/main/examples/kubernetes): a Deployment, a ClusterIP Service and a PersistentVolumeClaim for `stage.db`. There is no published image: build one from the repository `Dockerfile` at the release your workers run and push it to your registry. Then set the image and `STAGE_PUBLIC_URL`, apply the files, and put your [auth proxy](#auth-proxy) or ingress in front of the Service.
+
+- **Exactly one replica**, with `strategy: Recreate`. One server owns one data dir through a file lock, and SQLite has one writer; a second pod on the volume exits at startup. Do not autoscale it.
+- **A local volume**, never NFS: use a block-backed storage class (a cloud disk, local-path, Longhorn, Ceph RBD), `ReadWriteOnce`. File locks and SQLite locking are unreliable on network filesystems.
+- **Graceful stop**: `terminationGracePeriodSeconds: 120` covers the server's 100s drain.
+- **Probes** on `/api/health`, which answers 200 while the server and its database work, whatever harnesses or workers do.
+- **Back up** the volume. Before a migration the server also copies `stage.db` into `backups/` on it.
 
 ## Update
 

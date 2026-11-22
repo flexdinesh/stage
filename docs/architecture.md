@@ -18,6 +18,7 @@ Machines, the worker process and the main/worker split:
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`@stage/desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
 | `apps/website/` (`@stage/website`) | Static marketing site and public user guides on vocs (`renderStrategy: 'full-static'`), illustrative demos (vendored stageshow in `src/vendor/`), its own `PRODUCT.md`, `DESIGN.md` and `.impeccable/`, and the Cloudflare Workers static-assets config (`wrangler.jsonc`, worker `stage-website`, deployed by Workers Builds from `main`: [website.md](website.md)). Tasks: `mise run website:dev` (:5175), `website:build`, `website:check` (also in `mise run check`), `website:preview` (wrangler dev, :8787) | Import `@stage/*` or product UI/runtime internals; be needed by a product build or release (they install with `--filter` and never build it); deploy with product releases |
 | `desktop/fixture/` | MyGo proof (ADR 0001). Separate Go module and its own pnpm lockfile, outside the workspace | Be imported by anything |
+| `examples/kubernetes/` | A minimal Kubernetes example for a remote main server (Deployment, Service, PVC, README), per [runtime.md](runtime.md#remote-main-server-and-workers). Documentation only: no build, check or release uses it | Become a supported chart; run more than one replica |
 | `tools/release/`, `scripts/release.sh` | Release builds ([release.md](release.md)): one version and commit for the desktop, its bundled CLI and the headless CLI; the manifest, checksums and verification. `tools/release` is its own Go module (standard library only) | Upload, tag, install or hold product logic |
 
 One pnpm workspace (`pnpm-workspace.yaml`: `apps/web`, `apps/website`, `packages/app`, `desktop/app/ui`) with one lockfile at
@@ -39,7 +40,7 @@ Two homes, no shared or generated content between them:
 | [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/install` |
 | [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 pairing) | `/docs/t3` |
 | [desktop.md](desktop.md) | `/docs/desktop` |
-| [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy), `.env.example` | `/docs/deploy` (Headless server) |
+| [service.md](service.md) (incl. worker service), [runtime.md](runtime.md) (listeners, origin policy, worker process, agent gateway, remote main server), `.env.example`, `examples/kubernetes/` | `/docs/deploy` (Headless server) |
 | [features.md](features.md) | `/docs/features`, `/docs` |
 | [api.md](api.md) (MCP, tree, journal, handoff, base rules), CLI (`server/internal/cli`), MCP tools (`server/internal/agenttools`) | `/docs/agents` |
 
