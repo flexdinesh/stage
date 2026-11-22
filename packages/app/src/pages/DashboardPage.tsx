@@ -145,7 +145,7 @@ function Dashboard() {
               return (
                 <GroupPanel
                   key={key}
-                  group={key}
+                  info={GROUP_META[key]}
                   count={list.length}
                   collapsed={collapsed}
                   onToggle={() => fold.toggle(key, list)}

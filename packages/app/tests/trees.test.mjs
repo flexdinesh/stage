@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   bandState,
   baseCandidates,
+  byTreeGroup,
   closeBlocker,
   closedLabel,
   countMembers,
@@ -14,11 +15,13 @@ import {
   needCandidates,
   nextActionText,
   nodeState,
+  parseTreeGroup,
   pickedTask,
   rollupLabel,
   startModeCaption,
   taskClosedLabel,
   treeClosed,
+  treeGroup,
   treeMeta,
   treeProjectLabel,
   treeProjects,
@@ -366,4 +369,33 @@ test("joinSummary: parallel root without needs, runs after them with needs", () 
   // Every need completed in an auto tree: the release runner launches it at once.
   assert.equal(joinSummary(9, [done], "auto"), "#9 runs after #3: starts right away");
   assert.equal(joinSummary(9, [done], "manual"), "#9 runs after #3");
+});
+
+const m = (state, extra = {}) => ({ state, readiness: null, acceptanceId: null, ...extra });
+const summary = (id, members, settledAt = null) => ({ id, counts: countMembers(members), settledAt });
+
+test("treeGroup: a tree lists by its most pressing next step; settled trees are completed, empty ones wait", () => {
+  const accepted = m("settled", { acceptanceId: 1 });
+  assert.equal(treeGroup(summary(1, [m("needs_input"), m("backlog", { readiness: "ready" })])), "needs");
+  assert.equal(treeGroup(summary(2, [m("settled"), m("running")])), "done");
+  assert.equal(treeGroup(summary(3, [m("backlog", { readiness: "ready" }), m("failed")])), "ready");
+  assert.equal(treeGroup(summary(4, [m("interrupted"), m("running")])), "failed");
+  assert.equal(treeGroup(summary(5, [accepted, m("launching")])), "running");
+  assert.equal(treeGroup(summary(6, [accepted, m("backlog", { readiness: "blocked" })])), "waiting");
+  assert.equal(treeGroup(summary(7, [accepted], "2026-11-20T10:00:00Z")), "settled");
+  assert.equal(treeGroup(summary(8, [])), "waiting");
+});
+
+test("byTreeGroup: most pressing first, input order within a group", () => {
+  const trees = [
+    summary(1, [m("running")]),
+    summary(2, [m("backlog", { readiness: "blocked" })]),
+    summary(3, [m("needs_input")]),
+    summary(4, [m("running")]),
+    summary(5, [m("failed")]),
+  ];
+  assert.deepEqual(byTreeGroup(trees).map((t) => t.id), [3, 5, 1, 4, 2]);
+  assert.equal(parseTreeGroup("waiting"), "waiting");
+  assert.equal(parseTreeGroup("backlog"), null);
+  assert.equal(parseTreeGroup(null), null);
 });

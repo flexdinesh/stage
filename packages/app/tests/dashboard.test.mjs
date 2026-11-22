@@ -8,20 +8,20 @@ import {
   GROUP_KEYS,
   completedSince,
   endLinger,
+  filterByTree,
   inGroup,
   isFolded,
   needsEpisode,
   nextLingerEnd,
   parseFold,
   parseGroupKey,
+  parseTreeFilter,
   pruneLinger,
-  splitByKind,
   startLinger,
   toggleFold,
 } from "../src/lib/dashboard.ts";
 
 const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "settled" ? id : null, treeId: null, readiness: null, ...extra });
-const tree = (id, settledAt = null, status = "open") => ({ id, settledAt, status });
 const ids = (list) => list.map((t) => t.id);
 
 const SINCE = "2026-11-13T00:00:00Z";
@@ -53,12 +53,13 @@ test("the Dashboard lists only what asks for the user", () => {
   assert.equal(parseGroupKey(null), null);
 });
 
-test("splitByKind: tree members leave the task groups; members of unlisted trees stay", () => {
-  const tasks = [task(1, "running", { treeId: 10 }), task(2, "backlog"), task(3, "settled", { treeId: 20 }), task(4, "done", { treeId: 99 })];
-  const split = splitByKind(tasks, [tree(10), tree(20, "2026-11-15T10:00:00Z")]);
-  assert.deepEqual(ids(split.active), [10]);
-  assert.deepEqual(ids(split.settled), [20]);
-  assert.deepEqual(ids(split.standalone), [2, 4]);
+test("tree filter: any keeps tree members; none keeps only tasks outside trees, in order", () => {
+  const tasks = [task(1, "running", { treeId: 10 }), task(2, "backlog"), task(3, "settled", { treeId: 20 }), task(4, "done")];
+  assert.deepEqual(ids(filterByTree(tasks, "any")), [1, 2, 3, 4]);
+  assert.deepEqual(ids(filterByTree(tasks, "none")), [2, 4]);
+  assert.equal(parseTreeFilter("none"), "none");
+  assert.equal(parseTreeFilter(null), "any");
+  assert.equal(parseTreeFilter("trees"), "any");
 });
 
 test("a lingering task stays in Awaiting review and out of Completed until its linger ends", () => {

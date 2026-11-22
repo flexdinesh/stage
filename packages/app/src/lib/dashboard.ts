@@ -1,4 +1,4 @@
-import type { Task, TreeSummary } from "../api/types.ts";
+import type { Task } from "../api/types.ts";
 
 /** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
 export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "settled";
@@ -41,25 +41,14 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
   }
 }
 
-/** Tasks view grouped by kind: trees with their members, and tasks outside them. */
-export interface KindSplit<T> {
-  /** Trees with work left (the Trees group). */
-  active: T[];
-  /** Trees whose every member is completed (listed in Completed). */
-  settled: T[];
-  /** Tasks not in a listed tree, input order. */
-  standalone: Task[];
-}
+/** Tasks view tree filter (`?tree=`): every task, or only tasks outside any tree. */
+export type TreeFilter = "any" | "none";
 
-/** Splits tasks from trees. Members of trees not listed keep their own rows, so no task drops out of view. */
-export function splitByKind<T extends Pick<TreeSummary, "id" | "settledAt">>(tasks: readonly Task[], trees: readonly T[]): KindSplit<T> {
-  const listed = new Set(trees.map((t) => t.id));
-  return {
-    active: trees.filter((t) => t.settledAt === null),
-    settled: trees.filter((t) => t.settledAt !== null),
-    standalone: tasks.filter((t) => t.treeId === null || !listed.has(t.treeId)),
-  };
-}
+export const parseTreeFilter = (v: string | null): TreeFilter => (v === "none" ? "none" : "any");
+
+/** Tasks the filter keeps, input order. */
+export const filterByTree = <T extends Pick<Task, "treeId">>(tasks: readonly T[], filter: TreeFilter): T[] =>
+  filter === "none" ? tasks.filter((t) => t.treeId === null) : [...tasks];
 
 /** How long a task completed from the Dashboard keeps its Awaiting review row (with Undo). */
 export const LINGER_MS = 6000;
