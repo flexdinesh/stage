@@ -172,7 +172,7 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
 /** Task row grid (laptop columns: chip, project, title, actions, copy), shared with its skeleton. */
 function taskRowGrid(showProject: boolean): string {
   return cx(
-    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-row md:gap-x-3.5",
     showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
   );
 }
@@ -201,7 +201,7 @@ export function TaskRowsSkeleton({ count = 3, showProject = false }: { count?: n
               <SkeletonBar className="hidden h-3 w-4/5 md:block" />
             </div>
             <div className="order-4 col-span-2 flex md:col-span-1 md:justify-end">
-              <SkeletonBar className="h-8 w-24 md:h-6" />
+              <SkeletonBar className="h-control-sm w-24" />
             </div>
           </div>
         </li>

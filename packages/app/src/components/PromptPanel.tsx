@@ -5,9 +5,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client.ts";
 import { useApi } from "../platform/context.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { CopyButton } from "./CopyButton.tsx";
 import { RefText } from "./StageLinks.tsx";
-import { Alert, Button, Muted, Panel, Skeleton, SkeletonBar, cx, errorText } from "./ui.tsx";
+import { Alert, Button, Muted, Panel, Skeleton, SkeletonBar, cx, errorText, CopyButton } from "./ui.tsx";
 
 /** A truncated T3 preview: the full text loads from the adopted task opening-prompt route. */
 interface FullSource {

@@ -105,7 +105,7 @@ function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: MenuItem)
         onPick(key);
       }}
       className={cx(
-        "flex flex-col border-b border-line px-3 py-2.5 text-left text-ui last:border-b-0 hover:bg-panel disabled:hover:bg-transparent md:py-2",
+        "flex flex-col border-b border-line px-3 py-row text-left text-ui last:border-b-0 hover:bg-panel disabled:hover:bg-transparent",
         opts.danger === true && "text-bad",
       )}
     >

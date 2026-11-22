@@ -12,8 +12,7 @@ import { useHarnessApi, useScopeMachineId, useSetupCopy } from "../api/harnessSc
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
-import { CommandBox } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, CommandBox } from "./ui.tsx";
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: refetch everything. */
 function useRefresh(): () => Promise<void> {

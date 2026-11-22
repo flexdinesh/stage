@@ -9,9 +9,9 @@ import { useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queri
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
-import { subjectLinks, useCopy, type LinkSubject } from "./StageLinks.tsx";
+import { subjectLinks, type LinkSubject } from "./StageLinks.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { Chip, Kbd, activeRowClass, cx } from "./ui.tsx";
+import { Chip, Kbd, activeRowClass, cx, useCopy } from "./ui.tsx";
 
 /** A closed item's plain chip (archived, done, tree done) beside its other badge. */
 function ClosedBadge({ label, children }: { label: string | null; children?: ReactNode }) {

@@ -6,10 +6,9 @@ import { connectionOptions } from "../../lib/machines.ts";
 import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 
-import { Combobox } from "../Combobox.tsx";
 import { ProjectCombobox } from "../ProjectSelect.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, Panel, Combobox } from "../ui.tsx";
 
 /** Explicit lookup only. Preview never adopts a session. */
 export function AdoptSessionDrawer({

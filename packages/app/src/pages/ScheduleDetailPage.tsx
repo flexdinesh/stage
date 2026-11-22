@@ -4,13 +4,12 @@ import { Link, useNavigate } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
-import { CopyButton } from "../components/CopyButton.tsx";
 import { RefText } from "../components/StageLinks.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, cx } from "../components/ui.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, cx, CopyButton } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { cronSummary, wallTime } from "../lib/schedules.ts";
@@ -246,7 +245,7 @@ const OUTCOME_TEXT: Record<ScheduleRun["outcome"], string> = {
 
 function RunRow({ run: r, tz }: { run: ScheduleRun; tz: string }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 border-l-2 border-l-transparent px-3 py-2.5 md:grid-cols-[118px_minmax(0,1fr)] md:gap-x-3.5 md:py-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 border-l-2 border-l-transparent px-3 py-row md:grid-cols-[118px_minmax(0,1fr)] md:gap-x-3.5">
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
         <OutcomeChip run={r} />
       </div>

@@ -82,7 +82,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
                     aria-label={`Move #${t.id} up`}
                     disabled={i === 0}
                     onClick={() => setOrder((o) => moveItem(o, i, -1))}
-                    className="w-8 px-0 md:w-6"
+                    className="w-control-sm px-0"
                   >
                     <IconChevronUp size={12} />
                   </Button>
@@ -92,7 +92,7 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
                     aria-label={`Move #${t.id} down`}
                     disabled={i === order.length - 1}
                     onClick={() => setOrder((o) => moveItem(o, i, 1))}
-                    className="w-8 px-0 md:w-6"
+                    className="w-control-sm px-0"
                   >
                     <IconChevronDown size={12} />
                   </Button>

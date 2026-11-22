@@ -10,8 +10,8 @@ import type { Machine, MachinePairing, PairingStatus } from "../api/types.ts";
 import { dateTime } from "../lib/format.ts";
 import { countdown, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, buttonClass, cx, toneClass } from "./ui.tsx";
+import { Step, Steps } from "./Steps.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, buttonClass, cx, toneClass, CommandBox } from "./ui.tsx";
 
 /** 6px square state marker. */
 export function Marker({ tone }: { tone: "ok" | "idle" | "run" | "bad" }) {
@@ -58,7 +58,7 @@ function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; s
   // Usage counts come from GET /connections (which lists only connections this server can reach); unknown ones show none.
   const usage = m.connections.map((c) => harnesses.connection(c.id) ?? c);
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-3 py-2.5 last:border-b-0 md:py-2">
+    <li className="flex flex-col gap-2 border-b border-line px-3 py-row last:border-b-0">
       {mode === "rename" ? (
         <RenameForm machine={m} onDone={() => setMode("view")} />
       ) : (

@@ -3,8 +3,7 @@ import { useState } from "react";
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { Combobox } from "./Combobox.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel } from "./ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, Panel, Combobox } from "./ui.tsx";
 
 export function SharedPaths() {
   const api = useApi();

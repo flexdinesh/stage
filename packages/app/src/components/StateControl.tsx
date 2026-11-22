@@ -3,10 +3,9 @@ import { useHarnesses } from "../api/queries.ts";
 import type { Task, TreeDetail } from "../api/types.ts";
 import { stateMove, stateSummary } from "../lib/completion.ts";
 import { statusChips } from "../lib/tasks.ts";
-import { Combobox } from "./Combobox.tsx";
 import { CompletionDrawer } from "./Completion.tsx";
 import { statusChipView } from "./StateBadge.tsx";
-import { cx, toneClass } from "./ui.tsx";
+import { cx, toneClass, Combobox } from "./ui.tsx";
 
 /**
  * The State picker: the task's current status and the one manual change it allows (Completed, or back from it), each

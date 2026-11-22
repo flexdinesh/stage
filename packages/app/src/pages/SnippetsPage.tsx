@@ -3,10 +3,9 @@ import { useId, useMemo, useState, type FormEvent } from "react";
 import { useApi } from "../platform/context.tsx";
 import { keys, useProjects, useSnippets } from "../api/queries.ts";
 import type { CreateSnippetRequest, Project, Snippet } from "../api/types.ts";
-import { CopyButton } from "../components/CopyButton.tsx";
 import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectCombobox } from "../components/ProjectSelect.tsx";
-import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Textarea, cx } from "../components/ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Textarea, cx, CopyButton } from "../components/ui.tsx";
 
 type Editing = { mode: "create" } | { mode: "edit"; snippet: Snippet };
 

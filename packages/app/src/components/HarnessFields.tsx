@@ -1,7 +1,6 @@
 import type { Capabilities, ExecutionConfig, HarnessChoice } from "../api/types.ts";
 import { optionsFor } from "../lib/capabilities.ts";
-import { Combobox } from "./Combobox.tsx";
-import { Button, Field } from "./ui.tsx";
+import { Button, Field, Combobox } from "./ui.tsx";
 
 export const harnessDefaults: ExecutionConfig = {
   model: "",

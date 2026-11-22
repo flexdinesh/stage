@@ -1,7 +1,7 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import type { Project } from "../api/types.ts";
 import { matchProjects, projectDetail, type ProjectMatch } from "../lib/projects.ts";
-import { Combobox, type ComboboxOption } from "./Combobox.tsx";
+import { Combobox, type ComboboxOption } from "./ui.tsx";
 
 function toOption(m: ProjectMatch): ComboboxOption {
   return {

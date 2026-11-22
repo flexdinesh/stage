@@ -3,9 +3,8 @@ import type { Handoff } from "../api/types.ts";
 import { dateTime } from "../lib/format.ts";
 import { handoffSummary, recordedSource } from "../lib/handoff.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
-import { CopyButton } from "./CopyButton.tsx";
 import { RefText } from "./StageLinks.tsx";
-import { Checkbox } from "./ui.tsx";
+import { Checkbox, CopyButton } from "./ui.tsx";
 
 /** "Hand off context" checkbox row: the whole row is the label (44px phone, 32px laptop), mono hint below. */
 export function HandoffToggle({

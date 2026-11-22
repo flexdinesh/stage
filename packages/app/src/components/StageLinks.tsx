@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -18,29 +18,7 @@ import {
 import { usePlatform } from "../platform/context.tsx";
 import { IconChainLink, IconCheck } from "./icons.tsx";
 import { taskStateLabel, taskStateTone } from "./StateBadge.tsx";
-import { Button, cx, toneClass } from "./ui.tsx";
-
-// ---- Copy ----
-
-type CopyStatus = "idle" | "copied" | "failed";
-
-/** Copy with a status that resets after a moment. */
-export function useCopy(): [CopyStatus, (text: string) => void] {
-  const { clipboard } = usePlatform();
-  const [status, setStatus] = useState<CopyStatus>("idle");
-  useEffect(() => {
-    if (status === "idle") return;
-    const t = setTimeout(() => setStatus("idle"), 1500);
-    return () => clearTimeout(t);
-  }, [status]);
-  const copy = (text: string) => {
-    clipboard.writeText(text).then(
-      () => setStatus("copied"),
-      () => setStatus("failed"),
-    );
-  };
-  return [status, copy];
-}
+import { Button, cx, toneClass, useCopy, type CopyStatus } from "./ui.tsx";
 
 /** What a copied link points at: a task or a tree. */
 export type LinkSubject = { kind: "task" | "tree"; id: number; title: string };

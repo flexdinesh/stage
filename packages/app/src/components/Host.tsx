@@ -29,8 +29,8 @@ import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { Marker } from "./Machines.tsx";
 import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
-import { CommandBox, CopyAction, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx } from "./ui.tsx";
+import { Step, Steps } from "./Steps.tsx";
+import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx, CommandBox, CopyAction } from "./ui.tsx";
 
 /** Delay before the starting screen appears, so a fast start shows no flash. */
 const STARTING_DELAY_MS = 400;
@@ -390,7 +390,7 @@ function JoinRemote({ serverName, control }: { serverName: string; control: Host
   };
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-line py-2.5 md:py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-line py-row">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-small text-fg">Run {serverName}'s tasks on this machine</span>
           <span className="font-mono text-meta text-muted">its harnesses join as a worker; this machine's own server stops, its data stays</span>

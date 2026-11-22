@@ -59,7 +59,7 @@ export function ScheduleRows({
 
 function scheduleRowGrid(showProject: boolean): string {
   return cx(
-    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-transparent px-3 py-2.5 md:gap-x-3.5 md:py-2",
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-transparent px-3 py-row md:gap-x-3.5",
     showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
   );
 }
@@ -88,8 +88,8 @@ export function ScheduleRowsSkeleton({ count = 3, showProject = false }: { count
                 <SkeletonBar className="h-3 w-72 max-w-full" />
               </div>
               <div className="order-4 col-span-2 flex gap-1.5 md:col-span-2 md:justify-end">
-                <SkeletonBar className="h-8 w-20 md:h-6" />
-                <SkeletonBar className="h-8 w-14 md:h-6" />
+                <SkeletonBar className="h-control-sm w-20" />
+                <SkeletonBar className="h-control-sm w-14" />
               </div>
             </div>
           </li>

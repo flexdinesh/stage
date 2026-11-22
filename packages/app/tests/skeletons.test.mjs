@@ -1,4 +1,4 @@
-// Loading placeholders go through the shared skeleton in components/ui.tsx: SkeletonBar pulses only without
+// Loading placeholders go through the shared skeleton in components/ui/loading.tsx: SkeletonBar pulses only without
 // reduced motion, and Skeleton holds its space hidden for 200ms so fast loads show nothing. A raw pulse skips both.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -6,7 +6,7 @@ import { join, relative } from "node:path";
 import { test } from "node:test";
 
 const src = new URL("../src/", import.meta.url).pathname;
-const OWNER = join("components", "ui.tsx");
+const OWNER = join("components", "ui", "loading.tsx");
 
 function files(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -35,6 +35,6 @@ test("the shared bar pulses only when motion is allowed", () => {
   assert.deepEqual(
     pulses.filter((p) => p !== "motion-safe:animate-pulse"),
     [],
-    "every pulse in ui.tsx is gated with motion-safe:",
+    "every pulse in ui/loading.tsx is gated with motion-safe:",
   );
 });

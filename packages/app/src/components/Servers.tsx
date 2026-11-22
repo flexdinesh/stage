@@ -8,8 +8,8 @@ import { useHostServers, useHostState } from "../lib/hostState.ts";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostServers, HostServerTest, HostState } from "../platform/index.ts";
 import { IconCheck, IconChevronDown } from "./icons.tsx";
-import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, SkeletonRows, buttonClass, cx, toneClass } from "./ui.tsx";
+import { Step, Steps } from "./Steps.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, SkeletonRows, buttonClass, cx, toneClass, CommandBox } from "./ui.tsx";
 
 /** 6px square state marker in the server's tone. */
 function Marker({ tone }: { tone: ServerTone }) {
@@ -266,7 +266,7 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
   };
   const needs = entry.needsInput ?? 0;
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-3 py-2.5 last:border-b-0 md:py-2">
+    <li className="flex flex-col gap-2 border-b border-line px-3 py-row last:border-b-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Marker tone={status.tone} />
         <div className="min-w-0 flex-1">

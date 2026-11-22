@@ -43,6 +43,12 @@
   --fs-input-mono: 13px;
   --fs-input-sm: 12.5px;
 
+  /* Size roles: laptop values; phone overrides below (thumb-sized targets). Utilities: h-control, h-control-sm,
+     size-control, py-row. */
+  --control-h: 32px;
+  --control-h-sm: 24px;
+  --row-py: 8px;
+
   /* Top chrome offset; edge-anchored bars pad by this, never the raw safe-area inset. */
   --inset-top: env(safe-area-inset-top);
 }
@@ -71,6 +77,9 @@
     --fs-input: 16px;
     --fs-input-mono: 16px;
     --fs-input-sm: 16px;
+    --control-h: 40px;
+    --control-h-sm: 32px;
+    --row-py: 10px;
   }
 }
 
@@ -137,6 +146,10 @@
   --text-input: var(--fs-input);
   --text-input-mono: var(--fs-input-mono);
   --text-input-sm: var(--fs-input-sm);
+
+  --spacing-control: var(--control-h);
+  --spacing-control-sm: var(--control-h-sm);
+  --spacing-row: var(--row-py);
 
   --color-bg: var(--bg);
   --color-surface: var(--surface);
