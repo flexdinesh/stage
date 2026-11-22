@@ -64,6 +64,7 @@ export const IconPlus = sharp(PlusIcon);
 export const IconCheck = sharp(CheckIcon);
 export const IconClose = sharp(XIcon);
 export const IconBack = sharp(ChevronLeftIcon);
+export const IconForward = sharp(ChevronRightIcon);
 /** Level step in the task detail tree bar. */
 export const IconStep = sharp(ChevronRightIcon, 12);
 export const IconArrowRight = sharp(ArrowRightIcon);

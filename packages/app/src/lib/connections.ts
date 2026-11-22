@@ -1,5 +1,5 @@
-// Harness status control (sidebar and phone top bar): one icon and one details card over every configured harness.
-// Rendering lives in components/Layout.tsx.
+// Per-harness status summaries for the sidebar status row and its details panel (lib/status.ts,
+// components/StatusRow.tsx).
 import type { Harness, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
 import { T3_STATE_TONE } from "./onboarding.ts";
 import { openCodeChip } from "./opencode.ts";
@@ -54,19 +54,4 @@ export function openCodeErrorText(read: StatusRead<OpenCodeStatus>): string | nu
   const data = read.data;
   if (data === undefined) return read.error;
   return data.state === "unavailable" || data.state === "rejected" ? (data.reason ?? null) : null;
-}
-
-const RANK: Record<HarnessTone, number> = { ok: 0, idle: 1, need: 2, bad: 3 };
-
-/** The control's icon: the worst configured harness wins (bad, then need, then checking, then ok). */
-export interface OverallStatus {
-  /** `none`: no harness is configured. */
-  tone: HarnessTone | "none";
-  label: string;
-}
-
-export function overallStatus(summaries: readonly HarnessSummary[]): OverallStatus {
-  if (summaries.length === 0) return { tone: "none", label: "Connect a harness" };
-  const tone = summaries.reduce<HarnessTone>((worst, s) => (RANK[s.tone] > RANK[worst] ? s.tone : worst), "ok");
-  return { tone, label: summaries.map((s) => s.label).join(", ") };
 }

@@ -54,14 +54,8 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
     <div>
       <PageHeader
         title={s.title}
-        meta={
-          <>
-            <Link to={`/projects/${s.projectId}`} className={linkClass}>
-              {s.projectTitle}
-            </Link>
-            {` / schedule ${s.id} · ${cronSummary(s.cron)} · ${s.tz}`}
-          </>
-        }
+        trail={[{ label: s.projectTitle, to: `/projects/${s.projectId}` }, { label: `schedule ${s.id}` }]}
+        meta={`${cronSummary(s.cron)} · ${s.tz}`}
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />

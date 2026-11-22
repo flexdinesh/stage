@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openCodeErrorText, openCodeSummary, overallStatus, t3ErrorText, t3Summary } from "../src/lib/connections.ts";
+import { openCodeErrorText, openCodeSummary, t3ErrorText, t3Summary } from "../src/lib/connections.ts";
+import { statusRow } from "../src/lib/status.ts";
 import { serviceHostText } from "../src/lib/opencode.ts";
 
 const NOW = Date.parse("2026-11-20T10:00:00Z");
@@ -66,24 +67,32 @@ test("opencode: states follow the Settings chip; a failed status call is offline
   assert.deepEqual(openCodeSummary(failed, NOW), { harness: "opencode", state: "offline", tone: "bad", label: "OpenCode offline" });
 });
 
-test("overall: the worst configured harness drives the icon", () => {
+// The sidebar status row over real harness summaries (lib/status.ts owns the rules).
+const row = (...summaries) =>
+  statusRow(
+    summaries.map((s) => ({ key: s.harness, group: "Harnesses", name: s.harness, tone: s.tone, state: s.state, label: s.label })),
+    { checking: false, empty: "Connect a harness" },
+  );
+
+test("status row: the worst configured harness drives the tone", () => {
   const ok = t3Summary(t3({}));
   const need = t3Summary(t3({ state: "unpaired" }));
   const bad = openCodeSummary(oc({ state: "unavailable" }), NOW);
   const idle = openCodeSummary(checking, NOW);
   const okOc = openCodeSummary(oc({}), NOW);
-  assert.equal(overallStatus([ok, okOc]).tone, "ok");
-  assert.equal(overallStatus([ok, bad]).tone, "bad", "a broken OpenCode is not hidden by a connected T3");
-  assert.equal(overallStatus([need, okOc]).tone, "need", "an unpaired T3 is not hidden by a connected OpenCode");
-  assert.equal(overallStatus([need, bad]).tone, "bad");
-  assert.equal(overallStatus([ok, idle]).tone, "idle", "checking only outranks ok");
-  assert.equal(overallStatus([need, idle]).tone, "need");
-  assert.equal(overallStatus([okOc]).tone, "ok", "OpenCode alone drives the icon when T3 is not configured");
+  assert.equal(row(ok, okOc).tone, "ok");
+  assert.equal(row(ok, bad).tone, "bad", "a broken OpenCode is not hidden by a connected T3");
+  assert.equal(row(need, okOc).tone, "need", "an unpaired T3 is not hidden by a connected OpenCode");
+  assert.equal(row(need, bad).tone, "bad");
+  assert.equal(row(ok, idle).tone, "idle", "checking only outranks ok");
+  assert.equal(row(need, idle).tone, "need");
+  assert.equal(row(okOc).tone, "ok", "OpenCode alone drives the row when T3 is not configured");
 });
 
-test("overall: the label names every configured harness; none configured asks to connect one", () => {
-  assert.equal(overallStatus([t3Summary(t3({})), openCodeSummary(oc({ state: "unavailable" }), NOW)]).label, "T3 connected, OpenCode unavailable");
-  assert.deepEqual(overallStatus([]), { tone: "none", label: "Connect a harness" });
+test("status row: one problem names its harness; none configured asks to connect one", () => {
+  assert.equal(row(t3Summary(t3({})), openCodeSummary(oc({ state: "unavailable" }), NOW)).text, "OpenCode unavailable");
+  assert.equal(row(t3Summary(t3({ state: "expired" }))).text, "T3 pairing expired");
+  assert.equal(row().text, "Connect a harness");
 });
 
 test("error lines: the reason for trouble, else the failed fetch, else none", () => {

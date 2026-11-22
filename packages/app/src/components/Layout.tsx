@@ -1,31 +1,15 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, matchPath, useLocation, useSearchParams } from "react-router";
-import { useBadge, useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { useBadge } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
-import { relativeTime } from "../lib/format.ts";
+import { routeLabel } from "../lib/history.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { useTheme, type Theme } from "../lib/theme.ts";
-import { t3Identity } from "../lib/onboarding.ts";
-import {
-  openCodeErrorText,
-  openCodeSummary,
-  overallStatus,
-  t3ErrorText,
-  t3Summary,
-  type HarnessSummary,
-  type HarnessTone,
-  type OverallStatus,
-  type StatusRead,
-} from "../lib/connections.ts";
-import { serviceHostText, signInText } from "../lib/opencode.ts";
 import { MORE_DESTINATIONS } from "../pages/MorePage.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
-  IconChainLink,
-  IconCheck,
   IconChevronDown,
-  IconClose,
   IconDashboard,
   IconMoon,
   IconMore,
@@ -38,16 +22,22 @@ import {
   IconTasks,
   IconThemeSystem,
 } from "./icons.tsx";
+import { BackForward, NavHistoryProvider, PhoneBack, useCanGoBack } from "./NavHistory.tsx";
+import { TrailSlotContext } from "./navContext.ts";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
-import { Button, Chip, Drawer, Kbd, buttonClass, cx } from "./ui.tsx";
+import { StatusRow, useStatusAlert } from "./StatusRow.tsx";
+import { Button, Drawer, Kbd, buttonClass, cx, toneClass } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
+
+/** Phone tab roots: the top bar keeps the mark there instead of Back. */
+const TAB_ROOTS = ["/", "/tasks", "/schedules", "/more"];
 
 const TABS = [
   { to: "/", label: "Dashboard", icon: <IconDashboard size={TAB_ICON} /> },
@@ -89,109 +79,6 @@ function Mark({ needsInput, compact = false }: { needsInput: number; compact?: b
       </svg>
       <span className={cx(compact && "sr-only")}>stage</span>
     </Link>
-  );
-}
-
-function StatusRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
-      <dt className="text-muted">{label}</dt>
-      <dd className="truncate text-fg">{children}</dd>
-    </div>
-  );
-}
-
-/** A status query as the control reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
-function statusRead<T>(q: { data: T | undefined; isPending: boolean; errorUpdateCount: number; error: Error | null }): StatusRead<T> {
-  return { data: q.data, checking: q.isPending && q.errorUpdateCount === 0, error: q.error?.message ?? null };
-}
-
-const TONE_TEXT: Record<HarnessTone, string> = { ok: "text-ok", need: "text-need-fg", bad: "text-bad", idle: "text-muted" };
-
-function StatusIcon({ tone }: { tone: OverallStatus["tone"] }) {
-  switch (tone) {
-    case "none":
-      return <IconChainLink size={16} />;
-    case "idle":
-      return <span className="size-1.5 bg-idle" />;
-    case "ok":
-      return <span className={TONE_TEXT.ok}><IconCheck /></span>;
-    case "need":
-      return <span className={TONE_TEXT.need}><IconChainLink size={16} /></span>;
-    case "bad":
-      return <span className={TONE_TEXT.bad}><IconClose /></span>;
-  }
-}
-
-function StatusSection({ title, summary, error, children }: { title: string; summary: HarnessSummary; error: string | null; children: ReactNode }) {
-  return (
-    <section className="border-b border-line">
-      <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
-        <span className="label-caps text-fg">{title}</span>
-        <Chip dot tone={summary.tone} className="ml-auto">
-          {summary.state}
-        </Chip>
-      </div>
-      <div className="flex flex-col gap-1 px-3 py-2 font-mono text-meta">
-        <dl className="flex flex-col gap-1">{children}</dl>
-        {error === null ? null : <p className="line-clamp-2 break-words text-bad">{error}</p>}
-      </div>
-    </section>
-  );
-}
-
-/** Square harness status control; links to Settings, hover/focus (pointer devices only) reveals one section per configured harness. */
-function ConnectionStatus() {
-  const detailsId = useId();
-  const harnesses = useHarnesses();
-  const t3 = statusRead(useT3Status());
-  const openCode = statusRead(useOpenCodeStatus());
-  // Until connections load, keep checking; if they never load, fall back to T3 alone.
-  const showT3 = harnesses.loaded ? harnesses.activeConnection("t3")?.configured === true : harnesses.error != null;
-  const showOpenCode = harnesses.loaded && harnesses.activeConnection("opencode")?.configured === true;
-  const t3Status = showT3 ? t3Summary(t3) : null;
-  const openCodeStatus = showOpenCode ? openCodeSummary(openCode) : null;
-  const summaries = [t3Status, openCodeStatus].filter((s) => s !== null);
-  const overall: OverallStatus = harnesses.loaded || showT3 ? overallStatus(summaries) : { tone: "idle", label: "Checking harnesses" };
-  const t3Data = t3.data;
-  const openCodeData = openCode.data;
-  const tokenExpiresAt = t3Data?.tokenExpiresAt ?? null;
-  return (
-    <div className="group relative shrink-0">
-      <Link to="/settings" aria-label={overall.label} aria-describedby={detailsId} className={cx(buttonClass("secondary"), "w-10 px-0 md:w-8")}>
-        <StatusIcon tone={overall.tone} />
-      </Link>
-      <div
-        id={detailsId}
-        role="tooltip"
-        className="pointer-events-none invisible absolute top-full right-0 z-50 mt-1 w-[280px] lg:right-auto lg:left-0 border border-line-strong bg-surface opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none group-hover:visible group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:opacity-100"
-      >
-        {t3Status === null ? null : (
-          <StatusSection title="T3" summary={t3Status} error={t3ErrorText(t3)}>
-            <StatusRow label="T3">{(t3Data === undefined ? null : t3Identity(t3Data)) ?? "-"}</StatusRow>
-            <StatusRow label="URL">{t3Data?.t3Url ?? "-"}</StatusRow>
-            <StatusRow label="Last sync">{relativeTime(t3Data?.lastFullSyncAt ?? null)}</StatusRow>
-            <StatusRow label="Token">{tokenExpiresAt === null ? "-" : `${t3Data?.state === "expired" ? "expired" : "expires"} ${relativeTime(tokenExpiresAt)}`}</StatusRow>
-          </StatusSection>
-        )}
-        {openCodeStatus === null ? null : (
-          <StatusSection title="OpenCode" summary={openCodeStatus} error={openCodeErrorText(openCode)}>
-            <StatusRow label="Service">{openCodeData === undefined || openCodeData.endpoint === "" ? "-" : serviceHostText(openCodeData)}</StatusRow>
-            <StatusRow label="Sign-in">{openCodeData === undefined ? "-" : signInText(openCodeData)}</StatusRow>
-            <StatusRow label="Checked">{relativeTime(openCodeData?.checkedAt ?? null)}</StatusRow>
-          </StatusSection>
-        )}
-        {summaries.length > 0 ? null : (
-          <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
-            <span className="label-caps text-fg">Harnesses</span>
-            <Chip dot tone="idle" className="ml-auto">
-              {overall.tone === "none" ? "not connected" : "checking"}
-            </Chip>
-          </div>
-        )}
-        <div className="px-3 py-1.5 font-mono text-meta-sm text-muted">Click to open settings</div>
-      </div>
-    </div>
   );
 }
 
@@ -273,6 +160,10 @@ function Shell() {
   const scopeLoad = useScopeLoad();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
+  const [trailSlot, setTrailSlot] = useState<HTMLElement | null>(null);
+  const canGoBack = useCanGoBack();
+  const showBack = canGoBack && !TAB_ROOTS.includes(location.pathname);
+  const statusAlert = useStatusAlert();
 
   return (
     <div className="min-h-screen bg-bg text-fg lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
@@ -283,7 +174,6 @@ function Shell() {
           <div className="ml-auto flex items-center gap-1.5">
             <ThemeButton />
             <NotificationsBell onOpen={openInbox} />
-            <ConnectionStatus />
           </div>
         </div>
         <div className="flex shrink-0 gap-2 px-3 pt-3">
@@ -313,13 +203,17 @@ function Shell() {
           <SideLink to="/snippets" icon={<IconSnippets />} label="Snippets" />
           <SideLink to="/settings" icon={<IconSettings />} label="Settings" />
           <ServerMenu className="mx-0.5 mt-2" />
+          <StatusRow className="mt-2 border-t border-line pt-2" />
         </div>
       </aside>
 
       <div className="min-w-0 pt-[calc(3.25rem+var(--inset-top))] lg:pt-0">
       {/* Phone top bar: fixed, not sticky (iOS WebKit can rasterize a sticky bar blurry after a PWA reload); --inset-top clears the iOS 26 PWA edge blur. */}
       <header className="fixed inset-x-0 top-0 z-40 flex h-[calc(3.25rem+var(--inset-top))] items-center gap-2 border-b border-line bg-bg pt-[var(--inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] lg:hidden">
-        <Mark needsInput={needsInput} compact />
+        {/* Fixed slot: Back and the mark swap without moving the rest of the bar. */}
+        <div className="flex w-10 shrink-0 items-center">
+          {showBack ? <PhoneBack /> : <Mark needsInput={needsInput} compact />}
+        </div>
         <button
           type="button"
           onClick={() => setScopeSheet(true)}
@@ -330,7 +224,6 @@ function Shell() {
           <IconChevronDown size={12} />
         </button>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <ConnectionStatus />
           <NotificationsBell onOpen={openInbox} />
           <ServerMenu />
           <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 shrink-0 px-0">
@@ -342,12 +235,25 @@ function Shell() {
         </div>
       </header>
 
+      {/* Laptop content bar: ruled level with the sidebar header; arrows and the page's location (PageHeader trail). */}
+      <div className="sticky top-0 z-30 hidden h-12 border-b border-line bg-bg lg:block">
+        <div className="group/bar mx-auto flex h-full w-full max-w-[1240px] items-center gap-3 px-6">
+          <BackForward />
+          <nav aria-label="Location" className="min-w-0 truncate font-mono text-detail text-muted">
+            <span className="text-fg group-has-[[data-trail]>*]/bar:hidden">{routeLabel(location.pathname)}</span>
+            <span data-trail ref={setTrailSlot} className="contents" />
+          </nav>
+        </div>
+      </div>
+
       <PullToReload key={location.key} contentRef={contentRef} />
 
       {/* Relative positioning keeps fixed task actions anchored to the viewport during a pull. */}
       <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 lg:pb-10">
         <HostBanner />
-        <Outlet />
+        <TrailSlotContext.Provider value={trailSlot}>
+          <Outlet />
+        </TrailSlotContext.Provider>
       </main>
 
       {/* Phone bottom tabs */}
@@ -376,6 +282,9 @@ function Shell() {
         >
           <IconMore size={TAB_ICON} />
           More
+          {statusAlert === null ? null : (
+            <span className={cx("absolute top-2 left-[calc(50%+8px)] size-2 bg-(--c)", toneClass(statusAlert))} aria-label="Connection needs attention" />
+          )}
         </Link>
       </nav>
 
@@ -396,10 +305,12 @@ function Shell() {
 
 export function Layout() {
   return (
-    <ScopeProvider>
-      <NewTaskProvider>
-        <Shell />
-      </NewTaskProvider>
-    </ScopeProvider>
+    <NavHistoryProvider>
+      <ScopeProvider>
+        <NewTaskProvider>
+          <Shell />
+        </NewTaskProvider>
+      </ScopeProvider>
+    </NavHistoryProvider>
   );
 }

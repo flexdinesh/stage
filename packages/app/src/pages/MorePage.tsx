@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { IconStep } from "../components/icons.tsx";
+import { StatusSections, useStatus } from "../components/StatusRow.tsx";
 import { PageHeader, Segmented } from "../components/ui.tsx";
 import { THEMES, useTheme } from "../lib/theme.ts";
 
@@ -13,6 +14,7 @@ const THEME_OPTIONS = THEMES.map((theme) => ({ value: theme, label: theme }));
 
 export function MorePage() {
   const { theme, setTheme } = useTheme();
+  const { row, details } = useStatus();
 
   return (
     <>
@@ -30,6 +32,9 @@ export function MorePage() {
             </Link>
           ))}
         </nav>
+        <div className="flex flex-col border border-line" aria-label="Connections" role="group">
+          <StatusSections row={row} details={details} touch />
+        </div>
         <div className="flex flex-col items-start gap-2">
           <h2 className="label-caps">Theme</h2>
           <Segmented label="Theme" options={THEME_OPTIONS} value={theme} onChange={setTheme} fill />

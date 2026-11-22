@@ -93,7 +93,6 @@ function workspaceChip(task: TaskDetail): string {
 
 const linkClass = "text-fg underline-offset-2 hover:underline";
 // The tree is underlined at rest so the way back reads as a link, not a label.
-const treeLinkClass = "text-fg underline decoration-line-strong underline-offset-2 hover:decoration-current";
 
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
@@ -162,33 +161,31 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <PageHeader
         title={task.title}
         actions={<CopyLinkPair subject={{ kind: "task", id: task.id, title: task.title }} />}
-        meta={
-          <>
-            <Link to={`/projects/${task.projectId}`} className={linkClass}>
-              {task.projectTitle}
-            </Link>
-            {task.tree === null ? null : (
-              <>
-                {" / "}
-                <Link to={treeTaskPath(task.tree.id, task.id)} className={treeLinkClass}>
-                  {task.tree.title}
-                </Link>
-              </>
-            )}
-            {` / task ${task.id}`}
-            {task.startAt === null ? null : (
-              <span title={dateTime(task.startAt)}>{` · starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
-            )}
-            {task.scheduleId === null ? null : (
-              <>
-                {" · from "}
-                <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
-                  {task.scheduleTitle ?? `schedule #${task.scheduleId}`}
-                </Link>
-              </>
-            )}
-          </>
-        }
+        trail={[
+          { label: task.projectTitle, to: `/projects/${task.projectId}` },
+          ...(task.tree === null ? [] : [{ label: task.tree.title, to: treeTaskPath(task.tree.id, task.id) }]),
+          { label: `task ${task.id}` },
+        ]}
+        {...(task.startAt === null && task.scheduleId === null
+          ? {}
+          : {
+              meta: (
+                <>
+                  {task.startAt === null ? null : (
+                    <span title={dateTime(task.startAt)}>{`starts ${wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}`}</span>
+                  )}
+                  {task.startAt !== null && task.scheduleId !== null ? " · " : null}
+                  {task.scheduleId === null ? null : (
+                    <>
+                      {"from "}
+                      <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
+                        {task.scheduleTitle ?? `schedule #${task.scheduleId}`}
+                      </Link>
+                    </>
+                  )}
+                </>
+              ),
+            })}
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <NodeChip task={task} />

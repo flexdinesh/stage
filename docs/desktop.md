@@ -65,7 +65,7 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 
 - **Terminal server (exit 5).** When a foreground `stage serve` holds the data dir and its socket answers health with the same identity and API version, the desktop uses it and shows a quiet banner: "Connected to a Stage server started from a terminal (pid N). It stops when that terminal does." A default foreground server listens on TCP only, so this usually lands on `conflict`, whose command adds a socket (`stage serve --listen unix,127.0.0.1:7380`).
 - **Version skew.** A server build different from the bundled CLI shows a dismissible banner with "Restart Stage server" (`stage service restart --exe <cli> --wait 30s --json`).
-- **T3.** Never blocks startup. T3 offline or unpaired uses the app's existing T3 status control and Settings pairing.
+- **T3.** Never blocks startup. T3 offline or unpaired uses the app's existing status row and Settings pairing.
 - **Diagnostics.** "Show details" lists the server log tail; "Copy diagnostics" (screen, Settings, Help menu) copies app, CLI and server versions, the identity, `service status --json` without secrets and the last 50 log lines.
 
 ## Servers
@@ -124,7 +124,7 @@ Switching to the active server only refreshes its name. Editing the active serve
 - Linux: the first close shows a one-time dialog, "Stage keeps running. Reopen it from the tray or your app launcher.", with Keep running and Quit Stage. It shows whether or not a tray exists, because a missing tray host (GNOME without AppIndicator) is undetectable.
 - Tray (where available): Show Stage, Quit Stage. Notification controls live in Settings only.
 - Window size, position and maximized state persist (`StateKey "main"`). Minimum 720x520.
-- Menus: app menu (macOS) or File with Quit (Linux), Edit (so copy and paste work on macOS), View (Reload `Cmd/Ctrl+R`, zoom), Window (Minimize, Close `Cmd/Ctrl+W`), Help (Copy Diagnostics, Show Logs). The page keeps its own shortcuts (`Ctrl/Cmd+K`, `N`).
+- Menus: app menu (macOS) or File with Quit (Linux), Edit (so copy and paste work on macOS), View (Reload `Cmd/Ctrl+R`, zoom), Go (Back `Cmd+[` on macOS or `Alt+Left` elsewhere, Forward `Cmd+]` or `Alt+Right`: the webview's history, which the page's own back and forward arrows also walk), Window (Minimize, Close `Cmd/Ctrl+W`), Help (Copy Diagnostics, Show Logs). The page keeps its own shortcuts (`Ctrl/Cmd+K`, `N`). The desktop host maps the mouse side buttons to back and forward (the webview has no browser chrome) and cancels their default, so an engine that handles them itself does not move twice.
 - MyGo's own folders (window state, cache, logs) use the app identifier, never the Stage data dir (`~/Library/Application Support/Stage` would collide with `.../stage` on case-insensitive APFS).
 
 ## Notifications

@@ -256,10 +256,10 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
       ) : null}
       <PageHeader
         title={renaming ? <span className="sr-only">{tree.title}</span> : tree.title}
+        trail={[{ label: treeProjectLabel(tree) }, { label: `tree ${tree.id}` }]}
         meta={
           <>
-            <span className="text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</span>
-            <span className="mt-1 block">
+            <span>
               {treeMeta(tree)} · <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span> ·{" "}
               <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
                 active {relativeTime(tree.lastActivityAt)}

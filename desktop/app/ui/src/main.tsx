@@ -64,6 +64,19 @@ const platform: Platform = {
   host,
 };
 
+// The webview has no browser chrome: the mouse side buttons go back and forward as in a browser (the Go menu holds the
+// keys). The default is cancelled so an engine that handles them itself does not move twice.
+const SIDE_BUTTONS: Record<number, () => void> = { 3: () => window.history.back(), 4: () => window.history.forward() };
+window.addEventListener("mousedown", (e) => {
+  if (SIDE_BUTTONS[e.button] !== undefined) e.preventDefault();
+});
+window.addEventListener("mouseup", (e) => {
+  const go = SIDE_BUTTONS[e.button];
+  if (go === undefined) return;
+  e.preventDefault();
+  go();
+});
+
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root element missing");
 
