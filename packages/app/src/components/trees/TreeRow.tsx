@@ -6,7 +6,7 @@ import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { RowCopyLink } from "../StageLinks.tsx";
-import { Button, Chip, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
+import { Button, Chip, Skeleton, SkeletonBar, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
 const CELL_LIMIT = 30;
@@ -60,6 +60,50 @@ function TreeWhen({ tree, inline = false }: { tree: TreeSummary; inline?: boolea
   );
 }
 
+/** Tree row grid: title block, times (laptop), state bar, action. Shared with its skeleton. */
+const TREE_ROW_GRID =
+  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]";
+
+const TREE_TITLE_WIDTHS = ["w-48", "w-36", "w-56"];
+
+/** Loading tree list rows: the expand column, then the tree row grid in bars. */
+export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <Skeleton label="Loading trees">
+      <ul>
+        {Array.from({ length: count }, (_, i) => (
+          <li key={i} className="flex items-stretch border-b border-line last:border-b-0">
+            <span className="w-9 shrink-0" />
+            <div className="min-w-0 flex-1 [&>div]:pl-0">
+              <div className={TREE_ROW_GRID}>
+                <div className="flex min-w-0 flex-col gap-1.5 py-0.5">
+                  <SkeletonBar className={cx("h-4 max-w-full", TREE_TITLE_WIDTHS[i % TREE_TITLE_WIDTHS.length])} />
+                  <SkeletonBar className="h-3 w-28" />
+                  <SkeletonBar className="h-3 w-44 max-w-full" />
+                </div>
+                <div className="flex flex-col items-end gap-1.5 max-lg:hidden">
+                  <SkeletonBar className="h-3 w-24" />
+                  <SkeletonBar className="h-3 w-32" />
+                </div>
+                <div className="order-3 col-span-2 flex min-w-0 flex-col gap-1.5 md:order-none md:col-span-1">
+                  <SkeletonBar className="h-2 w-full" />
+                  <div className="flex justify-between gap-2">
+                    <SkeletonBar className="h-3 w-20" />
+                    <SkeletonBar className="h-3 w-16" />
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <SkeletonBar className="h-8 w-14 md:h-6" />
+                </div>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Skeleton>
+  );
+}
+
 /**
  * A tree in a ruled list: title and mono meta, its times, the state bar with its next step, and one action. A done or
  * archived tree carries its chip and only offers Open.
@@ -77,7 +121,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
 
   return (
-    <div className="group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]">
+    <div className={cx("group/row", TREE_ROW_GRID)}>
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <Link to={to} className="min-w-0 text-body font-medium break-words hover:underline">

@@ -33,6 +33,8 @@ import {
   PageHeader,
   Panel,
   QueryState,
+  Skeleton,
+  SkeletonBar,
   cx,
 } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
@@ -63,10 +65,90 @@ function TaskDetailView({ id }: { id: number }) {
     markViewed([`task:${id}`]);
   }, [notifications, id, markViewed]);
   return (
-    <QueryState isPending={task.isPending} error={task.data === undefined ? task.error : null}>
+    <QueryState isPending={task.isPending} error={task.data === undefined ? task.error : null} skeleton={<TaskDetailSkeleton />}>
       {task.data === undefined ? null : <ErrorText error={task.error} />}
       {task.data === undefined ? null : <TaskBody key={id} task={task.data} />}
     </QueryState>
+  );
+}
+
+/** Mono text lines as bars (prompt, replies). */
+function LineBars({ widths }: { widths: readonly string[] }) {
+  return (
+    <div className="flex flex-col gap-2.5 py-1">
+      {widths.map((w, i) => (
+        <SkeletonBar key={i} className={cx("h-3", w)} />
+      ))}
+    </div>
+  );
+}
+
+function StatePanelSkeleton({ className }: { className: string }) {
+  return (
+    <Panel title="State" className={className}>
+      <div className="flex flex-col gap-2.5">
+        <SkeletonBar className="h-10 w-full md:h-8" />
+        <SkeletonBar className="h-3 w-40" />
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * TaskBody's frame while the task loads: header, chips, action row, then its two columns (State first on phones).
+ * Titles known before the data render as text; everything else is bars.
+ */
+function TaskDetailSkeleton() {
+  return (
+    <Skeleton label="Loading task">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-2.5 py-0.5">
+          <SkeletonBar className="h-7 w-72 max-w-full" />
+          <SkeletonBar className="h-3 w-36 lg:hidden" />
+        </div>
+        <SkeletonBar className="h-8 w-32 md:h-6" />
+      </div>
+      <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
+        {["w-24", "w-32", "w-24"].map((w) => (
+          <SkeletonBar key={w} className={cx("h-[22px]", w)} />
+        ))}
+      </div>
+      <div className="flex flex-col gap-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <SkeletonBar className="h-10 w-24 md:h-8" />
+          <SkeletonBar className="h-10 w-24 md:h-8" />
+          <SkeletonBar className="h-10 w-14 md:h-8" />
+          <SkeletonBar className="ml-auto h-10 w-20 md:h-8" />
+        </div>
+        <StatePanelSkeleton className="lg:hidden" />
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-3.5">
+            <Panel title="Prompt">
+              <LineBars widths={["w-full", "w-11/12", "w-full", "w-4/5", "w-2/3"]} />
+            </Panel>
+            <Panel title={<SkeletonBar onPanel className="h-2.5 w-28" />}>
+              <LineBars widths={["w-5/6", "w-full", "w-1/2"]} />
+            </Panel>
+          </div>
+          <div className="flex min-w-0 flex-col gap-3.5">
+            <StatePanelSkeleton className="max-lg:hidden" />
+            <Panel title="Tree">
+              <LineBars widths={["w-full", "w-3/5"]} />
+            </Panel>
+            <Panel title={<SkeletonBar onPanel className="h-2.5 w-24" />}>
+              <div className="flex flex-col gap-3 py-0.5">
+                {["w-20", "w-16", "w-32", "w-12"].map((w) => (
+                  <div key={w} className="flex items-center gap-4">
+                    <SkeletonBar className="h-3 w-14" />
+                    <SkeletonBar className={cx("h-3", w)} />
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+    </Skeleton>
   );
 }
 

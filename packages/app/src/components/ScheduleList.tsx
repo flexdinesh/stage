@@ -7,7 +7,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { cronSummary, lastRun, wallTime } from "../lib/schedules.ts";
 import { IconRepeat } from "./icons.tsx";
 import { TaskStateBadge, taskStateTone } from "./StateBadge.tsx";
-import { Button, Chip, ErrorText, cx, toneClass } from "./ui.tsx";
+import { Button, Chip, ErrorText, Skeleton, SkeletonBar, cx, toneClass } from "./ui.tsx";
 
 /** "paused" (idle) or a plain "repeat" chip: a schedule has no state of its own, its runs do. */
 export function ScheduleChip({ paused }: { paused: boolean }) {
@@ -57,6 +57,48 @@ export function ScheduleRows({
   );
 }
 
+function scheduleRowGrid(showProject: boolean): string {
+  return cx(
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-transparent px-3 py-2.5 md:gap-x-3.5 md:py-2",
+    showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
+  );
+}
+
+const SCHEDULE_TITLE_WIDTHS = ["w-2/5", "w-1/2", "w-1/3"];
+
+/** Loading schedule rows in the schedule grid: chip, project, title over meta, Run now and Pause. */
+export function ScheduleRowsSkeleton({ count = 3, showProject = false }: { count?: number; showProject?: boolean }) {
+  return (
+    <Skeleton label="Loading schedules">
+      <ul>
+        {Array.from({ length: count }, (_, i) => (
+          <li key={i} className="border-b border-line last:border-b-0">
+            <div className={scheduleRowGrid(showProject)}>
+              <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
+                <SkeletonBar className="h-[22px] w-20" />
+              </div>
+              {showProject ? (
+                <div className="hidden md:order-2 md:block">
+                  <SkeletonBar className="h-3.5 w-20" />
+                </div>
+              ) : null}
+              <div className="order-1 flex min-w-0 flex-col gap-1.5 py-0.5 md:order-2">
+                {showProject ? <SkeletonBar className="h-3.5 w-20 md:hidden" /> : null}
+                <SkeletonBar className={cx("h-4", SCHEDULE_TITLE_WIDTHS[i % SCHEDULE_TITLE_WIDTHS.length])} />
+                <SkeletonBar className="h-3 w-72 max-w-full" />
+              </div>
+              <div className="order-4 col-span-2 flex gap-1.5 md:col-span-2 md:justify-end">
+                <SkeletonBar className="h-8 w-20 md:h-6" />
+                <SkeletonBar className="h-8 w-14 md:h-6" />
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Skeleton>
+  );
+}
+
 /** Same grid as TaskRow: chip column, optional project column, title + mono meta, last-run chip (failed or blocking runs only), actions. */
 export function ScheduleRow({
   schedule: s,
@@ -80,10 +122,7 @@ export function ScheduleRow({
 
   return (
     <div
-      className={cx(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-transparent px-3 py-2.5 md:gap-x-3.5 md:py-2",
-        showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
-      )}
+      className={scheduleRowGrid(showProject)}
     >
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
         <ScheduleChip paused={s.paused} />

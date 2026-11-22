@@ -106,7 +106,7 @@ function ProjectDetail({ id }: { id: number }) {
                 </div>
               }
             >
-              <QueryState isPending={tasks.isPending} error={tasks.error}>
+              <QueryState isPending={tasks.isPending} error={tasks.error} stale={tasks.isPlaceholderData}>
                 <TaskRows
                   tasks={tasks.data?.tasks ?? []}
                   emptyText={

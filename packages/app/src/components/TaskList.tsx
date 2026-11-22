@@ -16,7 +16,7 @@ import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickC
 import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { AppButton, Button, Chip, ErrorText, Muted, cx } from "./ui.tsx";
+import { AppButton, Button, Chip, ErrorText, Muted, SkeletonBar, cx } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
@@ -169,6 +169,47 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
  * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). `contextThreadId`: the session
  * page showing the row (relative run-order chip copy).
  */
+/** Task row grid (laptop columns: chip, project, title, actions, copy), shared with its skeleton. */
+function taskRowGrid(showProject: boolean): string {
+  return cx(
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
+    showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
+  );
+}
+
+const TITLE_WIDTHS = ["w-3/5", "w-2/5", "w-1/2", "w-2/3", "w-1/3"];
+
+/** Loading rows in the task row grid: chip, project, title over meta and last word, an action. */
+export function TaskRowsSkeleton({ count = 3, showProject = false }: { count?: number; showProject?: boolean }) {
+  return (
+    <ul>
+      {Array.from({ length: count }, (_, i) => (
+        <li key={i} className="border-b border-line last:border-b-0">
+          <div className={cx(taskRowGrid(showProject), "border-l-transparent")}>
+            <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
+              <SkeletonBar className="h-[22px] w-20" />
+            </div>
+            {showProject ? (
+              <div className="hidden md:order-2 md:block">
+                <SkeletonBar className="h-3 w-16" />
+              </div>
+            ) : null}
+            <div className="order-1 flex min-w-0 flex-col gap-1.5 py-0.5 md:order-2">
+              {showProject ? <SkeletonBar className="h-3 w-16 md:hidden" /> : null}
+              <SkeletonBar className={cx("h-4", TITLE_WIDTHS[i % TITLE_WIDTHS.length])} />
+              <SkeletonBar className="h-3 w-56 max-w-full" />
+              <SkeletonBar className="hidden h-3 w-4/5 md:block" />
+            </div>
+            <div className="order-4 col-span-2 flex md:col-span-1 md:justify-end">
+              <SkeletonBar className="h-8 w-24 md:h-6" />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function TaskRow({
   task,
   extra,
@@ -210,13 +251,7 @@ export function TaskRow({
 
   return (
     <div
-      className={cx(
-        "group/row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-2.5 md:gap-x-3.5 md:py-2",
-        showProject
-          ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]"
-          : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
-        needsInput ? "border-l-need" : "border-l-transparent",
-      )}
+      className={cx("group/row", taskRowGrid(showProject), needsInput ? "border-l-need" : "border-l-transparent")}
     >
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
         <NodeChip task={task} />

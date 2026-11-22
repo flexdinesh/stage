@@ -6,10 +6,10 @@ import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
 import { useScope } from "../components/Scope.tsx";
-import { GROUP_META, GroupPanel, ScheduledRows, StatStrip, useGroupFold } from "../components/TaskGroups.tsx";
-import { SettledRows, TaskRows } from "../components/TaskList.tsx";
+import { GROUP_META, GroupPanel, GroupPanelSkeleton, ScheduledRows, StatStrip, useGroupFold } from "../components/TaskGroups.tsx";
+import { SettledRows, TaskRows, TaskRowsSkeleton } from "../components/TaskList.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { Button, PageHeader, Panel, QueryState, Segmented, buttonClass } from "../components/ui.tsx";
+import { Button, PageHeader, Panel, QueryState, Segmented, Skeleton, buttonClass } from "../components/ui.tsx";
 import {
   GROUP_KEYS,
   awaitingReview,
@@ -134,7 +134,19 @@ function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: G
   };
 
   return (
-    <QueryState isPending={live.isPending || settled.isPending} error={live.error ?? settled.error}>
+    <QueryState
+      isPending={live.isPending || settled.isPending}
+      error={live.error ?? settled.error}
+      stale={live.isPlaceholderData || settled.isPlaceholderData}
+      skeleton={
+        <>
+          <StatStrip groups={STAT_GROUPS} meta={GROUP_META} counts={null} selected={selected} onToggle={(k) => onSelect(selected === k ? null : k)} />
+          <Skeleton label="Loading tasks">
+            <GroupPanelSkeleton showProject={!scoped} />
+          </Skeleton>
+        </>
+      }
+    >
       <StatStrip
         groups={STAT_GROUPS}
         meta={GROUP_META}
@@ -185,7 +197,18 @@ function ClosedTasks({ view, tree }: { view: "closed" | "all"; tree: TreeFilter 
         ? "Nothing closed. Archived tasks and tasks of done or archived trees land here."
         : "No tasks yet. Create one with New task.";
   return (
-    <QueryState isPending={tasks.isPending} error={tasks.error}>
+    <QueryState
+      isPending={tasks.isPending}
+      error={tasks.error}
+      stale={tasks.isPlaceholderData}
+      skeleton={
+        <Panel flush title="Tasks">
+          <Skeleton label="Loading tasks">
+            <TaskRowsSkeleton showProject={!scoped} />
+          </Skeleton>
+        </Panel>
+      }
+    >
       <Panel flush title="Tasks" meta={<span className="tabular">{listed.length}</span>}>
         <TaskRows tasks={listed} emptyText={empty} showProject={!scoped} showTree />
       </Panel>

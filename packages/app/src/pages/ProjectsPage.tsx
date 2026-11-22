@@ -19,6 +19,9 @@ import {
   Panel,
   QueryState,
   Segmented,
+  Skeleton,
+  SkeletonBar,
+  cx,
 } from "../components/ui.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
 
@@ -101,6 +104,36 @@ const ARCHIVED_OPTIONS = [
   { value: "all", label: "incl. archived" },
 ] as const;
 
+/** Project row grid: name over path, harness chip, counts (below the name on phone). Shared with the skeleton. */
+const PROJECT_ROW =
+  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px]";
+
+const NAME_WIDTHS = ["w-24", "w-16", "w-28", "w-20", "w-32"];
+
+function ProjectRowsSkeleton({ title }: { title: string }) {
+  return (
+    <Panel flush title={title}>
+      <Skeleton label="Loading projects">
+        <ul>
+          {NAME_WIDTHS.map((w, i) => (
+            <li key={i} className={PROJECT_ROW}>
+              <div className="flex min-w-0 flex-col gap-1.5 py-0.5">
+                <SkeletonBar className={cx("h-4", w)} />
+                <SkeletonBar className="h-3 w-56 max-w-full" />
+              </div>
+              <SkeletonBar className="h-[22px] w-9 justify-self-end md:justify-self-start" />
+              <div className="flex flex-col gap-1.5 py-0.5">
+                <SkeletonBar className="h-3 w-14" />
+                <SkeletonBar className="h-3 w-20" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Skeleton>
+    </Panel>
+  );
+}
+
 export function ProjectsPage() {
   const [filter, setFilter] = useState<"active" | "all">("active");
   const { storage } = usePlatform();
@@ -141,6 +174,8 @@ export function ProjectsPage() {
       <QueryState
         isPending={projects.isPending}
         error={projects.error}
+        stale={projects.isPlaceholderData}
+        skeleton={<ProjectRowsSkeleton title={filter === "all" ? "All projects" : "Active projects"} />}
         empty={list.length === 0}
         emptyText="No projects yet. Create one to start planning."
       >
@@ -149,10 +184,7 @@ export function ProjectsPage() {
             {list.map((p) => {
               const c = counts?.get(p.id) ?? { total: 0, active: 0 };
               return (
-                <li
-                  key={p.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px]"
-                >
+                <li key={p.id} className={PROJECT_ROW}>
                   <div className="min-w-0">
                     <Link to={`/projects/${p.id}`} className="block truncate text-body font-medium hover:underline">
                       {p.title}

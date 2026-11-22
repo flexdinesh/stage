@@ -5,7 +5,7 @@ import { capCount } from "../lib/format.ts";
 import { EMPTY_LOAD, LIVE_STATES, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
 import { IconChevronDown, IconMore, IconPin } from "./icons.tsx";
 import { useScope } from "./Scope.tsx";
-import { activeRowClass, cx } from "./ui.tsx";
+import { Skeleton, SkeletonBar, activeRowClass, cx } from "./ui.tsx";
 
 /** Views that follow the scope; picking a project anywhere else opens the Dashboard. */
 const SCOPED_PATHS = ["/", "/tasks", "/trees", "/schedules"];
@@ -185,6 +185,15 @@ export function ProjectNav({ onPick, touch = false }: { onPick?: () => void; tou
         Projects
       </SectionLabel>
       <ul>{lists.active.map(item)}</ul>
+      {projects.isPending ? (
+        <Skeleton label="Loading projects">
+          {["w-14", "w-10", "w-20"].map((w) => (
+            <div key={w} className={cx("flex items-center px-2.5", touch ? "min-h-11" : "min-h-8")}>
+              <SkeletonBar className={cx("h-3", w)} />
+            </div>
+          ))}
+        </Skeleton>
+      ) : null}
       {lists.active.length === 0 && lists.quiet.length === 0 && projects.data !== undefined ? (
         <p className="px-2.5 py-1 text-small text-muted">No projects yet.</p>
       ) : null}

@@ -186,7 +186,7 @@ export const useCatalog = () => {
 
 export const useProjects = (archived: ArchivedFilter = "false") => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.projects, "list", archived], queryFn: () => api.projects(archived) });
+  return useQuery({ queryKey: [...keys.projects, "list", archived], queryFn: () => api.projects(archived), placeholderData: keepPreviousData });
 };
 
 export const useProject = (id: number) => {
@@ -196,7 +196,7 @@ export const useProject = (id: number) => {
 
 export const useTasks = (q: TaskListQuery = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.tasks, q], queryFn: () => api.tasks(q) });
+  return useQuery({ queryKey: [...keys.tasks, q], queryFn: () => api.tasks(q), placeholderData: keepPreviousData });
 };
 
 export const useTask = (id: number) => {
@@ -222,7 +222,7 @@ export const useTree = (id: number, enabled = true) => {
 
 export const useSchedules = (q: ScheduleListQuery = {}) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q) });
+  return useQuery({ queryKey: [...keys.schedules, q], queryFn: () => api.schedules(q), placeholderData: keepPreviousData });
 };
 
 export const useJournal = (owner: JournalOwner, q: Omit<JournalQuery, "cursor"> = {}) => {

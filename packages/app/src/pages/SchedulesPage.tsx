@@ -2,7 +2,7 @@ import { useSchedules } from "../api/queries.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { useScope } from "../components/Scope.tsx";
-import { ScheduleRows } from "../components/ScheduleList.tsx";
+import { ScheduleRows, ScheduleRowsSkeleton } from "../components/ScheduleList.tsx";
 import { Button, PageHeader, Panel, QueryState } from "../components/ui.tsx";
 import { relativeTime } from "../lib/format.ts";
 
@@ -41,7 +41,12 @@ export function SchedulesPage() {
         }
       />
       <Panel flush title="Schedules" {...(schedules.data === undefined ? {} : { meta: <span className="tabular">{list.length}</span> })}>
-        <QueryState isPending={schedules.isPending} error={schedules.error}>
+        <QueryState
+          isPending={schedules.isPending}
+          error={schedules.error}
+          stale={schedules.isPlaceholderData}
+          skeleton={<ScheduleRowsSkeleton showProject={scope.project === null} />}
+        >
           <ScheduleRows
             schedules={list}
             emptyText={

@@ -9,7 +9,7 @@ import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostServers, HostServerTest, HostState } from "../platform/index.ts";
 import { IconCheck, IconChevronDown } from "./icons.tsx";
 import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, buttonClass, cx, toneClass } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, SkeletonRows, buttonClass, cx, toneClass } from "./ui.tsx";
 
 /** 6px square state marker in the server's tone. */
 function Marker({ tone }: { tone: ServerTone }) {
@@ -234,7 +234,7 @@ export function ServersCard() {
         flush
       >
         {servers === null ? (
-          <div className="p-3">{error === null ? <div aria-busy="true" className="h-9 animate-pulse border border-line bg-panel" /> : <ErrorText error={error} />}</div>
+          error === null ? <SkeletonRows rows={2} label="Loading servers" /> : <div className="p-3"><ErrorText error={error} /></div>
         ) : (
           <ul>
             {servers.map((s) => (

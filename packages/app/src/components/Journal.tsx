@@ -10,7 +10,7 @@ import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { Combobox } from "./Combobox.tsx";
-import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented } from "./ui.tsx";
+import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Skeleton, SkeletonBar } from "./ui.tsx";
 
 const Markdown = lazy(() => import("./ReplyMarkdown.tsx"));
 const KIND_OPTIONS: { value: JournalKind; label: string }[] = [
@@ -162,11 +162,11 @@ export function JournalHistoryNotice() {
 
 function JournalSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading journal" className="flex flex-col gap-3 p-3">
-      <div className="h-3 w-1/3 animate-pulse bg-panel" />
-      <div className="h-4 w-full animate-pulse bg-panel" />
-      <div className="h-4 w-2/3 animate-pulse bg-panel" />
-    </div>
+    <Skeleton label="Loading journal" className="flex flex-col gap-3 p-3">
+      <SkeletonBar className="h-3 w-1/3" />
+      <SkeletonBar className="h-4 w-full" />
+      <SkeletonBar className="h-4 w-2/3" />
+    </Skeleton>
   );
 }
 
