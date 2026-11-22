@@ -40,13 +40,12 @@ import { isFullyEditable } from "../lib/tasks.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
-import { Combobox } from "./Combobox.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
 import { prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText } from "./ui.tsx";
+import { Alert, Button, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText, Combobox } from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
 export const START_MODES = ["now", "backlog", "at", "repeat"] as const;

@@ -1,9 +1,8 @@
 // Stepped setup UI shared by the connection screen and T3 setup: mono step
 // rows (a square marker in the step's tone, or the square run-tone spinner on
-// the active step) and the remedy command box with Copy.
+// the active step). The remedy command box is CommandBox in ui.
 import type { ReactNode } from "react";
-import { useCopy } from "./StageLinks.tsx";
-import { Button, cx, toneClass, type ChipTone } from "./ui.tsx";
+import { cx, toneClass, type ChipTone } from "./ui.tsx";
 
 export type StepStatus = "idle" | "active" | "ok" | "need" | "bad";
 
@@ -38,30 +37,5 @@ export function Step({ label, note, status, tabular = false }: { label: string; 
         {note}
       </span>
     </li>
-  );
-}
-
-/** Copy button whose label confirms the copy (announced politely). */
-export function CopyAction({ text, label, small = true }: { text: string; label: string; small?: boolean }) {
-  const [status, copy] = useCopy();
-  return (
-    <>
-      <Button small={small} onClick={() => copy(text)}>
-        {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
-      </Button>
-      <span className="sr-only" aria-live="polite">
-        {status === "copied" ? `${label}: copied` : status === "failed" ? `${label}: copy failed` : ""}
-      </span>
-    </>
-  );
-}
-
-/** A remedy command in a Bench Gray mono box with Copy. */
-export function CommandBox({ command }: { command: string }) {
-  return (
-    <div className="flex items-start gap-2 border border-line bg-panel px-3 py-2">
-      <code className="min-w-0 flex-1 font-mono text-detail break-all text-fg">{command}</code>
-      <CopyAction text={command} label="Copy" />
-    </div>
   );
 }

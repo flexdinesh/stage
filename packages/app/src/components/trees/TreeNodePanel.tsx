@@ -11,8 +11,7 @@ import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconArrowRight, IconChainLink, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
-import { Combobox } from "../Combobox.tsx";
-import { Button, ErrorText, Panel, Segmented } from "../ui.tsx";
+import { Button, ErrorText, Panel, Segmented, Combobox } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeAction, NodeChip } from "./TreeNode.tsx";
 
@@ -196,7 +195,7 @@ export function TreeNodeEditor({
                           title={`Remove need #${n.id}`}
                           disabled={setNeeds.isPending}
                           onClick={() => setNeeds.mutate(task.needs.filter((id) => id !== n.id))}
-                          className="w-8 px-0 md:w-6"
+                          className="w-control-sm px-0"
                         >
                           <IconClose size={12} />
                         </Button>

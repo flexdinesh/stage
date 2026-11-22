@@ -40,7 +40,7 @@ export function MiniLevels({ tree, current }: { tree: Pick<TreeDetail, "tasks">;
                 title={`#${id} ${t.title} · ${label}`}
                 className={cx(
                   toneClass(tone),
-                  "inline-flex h-8 items-center gap-1.5 border border-line-strong bg-surface px-2 font-mono text-meta text-fg tabular transition-colors duration-150 hover:bg-panel md:h-6 md:px-1.5",
+                  "inline-flex h-control-sm items-center gap-1.5 border border-line-strong bg-surface px-2 font-mono text-meta text-fg tabular transition-colors duration-150 hover:bg-panel md:px-1.5",
                   t.state === "backlog" && "border-dashed",
                   here && "outline outline-1 outline-offset-1 outline-fg",
                 )}
@@ -66,7 +66,7 @@ export function TreeBar({ task, tree }: { task: Task; tree: TreeDetail }) {
   return (
     <nav
       aria-label="Tree"
-      className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border border-line-strong bg-surface py-2.5 pr-2.5 pl-3 md:py-2 md:pr-2"
+      className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border border-line-strong bg-surface py-row pr-2.5 pl-3 md:pr-2"
     >
       <div className="flex min-w-0 items-center gap-2 max-md:basis-full">
         <span className="text-muted">

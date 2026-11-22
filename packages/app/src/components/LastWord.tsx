@@ -2,8 +2,7 @@ import { Suspense, lazy } from "react";
 import { useHarnesses } from "../api/queries.ts";
 import type { TaskState, TaskDetail } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
-import { CopyButton } from "./CopyButton.tsx";
-import { Panel, cx } from "./ui.tsx";
+import { Panel, cx, CopyButton } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 // marked + DOMPurify load only when a reply is shown.

@@ -1,8 +1,7 @@
 import { useCatalog } from "../api/queries.ts";
 import { type CatalogModel, type ModelOption, type RuntimeMode } from "../api/types.ts";
 import { optionsText } from "../lib/format.ts";
-import { Combobox } from "./Combobox.tsx";
-import { Field, Muted, errorText } from "./ui.tsx";
+import { Field, Muted, errorText, Combobox } from "./ui.tsx";
 
 export interface ModelConfig {
   providerInstanceId: string | null;

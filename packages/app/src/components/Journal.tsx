@@ -9,8 +9,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
-import { Combobox } from "./Combobox.tsx";
-import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Skeleton, SkeletonBar } from "./ui.tsx";
+import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Skeleton, SkeletonBar, Combobox } from "./ui.tsx";
 
 const Markdown = lazy(() => import("./ReplyMarkdown.tsx"));
 const KIND_OPTIONS: { value: JournalKind; label: string }[] = [

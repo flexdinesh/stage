@@ -62,7 +62,7 @@ function TreeWhen({ tree, inline = false }: { tree: TreeSummary; inline?: boolea
 
 /** Tree row grid: title block, times (laptop), state bar, action. Shared with its skeleton. */
 const TREE_ROW_GRID =
-  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 md:py-2 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]";
+  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-row md:grid-cols-[minmax(0,1fr)_240px_128px] md:gap-x-5 lg:grid-cols-[minmax(0,1fr)_auto_240px_128px]";
 
 const TREE_TITLE_WIDTHS = ["w-48", "w-36", "w-56"];
 
@@ -93,7 +93,7 @@ export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <SkeletonBar className="h-8 w-14 md:h-6" />
+                  <SkeletonBar className="h-control-sm w-14" />
                 </div>
               </div>
             </div>

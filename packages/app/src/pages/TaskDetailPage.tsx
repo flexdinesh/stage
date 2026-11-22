@@ -6,7 +6,6 @@ import { useApi, usePlatform } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork, useTask } from "../api/queries.ts";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
-import { CopyButton } from "../components/CopyButton.tsx";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
@@ -21,22 +20,7 @@ import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
-import {
-  Alert,
-  AppButton,
-  Button,
-  Chip,
-  Detail,
-  Details,
-  ErrorText,
-  Muted,
-  PageHeader,
-  Panel,
-  QueryState,
-  Skeleton,
-  SkeletonBar,
-  cx,
-} from "../components/ui.tsx";
+import { Alert, AppButton, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, Skeleton, SkeletonBar, cx, CopyButton } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
@@ -87,7 +71,7 @@ function StatePanelSkeleton({ className }: { className: string }) {
   return (
     <Panel title="State" className={className}>
       <div className="flex flex-col gap-2.5">
-        <SkeletonBar className="h-10 w-full md:h-8" />
+        <SkeletonBar className="h-control w-full" />
         <SkeletonBar className="h-3 w-40" />
       </div>
     </Panel>
@@ -106,7 +90,7 @@ function TaskDetailSkeleton() {
           <SkeletonBar className="h-7 w-72 max-w-full" />
           <SkeletonBar className="h-3 w-36 lg:hidden" />
         </div>
-        <SkeletonBar className="h-8 w-32 md:h-6" />
+        <SkeletonBar className="h-control-sm w-32" />
       </div>
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         {["w-24", "w-32", "w-24"].map((w) => (
@@ -115,10 +99,10 @@ function TaskDetailSkeleton() {
       </div>
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <SkeletonBar className="h-10 w-24 md:h-8" />
-          <SkeletonBar className="h-10 w-24 md:h-8" />
-          <SkeletonBar className="h-10 w-14 md:h-8" />
-          <SkeletonBar className="ml-auto h-10 w-20 md:h-8" />
+          <SkeletonBar className="h-control w-24" />
+          <SkeletonBar className="h-control w-24" />
+          <SkeletonBar className="h-control w-14" />
+          <SkeletonBar className="ml-auto h-control w-20" />
         </div>
         <StatePanelSkeleton className="lg:hidden" />
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">

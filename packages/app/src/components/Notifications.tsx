@@ -125,7 +125,7 @@ export function NotificationsBell({ onOpen }: { onOpen: () => void }) {
       onClick={onOpen}
       title={label}
       aria-label={label}
-      className={cx(unread === 0 ? "w-10 px-0 md:w-8" : "gap-1.5 px-2.5 md:px-2")}
+      className={cx(unread === 0 ? "w-control px-0" : "gap-1.5 px-2.5 md:px-2")}
     >
       <IconBell size={16} />
       {unread === 0 ? null : (

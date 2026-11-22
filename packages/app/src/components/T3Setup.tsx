@@ -12,8 +12,8 @@ import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.t
 import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
-import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, Panel, QueryState } from "./ui.tsx";
+import { Step, Steps } from "./Steps.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {

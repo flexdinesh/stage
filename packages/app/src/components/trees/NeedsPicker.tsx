@@ -1,5 +1,5 @@
 import type { Task } from "../../api/types.ts";
-import { Combobox } from "../Combobox.tsx";
+import { Combobox } from "../ui.tsx";
 
 /**
  * Adds a need from cycle-safe candidates (see `needCandidates`): a combobox that resets after each pick. Disabled with

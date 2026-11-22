@@ -4,8 +4,7 @@ import { useInvalidateWork, useTree, useTrees } from "../../api/queries.ts";
 import type { StartMode, Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { joinSummary, treeMeta } from "../../lib/trees.ts";
-import { Combobox } from "../Combobox.tsx";
-import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, cx } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, cx, Combobox } from "../ui.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "auto", label: "Auto" },
