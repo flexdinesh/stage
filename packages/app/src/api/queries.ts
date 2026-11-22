@@ -33,6 +33,10 @@ export const keys = {
   tree: ["tree"],
   journal: ["journal"],
   journalEntry: ["journalEntry"],
+  /** This device's state (not the server's): its push subscription. */
+  device: { push: ["device", "push"] },
+  /** The native host's state (desktop): login startup and diagnostics. */
+  host: { loginStartup: ["host", "loginStartup"], diagnostics: ["host", "diagnostics"] },
 } as const;
 
 /** Harness connections (live: sync counts and activity move on their own). */

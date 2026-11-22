@@ -1,6 +1,5 @@
 import { ProjectWorkspace } from "../components/ProjectWorkspace.tsx";
 import { projectWorkspace } from "../lib/projects.ts";
-import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { isNotFound, useProject, useSchedules, useTasks } from "../api/queries.ts";
 import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
@@ -11,11 +10,13 @@ import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { Button, PageHeader, Panel, QueryState, Segmented, Combobox } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
-import { useIdParam } from "../lib/params.ts";
+import { useIdParam, useSearchParam } from "../lib/params.ts";
 import { NotFoundPage, RecordNotFound } from "./NotFoundPage.tsx";
 
 /** Open: not archived and not in a done or archived tree; Closed: done or archived. */
 type Scope = "open" | "closed" | "all";
+
+const SCOPE_VALUES: readonly Scope[] = ["open", "closed", "all"];
 
 const SCOPES: { value: Scope; label: string }[] = [
   { value: "open", label: "Open" },
@@ -31,8 +32,9 @@ export function ProjectDetailPage() {
 
 function ProjectDetail({ id }: { id: number }) {
   const project = useProject(id);
-  const [stateFilter, setStateFilter] = useState("");
-  const [scope, setScope] = useState<Scope>("open");
+  // In the address, so Back from a task keeps the list as it was.
+  const [stateFilter, setStateFilter] = useSearchParam("state", ["", ...TASK_STATES], "");
+  const [scope, setScope] = useSearchParam("scope", SCOPE_VALUES, "open");
   const state = pick(TASK_STATES, stateFilter);
   const closed: TaskListQuery["closed"] = scope === "closed" ? "true" : scope === "all" ? "all" : undefined;
   const tasks = useTasks({
@@ -100,7 +102,7 @@ function ProjectDetail({ id }: { id: number }) {
                   <Segmented label="Task scope" small options={SCOPES} value={scope} onChange={setScope} />
                   <Combobox
                     value={stateFilter}
-                    onChange={setStateFilter}
+                    onChange={(next) => setStateFilter(pick(TASK_STATES, next) ?? "")}
                     aria-label="Filter by state"
                     listLabel="States"
                     small

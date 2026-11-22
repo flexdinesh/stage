@@ -1,14 +1,9 @@
 import { Link } from "react-router";
+import { MORE_DESTINATIONS } from "../components/destinations.ts";
 import { IconStep } from "../components/icons.tsx";
 import { StatusSections, useStatus } from "../components/StatusRow.tsx";
 import { PageHeader, Segmented, SubHeading, cx, rowButtonClass } from "../components/ui.tsx";
 import { THEMES, useTheme } from "../lib/theme.ts";
-
-export const MORE_DESTINATIONS = [
-  { to: "/projects", label: "Projects" },
-  { to: "/snippets", label: "Snippets" },
-  { to: "/settings", label: "Settings" },
-] as const;
 
 const THEME_OPTIONS = THEMES.map((theme) => ({ value: theme, label: theme }));
 

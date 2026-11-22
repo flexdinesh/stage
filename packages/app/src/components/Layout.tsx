@@ -4,7 +4,7 @@ import { useBadge } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { useTheme, type Theme } from "../lib/theme.ts";
-import { MORE_DESTINATIONS } from "../pages/MorePage.tsx";
+import { MORE_DESTINATIONS } from "./destinations.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {

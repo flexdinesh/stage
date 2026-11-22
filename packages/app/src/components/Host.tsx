@@ -140,7 +140,7 @@ function Remedy({ state }: { state: HostState }) {
 function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] }) {
   const [open, setOpen] = useState(false);
   const report = useQuery({
-    queryKey: ["hostDiagnostics"],
+    queryKey: keys.host.diagnostics,
     queryFn: () => host.connection.diagnostics(),
     enabled: open,
     refetchInterval: false,
@@ -603,15 +603,13 @@ function WorkerAlert({ worker, tone, control }: { worker: HostWorker; tone: "pla
 
 // ---- Settings ----
 
-const LOGIN_KEY = ["hostLoginStartup"];
-
 /** Settings panel of the desktop app: login startup (this machine's server or worker), the worker, versions, diagnostics. */
 export function DesktopAppCard() {
   const { host } = usePlatform();
   const state = useHostState();
   const qc = useQueryClient();
   const login = useQuery({
-    queryKey: LOGIN_KEY,
+    queryKey: keys.host.loginStartup,
     queryFn: () => host?.loginStartup.get() ?? Promise.resolve(false),
     enabled: host !== undefined,
     refetchInterval: false,
@@ -619,7 +617,7 @@ export function DesktopAppCard() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const diagnostics = useQuery({
-    queryKey: ["hostDiagnostics", "settings"],
+    queryKey: [...keys.host.diagnostics, "settings"],
     queryFn: () => host?.connection.diagnostics() ?? Promise.resolve(""),
     enabled: host !== undefined,
     refetchInterval: false,
@@ -630,13 +628,13 @@ export function DesktopAppCard() {
   const toggle = (enabled: boolean) => {
     setSaving(true);
     setSaveError(null);
-    qc.setQueryData(LOGIN_KEY, enabled);
+    qc.setQueryData(keys.host.loginStartup, enabled);
     host.loginStartup
       .set(enabled)
       .catch((err: unknown) => setSaveError(err))
       .finally(() => {
         setSaving(false);
-        void qc.invalidateQueries({ queryKey: LOGIN_KEY });
+        void qc.invalidateQueries({ queryKey: keys.host.loginStartup });
       });
   };
   const server = state.server;
