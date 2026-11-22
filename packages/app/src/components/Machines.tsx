@@ -1,8 +1,9 @@
 // Settings MACHINES: every machine with presence, last seen, build and its harness connections; inline rename and
-// remove (remote only); Add machine opens a drawer that creates a one-time pairing link and waits for the worker to
+// remove (remote only); a remote machine's Harnesses link opens its page (pages/MachinePage.tsx); Add machine opens a drawer that creates a one-time pairing link and waits for the worker to
 // join. Logic: lib/machines.ts. API: docs/api.md "Machines".
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useHarnesses, useMachines, useRemoveMachine, useRenameMachine } from "../api/queries.ts";
 import type { Machine, MachinePairing, PairingStatus } from "../api/types.ts";
@@ -10,10 +11,10 @@ import { dateTime } from "../lib/format.ts";
 import { countdown, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { CommandBox, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, cx, toneClass } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, buttonClass, cx, toneClass } from "./ui.tsx";
 
 /** 6px square state marker. */
-function Marker({ tone }: { tone: "ok" | "idle" }) {
+export function Marker({ tone }: { tone: "ok" | "idle" }) {
   return <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c) transition-colors duration-150", toneClass(tone))} />;
 }
 
@@ -88,6 +89,11 @@ function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; s
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 max-md:w-full max-md:pl-[18px]">
+            {remote ? (
+              <Link to={`/settings/machines/${m.id}`} className={buttonClass("secondary", true)} aria-label={`${m.label} harnesses`}>
+                Harnesses
+              </Link>
+            ) : null}
             <Button small variant="ghost" disabled={mode === "remove"} onClick={() => setMode("rename")}>
               Rename
             </Button>
@@ -189,6 +195,7 @@ function AddMachineDrawer({ onClose }: { onClose: () => void }) {
   const gone = status.error instanceof ApiError && status.error.status === 404;
   const phase = pairing === null ? null : gone ? "expired" : pairingPhase(status.data, pairing.expiresAt, now);
   const waiting = phase === "waiting";
+  const joinedId = status.data?.machineId ?? null;
 
   useEffect(() => {
     if (!waiting) return;
@@ -218,9 +225,16 @@ function AddMachineDrawer({ onClose }: { onClose: () => void }) {
             </Button>
           </>
         ) : phase === "joined" ? (
-          <Button variant="primary" onClick={close}>
-            Done
-          </Button>
+          <>
+            {joinedId === null ? null : (
+              <Link to={`/settings/machines/${joinedId}`} className={buttonClass("primary")} onClick={close}>
+                Set up harnesses
+              </Link>
+            )}
+            <Button variant="ghost" onClick={close}>
+              Done
+            </Button>
+          </>
         ) : phase === "expired" ? (
           <>
             <Button variant="primary" onClick={() => setPairing(null)}>
@@ -354,7 +368,7 @@ function PairingView({ pairing, status, phase, now }: { pairing: MachinePairing;
         </>
       ) : null}
       {phase === "joined" ? (
-        <Muted>{name} is listed under Machines. It shows online once its worker connects.</Muted>
+        <Muted>{name} is listed under Machines. It shows online once its worker connects; then set up its harnesses on its page.</Muted>
       ) : null}
       {phase === "expired" ? <Muted>The link was not used in time. Create a new link to try again.</Muted> : null}
     </div>

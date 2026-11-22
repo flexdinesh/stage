@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
@@ -42,8 +44,12 @@ type Deps struct {
 	// Setup is the T3 endpoint, read only for the legacy T3 link fields of
 	// task and thread responses and T3 thread refs (nil: none).
 	Setup *t3setup.Service
-	// Connectors is the connection setup per connected harness kind.
+	// Connectors is the connection setup per machine and connected harness
+	// kind (fixed; used when LiveConnectors is nil).
 	Connectors harness.Connectors
+	// LiveConnectors indexes the connection setups of the machines hosted
+	// now (remote machines join and leave while the server runs).
+	LiveConnectors func() harness.Connectors
 	// Harnesses is the server's fixed harness composition (nil: none).
 	Harnesses *harness.Registry
 	// Channels is the worker channel hub (nil: a private hub that
@@ -62,6 +68,14 @@ type Deps struct {
 type MachineHosts interface {
 	Join(machineID int64)
 	Leave(machineID int64)
+}
+
+// connectors is the connection setup per machine and kind now.
+func (s *server) connectors() harness.Connectors {
+	if s.LiveConnectors != nil {
+		return s.LiveConnectors()
+	}
+	return s.Connectors
 }
 
 // registry is Harnesses, or an empty registry.
@@ -122,9 +136,22 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/harnesses/{kind}/settings", s.harnessSettings)
 	h("POST /api/harnesses/{kind}/actions/{action}", s.harnessAction)
 	h("DELETE /api/harnesses/{kind}/connection", s.harnessDisconnect)
+	// The same per machine (/api/harnesses is machine 1's).
+	h("GET /api/machines/{id}/harnesses", s.listHarnesses)
+	h("GET /api/machines/{id}/harnesses/{kind}/status", s.harnessStatus)
+	h("PUT /api/machines/{id}/harnesses/{kind}/settings", s.harnessSettings)
+	h("POST /api/machines/{id}/harnesses/{kind}/actions/{action}", s.harnessAction)
+	h("DELETE /api/machines/{id}/harnesses/{kind}/connection", s.harnessDisconnect)
 	h("GET /api/machines", s.listMachines)
 	h("POST /api/machines/pairings", s.createPairing)
-	h("GET /api/machines/pairings/{id}", s.pairingStatus)
+	// GET /api/machines/pairings/{id}, written so the mux can tell it from
+	// GET /api/machines/{id}/harnesses (the more specific pattern below).
+	h("GET /api/machines/{scope}/{id}", func(w http.ResponseWriter, r *http.Request) error {
+		if r.PathValue("scope") != "pairings" {
+			return fmt.Errorf("%w: %s", db.ErrNotFound, r.URL.Path)
+		}
+		return s.pairingStatus(w, r)
+	})
 	h("DELETE /api/machines/pairings/{id}", s.revokePairing)
 	h("GET /api/machines/{id}", s.getMachine)
 	h("PATCH /api/machines/{id}", s.renameMachine)
@@ -289,7 +316,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Harnesses = []HealthHarness{}
 	// The harness setup API serves the local machine's connectors.
-	s.Connectors.Each(func(machine int64, d harness.Descriptor, c harness.Connector) {
+	s.connectors().Each(func(machine int64, d harness.Descriptor, c harness.Connector) {
 		if machine != db.LocalMachine {
 			return
 		}
@@ -333,7 +360,10 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	if writeAuthErr(w, err) {
 		return
 	}
+	var unavailable *remote.UnavailableError
 	switch {
+	case errors.As(err, &unavailable):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": unavailable.Message, "code": unavailable.Code})
 	case errors.Is(err, execution.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "Harness unavailable")
 	case errors.As(err, &invalid):

@@ -76,8 +76,10 @@ func Join(ctx context.Context, o JoinOptions) (Config, error) {
 	if err := SaveConfig(o.ConfigPath, c); err != nil {
 		return Config{}, fmt.Errorf("joined as machine %d but could not save %s (remove the machine in Settings and pair again): %w", c.MachineID, o.ConfigPath, err)
 	}
-	// A previous machine's final state (revoked, stopped) no longer applies.
+	// A previous machine's final state (revoked, stopped) and harness
+	// credentials no longer apply.
 	_ = os.Remove(filepath.Join(Dir(o.ConfigPath), StateFile))
+	_ = os.Remove(filepath.Join(Dir(o.ConfigPath), CredentialsFile))
 	return c, nil
 }
 
@@ -118,8 +120,8 @@ type LeaveResult struct {
 }
 
 // Leave removes this machine from the main server (unless Local) and
-// deletes worker.json and worker.state.json. The lock file is kept (lock
-// files are never deleted).
+// deletes worker.json, worker.state.json and the harness credentials
+// (credentials.json). The lock file is kept (lock files are never deleted).
 func Leave(ctx context.Context, o LeaveOptions) (LeaveResult, error) {
 	var res LeaveResult
 	c, err := LoadConfig(o.ConfigPath)
@@ -139,7 +141,7 @@ func Leave(ctx context.Context, o LeaveOptions) (LeaveResult, error) {
 		}
 	}
 	dir := Dir(o.ConfigPath)
-	for _, f := range []string{o.ConfigPath, filepath.Join(dir, StateFile)} {
+	for _, f := range []string{o.ConfigPath, filepath.Join(dir, StateFile), filepath.Join(dir, CredentialsFile)} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return res, err
 		}

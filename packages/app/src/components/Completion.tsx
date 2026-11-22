@@ -2,7 +2,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { Acceptance, AcceptanceRequest, AcceptedEvidence, HarnessConnection, Task } from "../api/types.ts";
+import { useScopeMachineId } from "../api/harnessScope.tsx";
 import { useConnections, useHarnesses, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
+import { activeOn } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
 import { provenanceText, stateMove } from "../lib/completion.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
@@ -122,7 +124,7 @@ export function AutoCompleteToggle({ harness, className }: { harness: HarnessCon
   const closure = useHarnesses().descriptor(harness)?.closures[0];
   const save = useSetAutoComplete();
   const hintId = useId();
-  const connection = connections.data?.connections.find((c) => c.harness === harness && c.active);
+  const connection = activeOn(connections.data?.connections ?? [], harness, useScopeMachineId());
   if (connection === undefined || closure === undefined) return null;
   return (
     <div className={cx("flex min-w-0 flex-col gap-0.5", className)} aria-busy={save.isPending}>

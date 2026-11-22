@@ -58,7 +58,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	} else if err != nil {
-		s.Connectors.Each(func(_ int64, _ harness.Descriptor, c harness.Connector) {
+		s.connectors().Each(func(_ int64, _ harness.Descriptor, c harness.Connector) {
 			if err == nil {
 				return
 			}

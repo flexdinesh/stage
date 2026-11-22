@@ -1,16 +1,17 @@
 import { useState } from "react";
+import { useScopeMachineId } from "../api/harnessScope.tsx";
 import { useForgetConnection, useHarnesses } from "../api/queries.ts";
 import type { Harness } from "../api/types.ts";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { forgetPrompt, previousConnections, usageText } from "../lib/harnesses.ts";
 import { Alert, Button, ErrorText, cx } from "./ui.tsx";
 
-/** Settings: a harness's replaced, not forgotten connections, each with Forget behind an inline confirm. Hidden when none. */
+/** Settings: a harness's replaced, not forgotten connections on the harness scope's machine, each with Forget behind an inline confirm. Hidden when none. */
 export function PreviousConnections({ harness, className }: { harness: Harness; className?: string }) {
   const { list, kindName } = useHarnesses();
   const forget = useForgetConnection();
   const [confirm, setConfirm] = useState<number | null>(null);
-  const previous = previousConnections(list, harness);
+  const previous = previousConnections(list, harness, useScopeMachineId());
   if (previous.length === 0) return null;
   return (
     <section className={cx("flex min-w-0 flex-col gap-2", className)} aria-label={`Previous ${kindName(harness)} connections`}>

@@ -200,7 +200,7 @@ The up half: one envelope per request (at most 32 MiB), header `Stage-Channel-Se
 #### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
 A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
 
-- Machine management is refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`) work.
+- Machine management and per-machine harness setup changes are refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping`, `PUT /api/machines/{id}/harnesses/{kind}/settings`, `POST /api/machines/{id}/harnesses/{kind}/actions/{action}` and `DELETE /api/machines/{id}/harnesses/{kind}/connection` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`, `GET /api/machines/{id}/harnesses...`) work.
 - `/api/worker/*` and any path that is neither `/api/...` nor `/mcp`: 404.
 
 ## Harness connections (API v6)
@@ -238,6 +238,9 @@ Body: the action's input object (strict; empty means `{}`). 200 `HarnessStatus` 
 
 ### `DELETE /api/harnesses/{kind}/connection`
 Forget the connection's credentials; the connection keeps its identity, tasks and history. 200 `HarnessStatus`. 409 when the descriptor's `setup.disconnect` is false or the environment manages the connection.
+
+### Per machine (`/api/machines/{id}/harnesses...`)
+`GET /api/machines/{id}/harnesses`, `GET .../{kind}/status`, `PUT .../{kind}/settings`, `POST .../{kind}/actions/{action}` and `DELETE .../{kind}/connection` are the routes above for machine `{id}`; `/api/harnesses...` is machine 1 (this server). Unknown or removed machine: 404. A remote machine's setup runs on its worker ([execution.md](execution.md#remote-machines)): credentials stay there, and its environment, not this server's, locks fields (`locked`, `source: env`). When its worker cannot answer: 503 `{error, code}` with `machine_offline` (not connected, or no reply in time), `machine_needs_update` (another API version, or a worker without this harness's setup) or `machine_setup_starting` (connected, still composing its setup; retry). Health and `GET /api/harnesses` report an offline remote connection as not connected with the offline reason as `lastError`. A remote machine's connection is created by its first pairing or connect.
 
 ## T3 connection, sync, catalog
 
@@ -390,7 +393,7 @@ Each connect tests the service and returns 200 `HarnessStatus`. Credentials and 
 - `POST /api/harnesses/opencode/actions/pair`: `{link}` from `opencode pair` (`http(s)://host:port/auth/connect/CODE`, no credentials, query or fragment; else 400). The link origin becomes the endpoint. A link stopped by `instance_changed`/`instance_returned` keeps its redeemed token for 10 minutes, so resending the same link with `newInstance: true` confirms it (links work once).
 - `DELETE /api/harnesses/opencode/connection`: disconnect. Clears the addresses, credentials and token and deactivates the adapter; keeps the connection's identity, tasks and history.
 
-409 codes: `opencode_local_unavailable` (no, unreadable or invalid registration file, or the service is not answering), `opencode_pairing_expired` (the code expired or was used), `opencode_auth_required` (the service answered 401/403). With `OPENCODE_URL` set, connect-local, pair and disconnect return 409 (managed by the Stage server environment).
+409 codes: `opencode_local_unavailable` (no, unreadable or invalid registration file, or the service is not answering), `opencode_pairing_expired` (the code expired or was used), `opencode_auth_required` (the service answered 401/403). With `OPENCODE_URL` set, connect-local, pair and disconnect return 409 (managed by the machine's Stage environment).
 
 Instance check: an address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service with the same repository at the same path is never bound silently. `connectionId` in the status changes with it.
 

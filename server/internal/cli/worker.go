@@ -21,6 +21,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/service"
 	"github.com/flexdinesh/stage/server/internal/worker"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
+	"github.com/flexdinesh/stage/server/internal/workersetup"
 )
 
 // runWorker is `stage worker join|run|status|leave|service`: this machine
@@ -141,12 +143,22 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 	return st.Definition.Present
 }
 
-// workerHost is what `stage worker run` serves: this machine's adapters
-// (none until connection setup installs them, #345) and its fs and process
-// work (machine.LocalOps), over the worker channel.
-func workerHost(managed bool, getenv func(string) string) func(int64) worker.Host {
-	return func(machineID int64) worker.Host {
-		return remote.NewHost(machine.NewLocal(machineID, harness.ResolveProfile(managed, false, getenv), machine.LocalOps{}))
+// workerHost is what `stage worker run` serves: this machine's connection
+// setup (T3 and OpenCode, composed once the main server is reachable), the
+// adapters it installs, and its fs and process work (machine.LocalOps),
+// over the worker channel. harnessEnv is the machine's harness settings
+// (config.HarnessEnvKeys); credentials stay in the worker dir of
+// configPath.
+func workerHost(managed bool, getenv, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, workerchan.Upcall) worker.Host {
+	return func(machineID int64, call workerchan.Upcall) worker.Host {
+		h := remote.NewHost(machine.NewLocal(machineID, harness.ResolveProfile(managed, false, getenv), machine.LocalOps{}))
+		workersetup.Attach(workersetup.Options{
+			Host:   h,
+			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath)},
+			Config: config.HarnessFrom(harnessEnv),
+			Logger: logger,
+		})
+		return h
 	}
 }
 
@@ -159,12 +171,23 @@ func workerHost(managed bool, getenv func(string) string) func(int64) worker.Hos
 func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, listenFlag string) error {
 	goos := runtime.GOOS
 	logger := slog.New(slog.NewTextHandler(env.Stderr, nil))
-	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv, Host: workerHost(managed, env.Getenv)}
+	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv}
 	var err error
 	listenList := listenFlag
+	// A foreground worker takes its harness settings from its environment;
+	// the worker service only from worker.env.
+	harnessEnv := env.Getenv
 	if managed {
 		opts.Manager, opts.Service = service.ManagerKind(goos), service.NameFor(goos, service.RoleWorker)
-		opts.ConfigPath, listenList, err = managedWorkerConfig(env.Getenv, goos)
+		var vals map[string]string
+		opts.ConfigPath, vals, err = managedWorkerConfig(env.Getenv, goos)
+		listenList = vals[config.WorkerListenEnv]
+		harnessEnv = func(k string) string {
+			if k == "STAGE_ENV" {
+				return env.Getenv(k)
+			}
+			return vals[k]
+		}
 		// The gateway socket is the identity default data dir's, like the
 		// managed server's: STAGE_DATA_DIR in the inherited environment is
 		// ignored.
@@ -191,6 +214,7 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, li
 		}
 	}
 	if err == nil {
+		opts.Host = workerHost(managed, env.Getenv, harnessEnv, opts.ConfigPath, opts.Logger)
 		err = worker.Run(ctx, opts)
 	}
 	if err == nil {
@@ -213,22 +237,23 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, li
 	return exitError{code}
 }
 
-// managedWorkerConfig is the worker service's config path and gateway
-// listen list (worker.env; the shell environment is never used).
-func managedWorkerConfig(getenv func(string) string, goos string) (string, string, error) {
+// managedWorkerConfig is the worker service's config path and worker.env
+// (gateway listen list, harness settings; the shell environment is never
+// used).
+func managedWorkerConfig(getenv func(string) string, goos string) (string, map[string]string, error) {
 	envPath, err := config.WorkerEnvPath(getenv, goos)
 	if err != nil {
-		return "", "", config.Invalid(err)
+		return "", nil, config.Invalid(err)
 	}
 	vals, err := config.ReadWorkerEnv(envPath)
 	if err != nil {
-		return "", "", config.Invalid(err)
+		return "", nil, config.Invalid(err)
 	}
 	p, err := worker.ManagedConfigPath(getenv, goos, vals)
 	if err != nil {
-		return "", "", config.Invalid(err)
+		return "", nil, config.Invalid(err)
 	}
-	return p, vals[config.WorkerListenEnv], nil
+	return p, vals, nil
 }
 
 // managedWorkerLog (macOS) logs to ~/Library/Logs/<id>/worker.log, rotated,

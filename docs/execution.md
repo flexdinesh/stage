@@ -123,12 +123,38 @@ suite cannot tell a remote machine from the local one.
   and streams idle, task states and acceptance do not change, a backlog
   launch is refused as `connection_unavailable`, and an attempt already
   dispatched stays unconfirmed and retries until the worker is back.
+- **Setup.** A remote machine's connection setup runs on its worker
+  (`server/internal/workersetup`): the same `t3setup` and `opencodesetup`
+  constructors as the local machine, composed once the channel is first
+  online, over ports that call the main server (`setup.*` worker-to-main
+  kinds, `remote.ServeSetup`, always scoped to the token's machine; a
+  connection of another machine is `not_found`). The main server keeps the
+  connection rows, identity, status, non-secret settings (T3 URL, OpenCode
+  addresses and auth mode) and sync bookkeeping; harness credentials (the
+  T3 token, OpenCode Basic credentials or paired token) stay in the
+  worker's `credentials.json` (`0600`, deleted on join and leave) and never
+  cross the channel. The main server's `remote.Connector` per machine and
+  kind forwards `Status`, `Configure`, `Run` and `Disconnect` as
+  `connector.*` calls; `Summary` is memory only (the main server's active
+  connection plus the worker's last report from `machine.describe`, which
+  carries connector summaries once `setupReady`). Offline, needs update and
+  a worker still composing its setup are `remote.UnavailableError`
+  (503 `machine_offline`, `machine_needs_update`,
+  `machine_setup_starting`). A remote machine's connection row is created
+  on first connect (T3 pairing, OpenCode connect or pair), and a switch on
+  the worker follows the connections on the main server (runners, sync).
+  Harness environment settings come from the worker's environment
+  (managed: `worker.env`; foreground: its shell) and lock those settings
+  for that machine only.
 - **Verification.** Every `TestContract*` in `server/internal/sync` runs
   twice, in process and behind a real worker channel
   (`remote/remotetest`: the hub and its HTTP serving on a loopback server
   and a real `worker.Run`), plus remote-only tests: a lost launch reply, a
   worker restart mid-launch, an offline machine, refused and late saves,
-  images, traits and ops.
+  images, traits and ops. Setup runs end to end over a real channel and
+  store in `workersetup` (T3 pair creating the machine's connection,
+  environment locks, OpenCode credentials kept on the worker, calls scoped
+  to the caller's machine).
 
 ## Harness registry
 

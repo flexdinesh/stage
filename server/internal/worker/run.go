@@ -49,8 +49,10 @@ type RunOptions struct {
 	// Getenv resolves the gateway's default socket (os.Getenv).
 	Getenv func(string) string
 	// Host builds what the worker serves for its machine (remote.Host): its
-	// call handlers beside ping, and changes to report. Nil serves ping only.
-	Host func(machineID int64) Host
+	// call handlers beside ping, and changes to report. call sends a
+	// worker-initiated call to the main server over the live channel
+	// (ErrOffline when none). Nil serves ping only.
+	Host func(machineID int64, call workerchan.Upcall) Host
 }
 
 // Host is what a worker serves over its channel.
@@ -60,7 +62,14 @@ type Host interface {
 	// Changes signals that what the host serves changed (reported to the
 	// main server as machine.changed).
 	Changes() <-chan struct{}
+	// Attached runs (in its own goroutine) each time a channel session
+	// goes online; ctx ends when the worker stops.
+	Attached(ctx context.Context)
 }
+
+// ErrOffline: no channel to the main server is live (a worker-initiated
+// call was not sent).
+var ErrOffline = errors.New("the worker is not connected to the Stage server")
 
 // Run is `stage worker run`: lock the worker directory, open the agent
 // gateway, then keep a channel to the main server open until ctx ends,
@@ -120,7 +129,7 @@ func Run(ctx context.Context, o RunOptions) error {
 		},
 	}
 	if o.Host != nil {
-		w.host = o.Host(cfg.MachineID)
+		w.host = o.Host(cfg.MachineID, w.call)
 		for kind, h := range w.host.Handlers() {
 			if kind != workerchan.KindPing {
 				w.handlers[kind] = h
@@ -160,6 +169,18 @@ type runner struct {
 
 	mu    sync.Mutex
 	state State
+	// cur is the live channel session (nil while offline).
+	cur atomic.Pointer[channel]
+}
+
+// call is a worker-initiated call naming no request, over the live
+// channel.
+func (w *runner) call(ctx context.Context, kind string, body any) (json.RawMessage, error) {
+	c := w.cur.Load()
+	if c == nil {
+		return nil, ErrOffline
+	}
+	return c.upcall(workerchan.Envelope{})(ctx, kind, body)
 }
 
 // set records a state change in worker.state.json.
@@ -313,8 +334,11 @@ func (w *runner) session(parent context.Context) error {
 	w.log.Info("worker channel online", "session", hello.Session)
 
 	wg.Go(func() { sess.heartbeats(heartbeat) })
+	w.cur.Store(sess)
+	defer w.cur.CompareAndSwap(sess, nil)
 	if w.host != nil {
 		wg.Go(func() { sess.changes(w.host.Changes()) })
+		go w.host.Attached(parent)
 	}
 	defer sess.cancelAll()
 	for {

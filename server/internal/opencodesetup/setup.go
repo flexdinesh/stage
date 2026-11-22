@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"strings"
 	"sync"
@@ -31,7 +32,7 @@ const (
 	localCache = 10 * time.Second   // Status's local registration probe
 )
 
-var errManaged = errors.New("This connection is managed by the Stage server environment.")
+var errManaged = errors.New("This connection is managed by this machine's Stage environment.")
 
 type Service struct {
 	mu         sync.Mutex
@@ -116,13 +117,24 @@ type Ports struct {
 	Install func(old, next int64, a execution.Adapter)
 	// Local: nil is LocalService.
 	Local Local
+	// Active, when set, is the machine's active OpenCode connection (0:
+	// none) and replaces EnsureOpenCode: the connection is then created by
+	// the first service that connects (a remote machine has no OpenCode
+	// connection until then).
+	Active func(ctx context.Context) (int64, error)
 }
 
 func New(ctx context.Context, p Ports, env config.OpenCodeSettings, log *slog.Logger) (*Service, error) {
 	if p.Local == nil {
 		p.Local = LocalService{}
 	}
-	id, err := p.Identity.EnsureOpenCode(ctx)
+	var id int64
+	var err error
+	if p.Active != nil {
+		id, err = p.Active(ctx)
+	} else {
+		id, err = p.Identity.EnsureOpenCode(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -149,25 +161,56 @@ func New(ctx context.Context, p Ports, env config.OpenCodeSettings, log *slog.Lo
 				cfg.Username, cfg.Password = localCredentials(reg)
 			}
 		}
-		a, err := opencode.New(id, cfg)
+		a, err := opencode.New(checking(id), cfg)
 		if err != nil {
 			s.problem = err.Error()
 			break
 		}
 		// Record the original address before any task can acquire its adapter.
 		if verified == "" {
-			if err := p.Identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
+			if s.id, err = s.stamp(ctx, id, cfg.Endpoint); err != nil {
 				return nil, err
 			}
 			s.verified = cfg.Endpoint
+			if s.id != id {
+				if a, err = opencode.New(s.id, cfg); err != nil {
+					return nil, err
+				}
+			}
 		}
-		s.activate(id, a, cfg)
+		s.activate(s.id, a, cfg)
 	}
 	return s, nil
 }
 
-// ID is the active OpenCode connection; it changes when the service is
-// replaced.
+// unstamped is the connection a machine's first service is checked as
+// before its connection exists (a remote machine); an adapter on it is
+// never installed: stamp creates the connection and the adapter is rebuilt
+// on it.
+const unstamped int64 = math.MaxInt64
+
+// checking is the connection to build a candidate adapter on: id, or
+// unstamped while the machine has none.
+func checking(id int64) int64 {
+	if id == 0 {
+		return unstamped
+	}
+	return id
+}
+
+// stamp records endpoint as connection id's identity, or creates the
+// machine's first OpenCode connection with it when id is 0; it returns the
+// connection.
+func (s *Service) stamp(ctx context.Context, id int64, endpoint string) (int64, error) {
+	if id != 0 {
+		return id, s.identity.SetConnectionIdentity(ctx, id, endpoint, publicAddress(endpoint))
+	}
+	sw, err := s.identity.SwitchInstance(ctx, opencode.Kind, endpoint, publicAddress(endpoint), 0)
+	return sw.New, err
+}
+
+// ID is the active OpenCode connection (0 before a remote machine's first
+// service connected); it changes when the service is replaced.
 func (s *Service) ID() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -447,7 +490,7 @@ func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
 			return nil
 		}
 		if env != "" {
-			return db.Conflict("This field is managed by the Stage server environment.")
+			return db.Conflict("This field is managed by this machine's Stage environment.")
 		}
 		*dest = strings.TrimRight(strings.TrimSpace(*field), "/")
 		return nil
@@ -467,7 +510,7 @@ func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
 	}
 	if in.Password != nil || in.Username != nil {
 		if s.env.Username != "" || s.env.Password != "" {
-			return db.Conflict("Credentials are managed by the Stage server environment.")
+			return db.Conflict("Credentials are managed by this machine's Stage environment.")
 		}
 		if in.Username == nil || in.Password == nil {
 			return db.Invalid("Supply both username and password to replace or clear credentials.")
@@ -580,7 +623,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		cfg.Username, cfg.Password = localCredentials(reg)
 		failCode = CodeLocalUnavailable
 	}
-	a, err := opencode.New(s.id, cfg)
+	a, err := opencode.New(checking(s.id), cfg)
 	if err != nil {
 		return db.Invalid("%s", err)
 	}
@@ -598,8 +641,15 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 	id, label := s.id, publicAddress(cfg.Endpoint)
 	switch {
 	case s.verified == "":
-		if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
+		first, err := s.stamp(ctx, id, cfg.Endpoint)
+		if err != nil {
 			return err
+		}
+		if first != id {
+			if a, err = opencode.New(first, cfg); err != nil {
+				return db.Invalid("%s", err)
+			}
+			id = first
 		}
 	case cfg.Endpoint != s.verified:
 		continuity := s.verifyContinuity(call, a, id)

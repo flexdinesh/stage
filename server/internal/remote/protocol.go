@@ -78,6 +78,11 @@ const (
 type Description struct {
 	Profile     harness.Profile `json:"profile"`
 	Connections []Hosted        `json:"connections"`
+	// Connectors are the connection setups the worker hosts (none until
+	// it composed them), with their memory-only summaries.
+	Connectors []ConnectorState `json:"connectors"`
+	// SetupReady: the worker composed its connection setup.
+	SetupReady bool `json:"setupReady"`
 }
 
 // Hosted is one connection the worker has an adapter for, with the

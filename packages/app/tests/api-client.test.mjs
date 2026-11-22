@@ -146,3 +146,35 @@ test("createPairing surfaces 409 public_url_required with its code", async () =>
   const { api } = fakeApi(async () => Response.json({ error: "Set STAGE_PUBLIC_URL", code: "public_url_required" }, { status: 409 }));
   await assert.rejects(api.createPairing(""), (err) => err instanceof ApiError && err.status === 409 && err.code === "public_url_required");
 });
+
+test("harness setup calls: local routes stay, forMachine drives a remote machine's", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push(`${init.method} ${path}`);
+    return Response.json({ details: { state: "unpaired", t3Url: "u", local: { available: false }, environmentFields: [] }, fields: [], actions: [] });
+  });
+  await api.harnesses();
+  await api.harnessStatus("t3");
+  const desk = api.forMachine(2);
+  await desk.harnesses();
+  await desk.harnessStatus("x");
+  await desk.configureHarness("x", { a: 1 });
+  await desk.runHarnessAction("x", "connect local");
+  await desk.disconnectHarness("x");
+  await desk.connectLocalOpenCode();
+  assert.deepEqual(seen, [
+    "GET /harnesses",
+    "GET /harnesses/t3/status",
+    "GET /machines/2/harnesses",
+    "GET /machines/2/harnesses/x/status",
+    "PUT /machines/2/harnesses/x/settings",
+    "POST /machines/2/harnesses/x/actions/connect%20local",
+    "DELETE /machines/2/harnesses/x/connection",
+    "POST /machines/2/harnesses/opencode/actions/connect-local",
+  ]);
+});
+
+test("a remote machine that cannot answer surfaces 503 with its code", async () => {
+  const { api } = fakeApi(async () => Response.json({ error: "This machine is offline", code: "machine_offline" }, { status: 503 }));
+  await assert.rejects(api.forMachine(3).harnessStatus("t3"), (e) => e instanceof ApiError && e.status === 503 && e.code === "machine_offline");
+});

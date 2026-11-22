@@ -307,7 +307,7 @@ func TestEnvironmentManagedConnection(t *testing.T) {
 		"disconnect":    h.s.Disconnect(t.Context()),
 	} {
 		var c *db.ConflictError
-		if !errors.As(err, &c) || !strings.Contains(c.Msg, "managed by the Stage server environment") {
+		if !errors.As(err, &c) || !strings.Contains(c.Msg, "managed by this machine's Stage environment") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

@@ -22,11 +22,7 @@ const ServiceEnvFile = "service.env"
 // ServiceEnvKeys are the keys service.env may set. In managed mode
 // (`stage serve --managed`) these, plus STAGE_DATA_DIR and STAGE_ENV, are never taken
 // from the inherited environment: only from service.env.
-var ServiceEnvKeys = []string{
-	"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS",
-	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED", "T3_BIN",
-	"OPENCODE_URL", "OPENCODE_PUBLIC_URL", "OPENCODE_WEB_URL", "OPENCODE_USERNAME", "OPENCODE_PASSWORD",
-}
+var ServiceEnvKeys = append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS"}, HarnessEnvKeys...)
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in
 // service.env: the service's data dir is always the identity default.

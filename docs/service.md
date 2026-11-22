@@ -310,9 +310,12 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   the identity's default data dir) and `STAGE_WORKER_LISTEN` (the agent
   gateway's listeners, default `unix`, which is required; add a loopback
   `host:port` for HTTP MCP clients;
-  [runtime.md](runtime.md#agent-gateway)). `--managed` ignores
-  `STAGE_DATA_DIR`, `STAGE_WORKER_CONFIG` and `STAGE_WORKER_LISTEN` in the
-  inherited environment, like the server, and refuses `--listen`.
+  [runtime.md](runtime.md#agent-gateway)), plus the harness settings the
+  server's `service.env` takes (`T3_*`, `OPENCODE_*`): they lock those
+  settings for this machine ([execution.md](execution.md#remote-machines)).
+  `--managed` ignores `STAGE_DATA_DIR`, `STAGE_WORKER_CONFIG`,
+  `STAGE_WORKER_LISTEN` and the harness settings in the inherited
+  environment, like the server, and refuses `--listen`.
 - **One role per identity.** `start` and `restart` refuse (exit 7) while the
   other role's generated definition exists; `status` reports
   `role_conflict`. Uninstall one first (#348 may lift this).

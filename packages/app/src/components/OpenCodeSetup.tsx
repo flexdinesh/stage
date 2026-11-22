@@ -5,9 +5,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { OpenCodeStatus } from "../api/types.ts";
 import { useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
-import { isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
+import { activeOn, isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
 import { PreviousConnections } from "./PreviousConnections.tsx";
-import { useApi, usePlatform } from "../platform/context.tsx";
+import { usePlatform } from "../platform/context.tsx";
+import { useHarnessApi, useScopeMachineId, useSetupCopy } from "../api/harnessScope.tsx";
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
@@ -42,7 +43,7 @@ function useConnect<T>(run: (arg: T, newInstance: boolean) => Promise<void>, onS
 
 /** The confirm for a different (or earlier) OpenCode service, or the request's error. */
 function ConnectOutcome({ address, connect, confirm }: { address: string; connect: { mutation: { error: unknown; isPending: boolean; reset: () => void }; returned: boolean; confirming: boolean }; confirm: () => void }) {
-  const current = useHarnesses().activeConnection("opencode");
+  const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
   const { mutation, returned, confirming } = connect;
   if (!confirming) return <ErrorText error={mutation.error} />;
   return (
@@ -93,14 +94,15 @@ export function OpenCodeSetup() {
 
 /** A1/A2: Connect to the local service when one answers, then a pairing link or address for another machine. */
 function NotConnected({ info }: { info: OpenCodeStatus }) {
-  const api = useApi();
+  const api = useHarnessApi();
+  const copy = useSetupCopy();
   const refresh = useRefresh();
   const connect = useConnect((_: null, newInstance: boolean) => api.connectLocalOpenCode(newInstance), refresh);
   const note = localNote(info);
   if (info.local.available) {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-small font-medium text-fg">OpenCode is running on this machine</p>
+        <p className="text-small font-medium text-fg">OpenCode is running on {copy.machine}</p>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 font-mono text-detail">
           <dt className="text-muted">service</dt>
           <dd className="min-w-0 break-all">{info.local.url}</dd>
@@ -140,7 +142,7 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
  * OpenCode asks for a password, reveals one. `linkOnly` takes links alone (pair again).
  */
 function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary: boolean; linkOnly?: boolean; pairLabel?: string }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const refresh = useRefresh();
   const [text, setText] = useState("");
   const [password, setPassword] = useState("");
@@ -272,7 +274,7 @@ function Connection({ info, checking, check, advanced }: { info: OpenCodeStatus;
 
 /** A4: OpenCode answered but no longer accepts Stage's sign-in; the fix depends on how Stage signed in. */
 function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => void }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const refresh = useRefresh();
   const reconnect = useConnect((_: null, newInstance: boolean) => api.connectLocalOpenCode(newInstance), refresh);
   const host = <span className="font-mono break-all">{serviceHost(info.endpoint)}</span>;
@@ -331,7 +333,7 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
 
 /** Check connection, Advanced, and Disconnect with an inline confirm (locked while OPENCODE_URL sets the service). */
 function ConnectionActions({ info, checking, check, advanced }: { info: OpenCodeStatus; checking: boolean; check: () => void; advanced: () => void }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const refresh = useRefresh();
   const [confirm, setConfirm] = useState(false);
   const disconnect = useMutation({
@@ -401,7 +403,7 @@ function BrowserSetupHint({ client, service }: { client: string; service: string
 
 /** D: the rarely needed fields. Saves only what changed, so an untouched service URL keeps the sign-in mode. */
 function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => void }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const refresh = useRefresh();
   const [urls, setUrls] = useState({
     endpoint: info.endpoint,
@@ -412,7 +414,8 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const locked = (key: string) => info.environmentFields.includes(key);
-  const current = useHarnesses().activeConnection("opencode");
+  const copy = useSetupCopy();
+  const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
   // Which confirm (a replaced service returning, or a different one): kept while its resend runs, so the copy does not flip.
   const [returned, setReturned] = useState(false);
   const body = advancedChanges(info, urls, replace && !locked("credentials") ? { username, password } : null);
@@ -431,7 +434,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const changed = isInstanceChanged(save.error) || (save.isPending && save.variables === true);
   function address(key: keyof typeof urls, label: string, hint: string) {
     return (
-      <Field label={label} hint={locked(key) ? "Managed by the Stage server environment." : hint}>
+      <Field label={label} hint={locked(key) ? `Managed by ${copy.managedBy}.` : hint}>
         {(id) => (
           <Input
             id={id}
@@ -483,7 +486,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
           </p>
         ) : null}
         {locked("credentials") ? (
-          <p className="text-small">Credentials are managed by the Stage server environment.</p>
+          <p className="text-small">Credentials are managed by {copy.managedBy}.</p>
         ) : (
           <div className="flex flex-col items-start gap-2">
             <Button small variant="ghost" onClick={() => setReplace(!replace)}>

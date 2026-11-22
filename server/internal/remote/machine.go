@@ -21,22 +21,29 @@ type Connections func(machineID int64) []int64
 // Machine is a remote machine as the main server hosts it: a proxy adapter
 // for each of its active connections (the main server's record, so an
 // offline machine's connections still answer, as offline) and its ops,
-// over the machine's worker channel. Connector setup arrives with #345.
+// over the machine's worker channel, and a proxy of each connection setup
+// its worker runs (Connector).
 type Machine struct {
 	id    int64
 	hub   *workerchan.Hub
 	conns Connections
+	// hosts is the Hosts that hosts the machine (nil: no connection setup).
+	hosts *Hosts
 
 	mu       sync.Mutex
 	desc     *Description
 	adapters map[int64]*Adapter
+	// sums are the worker's last connector summaries by kind (describe, or
+	// a setup call's status).
+	sums       map[string]harness.Summary
+	connectors map[string]*Connector
 }
 
 var _ machine.Machine = (*Machine)(nil)
 
 // NewMachine hosts machine id over hub.
 func NewMachine(id int64, hub *workerchan.Hub, conns Connections) *Machine {
-	return &Machine{id: id, hub: hub, conns: conns, adapters: map[int64]*Adapter{}}
+	return &Machine{id: id, hub: hub, conns: conns, adapters: map[int64]*Adapter{}, sums: map[string]harness.Summary{}, connectors: map[string]*Connector{}}
 }
 
 func (m *Machine) ID() int64 { return m.id }
@@ -97,10 +104,39 @@ func (m *Machine) Adapters() map[int64]execution.Adapter {
 	return out
 }
 
-// Connector: remote connection setup is #345's.
-func (m *Machine) Connector(string) (harness.Connector, bool) { return nil, false }
+// kinds are the connected harness kinds the machine's worker sets up.
+func (m *Machine) kinds() []string {
+	if m.hosts == nil {
+		return nil
+	}
+	return m.hosts.setup.Kinds
+}
 
-func (m *Machine) Connectors() map[string]harness.Connector { return map[string]harness.Connector{} }
+// Connector is the proxy of kind's connection setup on the worker; it
+// exists offline too (its calls then answer as unavailable).
+func (m *Machine) Connector(kind string) (harness.Connector, bool) {
+	if !slices.Contains(m.kinds(), kind) {
+		return nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.connectors[kind]
+	if c == nil {
+		c = &Connector{m: m, kind: kind}
+		m.connectors[kind] = c
+	}
+	return c, true
+}
+
+func (m *Machine) Connectors() map[string]harness.Connector {
+	out := map[string]harness.Connector{}
+	for _, kind := range m.kinds() {
+		if c, ok := m.Connector(kind); ok {
+			out[kind] = c
+		}
+	}
+	return out
+}
 
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
@@ -141,6 +177,12 @@ func (m *Machine) Describe(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.desc = &d
+	if d.SetupReady {
+		clear(m.sums)
+		for _, c := range d.Connectors {
+			m.sums[c.Kind] = c.Summary
+		}
+	}
 	m.mu.Unlock()
 	return nil
 }
@@ -179,7 +221,13 @@ type Hosts struct {
 	// changed runs after the hosted machines, or what a worker hosts,
 	// changed (the coordinator and runners follow the connections).
 	changed func()
+	// setup connects remote connectors to the main server (SetSetup).
+	setup SetupHooks
 }
+
+// SetSetup gives hosted machines connection setup for hooks.Kinds. Call it
+// before the first Join.
+func (h *Hosts) SetSetup(hooks SetupHooks) { h.setup = hooks }
 
 // NewHosts hosts remote machines in set over hub and registers the hub's
 // attach hook and machine.changed handler. changed may be nil.
@@ -204,7 +252,9 @@ func (h *Hosts) Join(id int64) {
 	if _, ok := h.set.Get(id); ok {
 		return
 	}
-	if err := h.set.Add(NewMachine(id, h.hub, h.conns)); err != nil {
+	m := NewMachine(id, h.hub, h.conns)
+	m.hosts = h
+	if err := h.set.Add(m); err != nil {
 		h.log.Warn("host remote machine", "machine", id, "err", err)
 		return
 	}

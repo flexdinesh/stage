@@ -5,6 +5,9 @@ import type { Harness, HarnessConnection, Machine, PairingStatus } from "../api/
 import type { ComboboxOption } from "./combobox.ts";
 import { relativeTime } from "./format.ts";
 
+/** The server's own machine (GET /api/machines lists it first). */
+export const LOCAL_MACHINE_ID = 1;
+
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** The machine's marker tone: ok while online, idle otherwise. */
@@ -105,3 +108,46 @@ export function connectionOptions(
 
 /** A connection's name with its machine when one is given: "T3 · desk", else "T3". */
 export const withMachine = (name: string, tag: string | undefined): string => (tag === undefined ? name : `${name} · ${tag}`);
+
+/** A harness query key on a machine: the local machine (null) keeps key; a remote machine's lives under ["machine", id]. */
+export const machineKey = (machineId: number | null, key: readonly unknown[]): readonly unknown[] =>
+  machineId === null ? key : ["machine", machineId, ...key];
+
+/** Where a machine's harness setup stands on its page: ready (online), offline, or needs_update (another API version). */
+export type MachineSetupState = "ready" | "offline" | "needs_update";
+
+export const machineSetupState = (m: Pick<Machine, "kind" | "status">): MachineSetupState =>
+  m.kind === "local" || m.status === "online" ? "ready" : m.status;
+
+/** The machine page's alert when its setup cannot be driven; null when it can. */
+export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" | "version">, server: string | null): string | null {
+  switch (machineSetupState(m)) {
+    case "ready":
+      return null;
+    case "offline":
+      return `${m.label} is offline. Its harness setup returns when its worker reconnects (stage worker run, or its service).`;
+    case "needs_update": {
+      const versions = m.version !== null && server !== null ? ` It runs ${m.version}; this server runs ${server}.` : "";
+      return `${m.label} needs an update: its worker speaks another API version.${versions} Install the same Stage version there.`;
+    }
+  }
+}
+
+/**
+ * Setup copy that names the machine (`remote`: a remote machine's label, null for the local machine): settings its
+ * environment locks, where its CLIs run, and what to restart after an environment change.
+ */
+export function setupCopy(remote: string | null) {
+  return {
+    /** "this machine", or the remote machine's label. */
+    machine: remote ?? "this machine",
+    /** The hint under a field the environment locks. */
+    envLock: (env: string | undefined) => (remote === null ? `Set by ${env ?? "the server environment"}.` : `Set by ${env ?? "the worker environment"} on ${remote}.`),
+    /** Suffix naming a remote machine after an environment note ("set by T3_URL on desk"); "" locally. */
+    on: remote === null ? "" : ` on ${remote}`,
+    /** Whose environment manages a setting. */
+    managedBy: remote === null ? "the Stage server environment" : `${remote}'s worker environment`,
+    /** What reads an environment change. */
+    restart: remote === null ? "restart stage" : "restart its worker",
+  };
+}

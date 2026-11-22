@@ -202,7 +202,12 @@ Browser and API access stays behind the authenticating proxy.
   identity, status and non-secret settings only. Checkpoints already carry
   only references and non-secret identity
   ([execution.md](../execution.md#contracts-for-roadmap-tasks-5-and-6)), so
-  storing them on the main server is safe.
+  storing them on the main server is safe. #345 implements it: the worker
+  runs its machine's connection setup and keeps the T3 token and OpenCode
+  credentials in `credentials.json` (0600) in the worker dir; the main
+  server forwards setup calls over the channel
+  ([execution.md](../execution.md#remote-machines)). Per-machine setup
+  changes are refused through the agent gateway.
 - **Gateway trust.** A machine token allows agent-level API access through the
   gateway. This matches today's rule that any local process that can reach a
   listener has full access. The gateway listens on the identity's private
@@ -351,6 +356,10 @@ Stage tree 197 (auto start). Each task ships as its own PR.
 
 - Running both the main server and a worker under one identity on one
   machine (#348).
+- ~~Where a remote machine's harness setup runs and its secrets live~~:
+  resolved in #345. On the worker, composed from the same setup packages;
+  the main server proxies the connector (`/api/machines/{id}/harnesses`)
+  and serves the non-secret record back over `setup.*` calls.
 - ~~How launch image bytes reach the worker~~: resolved in #344. The launch
   call carries image metadata only; the worker fetches each image with a
   `launch.image` callback while the launch waits

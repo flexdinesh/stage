@@ -282,6 +282,17 @@ func (h *Hub) Presence(machineID int64) Presence {
 	return p
 }
 
+// SessionID is machineID's live channel session ("" when offline).
+func (h *Hub) SessionID(machineID int64) string {
+	h.mu.Lock()
+	s := h.sessions[machineID]
+	h.mu.Unlock()
+	if s == nil || !s.alive() {
+		return ""
+	}
+	return s.ID
+}
+
 // Gateways is the agent gateway listener URLs machineID's live worker
 // reported (nil when offline or none).
 func (h *Hub) Gateways(machineID int64) []string {

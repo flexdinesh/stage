@@ -353,7 +353,7 @@ serving), `server/internal/api` (routes and auth), `server/internal/worker`
 | Command | Does |
 | --- | --- |
 | `stage worker join <link> [--label L]` | Redeems the pairing link's code (`POST /api/worker/join`) and writes the worker config. Refuses when already joined (`stage worker leave` first). Plain `http://` links are accepted (LAN and loopback mains). |
-| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. Over the channel it serves this machine's adapters and fs/process work (`remote.Host`; no harness until connection setup installs one, #345). |
+| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. Over the channel it serves this machine's adapters, fs/process work and connection setup (`remote.Host`, `workersetup`; harness credentials in `credentials.json` beside the config, `0600`). Harness settings (`T3_*`, `OPENCODE_*`) come from its environment: the managed worker reads them only from `worker.env`. |
 | `stage worker status` | Config, the server's view of this machine and the running process. Exit 0 the server says online, 1 not online (or unreachable, or an invalid config), 4 not joined, 7 revoked. |
 | `stage worker leave [--local]` | Removes this machine on the main server (`POST /api/worker/leave`), then deletes the local config and state. A revoked token counts as already removed. `--local` only deletes locally. |
 | `stage worker service ...` | The worker service ([service.md](service.md#worker-service)). |
@@ -435,7 +435,9 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   `source_machine_id` ([architecture.md](architecture.md#users)). The outer
   request already passed `guard.Policy`; the MCP SDK's loopback Host check
   is skipped for it (a proxy on the same host forwards the public Host).
-  Machine management routes are 403 `gateway_forbidden`; `/api/worker/*`
+  Machine management routes and per-machine harness setup changes
+  (`PUT`/`POST`/`DELETE /api/machines/{id}/harnesses/...`) are 403
+  `gateway_forbidden`; `/api/worker/*`
   and other paths 404 ([api.md](api.md#apiworkergatewayapi-and-apiworkergatewaymcp)).
 - **Reported addresses.** The worker sends its listener URLs in the channel
   connect's `Stage-Worker-Gateway` header; the main server keeps them in

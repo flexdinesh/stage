@@ -8,6 +8,7 @@ import type { ReplacedConnection, T3Status } from "../api/types.ts";
 import { replacedNotice } from "../lib/harnesses.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps, t3Identity } from "../lib/onboarding.ts";
+import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
@@ -17,8 +18,9 @@ import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, P
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
   const qc = useQueryClient();
+  const key = useScopedKey()(keys.t3Status);
   return (s) => {
-    qc.setQueryData(keys.t3Status, s);
+    qc.setQueryData(key, s);
     void qc.invalidateQueries({ queryKey: keys.connections });
   };
 }
@@ -26,11 +28,12 @@ function useSetStatus(): (s: T3Status) => void {
 /** Re-reads the status; the server probes T3 again when its last probe is stale. */
 function useRetry() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: () => qc.refetchQueries({ queryKey: keys.t3Status }, { throwOnError: true }) });
+  const key = useScopedKey()(keys.t3Status);
+  return useMutation({ mutationFn: () => qc.refetchQueries({ queryKey: key, exact: true }, { throwOnError: true }) });
 }
 
 function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3Status) => void }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const setStatus = useSetStatus();
   const [code, setCode] = useState("");
   const pair = useMutation({
@@ -77,7 +80,8 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
  * while connected).
  */
 export function PairActions({ status, primary = true }: { status: T3Status; primary?: boolean }) {
-  const api = useApi();
+  const api = useHarnessApi();
+  const copy = useSetupCopy();
   const setStatus = useSetStatus();
   const [showCode, setShowCode] = useState(false);
   // Pairing another T3 retires the previous connection: say so once, where the user paired.
@@ -110,7 +114,7 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
         <Button variant={primary ? "primary" : "secondary"} busy={auto.isPending} onClick={() => auto.mutate()}>
           Pair with T3
         </Button>
-        <span className="font-mono text-meta text-muted">uses the t3 CLI on this machine</span>
+        <span className="font-mono text-meta text-muted">uses the t3 CLI on {copy.machine}</span>
       </div>
       <ErrorText error={auto.error} />
       {codeOpen ? (
@@ -128,7 +132,8 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
 
 /** The T3 URL: editable (Save, Reset to default), or locked by the T3_URL env. */
 export function T3UrlEditor({ status }: { status: T3Status }) {
-  const api = useApi();
+  const api = useHarnessApi();
+  const copy = useSetupCopy();
   const setStatus = useSetStatus();
   const [draft, setDraft] = useState(status.t3Url);
   const save = useMutation({
@@ -145,7 +150,7 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
         <div className="flex min-h-10 items-center border border-line bg-panel px-2.5 md:min-h-8">
           <code className="font-mono text-detail break-all text-fg">{status.t3Url}</code>
         </div>
-        <p className="font-mono text-meta text-muted">set by T3_URL</p>
+        <p className="font-mono text-meta text-muted">set by T3_URL{copy.on}</p>
       </div>
     );
   }
@@ -195,7 +200,8 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
  * would mint a new token at once.
  */
 export function DisconnectT3({ status }: { status: T3Status }) {
-  const api = useApi();
+  const api = useHarnessApi();
+  const copy = useSetupCopy();
   const setStatus = useSetStatus();
   const [confirm, setConfirm] = useState(false);
   const disconnect = useMutation({
@@ -213,7 +219,7 @@ export function DisconnectT3({ status }: { status: T3Status }) {
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-        {availability === "locked" ? <span className="font-mono text-meta text-muted">renewed by T3_ADMIN_TOKEN</span> : null}
+        {availability === "locked" ? <span className="font-mono text-meta text-muted">renewed by T3_ADMIN_TOKEN{copy.on}</span> : null}
         <Button small variant="danger" disabled={availability === "locked" || confirm} onClick={() => setConfirm(true)}>
           Disconnect
         </Button>
@@ -263,12 +269,13 @@ function SyncNow() {
 
 /** Unreachable: the command that starts T3, Retry (when the region has none), and the URL to point stage elsewhere. */
 function ReachFix({ status, retry }: { status: T3Status; retry: ReturnType<typeof useRetry> | null }) {
+  const copy = useSetupCopy();
   return (
     <div className="flex flex-col gap-3">
       <Muted>
         {status.t3UrlSource === "env"
-          ? "Start T3 on this machine, or change T3_URL and restart stage."
-          : "Start T3 on this machine, or point stage at the T3 server."}
+          ? `Start T3 on ${copy.machine}, or change T3_URL and ${copy.restart}.`
+          : `Start T3 on ${copy.machine}, or point stage at the T3 server.`}
       </Muted>
       <CommandBox command="t3 serve" />
       {retry === null ? null : (
@@ -332,7 +339,7 @@ export function T3SetupPanel({ status }: { status: T3Status }) {
 
 /** Trouble after the first sync: an Alert above the Dashboard with the same fix inline. */
 export function T3Alert({ status }: { status: T3Status | undefined }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const setStatus = useSetStatus();
   const retry = useRetry();
   const auto = useMutation({ mutationFn: api.autoPair, onSuccess: setStatus });

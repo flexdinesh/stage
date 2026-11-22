@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  LOCAL_MACHINE_ID,
   connectionOptions,
   countdown,
+  machineKey,
+  machineSetupAlert,
+  machineSetupState,
   machineStatusLine,
   machineTag,
   machineTone,
   pairingPhase,
   removePrompt,
   serverVersion,
+  setupCopy,
   versionDiffers,
   withMachine,
 } from "../src/lib/machines.ts";
@@ -104,4 +109,40 @@ test("connection options: a chosen project's bindings list first; the rest are m
     ["1", "This computer", "not bound"],
     ["5", "This computer", "not bound"],
   ]);
+});
+
+test("machine page: setup state and alert per presence", () => {
+  const online = { ...desk, online: true, status: "online" };
+  assert.equal(machineSetupState(online), "ready");
+  assert.equal(machineSetupState(local), "ready");
+  assert.equal(machineSetupAlert(online, "v1.6.0"), null);
+  assert.equal(machineSetupState(desk), "offline");
+  assert.match(machineSetupAlert(desk, "v1.6.0"), /^desk is offline\. Its harness setup returns when its worker reconnects/);
+  const old = { ...desk, status: "needs_update" };
+  assert.equal(machineSetupState(old), "needs_update");
+  assert.equal(machineSetupAlert(old, "v1.6.0"), "desk needs an update: its worker speaks another API version. It runs v1.5.0; this server runs v1.6.0. Install the same Stage version there.");
+  assert.equal(machineSetupAlert({ ...old, version: null }, "v1.6.0"), "desk needs an update: its worker speaks another API version. Install the same Stage version there.");
+});
+
+test("setup copy names the remote machine and its worker environment; local copy is unchanged", () => {
+  const here = setupCopy(null);
+  assert.equal(here.machine, "this machine");
+  assert.equal(here.envLock("T3_URL"), "Set by T3_URL.");
+  assert.equal(here.envLock(undefined), "Set by the server environment.");
+  assert.equal(here.on, "");
+  assert.equal(here.managedBy, "the Stage server environment");
+  assert.equal(here.restart, "restart stage");
+  const there = setupCopy("desk");
+  assert.equal(there.machine, "desk");
+  assert.equal(there.envLock("T3_URL"), "Set by T3_URL on desk.");
+  assert.equal(there.envLock(undefined), "Set by the worker environment on desk.");
+  assert.equal(there.on, " on desk");
+  assert.equal(there.managedBy, "desk's worker environment");
+  assert.equal(there.restart, "restart its worker");
+});
+
+test("harness query keys: the local machine keeps its keys, a remote machine's are its own", () => {
+  assert.deepEqual(machineKey(null, ["t3Status"]), ["t3Status"]);
+  assert.deepEqual(machineKey(2, ["harness-status", "x"]), ["machine", 2, "harness-status", "x"]);
+  assert.equal(LOCAL_MACHINE_ID, 1);
 });

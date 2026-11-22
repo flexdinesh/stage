@@ -121,8 +121,9 @@ type Options struct {
 	// OnPaired runs after every successful pairing (full sync and catalog
 	// refresh now). Must not block.
 	OnPaired func()
-	// OnSwitched runs when pairing moved T3 to another connection (the
-	// adapter must follow before OnPaired). Must not block.
+	// OnSwitched runs when pairing moved T3 to another connection, or
+	// created the machine's first one (the adapter must follow before
+	// OnPaired). Must not block.
 	OnSwitched func(db.Switch)
 	Logger     *slog.Logger
 	// Local finds and runs the t3 CLI on the machine T3 runs on; nil is
@@ -197,7 +198,7 @@ func (s *Service) Status(ctx context.Context, refresh bool) Status {
 // environment the new URL does not serve; 400 for an invalid URL.
 func (s *Service) SetURL(ctx context.Context, raw *string) error {
 	if s.o.Config.T3URLFromEnv {
-		return db.Conflict("the T3 URL is set by T3_URL in this stage server's environment; change it there")
+		return db.Conflict("the T3 URL is set by T3_URL in this machine's Stage environment; change it there")
 	}
 	target, saved, source := config.DefaultT3URL, "", SourceDefault
 	if raw != nil {
@@ -248,13 +249,21 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 		if err != nil {
 			return out, err
 		}
-		if sw.Changed {
+		switch {
+		case sw.Changed:
 			s.log.Info("t3 connection replaced", "from", sw.Old, "to", sw.New, "revived", sw.Revived, "environment", p.Identity.EnvironmentID)
 			if s.o.OnSwitched != nil {
 				s.o.OnSwitched(sw)
 			}
 			if old, err := s.o.Identity.GetHarnessConnection(ctx, sw.Old); err == nil {
 				out.Replaced = &old
+			}
+		case sw.Old == 0 && sw.New != 0:
+			// The machine's first T3 connection (a remote machine has none
+			// until its first pairing).
+			s.log.Info("t3 connection created", "connection", sw.New, "environment", p.Identity.EnvironmentID)
+			if s.o.OnSwitched != nil {
+				s.o.OnSwitched(sw)
 			}
 		}
 	}
@@ -271,7 +280,7 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 // set (the client would mint a new token at once). Idempotent.
 func (s *Service) Unpair(ctx context.Context) error {
 	if s.o.Config.T3AdminToken != "" {
-		return db.Conflict("T3_ADMIN_TOKEN in this stage server's environment renews the T3 token; unset it and restart stage to disconnect")
+		return db.Conflict("T3_ADMIN_TOKEN in this machine's Stage environment renews the T3 token; unset it and restart Stage there to disconnect")
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -311,8 +320,13 @@ func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if err != nil || (conn.EnvironmentID != nil && *conn.EnvironmentID != "") {
 		return
 	}
-	if _, err := s.o.Identity.SwitchInstance(ctx, t3.Kind, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0); err != nil {
+	sw, err := s.o.Identity.SwitchInstance(ctx, t3.Kind, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0)
+	if err != nil {
 		s.log.Warn("stamp t3 environment", "err", err)
+		return
+	}
+	if sw.Old == 0 && sw.New != 0 && s.o.OnSwitched != nil {
+		s.o.OnSwitched(sw)
 	}
 }
 

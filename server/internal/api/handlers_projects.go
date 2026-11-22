@@ -12,7 +12,7 @@ import (
 // plannedConnection: id has an adapter or is a connector's active
 // connection (set up or not).
 func (s *server) plannedConnection(ctx context.Context, id int64) error {
-	if _, _, ok := s.Connectors.Owner(ctx, id); ok {
+	if _, _, ok := s.connectors().Owner(ctx, id); ok {
 		return nil
 	}
 	_, err := s.Sync.Adapter(id)
@@ -73,7 +73,7 @@ func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.Harn
 		c.Configured = false
 		return c
 	}
-	if _, k, ok := s.Connectors.Owner(ctx, c.ID); ok {
+	if _, k, ok := s.connectors().Owner(ctx, c.ID); ok {
 		c.Configured = k.Summary(ctx).Configured
 		return c
 	}
