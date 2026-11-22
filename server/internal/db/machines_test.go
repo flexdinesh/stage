@@ -34,7 +34,8 @@ func TestMachinesMigrationKeepsConnectionsAndOpensKinds(t *testing.T) {
 	if c, _ := s.GetHarnessConnection(ctx, 7); c.Harness != "opencode" || c.AutoComplete || c.Label != "oc" || c.Bindings != 1 {
 		t.Fatalf("opencode %+v", c)
 	}
-	if m, err := s.GetMachine(ctx, LocalMachine); err != nil || m.Label == "" {
+	// The seeded label is unset by 0022 until the server names the machine.
+	if m, err := s.GetMachine(ctx, LocalMachine); err != nil || m.Label != "" {
 		t.Fatalf("machine %+v %v", m, err)
 	}
 	var stable []int64
@@ -95,5 +96,21 @@ func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 	var conflict *ConflictError
 	if _, err := s.SwitchInstance(ctx, LocalMachine, loose, "", "", 99); !errors.As(err, &conflict) {
 		t.Fatalf("unknown revive: %v", err)
+	}
+}
+
+func TestLocalMachineLabelMigrationUnsetsOnlyTheSeed(t *testing.T) {
+	for _, tc := range []struct{ before, after string }{
+		{"This computer", ""},
+		{"desk", "desk"},
+	} {
+		pool := openUnmigrated(t)
+		migrateTo(t, pool, 21)
+		mustExec(t, pool, `UPDATE machines SET label=$1 WHERE id=1`, tc.before)
+		migrateTo(t, pool, MaxVersion())
+		m, err := NewStore(pool).GetMachine(t.Context(), LocalMachine)
+		if err != nil || m.Label != tc.after {
+			t.Fatalf("%q: machine %+v %v, want label %q", tc.before, m, err, tc.after)
+		}
 	}
 }

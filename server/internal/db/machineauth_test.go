@@ -379,3 +379,33 @@ func TestRevokePairing(t *testing.T) {
 		t.Fatalf("revoke redeemed: %v", err)
 	}
 }
+
+func TestSetDefaultLocalLabelKeepsAGivenName(t *testing.T) {
+	s, ctx := setup(t)
+	label := func() string {
+		t.Helper()
+		m, err := s.GetMachine(ctx, db.LocalMachine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.Label
+	}
+	if got := label(); got != "" {
+		t.Fatalf("fresh label %q, want unset", got)
+	}
+	if _, err := s.SetDefaultLocalLabel(ctx, " "); !isInvalid(err) {
+		t.Fatalf("blank default: %v", err)
+	}
+	if set, err := s.SetDefaultLocalLabel(ctx, " deebox "); err != nil || !set || label() != "deebox" {
+		t.Fatalf("first default: %v %v %q", set, err, label())
+	}
+	if set, err := s.SetDefaultLocalLabel(ctx, "other"); err != nil || set || label() != "deebox" {
+		t.Fatalf("second default must not replace: %v %v %q", set, err, label())
+	}
+	if err := s.RenameMachine(ctx, db.LocalMachine, "studio"); err != nil {
+		t.Fatal(err)
+	}
+	if set, err := s.SetDefaultLocalLabel(ctx, "deebox"); err != nil || set || label() != "studio" {
+		t.Fatalf("rename must survive: %v %v %q", set, err, label())
+	}
+}

@@ -180,6 +180,7 @@ func Run(ctx context.Context, o Options) error {
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
 	}
+	nameLocalMachine(ctx, store, profile, cfg.PublicURL, logger)
 	// The machine-runtime seam: the in-process local machine, plus a remote
 	// machine per joined worker (below, ADR 0002).
 	local, err = newLocalMachine(ctx, &wg, store, cfg, o.T3, profile, logger)
