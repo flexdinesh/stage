@@ -7,7 +7,7 @@ import { useApi } from "../platform/context.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { RefText } from "./StageLinks.tsx";
-import { Alert, Button, Muted, Panel, cx, errorText } from "./ui.tsx";
+import { Alert, Button, Muted, Panel, Skeleton, SkeletonBar, cx, errorText } from "./ui.tsx";
 
 /** A truncated T3 preview: the full text loads from the adopted task opening-prompt route. */
 interface FullSource {
@@ -142,10 +142,10 @@ export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean 
   }
   return (
     <Panel title="Prompt">
-      <div aria-busy="true" aria-label="Loading prompt" className="flex flex-col gap-2">
-        <div className="h-3 w-full animate-pulse bg-panel" />
-        <div className="h-3 w-2/3 animate-pulse bg-panel" />
-      </div>
+      <Skeleton label="Loading prompt" className="flex flex-col gap-2">
+        <SkeletonBar className="h-3 w-full" />
+        <SkeletonBar className="h-3 w-2/3" />
+      </Skeleton>
     </Panel>
   );
 }

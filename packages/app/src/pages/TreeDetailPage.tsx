@@ -14,7 +14,7 @@ import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeGraph } from "../components/trees/TreeGraph.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, buttonClass, cx } from "../components/ui.tsx";
+import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, SkeletonBar, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
@@ -57,9 +57,9 @@ function TreeDetailView({ id }: { id: number }) {
 function TreeLoading() {
   return (
     <>
-      <div className="mb-4 flex flex-col gap-2" aria-hidden>
-        <div className="h-7 w-64 animate-pulse bg-panel" />
-        <div className="h-3.5 w-80 max-w-full animate-pulse bg-panel" />
+      <div className="skeleton-reveal mb-4 flex flex-col gap-2" aria-hidden>
+        <SkeletonBar className="h-7 w-64" />
+        <SkeletonBar className="h-3.5 w-80 max-w-full" />
       </div>
       <Panel title="Tree" flush>
         <TreeViewSkeleton />

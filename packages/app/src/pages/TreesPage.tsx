@@ -6,7 +6,7 @@ import { IconChevronDown } from "../components/icons.tsx";
 import { useScope } from "../components/Scope.tsx";
 import { GroupPanel, StatStrip, useGroupFold, type GroupMeta } from "../components/TaskGroups.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { TreeRow } from "../components/trees/TreeRow.tsx";
+import { TreeRow, TreeRowsSkeleton } from "../components/trees/TreeRow.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { ErrorText, PageHeader, Panel, QueryState, Segmented, buttonClass, cx } from "../components/ui.tsx";
 import { projectWorkspace } from "../lib/projects.ts";
@@ -96,7 +96,19 @@ function OpenTrees({ selected, onSelect }: { selected: TreeGroupKey | null; onSe
   const collapsed = fold.folded("settled", []);
 
   return (
-    <QueryState isPending={trees.isPending} error={trees.error}>
+    <QueryState
+      isPending={trees.isPending}
+      error={trees.error}
+      stale={trees.isPlaceholderData}
+      skeleton={
+        <>
+          <StatStrip groups={TREE_GROUP_KEYS} meta={TREE_GROUP_META} counts={null} selected={selected} onToggle={(k) => onSelect(selected === k ? null : k)} />
+          <Panel flush title="Active">
+            <TreeRowsSkeleton />
+          </Panel>
+        </>
+      }
+    >
       <StatStrip
         groups={TREE_GROUP_KEYS}
         meta={TREE_GROUP_META}
@@ -142,7 +154,16 @@ function ClosedTrees({ view }: { view: "closed" | "all" }) {
   const list = (trees.data?.trees ?? []).filter((t) => view === "all" || treeClosed(t) || t.settledAt !== null);
   const empty = view === "closed" ? "Nothing closed. Done, completed and archived trees land here." : "No trees yet. Let an agent plan one.";
   return (
-    <QueryState isPending={trees.isPending} error={trees.error}>
+    <QueryState
+      isPending={trees.isPending}
+      error={trees.error}
+      stale={trees.isPlaceholderData}
+      skeleton={
+        <Panel flush title="Trees">
+          <TreeRowsSkeleton />
+        </Panel>
+      }
+    >
       <Panel flush title="Trees" meta={<span className="tabular">{list.length}</span>}>
         <TreeList trees={list} emptyText={empty} />
       </Panel>

@@ -4,8 +4,8 @@ import { isFolded, needsEpisode, parseFold, toggleFold, type GroupKey } from "..
 import { usePlatform } from "../platform/context.tsx";
 import { IconChevronDown } from "./icons.tsx";
 import { ScheduleRow } from "./ScheduleList.tsx";
-import { TaskRow } from "./TaskList.tsx";
-import { Panel, cx, toneClass, type ChipTone } from "./ui.tsx";
+import { TaskRow, TaskRowsSkeleton } from "./TaskList.tsx";
+import { Panel, SkeletonBar, cx, toneClass, type ChipTone } from "./ui.tsx";
 
 export interface GroupMeta {
   title: string;
@@ -151,7 +151,19 @@ export function GroupPanel({
   );
 }
 
-/** Strip of group counts; a cell filters the view to its group. A trailing `settled` cell hides on phone. */
+/** Loading group: a panel with a bar for its title over task row skeletons. */
+export function GroupPanelSkeleton({ rows = 3, showProject = false }: { rows?: number; showProject?: boolean }) {
+  return (
+    <Panel flush title={<SkeletonBar onPanel className="h-2.5 w-32" />}>
+      <TaskRowsSkeleton count={rows} showProject={showProject} />
+    </Panel>
+  );
+}
+
+/**
+ * Strip of group counts; a cell filters the view to its group. A trailing `settled` cell hides on phone.
+ * `counts` null while loading: bars stand in for the numbers and the cells are disabled.
+ */
 export function StatStrip<K extends string>({
   groups,
   meta,
@@ -161,24 +173,25 @@ export function StatStrip<K extends string>({
 }: {
   groups: readonly K[];
   meta: Record<K, GroupMeta>;
-  counts: Record<K, number>;
+  counts: Record<K, number> | null;
   selected: K | null;
   onToggle: (key: K) => void;
 }) {
   // Phone fits six cells; the cell before a hidden Completed closes the row.
   const phoneLast = groups.at(-1) === "settled" ? groups.at(-2) : undefined;
   return (
-    <div role="group" aria-label="Filter by state" className="mb-4 flex border border-line bg-surface">
+    <div role="group" aria-label="Filter by state" aria-busy={counts === null} className="mb-4 flex border border-line bg-surface">
       {groups.map((key) => {
         const g = meta[key];
         const on = selected === key;
-        const n = counts[key];
+        const n = counts === null ? null : counts[key];
         return (
           <button
             key={key}
             type="button"
             aria-pressed={on}
             title={g.stat}
+            disabled={n === null}
             onClick={() => onToggle(key)}
             className={cx(
               toneClass(g.tone),
@@ -186,13 +199,19 @@ export function StatStrip<K extends string>({
               // Completed stays reachable from its collapsible group.
               key === "settled" && "max-md:hidden",
               key === phoneLast && "max-md:border-r-0",
-              on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "hover:bg-panel",
+              on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "enabled:hover:bg-panel",
             )}
           >
-            <span className="flex items-center gap-1.5">
-              {n > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
-              <span className={cx("tabular text-title font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>{n}</span>
-            </span>
+            {n === null ? (
+              <span className="skeleton-reveal flex h-6 items-center">
+                <SkeletonBar className="h-4 w-4" />
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                {n > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
+                <span className={cx("tabular text-title font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>{n}</span>
+              </span>
+            )}
             <span className="label-caps text-label lg:hidden">{g.short}</span>
             <span className="label-caps hidden lg:inline">{g.stat}</span>
           </button>

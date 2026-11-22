@@ -5,14 +5,14 @@ import { useProjects, useSchedules, useT3Status, useOpenCodeStatus, useHarnesses
 import type { Task } from "../api/types.ts";
 import { IconCheck } from "../components/icons.tsx";
 import { useScope } from "../components/Scope.tsx";
-import { GROUP_META, GroupPanel, useGroupFold } from "../components/TaskGroups.tsx";
+import { GROUP_META, GroupPanel, GroupPanelSkeleton, useGroupFold } from "../components/TaskGroups.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
 import { ATTENTION_GROUPS, awaitingReview, inGroup, type GroupKey } from "../lib/dashboard.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
-import { AppButton, PageHeader, QueryState, buttonClass, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { AppButton, PageHeader, QueryState, Skeleton, SkeletonBar, buttonClass, cx, toneClass, type ChipTone } from "../components/ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 /** Per-device collapsed groups (`GroupFold`). */
@@ -31,8 +31,10 @@ function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
   );
 }
 
-/** Work in motion that asks nothing: counts that open the Tasks view filtered to them. */
-function InFlight({ cells }: { cells: { key: GroupKey; label: string; tone: ChipTone; count: number }[] }) {
+type InFlightCell = { key: GroupKey; label: string; tone: ChipTone; count: number | null };
+
+/** Work in motion that asks nothing: counts that open the Tasks view filtered to them. A null count is loading. */
+function InFlight({ cells }: { cells: InFlightCell[] }) {
   return (
     <section aria-labelledby="in-flight" className="mt-6">
       <div className="mb-2 flex items-baseline gap-3">
@@ -48,10 +50,16 @@ function InFlight({ cells }: { cells: { key: GroupKey; label: string; tone: Chip
               to={`/tasks?state=${c.key}`}
               className={cx(toneClass(c.tone), "flex flex-col gap-1 px-3 py-2.5 transition-colors duration-150 hover:bg-panel")}
             >
-              <span className="flex items-center gap-2">
-                {c.count > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
-                <span className={cx("tabular text-title font-bold", c.count === 0 ? "text-muted" : "text-fg")}>{c.count}</span>
-              </span>
+              {c.count === null ? (
+                <span className="skeleton-reveal flex h-6 items-center">
+                  <SkeletonBar className="h-4 w-5" />
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  {c.count > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
+                  <span className={cx("tabular text-title font-bold", c.count === 0 ? "text-muted" : "text-fg")}>{c.count}</span>
+                </span>
+              )}
               <span className="label-caps text-muted">{c.label}</span>
             </Link>
           </li>
@@ -104,9 +112,22 @@ function Dashboard() {
       : projectCount === undefined
         ? null
         : `${projectCount} project${projectCount === 1 ? "" : "s"}`;
-  const meta = [tasks.data === undefined ? null : owed === 0 ? "nothing needs you" : `${owed} need${owed === 1 ? "s" : ""} you`, where]
+  const metaText = [tasks.data === undefined ? null : owed === 0 ? "nothing needs you" : `${owed} need${owed === 1 ? "s" : ""} you`, where]
     .filter((s) => s !== null)
     .join(" · ");
+  // Loading holds the meta line's height so the header does not grow when the counts land.
+  const meta =
+    tasks.data === undefined ? (
+      <span className="skeleton-reveal inline-block align-middle">
+        <SkeletonBar className="h-3 w-44" />
+      </span>
+    ) : metaText;
+  const scheduledCount = (n: number) => n + (dueSchedules.data?.schedules.length ?? 0);
+  const inFlight = (loaded: boolean): InFlightCell[] => [
+    { key: "running", label: "Running", tone: "run", count: loaded ? of("running").length : null },
+    { key: "scheduled", label: "Scheduled · 24h", tone: "idle", count: loaded ? scheduledCount(of("scheduled").length) : null },
+    { key: "backlog", label: "Backlog", tone: "idle", count: loaded ? of("backlog").length : null },
+  ];
 
   return (
     <>
@@ -124,7 +145,19 @@ function Dashboard() {
           </>
         }
       />
-      <QueryState isPending={tasks.isPending} error={tasks.error}>
+      <QueryState
+        isPending={tasks.isPending}
+        error={tasks.error}
+        stale={tasks.isPlaceholderData}
+        skeleton={
+          <>
+            <Skeleton label="Loading dashboard">
+              <GroupPanelSkeleton showProject={!scoped} />
+            </Skeleton>
+            <InFlight cells={inFlight(false)} />
+          </>
+        }
+      >
         {groups.length === 0 ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border border-line bg-surface px-4 py-5">
             <span className="text-ok">
@@ -159,13 +192,7 @@ function Dashboard() {
             })}
           </div>
         )}
-        <InFlight
-          cells={[
-            { key: "running", label: "Running", tone: "run", count: of("running").length },
-            { key: "scheduled", label: "Scheduled · 24h", tone: "idle", count: of("scheduled").length + (dueSchedules.data?.schedules.length ?? 0) },
-            { key: "backlog", label: "Backlog", tone: "idle", count: of("backlog").length },
-          ]}
-        />
+        <InFlight cells={inFlight(true)} />
       </QueryState>
     </>
   );

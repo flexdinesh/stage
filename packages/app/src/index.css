@@ -401,3 +401,16 @@
     opacity: 0;
   }
 }
+
+/* Skeleton: holds its space but stays hidden for 200ms, so fast loads show nothing. An instant step, not
+   motion, so it applies under reduced motion too (the bars' pulse does not). */
+.skeleton-reveal {
+  opacity: 0;
+  animation: skeleton-reveal 0s linear 200ms forwards;
+}
+
+@keyframes skeleton-reveal {
+  to {
+    opacity: 1;
+  }
+}

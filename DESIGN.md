@@ -203,7 +203,7 @@ stage is a workbench, not a dashboard of cards. Every view is a stack of ruled, 
 
 Density is high and deliberate: 14.5px body, 32px controls (40px on phone), 8-10px row padding, 14px between panels. Geist carries titles, actions and prose; JetBrains Mono carries everything that is metadata (project names, models, times, counts in rows, labels, chips, keycaps). The direction refuses the rounded-card SaaS dashboard and the neon-terminal costume: it reads like an instrument panel drawn with a ruler, lit only where attention is owed.
 
-Motion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading, a square spinner on busy buttons, and no entrance choreography.
+Motion is quiet: 150ms color, opacity and border transitions on state change, a pulsing skeleton while loading (static with reduced motion), a square spinner on busy buttons, and no entrance choreography.
 
 **Key Characteristics:**
 - Zero radius on every element, including chips, markers, spinners and focus outlines.
@@ -335,6 +335,9 @@ Compact, flat, and ink-led.
 - **Shadow Strategy:** none (Flat Bench Rule).
 - **Border:** 1px Hairline outside, Hairline under the header.
 - **Internal Padding:** 12px; flush for row lists.
+
+### Loading (skeleton)
+A loading view mirrors the layout it stands in for, so nothing shifts when data lands: rows reuse their real grid (task, schedule, project and tree rows; the task detail header, chips, action row and two columns, State first on phone), and text known before the data (panel titles such as Prompt, State, Tree, Tasks; stat strip and In flight labels; section headings) renders as itself. Only data becomes bars: square Bench Gray blocks (Hairline-dark on a Bench Gray header bar) sized to the text, chip, button or count they replace. Bars pulse; with reduced motion they hold still. The placeholder keeps its space but stays hidden for its first 200ms, an instant step and not a fade, so a fast load shows only the finished view. Screen readers hear one "Loading …" status. Stat strip and In flight cells keep their labels and swap the count for a bar (stat cells disabled until counts land); the Dashboard `//` meta line holds its height with a bar. Shared pieces: `SkeletonBar`, `Skeleton`, `SkeletonRows` (the ruled-rows default for `QueryState`) in `packages/app/src/components/ui.tsx`; no raw pulse elsewhere. Switching a list's filter or project scope keeps the previous rows on screen at 60% opacity (150ms) and busy until the new rows land; only a list's first load shows a skeleton.
 
 ### Inputs / Fields
 - **Style:** 32px (40px on phone; small selects 24px, 32px on phone), Paper fill, Strong Hairline border, square, 10px padding, 14px text (16px on phone); textareas switch to 13px mono (16px on phone). Selects and comboboxes carry an authored Slate chevron (`.select-chevron`, per-theme `--chevron`). Enabled buttons, selects and labels show a pointer cursor; disabled ones `not-allowed`.
@@ -606,7 +609,7 @@ The desktop app renders the same UI; its differences are restrained and live in 
 - **Do** set titles, actions and prose in Geist; set metadata, labels, chips, counts and keycaps in JetBrains Mono with tabular numerals.
 - **Do** take icons from Lucide through `icons.tsx`: square caps, miter joins, constant 1.33px stroke, currentColor.
 - **Do** open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.
-- **Do** keep motion to 150ms color, opacity and border transitions on state change.
+- **Do** keep motion to 150ms color, opacity and border transitions on state change (plus the skeleton pulse, still with reduced motion).
 - **Do** give needs-input rows (and still-waiting needs-input toasts, inbox rows and the Needs input panel) the 2px Waiting Yellow left edge and a primary Open in T3; it is the only colored row edge.
 
 ### Don't:
