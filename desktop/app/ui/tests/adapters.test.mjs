@@ -125,11 +125,29 @@ test("host: servers go to the shell; subscribe follows servers:changed until uns
   assert.equal(s.listeners.size, 0);
 });
 
+test("host: no worker without the shell's worker calls; worker calls go to the shell", async () => {
+  assert.equal(desktopHost(fakeNative().native).worker, undefined);
+  const calls = [];
+  const native = {
+    joinWorker: async (link) => void calls.push(["join", link]),
+    leaveWorker: async (local) => void calls.push(["leave", local]),
+    restartWorker: async () => void calls.push(["restart"]),
+  };
+  const { worker } = desktopHost(fakeNative().native, undefined, native);
+  assert.ok(worker);
+  await worker.join("https://stage.example.com/join#stage_pc_1_x");
+  await worker.leave({ local: false });
+  await worker.leave({ local: true });
+  await worker.restart();
+  assert.deepEqual(calls, [["join", "https://stage.example.com/join#stage_pc_1_x"], ["leave", false], ["leave", true], ["restart"]]);
+});
+
 test("host: the initial state targets this machine, before any ready", () => {
   const host = desktopHost(fakeNative({ state: () => new Promise(() => {}) }).native);
   const s = host.connection.current();
   assert.deepEqual(s.target, { id: "local", name: "This machine", kind: "local", url: "" });
   assert.equal(s.serverEpoch, 0);
+  assert.equal(s.worker, null);
 });
 
 test("links: public URL when the server has one, else the app's deep link, never mygo://", () => {

@@ -283,7 +283,11 @@ completion.
    identity, never the stable `stage` one (#343). Under one identity, a
    machine runs either the main server service or the worker service, not
    both: the gateway's default socket would collide with the main server's.
-   #348 (desktop join as worker) may revisit this.
+   #348 (desktop join as worker) kept this rule: joining from the desktop
+   uninstalls this machine's server service (its data stays) and starts the
+   worker service; leaving reverses it
+   ([desktop.md](../desktop.md#worker)). So agents' default `stage` and
+   `stage mcp` reach the main server through the gateway.
 2. **The main server records the forwarding machine.** For requests that
    arrive through a worker's agent gateway, the main server resolves the
    machine principal from the token. It records that machine on writes
@@ -355,8 +359,9 @@ Stage tree 197 (auto start). Each task ships as its own PR.
 
 ## Open items
 
-- Running both the main server and a worker under one identity on one
-  machine (#348).
+- ~~Running both the main server and a worker under one identity on one
+  machine~~: kept as one role per identity in #348; the desktop switches
+  roles on join and leave ([desktop.md](../desktop.md#worker)).
 - ~~Where a remote machine's harness setup runs and its secrets live~~:
   resolved in #345. On the worker, composed from the same setup packages;
   the main server proxies the connector (`/api/machines/{id}/harnesses`)

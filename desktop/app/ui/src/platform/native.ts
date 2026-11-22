@@ -23,6 +23,13 @@ export interface DesktopNative {
   setLoginStartup(enabled: boolean): Promise<void>;
 }
 
+/** The Go side's worker calls (desktop/app/launch/worker.go), as the host adapter uses them. */
+export interface NativeWorker {
+  joinWorker(link: string): Promise<void>;
+  leaveWorker(local: boolean): Promise<void>;
+  restartWorker(): Promise<void>;
+}
+
 /** The Go side's server list and switching (desktop/app/servers.go), as the host adapter uses it. */
 export interface NativeServers {
   servers(): Promise<HostServerEntry[]>;
@@ -70,4 +77,5 @@ export const INITIAL_STATE: HostState = {
   serverEpoch: 0,
   busy: false,
   dev: false,
+  worker: null,
 };

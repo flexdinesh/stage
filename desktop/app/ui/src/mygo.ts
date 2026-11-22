@@ -19,7 +19,7 @@ export type Kind = "local" | "remote";
  * Phase is where the connection to the Stage server stands (the TS
  * HostPhase of app/src/platform/index.ts).
  */
-export type Phase = "starting" | "ready" | "reconnecting" | "stopped" | "failed" | "unsupported" | "misconfigured" | "conflict" | "incompatible" | "unreachable";
+export type Phase = "starting" | "ready" | "reconnecting" | "stopped" | "failed" | "unsupported" | "misconfigured" | "conflict" | "incompatible" | "unreachable" | "worker";
 
 /** Problem is one diagnostic of `stage service status`. */
 export interface Problem {
@@ -145,6 +145,11 @@ export interface State {
   busy: boolean;
   /** Dev: development run against a foreground dev server. */
   dev: boolean;
+  /**
+   * Worker is this machine as a worker of a main server, null when it
+   * is not one.
+   */
+  worker: Worker | null;
 }
 
 /** Step is the progress while starting. */
@@ -161,6 +166,34 @@ export interface Target {
    */
   url: string;
 }
+
+/**
+ * Worker is this machine as a worker of a main server (`stage worker
+ * service`), the TS HostWorker field for field.
+ */
+export interface Worker {
+  /** URL is the main server's URL from the worker config. */
+  url: string;
+  machineId: number;
+  /**
+   * ServerID is the saved server that is this main server, null when
+   * none matches its URL.
+   */
+  serverId: string | null;
+  /** ServerName is that server's name, else the URL's host. */
+  serverName: string;
+  status: WorkerStatus;
+  /** Message is a detail sentence, or "". */
+  message: string;
+  /** Fix says what to do about it, or "". */
+  fix: string;
+}
+
+/**
+ * WorkerStatus is where this machine's worker stands (the TS
+ * HostWorkerStatus of app/src/platform/index.ts).
+ */
+export type WorkerStatus = "starting" | "online" | "offline" | "needs_update" | "removed" | "failed";
 
 // ---- Services ----
 
@@ -206,6 +239,23 @@ export const Desktop = {
   enableNotifications(): Promise<void> {
     return call("Desktop.EnableNotifications");
   },
+  /**
+   * JoinWorker makes this machine a worker of the active remote server with
+   * link, a pairing link the page created there: this machine's own Stage
+   * server service is uninstalled (its data stays) and the worker service
+   * started (docs/desktop.md, Worker).
+   */
+  joinWorker(link: string): Promise<void> {
+    return call("Desktop.JoinWorker", link);
+  },
+  /**
+   * LeaveWorker stops this machine's worker and leaves its main server,
+   * which removes the machine there; local only deletes the local worker
+   * config (the main server is unreachable or already removed it).
+   */
+  leaveWorker(local: boolean): Promise<void> {
+    return call("Desktop.LeaveWorker", local);
+  },
   /** LoginStartup reports whether Stage opens at login. */
   loginStartup(): Promise<boolean> {
     return call("Desktop.LoginStartup");
@@ -250,6 +300,13 @@ export const Desktop = {
   restartServer(): Promise<void> {
     return call("Desktop.RestartServer");
   },
+  /**
+   * RestartWorker restarts the worker service onto the stage CLI bundled
+   * with this app.
+   */
+  restartWorker(): Promise<void> {
+    return call("Desktop.RestartWorker");
+  },
   /** Retry runs the start sequence again; it resolves once it settled. */
   retry(): Promise<void> {
     return call("Desktop.Retry");
@@ -263,8 +320,8 @@ export const Desktop = {
   },
   /**
    * SetLoginStartup turns "Open Stage at login" on or off: the app (hidden)
-   * and the Stage service; this machine only (an error while a remote is
-   * active).
+   * and this machine's service (the worker service while it is a worker);
+   * an error while a remote is active and this machine is not its worker.
    */
   setLoginStartup(on: boolean): Promise<void> {
     return call("Desktop.SetLoginStartup", on);

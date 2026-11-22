@@ -14,7 +14,7 @@ import { CommandBox, Step, Steps } from "./Steps.tsx";
 import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, buttonClass, cx, toneClass } from "./ui.tsx";
 
 /** 6px square state marker. */
-export function Marker({ tone }: { tone: "ok" | "idle" }) {
+export function Marker({ tone }: { tone: "ok" | "idle" | "run" | "bad" }) {
   return <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c) transition-colors duration-150", toneClass(tone))} />;
 }
 

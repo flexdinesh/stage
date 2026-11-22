@@ -221,7 +221,7 @@ Click the machine's **Harnesses** link (or **Set up harnesses** after it joins):
 | `stage worker service start\|stop\|restart\|status\|logs\|enable\|disable\|uninstall` | the worker service, like `stage service` |
 
 - **Config**: the worker service reads only `worker.env` next to `service.env` (`~/.config/stage/worker.env` on Linux, `~/Library/Application Support/stage/worker.env` on macOS), never your shell. It takes `STAGE_WORKER_LISTEN` ([Agent gateway](#agent-gateway)) and the T3 and OpenCode settings (`T3_URL`, `T3_ADMIN_TOKEN`, …), which lock those settings for that machine. A foreground `stage worker run` reads its shell.
-- **One role per install**: a machine runs either this install's server or its worker, not both. A laptop that runs the desktop app's server cannot also be a worker of another main server.
+- **One role per install**: a machine runs either this install's server or its worker, not both. The desktop app switches roles for you: **Join as worker** turns its server off (data kept) until you leave ([Desktop](/docs/desktop#this-machine-as-a-worker)).
 - **Remove**: removing a machine in Settings > Machines revokes its token at once; its worker stops, and `stage worker status` says it was revoked. Its connections become history; its tasks stay.
 - `stage update` restarts a running worker service and rolls back if the new one does not start.
 

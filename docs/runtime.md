@@ -388,7 +388,8 @@ All take `--config PATH` and `--json`. Worker commands never use
   78 exit 0 (launchd cannot exclude exit codes). Managed, it sends
   `READY=1` once it holds the dir and `STOPPING=1` on shutdown; readiness
   does not wait for the channel.
-- One identity runs the main server or a worker service, not both (#348).
+- One identity runs the main server or a worker service, not both (the
+  desktop switches roles on join and leave, [desktop.md](desktop.md#worker)).
 
 ## Agent gateway
 
@@ -413,7 +414,7 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   readiness and the channel, and stay open while the channel reconnects or
   the main server is down (requests then get 502). A socket held by another
   process (the main server or another worker of this identity) exits 75
-  naming it; one identity runs the main server or a worker (#348). They
+  naming it; one identity runs the main server or a worker. They
   close on shutdown and when the worker stops as revoked.
 - **Origin policy.** Each request first passes `guard.Policy` as on a
   server listener, with no extra trusted origins: Host `stage` on the socket,

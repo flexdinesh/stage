@@ -1,5 +1,5 @@
 // Pure logic of the host-managed connection UI (components/Host.tsx).
-import type { HostPhase, HostServerEntry, HostServerTest, HostState, HostTarget } from "../platform/index.ts";
+import type { HostPhase, HostServerEntry, HostServerTest, HostState, HostTarget, HostWorker, HostWorkerStatus } from "../platform/index.ts";
 
 export type StepKey = "service" | "server" | "api";
 export type StepStatus = "idle" | "active" | "ok" | "bad";
@@ -66,6 +66,7 @@ export function primaryAction(phase: HostPhase, kind: HostTarget["kind"] = "loca
       return "retry";
     case "starting":
     case "ready":
+    case "worker": // the worker screen offers Switch and Leave instead
       return null;
   }
 }
@@ -122,12 +123,15 @@ export function serverStatus(entry: HostServerEntry, state: HostState | null): {
     case "misconfigured":
     case "conflict":
       return { tone: "bad", note: "failed" };
+    case "worker":
+      return { tone: "idle", note: "worker" };
   }
 }
 
 /** The mono line under a server's name: this machine (and its socket while active), or the remote's URL. */
 export function serverWhere(entry: HostServerEntry, state: HostState | null): string {
   if (entry.kind === "remote") return entry.url;
+  if (state?.worker != null) return `this machine · worker of ${state.worker.serverName}`;
   const socket = state !== null && state.target.id === entry.id ? (state.server?.socket ?? "") : "";
   return socket === "" ? "this machine" : `this machine · ${socket}`;
 }
@@ -168,4 +172,91 @@ export function serverTestSteps(test: HostServerTest | null, testing: boolean): 
     { key: "api", ...api },
     { key: "identity", ...identity },
   ];
+}
+
+// ---- Worker (this machine as a worker of a remote server) ----
+
+/** The worker of the active remote server; null when this machine serves another server, or none. */
+export function activeWorker(state: HostState | null): HostWorker | null {
+  if (state === null || state.worker === null || state.target.kind !== "remote") return null;
+  return state.worker.serverId === state.target.id ? state.worker : null;
+}
+
+/** The marker tone of a worker status: online ok, starting run, offline idle (as Settings > Machines), trouble bad. */
+export function workerTone(status: HostWorkerStatus): ServerTone {
+  switch (status) {
+    case "online":
+      return "ok";
+    case "starting":
+      return "run";
+    case "offline":
+      return "idle";
+    case "needs_update":
+    case "removed":
+    case "failed":
+      return "bad";
+  }
+}
+
+const WORKER_NOTE: Record<HostWorkerStatus, string> = {
+  starting: "starting",
+  online: "online",
+  offline: "offline",
+  needs_update: "needs update",
+  removed: "removed",
+  failed: "failed",
+};
+
+/** The mono status line of a worker: `online · machine 4`. */
+export function workerLine(w: HostWorker): string {
+  return `${WORKER_NOTE[w.status]} · machine ${w.machineId}`;
+}
+
+/** The banner tone of the active server's worker: none while online or starting, plain while offline, bad on trouble. */
+export function workerBanner(w: HostWorker | null): "plain" | "bad" | null {
+  if (w === null) return null;
+  switch (w.status) {
+    case "online":
+    case "starting":
+      return null;
+    case "offline":
+      return "plain";
+    case "needs_update":
+    case "removed":
+    case "failed":
+      return "bad";
+  }
+}
+
+/** The banner headline of a worker in trouble. */
+export function workerHeadline(w: HostWorker): string {
+  switch (w.status) {
+    case "removed":
+      return `${w.serverName} removed this machine`;
+    case "needs_update":
+      return "This machine's worker needs an update";
+    case "failed":
+      return "This machine's worker failed";
+    default:
+      return "This machine's worker is offline";
+  }
+}
+
+/** Whether Restart worker can help: not while online, starting or removed (that needs a new join). */
+export function canRestartWorker(w: HostWorker): boolean {
+  return w.status === "offline" || w.status === "failed" || w.status === "needs_update";
+}
+
+/**
+ * The inline confirm before leaving: what the main server does, and how this machine gets its server back (at once
+ * from this machine's own screen, else when switching to it).
+ */
+export function leavePrompt(w: HostWorker, onThisMachine = false): string[] {
+  const back = onThisMachine ? "This machine's own Stage server starts again." : "This machine's own Stage server runs again when you switch to This machine.";
+  return [`Leave ${w.serverName}?`, `${w.serverName} removes this machine and retires its harness connections. ${back}`];
+}
+
+/** Set up harnesses opens the machine's page on the active server: only for its worker, and not once removed. */
+export function canSetUpWorker(w: HostWorker, ofActive: boolean): boolean {
+  return ofActive && w.status !== "removed";
 }

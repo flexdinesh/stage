@@ -57,7 +57,21 @@ func (l *Launcher) Diagnostics(ctx context.Context) string {
 	for _, p := range st.Problems {
 		fmt.Fprintf(&b, "problem    %s: %s (%s)\n", p.Code, p.Message, p.Fix)
 	}
-	if l.devMode() || st.Target.Remote() {
+	if w := st.Worker; w != nil {
+		fmt.Fprintf(&b, "worker     machine %d of %s (%s), %s\n", w.MachineID, w.ServerName, w.URL, w.Status)
+		if w.Message != "" {
+			fmt.Fprintf(&b, "           %s\n", w.Message)
+		}
+		b.WriteString("\n--- stage worker service status --json ---\n")
+		res := l.run(ctx, l.t.Status, "worker", "service", "status", "--json")
+		if res.Err != nil {
+			fmt.Fprintf(&b, "(failed: %v)\n", res.Err)
+		} else {
+			b.WriteString(redact(res.Stdout))
+			b.WriteString("\n")
+		}
+	}
+	if l.devMode() || st.Target.Remote() || st.Worker != nil {
 		return b.String()
 	}
 	b.WriteString("\n--- stage service status --json ---\n")
@@ -141,11 +155,14 @@ func (l *Launcher) LoginStartup() bool {
 }
 
 // SetLoginStartup turns "Open Stage at login" on or off: the app's login
-// item and the service's login startup (`service enable|disable`). A
-// development run changes the login item only. ErrRemote while a remote
-// is active (it concerns this machine's service).
+// item and the login startup of this machine's service (`service
+// enable|disable`; while this machine is a worker, `worker service
+// enable|disable`). A development run changes the login item only.
+// ErrRemote while a remote is active and this machine is not a worker
+// (it concerns this machine's server).
 func (l *Launcher) SetLoginStartup(ctx context.Context, on bool) error {
-	if l.remote() {
+	worker := l.joined()
+	if l.remote() && !worker {
 		return ErrRemote
 	}
 	var errs []error
@@ -159,17 +176,22 @@ func (l *Launcher) SetLoginStartup(ctx context.Context, on bool) error {
 		if on {
 			args = []string{"service", "enable", "--exe", l.cfg.CLI, "--json"}
 		}
+		cmd := "stage service " + args[1]
+		if worker {
+			args = append([]string{"worker"}, args...)
+			cmd = "stage worker service " + args[2]
+		}
 		res := l.run(ctx, l.t.Command, args...)
 		var rep report
 		switch {
 		case res.Err != nil:
-			errs = append(errs, fmt.Errorf("stage service %s: %w", args[1], res.Err))
+			errs = append(errs, fmt.Errorf("%s: %w", cmd, res.Err))
 		case res.Code != 0:
 			msg := fmt.Sprintf("exit %d", res.Code)
 			if parseJSON(res.Stdout, &rep) == nil && rep.Message != "" {
 				msg = rep.Message
 			}
-			errs = append(errs, fmt.Errorf("stage service %s: %s", args[1], msg))
+			errs = append(errs, fmt.Errorf("%s: %s", cmd, msg))
 		}
 	}
 	return errors.Join(errs...)

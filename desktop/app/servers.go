@@ -38,13 +38,18 @@ func (h *host) activeID() string {
 }
 
 // serverTargets is every saved server for the notification streams, this
-// machine's with its socket once known.
+// machine's with its socket once known. While this machine is a worker its
+// own server is off and the default socket is the worker's agent gateway
+// (which forwards to the main server), so it has no stream.
 func (h *host) serverTargets() []target.Target {
 	if h.servers == nil {
 		return nil
 	}
 	ts := h.servers.List()
 	if h.l != nil {
+		if h.l.Worker() != nil {
+			return ts[1:]
+		}
 		ts[0] = h.l.LocalTarget()
 	}
 	return ts

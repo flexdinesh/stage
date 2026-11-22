@@ -1,16 +1,36 @@
 // Host-managed connection UI (desktop): the connection screen shown until the
 // active Stage server first answers, the banner for later trouble, and the
-// Settings panel for the desktop app. A host without `platform.host` (the
+// Settings panel for the desktop app, with this machine as a worker of the
+// active remote (join, state, leave). A host without `platform.host` (the
 // browser) renders none of it. Server switching: Servers.tsx.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ACTION_LABEL, gateView, primaryAction, stepNote, stepStatus, visibleSteps, type HostAction } from "../lib/host.ts";
+import { Link } from "react-router";
+import { keys } from "../api/queries.ts";
+import {
+  ACTION_LABEL,
+  activeWorker,
+  canRestartWorker,
+  canSetUpWorker,
+  gateView,
+  leavePrompt,
+  primaryAction,
+  stepNote,
+  stepStatus,
+  visibleSteps,
+  workerBanner,
+  workerHeadline,
+  workerLine,
+  workerTone,
+  type HostAction,
+} from "../lib/host.ts";
 import { useHostState } from "../lib/hostState.ts";
-import type { HostServices, HostState } from "../platform/index.ts";
-import { usePlatform } from "../platform/context.tsx";
+import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../platform/index.ts";
+import { useApi, usePlatform } from "../platform/context.tsx";
+import { Marker } from "./Machines.tsx";
 import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
 import { CommandBox, CopyAction, Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel } from "./ui.tsx";
+import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx } from "./ui.tsx";
 
 /** Delay before the starting screen appears, so a fast start shows no flash. */
 const STARTING_DELAY_MS = 400;
@@ -51,6 +71,7 @@ export function HostGate({ children }: { children: ReactNode }) {
   const view = host === undefined ? "app" : gateView(state, late);
   if (view === "app" || host === undefined || state === null) return children;
   if (view === "blank") return <div className="min-h-dvh bg-bg" aria-busy="true" />;
+  if (state.phase === "worker" && state.worker !== null) return <WorkerScreen state={state} worker={state.worker} host={host} />;
   return <ConnectionScreen state={state} host={host} />;
 }
 
@@ -188,6 +209,235 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
   );
 }
 
+/**
+ * This machine's target while it is a worker of a remote: its own server is off. Offers the remote it serves (when
+ * saved) and Leave, which brings this machine's server back.
+ */
+function WorkerScreen({ state, worker, host }: { state: HostState; worker: HostWorker; host: HostServices }) {
+  const canSwitch = useCanSwitchServer();
+  const [picker, setPicker] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [switchError, setSwitchError] = useState<unknown>(null);
+  const serverId = worker.serverId;
+  const control = host.worker;
+  const servers = host.servers;
+  return (
+    <main className="min-h-dvh bg-bg text-fg">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3.5 px-4 pt-[max(2.5rem,14vh)] pb-12">
+        <BrandMark />
+        <div className="mt-6" aria-live="polite">
+          <PageHeader title={state.title} meta={state.message} />
+        </div>
+        <Panel title="This machine" meta={state.app.identity} flush>
+          <WorkerRow worker={worker} className="px-3 py-2.5" />
+        </Panel>
+        <ErrorText error={switchError} />
+        <div className="flex flex-wrap gap-2">
+          {serverId !== null && servers !== undefined ? (
+            <Button
+              variant="primary"
+              onClick={() => {
+                setSwitchError(null);
+                servers.switch(serverId).catch((err: unknown) => setSwitchError(err));
+              }}
+            >
+              Switch to {worker.serverName}
+            </Button>
+          ) : canSwitch ? (
+            <Button variant="primary" onClick={() => setPicker(true)}>
+              Switch server
+            </Button>
+          ) : null}
+          {control === undefined ? null : (
+            <Button variant="danger" disabled={leaving} onClick={() => setLeaving(true)}>
+              Leave and use this machine
+            </Button>
+          )}
+        </div>
+        {leaving && control !== undefined ? <LeaveConfirm worker={worker} control={control} onThisMachine onCancel={() => setLeaving(false)} /> : null}
+      </div>
+      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
+    </main>
+  );
+}
+
+// ---- Worker ----
+
+/** The worker's marker, server and status line, its main server's URL and message; actions on their own row. */
+function WorkerRow({ worker, actions, className }: { worker: HostWorker; actions?: ReactNode; className?: string }) {
+  return (
+    <div className={cx("flex flex-col gap-2", className)}>
+      <div className="flex items-start gap-3">
+        <span className="flex h-6 items-center">
+          <Marker tone={workerTone(worker.status)} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="min-w-0 truncate text-body font-medium text-fg">Worker of {worker.serverName}</span>
+          <p className="font-mono text-meta text-muted">
+            <span className="tabular">{workerLine(worker)}</span>
+          </p>
+          <p className="font-mono text-meta text-muted [overflow-wrap:anywhere]">{worker.url}</p>
+          {worker.message === "" ? null : <p className="mt-1 text-small text-muted [overflow-wrap:anywhere]">{worker.message}</p>}
+        </div>
+      </div>
+      {actions === undefined ? null : <div className="flex flex-wrap items-center gap-1.5 pl-[18px]">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * The inline confirm before leaving (as removing a machine). After a failed leave (the server is unreachable) it
+ * offers to forget the worker on this machine only.
+ */
+function LeaveConfirm({
+  worker,
+  control,
+  onCancel,
+  onThisMachine = false,
+}: {
+  worker: HostWorker;
+  control: HostWorkerControl;
+  onCancel: () => void;
+  onThisMachine?: boolean;
+}) {
+  const [busy, setBusy] = useState<"server" | "local" | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const leave = (local: boolean) => {
+    setBusy(local ? "local" : "server");
+    setError(null);
+    control
+      .leave({ local })
+      .catch((err: unknown) => setError(err))
+      .finally(() => setBusy(null));
+  };
+  const [question, detail] = leavePrompt(worker, onThisMachine);
+  return (
+    <div className="flex flex-col gap-2">
+      <Alert tone="bad">
+        <p className="font-medium">{question}</p>
+        <p className="mt-1">{detail}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button small variant="danger" busy={busy === "server"} disabled={busy !== null} onClick={() => leave(false)}>
+            Leave {worker.serverName}
+          </Button>
+          {error === null ? null : (
+            <Button small busy={busy === "local"} disabled={busy !== null} onClick={() => leave(true)}>
+              Forget it on this machine only
+            </Button>
+          )}
+          <Button small variant="ghost" autoFocus disabled={busy !== null} onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </Alert>
+      <ErrorText error={error} />
+    </div>
+  );
+}
+
+/** Restart worker as a small button with its own busy state and error. */
+function useRestartWorker(control: HostWorkerControl | undefined) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const restart = () => {
+    if (control === undefined) return;
+    setBusy(true);
+    setError(null);
+    control
+      .restart()
+      .catch((err: unknown) => setError(err))
+      .finally(() => setBusy(false));
+  };
+  return { busy, error, restart };
+}
+
+/**
+ * Settings > Desktop app: join the active remote as a worker, or this machine's worker state with Set up harnesses,
+ * Restart and Leave. Joining creates a pairing on the active server (as Settings > Machines > Add does), then the
+ * host joins with its link; the code is revoked when the join fails.
+ */
+function WorkerSection({ state, control }: { state: HostState; control: HostWorkerControl }) {
+  const worker = state.worker;
+  if (worker !== null) {
+    // Keyed by the join, so a confirm left open never carries over to a later join.
+    return <JoinedWorker key={`${worker.url} ${worker.machineId}`} worker={worker} ofActive={activeWorker(state) !== null} control={control} />;
+  }
+  return state.target.kind === "remote" ? <JoinRemote serverName={state.target.name} control={control} /> : null;
+}
+
+function JoinRemote({ serverName, control }: { serverName: string; control: HostWorkerControl }) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<unknown>(null);
+  const join = async () => {
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const pairing = await api.createPairing("");
+      try {
+        await control.join(pairing.link);
+      } catch (err) {
+        api.revokePairing(pairing.id).catch(() => undefined);
+        throw err;
+      }
+      void qc.invalidateQueries({ queryKey: keys.machines });
+    } catch (err) {
+      setJoinError(err);
+    } finally {
+      setJoining(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-line py-2.5 md:py-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-small text-fg">Run {serverName}'s tasks on this machine</span>
+          <span className="font-mono text-meta text-muted">its harnesses join as a worker; this machine's own server stops, its data stays</span>
+        </div>
+        <Button small busy={joining} onClick={() => void join()}>
+          Join as worker
+        </Button>
+      </div>
+      <ErrorText error={joinError} />
+    </div>
+  );
+}
+
+function JoinedWorker({ worker, ofActive, control }: { worker: HostWorker; ofActive: boolean; control: HostWorkerControl }) {
+  const [leaving, setLeaving] = useState(false);
+  const restart = useRestartWorker(control);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="border-y border-line">
+        <WorkerRow
+          worker={worker}
+          className="py-2.5"
+          actions={
+            <>
+              {canSetUpWorker(worker, ofActive) ? (
+                <Link to={`/settings/machines/${worker.machineId}`} className={buttonClass("secondary", true)}>
+                  Set up harnesses
+                </Link>
+              ) : null}
+              {canRestartWorker(worker) ? (
+                <Button small busy={restart.busy} onClick={restart.restart}>
+                  Restart worker
+                </Button>
+              ) : null}
+              <Button small variant="danger" disabled={leaving} onClick={() => setLeaving(true)}>
+                Leave
+              </Button>
+            </>
+          }
+        />
+      </div>
+      <ErrorText error={restart.error} />
+      {leaving ? <LeaveConfirm worker={worker} control={control} onCancel={() => setLeaving(false)} /> : null}
+    </div>
+  );
+}
+
 // ---- Banner (after the app first ran) ----
 
 /** Connection trouble and server notes above the page while the app stays usable. */
@@ -267,6 +517,12 @@ export function HostBanner() {
     );
   }
 
+  const worker = activeWorker(state);
+  const bannerTone = workerBanner(worker);
+  if (state.phase === "ready" && worker !== null && bannerTone !== null) {
+    items.push(<WorkerAlert key="worker" worker={worker} tone={bannerTone} control={host.worker} />);
+  }
+
   const skewKey = `skew:${state.server?.version ?? ""}`;
   if (state.phase === "ready" && !remote && state.versionSkew && !state.foreground && !dismissed.has(skewKey)) {
     items.push(
@@ -299,11 +555,40 @@ export function HostBanner() {
   );
 }
 
+/** The active server's worker in trouble: what happened, its fix, and Restart worker when that helps. */
+function WorkerAlert({ worker, tone, control }: { worker: HostWorker; tone: "plain" | "bad"; control: HostWorkerControl | undefined }) {
+  const restart = useRestartWorker(control);
+  return (
+    <>
+      <Alert
+        tone={tone}
+        actions={
+          <>
+            {control !== undefined && canRestartWorker(worker) ? (
+              <Button small busy={restart.busy} onClick={restart.restart}>
+                Restart worker
+              </Button>
+            ) : null}
+            <Link to="/settings" className={buttonClass("ghost", true)}>
+              Settings
+            </Link>
+          </>
+        }
+      >
+        <span className="font-medium">{workerHeadline(worker)}</span>
+        {worker.message === "" ? null : <span> {worker.message}</span>}
+        {worker.fix === "" ? null : <span className="block text-meta">{worker.fix}</span>}
+      </Alert>
+      <ErrorText error={restart.error} />
+    </>
+  );
+}
+
 // ---- Settings ----
 
 const LOGIN_KEY = ["hostLoginStartup"];
 
-/** Settings panel of the desktop app: login startup (this machine's server only), versions, diagnostics. */
+/** Settings panel of the desktop app: login startup (this machine's server or worker), the worker, versions, diagnostics. */
 export function DesktopAppCard() {
   const { host } = usePlatform();
   const state = useHostState();
@@ -341,10 +626,11 @@ export function DesktopAppCard() {
     server === null || server.id !== state.target.id
       ? state.target.name
       : `${state.target.name} · ${server.version}${remote ? "" : ` · ${server.managed ? "per-user service" : "started from a terminal"}`}`;
+  const joined = state.worker !== null;
   return (
     <Panel title="Desktop app" meta={`${state.app.name} ${state.app.version}`}>
       <div className="flex flex-col gap-4">
-        {remote ? null : (
+        {remote && !joined ? null : (
           <label className="flex min-h-11 cursor-pointer items-center gap-3 border-y border-line transition-colors duration-150 hover:bg-panel md:min-h-8">
             <Checkbox
               checked={login.data === true}
@@ -352,10 +638,11 @@ export function DesktopAppCard() {
               onChange={(e) => toggle(e.target.checked)}
             />
             <span className="text-small text-fg">Open Stage at login</span>
-            <span className="ml-auto font-mono text-meta text-muted">starts hidden, with the server</span>
+            <span className="ml-auto font-mono text-meta text-muted">{joined ? "starts hidden, with the worker" : "starts hidden, with the server"}</span>
           </label>
         )}
         <ErrorText error={saveError ?? login.error} />
+        {host.worker === undefined ? null : <WorkerSection state={state} control={host.worker} />}
         <Details>
           <Detail label="App">{`${state.app.name} ${state.app.version}`}</Detail>
           <Detail label="Server">{serverLine}</Detail>

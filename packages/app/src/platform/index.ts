@@ -113,9 +113,11 @@ export interface PreferenceStorage {
  * - `conflict`: another (terminal) server owns the data and cannot be used
  * - `incompatible`: the server speaks another API version
  * - `unreachable`: a remote server does not answer, or refuses this app (polling continues)
+ * - `worker`: this machine is a worker of a main server (`HostState.worker`), so its own server is off until it leaves
  *
  * For a remote target (`HostState.target.kind === "remote"`) only `starting` (steps `server`, `api`),
- * `ready`, `reconnecting`, `unreachable` and `incompatible` occur: the host never manages a remote server.
+ * `ready`, `reconnecting`, `unreachable` and `incompatible` occur: the host never manages a remote server. `worker`
+ * occurs for this machine's target (`local`) only.
  */
 export type HostPhase =
   | "starting"
@@ -127,7 +129,8 @@ export type HostPhase =
   | "misconfigured"
   | "conflict"
   | "incompatible"
-  | "unreachable";
+  | "unreachable"
+  | "worker";
 
 export interface HostProblem {
   code: string;
@@ -162,6 +165,34 @@ export interface HostTarget {
   url: string;
 }
 
+/**
+ * Where this machine's worker stands.
+ * - `starting`: the worker service is starting
+ * - `online`: running and connected to its main server
+ * - `offline`: joined but not connected (service stopped, or main server unreachable)
+ * - `needs_update`: the main server speaks another API version
+ * - `removed`: the main server removed this machine (its token is revoked)
+ * - `failed`: the worker service failed
+ */
+export type HostWorkerStatus = "starting" | "online" | "offline" | "needs_update" | "removed" | "failed";
+
+/** This machine as a worker of a main server: its harnesses run that server's tasks. */
+export interface HostWorker {
+  /** The main server's URL (from the worker config). */
+  url: string;
+  /** This machine's id on the main server. */
+  machineId: number;
+  /** The saved server that is this main server; null when none matches. */
+  serverId: string | null;
+  /** That server's name, else the URL's host. */
+  serverName: string;
+  status: HostWorkerStatus;
+  /** Detail sentence, or "". */
+  message: string;
+  /** What to do about it, or "". */
+  fix: string;
+}
+
 export interface HostState {
   phase: HostPhase;
   /** Progress while starting. */
@@ -193,6 +224,8 @@ export interface HostState {
   busy: boolean;
   /** Development run against a foreground dev server. */
   dev: boolean;
+  /** This machine as a worker of a main server; null when it is not one. */
+  worker: HostWorker | null;
 }
 
 export interface HostConnection {
@@ -270,12 +303,33 @@ export interface HostServers {
   subscribe(listener: (servers: HostServerEntry[]) => void): () => void;
 }
 
+/**
+ * This machine as a worker of a main server (one role per machine: its own server stays off while it is one).
+ * Methods reject with the host's message.
+ */
+export interface HostWorkerControl {
+  /**
+   * Joins the active remote with `link`, a pairing link created on it: this machine's own server stops (its data
+   * stays) and the worker starts. Login startup moves to the worker.
+   */
+  join(link: string): Promise<void>;
+  /**
+   * Stops the worker and leaves its main server, which removes this machine there. `local`: only forget it here
+   * (the main server is unreachable or already removed it).
+   */
+  leave(options: { local: boolean }): Promise<void>;
+  /** Restarts the worker onto the app's bundled version. */
+  restart(): Promise<void>;
+}
+
 /** Host-owned services of a native shell. */
 export interface HostServices {
   connection: HostConnection;
   loginStartup: LoginStartup;
   /** Switching between Stage servers; absent when the host connects to one server only. */
   servers?: HostServers;
+  /** This machine as a worker of a remote server; absent when the host cannot run one. */
+  worker?: HostWorkerControl;
   /** Paths the host asks the app to show (deep links, menu items). Returns an unsubscribe. */
   onNavigate(listener: (path: string) => void): () => void;
 }

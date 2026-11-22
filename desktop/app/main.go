@@ -145,7 +145,14 @@ func setup(h *host) bool {
 		OnTarget:   h.api.SetTarget,
 		// Every ready (first start, recovery, a new server) reconnects
 		// that server's notification stream too.
-		OnServer:       h.alerts.Connect,
+		OnServer: func(t target.Target) {
+			if t.Remote() || h.l.Worker() == nil {
+				h.alerts.Connect(t)
+			}
+		},
+		// Joining or leaving as a worker drops or restores this machine's
+		// own notification stream.
+		OnWorker:       func(bool) { h.listChanged() },
 		OpenAtLogin:    mygo.App.OpenAtLogin,
 		SetOpenAtLogin: mygo.App.SetOpenAtLogin,
 		Logf:           log.Printf,
