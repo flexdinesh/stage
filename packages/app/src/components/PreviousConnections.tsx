@@ -2,9 +2,8 @@ import { useState } from "react";
 import { useScopeMachineId } from "../api/harnessScope.tsx";
 import { useForgetConnection, useHarnesses } from "../api/queries.ts";
 import type { Harness } from "../api/types.ts";
-import { dateTime, relativeTime } from "../lib/format.ts";
 import { forgetPrompt, previousConnections, usageText } from "../lib/harnesses.ts";
-import { Alert, Button, ErrorText, cx } from "./ui.tsx";
+import { Alert, Button, ErrorText, MetaLine, RelTime, Row, RowList, SubHeading, cx } from "./ui.tsx";
 
 /** Settings: a harness's replaced, not forgotten connections on the harness scope's machine, each with Forget behind an inline confirm. Hidden when none. */
 export function PreviousConnections({ harness, className }: { harness: Harness; className?: string }) {
@@ -15,18 +14,17 @@ export function PreviousConnections({ harness, className }: { harness: Harness; 
   if (previous.length === 0) return null;
   return (
     <section className={cx("flex min-w-0 flex-col gap-2", className)} aria-label={`Previous ${kindName(harness)} connections`}>
-      <h3 className="label-caps">Previous</h3>
-      <ul className="border-y border-line">
+      <SubHeading title="Previous" />
+      <RowList className="border-y border-line">
         {previous.map((c) => (
-          <li key={c.id} className="flex flex-col gap-2 border-b border-line py-2 last:border-b-0">
+          <Row key={c.id} className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <div className="flex min-w-0 flex-1 flex-col">
                 <code className="font-mono text-detail break-all text-fg">{c.label || `connection #${c.id}`}</code>
-                <span className="font-mono text-meta text-muted">
-                  {c.retiredAt === null ? "replaced" : <span title={dateTime(c.retiredAt)}>replaced {relativeTime(c.retiredAt)}</span>}
-                  {" · "}
+                <MetaLine>
+                  {c.retiredAt === null ? "replaced" : <RelTime at={c.retiredAt} prefix="replaced" />}
                   <span className="tabular">{usageText(c)}</span>
-                </span>
+                </MetaLine>
               </div>
               <Button small variant="danger" disabled={confirm === c.id} onClick={() => {
                   forget.reset();
@@ -54,9 +52,9 @@ export function PreviousConnections({ harness, className }: { harness: Harness; 
               </Alert>
             ) : null}
             {confirm === c.id ? <ErrorText error={forget.error} /> : null}
-          </li>
+          </Row>
         ))}
-      </ul>
+      </RowList>
     </section>
   );
 }

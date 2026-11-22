@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { Link } from "react-router";
 import { useHarnesses, useInvalidateWork } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
@@ -8,7 +7,7 @@ import { canStart, statusChips } from "../../lib/tasks.ts";
 import { dateTime, duration } from "../../lib/format.ts";
 import { inState } from "../../lib/trees.ts";
 import { statusChipView } from "../StateBadge.tsx";
-import { AppButton, Button, Chip, cx, errorText } from "../ui.tsx";
+import { AppButton, Button, Chip, IdTag, InlineError, Meta, TextButton, TextLink, cx, errorText, needEdgeClass } from "../ui.tsx";
 import { CompletionButton } from "../Completion.tsx";
 import { isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
@@ -81,9 +80,9 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
     <div className="flex min-w-0 flex-col items-start gap-1">
       {action}
       {error === null ? null : (
-        <p className="relative z-[2] w-full truncate font-mono text-meta-sm text-bad" title={error}>
+        <InlineError truncate className="relative z-[2] w-full">
           {error}
-        </p>
+        </InlineError>
       )}
     </div>
   );
@@ -117,7 +116,7 @@ export function TreeNode({
   const { pending, failed } = pendingNeeds(task, byId);
   const when = inState(task);
   const ran = task.state === "done" || task.state === "settled" ? duration(task.runStartedAt, task.runEndedAt) : null;
-  const titleCls = "min-w-0 truncate text-left text-ui font-medium after:absolute after:inset-0 hover:underline";
+  const titleCls = "truncate text-ui font-medium after:absolute after:inset-0";
   const label = `#${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (
     <li
@@ -125,33 +124,30 @@ export function TreeNode({
       className={cx(
         "relative flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 last:border-b-0 md:col-span-6 md:grid md:min-h-[52px] md:grid-cols-subgrid md:gap-0 md:px-0 md:py-1.5",
         endsLevel ? "border-line-strong" : "border-line",
-        task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",
+        needEdgeClass(task.state === "needs_input"),
         selected && "outline outline-1 -outline-offset-2 outline-fg",
       )}
     >
-      <span className="font-mono text-meta-sm text-muted tabular max-md:hidden md:pl-3">{firstOfLevel ? `L${level + 1}` : null}</span>
+      <Meta small className="tabular max-md:hidden md:pl-3">{firstOfLevel ? `L${level + 1}` : null}</Meta>
       <span className="order-3 md:order-none md:px-2">
         <NodeChip task={task} className={task.state === "backlog" ? "border-dashed" : undefined} />
       </span>
       <span className="order-1 flex min-w-0 basis-full flex-col gap-0.5 md:order-none md:basis-auto md:px-2">
         <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="shrink-0 font-mono text-meta text-muted tabular">#{task.id}</span>
-          <button type="button" aria-label={label} aria-pressed={selected} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
+          <IdTag id={task.id} />
+          <TextButton aria-label={label} aria-pressed={selected} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
             {task.title}
-          </button>
-          <Link to={`/tasks/${task.id}`} aria-label={label} className={cx(titleCls, "lg:hidden")}>
+          </TextButton>
+          <TextLink to={`/tasks/${task.id}`} aria-label={label} className={cx(titleCls, "min-w-0 text-left lg:hidden")}>
             {task.title}
-          </Link>
+          </TextLink>
         </span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">
           {task.projectTitle}
           {isRetired(task) ? <HarnessName task={task} className="text-muted" /> : null}
         </span>
       </span>
-      <span
-        className="order-4 font-mono text-meta text-muted tabular md:order-none md:truncate md:px-2"
-        title={failed.length > 0 ? `blocked by failed ${ids(failed)}` : undefined}
-      >
+      <Meta className="order-4 tabular md:order-none md:truncate md:px-2" {...(failed.length > 0 ? { title: `blocked by failed ${ids(failed)}` } : {})}>
         {task.needs.length === 0 ? (
           <span className="max-md:hidden">root</span>
         ) : (
@@ -164,7 +160,7 @@ export function TreeNode({
             ))}
           </>
         )}
-      </span>
+      </Meta>
       <span
         className={cx(
           "order-5 font-mono text-meta tabular md:order-none md:px-2 md:text-right",

@@ -1,8 +1,7 @@
 import { Suspense, lazy } from "react";
 import { useHarnesses } from "../api/queries.ts";
 import type { TaskState, TaskDetail } from "../api/types.ts";
-import { dateTime, relativeTime } from "../lib/format.ts";
-import { Panel, cx, CopyButton } from "./ui.tsx";
+import { Hint, Panel, RelTime, cx, linkClass, CopyButton } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 // marked + DOMPurify load only when a reply is shown.
@@ -28,9 +27,7 @@ export function LastWordPanel({ task }: { task: TaskDetail }) {
       title="Last word"
       meta={
         <>
-          <time dateTime={word.at ?? undefined} title={word.at === null ? undefined : dateTime(word.at)} className="tabular">
-            {relativeTime(word.at)}
-          </time>
+          <RelTime at={word.at} className="tabular" />
           {earlier ? " · earlier run" : null}
         </>
       }
@@ -40,16 +37,16 @@ export function LastWordPanel({ task }: { task: TaskDetail }) {
         <ReplyMarkdown text={word.text} refs />
       </Suspense>
       {word.truncated ? (
-        <p className="mt-3 border-t border-line pt-2.5 font-mono text-meta text-muted">
+        <Hint className="mt-3 border-t border-line pt-2.5">
           Excerpt.{" "}
           {href === null ? (
             `Full reply in ${name}`
           ) : (
-            <a href={href} className="text-fg underline hover:opacity-80">
+            <a href={href} className={cx(linkClass("rest"), "text-fg")}>
               Full reply in {name}
             </a>
           )}
-        </p>
+        </Hint>
       ) : null}
     </Panel>
   );

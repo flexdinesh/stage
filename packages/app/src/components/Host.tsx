@@ -27,10 +27,27 @@ import {
 import { useHostState } from "../lib/hostState.ts";
 import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../platform/index.ts";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { Marker } from "./Machines.tsx";
 import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Checkbox, Detail, Details, ErrorText, PageHeader, Panel, buttonClass, cx, CommandBox, CopyButton } from "./ui.tsx";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  ChoiceRow,
+  Detail,
+  Details,
+  ErrorText,
+  Hint,
+  Marker,
+  PageHeader,
+  Panel,
+  Row,
+  RowList,
+  buttonClass,
+  cx,
+  CommandBox,
+  CopyButton,
+} from "./ui.tsx";
 
 /** Delay before the starting screen appears, so a fast start shows no flash. */
 const STARTING_DELAY_MS = 400;
@@ -105,14 +122,14 @@ function Remedy({ state }: { state: HostState }) {
     <div className="flex flex-col gap-3">
       {state.fix === "" ? null : <Alert tone="bad">{state.fix}</Alert>}
       {hasProblems ? (
-        <ul className="border border-line">
+        <RowList className="border border-line">
           {state.problems.map((p) => (
-            <li key={p.code} className="flex flex-col gap-0.5 border-b border-line px-3 py-2 last:border-b-0">
+            <Row key={p.code} className="flex flex-col gap-0.5">
               <span className="text-small text-fg">{p.message}</span>
-              {p.fix === "" ? null : <span className="font-mono text-meta text-muted">{p.fix}</span>}
-            </li>
+              {p.fix === "" ? null : <Hint>{p.fix}</Hint>}
+            </Row>
           ))}
-        </ul>
+        </RowList>
       ) : null}
       {state.command === "" ? null : <CommandBox command={state.command} />}
     </div>
@@ -150,7 +167,7 @@ function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] 
               {report.data}
             </pre>
           ) : null}
-          {report.isPending ? <p className="font-mono text-meta text-muted">Collecting diagnostics…</p> : null}
+          {report.isPending ? <Hint>Collecting diagnostics…</Hint> : null}
           <ErrorText error={report.error} />
         </div>
       ) : null}
@@ -393,7 +410,7 @@ function JoinRemote({ serverName, control }: { serverName: string; control: Host
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-line py-row">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-small text-fg">Run {serverName}'s tasks on this machine</span>
-          <span className="font-mono text-meta text-muted">its harnesses join as a worker; this machine's own server stops, its data stays</span>
+          <Hint>its harnesses join as a worker; this machine's own server stops, its data stays</Hint>
         </div>
         <Button small busy={joining} onClick={() => void join()}>
           Join as worker
@@ -631,15 +648,12 @@ export function DesktopAppCard() {
     <Panel title="Desktop app" meta={`${state.app.name} ${state.app.version}`}>
       <div className="flex flex-col gap-4">
         {remote && !joined ? null : (
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 border-y border-line transition-colors duration-150 hover:bg-panel md:min-h-8">
-            <Checkbox
-              checked={login.data === true}
-              disabled={login.isPending || saving}
-              onChange={(e) => toggle(e.target.checked)}
-            />
-            <span className="text-small text-fg">Open Stage at login</span>
-            <span className="ml-auto font-mono text-meta text-muted">{joined ? "starts hidden, with the worker" : "starts hidden, with the server"}</span>
-          </label>
+          <ChoiceRow
+            control={<Checkbox checked={login.data === true} disabled={login.isPending || saving} onChange={(e) => toggle(e.target.checked)} />}
+            detail={joined ? "starts hidden, with the worker" : "starts hidden, with the server"}
+          >
+            Open Stage at login
+          </ChoiceRow>
         )}
         <ErrorText error={saveError ?? login.error} />
         {host.worker === undefined ? null : <WorkerSection state={state} control={host.worker} />}

@@ -6,7 +6,7 @@ import { useApi } from "../platform/context.tsx";
 import { autoStarts, startsText } from "../lib/completion.ts";
 import { endLinger, nextLingerEnd, pruneLinger, startLinger, type Linger } from "../lib/dashboard.ts";
 import { noteRequest } from "../lib/journal.ts";
-import { Button, errorText } from "./ui.tsx";
+import { Button, InlineError, errorText } from "./ui.tsx";
 
 /** Rows completed here stay in place (completed chip + Undo) while they linger; outside a provider nothing lingers. */
 interface CompletionLingerApi {
@@ -230,10 +230,12 @@ export function CompleteAllFailures({ state: s }: { state: CompleteAll }) {
   if (s.failures.length === 0) return null;
   return (
     <div className="flex items-start gap-2 border-b border-line px-3 py-2">
-      <ul className="flex min-w-0 flex-1 flex-col gap-0.5 font-mono text-meta text-bad">
+      <ul className="flex min-w-0 flex-1 flex-col gap-0.5">
         {s.failures.map((f) => (
-          <li key={f.id} className="break-words">
-            #{f.id}: {errorText(f.error)}
+          <li key={f.id}>
+            <InlineError>
+              #{f.id}: {errorText(f.error)}
+            </InlineError>
           </li>
         ))}
       </ul>

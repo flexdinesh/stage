@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
 import {
@@ -14,7 +14,27 @@ import { MachinesCard } from "../components/Machines.tsx";
 import { ServersCard } from "../components/Servers.tsx";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
-import { Alert, Button, Checkbox, Chip, ErrorText, ExternalButton, Muted, PageHeader, Panel, QueryState, Segmented, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  ChoiceRow,
+  Chip,
+  ErrorText,
+  ExternalButton,
+  Marker,
+  MetaLine,
+  Muted,
+  PageHeader,
+  Panel,
+  QueryState,
+  Row,
+  RowList,
+  SectionHeading,
+  Segmented,
+  SubHeading,
+  type ChipTone,
+} from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
@@ -30,9 +50,12 @@ function UserCard() {
           <div className="flex flex-col gap-3">
             <div className="min-w-0">
               <p className="truncate text-small font-medium text-fg">{me.data.displayName}</p>
-              <p className="font-mono text-meta text-muted">
-                user #<span className="tabular">{me.data.id}</span> · since {shortDate(me.data.createdAt)}
-              </p>
+              <MetaLine>
+                <span>
+                  user #<span className="tabular">{me.data.id}</span>
+                </span>
+                <span>since {shortDate(me.data.createdAt)}</span>
+              </MetaLine>
             </div>
             <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>
           </div>
@@ -204,18 +227,23 @@ function EventFilter() {
             ? "All events off. Nothing is recorded or pushed."
             : "Checked events push to every device and appear in the inbox. Unchecked events are dropped."}
         </Muted>
-        <ul className="border-y border-line">
+        <RowList className="border-y border-line">
           {EVENTS.map(({ event, label, hint }) => (
-            <li key={event} className="border-b border-line last:border-b-0">
-              <label className="flex min-h-11 cursor-pointer items-center gap-3 transition-colors duration-150 hover:bg-panel md:min-h-8">
-                <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
-                <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c)", toneClass(notificationEventTone(event)))} />
-                <span className="text-small text-fg">{label}</span>
-                <span className="ml-auto font-mono text-meta text-muted">{hint}</span>
-              </label>
-            </li>
+            <Row key={event} bare>
+              <ChoiceRow
+                control={
+                  <>
+                    <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
+                    <Marker tone={notificationEventTone(event)} />
+                  </>
+                }
+                detail={hint}
+              >
+                {label}
+              </ChoiceRow>
+            </Row>
           ))}
-        </ul>
+        </RowList>
       </QueryState>
       <ErrorText error={save.error} />
     </fieldset>
@@ -264,7 +292,6 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
   const settings = useMutation({ mutationFn: async () => (await notifications.openSystemSettings?.()) ?? false });
   const busy = enable.isPending || disable.isPending || test.isPending || settings.isPending;
   const chip = state.data === undefined ? null : PUSH_CHIP[state.data];
-  const deviceId = useId();
   return (
     <Panel
       title="Notifications"
@@ -272,10 +299,8 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
     >
       <div className="flex flex-col gap-4">
         <EventFilter />
-        <section className="flex flex-col gap-3 border-t border-line pt-4" aria-labelledby={deviceId}>
-          <h3 id={deviceId} className="label-caps">
-            This device
-          </h3>
+        <section className="flex flex-col gap-3 border-t border-line pt-4" aria-label="This device">
+          <SubHeading title="This device" />
           <Muted>{copy.intro}</Muted>
           <QueryState isPending={state.isPending} error={state.error}>
             {state.data === "insecure" ? (
@@ -371,7 +396,6 @@ function ThemeCard() {
 function LocalHarnessSetup() {
   const { machines } = useMachines();
   const local = machines.find((m) => m.kind === "local");
-  const headingId = useId();
   const cards = (
     <>
       <HarnessConnections />
@@ -380,11 +404,8 @@ function LocalHarnessSetup() {
   );
   if (machines.length < 2 || local === undefined) return cards;
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3.5">
-      <h2 id={headingId} className="mt-2 flex items-baseline gap-2">
-        <span className="text-title font-semibold text-fg">{local.label}</span>
-        <span className="font-mono text-meta text-muted">harness setup · this server</span>
-      </h2>
+    <section aria-label={`${local.label} harness setup`} className="flex flex-col gap-3.5">
+      <SectionHeading title={local.label} meta="harness setup · this server" className="mt-2" />
       {cards}
     </section>
   );

@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
@@ -45,7 +44,25 @@ import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessF
 import { prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
-import { Alert, Button, Drawer, ErrorText, Field, Input, Muted, Segmented, Textarea, errorText, Combobox } from "./ui.tsx";
+import {
+  Alert,
+  Button,
+  Drawer,
+  ErrorText,
+  Field,
+  FieldGroup,
+  Hint,
+  InlineError,
+  Input,
+  Meta,
+  MetaLine,
+  Muted,
+  Segmented,
+  TextLink,
+  Textarea,
+  errorText,
+  Combobox,
+} from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
 export const START_MODES = ["now", "backlog", "at", "repeat"] as const;
@@ -417,9 +434,9 @@ function TaskFormDrawer({
 
   const footer = (
     <>
-      <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted max-md:basis-full empty:hidden md:text-right">
+      <Meta small className="min-w-0 flex-1 max-md:basis-full empty:hidden md:text-right">
         {missing.length > 0 ? `required: ${missing.join(", ")}` : null}
-      </span>
+      </Meta>
       <Button variant="primary" busy={save.isPending} disabled={blocked} onClick={() => submit()} className="ml-auto">
         {primaryLabel}
         <kbd className="hidden border border-current/40 px-1 font-mono text-label leading-4 md:inline">Ctrl ↵</kbd>
@@ -478,7 +495,7 @@ function TaskFormDrawer({
         {selectedProject === undefined || !connection || bound ? null : <Alert>
           Planning is available. Bind or confirm a workspace before launching.
           <div className="mt-2 flex flex-wrap gap-3">
-            <Link to={`/projects/${selectedProject.id}`} className="underline">Bind workspace</Link>
+            <TextLink to={`/projects/${selectedProject.id}`} variant="rest">Bind workspace</TextLink>
             {mode === "now" ? <Button small onClick={() => set({mode: "backlog"})}>Save to backlog instead</Button> : null}
           </div>
         </Alert>}
@@ -512,15 +529,16 @@ function TaskFormDrawer({
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
         </> : null}
         <fieldset disabled={!full || !connection} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
-          <div className="flex min-w-0 flex-col items-start gap-1.5">
-            <span className="label-caps">Workspace</span>
-            <Segmented
-              label="Workspace"
-              options={workspaces}
-              value={wsChoice}
-              onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
-            />
-          </div>
+          <FieldGroup label="Workspace">
+            <div className="self-start">
+              <Segmented
+                label="Workspace"
+                options={workspaces}
+                value={wsChoice}
+                onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
+              />
+            </div>
+          </FieldGroup>
           {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
           {!harnessWorktree && wsChoice !== "root" ? (
             <>
@@ -537,17 +555,18 @@ function TaskFormDrawer({
           ) : null}
         </fieldset>
         {prefilled === undefined || draftConfig ? null : (
-          <p className="-mt-1.5 font-mono text-meta-sm text-muted">
+          <Hint className="-mt-1.5">
             {prefill?.source === "pinned"
               ? "model and mode prefilled from your pinned default (Settings)"
               : "model and mode prefilled from your last task · pin a default in Settings"}
-          </p>
+          </Hint>
         )}
         {modes.length > 0 ? (
-          <div className="flex min-w-0 flex-col items-start gap-1.5">
-            <span className="label-caps">Start</span>
-            <Segmented label="Start" fill options={modes.map((m) => START_OPTIONS[m])} value={mode} onChange={(m) => set({ mode: m })} />
-          </div>
+          <FieldGroup label="Start">
+            <div className="md:self-start">
+              <Segmented label="Start" fill options={modes.map((m) => START_OPTIONS[m])} value={mode} onChange={(m) => set({ mode: m })} />
+            </div>
+          </FieldGroup>
         ) : null}
         {mode === "at" && modes.length > 0 ? (
           <StartAtFields s={s} set={set} startMs={startMs} past={startPast} now={now} />
@@ -604,7 +623,7 @@ type FieldsProps = { s: FormState; set: (patch: Partial<FormState>) => void };
 function NoHarnessProjects({ connectionId }: { connectionId: number }) {
   const harnesses = useHarnesses();
   const name = harnesses.name(connectionId);
-  const settings = <Link to="/settings" className="underline">Settings</Link>;
+  const settings = <TextLink to="/settings" variant="rest">Settings</TextLink>;
   if (harnesses.connection(connectionId)?.configured === false) {
     return <>{name} is not connected. Connect it in {settings}.</>;
   }
@@ -646,13 +665,18 @@ function StartAtFields({ s, set, startMs, past, now }: FieldsProps & { startMs: 
         </Field>
         <ZoneField s={s} set={set} />
       </div>
-      <p className={past ? "font-mono text-meta text-bad" : "font-mono text-meta text-muted"} aria-live="polite">
-        {startMs === null
-          ? "Pick a date and time."
-          : past
-            ? "That time has passed. Pick a later one."
-            : `starts in ${until(startMs, now)} · ${wallTime(new Date(startMs).toISOString(), s.tz, { zone: true, now })}`}
-      </p>
+      <div aria-live="polite">
+        {startMs === null ? (
+          <Hint>Pick a date and time.</Hint>
+        ) : past ? (
+          <InlineError>That time has passed. Pick a later one.</InlineError>
+        ) : (
+          <MetaLine>
+            {`starts in ${until(startMs, now)}`}
+            {wallTime(new Date(startMs).toISOString(), s.tz, { zone: true, now })}
+          </MetaLine>
+        )}
+      </div>
     </div>
   );
 }
@@ -682,10 +706,11 @@ function RepeatFields({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex min-w-0 flex-col items-start gap-1.5">
-        <span className="label-caps">Repeat</span>
-        <Segmented label="Repeat" fill options={PRESET_OPTIONS} value={r.preset} onChange={setPreset} />
-      </div>
+      <FieldGroup label="Repeat">
+        <div className="md:self-start">
+          <Segmented label="Repeat" fill options={PRESET_OPTIONS} value={r.preset} onChange={setPreset} />
+        </div>
+      </FieldGroup>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {r.preset === "hourly" ? (
           <Field label="Minute past the hour">
@@ -745,7 +770,7 @@ function RepeatFields({
       </div>
       <div className="flex flex-col gap-0.5 border border-line bg-panel px-2.5 py-1.5 font-mono text-meta" aria-live="polite">
         {error !== null ? (
-          <p className="text-bad">{error}</p>
+          <InlineError>{error}</InlineError>
         ) : (
           <>
             <p className="text-fg">

@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router";
 import type { ExternalProject, HarnessConnection, Project, ProjectBinding } from "../api/types.ts";
 import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
 import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { Alert, Button, Drawer, ErrorText, Field, Input, Panel, QueryState } from "./ui.tsx";
+import { Alert, Button, Drawer, EmptyState, ErrorText, Field, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
 
 export function BindWorkspaceDrawer({
   project,
@@ -73,11 +72,11 @@ export function BindWorkspaceDrawer({
       }
     >
       <div className="flex flex-col gap-3.5">
-        <p className="text-small text-muted">
+        <Muted>
           Choose the {name} workspace for {project.title}. New launches use
           this workspace. Existing sessions and launches already in progress keep their original
           workspace.
-        </p>
+        </Muted>
         <Field label="Find workspace">
           {(id) => (
             <Input
@@ -91,9 +90,7 @@ export function BindWorkspaceDrawer({
         <QueryState isPending={external.isPending} error={external.error}>
           <Panel title={`${name} workspaces`} flush>
             {candidates.length === 0 ? (
-              <p className="p-3 text-small text-muted">
-                No matching workspaces. Open the project in {name} and refresh.
-              </p>
+              <EmptyState inset>No matching workspaces. Open the project in {name} and refresh.</EmptyState>
             ) : (
               candidates.map((candidate) => {
                 const unavailable =
@@ -104,24 +101,23 @@ export function BindWorkspaceDrawer({
                 return (
                   <label
                     key={`${candidate.externalId}:${candidate.workspace}`}
-                    className="flex items-start gap-3 border-b border-line p-3 last:border-b-0"
+                    className={cx(rowClass, "flex items-start gap-3")}
                   >
-                    <input
-                      type="radio"
+                    <Radio
                       name="workspace"
                       checked={selected}
                       disabled={unavailable || bind.isPending}
                       onChange={() => setPicked(candidate)}
-                      className="mt-1 accent-fg"
+                      className="mt-0.5"
                     />
                     <span className="min-w-0">
                       <span className="block text-small font-medium">
                         {candidate.title || candidate.externalId}
                       </span>
-                      <span className="block break-all font-mono text-meta text-muted">
+                      <Meta className="block break-all">
                         {candidate.workspace}
                         {candidate.repo === "" ? null : ` · ${repoLabel(candidate.repo)}`}
-                      </span>
+                      </Meta>
                       <span className="block text-small text-muted">
                         {unavailable
                           ? `Bound to Stage project #${candidate.projectId}. Unbind it there first.`
@@ -147,9 +143,9 @@ export function BindWorkspaceDrawer({
           >
             Refresh workspaces
           </Button>
-          <Link to="/settings" className="text-small underline">
+          <TextLink to="/settings" variant="rest" className="text-small">
             Connection settings
-          </Link>
+          </TextLink>
         </div>
         {harness !== "t3" ? null : registering ? (
           <div className="flex flex-col gap-3 border-t border-line pt-3">
@@ -167,9 +163,7 @@ export function BindWorkspaceDrawer({
                 />
               )}
             </Field>
-            <p className="text-small text-muted">
-              Registers the directory in T3. Stage does not create or clone a directory.
-            </p>
+            <Muted>Registers the directory in T3. Stage does not create or clone a directory.</Muted>
             <Button
               busy={register.isPending}
               disabled={workspace.trim() === "" || registrationAttempted}
@@ -354,9 +348,9 @@ function ConnectionWorkspace({
   });
   return (
     <section className="flex flex-col gap-2 border-t border-line pt-3">
-      <h3 className="text-small font-medium">{name} workspace</h3>
+      <SubHeading title={`${name} workspace`} />
       {current === undefined ? (
-        <p className="text-small text-muted">Plan tasks here. Bind a workspace before launching.</p>
+        <Muted>Plan tasks here. Bind a workspace before launching.</Muted>
       ) : (
         <>
           <p className="break-all font-mono text-meta">{current.workspace}</p>

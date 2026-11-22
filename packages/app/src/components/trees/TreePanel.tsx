@@ -4,7 +4,7 @@ import type { Task, TreeDetail } from "../../api/types.ts";
 import { closedLabel, countMembers, layoutLevels, nodeState, treePosition, treeTaskPath } from "../../lib/trees.ts";
 import { IconBack, IconStep, IconTree } from "../icons.tsx";
 import { taskStateLabel, taskStateTone } from "../StateBadge.tsx";
-import { Button, Chip, Muted, Panel, buttonClass, cx, toneClass } from "../ui.tsx";
+import { Button, Chip, EmptyState, Marker, Meta, Panel, TextLink, buttonClass, cx } from "../ui.tsx";
 import { AddToTreeDrawer } from "./AddToTreeDrawer.tsx";
 import { TreeNodeEditor } from "./TreeNodePanel.tsx";
 
@@ -39,13 +39,12 @@ export function MiniLevels({ tree, current }: { tree: Pick<TreeDetail, "tasks">;
                 aria-label={`Task #${id}: ${t.title}, ${label}`}
                 title={`#${id} ${t.title} · ${label}`}
                 className={cx(
-                  toneClass(tone),
                   "inline-flex h-control-sm items-center gap-1.5 border border-line-strong bg-surface px-2 font-mono text-meta text-fg tabular transition-colors duration-150 hover:bg-panel md:px-1.5",
                   t.state === "backlog" && "border-dashed",
                   here && "outline outline-1 outline-offset-1 outline-fg",
                 )}
               >
-                <span aria-hidden className="size-1.5 bg-[var(--c)]" />#{id}
+                <Marker tone={tone} />#{id}
               </Link>,
             ];
           })}
@@ -73,15 +72,15 @@ export function TreeBar({ task, tree }: { task: Task; tree: TreeDetail }) {
           <IconTree />
         </span>
         <span className="label-caps text-muted max-md:hidden">Tree</span>
-        <Link to={back} className="min-w-0 text-body font-medium break-words hover:underline">
+        <TextLink to={back} className="min-w-0 text-body font-medium break-words">
           {tree.title}
-        </Link>
+        </TextLink>
         {chip === null ? null : <Chip>{chip}</Chip>}
         {position === null ? null : (
-          <span className="shrink-0 font-mono text-meta whitespace-nowrap text-muted tabular">
+          <Meta className="shrink-0 whitespace-nowrap tabular">
             <span className="max-md:hidden">task </span>
             {position.index} of {position.total}
-          </span>
+          </Meta>
         )}
       </div>
       <div className="min-w-0 max-md:flex-1">
@@ -121,9 +120,9 @@ export function NoTreePanel({ task }: { task: Task }) {
         )
       }
     >
-      <Muted>
+      <EmptyState>
         {archived ? "Not in a tree. Unarchive it to add it to one." : "Not in a tree. Add it to one so it can need other tasks, or be needed."}
-      </Muted>
+      </EmptyState>
       {adding ? <AddToTreeDrawer task={task} onClose={() => setAdding(false)} /> : null}
     </Panel>
   );

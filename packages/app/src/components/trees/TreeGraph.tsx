@@ -1,9 +1,8 @@
 import { useMemo } from "react";
-import { Link } from "react-router";
 import type { Task, TreeDetail } from "../../api/types.ts";
 import { dateTime } from "../../lib/format.ts";
 import { bandState, edgeState, graphLayout, inState, type BandState, type EdgeState } from "../../lib/trees.ts";
-import { cx } from "../ui.tsx";
+import { IdTag, Meta, TextButton, TextLink, cx, needEdgeClass } from "../ui.tsx";
 import { NodeChip } from "./TreeNode.tsx";
 
 const SIZE = { nodeW: 224, nodeH: 80, gapX: 16, gapY: 32 };
@@ -58,7 +57,7 @@ export function TreeGraph({
             >
               <span className="label-caps text-fg">Step {l + 1}</span>
               <span className={cx("font-mono text-meta-sm", state === "now" ? "text-run" : "text-muted")}>{BAND_TEXT[state]}</span>
-              {members.length > 1 ? <span className="font-mono text-meta-sm text-muted tabular">{members.length} parallel</span> : null}
+              {members.length > 1 ? <Meta small className="tabular">{members.length} parallel</Meta> : null}
             </div>
           );
         })}
@@ -120,7 +119,7 @@ function GraphNode({
   onSelect: (id: number) => void;
 }) {
   const when = inState(task);
-  const titleCls = "min-w-0 truncate text-left text-ui font-medium after:absolute after:inset-0 hover:underline";
+  const titleCls = "truncate text-ui font-medium after:absolute after:inset-0";
   const label = `Step ${step}: #${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (
     <li
@@ -129,7 +128,7 @@ function GraphNode({
         "absolute flex flex-col justify-center gap-1 border bg-surface px-2",
         task.state === "running" || task.state === "launching" ? "border-run" : "border-line-strong",
         task.state === "backlog" && "border-dashed",
-        task.state === "needs_input" && "shadow-[inset_2px_0_var(--need)]",
+        task.state === "needs_input" && needEdgeClass(true),
         selected && "outline outline-1 -outline-offset-2 outline-fg",
       )}
       style={{ left: x, top: y, width: SIZE.nodeW, height: SIZE.nodeH }}
@@ -144,13 +143,13 @@ function GraphNode({
         </span>
       </span>
       <span className="flex min-w-0 items-baseline gap-1.5">
-        <span className="shrink-0 font-mono text-meta text-muted tabular">#{task.id}</span>
-        <button type="button" aria-pressed={selected} aria-label={label} title={task.title} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
+        <IdTag id={task.id} />
+        <TextButton aria-pressed={selected} aria-label={label} title={task.title} onClick={() => onSelect(task.id)} className={cx(titleCls, "max-lg:hidden")}>
           {task.title}
-        </button>
-        <Link to={`/tasks/${task.id}`} aria-label={label} title={task.title} className={cx(titleCls, "lg:hidden")}>
+        </TextButton>
+        <TextLink to={`/tasks/${task.id}`} aria-label={label} title={task.title} className={cx(titleCls, "min-w-0 text-left lg:hidden")}>
           {task.title}
-        </Link>
+        </TextLink>
       </span>
       <span className="truncate font-mono text-meta text-fg" title={task.projectTitle}>{task.projectTitle}</span>
     </li>

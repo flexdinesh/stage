@@ -3,9 +3,9 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useProjects, useTasks } from "../api/queries.ts";
 import { capCount } from "../lib/format.ts";
 import { EMPTY_LOAD, LIVE_STATES, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
-import { IconChevronDown, IconMore, IconPin } from "./icons.tsx";
+import { IconMore, IconPin } from "./icons.tsx";
 import { useScope } from "./Scope.tsx";
-import { Skeleton, SkeletonBar, activeRowClass, cx } from "./ui.tsx";
+import { DisclosureButton, EmptyState, IconButton, Meta, Skeleton, SkeletonBar, SubHeading, activeRowClass, cx, iconButtonClass } from "./ui.tsx";
 
 /** Views that follow the scope; picking a project anywhere else opens the Dashboard. */
 const SCOPED_PATHS = ["/", "/tasks", "/trees", "/schedules"];
@@ -52,13 +52,13 @@ export function LoadCount({ load }: { load: ProjectLoad }) {
     .filter((p) => p !== null)
     .join(", ");
   return (
-    <span title={label} className="ml-auto flex shrink-0 font-mono text-meta-sm text-muted tabular">
+    <Meta small title={label} className="ml-auto flex shrink-0 tabular">
       <span aria-hidden className="relative min-w-[2ch] text-right">
         {hang ? count.slice(0, -1) : count}
         {hang ? <span className="absolute left-full">+</span> : null}
       </span>
       <span className="sr-only">{label}</span>
-    </span>
+    </Meta>
   );
 }
 
@@ -91,33 +91,22 @@ function ProjectItem({
         <LoadCount load={load} />
       </button>
       {pin === undefined ? (
-        <span aria-hidden className="w-7 shrink-0" />
+        <span aria-hidden className="w-control-sm shrink-0" />
       ) : (
-        <button
-          type="button"
+        <IconButton
+          small
+          icon={IconPin}
           aria-pressed={pin.pinned}
-          aria-label={`${pin.pinned ? "Unpin" : "Pin"} ${label}`}
+          label={`${pin.pinned ? "Unpin" : "Pin"} ${label}`}
           title={pin.pinned ? "Unpin" : "Pin to top"}
           onClick={pin.toggle}
           className={cx(
-            "flex w-7 shrink-0 items-center justify-center transition-[color,opacity] duration-150 hover:text-fg focus-visible:opacity-100",
-            pin.pinned ? "text-fg" : "text-muted",
+            "self-center focus-visible:opacity-100 aria-pressed:text-fg",
             !touch && !pin.pinned && "opacity-0 group-hover/project:opacity-100",
           )}
-        >
-          <IconPin />
-        </button>
+        />
       )}
     </li>
-  );
-}
-
-function SectionLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="flex min-h-7 items-center justify-between px-2.5 pt-3 pb-1">
-      <span className="label-caps text-muted">{children}</span>
-      {action}
-    </div>
   );
 }
 
@@ -165,25 +154,25 @@ export function ProjectNav({ onPick, touch = false }: { onPick?: () => void; tou
       </ul>
       {lists.pinned.length === 0 ? null : (
         <>
-          <SectionLabel>Pinned</SectionLabel>
+          <SubHeading title="Pinned" className="px-2.5 pt-3 pb-1" />
           <ul>{lists.pinned.map(item)}</ul>
         </>
       )}
-      <SectionLabel
-        action={
+      <SubHeading
+        title="Projects"
+        className="px-2.5 pt-3 pb-1"
+        actions={
           <Link
             to="/projects"
             onClick={onPick}
             title="Manage projects"
             aria-label="Manage projects"
-            className="flex size-6 items-center justify-center text-muted hover:bg-panel hover:text-fg"
+            className={iconButtonClass("ghost", true)}
           >
             <IconMore size={14} />
           </Link>
         }
-      >
-        Projects
-      </SectionLabel>
+      />
       <ul>{lists.active.map(item)}</ul>
       {projects.isPending ? (
         <Skeleton label="Loading projects">
@@ -195,24 +184,17 @@ export function ProjectNav({ onPick, touch = false }: { onPick?: () => void; tou
         </Skeleton>
       ) : null}
       {lists.active.length === 0 && lists.quiet.length === 0 && projects.data !== undefined ? (
-        <p className="px-2.5 py-1 text-small text-muted">No projects yet.</p>
+        <EmptyState className="px-2.5 py-1">No projects yet.</EmptyState>
       ) : null}
       {lists.quiet.length === 0 ? null : (
         <>
-          <button
-            type="button"
-            aria-expanded={showQuiet}
+          <DisclosureButton
+            open={showQuiet}
             onClick={() => setShowQuiet((v) => !v)}
-            className={cx(
-              "flex items-center gap-1.5 px-2.5 font-mono text-meta text-muted hover:text-fg",
-              touch ? "min-h-11" : "min-h-8",
-            )}
+            className={cx("px-2.5 font-mono text-meta text-muted hover:text-fg", touch ? "min-h-11" : "min-h-8")}
           >
-            <span aria-hidden className={cx("inline-flex transition-transform duration-150", !showQuiet && "-rotate-90")}>
-              <IconChevronDown size={12} />
-            </span>
             {lists.quiet.length} quiet project{lists.quiet.length === 1 ? "" : "s"}
-          </button>
+          </DisclosureButton>
           {showQuiet ? <ul>{lists.quiet.map(item)}</ul> : null}
         </>
       )}
@@ -226,7 +208,7 @@ export function SideLink({ to, icon, label, count }: { to: string; icon: ReactNo
     <NavLink to={to} end={to === "/"} className={({ isActive }) => navRowClass(isActive)}>
       <span className="flex shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count === undefined ? null : <span className="mr-7 flex shrink-0">{count}</span>}
+      {count === undefined ? null : <span className="mr-control-sm flex shrink-0">{count}</span>}
     </NavLink>
   );
 }

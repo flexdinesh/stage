@@ -1,7 +1,7 @@
 import { LaunchRecovery } from "../components/LaunchRecovery.tsx";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork, useTask } from "../api/queries.ts";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -20,8 +20,30 @@ import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
-import { Alert, AppButton, Button, Chip, Detail, Details, ErrorText, Muted, PageHeader, Panel, QueryState, Skeleton, SkeletonBar, cx, CopyButton } from "../components/ui.tsx";
-import { configModelText, dateTime, executionModes, relativeTime, workspaceText } from "../lib/format.ts";
+import {
+  Alert,
+  AppButton,
+  Button,
+  Chip,
+  CopyButton,
+  Detail,
+  Details,
+  EmptyState,
+  ErrorText,
+  ExternalLink,
+  Meta,
+  Muted,
+  PageHeader,
+  Panel,
+  QueryState,
+  RelTime,
+  Row,
+  Skeleton,
+  SkeletonBar,
+  TextLink,
+  cx,
+} from "../components/ui.tsx";
+import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
@@ -136,9 +158,6 @@ function TaskDetailSkeleton() {
   );
 }
 
-const when = (iso: string | null) => (iso === null ? "-" : <span title={dateTime(iso)}>{relativeTime(iso)}</span>);
-
-
 /** "10:42:03" today, "Nov 3 10:42" otherwise. */
 function stamp(iso: string): string {
   const d = new Date(iso);
@@ -156,9 +175,6 @@ function workspaceChip(task: TaskDetail): string {
   if (branch !== null) return `worktree ${branch}`;
   return predecessorChip(task, task.currentLaunchBase) ?? `worktree from ${w.baseRef}`;
 }
-
-const linkClass = "text-fg underline-offset-2 hover:underline";
-// The tree is underlined at rest so the way back reads as a link, not a label.
 
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
@@ -244,9 +260,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
                   {task.scheduleId === null ? null : (
                     <>
                       {"from "}
-                      <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
+                      <TextLink to={`/schedules/${task.scheduleId}`} className="text-fg">
                         {task.scheduleTitle ?? `schedule #${task.scheduleId}`}
-                      </Link>
+                      </TextLink>
                     </>
                   )}
                 </>
@@ -353,7 +369,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             )}
             {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} harness={task.harness} />)}
             <LastWordPanel task={task} />
-            {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-small underline">{artifact.label}</a></li>)}</ul></Panel>}
+            {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><ExternalLink href={artifact.url} className="text-small">{artifact.label}</ExternalLink></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
           </div>
@@ -401,7 +417,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   }
   // Sessions Stage mirrors (thread history) carry run state; others only their id.
   return (
-    <Panel title={title} meta={thread === null ? undefined : <>synced {when(thread.syncedAt)}</>}>
+    <Panel title={title} meta={thread === null ? undefined : <>synced <RelTime at={thread.syncedAt} /></>}>
       <Details>
         {thread === null ? null : (
           <>
@@ -414,7 +430,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
             <Detail label="Settled">
               {thread.settled ? (
                 <span>
-                  yes{thread.settledAt === null ? null : <span className="text-muted"> ({when(thread.settledAt)})</span>}
+                  yes{thread.settledAt === null ? null : <span className="text-muted"> (<RelTime at={thread.settledAt} />)</span>}
                 </span>
               ) : (
                 "no (execution metadata only)"
@@ -423,7 +439,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
             <Detail label="Model">{thread.model ?? "-"}</Detail>
             <Detail label="Branch">{thread.branch ?? "-"}</Detail>
             <Detail label="Worktree">{thread.worktreePath ?? "-"}</Detail>
-            <Detail label="Synced">{when(thread.syncedAt)}</Detail>
+            <Detail label="Synced"><RelTime at={thread.syncedAt} /></Detail>
           </>
         )}
         <Detail label="Session id">
@@ -436,9 +452,9 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
         </Detail>
       </Details>
       {destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
-        <Link to="/settings" className={cx("mt-3 inline-block text-small", linkClass)}>
+        <TextLink to="/settings" className="mt-3 inline-block text-small text-fg">
           Configure browser address
-        </Link>
+        </TextLink>
       ) : null}
     </Panel>
   );
@@ -472,32 +488,36 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
           <Detail label="Needs">
             <span className="flex flex-wrap gap-x-2">
               {task.needs.map((n) => (
-                <Link key={n} to={`/tasks/${n}`} className={linkClass}>
+                <TextLink key={n} to={`/tasks/${n}`}>
                   #{n}
-                </Link>
+                </TextLink>
               ))}
             </span>
           </Detail>
         )}
         {task.originSession === null ? null : (
           <Detail label="Created by">
-            <Link to={`/tasks/${task.id}?batch=1`} className={linkClass}>
-              {task.originSessionTitle ?? task.originSession.externalSessionId}
-            </Link>
+            <TextLink to={`/tasks/${task.id}?batch=1`}>{task.originSessionTitle ?? task.originSession.externalSessionId}</TextLink>
           </Detail>
         )}
         {task.scheduleId === null ? null : (
           <Detail label="Schedule">
-            <Link to={`/schedules/${task.scheduleId}`} className={linkClass}>
-              {task.scheduleTitle ?? `#${task.scheduleId}`}
-            </Link>
+            <TextLink to={`/schedules/${task.scheduleId}`}>{task.scheduleTitle ?? `#${task.scheduleId}`}</TextLink>
           </Detail>
         )}
         <Detail label="Attempts">{task.launchAttempt}</Detail>
-        <Detail label="Created">{when(task.createdAt)}</Detail>
-        <Detail label="Launched">{when(task.launchedAt)}</Detail>
-        <Detail label="Finished">{when(task.finishedAt)}</Detail>
-        <Detail label="Settled">{when(task.settledAt)}</Detail>
+        <Detail label="Created">
+          <RelTime at={task.createdAt} />
+        </Detail>
+        <Detail label="Launched">
+          <RelTime at={task.launchedAt} />
+        </Detail>
+        <Detail label="Finished">
+          <RelTime at={task.finishedAt} />
+        </Detail>
+        <Detail label="Settled">
+          <RelTime at={task.settledAt} />
+        </Detail>
       </Details>
     </Panel>
   );
@@ -507,32 +527,27 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
   return (
     <Panel title="Timeline" meta={`${events.length} event${events.length === 1 ? "" : "s"}`} flush>
       {events.length === 0 ? (
-        <div className="p-3">
-          <Muted>No events yet. State changes appear here once the task moves.</Muted>
-        </div>
+        <EmptyState inset>No events yet. State changes appear here once the task moves.</EmptyState>
       ) : (
         <ol>
           {events.map((e) => (
-            <li
-              key={e.id}
-              className="grid grid-cols-[auto_1fr] items-center gap-x-3 border-b border-line px-3 py-1.5 last:border-b-0 sm:grid-cols-[88px_1fr]"
-            >
-              <span className="font-mono text-meta text-muted tabular" title={dateTime(e.at)}>
+            <Row key={e.id} className="grid grid-cols-[auto_1fr] items-center gap-x-3 sm:grid-cols-[88px_1fr]">
+              <Meta className="tabular" title={dateTime(e.at)}>
                 {stamp(e.at)}
-              </span>
+              </Meta>
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {e.fromState === null || e.fromState === e.toState ? null : (
-                  <span className="inline-flex items-center gap-1.5 font-mono text-meta text-muted">
+                  <Meta className="inline-flex items-center gap-1.5">
                     {taskStateLabel(e.fromState)}
                     <IconArrowRight size={12} label="to" />
-                  </span>
+                  </Meta>
                 )}
                 <TaskStateBadge state={e.toState} />
                 {e.detail === "" ? null : (
-                  <span className="min-w-0 font-mono text-meta break-words text-muted">{e.detail}</span>
+                  <Meta className="min-w-0 break-words">{e.detail}</Meta>
                 )}
               </span>
-            </li>
+            </Row>
           ))}
         </ol>
       )}

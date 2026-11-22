@@ -9,7 +9,7 @@ import { useScope } from "../components/Scope.tsx";
 import { GROUP_META, GroupPanel, GroupPanelSkeleton, ScheduledRows, StatStrip, useGroupFold } from "../components/TaskGroups.tsx";
 import { SettledRows, TaskRows, TaskRowsSkeleton } from "../components/TaskList.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { Button, PageHeader, Panel, QueryState, Segmented, Skeleton, buttonClass } from "../components/ui.tsx";
+import { Button, EmptyState, PageHeader, Panel, QueryState, Segmented, Skeleton, buttonClass } from "../components/ui.tsx";
 import {
   GROUP_KEYS,
   awaitingReview,
@@ -156,11 +156,11 @@ function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: G
       />
       <div className="flex flex-col gap-3.5">
         {groups.length === 0 ? (
-          <p className="border border-line bg-surface px-3 py-2.5 text-small text-muted">
+          <EmptyState inset className="border border-line bg-surface">
             {tree === "none" && merged.length > 0
               ? "Every open task is in a tree. Trees lists them."
               : "No open tasks. Create one with New task, or let an agent plan a tree."}
-          </p>
+          </EmptyState>
         ) : (
           groups.map(({ key, list }) => {
             const collapsed = selected !== key && fold.folded(key, list);

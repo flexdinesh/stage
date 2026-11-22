@@ -11,12 +11,7 @@ import { dateTime } from "../lib/format.ts";
 import { countdown, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, QueryState, buttonClass, cx, toneClass, CommandBox } from "./ui.tsx";
-
-/** 6px square state marker. */
-export function Marker({ tone }: { tone: "ok" | "idle" | "run" | "bad" }) {
-  return <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c) transition-colors duration-150", toneClass(tone))} />;
-}
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Hint, Input, Marker, Muted, Panel, QueryState, Row, RowList, SubHeading, buttonClass, CommandBox } from "./ui.tsx";
 
 export function MachinesCard() {
   const machines = useMachines();
@@ -35,15 +30,15 @@ export function MachinesCard() {
         flush
       >
         <QueryState isPending={machines.isPending} error={machines.error}>
-          <ul>
+          <RowList>
             {machines.machines.map((m) => (
               <MachineRow key={m.id} machine={m} serverVersion={server} />
             ))}
-          </ul>
+          </RowList>
         </QueryState>
-        <p className="border-t border-line px-3 py-2 font-mono text-meta text-muted">
-          Remote machines run <code className="text-fg">stage worker</code> and connect out to this server.
-        </p>
+        <Hint className="border-t border-line px-3 py-2">
+          Remote machines run <code className="font-mono text-fg">stage worker</code> and connect out to this server.
+        </Hint>
       </Panel>
       {adding ? <AddMachineDrawer onClose={() => setAdding(false)} /> : null}
     </>
@@ -58,7 +53,7 @@ function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; s
   // Usage counts come from GET /connections (which lists only connections this server can reach); unknown ones show none.
   const usage = m.connections.map((c) => harnesses.connection(c.id) ?? c);
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-3 py-row last:border-b-0">
+    <Row className="flex flex-col gap-2">
       {mode === "rename" ? (
         <RenameForm machine={m} onDone={() => setMode("view")} />
       ) : (
@@ -131,7 +126,7 @@ function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; s
         </Alert>
       ) : null}
       {mode === "remove" ? <ErrorText error={remove.error} /> : null}
-    </li>
+    </Row>
   );
 }
 
@@ -357,11 +352,11 @@ function PairingView({ pairing, status, phase, now }: { pairing: MachinePairing;
       {phase === "waiting" ? (
         <>
           <section className="flex flex-col gap-2" aria-label="Command">
-            <h3 className="label-caps">On the machine to add, run</h3>
+            <SubHeading title="On the machine to add, run" />
             <CommandBox command={pairing.command} />
           </section>
           <section className="flex flex-col gap-2" aria-label="Pairing link">
-            <h3 className="label-caps">Or give it the link</h3>
+            <SubHeading title="Or give it the link" />
             <CommandBox command={pairing.link} />
           </section>
           <Muted>Shown once. The link adds one machine and works for 10 minutes. Closing this drawer revokes it.</Muted>

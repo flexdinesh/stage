@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { IconStep } from "../components/icons.tsx";
 import { StatusSections, useStatus } from "../components/StatusRow.tsx";
-import { PageHeader, Segmented } from "../components/ui.tsx";
+import { PageHeader, Segmented, SubHeading, cx, rowButtonClass } from "../components/ui.tsx";
 import { THEMES, useTheme } from "../lib/theme.ts";
 
 export const MORE_DESTINATIONS = [
@@ -25,7 +25,7 @@ export function MorePage() {
             <Link
               key={to}
               to={to}
-              className="flex min-h-11 items-center justify-between gap-3 border-b border-line px-3 py-2.5 text-body last:border-b-0 hover:bg-panel focus-visible:z-10"
+              className={cx(rowButtonClass(), "justify-between border-b border-line text-body last:border-b-0 focus-visible:z-10")}
             >
               {label}
               <span className="text-muted"><IconStep /></span>
@@ -36,7 +36,7 @@ export function MorePage() {
           <StatusSections row={row} details={details} touch />
         </div>
         <div className="flex flex-col items-start gap-2">
-          <h2 className="label-caps">Theme</h2>
+          <SubHeading title="Theme" />
           <Segmented label="Theme" options={THEME_OPTIONS} value={theme} onChange={setTheme} fill />
         </div>
       </div>

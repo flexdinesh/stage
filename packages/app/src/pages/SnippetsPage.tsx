@@ -3,9 +3,23 @@ import { useId, useMemo, useState, type FormEvent } from "react";
 import { useApi } from "../platform/context.tsx";
 import { keys, useProjects, useSnippets } from "../api/queries.ts";
 import type { CreateSnippetRequest, Project, Snippet } from "../api/types.ts";
-import { IconChevronDown } from "../components/icons.tsx";
 import { ProjectCombobox } from "../components/ProjectSelect.tsx";
-import { Button, Drawer, ErrorText, Field, Input, PageHeader, Panel, QueryState, Textarea, cx, CopyButton } from "../components/ui.tsx";
+import {
+  Button,
+  DisclosureButton,
+  Drawer,
+  ErrorText,
+  Field,
+  Input,
+  PageHeader,
+  Panel,
+  QueryState,
+  Row,
+  RowList,
+  TextButton,
+  Textarea,
+  CopyButton,
+} from "../components/ui.tsx";
 
 type Editing = { mode: "create" } | { mode: "edit"; snippet: Snippet };
 
@@ -88,7 +102,7 @@ export function SnippetsPage() {
                   </Button>
                 }
               >
-                <ul>
+                <RowList>
                   {g.snippets.map((s) => (
                     <SnippetRow
                       key={s.id}
@@ -98,7 +112,7 @@ export function SnippetsPage() {
                       onEdit={() => setEditing({ mode: "edit", snippet: s })}
                     />
                   ))}
-                </ul>
+                </RowList>
               </Panel>
             );
           })}
@@ -134,25 +148,20 @@ function SnippetRow({
     onSettled: () => qc.invalidateQueries({ queryKey: keys.snippets }),
   });
   return (
-    <li className="border-b border-line px-3 py-2.5 last:border-b-0">
+    <Row>
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-2">
-          <button
-            type="button"
-            aria-expanded={expanded}
+          <DisclosureButton
+            open={expanded}
             aria-controls={bodyId}
             aria-label={expanded ? `Collapse ${s.name}` : `Expand ${s.name}`}
             onClick={onToggle}
-            className="mt-px inline-flex size-5 shrink-0 items-center justify-center text-muted transition-colors duration-150 hover:bg-panel hover:text-fg"
-          >
-            <span aria-hidden className={cx("inline-flex transition-transform duration-150", !expanded && "-rotate-90")}>
-              <IconChevronDown size={12} />
-            </span>
-          </button>
+            className="mt-px size-5 shrink-0 justify-center transition-colors duration-150 hover:bg-panel"
+          />
           <div className="min-w-0 flex-1">
-            <button type="button" onClick={onToggle} className="text-left text-body font-medium break-words hover:underline">
+            <TextButton onClick={onToggle} className="text-body font-medium break-words">
               {s.name}
-            </button>
+            </TextButton>
             {expanded ? (
               <div id={bodyId} className="mt-1.5 flex flex-col items-start gap-2">
                 <pre className="w-full font-mono text-small leading-relaxed break-words whitespace-pre-wrap">{s.body}</pre>
@@ -190,7 +199,7 @@ function SnippetRow({
           <ErrorText error={remove.error} />
         </div>
       )}
-    </li>
+    </Row>
   );
 }
 

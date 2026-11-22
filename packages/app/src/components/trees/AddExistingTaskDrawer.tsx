@@ -5,7 +5,7 @@ import type { Task, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { joinSummary } from "../../lib/trees.ts";
 import { NodeChip } from "./TreeNode.tsx";
-import { Button, Checkbox, Drawer, ErrorText, Field, Input, QueryState, Radio, cx } from "../ui.tsx";
+import { Button, Checkbox, ChoiceRow, Drawer, EmptyState, ErrorText, Field, FieldGroup, IdTag, Input, Meta, QueryState, Radio, cx, rowButtonClass } from "../ui.tsx";
 
 const RESULT_LIMIT = 30;
 
@@ -47,9 +47,9 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
 
   const footer = (
     <>
-      <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted md:text-right">
+      <Meta small className="min-w-0 flex-1 md:text-right">
         {picked === null ? "required: a task" : joinSummary(picked.id, chosenTasks, picked.startMode ?? tree.startMode)}
-      </span>
+      </Meta>
       <Button variant="primary" busy={add.isPending} disabled={picked === null} onClick={() => picked !== null && add.mutate(picked)}>
         Add to tree
       </Button>
@@ -67,24 +67,21 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
         <QueryState isPending={tasks.isPending} error={tasks.error}>
           <div role="radiogroup" aria-label="Task" className="border border-line">
             {results.length === 0 ? (
-              <p className="px-3 py-2.5 text-small text-muted">No task matches. Tasks already in this tree are not listed.</p>
+              <EmptyState inset>No task matches. Tasks already in this tree are not listed.</EmptyState>
             ) : (
               results.map((t) => (
                 <label
                   key={t.id}
-                  className={cx(
-                    "flex min-h-11 cursor-pointer items-center gap-3 border-b border-line px-3 py-2 last:border-b-0 hover:bg-panel md:min-h-10",
-                    picked?.id === t.id && "bg-accent/5",
-                  )}
+                  className={cx(rowButtonClass(picked?.id === t.id), "cursor-pointer border-b border-line last:border-b-0")}
                 >
                   <Radio name="task" checked={picked?.id === t.id} onChange={() => setPicked(t)} />
                   <span className="min-w-0 flex-1">
-                    <span className="mr-1.5 font-mono text-meta text-muted tabular">#{t.id}</span>
+                    <IdTag id={t.id} className="mr-1.5" />
                     <span className="text-small font-medium break-words">{t.title}</span>
-                    <span className="mt-0.5 block truncate font-mono text-meta text-muted">
+                    <Meta className="mt-0.5 block truncate">
                       {t.projectTitle}
                       {t.treeTitle === null ? "" : ` · moves from ${t.treeTitle}`}
-                    </span>
+                    </Meta>
                   </span>
                   <NodeChip task={t} />
                 </label>
@@ -93,24 +90,26 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
           </div>
         </QueryState>
         {picked === null ? null : (
-          <fieldset disabled={!canNeed} className="flex min-w-0 flex-col gap-1.5 disabled:opacity-55">
-            <legend className="label-caps mb-1.5">Runs after</legend>
-            <div className="border border-line">
-              {tree.tasks.map((m) => (
-                <label key={m.id} className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-line px-3 last:border-b-0 hover:bg-panel md:min-h-8">
-                  <Checkbox checked={chosen.includes(m.id)} onChange={(e) => toggle(m.id, e.target.checked)} />
-                  <span className="font-mono text-meta text-muted tabular">#{m.id}</span>
-                  <span className="min-w-0 flex-1 truncate text-small">{m.title}</span>
-                </label>
-              ))}
-            </div>
-            <p className="font-mono text-meta text-muted">
-              {canNeed
-                ? "None checked: a parallel root. Checked: it waits for them."
-                : picked.state !== "backlog"
-                  ? "It has already run, so it joins as a parallel root."
-                  : "It has a start time; clear it to give it needs."}
-            </p>
+          <fieldset disabled={!canNeed} className="min-w-0 disabled:opacity-55">
+            <FieldGroup
+              label="Runs after"
+              hint={
+                canNeed
+                  ? "None checked: a parallel root. Checked: it waits for them."
+                  : picked.state !== "backlog"
+                    ? "It has already run, so it joins as a parallel root."
+                    : "It has a start time; clear it to give it needs."
+              }
+            >
+              <div className="flex flex-col">
+                {tree.tasks.map((m) => (
+                  <ChoiceRow key={m.id} control={<Checkbox checked={chosen.includes(m.id)} onChange={(e) => toggle(m.id, e.target.checked)} />}>
+                    <IdTag id={m.id} className="mr-1.5" />
+                    {m.title}
+                  </ChoiceRow>
+                ))}
+              </div>
+            </FieldGroup>
           </fieldset>
         )}
         <ErrorText error={add.error} />

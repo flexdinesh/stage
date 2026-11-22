@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { TreeDetail } from "../../api/types.ts";
 import { layoutLevels } from "../../lib/trees.ts";
 import { TreeNode } from "./TreeNode.tsx";
-import { Skeleton, SkeletonBar } from "../ui.tsx";
+import { Skeleton, SkeletonBar, cx } from "../ui.tsx";
 
 /** Laptop columns: level, state, task, needs, in state, action (rows join the list's subgrid). */
 const COLUMNS = "md:grid md:grid-cols-[44px_auto_minmax(0,1fr)_minmax(72px,auto)_auto_auto]";
@@ -56,17 +56,18 @@ export function TreeView({
   );
 }
 
+/** Skeleton title bar widths, one per placeholder row. */
+const SKELETON_WIDTHS = ["w-1/3", "w-1/4", "w-2/5", "w-1/3", "w-1/4"];
+
 /** Loading placeholder: pulsing rows. */
 export function TreeViewSkeleton() {
   return (
     <Skeleton label="Loading tree">
-      {[0.6, 0.45, 0.7, 0.5, 0.4].map((w, i) => (
+      {SKELETON_WIDTHS.map((w, i) => (
         <div key={i} className="flex h-[76px] items-center gap-3 border-b border-line px-3 last:border-b-0 md:h-[52px]">
           <SkeletonBar className="h-3 w-6" />
           <SkeletonBar className="h-4 w-20" />
-          <span className="block" style={{ width: `${w * 60}%` }}>
-            <SkeletonBar className="h-3.5 w-full" />
-          </span>
+          <SkeletonBar className={cx("h-3.5", w)} />
         </div>
       ))}
     </Skeleton>

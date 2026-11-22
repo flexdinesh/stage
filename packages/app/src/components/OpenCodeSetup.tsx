@@ -12,7 +12,7 @@ import { useHarnessApi, useScopeMachineId, useSetupCopy } from "../api/harnessSc
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, CommandBox } from "./ui.tsx";
+import { Alert, Button, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: refetch everything. */
 function useRefresh(): () => Promise<void> {
@@ -116,7 +116,7 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
           <Button variant="primary" busy={connect.mutation.isPending && !connect.confirming} disabled={connect.confirming} onClick={() => connect.mutation.mutate({ arg: null, newInstance: false })}>
             Connect
           </Button>
-          <span className="font-mono text-meta text-muted">signs in with the service's own password</span>
+          <Hint>signs in with the service's own password</Hint>
         </div>
         <ConnectOutcome address={info.local.url} connect={connect} confirm={() => connect.mutation.mutate({ arg: null, newInstance: true })} />
         <div className="label-caps flex items-center gap-2.5 before:flex-1 before:border-t before:border-line after:flex-1 after:border-t after:border-line">
@@ -257,7 +257,7 @@ function Connection({ info, checking, check, advanced }: { info: OpenCodeStatus;
   return (
     <div className="flex flex-col gap-3">
       {info.state === "rejected" ? <SignInLost info={info} advanced={advanced} /> : null}
-      {info.state === "unavailable" && info.reason ? <p className="text-small text-bad">{info.reason}</p> : null}
+      {info.state === "unavailable" && info.reason ? <InlineError>{info.reason}</InlineError> : null}
       <dl className="grid grid-cols-[max-content_1fr] border-t border-line">
         <Row label="Service">{info.endpoint === "" ? "-" : serviceText(info)}</Row>
         <Row label="Sign-in">{signInText(info)}</Row>
@@ -353,7 +353,7 @@ function ConnectionActions({ info, checking, check, advanced }: { info: OpenCode
           Advanced
         </Button>
         <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-          {locked ? <span className="font-mono text-meta text-muted">set by OPENCODE_URL</span> : null}
+          {locked ? <Hint>set by OPENCODE_URL</Hint> : null}
           <Button small variant="danger" disabled={locked || confirm} onClick={() => setConfirm(true)}>
             Disconnect
           </Button>
@@ -383,7 +383,7 @@ function BrowserSetupHint({ client, service }: { client: string; service: string
   const [hidden, setHidden] = useState(() => storage.get(key) === "seen");
   if (hidden) return null;
   return (
-    <div className="text-small text-muted">
+    <Muted>
       On this device, add <code className="break-all">{service}</code> to your OpenCode web client
       once to open sessions there.
       <Button
@@ -396,7 +396,7 @@ function BrowserSetupHint({ client, service }: { client: string; service: string
       >
         Got it
       </Button>
-    </div>
+    </Muted>
   );
 }
 
@@ -480,9 +480,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
           "Leave empty to open the web client hosted by the service.",
         )}
         {urls.webClient && urls.webClient !== (urls.browserEndpoint || urls.endpoint) ? (
-          <p className="text-small text-muted">
-            Add the address for other devices to this web client once on each device.
-          </p>
+          <Muted>Add the address for other devices to this web client once on each device.</Muted>
         ) : null}
         {locked("credentials") ? (
           <p className="text-small">Credentials are managed by {copy.managedBy}.</p>

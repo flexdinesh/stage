@@ -4,9 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client.ts";
 import { useApi } from "../platform/context.tsx";
-import { dateTime, relativeTime } from "../lib/format.ts";
 import { RefText } from "./StageLinks.tsx";
-import { Alert, Button, Muted, Panel, Skeleton, SkeletonBar, cx, errorText, CopyButton } from "./ui.tsx";
+import { Alert, Button, EmptyState, InlineError, Panel, RelTime, Skeleton, SkeletonBar, cx, errorText, CopyButton } from "./ui.tsx";
 
 /** A truncated T3 preview: the full text loads from the adopted task opening-prompt route. */
 interface FullSource {
@@ -84,7 +83,7 @@ export function PromptPanel({
               >
                 {expanded ? "Show less" : "Show all"}
               </Button>
-              {fullText.error === null ? null : <span className="text-meta text-bad">Full text failed: {errorText(fullText.error)}</span>}
+              {fullText.error === null ? null : <InlineError>Full text failed: {errorText(fullText.error)}</InlineError>}
             </div>
           ) : null}
         </div>
@@ -112,7 +111,7 @@ export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean 
     if (item === null) {
       return (
         <Panel title="Prompt">
-          <Muted>{live ? "No prompt yet. It shows once T3 records the first message." : "No prompt in this session."}</Muted>
+          <EmptyState>{live ? "No prompt yet. It shows once T3 records the first message." : "No prompt in this session."}</EmptyState>
         </Panel>
       );
     }
@@ -121,11 +120,7 @@ export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean 
         key={item.itemId}
         text={item.text}
         full={item.truncated ? { taskId, itemId: item.itemId, updatedAt: item.updatedAt } : undefined}
-        meta={
-          <time dateTime={item.updatedAt} title={dateTime(item.updatedAt)} className="tabular">
-            {relativeTime(item.updatedAt)}
-          </time>
-        }
+        meta={<RelTime at={item.updatedAt} className="tabular" />}
       />
     );
   }

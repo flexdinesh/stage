@@ -7,7 +7,7 @@ import { openCodeErrorText, openCodeSummary, t3ErrorText, t3Summary, type Harnes
 import { serviceHostText, signInText } from "../lib/opencode.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
 import { IconChevronUp, IconSettings } from "./icons.tsx";
-import { cx, toneClass } from "./ui.tsx";
+import { InlineError, Marker, Meta, PanelHeader, Row as ListRow, RowList, cx, rowButtonClass } from "./ui.tsx";
 
 /** A status query as the row reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
 function statusRead<T>(q: { data: T | undefined; isPending: boolean; errorUpdateCount: number; error: Error | null }): StatusRead<T> {
@@ -66,10 +66,6 @@ export function useStatus(): { row: Row; details: Details } {
 
 const TEXT: Record<StatusTone, string> = { ok: "text-muted", idle: "text-muted", need: "text-need-fg", bad: "text-bad" };
 
-function Marker({ tone }: { tone: StatusTone }) {
-  return <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c) transition-colors duration-150", toneClass(tone))} />;
-}
-
 /** One section per group; each line links to Settings. `touch` sizes rows for the phone. */
 export function StatusSections({ row, details, touch = false, onPick }: { row: Row; details: Details; touch?: boolean; onPick?: () => void }) {
   const groups = statusGroups(row.items);
@@ -83,34 +79,31 @@ export function StatusSections({ row, details, touch = false, onPick }: { row: R
   }
   return groups.map(({ group, items }) => (
     <section key={group} aria-label={group}>
-      <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
-        <span className="label-caps text-fg">{group}</span>
-        <span className="ml-auto font-mono text-meta-sm text-muted">{items.length}</span>
-      </div>
-      <ul>
+      <PanelHeader title={group} meta={items.length} />
+      <RowList>
         {items.map((i) => {
           const d = details[i.key];
           return (
-            <li key={i.key} className="border-b border-line last:border-b-0">
+            <ListRow key={i.key} bare>
               <Link
                 to="/settings"
                 onClick={onPick}
-                className={cx("grid grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 px-3 hover:bg-panel", touch ? "py-2.5" : "py-2")}
+                className="grid grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 px-3 py-row hover:bg-panel"
               >
                 <Marker tone={i.tone} />
                 <span className={cx("truncate text-ui", i.tone === "need" || i.tone === "bad" ? TEXT[i.tone] : "text-fg")}>{i.name}</span>
                 <span className={cx("font-mono text-meta", TEXT[i.tone])}>{i.state}</span>
                 {d?.lines.map((l) => (
-                  <span key={l} className="col-start-2 col-end-4 truncate font-mono text-meta-sm text-muted">
+                  <Meta key={l} small className="col-start-2 col-end-4 truncate">
                     {l}
-                  </span>
+                  </Meta>
                 ))}
-                {d?.error == null ? null : <span className="col-start-2 col-end-4 line-clamp-2 font-mono text-meta-sm break-words text-bad">{d.error}</span>}
+                {d?.error == null ? null : <InlineError className="col-start-2 col-end-4 line-clamp-2">{d.error}</InlineError>}
               </Link>
-            </li>
+            </ListRow>
           );
         })}
-      </ul>
+      </RowList>
     </section>
   ));
 }
@@ -188,7 +181,7 @@ export function StatusRow({ className }: { className?: string }) {
           <Link
             to="/settings"
             onClick={close}
-            className="flex min-h-9 items-center gap-2 border-t border-line px-3 text-small text-fg transition-colors duration-150 hover:bg-panel"
+            className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}
           >
             <IconSettings size={14} />
             Open settings

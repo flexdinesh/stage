@@ -8,7 +8,7 @@ import { useApi } from "../../platform/context.tsx";
 
 import { ProjectCombobox } from "../ProjectSelect.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel, Combobox } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, InlineError, Input, Meta, Muted, Panel, Combobox } from "../ui.tsx";
 
 /** Explicit lookup only. Preview never adopts a session. */
 export function AdoptSessionDrawer({
@@ -94,9 +94,7 @@ export function AdoptSessionDrawer({
       }
     >
       <div className="flex flex-col gap-3.5">
-        <p className="text-small text-muted">
-          Choose a harness and paste the session you want to track.
-        </p>
+        <Muted>Choose a harness and paste the session you want to track.</Muted>
         <form
           className="flex flex-col gap-2"
           onSubmit={(event) => {
@@ -158,27 +156,23 @@ export function AdoptSessionDrawer({
                 <p className="font-mono text-meta break-words">
                   {picked.project?.title ?? picked.workspace}
                 </p>
-                <p className="font-mono text-meta break-all text-muted">
-                  {picked.session.externalSessionId}
-                </p>
-                {!eligible ? (
-                  <p className="text-small text-bad">{picked.unavailableReason}</p>
-                ) : null}
+                <Meta className="break-all">{picked.session.externalSessionId}</Meta>
+                {!eligible ? <InlineError>{picked.unavailableReason}</InlineError> : null}
                 {picked.task === null ? null : (
-                  <p className="text-small text-muted">
+                  <Muted>
                     Already tracked as task #{picked.task.id}.
                     {tree === undefined ? "" : " Confirm to move that task into this tree."}
-                  </p>
+                  </Muted>
                 )}
               </div>
             </Panel>
             {picked.project !== null || !eligible ? null : (
               <Panel title="Stage project">
                 <div className="flex flex-col gap-3">
-                  <p className="text-small text-muted">
+                  <Muted>
                     This workspace is not bound. Choose a Stage project or create one while
                     adopting.
-                  </p>
+                  </Muted>
                   <Field label="Project">
                     {(id) => (
                       <ProjectCombobox
@@ -202,9 +196,7 @@ export function AdoptSessionDrawer({
                       )}
                     </Field>
                   )}
-                  <p className="text-small text-muted">
-                    Confirmation binds the session's workspace. Future launches use this binding.
-                  </p>
+                  <Muted>Confirmation binds the session's workspace. Future launches use this binding.</Muted>
                 </div>
               </Panel>
             )}

@@ -9,37 +9,33 @@ import { TaskRow } from "./TaskList.tsx";
 import { NewTreeDrawer } from "./trees/NewTreeDrawer.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { TreeStateBar } from "./trees/TreeRow.tsx";
-import { Button, Checkbox, Drawer, Panel, buttonClass, cx } from "./ui.tsx";
+import { Button, Checkbox, Drawer, IdTag, Panel, PanelHeader, Row, RowList, TextLink, activeRowClass, buttonClass, cx } from "./ui.tsx";
 
 /** Section header for a tree: its title linking the tree view, mono roll-up of the batch's members, state bar. */
 function TreeHeader({ tree, tasks }: { tree: TreeRef; tasks: readonly Task[] }) {
   const rollup = treeRollup(countMembers(tasks));
   const n = tasks.length;
   return (
-    <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5 md:min-h-8">
-      <h3 className="min-w-0 truncate text-small font-medium">
-        <Link to={`/trees/${tree.id}`} className="hover:underline">
-          {tree.title}
-        </Link>
-      </h3>
-      <span className="font-mono text-meta-sm text-muted tabular">
-        {n} task{n === 1 ? "" : "s"} · {nextActionText(rollup.next)} · {tree.startMode}
-      </span>
-      <div className="ml-auto w-24 max-md:w-full max-md:basis-full">
-        <TreeStateBar rollup={rollup} />
-      </div>
-    </div>
+    <PanelHeader
+      as="h3"
+      title={<TextLink to={`/trees/${tree.id}`}>{tree.title}</TextLink>}
+      meta={
+        <span className="tabular">
+          {n} task{n === 1 ? "" : "s"} · {nextActionText(rollup.next)} · {tree.startMode}
+        </span>
+      }
+      actions={
+        <div className="w-24">
+          <TreeStateBar rollup={rollup} />
+        </div>
+      }
+    />
   );
 }
 
-/** Slate "Independent" section header, mono count. */
+/** "Independent" section header, mono count. */
 function IndependentHeader({ count }: { count: number }) {
-  return (
-    <div className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-3 py-1 md:min-h-8">
-      <h3 className="label-caps text-muted">Independent</h3>
-      <span className="font-mono text-meta-sm text-muted tabular">{count}</span>
-    </div>
-  );
+  return <PanelHeader as="h3" title="Independent" meta={<span className="tabular">{count}</span>} />;
 }
 
 /**
@@ -68,9 +64,9 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
     ) : undefined;
   const rows = (tasks: Task[]): ReactNode =>
     tasks.map((t) => (
-      <li key={t.id} className="border-b border-line last:border-b-0">
+      <Row key={t.id} bare>
         <TaskRow task={t} contextThreadId={threadId} extra={editButton(t)} />
-      </li>
+      </Row>
     ));
 
   // Only backlog tasks can be given needs, so only they can be checked.
@@ -80,7 +76,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
   const independentRows = batch.independent.map((t) => {
     const canPick = t.state === "backlog";
     return (
-      <li key={t.id} className="flex items-start border-b border-line last:border-b-0 md:items-center">
+      <Row key={t.id} bare className="flex items-start md:items-center">
         {selectable.length === 0 ? null : (
           <div className="flex w-4 shrink-0 pt-3 pl-3 box-content md:pt-0">
             {canPick ? (
@@ -95,7 +91,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
         <div className="min-w-0 flex-1">
           <TaskRow task={t} contextThreadId={threadId} extra={editButton(t)} />
         </div>
-      </li>
+      </Row>
     );
   });
 
@@ -123,13 +119,13 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
         {batch.trees.map(({ tree, tasks }) => (
           <section key={tree.id} className="border-b border-line last:border-b-0">
             <TreeHeader tree={tree} tasks={tasks} />
-            <ul aria-label={`Tree ${tree.title}`}>{rows(tasks)}</ul>
+            <RowList label={`Tree ${tree.title}`}>{rows(tasks)}</RowList>
           </section>
         ))}
         {batch.independent.length === 0 ? null : (
           <section className="border-b border-line last:border-b-0">
             <IndependentHeader count={batch.independent.length} />
-            <ul>{independentRows}</ul>
+            <RowList>{independentRows}</RowList>
           </section>
         )}
       </Panel>
@@ -154,24 +150,18 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
   const row = (t: Task) => {
     const current = t.id === task.id;
     return (
-      <li
-        key={t.id}
-        className={cx(
-          "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-line px-3 py-2 last:border-b-0 md:py-1.5",
-          current && "outline outline-1 -outline-offset-2 outline-fg",
-        )}
-      >
-        <Link
+      <Row key={t.id} className={cx("grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2", current && activeRowClass)}>
+        <TextLink
           to={`/tasks/${t.id}`}
           aria-current={current ? "page" : undefined}
-          className={cx("min-w-0 truncate text-small hover:underline", current ? "font-semibold" : "font-medium")}
+          className={cx("min-w-0 truncate text-small", current ? "font-semibold" : "font-medium")}
           title={t.title}
         >
-          <span className="mr-1.5 font-mono text-meta font-normal text-muted tabular">#{t.id}</span>
+          <IdTag id={t.id} className="mr-1.5 font-normal" />
           {t.title}
-        </Link>
+        </TextLink>
         <NodeChip task={t} />
-      </li>
+      </Row>
     );
   };
   return (
@@ -189,18 +179,14 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
     >
       {batch.trees.map(({ tree, tasks }) => (
         <section key={tree.id} className="border-b border-line last:border-b-0">
-          <h3 className="truncate border-b border-line px-3 py-1.5 text-small font-medium">
-            <Link to={`/trees/${tree.id}`} className="hover:underline">
-              {tree.title}
-            </Link>
-          </h3>
-          <ul>{tasks.map(row)}</ul>
+          <PanelHeader as="h3" title={<TextLink to={`/trees/${tree.id}`}>{tree.title}</TextLink>} />
+          <RowList>{tasks.map(row)}</RowList>
         </section>
       ))}
       {batch.independent.length === 0 ? null : (
         <section className="border-b border-line last:border-b-0">
-          <h3 className="label-caps border-b border-line px-3 py-1.5 text-muted">Independent</h3>
-          <ul>{batch.independent.map(row)}</ul>
+          <PanelHeader as="h3" title="Independent" />
+          <RowList>{batch.independent.map(row)}</RowList>
         </section>
       )}
     </Panel>
