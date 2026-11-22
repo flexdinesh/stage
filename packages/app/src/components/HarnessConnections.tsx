@@ -1,16 +1,15 @@
-// Harness connection setup in Settings: one card per connectable harness.
+// Harness connection setup (Settings > Connections, in the Manage drawer).
 // A harness with its own panel registers it in CONNECTION_PANELS (its
 // harness-specific UI, behind this one boundary); every other harness gets
 // the generic card rendered from its setup schema (GET /api/harnesses).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
-import { invalidateConnectionChange, keys, useScopedHarnessDescriptors } from "../api/queries.ts";
-import type { HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
+import { invalidateConnectionChange, keys } from "../api/queries.ts";
+import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
-import { PreviousConnections } from "./PreviousConnections.tsx";
 import { T3ConnectionPanel } from "./T3Setup.tsx";
 import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, InlineError, Input, Muted, Panel, QueryState } from "./ui.tsx";
 
@@ -20,24 +19,34 @@ const CONNECTION_PANELS: Record<string, ComponentType> = {
   opencode: OpenCodeSetup,
 };
 
-/** The harness scope's machine's connection setup. */
-export function HarnessConnections() {
-  const descriptors = useScopedHarnessDescriptors();
-  const connectable = (descriptors.data?.harnesses ?? []).filter((d) => d.connectable);
-  return (
-    <QueryState isPending={descriptors.isPending} error={descriptors.error} hasData={descriptors.data !== undefined}>
-      {connectable.map((d) => {
-        const Own = CONNECTION_PANELS[d.kind];
-        return Own === undefined ? <ConnectionCard key={d.kind} descriptor={d} /> : <Own key={d.kind} />;
-      })}
-    </QueryState>
-  );
+/** One harness's setup on the harness scope's machine: its own panel, or the generic card. */
+export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor }) {
+  const Own = CONNECTION_PANELS[descriptor.kind];
+  return Own === undefined ? <ConnectionCard descriptor={descriptor} /> : <Own />;
+}
+
+/** A generic harness's status on the harness scope's machine (shared by its card and its Settings row). */
+export function useHarnessStatus(kind: Harness) {
+  const api = useHarnessApi();
+  return useQuery({ queryKey: useScopedKey()([...keys.harnessStatus, kind]), queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
+}
+
+/** Disconnects a generic harness on the harness scope's machine. */
+export function useDisconnectHarness(kind: Harness, onDone?: () => void) {
+  const api = useHarnessApi();
+  const apply = useApply(kind);
+  return useMutation({
+    mutationFn: () => api.disconnectHarness(kind),
+    onSuccess: (s) => {
+      onDone?.();
+      apply(s);
+    },
+  });
 }
 
 /** The generic card: state, settings, actions and disconnect from the setup schema. */
 export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }) {
-  const api = useHarnessApi();
-  const status = useQuery({ queryKey: useScopedKey()([...keys.harnessStatus, descriptor.kind]), queryFn: () => api.harnessStatus(descriptor.kind), refetchInterval: 15000 });
+  const status = useHarnessStatus(descriptor.kind);
   return (
     <Panel
       title={`${descriptor.name} connection`}
@@ -66,9 +75,7 @@ function useApply(kind: string) {
 }
 
 function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor; status: HarnessStatus }) {
-  const api = useHarnessApi();
-  const apply = useApply(descriptor.kind);
-  const disconnect = useMutation({ mutationFn: () => api.disconnectHarness(descriptor.kind), onSuccess: apply });
+  const disconnect = useDisconnectHarness(descriptor.kind);
   const reason = status.reason ?? status.lastError;
   return (
     <div className="flex flex-col gap-3">
@@ -88,7 +95,6 @@ function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor;
           <ErrorText error={disconnect.error} />
         </div>
       ) : null}
-      <PreviousConnections harness={descriptor.kind} className="border-t border-line pt-3" />
     </div>
   );
 }

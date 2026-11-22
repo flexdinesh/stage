@@ -47,6 +47,8 @@ const PAGES: [string, string][] = [
   ["Projects", "/projects"],
   ["Snippets", "/snippets"],
   ["Settings", "/settings"],
+  ["Connections", "/settings/connections"],
+  ["Notifications", "/settings/notifications"],
 ];
 
 const has = (text: string, q: string) => text.toLowerCase().includes(q);

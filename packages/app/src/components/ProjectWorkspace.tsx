@@ -143,7 +143,7 @@ export function BindWorkspaceDrawer({
           >
             Refresh workspaces
           </Button>
-          <TextLink to="/settings" variant="rest" className="text-small">
+          <TextLink to="/settings/connections" variant="rest" className="text-small">
             Connection settings
           </TextLink>
         </div>

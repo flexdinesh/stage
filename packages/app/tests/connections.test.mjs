@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openCodeErrorText, openCodeSummary, t3ErrorText, t3Summary } from "../src/lib/connections.ts";
+import { openCodeErrorText, openCodeRowDetail, openCodeSummary, statusRead, t3ErrorText, t3RowDetail, t3Summary } from "../src/lib/connections.ts";
 import { statusRow } from "../src/lib/status.ts";
 import { serviceHostText } from "../src/lib/opencode.ts";
 
@@ -110,4 +110,20 @@ test("error lines: the reason for trouble, else the failed fetch, else none", ()
 test("service host: host:port with the local version only when it is the one connected", () => {
   assert.equal(serviceHostText({ ...ocBase }), "127.0.0.1:49374 · v2.3.2");
   assert.equal(serviceHostText({ ...ocBase, endpoint: "http://studio.lan:4096", auth: "paired" }), "studio.lan:4096");
+});
+
+test("row detail: which T3 and when its token expires; falls back to the T3 URL before T3 answers", () => {
+  assert.equal(t3RowDetail(t3Base, NOW), "controlbox · v0.1.10 · token expires in 23d");
+  assert.equal(t3RowDetail({ ...t3Base, state: "expired", tokenExpiresAt: "2026-11-18T10:00:00Z" }, NOW), "controlbox · v0.1.10 · token expired 2d ago");
+  assert.equal(t3RowDetail({ ...t3Base, t3: null, tokenExpiresAt: null }, NOW), "http://127.0.0.1:3773");
+});
+
+test("row detail: OpenCode's host and how Stage signs in", () => {
+  assert.equal(openCodeRowDetail(ocBase, NOW), `${serviceHostText(ocBase)} · local service`);
+  assert.equal(openCodeRowDetail({ ...ocBase, endpoint: "" }, NOW), "local service");
+});
+
+test("statusRead: only the first data-less fetch counts as checking", () => {
+  assert.deepEqual(statusRead({ data: undefined, isPending: true, errorUpdateCount: 0, error: null }), { data: undefined, checking: true, error: null });
+  assert.deepEqual(statusRead({ data: undefined, isPending: true, errorUpdateCount: 1, error: new Error("down") }), { data: undefined, checking: false, error: "down" });
 });

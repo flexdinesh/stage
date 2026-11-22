@@ -1,6 +1,6 @@
-// Server switching on desktop (platform.host.servers): the Settings SERVERS panel and its Add/Edit drawer, the
-// top-bar server menu (more than one server saved) and the Switch server drawer of the connection screen and
-// banner. A host without server switching (the browser) renders none of it. Logic: lib/host.ts.
+// Server switching on desktop (platform.host.servers): a SERVERS panel and its Add/Edit drawer, a top-bar server
+// menu and a Switch server drawer. Kept, but not mounted anywhere: the UI assumes one server, this machine's.
+// A host without server switching (the browser) renders none of it. Logic: lib/host.ts.
 import { useCallback, useId, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { serverStatus, serverTestSteps, serverWhere, type ServerTone } from "../lib/host.ts";

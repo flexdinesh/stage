@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizeT3Status } from "../src/api/client.ts";
-import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, setupSteps } from "../src/lib/onboarding.ts";
+import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, setupSteps, t3DisconnectPrompt } from "../src/lib/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const SYNCED = "2026-11-17T10:00:00Z";
@@ -128,6 +128,21 @@ test("disconnect shows only with a stored token and locks while an admin token r
   assert.equal(disconnectAvailability({ ...unreachable, tokenExpiresAt: "2026-12-17T00:00:00Z" }), "ready", "T3 away, token still stored");
   assert.equal(disconnectAvailability({ ...connected, adminTokenConfigured: true }), "locked");
   assert.equal(disconnectAvailability(status({ adminTokenConfigured: true })), "hidden");
+});
+
+const isoDate = (iso) => iso.slice(0, 10);
+
+test("disconnect prompt names the T3, what stays, and the token's validity only while T3 still accepts it", () => {
+  const date = isoDate;
+  assert.equal(
+    t3DisconnectPrompt(connected, date),
+    "Disconnect from controlbox? Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only. The token stays valid in T3 until 2026-12-17.",
+  );
+  const expired = status({ state: "expired", t3: null, tokenExpiresAt: "2026-11-01T00:00:00Z" });
+  assert.equal(
+    t3DisconnectPrompt(expired, date),
+    "Disconnect T3? Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.",
+  );
 });
 
 const reply = (details, replaced) => ({ kind: "t3", name: "T3", connectionId: 1, configured: true, connected: details.connected, state: details.state ?? "unpaired", fields: [], actions: [], details, ...(replaced ? { replaced } : {}) });

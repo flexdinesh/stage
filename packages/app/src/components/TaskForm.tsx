@@ -674,7 +674,7 @@ type FieldsProps = { s: FormState; set: (patch: Partial<FormState>) => void };
 function NoHarnessProjects({ connectionId }: { connectionId: number }) {
   const harnesses = useHarnesses();
   const name = harnesses.name(connectionId);
-  const settings = <TextLink to="/settings" variant="rest">Settings</TextLink>;
+  const settings = <TextLink to="/settings/connections" variant="rest">Settings</TextLink>;
   if (harnesses.connection(connectionId)?.configured === false) {
     return <>{name} is not connected. Connect it in {settings}.</>;
   }

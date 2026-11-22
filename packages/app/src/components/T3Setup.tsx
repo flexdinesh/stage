@@ -7,11 +7,10 @@ import { invalidateConnectionChange, keys, useT3Status } from "../api/queries.ts
 import type { ReplacedConnection, T3Status } from "../api/types.ts";
 import { replacedNotice } from "../lib/harnesses.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps, t3Identity } from "../lib/onboarding.ts";
+import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps, t3DisconnectPrompt, t3Identity } from "../lib/onboarding.ts";
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
-import { PreviousConnections } from "./PreviousConnections.tsx";
 import { Step, Steps } from "./Steps.tsx";
 import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
 
@@ -200,22 +199,11 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
  * would mint a new token at once.
  */
 export function DisconnectT3({ status }: { status: T3Status }) {
-  const api = useHarnessApi();
   const copy = useSetupCopy();
-  const setStatus = useSetStatus();
   const [confirm, setConfirm] = useState(false);
-  const disconnect = useMutation({
-    mutationFn: api.disconnectT3,
-    onSuccess: (s) => {
-      setConfirm(false);
-      setStatus(s);
-    },
-  });
+  const disconnect = useDisconnectT3(() => setConfirm(false));
   const availability = disconnectAvailability(status);
   if (availability === "hidden") return null;
-  const label = status.t3 === null || status.t3.label === "" ? null : status.t3.label;
-  // `connected` is a valid token T3 has not rejected: only then does it outlive the disconnect.
-  const expires = status.connected ? status.tokenExpiresAt : null;
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
@@ -226,14 +214,25 @@ export function DisconnectT3({ status }: { status: T3Status }) {
       </div>
       {confirm ? (
         <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          {label === null ? "Disconnect T3?" : `Disconnect from ${label}?`} Stage forgets its token and stops syncing. Pair this T3 again to
-          resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.
-          {expires === null ? null : ` The token stays valid in T3 until ${shortDate(expires)}.`}
+          {t3DisconnectPrompt(status, shortDate)}
         </ConfirmInline>
       ) : null}
       <ErrorText error={disconnect.error} />
     </div>
   );
+}
+
+/** Disconnects T3 on the harness scope's machine and shows the new status at once. */
+export function useDisconnectT3(onDone?: () => void) {
+  const api = useHarnessApi();
+  const setStatus = useSetStatus();
+  return useMutation({
+    mutationFn: api.disconnectT3,
+    onSuccess: (s) => {
+      onDone?.();
+      setStatus(s);
+    },
+  });
 }
 
 function SyncNow() {
@@ -429,7 +428,6 @@ function StatusCard({ status }: { status: T3Status }) {
         </Details>
         <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
         <DisconnectT3 status={status} />
-        <PreviousConnections harness="t3" className="border-t border-line pt-3" />
       </div>
     </Panel>
   );

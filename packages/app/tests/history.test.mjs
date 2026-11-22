@@ -127,6 +127,7 @@ test("route names and kinds", () => {
   assert.equal(routeLabel("/projects/4"), "project 4");
   assert.equal(routeLabel("/schedules/7"), "schedule 7");
   assert.equal(routeLabel("/settings"), "Settings");
+  assert.equal(routeLabel("/settings/connections"), "Connections");
   assert.equal(routeLabel("/nowhere"), "/nowhere");
   assert.equal(routeKind("/tasks/12"), "task");
   assert.equal(routeKind("/tasks"), null);

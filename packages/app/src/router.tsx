@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
-import { createBrowserRouter } from "react-router";
+import { Navigate, createBrowserRouter } from "react-router";
+import { SETTINGS_PATH } from "./lib/settings.ts";
 import { SkeletonRows } from "./components/ui.tsx";
 import { Layout } from "./components/Layout.tsx";
 import { RouteError } from "./components/ErrorBoundary.tsx";
@@ -42,8 +43,11 @@ export const router = createBrowserRouter([
           { path: "schedules/:id", ...lazyPage(async () => (await import("./pages/ScheduleDetailPage.tsx")).ScheduleDetailPage) },
           { path: "more", element: <MorePage /> },
           { path: "snippets", ...lazyPage(async () => (await import("./pages/SnippetsPage.tsx")).SnippetsPage) },
-          { path: "settings", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsPage) },
-          { path: "settings/machines/:id", ...lazyPage(async () => (await import("./pages/MachinePage.tsx")).MachinePage) },
+          { path: "settings", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsGeneralPage) },
+          { path: "settings/connections", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsConnectionsPage) },
+          { path: "settings/notifications", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsNotificationsPage) },
+          // Machine pages became rows of Connections.
+          { path: "settings/machines/:id", element: <Navigate to={SETTINGS_PATH.connections} replace /> },
           // Primitives gallery: unlinked.
           { path: "dev/ui", ...lazyPage(async () => (await import("./pages/DevUiPage.tsx")).DevUiPage) },
           { path: "*", element: <NotFoundPage /> },

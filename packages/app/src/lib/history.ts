@@ -99,6 +99,8 @@ const PAGES: Record<string, string> = {
   "/schedules": "Schedules",
   "/snippets": "Snippets",
   "/settings": "Settings",
+  "/settings/connections": "Connections",
+  "/settings/notifications": "Notifications",
   "/more": "More",
 };
 

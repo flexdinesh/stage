@@ -100,6 +100,20 @@ export function disconnectAvailability(s: T3Status): DisconnectAvailability {
   return s.adminTokenConfigured ? "locked" : "ready";
 }
 
+/** The Disconnect confirm's copy: what Stage forgets, what stays, and until when the token still works in T3. */
+export function t3DisconnectPrompt(s: Pick<T3Status, "t3" | "connected" | "tokenExpiresAt">, date: (iso: string) => string): string {
+  const label = s.t3 === null || s.t3.label === "" ? null : s.t3.label;
+  // `connected` is a valid token T3 has not rejected: only then does it outlive the disconnect.
+  const expires = s.connected ? s.tokenExpiresAt : null;
+  return [
+    label === null ? "Disconnect T3?" : `Disconnect from ${label}?`,
+    "Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.",
+    expires === null ? null : `The token stays valid in T3 until ${date(expires)}.`,
+  ]
+    .filter((p) => p !== null)
+    .join(" ");
+}
+
 /** Why pairing needs a code, when auto-pair is unavailable. */
 export function codeReason(reason: AutoPairReason | null): string {
   switch (reason) {

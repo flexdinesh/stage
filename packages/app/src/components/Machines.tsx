@@ -1,129 +1,111 @@
-// Settings MACHINES: every machine with presence, last seen, build and its harness connections; inline rename and
-// remove (remote only); a remote machine's Harnesses link opens its page (pages/MachinePage.tsx); Add machine opens a drawer that creates a one-time pairing link and waits for the worker to
-// join. Logic: lib/machines.ts. API: docs/api.md "Machines".
+// Settings > Connections: every machine as a group, its header (presence, role, build; inline rename, remove for a
+// worker, Add connection) over its harness connection rows (components/ConnectionRows.tsx). Add machine opens a
+// drawer that creates a one-time pairing link and waits for the worker to join. Logic: lib/machines.ts,
+// lib/connectionRows.ts. API: docs/api.md "Machines".
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useHarnesses, useMachines, useRemoveMachine, useRenameMachine } from "../api/queries.ts";
 import type { Machine, MachinePairing, PairingStatus } from "../api/types.ts";
+import { machineRole } from "../lib/connectionRows.ts";
 import { dateTime } from "../lib/format.ts";
-import { countdown, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
+import { countdown, machineSetupAlert, machineSetupState, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
+import { AddConnection, ConnectionRowList, MachineScope, ManageDrawer, useMachineConnections, type ManageTarget } from "./ConnectionRows.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, ConfirmInline, Drawer, ErrorText, Field, Hint, Input, Marker, Meta, Muted, Panel, QueryState, Row, RowList, SubHeading, buttonClass, CommandBox } from "./ui.tsx";
+import { Alert, Button, ConfirmInline, Drawer, ErrorText, Field, Hint, Input, Marker, Meta, Muted, Panel, QueryState, Row, RowList, SubHeading, CommandBox } from "./ui.tsx";
 
-export function MachinesCard() {
+/** The Machines panel: one group per machine, the main machine first. */
+export function MachinesPanel({ meta }: { meta?: string }) {
   const machines = useMachines();
-  const [adding, setAdding] = useState(false);
   const server = serverVersion(machines.machines);
   return (
-    <>
-      <Panel
-        title="Machines"
-        meta={machines.data === undefined ? undefined : `${machines.machines.length} ${machines.machines.length === 1 ? "machine" : "machines"}`}
-        actions={
-          <Button small onClick={() => setAdding(true)}>
-            Add machine
-          </Button>
-        }
-        flush
-      >
-        <QueryState isPending={machines.isPending} error={machines.error} hasData={machines.data !== undefined}>
-          <RowList>
-            {machines.machines.map((m) => (
-              <MachineRow key={m.id} machine={m} serverVersion={server} />
-            ))}
-          </RowList>
-        </QueryState>
-        <Hint className="border-t border-line px-3 py-2">
-          Remote machines run <code className="font-mono text-fg">stage worker</code> and connect out to this server.
-        </Hint>
-      </Panel>
-      {adding ? <AddMachineDrawer onClose={() => setAdding(false)} /> : null}
-    </>
+    <Panel title="Machines" {...(meta === undefined ? {} : { meta })} flush>
+      <QueryState isPending={machines.isPending} error={machines.error} hasData={machines.data !== undefined}>
+        <RowList label="Machines">
+          {machines.machines.map((m) => (
+            <MachineScope key={m.id} machine={m}>
+              <MachineGroup machine={m} serverVersion={server} />
+            </MachineScope>
+          ))}
+        </RowList>
+      </QueryState>
+      <Hint className="border-t border-line px-3 py-2">
+        Workers run <code className="font-mono text-fg">stage worker</code> and connect out to the main machine. Harness credentials stay on each machine.
+      </Hint>
+    </Panel>
   );
 }
 
-function MachineRow({ machine: m, serverVersion: server }: { machine: Machine; serverVersion: string | null }) {
+function MachineGroup({ machine: m, serverVersion: server }: { machine: Machine; serverVersion: string | null }) {
   const harnesses = useHarnesses();
+  const connections = useMachineConnections(m);
   const [mode, setMode] = useState<"view" | "rename" | "remove">("view");
+  const [manage, setManage] = useState<ManageTarget | null>(null);
   const remove = useRemoveMachine();
   const remote = m.kind === "remote";
+  const role = machineRole(m);
   // Usage counts come from GET /connections (which lists only connections this server can reach); unknown ones show none.
   const usage = m.connections.map((c) => harnesses.connection(c.id) ?? c);
+  const alert = machineSetupState(m) === "needs_update" ? machineSetupAlert(m, server) : null;
   return (
-    <Row className="flex flex-col gap-2">
-      {mode === "rename" ? (
-        <RenameForm machine={m} onDone={() => setMode("view")} />
-      ) : (
-        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-          <span className="flex h-6 items-center">
+    <Row bare>
+      <div className="flex flex-col gap-2 bg-panel px-3 py-2">
+        {mode === "rename" ? (
+          <RenameForm machine={m} onDone={() => setMode("view")} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <Marker tone={machineTone(m)} />
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span className="min-w-0 truncate text-body font-medium text-fg">{m.label}</span>
-              {remote ? null : <Meta>this server</Meta>}
+              <Meta title={role === "main" ? "Stage runs here; workers connect to it" : "Runs harnesses for the main machine"}>{role}</Meta>
+              <span className="font-mono text-meta text-muted" title={m.lastSeenAt === null ? undefined : `Last seen ${dateTime(m.lastSeenAt)}`}>
+                <span className="tabular">{machineStatusLine(m)}</span>
+                {versionDiffers(m, server) ? <span className="whitespace-nowrap"> · main {server}</span> : null}
+              </span>
             </div>
-            <p className="font-mono text-meta text-muted" title={m.lastSeenAt === null ? undefined : `Last seen ${dateTime(m.lastSeenAt)}`}>
-              <span className="tabular">{machineStatusLine(m)}</span>
-              {versionDiffers(m, server) ? <span className="whitespace-nowrap"> · server {server}</span> : null}
-            </p>
-            {m.connections.length === 0 ? (
-              <p className="font-mono text-meta text-muted">no harness connections</p>
-            ) : (
-              <ul aria-label={`${m.label} harness connections`} className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-meta">
-                {m.connections.map((c) => (
-                  <li key={c.id} className="min-w-0 break-all">
-                    <span className="text-fg">{harnesses.kindName(c.harness)}</span>
-                    {c.label === "" ? null : <span className="text-muted"> {c.label}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 max-md:w-full max-md:pl-[18px]">
-            {remote ? (
-              <Link to={`/settings/machines/${m.id}`} className={buttonClass("secondary", true)} aria-label={`${m.label} harnesses`}>
-                Harnesses
-              </Link>
-            ) : null}
-            <Button small variant="ghost" disabled={mode === "remove"} onClick={() => setMode("rename")}>
-              Rename
-            </Button>
-            {remote ? (
-              <Button
-                small
-                variant="danger"
-                disabled={mode === "remove"}
-                onClick={() => {
-                  remove.reset();
-                  setMode("remove");
-                }}
-              >
-                Remove
+            <div className="flex flex-wrap items-center gap-1.5 max-md:w-full max-md:pl-[18px]">
+              <Button small variant="ghost" disabled={mode === "remove"} onClick={() => setMode("rename")} aria-label={`Rename ${m.label}`}>
+                Rename
               </Button>
-            ) : null}
+              <AddConnection machine={m} connections={connections} onPick={setManage} />
+              {remote ? (
+                <Button
+                  small
+                  variant="danger"
+                  disabled={mode === "remove"}
+                  aria-label={`Remove ${m.label}`}
+                  onClick={() => {
+                    remove.reset();
+                    setMode("remove");
+                  }}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
-      )}
-      {mode === "remove" ? (
-        <ConfirmInline
-          danger
-          confirmLabel="Remove machine"
-          busy={remove.isPending}
-          error={remove.error}
-          onConfirm={() => remove.mutate(m.id)}
-          onCancel={() => setMode("view")}
-        >
-          {removePrompt(m, usage, harnesses.kindName).map((line, i) => (
-            <p key={i} className={i === 0 ? "font-medium" : "mt-1"}>
-              {line}
-            </p>
-          ))}
-        </ConfirmInline>
-      ) : null}
+        )}
+        {mode === "remove" ? (
+          <ConfirmInline
+            danger
+            confirmLabel="Remove machine"
+            busy={remove.isPending}
+            error={remove.error}
+            onConfirm={() => remove.mutate(m.id)}
+            onCancel={() => setMode("view")}
+          >
+            {removePrompt(m, usage, harnesses.kindName).map((line, i) => (
+              <p key={i} className={i === 0 ? "font-medium" : "mt-1"}>
+                {line}
+              </p>
+            ))}
+          </ConfirmInline>
+        ) : null}
+        {alert === null ? null : <Hint className="pl-[18px]">{alert}</Hint>}
+      </div>
+      <ConnectionRowList machine={m} connections={connections} onManage={setManage} />
+      {manage === null ? null : <ManageDrawer machine={m} target={manage} onClose={() => setManage(null)} />}
     </Row>
   );
 }
@@ -173,7 +155,7 @@ function RenameForm({ machine, onDone }: { machine: Machine; onDone: () => void 
 const PAIRING_POLL_MS = 1500;
 
 /** Add machine: name (optional), then the one-time link and command, a live countdown and the worker's join. */
-function AddMachineDrawer({ onClose }: { onClose: () => void }) {
+export function AddMachineDrawer({ onClose }: { onClose: () => void }) {
   const api = useApi();
   const [pairing, setPairing] = useState<MachinePairing | null>(null);
   const [now, setNow] = useState(Date.now);
@@ -188,7 +170,6 @@ function AddMachineDrawer({ onClose }: { onClose: () => void }) {
   const gone = status.error instanceof ApiError && status.error.status === 404;
   const phase = pairing === null ? null : gone ? "expired" : pairingPhase(status.data, pairing.expiresAt, now);
   const waiting = phase === "waiting";
-  const joinedId = status.data?.machineId ?? null;
 
   useEffect(() => {
     if (!waiting) return;
@@ -218,16 +199,9 @@ function AddMachineDrawer({ onClose }: { onClose: () => void }) {
             </Button>
           </>
         ) : phase === "joined" ? (
-          <>
-            {joinedId === null ? null : (
-              <Link to={`/settings/machines/${joinedId}`} className={buttonClass("primary")} onClick={close}>
-                Set up harnesses
-              </Link>
-            )}
-            <Button variant="ghost" onClick={close}>
-              Done
-            </Button>
-          </>
+          <Button variant="primary" onClick={close}>
+            Done
+          </Button>
         ) : phase === "expired" ? (
           <>
             <Button variant="primary" onClick={() => setPairing(null)}>
@@ -278,7 +252,7 @@ function PairingForm({ id, onCreated }: { id: string; onCreated: (p: MachinePair
   return (
     <form id={id} onSubmit={submit} aria-busy={busy} className="flex flex-col gap-4">
       <p className="text-small text-fg">
-        A remote machine runs its harnesses for this server. Stage creates a one-time link; run it with{" "}
+        A worker runs its harnesses for the main machine. Stage creates a one-time link; run it with{" "}
         <code className="font-mono text-detail">stage worker join</code> on the machine to add.
       </p>
       <Field label="Name" hint="Optional. Empty = the name its worker suggests.">
@@ -297,9 +271,9 @@ function PairingForm({ id, onCreated }: { id: string; onCreated: (p: MachinePair
       </Field>
       {needsPublicURL ? (
         <Alert tone="plain">
-          <p className="font-medium">This server has no public address.</p>
+          <p className="font-medium">Stage has no public address.</p>
           <p className="mt-1">
-            Set <code className="font-mono text-detail">STAGE_PUBLIC_URL</code> to the address the new machine reaches this server at, restart Stage, then
+            Set <code className="font-mono text-detail">STAGE_PUBLIC_URL</code> to the address the new machine reaches Stage at, restart Stage, then
             add the machine again.
           </p>
         </Alert>
@@ -361,7 +335,7 @@ function PairingView({ pairing, status, phase, now }: { pairing: MachinePairing;
         </>
       ) : null}
       {phase === "joined" ? (
-        <Muted>{name} is listed under Machines. It shows online once its worker connects; then set up its harnesses on its page.</Muted>
+        <Muted>{name} is listed under Machines. It shows online once its worker connects; then add its harness connections there.</Muted>
       ) : null}
       {phase === "expired" ? <Muted>The link was not used in time. Create a new link to try again.</Muted> : null}
     </div>
