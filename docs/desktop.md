@@ -68,7 +68,7 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 
 - **Terminal server (exit 5).** When a foreground `stage serve` holds the data dir and its socket answers health with the same identity and API version, the desktop uses it and shows a quiet banner: "Connected to a Stage server started from a terminal (pid N). It stops when that terminal does." A default foreground server listens on TCP only, so this usually lands on `conflict`, whose command adds a socket (`stage serve --listen unix,127.0.0.1:7380`).
 - **Version skew.** A server build different from the bundled CLI shows a dismissible banner with "Restart Stage server" (`stage service restart --exe <cli> --wait 30s --json`).
-- **T3.** Never blocks startup. T3 offline or unpaired uses the app's existing status row and Settings pairing.
+- **T3.** Never blocks startup. T3 offline or unpaired uses the app's existing status button and Settings pairing.
 - **Diagnostics.** "Show details" lists the server log tail; "Copy diagnostics" (screen, Settings, Help menu) copies app, CLI and server versions, the identity, `service status --json` without secrets and the last 50 log lines.
 
 ## Servers

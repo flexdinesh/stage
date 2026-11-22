@@ -125,7 +125,7 @@ export function ServerPicker({ onClose }: { onClose: () => void }) {
 
 const UNKNOWN: { tone: ServerTone; note: string } = { tone: "idle", note: "" };
 
-/** Server menu button (sidebar footer, opening upward; phone top bar) naming the active server (only with more than one saved): pick a server or manage them. */
+/** Server menu button (sidebar bottom row, its panel above the row; phone top bar) naming the active server (only with more than one saved): pick a server or manage them. */
 export function ServerMenu({ className }: { className?: string }) {
   const state = useHostState();
   const switchable = useSwitchable();
@@ -159,7 +159,7 @@ export function ServerMenu({ className }: { className?: string }) {
       <PopoverPanel
         popover={popover}
         label="Servers"
-        className="max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
+        className="max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-3 lg:mb-1"
       >
         <PanelHeader title="Servers" meta={servers.length} />
         <ServerChoices servers={servers} state={state} onPick={pick} />

@@ -18,11 +18,14 @@ import {
   MoonIcon,
   NetworkIcon,
   PinIcon,
+  PlugIcon,
   PlusIcon,
+  RefreshCwIcon,
   RepeatIcon,
   SearchIcon,
   SlidersHorizontalIcon,
   SunIcon,
+  TriangleAlertIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -77,6 +80,10 @@ export const IconMoon = sharp(MoonIcon);
 export const IconChainLink = sharp(LinkIcon, 12);
 export const IconImage = sharp(ImageIcon);
 export const IconBell = sharp(BellIcon);
+/** Status button: a problem (need or bad tone), still checking, nothing connected. */
+export const IconTriangleAlert = sharp(TriangleAlertIcon);
+export const IconRefresh = sharp(RefreshCwIcon);
+export const IconPlug = sharp(PlugIcon);
 /** One-shot start time ("at 02:00"). */
 export const IconClock = sharp(ClockIcon, 12);
 /** Recurring schedule. */

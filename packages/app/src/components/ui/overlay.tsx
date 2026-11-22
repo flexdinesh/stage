@@ -256,19 +256,16 @@ export function usePopover(onClose?: () => void): PopoverState {
 /** The panel of a `usePopover`: rendered only while open. Position it with `className`. */
 export function PopoverPanel({
   popover,
-  open,
   label,
   className,
   children,
 }: {
   popover: PopoverState;
-  /** Shows the panel regardless of the popover's own state (a hover preview). */
-  open?: boolean;
   label?: string;
   className?: string;
   children: ReactNode;
 }) {
-  if (!(open ?? popover.open)) return null;
+  if (!popover.open) return null;
   return (
     <div id={popover.panelId} aria-label={label} className={cx("z-50", surfaceClass, className)}>
       {children}
