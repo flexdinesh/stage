@@ -347,8 +347,6 @@ function groupByDay(items: NotificationGroup[], now: Date = new Date()): Group[]
   return groups.filter((g) => g.items.length > 0);
 }
 
-const PUSH_KEY = ["pushState"];
-
 /**
  * Opening reads the inbox: unread markers stay (from a snapshot) until
  * the drawer closes; anything that arrives while open is read on close.
@@ -360,7 +358,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const inbox = useNotificationInbox();
   const silent = inbox.data?.pages[0]?.waitingSessions ?? [];
   const push = useQuery({
-    queryKey: PUSH_KEY,
+    queryKey: keys.device.push,
     queryFn: () => notifications?.state() ?? Promise.resolve(undefined),
     refetchInterval: false,
     enabled: notifications !== undefined,

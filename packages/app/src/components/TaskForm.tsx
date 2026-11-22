@@ -5,15 +5,11 @@ import { useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjec
 import { connectionOptions } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
-  type CreateScheduleRequest,
-  type CreateTaskRequest,
   type ModelDefaults,
   type Preferences,
   type Schedule,
   type StartMode as TreeStartMode,
   type Task,
-  type UpdateTaskRequest,
-  type Workspace,
 } from "../api/types.ts";
 import {
   DEFAULT_REPEAT,
@@ -36,8 +32,9 @@ import {
   type RepeatSpec,
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
-import { choiceToWorkspace, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
-import { isFullyEditable, taskEditBaseline, taskEditChanges } from "../lib/tasks.ts";
+import { effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
+import { isFullyEditable } from "../lib/tasks.ts";
+import { formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
@@ -150,7 +147,6 @@ export interface TreePrefill {
   startMode?: TreeStartMode;
 }
 
-type TreeStartChoice = "inherit" | TreeStartMode;
 
 /** Start mode select options; Inherit names the tree's mode when known. */
 function treeStartOptions(inherited: TreeStartMode | null): { value: TreeStartChoice; label: string }[] {
@@ -260,48 +256,29 @@ function TaskFormDrawer({
   // The task and form state as the form opened: a save sends only what differs from them.
   const [opened] = useState(() => (task === undefined ? null : { task, state: s }));
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
-  const projects = useProjects();
   const invalidate = useInvalidateWork();
-  const selectedProject = projects.data?.projects.find((project) => String(project.id) === s.projectId);
-  const harnesses = useHarnesses();
   const { machines } = useMachines();
   const existing = task ?? schedule;
-  const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
-  // Bindings on replaced connections are history: they never pick the destination.
-  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
-  const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
-  // An explicitly chosen harness narrows the picker to projects it can run.
-  const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, s.projectId), [projects.data, chosen, s.projectId]);
-  const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
-  const caps = useQuery({
-    queryKey: ["capabilities", connection, s.projectId, bound],
-    enabled: connection > 0 && bound,
-    queryFn: () => api.capabilities(connection, Number(s.projectId)),
-    // What the harness can do changes rarely; the form reads it once, not on a poll.
-    staleTime: 60_000,
-    retry: false,
-  });
-  // Until the harness answers, nothing is ruled out: the server checks the launch.
-  const operation = (id: string) => caps.data?.operations[id]?.available ?? true;
-  const acceptsImages = operation("images");
-  const supportsPredecessor = operation("predecessorBase");
-  // A harness that chooses the worktree base and branch itself takes neither from Stage.
-  const harnessWorktree = !operation("worktreeBase");
-  const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
-  const prefilled = existing ? undefined : prefillConfig(prefill?.defaults, harnesses.harness(connection));
-  const originalConfig = existing?.executionConfig ?? prefilled;
-  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : harnessDefaults;
-  // New-task prefill carries model and options only; mode and permission start at the harness default.
-  const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
-  const effectiveConfig = draftConfig ?? initialConfig;
-  const issues = incompatibleSettings(effectiveConfig, caps.data);
-  const changedHarness = existing !== undefined && connection !== existing.connectionId;
-  const unverifiedConfig = changedHarness && caps.data === undefined &&
-    (effectiveConfig.model || effectiveConfig.mode || effectiveConfig.permission || effectiveConfig.options.length > 0);
-  function chooseHarness(id: number) {
-    if (existing || draftConfig) setDraftConfig(effectiveConfig);
-    setChosen(id);
-  }
+  const {
+    harnesses,
+    selectedProject,
+    bindings,
+    chosen,
+    connection,
+    pickable,
+    bound,
+    caps,
+    acceptsImages,
+    supportsPredecessor,
+    harnessWorktree,
+    prefilled,
+    draftConfig,
+    setDraftConfig,
+    effectiveConfig,
+    issues,
+    unverifiedConfig,
+    chooseHarness,
+  } = useHarnessConfig(existing, s.projectId, prefill);
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments ?? schedule?.attachments);
   const isNew = task === undefined && schedule === undefined;
@@ -322,78 +299,50 @@ function TaskFormDrawer({
   // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
   const inheritedMode = isNew ? (defaultTree?.startMode ?? null) : task !== undefined && task.startMode === null ? task.effectiveStartMode : null;
+  const { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError } = useStartTiming(s);
 
-  const tzValid = validTimeZone(s.tz);
-  const startMs = mode === "at" && tzValid ? localToInstant(s.startLocal, s.tz) : null;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (mode !== "at") return;
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, [mode]);
-  const startPast = startMs !== null && startMs <= now;
-
-  const cron = buildCron(s.repeat);
-  const previewInput = parsePreviewKey(useDebounced(mode === "repeat" && cron !== "" && tzValid ? previewKey(cron, s.tz) : null, 300));
-  const preview = useSchedulePreview(previewInput);
-  const previewStale = previewInput === null || previewInput.cron !== cron || previewInput.tz !== s.tz;
-  const previewError = mode === "repeat" && !previewStale && preview.isError ? errorText(preview.error) : null;
-
-  function template() {
-    const workspace: Workspace = harnessWorktree && wsChoice === "worktree"
-      ? { type: "worktree", baseRef: "", branch: null }
-      : choiceToWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId);
+  function template(): TaskTemplate {
     return {
       projectId: Number(s.projectId),
       title: s.title.trim(),
       prompt: s.prompt,
       connectionId: connection,
       executionConfig: effectiveConfig,
-      workspace,
+      workspace: formWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId, harnessWorktree),
     };
   }
 
   const save = useMutation({
     mutationFn: async (): Promise<Saved> => {
       if (mode === "repeat") {
-        const body: CreateScheduleRequest = { ...template(), notes: s.notes, attachmentIds: images.ids, cron, tz: s.tz };
+        const body = scheduleBody(template(), { notes: s.notes, attachmentIds: images.ids, cron, tz: s.tz });
         const saved = schedule === undefined ? await api.createSchedule(body) : await api.updateSchedule(schedule.id, body);
         return { kind: "schedule", schedule: saved };
       }
       const timed = mode === "at" ? { startLocal: s.startLocal, startTz: s.tz } : null;
       if (task !== undefined) {
-        // Compared with the task and form as they opened, so untouched fields never revert another client's change.
-        const before = opened?.task ?? task;
-        const body: UpdateTaskRequest = full
-          ? taskEditChanges(taskEditBaseline(before), { ...template(), attachmentIds: images.ids })
-          : { title: s.title.trim() };
-        if (full) {
-          if (needs.length > 0 && s.handoff !== before.handoff) body.handoff = s.handoff;
-          if (inTree && s.treeStart !== (before.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
-          if (timed !== null) {
-            const sameStart = opened !== null && opened.state.mode === "at" && opened.state.startLocal === timed.startLocal && opened.state.tz === timed.startTz;
-            if (!sameStart) {
-              body.startLocal = timed.startLocal;
-              body.startTz = timed.startTz;
-            }
-          } else if (before.startAt !== null) {
-            body.startLocal = null;
-            body.startTz = null;
-          }
-        }
+        const body = taskUpdateBody({
+          before: opened?.task ?? task,
+          openedStart: opened?.state ?? null,
+          full,
+          template: template(),
+          attachmentIds: images.ids,
+          handoff: needs.length > 0 ? s.handoff : null,
+          treeStart: inTree ? s.treeStart : null,
+          timed,
+        });
         // Nothing changed: no request, so nothing on the server is touched.
         if (Object.keys(body).length === 0) return { kind: "task", task };
         return { kind: "task", task: await api.updateTask(task.id, body) };
       }
-      const body: CreateTaskRequest = {
-        ...template(),
-        initialNote: s.notes,
-        ...(images.ids.length === 0 ? {} : { attachmentIds: images.ids }),
-        ...(timed !== null ? timed : { start: mode === "now" }),
-        ...(defaultTree === undefined ? {} : { treeId: defaultTree.treeId }),
-        ...(defaultTree === undefined || defaultTree.needs.length === 0 ? {} : { needs: defaultTree.needs }),
-        ...(defaultTree === undefined || s.treeStart === "inherit" ? {} : { startMode: s.treeStart }),
-      };
+      const body = taskCreateBody(template(), {
+        notes: s.notes,
+        attachmentIds: images.ids,
+        timed,
+        startNow: mode === "now",
+        tree: defaultTree,
+        treeStart: s.treeStart,
+      });
       return { kind: "task", task: await api.createTask(body) };
     },
     // Closes at once; the views behind the drawer refresh in the background.
@@ -629,6 +578,94 @@ function TaskFormDrawer({
       </form>
     </Drawer>
   );
+}
+
+/**
+ * The harness a form launches on and its execution config: the chosen harness (or the project's only binding),
+ * what it can do there, the config draft, and what blocks saving it.
+ */
+function useHarnessConfig(
+  existing: Task | Schedule | undefined,
+  projectId: string,
+  prefill: { defaults: ModelDefaults; source: DefaultsSource } | null,
+) {
+  const api = useApi();
+  const projects = useProjects();
+  const harnesses = useHarnesses();
+  const selectedProject = projects.data?.projects.find((project) => String(project.id) === projectId);
+  const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
+  // Bindings on replaced connections are history: they never pick the destination.
+  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
+  const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
+  // An explicitly chosen harness narrows the picker to projects it can run.
+  const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, projectId), [projects.data, chosen, projectId]);
+  const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
+  const caps = useQuery({
+    queryKey: ["capabilities", connection, projectId, bound],
+    enabled: connection > 0 && bound,
+    queryFn: () => api.capabilities(connection, Number(projectId)),
+    // What the harness can do changes rarely; the form reads it once, not on a poll.
+    staleTime: 60_000,
+    retry: false,
+  });
+  // Until the harness answers, nothing is ruled out: the server checks the launch.
+  const operation = (id: string) => caps.data?.operations[id]?.available ?? true;
+  const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
+  const prefilled = existing ? undefined : prefillConfig(prefill?.defaults, harnesses.harness(connection));
+  const originalConfig = existing?.executionConfig ?? prefilled;
+  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : harnessDefaults;
+  // New-task prefill carries model and options only; mode and permission start at the harness default.
+  const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
+  const effectiveConfig = draftConfig ?? initialConfig;
+  const changedHarness = existing !== undefined && connection !== existing.connectionId;
+  const unverifiedConfig = changedHarness && caps.data === undefined &&
+    (effectiveConfig.model || effectiveConfig.mode || effectiveConfig.permission || effectiveConfig.options.length > 0);
+  function chooseHarness(id: number) {
+    if (existing || draftConfig) setDraftConfig(effectiveConfig);
+    setChosen(id);
+  }
+  return {
+    harnesses,
+    selectedProject,
+    bindings,
+    chosen,
+    connection,
+    pickable,
+    bound,
+    caps,
+    acceptsImages: operation("images"),
+    supportsPredecessor: operation("predecessorBase"),
+    // A harness that chooses the worktree base and branch itself takes neither from Stage.
+    harnessWorktree: !operation("worktreeBase"),
+    prefilled,
+    draftConfig,
+    setDraftConfig,
+    effectiveConfig,
+    issues: incompatibleSettings(effectiveConfig, caps.data),
+    unverifiedConfig,
+    chooseHarness,
+  };
+}
+
+/** When the task starts: a start time (validity, whether it passed, a clock that ticks while it shows) or a repeat (its cron and debounced preview). */
+function useStartTiming(s: FormState) {
+  const mode = s.mode;
+  const tzValid = validTimeZone(s.tz);
+  const startMs = mode === "at" && tzValid ? localToInstant(s.startLocal, s.tz) : null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (mode !== "at") return;
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [mode]);
+  const startPast = startMs !== null && startMs <= now;
+
+  const cron = buildCron(s.repeat);
+  const previewInput = parsePreviewKey(useDebounced(mode === "repeat" && cron !== "" && tzValid ? previewKey(cron, s.tz) : null, 300));
+  const preview = useSchedulePreview(previewInput);
+  const previewStale = previewInput === null || previewInput.cron !== cron || previewInput.tz !== s.tz;
+  const previewError = mode === "repeat" && !previewStale && preview.isError ? errorText(preview.error) : null;
+  return { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError };
 }
 
 type FieldsProps = { s: FormState; set: (patch: Partial<FormState>) => void };

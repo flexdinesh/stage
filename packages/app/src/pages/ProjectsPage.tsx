@@ -28,6 +28,7 @@ import {
   cx,
 } from "../components/ui.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
+import { useSearchParam } from "../lib/params.ts";
 
 const FORM_ID = "new-project-form";
 
@@ -103,6 +104,8 @@ const activityMs = (p: Project) => (p.lastActivityAt === null ? 0 : new Date(p.l
 /** Most recent activity first; projects without activity last, by name (server order, stable sort). */
 const byRecent = (projects: Project[]) => projects.toSorted((a, b) => activityMs(b) - activityMs(a));
 
+const ARCHIVED_VALUES = ["active", "all"] as const;
+
 const ARCHIVED_OPTIONS = [
   { value: "active", label: "active" },
   { value: "all", label: "incl. archived" },
@@ -138,7 +141,8 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
 }
 
 export function ProjectsPage() {
-  const [filter, setFilter] = useState<"active" | "all">("active");
+  // In the address, so Back keeps the filter.
+  const [filter, setFilter] = useSearchParam("archived", ARCHIVED_VALUES, "active");
   const { storage } = usePlatform();
   const [sort, setSort] = useState<Sort>(() => readSort(storage));
   const [creating, setCreating] = useState(false);

@@ -168,8 +168,6 @@ function DefaultModelForm({ prefs }: { prefs: Preferences }) {
   );
 }
 
-const PUSH_KEY = ["pushState"];
-
 const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
   insecure: { tone: "idle", label: "needs https" },
   unsupported: { tone: "idle", label: "unsupported" },
@@ -281,8 +279,8 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
   const copy = DEVICE_COPY[channel];
   const canOpenSettings = notifications.openSystemSettings !== undefined;
   // Device state, not server state: no polling; rechecked on focus (permission may change in system settings).
-  const state = useQuery({ queryKey: PUSH_KEY, queryFn: () => notifications.state(), refetchInterval: false });
-  const refresh = () => qc.invalidateQueries({ queryKey: PUSH_KEY });
+  const state = useQuery({ queryKey: keys.device.push, queryFn: () => notifications.state(), refetchInterval: false });
+  const refresh = () => qc.invalidateQueries({ queryKey: keys.device.push });
   const enable = useMutation({ mutationFn: () => notifications.enable(), onSettled: refresh });
   const disable = useMutation({ mutationFn: () => notifications.disable(), onSettled: refresh });
   const test = useMutation({ mutationFn: () => notifications.test(), onSettled: refresh });
