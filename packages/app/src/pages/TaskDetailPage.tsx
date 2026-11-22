@@ -431,7 +431,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
             <span className="min-w-0 truncate" title={session.externalSessionId}>
               {session.externalSessionId}
             </span>
-            <CopyButton text={session.externalSessionId} label="Copy" />
+            <CopyButton text={session.externalSessionId} label="Copy" title={session.externalSessionId} />
           </span>
         </Detail>
       </Details>

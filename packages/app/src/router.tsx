@@ -33,6 +33,8 @@ export const router = createBrowserRouter([
       { path: "snippets", element: <SnippetsPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "settings/machines/:id", element: <MachinePage /> },
+      // Primitives gallery: unlinked, loaded only when visited.
+      { path: "dev/ui", lazy: async () => ({ Component: (await import("./pages/DevUiPage.tsx")).DevUiPage }) },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

@@ -78,6 +78,78 @@ export function Field({
   );
 }
 
+/**
+ * A labelled group of controls that is not one input (a Segmented, a set of choices): fieldset and legend with
+ * Field's layout, so the label names the group for screen readers.
+ */
+export function FieldGroup({
+  label,
+  meta,
+  hint,
+  start = false,
+  disabled,
+  className,
+  children,
+  ...rest
+}: {
+  label: string;
+  /** Mono Slate text after the label ("all devices"). */
+  meta?: ReactNode;
+  hint?: ReactNode;
+  /** Children keep their own width (a Segmented) instead of stretching. */
+  start?: boolean;
+  disabled?: boolean;
+  className?: string;
+  children: ReactNode;
+  "aria-busy"?: boolean;
+}) {
+  return (
+    <fieldset disabled={disabled} className={cx("min-w-0", className)} {...rest}>
+      <legend className="mb-1.5">
+        <span className="label-caps">{label}</span>
+        {meta === undefined ? null : <span className="ml-2 font-mono text-meta-sm text-muted">{meta}</span>}
+      </legend>
+      <div className={cx("flex min-w-0 flex-col gap-1.5", start && "items-start")}>
+        {children}
+        {hint === undefined ? null : <p className="text-meta text-muted">{hint}</p>}
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * A checkbox or radio with its label (and optional detail) as one target: 44px on phone, a faint hover fill.
+ * `control` is the `Checkbox` or `Radio`.
+ */
+export function ChoiceRow({
+  control,
+  detail,
+  inset = false,
+  className,
+  children,
+}: {
+  control: ReactNode;
+  detail?: ReactNode;
+  /** A row in a ruled list or flush panel: 12px sides inside the box, instead of a hover fill that bleeds 6px out. */
+  inset?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label
+      className={cx(
+        "flex min-h-11 cursor-pointer items-center gap-2.5 py-1 transition-colors duration-150 hover:bg-panel md:min-h-8",
+        inset ? "px-3" : "-mx-1.5 px-1.5",
+        className,
+      )}
+    >
+      {control}
+      <span className="min-w-0 flex-1 text-small">{children}</span>
+      {detail === undefined ? null : <span className="shrink-0 font-mono text-meta text-muted">{detail}</span>}
+    </label>
+  );
+}
+
 /** Joined button group for small enumerations (runtime mode, time window). */
 export function Segmented<T extends string>({
   options,
