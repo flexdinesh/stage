@@ -6,8 +6,5 @@ export interface TrailSegment {
   to?: string;
 }
 
-/** The laptop content bar's location slot that `PageHeader` portals its trail into; null outside the app shell. */
-export const TrailSlotContext = createContext<HTMLElement | null>(null);
-
 /** Names the current history entry for the history list; null outside the app shell. */
 export const NavLabelContext = createContext<((label: string) => void) | null>(null);

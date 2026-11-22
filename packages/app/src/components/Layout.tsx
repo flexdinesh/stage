@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, matchPath, useLocation, useSearchParams } from "react-router";
 import { useBadge } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
-import { routeLabel } from "../lib/history.ts";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { useTheme, type Theme } from "../lib/theme.ts";
 import { MORE_DESTINATIONS } from "../pages/MorePage.tsx";
@@ -23,14 +22,13 @@ import {
   IconTree,
 } from "./icons.tsx";
 import { BackForward, NavHistoryProvider, PhoneBack, useCanGoBack } from "./NavHistory.tsx";
-import { TrailSlotContext } from "./navContext.ts";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
-import { StatusRow, useStatusAlert } from "./StatusRow.tsx";
+import { StatusButton, useStatusAlert } from "./StatusRow.tsx";
 import { Drawer, IconButton, Kbd, PickerButton, cx, toneClass, type IconComponent } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
@@ -159,7 +157,6 @@ function Shell() {
   const scopeLoad = useScopeLoad();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
-  const [trailSlot, setTrailSlot] = useState<HTMLElement | null>(null);
   const canGoBack = useCanGoBack();
   const showBack = canGoBack && !TAB_ROOTS.includes(location.pathname);
   const statusAlert = useStatusAlert();
@@ -170,9 +167,8 @@ function Shell() {
       <aside className="sticky top-0 z-40 hidden h-screen min-w-0 flex-col border-r border-line bg-bg lg:flex">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line pr-3 pl-4">
           <Mark needsInput={needsInput} />
-          <div className="ml-auto flex items-center gap-1.5">
-            <ThemeButton />
-            <NotificationsBell onOpen={openInbox} />
+          <div className="ml-auto">
+            <BackForward />
           </div>
         </div>
         <div className="flex shrink-0 gap-2 px-3 pt-3">
@@ -200,8 +196,13 @@ function Shell() {
         <div className="flex shrink-0 flex-col border-t border-line px-2 py-2">
           <SideLink to="/snippets" icon={<IconSnippets />} label="Snippets" />
           <SideLink to="/settings" icon={<IconSettings />} label="Settings" />
-          <ServerMenu className="mx-0.5 mt-2" />
-          <StatusRow className="mt-2 border-t border-line pt-2" />
+        </div>
+        {/* Bottom row: popovers here anchor to the row (their wrappers are static), opening above it. */}
+        <div className="relative flex h-12 shrink-0 items-center gap-1.5 border-t border-line px-3">
+          <StatusButton />
+          <ThemeButton />
+          <NotificationsBell onOpen={openInbox} />
+          <ServerMenu className="flex-1 lg:static" />
         </div>
       </aside>
 
@@ -228,25 +229,12 @@ function Shell() {
         </div>
       </header>
 
-      {/* Laptop content bar: ruled level with the sidebar header; arrows and the page's location (PageHeader trail). */}
-      <div className="sticky top-0 z-30 hidden h-12 border-b border-line bg-bg lg:block">
-        <div className="group/bar mx-auto flex h-full w-full max-w-[1240px] items-center gap-3 px-6">
-          <BackForward />
-          <nav aria-label="Location" className="min-w-0 truncate font-mono text-detail text-muted">
-            <span className="text-fg group-has-[[data-trail]>*]/bar:hidden">{routeLabel(location.pathname)}</span>
-            <span data-trail ref={setTrailSlot} className="contents" />
-          </nav>
-        </div>
-      </div>
-
       <PullToReload key={location.key} contentRef={contentRef} />
 
       {/* Relative positioning keeps fixed task actions anchored to the viewport during a pull. */}
       <main ref={contentRef} className="relative top-[var(--pull-offset,0px)] mx-auto w-full max-w-[1240px] px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-[top] duration-180 ease-out data-pulling:transition-none motion-reduce:transition-none md:px-6 md:pt-6 lg:pb-10">
         <HostBanner />
-        <TrailSlotContext.Provider value={trailSlot}>
-          <Outlet />
-        </TrailSlotContext.Provider>
+        <Outlet />
       </main>
 
       {/* Phone bottom tabs */}

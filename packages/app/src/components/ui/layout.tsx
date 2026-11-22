@@ -1,7 +1,6 @@
 import { Fragment, useContext, useEffect, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Link } from "react-router";
-import { NavLabelContext, TrailSlotContext, type TrailSegment } from "../navContext.ts";
+import { NavLabelContext, type TrailSegment } from "../navContext.ts";
 import { cx } from "./cx.ts";
 
 /** Bordered panel with an uppercase mono header bar. `flush` drops body padding (for row lists). */
@@ -132,12 +131,10 @@ export function Trail({ segments, linkClass }: { segments: readonly TrailSegment
 }
 
 const metaLinkClass = "text-fg underline-offset-2 hover:underline";
-const barLinkClass = "text-muted underline-offset-2 transition-colors duration-150 hover:text-fg hover:underline";
 
 /**
- * Page title, meta line and actions. `trail` is the page's location: in the laptop content bar when the shell has one,
- * and at the start of the meta line on narrower screens. The title (or the trail's last step) names the page in the
- * history list. `subtitle` is accepted as an alias of `meta`.
+ * Page title, meta line and actions. `trail` is the page's location, at the start of the meta line. The title (or the
+ * trail's last step) names the page in the history list. `subtitle` is accepted as an alias of `meta`.
  */
 export function PageHeader({
   title,
@@ -153,25 +150,22 @@ export function PageHeader({
   trail?: readonly TrailSegment[];
 }) {
   const line = meta ?? subtitle;
-  const slot = useContext(TrailSlotContext);
   const nameEntry = useContext(NavLabelContext);
   const name = typeof title === "string" ? title : trail?.at(-1)?.label;
   useEffect(() => {
     if (name !== undefined) nameEntry?.(name);
   }, [name, nameEntry]);
-  const inBar = slot !== null && trail !== undefined;
   return (
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-      {inBar ? createPortal(<Trail segments={trail} linkClass={barLinkClass} />, slot) : null}
       <div className="min-w-0">
         <h1 className="text-headline leading-tight font-bold tracking-[-0.025em] break-words text-balance">
           {title}
         </h1>
         {line === undefined && trail === undefined ? null : (
-          <div className={cx("mt-1 font-mono text-detail text-muted", inBar && line === undefined && "lg:hidden")}>
+          <div className="mt-1 font-mono text-detail text-muted">
             <span className="font-bold text-fg">{"//"}</span>{" "}
             {trail === undefined ? null : (
-              <span className={cx(inBar && "lg:hidden")}>
+              <span>
                 <Trail segments={trail} linkClass={metaLinkClass} />
                 {line === undefined ? null : " · "}
               </span>

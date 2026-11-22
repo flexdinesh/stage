@@ -1,4 +1,4 @@
-// Per-harness status summaries for the sidebar status row and its details panel (lib/status.ts,
+// Per-harness status summaries for the sidebar status button and its details panel (lib/status.ts,
 // components/StatusRow.tsx).
 import type { Harness, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
 import { T3_STATE_TONE } from "./onboarding.ts";

@@ -1,13 +1,12 @@
-import { useCallback, useState } from "react";
 import { Link } from "react-router";
 import { useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import { relativeTime } from "../lib/format.ts";
 import { t3Identity } from "../lib/onboarding.ts";
 import { openCodeErrorText, openCodeSummary, t3ErrorText, t3Summary, type HarnessSummary, type StatusRead } from "../lib/connections.ts";
 import { serviceHostText, signInText } from "../lib/opencode.ts";
-import { statusGroups, statusRow, type StatusItem, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
-import { IconChevronUp, IconSettings } from "./icons.tsx";
-import { InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowButton, RowList, cx, rowButtonClass, usePopover } from "./ui.tsx";
+import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
+import { IconCheck, IconPlug, IconRefresh, IconSettings, IconTriangleAlert } from "./icons.tsx";
+import { Button, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, toneClass, usePopover, type IconComponent } from "./ui.tsx";
 
 /** A status query as the row reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
 function statusRead<T>(q: { data: T | undefined; isPending: boolean; errorUpdateCount: number; error: Error | null }): StatusRead<T> {
@@ -26,7 +25,7 @@ const item = (s: HarnessSummary, name: string): StatusItem => ({
 /** Detail lines per item key, for the panel. */
 type Details = Record<string, { lines: string[]; error: string | null }>;
 
-/** The row's sentence and tone, and each item's detail lines: every configured harness (workers join later). */
+/** The status sentence, kind and tone, and each item's detail lines: every configured harness (workers join later). */
 export function useStatus(): { row: Row; details: Details } {
   const harnesses = useHarnesses();
   const t3 = statusRead(useT3Status());
@@ -73,7 +72,7 @@ export function StatusSections({ row, details, touch = false, onPick }: { row: R
     return (
       <p className={cx("flex items-center gap-2 px-3 text-ui text-muted", touch ? "min-h-11" : "min-h-9")}>
         <Marker tone={row.tone} />
-        {row.text === "Checking" ? "Checking connections" : "No harness connected yet"}
+        {row.kind === "checking" ? "Checking connections" : "No harness connected yet"}
       </p>
     );
   }
@@ -108,33 +107,41 @@ export function StatusSections({ row, details, touch = false, onPick }: { row: R
   ));
 }
 
+const ICON: Record<StatusKind, { icon: IconComponent; className: string }> = {
+  ok: { icon: IconCheck, className: "text-ok" },
+  need: { icon: IconTriangleAlert, className: "text-need-fg" },
+  bad: { icon: IconTriangleAlert, className: "text-bad" },
+  checking: { icon: IconRefresh, className: "text-muted" },
+  empty: { icon: IconPlug, className: "text-muted" },
+};
+
 /**
- * Sidebar footer status row: one marker in the worst tone and one sentence ("All connected", "T3 pairing expired",
- * "2 need attention"). Click opens the details panel above it; hovering with a mouse previews it.
+ * Sidebar bottom-row status button: one icon for everything Stage depends on (a check when all is well, an alert in
+ * the worst tone, refresh while checking, a plug with nothing set up), and a toned count from two problems up. Its
+ * name and title carry the sentence ("T3 pairing expired"). Click toggles the details panel above the row; the
+ * wrapper stays static so the panel anchors to the row (the nearest positioned ancestor).
  */
-export function StatusRow({ className }: { className?: string }) {
+export function StatusButton() {
   const { row, details } = useStatus();
-  const [hover, setHover] = useState(false);
-  const popover = usePopover(useCallback(() => setHover(false), []));
-  const shown = popover.open || hover;
+  const popover = usePopover();
+  const { icon: Icon, className } = ICON[row.kind];
+  const count = row.problems > 1 ? row.problems : null;
+  const label = `Status: ${row.text}`;
   return (
-    <div
-      {...popover.wrapProps}
-      className={cx("relative", className)}
-      onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
-      onPointerLeave={() => setHover(false)}
-    >
-      <RowButton {...popover.triggerProps} selected={shown} className="font-mono text-meta">
-        <Marker tone={row.tone} />
-        <span className={cx("min-w-0 flex-1 truncate", TEXT[row.tone])}>
-          <span className="sr-only">Status: </span>
-          {row.text}
+    <div {...popover.wrapProps}>
+      <Button
+        variant="secondary"
+        {...popover.triggerProps}
+        title={row.text}
+        aria-label={label}
+        className={cx(count === null ? "w-control px-0" : "gap-1.5 px-2", popover.open && "bg-panel")}
+      >
+        <span className={cx("flex", className)}>
+          <Icon size={16} />
         </span>
-        <span className={cx("flex shrink-0 text-muted transition-transform duration-150 motion-reduce:transition-none", popover.open && "rotate-180")}>
-          <IconChevronUp size={12} />
-        </span>
-      </RowButton>
-      <PopoverPanel popover={popover} open={shown} label="Status" className="absolute bottom-full left-0 mb-1 w-[300px]">
+        {count === null ? null : <span className={cx("chip px-1.5 text-meta-sm leading-4 tabular", toneClass(row.tone))}>{count}</span>}
+      </Button>
+      <PopoverPanel popover={popover} label="Status" className="absolute bottom-full left-3 mb-1 w-[300px]">
         <StatusSections row={row} details={details} onPick={popover.close} />
         <Link to="/settings" onClick={popover.close} className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}>
           <IconSettings size={14} />

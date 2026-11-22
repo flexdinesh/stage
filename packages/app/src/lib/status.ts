@@ -1,5 +1,5 @@
-// The sidebar status row: one sentence and one tone over everything Stage depends on. Harnesses today; other groups
-// (workers) add their own items. The row never lists items, so it never runs out of room; the details panel does.
+// The sidebar status: one kind, one tone and one sentence over everything Stage depends on. Harnesses today; other
+// groups (workers) add their own items. The button shows the kind as an icon; the details panel lists the items.
 
 export type StatusTone = "ok" | "need" | "bad" | "idle";
 
@@ -15,7 +15,11 @@ export interface StatusItem {
   label: string;
 }
 
+/** What the status button draws: all healthy, a problem in its tone, still checking, or nothing set up. */
+export type StatusKind = "ok" | "need" | "bad" | "checking" | "empty";
+
 export interface StatusRow {
+  kind: StatusKind;
   tone: StatusTone;
   text: string;
   /** Problems first (worst first), otherwise in the given order. */
@@ -36,11 +40,14 @@ export function statusRow(items: readonly StatusItem[], opts: { checking: boolea
   const base = { items: sorted, problems: problems.length };
   const first = problems[0];
   if (first !== undefined) {
-    return { ...base, tone: first.tone, text: problems.length === 1 ? first.label : `${problems.length} need attention` };
+    const text = problems.length === 1 ? first.label : `${problems.length} need attention`;
+    return { ...base, kind: first.tone === "bad" ? "bad" : "need", tone: first.tone, text };
   }
-  if (sorted.length === 0) return { ...base, tone: "idle", text: opts.checking ? "Checking" : opts.empty };
-  if (opts.checking || sorted.some((i) => i.tone === "idle")) return { ...base, tone: "idle", text: "Checking" };
-  return { ...base, tone: "ok", text: "All connected" };
+  if (sorted.length === 0) {
+    return opts.checking ? { ...base, kind: "checking", tone: "idle", text: "Checking" } : { ...base, kind: "empty", tone: "idle", text: opts.empty };
+  }
+  if (opts.checking || sorted.some((i) => i.tone === "idle")) return { ...base, kind: "checking", tone: "idle", text: "Checking" };
+  return { ...base, kind: "ok", tone: "ok", text: "All connected" };
 }
 
 /** Groups in first-seen order, for the panel's sections. */

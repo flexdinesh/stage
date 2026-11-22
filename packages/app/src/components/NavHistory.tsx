@@ -144,7 +144,7 @@ function NavArrow({ dir, variant, className }: { dir: "back" | "forward"; varian
   );
 }
 
-/** Laptop content bar arrows. */
+/** Laptop sidebar header arrows. */
 export function BackForward() {
   return (
     <div className="flex shrink-0 items-center gap-0.5">
