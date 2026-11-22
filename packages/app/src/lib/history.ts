@@ -94,7 +94,7 @@ export function forwardList(h: NavHistory, limit = LIST_LIMIT): HistoryJump[] {
 const PAGES: Record<string, string> = {
   "/": "Dashboard",
   "/tasks": "Tasks",
-  "/trees": "Tasks",
+  "/trees": "Trees",
   "/projects": "Projects",
   "/schedules": "Schedules",
   "/snippets": "Snippets",

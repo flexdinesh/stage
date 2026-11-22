@@ -8,7 +8,7 @@ import { useScope } from "./Scope.tsx";
 import { activeRowClass, cx } from "./ui.tsx";
 
 /** Views that follow the scope; picking a project anywhere else opens the Dashboard. */
-const SCOPED_PATHS = ["/", "/tasks", "/schedules"];
+const SCOPED_PATHS = ["/", "/tasks", "/trees", "/schedules"];
 
 /** Open work per project, from the same query the unscoped Dashboard reads. */
 export function useProjectLoads(): Map<number, ProjectLoad> {

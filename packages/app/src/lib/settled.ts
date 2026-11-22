@@ -1,5 +1,15 @@
 import type { Task, TreeSummary } from "../api/types.ts";
 
+/** Days the Completed groups (Tasks and Trees) look back. */
+export const SETTLED_DAYS = 7;
+
+/** Start of the Completed window, floored to the hour so a query key stays stable between renders. */
+export function settledSince(now: number = Date.now()): string {
+  const d = new Date(now - SETTLED_DAYS * 24 * 3600 * 1000);
+  d.setMinutes(0, 0, 0);
+  return d.toISOString();
+}
+
 /** One row of the Dashboard Settled group: an app task, an external T3 thread, or a completed tree. */
 export type SettledItem = { kind: "task"; task: Task } | { kind: "tree"; tree: TreeSummary };
 

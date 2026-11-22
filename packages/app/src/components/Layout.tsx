@@ -21,6 +21,7 @@ import {
   IconSun,
   IconTasks,
   IconThemeSystem,
+  IconTree,
 } from "./icons.tsx";
 import { BackForward, NavHistoryProvider, PhoneBack, useCanGoBack } from "./NavHistory.tsx";
 import { TrailSlotContext } from "./navContext.ts";
@@ -37,11 +38,12 @@ import { Button, Drawer, Kbd, buttonClass, cx, toneClass } from "./ui.tsx";
 const TAB_ICON = 22;
 
 /** Phone tab roots: the top bar keeps the mark there instead of Back. */
-const TAB_ROOTS = ["/", "/tasks", "/schedules", "/more"];
+const TAB_ROOTS = ["/", "/tasks", "/trees", "/schedules", "/more"];
 
 const TABS = [
   { to: "/", label: "Dashboard", icon: <IconDashboard size={TAB_ICON} /> },
   { to: "/tasks", label: "Tasks", icon: <IconTasks size={TAB_ICON} /> },
+  { to: "/trees", label: "Trees", icon: <IconTree size={TAB_ICON} /> },
   { to: "/schedules", label: "Schedules", icon: <IconSchedules size={TAB_ICON} /> },
 ] as const;
 
@@ -194,6 +196,7 @@ function Shell() {
         <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
           <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<LoadCount load={scopeLoad} />} />
           <SideLink to="/tasks" icon={<IconTasks />} label="Tasks" />
+          <SideLink to="/trees" icon={<IconTree />} label="Trees" />
           <SideLink to="/schedules" icon={<IconSchedules />} label="Schedules" />
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-3">
@@ -259,7 +262,7 @@ function Shell() {
       {/* Phone bottom tabs */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-4 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-5 border-t border-line bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] lg:hidden"
       >
         {TABS.map((t) => (
           <NavLink

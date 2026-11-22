@@ -92,7 +92,7 @@ export function useGroupFold(storageKey: string) {
 
 /** A group's ruled panel: tone square and title (a fold toggle when `onToggle`), its count, actions while open. */
 export function GroupPanel({
-  group,
+  info: g,
   count,
   meta,
   collapsed = false,
@@ -100,7 +100,7 @@ export function GroupPanel({
   actions,
   children,
 }: {
-  group: GroupKey;
+  info: GroupMeta;
   count: number;
   /** Extra mono meta after the count. */
   meta?: string | undefined;
@@ -109,7 +109,6 @@ export function GroupPanel({
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const g = GROUP_META[group];
   // self-baseline: flex baseline comes from the text, not the square/chevron, so Panel's cap-trimmed h2 centers the caps.
   const label = (
     <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2 self-baseline")}>
@@ -152,22 +151,26 @@ export function GroupPanel({
   );
 }
 
-/** Strip of group counts; a cell filters the view to its group. */
-export function StatStrip({
+/** Strip of group counts; a cell filters the view to its group. A trailing `settled` cell hides on phone. */
+export function StatStrip<K extends string>({
   groups,
+  meta,
   counts,
   selected,
   onToggle,
 }: {
-  groups: readonly GroupKey[];
-  counts: Record<GroupKey, number>;
-  selected: GroupKey | null;
-  onToggle: (key: GroupKey) => void;
+  groups: readonly K[];
+  meta: Record<K, GroupMeta>;
+  counts: Record<K, number>;
+  selected: K | null;
+  onToggle: (key: K) => void;
 }) {
+  // Phone fits six cells; the cell before a hidden Completed closes the row.
+  const phoneLast = groups.at(-1) === "settled" ? groups.at(-2) : undefined;
   return (
     <div role="group" aria-label="Filter by state" className="mb-4 flex border border-line bg-surface">
       {groups.map((key) => {
-        const g = GROUP_META[key];
+        const g = meta[key];
         const on = selected === key;
         const n = counts[key];
         return (
@@ -180,9 +183,9 @@ export function StatStrip({
             className={cx(
               toneClass(g.tone),
               "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-lg:last-of-type:border-r-0 transition-colors duration-150 lg:flex-none lg:flex-row lg:justify-start lg:gap-2 lg:px-3",
-              // Phone fits six cells; Completed stays reachable from its collapsible group.
+              // Completed stays reachable from its collapsible group.
               key === "settled" && "max-md:hidden",
-              key === "backlog" && "max-md:border-r-0",
+              key === phoneLast && "max-md:border-r-0",
               on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "hover:bg-panel",
             )}
           >

@@ -8,7 +8,7 @@ import { configModelText, dateTime, duration, relativeTime } from "../lib/format
 import type { SettledItem } from "../lib/settled.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { HarnessName } from "./HarnessName.tsx";
-import { taskClosedLabel } from "../lib/trees.ts";
+import { taskClosedLabel, treeTaskPath } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
 import { CompletionButton } from "./Completion.tsx";
@@ -44,7 +44,7 @@ export function TaskRows({
   tasks: Task[];
   emptyText?: string;
   showProject?: boolean;
-  /** Tree members carry a chip naming their tree (Dashboard breakouts). */
+  /** Tree members name their tree in the meta line, linking it with the task selected. */
   showTree?: boolean;
 }) {
   if (tasks.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
@@ -121,11 +121,10 @@ interface RowChip {
 
 /**
  * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then the one-shot start time
- * while timed, its tree when `showTree` (Dashboard breakouts), "needs #3 #5" while blocked on its needs, else the
- * schedule that spawned it, else the agent session that created it. Viewed from a session (`contextThreadId`), its own
- * provenance chip is dropped.
+ * while timed, "needs #3 #5" while blocked on its needs, else the schedule that spawned it, else the agent session that
+ * created it. Viewed from a session (`contextThreadId`), its own provenance chip is dropped.
  */
-function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChip | null {
+function rowChip(task: Task, contextThreadId?: string): RowChip | null {
   const closed = taskClosedLabel(task);
   if (closed !== null)
     return task.archivedAt !== null || task.treeId === null
@@ -141,13 +140,6 @@ function rowChip(task: Task, contextThreadId?: string, showTree = false): RowChi
       icon: <IconClock />,
     };
   }
-  if (showTree && task.treeId !== null)
-    return {
-      to: `/trees/${task.treeId}`,
-      label: task.treeTitle ?? `tree ${task.treeId}`,
-      title: `In tree: ${task.treeTitle ?? task.treeId}`,
-      icon: <IconTree />,
-    };
   const [firstNeed] = task.needs;
   if (isWaiting(task) && firstNeed !== undefined)
     return {
@@ -198,7 +190,9 @@ export function TaskRow({
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
-  const chip = rowChip(task, contextThreadId, showTree);
+  const chip = rowChip(task, contextThreadId);
+  // A closed tree's row chip already links it.
+  const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
   const needsInput = task.state === "needs_input";
   const appLink = useSessionDestination()(task);
   const { kindName, descriptor } = useHarnesses();
@@ -253,6 +247,16 @@ export function TaskRow({
             <span title={dateTime(since)} className="tabular">
               {relativeTime(since)}
             </span>
+          )}
+          {treeLink === null ? null : (
+            <Link
+              to={treeTaskPath(treeLink, task.id)}
+              title={`In tree: ${task.treeTitle ?? treeLink}. Open it with this task selected`}
+              className="inline-flex min-w-0 items-center gap-1 text-fg underline decoration-line-strong underline-offset-3 hover:decoration-fg"
+            >
+              <IconTree />
+              <span className="max-w-[26ch] truncate">{task.treeTitle ?? `tree ${treeLink}`}</span>
+            </Link>
           )}
           {chip === null ? null : (
             <Link

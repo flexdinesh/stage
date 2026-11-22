@@ -250,6 +250,36 @@ export function treeRollup(counts: TreeCounts): Rollup {
   return { counts, segments: all.filter((s) => s.count > 0), next };
 }
 
+/** Trees view state cells, most pressing first: needs input, review, ready, failed, running, waiting, completed. */
+export type TreeGroupKey = "needs" | "done" | "ready" | "failed" | "running" | "waiting" | "settled";
+
+export const TREE_GROUP_KEYS: readonly TreeGroupKey[] = ["needs", "done", "ready", "failed", "running", "waiting", "settled"];
+
+const NEXT_GROUP: Record<NextAction["kind"], TreeGroupKey> = {
+  answer: "needs",
+  settle: "done",
+  start: "ready",
+  retry: "failed",
+  running: "running",
+  waiting: "waiting",
+  done: "settled",
+};
+
+export const parseTreeGroup = (v: string | null): TreeGroupKey | null => TREE_GROUP_KEYS.find((k) => k === v) ?? null;
+
+/** A tree's group: completed once every member settled (an empty tree waits), else its rollup's next step. */
+export function treeGroup(tree: Pick<TreeSummary, "counts" | "settledAt">): TreeGroupKey {
+  if (tree.settledAt !== null) return "settled";
+  if (tree.counts.total === 0) return "waiting";
+  return NEXT_GROUP[treeRollup(tree.counts).next.kind];
+}
+
+/** Trees in group order, most pressing first; ties keep input order (the API's most recent activity first). */
+export function byTreeGroup<T extends Pick<TreeSummary, "counts" | "settledAt">>(trees: readonly T[]): T[] {
+  const rank = (t: T) => TREE_GROUP_KEYS.indexOf(treeGroup(t));
+  return trees.toSorted((a, b) => rank(a) - rank(b));
+}
+
 /** "7 tasks: 2 settled, 1 running, 4 blocked" (state bar label). */
 export function rollupLabel(r: Rollup): string {
   const n = r.counts.total;
