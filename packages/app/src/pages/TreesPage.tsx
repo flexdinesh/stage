@@ -98,6 +98,7 @@ function OpenTrees({ selected, onSelect }: { selected: TreeGroupKey | null; onSe
     <QueryState
       isPending={trees.isPending}
       error={trees.error}
+      hasData={trees.data !== undefined}
       stale={trees.isPlaceholderData}
       skeleton={
         <>
@@ -156,6 +157,7 @@ function ClosedTrees({ view }: { view: "closed" | "all" }) {
     <QueryState
       isPending={trees.isPending}
       error={trees.error}
+      hasData={trees.data !== undefined}
       stale={trees.isPlaceholderData}
       skeleton={
         <Panel flush title="Trees">

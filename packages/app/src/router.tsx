@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import { Layout } from "./components/Layout.tsx";
+import { RouteError } from "./components/ErrorBoundary.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { MachinePage } from "./pages/MachinePage.tsx";
 import { MorePage } from "./pages/MorePage.tsx";
@@ -19,23 +20,31 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
+    // A layout-level fallback for errors in the shell itself.
+    errorElement: <RouteError />,
     children: [
-      { index: true, element: <DashboardPage /> },
-      { path: "tasks", element: <TasksPage /> },
-      { path: "trees", element: <TreesPage /> },
-      { path: "trees/:id", element: <TreeDetailPage /> },
-      { path: "projects", element: <ProjectsPage /> },
-      { path: "projects/:id", element: <ProjectDetailPage /> },
-      { path: "tasks/:id", element: <TaskDetailPage /> },
-      { path: "schedules", element: <SchedulesPage /> },
-      { path: "schedules/:id", element: <ScheduleDetailPage /> },
-      { path: "more", element: <MorePage /> },
-      { path: "snippets", element: <SnippetsPage /> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "settings/machines/:id", element: <MachinePage /> },
-      // Primitives gallery: unlinked, loaded only when visited.
-      { path: "dev/ui", lazy: async () => ({ Component: (await import("./pages/DevUiPage.tsx")).DevUiPage }) },
-      { path: "*", element: <NotFoundPage /> },
+      {
+        // Page errors render inside the layout, so the sidebar and navigation survive.
+        errorElement: <RouteError />,
+        children: [
+          { index: true, element: <DashboardPage /> },
+          { path: "tasks", element: <TasksPage /> },
+          { path: "trees", element: <TreesPage /> },
+          { path: "trees/:id", element: <TreeDetailPage /> },
+          { path: "projects", element: <ProjectsPage /> },
+          { path: "projects/:id", element: <ProjectDetailPage /> },
+          { path: "tasks/:id", element: <TaskDetailPage /> },
+          { path: "schedules", element: <SchedulesPage /> },
+          { path: "schedules/:id", element: <ScheduleDetailPage /> },
+          { path: "more", element: <MorePage /> },
+          { path: "snippets", element: <SnippetsPage /> },
+          { path: "settings", element: <SettingsPage /> },
+          { path: "settings/machines/:id", element: <MachinePage /> },
+          // Primitives gallery: unlinked, loaded only when visited.
+          { path: "dev/ui", lazy: async () => ({ Component: (await import("./pages/DevUiPage.tsx")).DevUiPage }) },
+          { path: "*", element: <NotFoundPage /> },
+        ],
+      },
     ],
   },
 ]);

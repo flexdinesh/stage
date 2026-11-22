@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx.ts";
 import { ErrorText, Muted } from "./feedback.tsx";
+import { queryStateView } from "../../lib/queryState.ts";
 
 /**
  * One square placeholder bar. Size it with `className` (height, width); `onPanel` darkens it for Bench Gray
@@ -37,10 +38,14 @@ export function SkeletonRows({ rows = 3, label = "Loading" }: { rows?: number; l
   );
 }
 
-/** Loading / error / empty wrapper for a query result. `stale` dims kept data while a new key loads. */
+/**
+ * Loading / error / empty wrapper for a query result. `stale` dims kept data while a new key loads. With `hasData`,
+ * an error (a failed background refetch) shows above the kept view instead of replacing it, so drafts survive.
+ */
 export function QueryState({
   isPending,
   error,
+  hasData,
   empty,
   emptyText = "Nothing here.",
   skeleton,
@@ -49,6 +54,8 @@ export function QueryState({
 }: {
   isPending: boolean;
   error: unknown;
+  /** Data is cached (`query.data !== undefined`): keep showing it on error. */
+  hasData: boolean;
   empty?: boolean;
   emptyText?: string;
   /** Replaces the default ruled rows; mirror the loaded layout. */
@@ -60,10 +67,17 @@ export function QueryState({
   stale?: boolean;
   children: ReactNode;
 }) {
-  if (isPending) return skeleton ?? <SkeletonRows />;
-  if (error !== null && error !== undefined) return <ErrorText error={error} />;
-  if (empty === true) return <Muted>{emptyText}</Muted>;
-  return stale === undefined ? children : <Stale stale={stale}>{children}</Stale>;
+  const { view, banner } = queryStateView({ isPending, error, hasData, empty });
+  if (view === "pending") return skeleton ?? <SkeletonRows />;
+  if (view === "error") return <ErrorText error={error} />;
+  const body = view === "empty" ? <Muted>{emptyText}</Muted> : stale === undefined ? children : <Stale stale={stale}>{children}</Stale>;
+  if (!banner) return body;
+  return (
+    <>
+      <ErrorText error={error} />
+      {body}
+    </>
+  );
 }
 
 /** Kept data under a loading key: one block, dimmed and busy until the new data lands. */

@@ -43,7 +43,9 @@ function IndependentHeader({ count }: { count: number }) {
  * tasks. Start a task, edit a backlog task; check independent backlog tasks to make a tree of them.
  */
 export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch: CreatedTasks }) {
-  const [editing, setEditing] = useState<Task | null>(null);
+  // The id only: the form edits the live task from the batch, never a copy from when it opened.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const editing = [...batch.trees.flatMap((t) => t.tasks), ...batch.independent].find((t) => t.id === editingId) ?? null;
   // Selection order matters: a chain runs in the order tasks were checked.
   const [selected, setSelected] = useState<number[]>([]);
   const [planting, setPlanting] = useState(false);
@@ -58,7 +60,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
 
   const editButton = (t: Task) =>
     t.state === "backlog" ? (
-      <Button small onClick={() => setEditing(t)}>
+      <Button small onClick={() => setEditingId(t.id)}>
         Edit
       </Button>
     ) : undefined;
@@ -129,7 +131,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
           </section>
         )}
       </Panel>
-      {editing === null ? null : <TaskFormModal task={editing} onClose={() => setEditing(null)} />}
+      {editing === null ? null : <TaskFormModal task={editing} onClose={() => setEditingId(null)} />}
       {planting ? (
         <NewTreeDrawer
           tasks={picked}

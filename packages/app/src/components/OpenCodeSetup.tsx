@@ -401,7 +401,9 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
   // Which confirm (a replaced service returning, or a different one): kept while its resend runs, so the copy does not flip.
   const [returned, setReturned] = useState(false);
-  const body = advancedChanges(info, urls, replace && !locked("credentials") ? { username, password } : null);
+  // Compared with the status as the editor opened, not the live poll: an untouched field never reverts a change made elsewhere.
+  const [opened] = useState(info);
+  const body = advancedChanges(opened, urls, replace && !locked("credentials") ? { username, password } : null);
   // A different service answers 409 instance_changed (a replaced one instance_returned): the same body is resent with newInstance once confirmed.
   const save = useMutation({
     mutationFn: (newInstance: boolean) => api.saveOpenCode(newInstance ? { ...body, newInstance: true } : body),

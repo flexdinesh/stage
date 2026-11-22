@@ -28,7 +28,9 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
   const invalidate = useInvalidateWork();
   const tasks = useTasks();
   const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<Task | null>(null);
+  // The id only: the task itself is read from the live list, so a task that started meanwhile no longer offers needs.
+  const [pickedId, setPickedId] = useState<number | null>(null);
+  const picked = tasks.data?.tasks.find((t) => t.id === pickedId) ?? null;
   const [needs, setNeeds] = useState<number[]>(after === undefined ? [] : [after]);
   const results = matches(tasks.data?.tasks ?? [], tree.id, query);
   const canNeed = picked !== null && picked.state === "backlog" && picked.startAt === null;
@@ -64,7 +66,7 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
             <Input id={id} type="search" data-autofocus placeholder="Title or #id" value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
         </Field>
-        <QueryState isPending={tasks.isPending} error={tasks.error}>
+        <QueryState isPending={tasks.isPending} error={tasks.error} hasData={tasks.data !== undefined}>
           <div role="radiogroup" aria-label="Task" className="border border-line">
             {results.length === 0 ? (
               <EmptyState inset>No task matches. Tasks already in this tree are not listed.</EmptyState>
@@ -74,7 +76,7 @@ export function AddExistingTaskDrawer({ tree, after, onClose }: { tree: TreeDeta
                   key={t.id}
                   className={cx(rowButtonClass(picked?.id === t.id), "cursor-pointer border-b border-line last:border-b-0")}
                 >
-                  <Radio name="task" checked={picked?.id === t.id} onChange={() => setPicked(t)} />
+                  <Radio name="task" checked={picked?.id === t.id} onChange={() => setPickedId(t.id)} />
                   <span className="min-w-0 flex-1">
                     <IdTag id={t.id} className="mr-1.5" />
                     <span className="text-small font-medium break-words">{t.title}</span>

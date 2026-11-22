@@ -14,3 +14,16 @@ export function NotFoundPage() {
     </>
   );
 }
+
+/** A record page whose record the server reports gone (404): what happened and the way back to its list. */
+export function RecordNotFound({ title, meta, text, back }: { title: string; meta: string; text: string; back: { to: string; label: string } }) {
+  return (
+    <>
+      <PageHeader title={title} meta={meta} />
+      <p className="mb-3 text-ui text-muted">{text}</p>
+      <Link to={back.to} className={buttonClass("secondary")}>
+        <IconBack /> {back.label}
+      </Link>
+    </>
+  );
+}

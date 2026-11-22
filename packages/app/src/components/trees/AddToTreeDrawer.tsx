@@ -85,7 +85,7 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
           <span className="font-mono tabular">#{task.id}</span> {task.title} joins as a parallel root: it waits on nothing. To run it
           after a task, pick its tree, then that task under After.
         </Muted>
-        <QueryState isPending={trees.isPending} error={trees.error}>
+        <QueryState isPending={trees.isPending} error={trees.error} hasData={trees.data !== undefined}>
           <div role="radiogroup" aria-label="Tree" className="border border-line">
             {option("new", "New tree", "with this task as its root")}
             {list.map((t) => option(t.id, t.title, treeMeta(t)))}

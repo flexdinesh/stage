@@ -436,7 +436,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
-      <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
+      <QueryState isPending={inbox.isPending} error={inbox.error} hasData={items.length > 0}>
         {items.length === 0 && silent.length === 0 ? (
           <EmptyState>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</EmptyState>
         ) : (
@@ -590,7 +590,7 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
   const unique = [...new Map(events.map((event) => [event.id, event])).values()];
   return (
     <div className="mt-2 flex flex-col gap-2">
-      <QueryState isPending={history.isPending} error={unique.length === 0 ? history.error : null}>
+      <QueryState isPending={history.isPending} error={history.error} hasData={unique.length > 0}>
         {unique.length === 0 ? <EmptyState>No notifications in the last 30 days.</EmptyState> : (
           <ol aria-label="Notification history, newest first" className="ml-[3px] w-[calc(100%-3px)] border-l border-line-strong pl-4">
             {unique.map((event) => (

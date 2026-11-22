@@ -44,6 +44,7 @@ export function SchedulesPage() {
         <QueryState
           isPending={schedules.isPending}
           error={schedules.error}
+          hasData={schedules.data !== undefined}
           stale={schedules.isPlaceholderData}
           skeleton={<ScheduleRowsSkeleton showProject={scope.project === null} />}
         >

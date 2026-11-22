@@ -177,6 +177,7 @@ export function ProjectsPage() {
       <QueryState
         isPending={projects.isPending}
         error={projects.error}
+        hasData={projects.data !== undefined}
         stale={projects.isPlaceholderData}
         skeleton={<ProjectRowsSkeleton title={filter === "all" ? "All projects" : "Active projects"} />}
         empty={list.length === 0}

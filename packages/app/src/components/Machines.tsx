@@ -29,7 +29,7 @@ export function MachinesCard() {
         }
         flush
       >
-        <QueryState isPending={machines.isPending} error={machines.error}>
+        <QueryState isPending={machines.isPending} error={machines.error} hasData={machines.data !== undefined}>
           <RowList>
             {machines.machines.map((m) => (
               <MachineRow key={m.id} machine={m} serverVersion={server} />

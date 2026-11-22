@@ -189,9 +189,15 @@ export const useProjects = (archived: ArchivedFilter = "false") => {
   return useQuery({ queryKey: [...keys.projects, "list", archived], queryFn: () => api.projects(archived), placeholderData: keepPreviousData });
 };
 
+/** The server answered 404: the record was deleted or never existed. */
+export const isNotFound = (error: unknown): boolean => error instanceof ApiError && error.status === 404;
+
+/** Retries transient failures; a 404 shows its not-found view at once. */
+const retryUnlessNotFound = (count: number, error: unknown): boolean => !isNotFound(error) && count < 3;
+
 export const useProject = (id: number) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.projects, "one", id], queryFn: () => api.project(id) });
+  return useQuery({ queryKey: [...keys.projects, "one", id], queryFn: () => api.project(id), retry: retryUnlessNotFound });
 };
 
 export const useTasks = (q: TaskListQuery = {}) => {
@@ -216,7 +222,7 @@ export const useTree = (id: number, enabled = true) => {
     enabled,
     queryKey: [...keys.tree, id],
     queryFn: () => api.tree(id),
-    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,
+    retry: retryUnlessNotFound,
   });
 };
 
@@ -253,7 +259,7 @@ export const useJournalEntry = (id: number | null, enabled = true) => {
 
 export const useSchedule = (id: number) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.schedule, id], queryFn: () => api.schedule(id) });
+  return useQuery({ queryKey: [...keys.schedule, id], queryFn: () => api.schedule(id), retry: retryUnlessNotFound });
 };
 
 /** Next fires for a cron + zone; null input disables the query. Errors carry the parse message. */
