@@ -3,7 +3,7 @@
 // machine. Offline or on another API version: why, and the connections Stage
 // has on record, read-only. The local machine's setup stays in Settings.
 import { useMemo } from "react";
-import { Link, Navigate } from "react-router";
+import { Navigate } from "react-router";
 import { HarnessScopeProvider, type HarnessScope } from "../api/harnessScope.tsx";
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import type { Machine } from "../api/types.ts";
@@ -14,8 +14,6 @@ import { dateTime } from "../lib/format.ts";
 import { machineSetupAlert, machineSetupState, machineStatusLine, machineTone, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useIdParam } from "../lib/params.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
-
-const linkClass = "text-fg underline-offset-2 hover:underline";
 
 export function MachinePage() {
   const id = useIdParam();
@@ -42,14 +40,9 @@ function MachineView({ machine: m, server }: { machine: Machine; server: string 
     <div>
       <PageHeader
         title={m.label}
+        trail={[{ label: "Settings", to: "/settings" }, { label: `machine ${m.id}` }]}
         meta={
           <>
-            <Link to="/settings" className={linkClass}>
-              Settings
-            </Link>
-            {" / machine "}
-            {m.id}
-            {" · "}
             <span className="inline-flex items-center gap-1.5 align-middle">
               <Marker tone={machineTone(m)} />
               <span className="tabular" title={m.lastSeenAt === null ? undefined : `Last seen ${dateTime(m.lastSeenAt)}`}>
