@@ -71,10 +71,10 @@ export function QueryState({
   if (view === "pending") return skeleton ?? <SkeletonRows />;
   if (view === "error") return <ErrorText error={error} />;
   const body = view === "empty" ? <Muted>{emptyText}</Muted> : stale === undefined ? children : <Stale stale={stale}>{children}</Stale>;
-  if (!banner) return body;
+  // One shape with or without the banner: a changed tree would remount the body and drop its drafts.
   return (
     <>
-      <ErrorText error={error} />
+      {banner ? <ErrorText error={error} /> : null}
       {body}
     </>
   );
