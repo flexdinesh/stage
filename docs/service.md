@@ -318,7 +318,9 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   environment, like the server, and refuses `--listen`.
 - **One role per identity.** `start` and `restart` refuse (exit 7) while the
   other role's generated definition exists; `status` reports
-  `role_conflict`. Uninstall one first (#348 may lift this).
+  `role_conflict`. Uninstall one first. The desktop does that for you when
+  it joins this machine as a worker, and reverses it on leave
+  ([desktop.md](desktop.md#worker)).
 - **Readiness:** the service is running and the holder record of
   `worker.lock` names its pid (the worker locked its dir and loaded its
   config, then sent `READY=1`). The channel being offline does not fail

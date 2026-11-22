@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -22,6 +23,13 @@ import (
 // server for the desktop) and waits for health; it returns its URL.
 func (e *env) serveTCP(t *testing.T, bin string) (string, *server) {
 	t.Helper()
+	return e.serveTCPWith(t, bin, false)
+}
+
+// serveTCPWith is serveTCP; public sets STAGE_PUBLIC_URL to the server's
+// own URL (needed to create pairing codes).
+func (e *env) serveTCPWith(t *testing.T, bin string, public bool) (string, *server) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -30,6 +38,9 @@ func (e *env) serveTCP(t *testing.T, bin string) (string, *server) {
 	_ = ln.Close()
 	cmd := exec.Command(bin, "serve", "--listen", addr)
 	cmd.Env = e.vars
+	if public {
+		cmd.Env = append(slices.Clone(e.vars), "STAGE_PUBLIC_URL=http://"+addr)
+	}
 	s := &server{cmd: cmd, done: make(chan struct{}), out: &syncBuffer{}}
 	cmd.Stdout, cmd.Stderr = s.out, s.out
 	if err := cmd.Start(); err != nil {

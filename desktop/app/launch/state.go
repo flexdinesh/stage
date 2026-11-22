@@ -29,6 +29,10 @@ const (
 	// PhaseUnreachable: a remote server does not answer (or refuses this
 	// app); polling continues.
 	PhaseUnreachable Phase = "unreachable"
+	// PhaseWorker: this machine is a worker of a main server, so its own
+	// Stage server is off until it leaves (one role per identity); this
+	// machine's target only.
+	PhaseWorker Phase = "worker"
 )
 
 // Step is the progress while starting.
@@ -110,6 +114,9 @@ type State struct {
 	Busy bool `json:"busy"`
 	// Dev: development run against a foreground dev server.
 	Dev bool `json:"dev"`
+	// Worker is this machine as a worker of a main server, null when it
+	// is not one.
+	Worker *Worker `json:"worker"`
 }
 
 // Usable reports whether the app can talk to the server.
@@ -135,6 +142,7 @@ func (s State) clone() State {
 		}
 		out.Server = &srv
 	}
+	out.Worker = s.Worker.clone()
 	return out
 }
 

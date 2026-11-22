@@ -2,14 +2,16 @@
 // desktop host's connection states with a fake shell, for visual checks in a browser. Not part of the build
 // (vite builds index.html only). With STAGE_DESKTOP_DEV_SOCKET set, "ready" states reach a real dev server.
 // The fake shell saves three servers (this machine, "Studio", "Lab"); switching plays a short connect, Lab
-// stays unreachable, and testing a `.lan` URL answers like a refused hostname.
+// stays unreachable, and testing a `.lan` URL answers like a refused hostname. Worker states: Join as worker on
+// Studio plays a short join (the pairing call needs a real server, so it fails without STAGE_DESKTOP_DEV_SOCKET);
+// Leave forgets the worker; Restart brings an offline worker online.
 import { StageApp } from "@stage/app";
 import "@stage/app/index.css";
-import type { HostServerEntry, HostState, HostTarget, Platform } from "@stage/app/platform";
+import type { HostServerEntry, HostState, HostTarget, HostWorker, Platform } from "@stage/app/platform";
 import { createRoot } from "react-dom/client";
 import { desktopHost } from "./platform/host.ts";
 import { desktopLinks } from "./platform/links.ts";
-import { INITIAL_STATE, type DesktopNative, type NativeServers } from "./platform/native.ts";
+import { INITIAL_STATE, type DesktopNative, type NativeServers, type NativeWorker } from "./platform/native.ts";
 import { desktopStorage } from "./platform/storage.ts";
 import { desktopTransport } from "./platform/transport.ts";
 
@@ -30,6 +32,16 @@ const lab: HostTarget = { id: "s-5e6f7a8b", name: "Lab", kind: "remote", url: "h
 const local: HostTarget = INITIAL_STATE.target;
 const remote: HostState = { ...base, target: box };
 const remoteServer = { ...server, id: box.id, socket: "", managed: false, pid: null };
+const studioWorker: HostWorker = {
+  url: "https://stage.example.com",
+  machineId: 4,
+  serverId: box.id,
+  serverName: box.name,
+  status: "online",
+  message: "",
+  fix: "",
+};
+const remoteReady: HostState = { ...remote, phase: "ready", step: null, title: "Connected", server: remoteServer, epoch: 2, serverEpoch: 1 };
 const log = [
   "level=INFO msg=\"listening\" addr=unix:///run/user/1000/stage-dev/stage.sock",
   "level=ERROR msg=\"open database\" err=\"disk I/O error\"",
@@ -112,7 +124,35 @@ const STATES: Record<string, HostState> = {
     fix: "On that server, allow this address, restart it, then Retry:",
     command: "STAGE_ALLOWED_ORIGINS=http://studio.lan:7380",
   },
-  "remote-ready": { ...remote, phase: "ready", step: null, title: "Connected", server: remoteServer, epoch: 2, serverEpoch: 1 },
+  "remote-ready": remoteReady,
+  "worker-join": remoteReady,
+  "worker-online": { ...remoteReady, worker: studioWorker },
+  "worker-offline": {
+    ...remoteReady,
+    worker: {
+      ...studioWorker,
+      status: "offline",
+      message: "Not connected to Studio: dial tcp 203.0.113.7:443: connect: connection refused",
+      fix: "It reconnects by itself once Studio is reachable.",
+    },
+  },
+  "worker-failed": {
+    ...remoteReady,
+    worker: { ...studioWorker, status: "failed", message: "The worker service failed.", fix: "Restart the worker. If it keeps failing, copy the diagnostics." },
+  },
+  "worker-removed": {
+    ...remoteReady,
+    worker: { ...studioWorker, status: "removed", message: "Studio removed this machine.", fix: "Leave to clean up, then join again to serve it." },
+  },
+  "local-worker": {
+    ...base,
+    phase: "worker",
+    step: null,
+    title: "This machine is a worker of Studio",
+    message: "Its own Stage server is off while it runs Studio's tasks. Its data stays on this machine.",
+    fix: "Leave Studio to use this machine's server again.",
+    worker: studioWorker,
+  },
   "remote-reconnecting": {
     ...remote,
     phase: "reconnecting",
@@ -223,7 +263,22 @@ const servers: NativeServers = {
   },
 };
 
-const host = desktopHost(native, servers);
+const worker: NativeWorker = {
+  joinWorker: async () => {
+    await wait();
+    emitState({ ...state, worker: studioWorker });
+  },
+  leaveWorker: async () => {
+    await wait();
+    emitState(state.phase === "worker" ? connected(local, state.epoch) : { ...state, worker: null });
+  },
+  restartWorker: async () => {
+    await wait();
+    if (state.worker !== null) emitState({ ...state, worker: { ...state.worker, status: "online", message: "", fix: "" } });
+  },
+};
+
+const host = desktopHost(native, servers, worker);
 const platform: Platform = {
   transport: desktopTransport(),
   clipboard: { writeText: (text) => native.copyText(text) },

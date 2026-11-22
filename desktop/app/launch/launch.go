@@ -49,6 +49,9 @@ type Timing struct {
 	// ReconnectWindow is how long the server may be unreachable before
 	// the launcher asks the service what happened (stopped or failed).
 	ReconnectWindow time.Duration
+	// WorkerEvery is how often the worker's state is read while this
+	// machine is a worker.
+	WorkerEvery time.Duration
 }
 
 // DefaultTiming is the production timing (docs/desktop.md).
@@ -61,6 +64,7 @@ func DefaultTiming() Timing {
 		HealthEvery: 5 * time.Second, HealthTimeout: 3 * time.Second,
 		BackoffMin: time.Second, BackoffMax: 5 * time.Second,
 		ReconnectWindow: 30 * time.Second,
+		WorkerEvery:     10 * time.Second,
 	}
 }
 
@@ -94,6 +98,9 @@ type Config struct {
 	// ready again (the active one, or this machine's while a remote is
 	// active), to reconnect its notification stream.
 	OnServer func(target.Target)
+	// OnWorker receives whether this machine is a worker each time that
+	// changes (its own server's notification stream follows it).
+	OnWorker func(joined bool)
 	// OpenAtLogin and SetOpenAtLogin are MyGo's login item.
 	OpenAtLogin    func() bool
 	SetOpenAtLogin func(bool) error
@@ -121,6 +128,7 @@ type Launcher struct {
 	opCancel   context.CancelFunc
 
 	op     sync.Mutex // one ensure at a time
+	w      workerState
 	cbMu   sync.Mutex // orders OnTarget calls with switches
 	notify chan struct{}
 }
@@ -148,6 +156,7 @@ func New(cfg Config) *Launcher {
 	}
 	life, stop := context.WithCancel(context.Background())
 	l := &Launcher{cfg: cfg, t: t, life: life, stop: stop, notify: make(chan struct{}, 1)}
+	l.w.kick = make(chan struct{}, 1)
 	l.target = target.Local("")
 	if cfg.Servers != nil {
 		l.target = cfg.Servers.Active()
@@ -221,13 +230,21 @@ func (l *Launcher) Start() {
 	if l.remote() {
 		go l.probeLocal()
 	}
+	if !l.devMode() {
+		go l.workerLoop()
+	}
 }
 
 // probeLocal learns this machine's socket without starting anything and
-// hands it to OnServer.
+// hands it to OnServer; not while this machine is a worker (the default
+// socket is then the worker's agent gateway, which forwards to its main
+// server).
 func (l *Launcher) probeLocal() {
 	sock := l.cfg.DevSocket
 	if !l.devMode() {
+		if l.refreshWorker(l.life) != nil {
+			return
+		}
 		st, _, _ := l.status(l.life)
 		if st == nil || st.Socket.Path == "" {
 			return
@@ -367,6 +384,9 @@ func (l *Launcher) action(restart bool) error {
 	defer l.op.Unlock()
 	l.update(func(s *State) { s.Busy = true })
 	defer l.update(func(s *State) { s.Busy = false })
+	if l.remote() {
+		l.kickWorker()
+	}
 	l.ensure(restart)
 	return nil
 }
@@ -504,6 +524,14 @@ func (l *Launcher) ensure(restart bool) {
 	info, o := l.readVersion(ctx)
 	if o != nil {
 		l.settle(*o)
+		return
+	}
+	// A worker owns this identity's default socket: this machine's own
+	// server stays off until it leaves.
+	if w := l.refreshWorker(ctx); w != nil {
+		if ctx.Err() == nil {
+			l.settle(workerOutcome(w))
+		}
 		return
 	}
 	verb, bound := "start", l.t.Start

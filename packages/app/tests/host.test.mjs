@@ -10,6 +10,14 @@ import {
   stepNote,
   stepStatus,
   visibleSteps,
+  activeWorker,
+  canRestartWorker,
+  canSetUpWorker,
+  leavePrompt,
+  workerBanner,
+  workerHeadline,
+  workerLine,
+  workerTone,
 } from "../src/lib/host.ts";
 
 const base = {
@@ -30,6 +38,7 @@ const base = {
   serverEpoch: 0,
   busy: false,
   dev: false,
+  worker: null,
 };
 const state = (over) => ({ ...base, ...over });
 const steps = (s) => ["service", "server", "api"].map((k) => stepStatus(s, k));
@@ -167,4 +176,74 @@ test("Test connection rows: reachable, api, identity", () => {
     "api:bad:v3",
     "identity:ok:stage · 1.4.0",
   ]);
+});
+
+const studioTarget = { id: "s-1a2b3c4d", name: "Studio", kind: "remote", url: "http://192.168.1.20:7380" };
+const worker = (over) => ({
+  url: "https://stage.example.com",
+  machineId: 4,
+  serverId: studioTarget.id,
+  serverName: "Studio",
+  status: "online",
+  message: "",
+  fix: "",
+  ...over,
+});
+
+test("activeWorker: only the worker of the active remote", () => {
+  assert.equal(activeWorker(null), null);
+  assert.equal(activeWorker(state({ target: studioTarget })), null);
+  const w = worker();
+  assert.equal(activeWorker(state({ target: studioTarget, worker: w })), w);
+  // This machine's target, another remote, or an unsaved main server: not the active server's worker.
+  assert.equal(activeWorker(state({ worker: w })), null);
+  assert.equal(activeWorker(state({ target: { ...studioTarget, id: "s-other" }, worker: w })), null);
+  assert.equal(activeWorker(state({ target: studioTarget, worker: worker({ serverId: null }) })), null);
+});
+
+test("worker tones, lines and banner follow its status", () => {
+  assert.equal(workerTone("online"), "ok");
+  assert.equal(workerTone("starting"), "run");
+  assert.equal(workerTone("offline"), "idle");
+  for (const s of ["needs_update", "removed", "failed"]) assert.equal(workerTone(s), "bad");
+  assert.equal(workerLine(worker()), "online · machine 4");
+  assert.equal(workerLine(worker({ status: "needs_update", machineId: 12 })), "needs update · machine 12");
+  // Problems only: online and starting stay quiet.
+  assert.equal(workerBanner(null), null);
+  assert.equal(workerBanner(worker()), null);
+  assert.equal(workerBanner(worker({ status: "starting" })), null);
+  assert.equal(workerBanner(worker({ status: "offline" })), "plain");
+  for (const s of ["needs_update", "removed", "failed"]) assert.equal(workerBanner(worker({ status: s })), "bad");
+  assert.equal(workerHeadline(worker({ status: "removed" })), "Studio removed this machine");
+  assert.equal(workerHeadline(worker({ status: "offline" })), "This machine's worker is offline");
+});
+
+test("Restart worker only where it can help", () => {
+  for (const s of ["offline", "failed", "needs_update"]) assert.equal(canRestartWorker(worker({ status: s })), true);
+  for (const s of ["online", "starting", "removed"]) assert.equal(canRestartWorker(worker({ status: s })), false);
+});
+
+test("leave prompt names the server and how this machine gets its server back", () => {
+  const [q, detail] = leavePrompt(worker());
+  assert.equal(q, "Leave Studio?");
+  assert.match(detail, /Studio removes this machine/);
+  assert.match(detail, /switch to This machine/);
+  assert.match(leavePrompt(worker(), true)[1], /server starts again\.$/);
+});
+
+test("Set up harnesses: the active server's worker only, not once removed", () => {
+  assert.equal(canSetUpWorker(worker(), true), true);
+  assert.equal(canSetUpWorker(worker({ status: "offline" }), true), true);
+  assert.equal(canSetUpWorker(worker(), false), false);
+  assert.equal(canSetUpWorker(worker({ status: "removed" }), true), false);
+});
+
+test("worker phase: no primary action; the local entry names the server it serves", () => {
+  assert.equal(primaryAction("worker"), null);
+  const local = { id: "local", name: "This machine", kind: "local", url: "", active: true, needsInput: null };
+  const s = state({ phase: "worker", worker: worker() });
+  assert.deepEqual(serverStatus(local, s), { tone: "idle", note: "worker" });
+  assert.equal(serverWhere(local, s), "this machine · worker of Studio");
+  assert.equal(serverWhere(local, state({ target: studioTarget, worker: worker() })), "this machine · worker of Studio");
+  assert.equal(gateView(s, true), "screen");
 });

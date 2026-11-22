@@ -131,7 +131,7 @@ func withServers(t *testing.T, remoteURL string, active bool, tg *targets) (func
 func noServiceCalls(t *testing.T, cli *fakeCLI, allowStatus bool) {
 	t.Helper()
 	for _, c := range cli.calls() {
-		if c == "" || c == "version --json" || (allowStatus && c == "service status --json") {
+		if c == "" || c == "version --json" || (allowStatus && c == "service status --json") || c == "worker service status --json" {
 			continue
 		}
 		t.Errorf("remote ran %q", c)

@@ -10,7 +10,7 @@ import { Desktop, events } from "./mygo.ts";
 import { desktopClipboard } from "./platform/clipboard.ts";
 import { desktopHost } from "./platform/host.ts";
 import { desktopLinks } from "./platform/links.ts";
-import type { DesktopNative, NativeNotifications, NativeServers } from "./platform/native.ts";
+import type { DesktopNative, NativeNotifications, NativeServers, NativeWorker } from "./platform/native.ts";
 import { desktopNotifications } from "./platform/notifications.ts";
 import { desktopStorage } from "./platform/storage.ts";
 import { desktopTransport } from "./platform/transport.ts";
@@ -52,7 +52,13 @@ const nativeServers: NativeServers = {
   onServers: (listener) => events.serversChanged.on(listener),
 };
 
-const host = desktopHost(native, nativeServers);
+const nativeWorker: NativeWorker = {
+  joinWorker: (link) => Desktop.joinWorker(link),
+  leaveWorker: (local) => Desktop.leaveWorker(local),
+  restartWorker: () => Desktop.restartWorker(),
+};
+
+const host = desktopHost(native, nativeServers, nativeWorker);
 const platform: Platform = {
   transport: desktopTransport(),
   clipboard: desktopClipboard(native),

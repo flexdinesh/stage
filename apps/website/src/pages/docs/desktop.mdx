@@ -31,6 +31,15 @@ A remote server is reached over TCP on a **trusted network with no authenticatio
 
 Each server keeps its own T3 connection, data and pairing. Starting or restarting the server, login startup and server logs apply to this machine only; Open in T3 uses native links for this machine and web links for remote servers.
 
+## This machine as a worker
+
+With a remote server active, Settings > Desktop app > **Join as worker** makes this machine a worker of it: this machine's T3 and OpenCode run that server's tasks, and harness credentials stay on this machine. The remote needs `STAGE_PUBLIC_URL` set (the address workers dial, [Main server and workers](/docs/deploy#main-server-and-workers)); otherwise the app shows the server's message.
+
+- A machine runs its own stage server or a worker, not both. Joining turns this machine's server off (its data stays) and starts the worker service; agents here (`stage`, `stage mcp`) then reach the remote server. Switching to This machine shows that it is a worker, with Leave.
+- Settings > Desktop app shows the worker's state (online, offline, needs update, removed, failed) with Set up harnesses, Restart worker and Leave. A banner appears only when the worker has a problem.
+- Leave removes the machine on the remote server and brings this machine's server back. If the remote can't be reached, you can forget it on this machine only.
+- "Open Stage at login" follows the role: with the worker while joined.
+
 ## Notifications
 
 Native OS notifications come from the app itself, not the web page, so they keep working while the window is closed. They cover **every saved server at once**:
@@ -47,4 +56,4 @@ On Linux, notification clicks work only while the app runs. See also [Notificati
 ## Links and login startup
 
 - `stage://tasks/<n>` and `stage://sessions/<id>` open the app at that page; other web links open in your browser; T3 thread links open the T3 app, else T3 in the browser.
-- Settings > Desktop app > "Open Stage at login" starts the app at login (without a window) and turns on the service's login startup; off turns both off.
+- Settings > Desktop app > "Open Stage at login" starts the app at login (without a window) and turns on the service's login startup (the worker service's while this machine is a worker); off turns both off.

@@ -54,6 +54,36 @@ func (d *Desktop) RestartServer() error {
 	return d.h.l.RestartServer()
 }
 
+// JoinWorker makes this machine a worker of the active remote server with
+// link, a pairing link the page created there: this machine's own Stage
+// server service is uninstalled (its data stays) and the worker service
+// started (docs/desktop.md, Worker).
+func (d *Desktop) JoinWorker(ctx context.Context, link string) error {
+	if d.h.l == nil {
+		return errNotRunning
+	}
+	return d.h.l.JoinWorker(ctx, link)
+}
+
+// LeaveWorker stops this machine's worker and leaves its main server,
+// which removes the machine there; local only deletes the local worker
+// config (the main server is unreachable or already removed it).
+func (d *Desktop) LeaveWorker(ctx context.Context, local bool) error {
+	if d.h.l == nil {
+		return errNotRunning
+	}
+	return d.h.l.LeaveWorker(ctx, local)
+}
+
+// RestartWorker restarts the worker service onto the stage CLI bundled
+// with this app.
+func (d *Desktop) RestartWorker(ctx context.Context) error {
+	if d.h.l == nil {
+		return errNotRunning
+	}
+	return d.h.l.RestartWorker(ctx)
+}
+
 // Diagnostics is a plain-text report for support: versions, identity,
 // service status (without secrets) and the last server log lines.
 func (d *Desktop) Diagnostics(ctx context.Context) string {
@@ -101,8 +131,8 @@ func (d *Desktop) LoginStartup() bool {
 }
 
 // SetLoginStartup turns "Open Stage at login" on or off: the app (hidden)
-// and the Stage service; this machine only (an error while a remote is
-// active).
+// and this machine's service (the worker service while it is a worker);
+// an error while a remote is active and this machine is not its worker.
 func (d *Desktop) SetLoginStartup(ctx context.Context, on bool) error {
 	if d.h.l == nil {
 		return errNotRunning

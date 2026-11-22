@@ -1,5 +1,5 @@
-import type { HostServers, HostServices, HostState } from "@stage/app/platform";
-import { INITIAL_STATE, type DesktopNative, type NativeServers } from "./native.ts";
+import type { HostServers, HostServices, HostState, HostWorkerControl } from "@stage/app/platform";
+import { INITIAL_STATE, type DesktopNative, type NativeServers, type NativeWorker } from "./native.ts";
 
 /** Server switching over the shell's server calls and its servers:changed event. */
 export function desktopServers(native: NativeServers): HostServers {
@@ -14,11 +14,24 @@ export function desktopServers(native: NativeServers): HostServers {
   };
 }
 
+/** This machine as a worker over the shell's worker calls. */
+export function desktopWorker(native: NativeWorker): HostWorkerControl {
+  return {
+    join: (link) => native.joinWorker(link),
+    leave: ({ local }) => native.leaveWorker(local),
+    restart: () => native.restartWorker(),
+  };
+}
+
 /**
  * The connection state store over the shell's state events, plus login startup, navigation and (when the shell
- * has them) server switching.
+ * has them) server switching and the worker.
  */
-export function desktopHost(native: DesktopNative, servers?: NativeServers): HostServices & { current(): HostState } {
+export function desktopHost(
+  native: DesktopNative,
+  servers?: NativeServers,
+  worker?: NativeWorker,
+): HostServices & { current(): HostState } {
   let state = INITIAL_STATE;
   const listeners = new Set<(s: HostState) => void>();
   const set = (next: HostState) => {
@@ -53,6 +66,7 @@ export function desktopHost(native: DesktopNative, servers?: NativeServers): Hos
       set: (enabled) => native.setLoginStartup(enabled),
     },
     ...(servers === undefined ? {} : { servers: desktopServers(servers) }),
+    ...(worker === undefined ? {} : { worker: desktopWorker(worker) }),
     onNavigate(listener) {
       const off = native.onNavigate(listener);
       void native.takeNavigation().then((path) => {

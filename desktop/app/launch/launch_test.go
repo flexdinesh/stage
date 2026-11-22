@@ -20,8 +20,11 @@ import (
 // fakeCLI is a shell script standing in for the bundled stage CLI. Each
 // `service <verb>` prints <verb>.out (or <verb>.<n>.out for its n-th call),
 // <verb>.err to stderr, sleeps <verb>.sleep seconds and exits with
-// <verb>.code; `version --json` prints version.json. Every call is
-// appended to calls.
+// <verb>.code; `worker service <verb>` and `worker <verb>` do the same
+// with worker-<verb>; `version --json` prints version.json. Once a call
+// starting with the line in <verb>.after was made, <verb>.post.* answers
+// instead (state that changes with an action). Every call is appended to
+// calls.
 type fakeCLI struct {
 	t   *testing.T
 	dir string
@@ -33,12 +36,14 @@ d=$(dirname "$0")
 echo "$*" >> "$d/calls"
 case "$1" in
 version) cat "$d/version.json"; exit "$(cat "$d/version.code" 2>/dev/null || echo 0)";;
-service) v=$2;;
+service) v=$2; k="service $v";;
+worker) if [ "$2" = service ]; then v="worker-$3"; k="worker service $3"; else v="worker-$2"; k="worker $2"; fi;;
 *) exit 2;;
 esac
-n=$(grep -c "^service $v" "$d/calls")
+n=$(grep -c "^$k" "$d/calls")
 p="$d/$v"
 [ -f "$d/$v.$n.code" ] && p="$d/$v.$n"
+[ -f "$d/$v.after" ] && grep -q "^$(cat "$d/$v.after")" "$d/calls" && p="$d/$v.post"
 [ -f "$p.sleep" ] && sleep "$(cat "$p.sleep")"
 [ -f "$p.out" ] && cat "$p.out"
 [ -f "$p.err" ] && cat "$p.err" >&2
@@ -72,6 +77,14 @@ func (f *fakeCLI) verb(verb string, n, code int, out string) {
 	}
 	f.write(name+".code", fmt.Sprint(code))
 	f.write(name+".out", out)
+}
+
+// after makes `<verb>` answer code and out once a call starting with
+// trigger was made.
+func (f *fakeCLI) after(verb, trigger string, code int, out string) {
+	f.write(verb+".after", trigger)
+	f.write(verb+".post.code", fmt.Sprint(code))
+	f.write(verb+".post.out", out)
 }
 
 func (f *fakeCLI) calls() []string {
@@ -160,6 +173,7 @@ func fastTiming() Timing {
 		HealthEvery: 50 * time.Millisecond, HealthTimeout: 500 * time.Millisecond,
 		BackoffMin: 20 * time.Millisecond, BackoffMax: 50 * time.Millisecond,
 		ReconnectWindow: 300 * time.Millisecond,
+		WorkerEvery:     50 * time.Millisecond,
 	}
 }
 
@@ -274,7 +288,7 @@ func TestStateJSON(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "target", "epoch", "serverEpoch", "busy", "dev"}
+	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "target", "epoch", "serverEpoch", "busy", "dev", "worker"}
 	if len(m) != len(want) {
 		t.Fatalf("fields %v, want %v", m, want)
 	}

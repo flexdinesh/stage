@@ -6,7 +6,9 @@ Stage server at a time: this machine's over its Unix socket (the default),
 or a saved remote server on a trusted network over TCP ([Servers](#servers)).
 Each server stays the sole owner of its SQLite, T3 connection, scheduling
 and business rules; this machine's per-user service supervises the local
-one ([service.md](service.md)). The desktop owns windows, OS integration
+one ([service.md](service.md)). With a remote active, the desktop can make
+this machine a worker of it, so this machine's harnesses run that server's
+tasks ([Worker](#worker)). The desktop owns windows, OS integration
 and transport. It never opens `stage.db`, holds no business logic and
 never manages a remote server. Browsers keep using TCP.
 Decisions: [ADR 0001](adr/0001-desktop-shell.md).
@@ -18,7 +20,7 @@ Decisions: [ADR 0001](adr/0001-desktop-shell.md).
 | `desktop/app/` | Go module `github.com/flexdinesh/stage/desktop/app` (MyGo v0.9.0). Never imports `server/internal` or the fixture. |
 | `bridge/` | Bridge B: the `mygo://localhost` scheme serves the embedded UI (`dist/`, with a CSP header) and reverse-proxies `/api/*` to the active server (socket or TCP). Request bodies without a `Content-Length` (macOS WKWebView sends none) are forwarded with unknown length. |
 | `target/` | The servers: the local target (implicit) and saved remotes (`servers.json`), each one's transport (no HTTP proxy), Host and base URL. No MyGo import. |
-| `launch/` | Launcher and monitor: ensures the local service through the bundled CLI, checks readiness and API version (socket or TCP), watches health, switches servers, tests a server URL. No MyGo import. |
+| `launch/` | Launcher and monitor: ensures the local service through the bundled CLI, checks readiness and API version (socket or TCP), watches health, switches servers, tests a server URL, and runs this machine's worker (`worker.go`: join, leave, restart, state). No MyGo import. |
 | `nav/` | URL policy: what the webview may load, what goes to the OS, deep links, notification click paths. |
 | `alerts/` | Native notifications: every saved server's notification stream, catch-up and foreground policy, device preferences (`notifications.json`), cleanup, badge, the OS settings opener. No MyGo import. |
 | `main.go`, `shell.go`, `service.go`, `servers.go` | Windows, menus, tray, single instance, close/Quit, login startup, notification clicks, the bound `Desktop` service (server list and switching in `servers.go`) and its events. |
@@ -60,6 +62,7 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 | `conflict` | exit 5 and the terminal server cannot be used | screen with fix and command | Retry |
 | `incompatible` | another API version | blocking screen, also after the app ran | Restart Stage server (remote: Retry once that machine is updated; Switch server) |
 | `unreachable` | remote only: no answer at its URL, or its origin policy refused this app (403); polling continues | screen before the server's first ready (since the switch), banner after | Retry (and Switch server) |
+| `worker` | this machine only: it is a worker of a main server, so its own server is off ([Worker](#worker)) | screen "This machine is a worker of Studio" with the worker's state | Switch to Studio (else Switch server), Leave and use this machine |
 
 "Before the first ready" counts per server: the page gates on `serverEpoch`, so after a switch the app stays unmounted until the new server answers. The screen and the banner offer "Switch server" (a drawer listing the saved servers) whenever more than one is saved; for a remote it sits next to Retry.
 
@@ -106,7 +109,7 @@ Switching to the active server only refreshes its name. Editing the active serve
 
 ### Remote differences
 
-- No service commands: Start/Restart server, "Open Stage at login" and the server logs are this machine's only (`ErrRemote` from the shell; the page hides them for a remote). Diagnostics name the remote and skip `service status` and logs.
+- No service commands: Start/Restart server, "Open Stage at login" and the server logs are this machine's only (`ErrRemote` from the shell; the page hides them for a remote). While this machine is a worker, "Open Stage at login" stays available and acts on the worker service ([Worker](#worker)). Diagnostics name the remote and skip `service status` and logs.
 - Phases: `starting` (server, api), `ready`, `reconnecting`, `unreachable`, `incompatible`. Never `stopped`, `failed`, `unsupported`, `misconfigured` or `conflict`; no foreground banner and no version-skew banner.
 - For T3, the local target opens its native link and a remote target opens its web link. OpenCode uses its configured web client for both targets.
 - Bridge requests carry the remote's Host and no `Cookie`, `Origin` or `Sec-Fetch-*`: the server sees a non-browser client, so its cross-origin checks pass over TCP; the bridge enforces the page origin itself first (a cross-site request, or an unsafe method from another origin, gets 403 without reaching any server).
@@ -116,6 +119,71 @@ Switching to the active server only refreshes its name. Editing the active serve
 ### Test connection
 
 `TestServer(url)` before saving: `GET /api/health` as the bridge would (8 s bound), returning `{reachable, apiVersion, identity, version, error, hint, command}`. A 403 from the server's origin policy is `reachable` with `command: "STAGE_ALLOWED_ORIGINS=<url>"`; no answer explains `--listen`; another API version is an `error`.
+
+## Worker
+
+With a remote server active, Settings, Desktop app can make this machine a
+**worker** of it ([ADR 0002](adr/0002-machines-and-workers.md),
+[runtime.md](runtime.md#worker-process)): this machine's T3 and OpenCode run
+that server's tasks, its agents reach that server through the worker's
+agent gateway, and harness credentials stay here. "This machine" stays the
+default; nothing changes until you join.
+
+**One role per machine.** One identity runs the Stage server or a worker,
+not both ([service.md](service.md#worker-service)): the worker's agent
+gateway owns the identity's default socket, so agents' bare `stage` and
+`stage mcp` reach the main server. Joining therefore turns this machine's
+own server off (its data stays, dormant), and leaving brings it back.
+
+### Join, leave, restart
+
+`HostServices.worker` (`packages/app/src/platform/index.ts`), the bound
+`Desktop` methods `JoinWorker(link)`, `LeaveWorker(local)` and
+`RestartWorker()` (`launch/worker.go`). Every command runs the bundled CLI
+by absolute path.
+
+| Action | Steps |
+| --- | --- |
+| **Join as worker** (remote active, not joined) | The page creates a pairing on the active server (`POST /api/machines/pairings`, as Settings, Machines, Add), so the link uses that server's `STAGE_PUBLIC_URL`; without one its 409 message shows. The host then runs `stage worker join --json <link>`, `stage service uninstall --wait 30s --json` and `stage worker service start --exe <cli> --wait 30s --json`. When the server service cannot be uninstalled (a foreign definition) or no service manager can run the worker (exit 6), the join is undone (`stage worker leave`, else `--local`). A failed worker start keeps the machine joined and shows `failed` with its fix. When the join fails the page revokes the code. Login startup moves to the worker (`stage worker service enable`). |
+| **Leave** (inline confirm, as removing a machine) | `stage worker service uninstall --wait 30s --json`, then `stage worker leave --json`, which removes the machine on the main server (its connections are retired). When that server cannot be told (unreachable), the error shows with "Forget it on this machine only" (`stage worker leave --local --json`; the server keeps the machine as offline until it is removed there). Login startup moves back (`stage service enable`). With this machine's target active, its server starts; with a remote active, nothing local starts. |
+| **Restart worker** (offline, failed, needs update) | `stage worker service restart --exe <cli> --wait 30s --json`, e.g. after an app update changed the bundled version. |
+
+### State
+
+`HostState.worker` (null when not joined) comes from `stage worker service
+status --json` (local only, no call to the main server): at launch, on each
+switch and retry, after each action, and every 10 s while joined. Its
+`serverId` and `serverName` are the saved server at the worker's URL (or the
+active remote whose `publicUrl` it is); otherwise the URL's host.
+
+| Status | When | Marker |
+| --- | --- | --- |
+| `starting` | the worker service is starting | run |
+| `online` | running, channel to the main server up | ok |
+| `offline` | running but not connected (main server unreachable; it reconnects by itself), or the service is stopped | idle |
+| `needs_update` | the main server speaks another API version | bad |
+| `removed` | the main server removed this machine (token revoked; the worker stopped) | bad |
+| `failed` | the service failed, or the service manager is unreachable | bad |
+
+- **Settings, Desktop app.** Not joined, remote active: "Run Studio's tasks
+  on this machine" with Join as worker. Joined: "Worker of Studio" with the
+  marker, `online · machine 4 · <url>` and the message; Set up harnesses
+  (the machine's page on the active server, `/settings/machines/:id`, only
+  when the worker belongs to it and was not removed), Restart worker and Leave. "Open Stage at
+  login" shows while joined, also with a remote active ("starts hidden, with
+  the worker").
+- **Banner.** Problems only, while the active remote is the worker's server
+  and ready: `offline` plain, `needs_update`, `removed` and `failed` bad,
+  with Restart worker (when it helps) and Settings. Online and starting stay
+  quiet.
+- **This machine's target** while joined: the `worker` phase. The launcher
+  never starts, probes or bridges this machine's socket then (it is the
+  gateway, which forwards to the main server), and this machine's
+  notification stream is dropped (its cursor forgotten); leaving restores
+  both. The server list names it `this machine · worker of Studio`.
+- **Diagnostics** add the worker line and `stage worker service status
+  --json` (secrets redacted).
+- A development run (`STAGE_DESKTOP_SOCKET`) has no worker.
 
 ## Window, close and Quit
 
@@ -187,7 +255,7 @@ Missing: defaults (on, no cursors). Version 1 (`{"version":1,"enabled":true,"cur
 
 ## Login startup
 
-Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin` (XDG autostart on Linux, a login item on macOS 13+, a launch agent on macOS 12) and `stage service enable`; off turns both off. A login launch starts the app resident without a window and ensures the service.
+Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin` (XDG autostart on Linux, a login item on macOS 13+, a launch agent on macOS 12) and `stage service enable` (while this machine is a worker, `stage worker service enable`); off turns both off. A login launch starts the app resident without a window and ensures the service.
 
 ## Links
 
@@ -206,7 +274,7 @@ Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin`
 
 ## Host differences (restrained)
 
-Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the Settings "Desktop app" panel, server switching ([Servers](#servers): Settings `SERVERS`, the top-bar server menu with more than one server), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). No service worker and no Web Push: Settings "This device" controls the native notifications (the platform's `notifications` has `channel: "native"`), and the page's `attention` is a no-op.
+Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the Settings "Desktop app" panel (with this machine as a worker, [Worker](#worker)), server switching ([Servers](#servers): Settings `SERVERS`, the top-bar server menu with more than one server), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). No service worker and no Web Push: Settings "This device" controls the native notifications (the platform's `notifications` has `channel: "native"`), and the page's `attention` is a no-op.
 
 ## Identities
 
@@ -225,7 +293,7 @@ App identifiers end in `.desktop` because `io.github.flexdinesh.<id>` is the ser
 ## Develop and package
 
 - `mise run desktop:dev`: builds a `stage-dev` CLI into `.scratch/dev/<branch>/bin`, runs a foreground `stage serve` on a short socket under `$XDG_RUNTIME_DIR/stage-desktopdev/` with data in `.scratch/dev/<branch>/desktop` (`.env.dev`, `T3_FAKE=1` to work without T3), and `go tool mygo dev` with the UI's Vite server on `localhost:5174`, which proxies `/api` to that socket. The dev-only `STAGE_DESKTOP_SOCKET` override skips the bundled CLI and the service (identity and API version come from the dev server's health) and is ignored by `mygo build` builds. No OS service is touched.
-- Preview of every connection state in a browser: `pnpm --filter @stage/desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`, and for a remote `remote-starting`, `unreachable`, `unreachable-refused`, `remote-ready`, `remote-reconnecting`; the fake shell saves this machine, "Studio" and "Lab": switching plays a short connect (Lab stays unreachable) and Test connection of a `.lan` URL answers like a refused hostname).
+- Preview of every connection state in a browser: `pnpm --filter @stage/desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`, and for a remote `remote-starting`, `unreachable`, `unreachable-refused`, `remote-ready`, `remote-reconnecting`, and for the worker `worker-join`, `worker-online`, `worker-offline`, `worker-failed`, `worker-removed`, `local-worker`; the fake shell saves this machine, "Studio" and "Lab": switching plays a short connect (Lab stays unreachable) and Test connection of a `.lan` URL answers like a refused hostname).
 - `mise run dist [TARGETS=host|all]`: a `stage-dev` developer build ([release.md](release.md)). It builds the CLI/server (web UI embedded) per target, copies it to `desktop/app/resources/<os>-<arch>/bin/stage` with `LICENSE` (MyGo merges the darwin pair into a universal binary), runs `go tool mygo build` (the `desktop/app/build/` outputs: per Linux arch a tarball with `install.sh`, a `.deb`, an `.rpm`, a `PKGBUILD` and a `.desktop` file (scheme handler); `<Name>.app` with `CFBundleURLTypes` and `LSMinimumSystemVersion 12.0`), then assembles and verifies the assets in `.scratch/dist/<version>`. `mise run release VERSION=X.Y.Z` is the `stage` build of a clean HEAD. The `.dmg` needs macOS. The app icon ships (see [App icon](#app-icon)); the tray uses a generated ink square. Installing and updating: [install.md](install.md) (Stage Dev from a checkout: [development.md](development.md)).
 - `STAGE_DESKTOP_SELFCHECK=1 <app executable>` prints how the packaged app resolves its bundled CLI (`<resources>/bin/stage`, its `version --json`) and exits before the single-instance lock, windows or the service; release verification runs it.
 - `mise run check` includes `check:desktop` (Go vet, unit tests, the headless integration test); the UI package's tests, typecheck and lint run in `check:web`.
@@ -242,7 +310,7 @@ python3 -c 'import struct,subprocess as s,sys; e=b"".join(t.encode()+struct.pack
 
 ## Verification
 
-See the PR and the plan's execution notes for the latest run. Covered without a webview: bridge policy and streaming (incl. a remote over TCP: Host, stripped `Cookie`/`Origin`/`Sec-Fetch-*`, the bridge's own page-origin check, switch cancels open streams, 503 mapping), the saved server list, launcher remote phases, switching and per-server epochs, launcher states against fake CLIs, URL policy (incl. notification click paths), the `alerts` unit tests against a scripted stream on a temp socket (preferences, first run, cursor and reset, reconnect and backoff, 404, catch-up, replace, foreground, off with badge, denial and recovery, cleanup, click targets, Linux settings command), a full local workflow through the bridge against a real `stage serve` with fake T3 and isolated data (create, start, read, stop, upload, attachment, notification stream, reconnect after a server restart, cancellation, deep link parsing by the CLI, zero TCP listeners), the notification stream integration test (`itest/notifications_test.go`: a real `stage serve`, the real `alerts` service and a recording sink; first run silent, live show and target, foreground, read elsewhere closes, global filter, reopen catch-up, 15 min window, server restart, database reset), multi-server notifications (two servers, badge sum, id collisions, version 1 migration), and `itest/remote_test.go` (`TestDesktopRemote`: a real `stage serve --listen 127.0.0.1:<port>` on its own temp data dir next to a local one; switching both ways, unsafe methods over TCP through the bridge, a stream cut by a switch, notifications from both, Test connection incl. a refused hostname, remote down and back). Not verified here: the webview e2e, real systemd or launchd from the desktop, tray, Dock, Wayland vs X11, real OS notifications, and a real Mac.
+See the PR and the plan's execution notes for the latest run. Covered without a webview: bridge policy and streaming (incl. a remote over TCP: Host, stripped `Cookie`/`Origin`/`Sec-Fetch-*`, the bridge's own page-origin check, switch cancels open streams, 503 mapping), the saved server list, launcher remote phases, switching and per-server epochs, launcher states against fake CLIs, URL policy (incl. notification click paths), the `alerts` unit tests against a scripted stream on a temp socket (preferences, first run, cursor and reset, reconnect and backoff, 404, catch-up, replace, foreground, off with badge, denial and recovery, cleanup, click targets, Linux settings command), a full local workflow through the bridge against a real `stage serve` with fake T3 and isolated data (create, start, read, stop, upload, attachment, notification stream, reconnect after a server restart, cancellation, deep link parsing by the CLI, zero TCP listeners), the notification stream integration test (`itest/notifications_test.go`: a real `stage serve`, the real `alerts` service and a recording sink; first run silent, live show and target, foreground, read elsewhere closes, global filter, reopen catch-up, 15 min window, server restart, database reset), multi-server notifications (two servers, badge sum, id collisions, version 1 migration), and `itest/remote_test.go` (`TestDesktopRemote`: a real `stage serve --listen 127.0.0.1:<port>` on its own temp data dir next to a local one; switching both ways, unsafe methods over TCP through the bridge, a stream cut by a switch, notifications from both, Test connection incl. a refused hostname, remote down and back), the worker launcher against fake CLIs (`launch/worker_test.go`: the worker phase without any local socket or service call, no local probe with a remote active, public URL match, join and its undo paths, leave incl. `--local` and the local server starting again, restart, login startup, status mapping), and `itest/worker_test.go` (`TestDesktopWorker`: a real `stage serve --listen 127.0.0.1:<port>` with `STAGE_PUBLIC_URL` as the remote, a real pairing, `stage worker join`, a real foreground `stage worker run` standing in for the worker service (no systemd in the isolated environment), online, offline, restart, the main server's view of the machine, and `stage worker leave` removing it). Not verified here: the webview e2e, real systemd or launchd from the desktop, tray, Dock, Wayland vs X11, real OS notifications, and a real Mac.
 
 ### Manual notification checks
 
