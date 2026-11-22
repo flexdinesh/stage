@@ -140,7 +140,7 @@ func (r *Rig) StartWorker() {
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.done = cancel, make(chan error, 1)
 	r.mu.Unlock()
-	host := func(id int64) worker.Host {
+	host := func(id int64, _ workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(id, harness.Profile{Kind: harness.ProfileServer}, machine.LocalOps{}))
 		for conn, a := range r.adapters {
 			h.Local().Install(conn, conn, a)

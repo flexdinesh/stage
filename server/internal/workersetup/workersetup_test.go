@@ -1,0 +1,384 @@
+package workersetup_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/opencode"
+	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
+	"github.com/flexdinesh/stage/server/internal/remote"
+	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/worker"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
+	"github.com/flexdinesh/stage/server/internal/workersetup"
+)
+
+// rig is a main server (store, hub, hosts, setup server) and one remote
+// machine's real worker loop whose host composes its connection setup.
+type rig struct {
+	t       *testing.T
+	store   *db.Store
+	hub     *workerchan.Hub
+	set     *machine.Set
+	hosts   *remote.Hosts
+	id      int64
+	cfgPath string
+	srv     *httptest.Server
+	listen  []listen.Addr
+	env     map[string]string
+	fake    *t3.Fake
+	stop    context.CancelFunc
+	done    chan error
+	changes int
+}
+
+func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func newRig(t *testing.T, env map[string]string) *rig {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var temp dbtest.DB
+	store := db.NewStore(temp.Reset(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	p, err := store.CreatePairing(ctx, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := store.RedeemPairing(ctx, p.Code, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &rig{t: t, store: store, id: grant.MachineID, env: env, fake: t3.NewFake()}
+	r.hub = workerchan.NewHub(ctx, workerchan.Options{Version: "test"})
+	r.set = machine.MustSet(machine.NewLocal(db.LocalMachine, harness.Profile{}, nil))
+	reg := harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	conns := func(id int64) []int64 {
+		var ids []int64
+		for _, c := range store.ActiveConnections() {
+			if c.Machine == id {
+				ids = append(ids, c.ID)
+			}
+		}
+		return ids
+	}
+	r.hosts = remote.NewHosts(r.set, r.hub, conns, nil, quiet())
+	r.hosts.SetSetup(remote.SetupHooks{
+		Kinds: []string{t3.Kind, opencode.Kind}, Active: store.ActiveID,
+		Changed: func(int64, string, string) { r.changes++ },
+	})
+	remote.ServeSetup(r.hub, func(id int64) machine.StorePorts { return machine.NewStorePorts(store.OnMachine(id), reg) }, nil)
+	r.hosts.Join(r.id)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
+		r.hub.ServeStream(w, req, r.id, "test", quiet())
+	})
+	mux.HandleFunc("POST /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
+		r.hub.ServePost(w, req, r.id)
+	})
+	r.srv = httptest.NewServer(mux)
+	r.cfgPath = filepath.Join(t.TempDir(), "worker", worker.ConfigFile)
+	short, err := os.MkdirTemp("", "ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	if r.listen, err = listen.ParseList("unix:" + filepath.Join(short, "gw.sock")); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.SaveConfig(r.cfgPath, worker.Config{Schema: worker.ConfigSchema, URL: r.srv.URL, MachineID: r.id, Label: "laptop", Token: "stage_mt_test", JoinedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		r.stopWorker()
+		cancel()
+		r.srv.Close()
+	})
+	r.startWorker()
+	return r
+}
+
+func (r *rig) startWorker() {
+	r.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.stop, r.done = cancel, make(chan error, 1)
+	host := func(id int64, call workerchan.Upcall) worker.Host {
+		h := remote.NewHost(machine.NewLocal(id, harness.Profile{Kind: harness.ProfileServer}, machine.LocalOps{}))
+		workersetup.Attach(workersetup.Options{
+			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath)},
+			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Logger: quiet(),
+		})
+		return h
+	}
+	done := r.done
+	go func() {
+		done <- worker.Run(ctx, worker.RunOptions{ConfigPath: r.cfgPath, Logger: quiet(), HTTP: r.srv.Client(), Listen: r.listen,
+			MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, Host: host})
+	}()
+	r.wait("setup composed and described", func() bool {
+		m := r.machine()
+		if !m.Online() || !m.Described() {
+			return false
+		}
+		_, err := m.Connectors()[t3.Kind].Status(context.Background(), false)
+		return err == nil
+	})
+}
+
+func (r *rig) stopWorker() {
+	if r.stop == nil {
+		return
+	}
+	r.stop()
+	r.stop = nil
+	select {
+	case err := <-r.done:
+		if err != nil {
+			r.t.Errorf("worker: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		r.t.Error("worker did not stop")
+	}
+	r.wait("machine offline", func() bool { return !r.machine().Online() })
+}
+
+func (r *rig) machine() *remote.Machine {
+	m, ok := r.hosts.Machine(r.id)
+	if !ok {
+		r.t.Fatal("remote machine not hosted")
+	}
+	return m
+}
+
+func (r *rig) connector(kind string) harness.Connector {
+	c, ok := r.machine().Connector(kind)
+	if !ok {
+		r.t.Fatalf("no %s connector", kind)
+	}
+	return c
+}
+
+func (r *rig) wait(what string, ok func() bool) {
+	r.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			r.t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (r *rig) openCodeCred() config.OpenCodeCredential {
+	r.t.Helper()
+	var c config.OpenCodeCredential
+	if err := worker.NewCredentialStore(r.cfgPath).Get(opencode.Kind, &c); err != nil {
+		r.t.Fatal(err)
+	}
+	return c
+}
+
+func TestRemoteT3PairCreatesTheMachinesConnectionAndInstallsItsAdapter(t *testing.T) {
+	r := newRig(t, map[string]string{})
+	ctx := t.Context()
+	if err := r.fake.Unpair(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.machine().Describe(ctx)
+	c := r.connector(t3.Kind)
+	if sum := c.Summary(ctx); sum.ConnectionID != 0 || sum.Configured {
+		t.Fatalf("fresh machine summary %+v", sum)
+	}
+	if id := r.store.ActiveID(r.id, t3.Kind); id != 0 {
+		t.Fatalf("T3 connection %d before pairing", id)
+	}
+	st, err := c.Status(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := st.Fields[0]; f.ID != "url" || f.Locked || f.Source != "default" {
+		t.Fatalf("url field %+v", f)
+	}
+	res, err := c.Run(ctx, t3.ActionPair, json.RawMessage(`{"code":"ABCD-1234"}`))
+	if err != nil || res.Replaced != 0 {
+		t.Fatalf("pair: %+v %v", res, err)
+	}
+	id := r.store.ActiveID(r.id, t3.Kind)
+	if id == 0 || r.store.ConnectionMachine(id) != r.id {
+		t.Fatalf("pairing created connection %d on machine %d", id, r.store.ConnectionMachine(id))
+	}
+	r.wait("adapter on the new connection", func() bool {
+		_, ok := r.machine().Adapter(id)
+		return ok && r.machine().Described()
+	})
+	if sum := c.Summary(ctx); sum.ConnectionID != id || !sum.Configured || !sum.Connected {
+		t.Fatalf("paired summary %+v", sum)
+	}
+	if h := r.machine().Adapters()[id].Health(ctx); !h.Available {
+		t.Fatalf("adapter health %+v", h)
+	}
+	if r.changes == 0 {
+		t.Fatal("setup change hook not run")
+	}
+	// The local machine's T3 setup is untouched.
+	if local := r.store.ActiveID(db.LocalMachine, t3.Kind); local == id {
+		t.Fatal("paired the local machine")
+	}
+}
+
+func TestRemoteEnvironmentLocksTheMachinesSettings(t *testing.T) {
+	r := newRig(t, map[string]string{"T3_URL": "http://t3.laptop:3773", "OPENCODE_URL": "http://127.0.0.1:1"})
+	ctx := t.Context()
+	st, err := r.connector(t3.Kind).Status(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := st.Fields[0]; !f.Locked || f.Source != "env" || f.Value != "http://t3.laptop:3773" {
+		t.Fatalf("T3 url field %+v", f)
+	}
+	_, err = r.connector(t3.Kind).Configure(ctx, json.RawMessage(`{"url":"http://other:3773"}`))
+	var conflict *db.ConflictError
+	if !errors.As(err, &conflict) || !strings.Contains(conflict.Msg, "T3_URL") {
+		t.Fatalf("locked url change: %v", err)
+	}
+	oc, err := r.connector(opencode.Kind).Status(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range oc.Fields {
+		if f.ID == "endpoint" && (!f.Locked || f.Source != "env") {
+			t.Fatalf("OpenCode endpoint field %+v", f)
+		}
+	}
+}
+
+func TestRemoteOpenCodeCredentialsStayOnTheWorker(t *testing.T) {
+	r := newRig(t, map[string]string{})
+	ctx := t.Context()
+	fake := opencodetest.New(t, "")
+	c := r.connector(opencode.Kind)
+	if id := r.store.ActiveID(r.id, opencode.Kind); id != 0 {
+		t.Fatalf("OpenCode connection %d before connecting", id)
+	}
+	if _, err := c.Run(ctx, opencode.ActionPair, json.RawMessage(`{"link":"`+fake.Link()+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	id := r.store.ActiveID(r.id, opencode.Kind)
+	if id == 0 {
+		t.Fatal("connecting created no OpenCode connection on the machine")
+	}
+	setup, cred, verified, err := r.store.OpenCodeSettings(ctx, r.id)
+	if err != nil || setup.Endpoint != fake.URL || setup.Auth != config.OpenCodeAuthPaired || verified != fake.URL {
+		t.Fatalf("main record %+v %q %v", setup, verified, err)
+	}
+	if cred != (config.OpenCodeCredential{}) {
+		t.Fatalf("the main server stored the credential: %+v", cred)
+	}
+	if got := r.openCodeCred(); got.Password == "" || !fake.Accepts(got.Password) {
+		t.Fatalf("worker credential %+v", got)
+	}
+	info, err := os.Stat(worker.NewCredentialStore(r.cfgPath).Path())
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials file %v %v", info, err)
+	}
+	r.wait("adapter installed", func() bool { _, ok := r.machine().Adapter(id); return ok })
+	if sum := c.Summary(ctx); !sum.Configured || sum.ConnectionID != id {
+		t.Fatalf("summary %+v", sum)
+	}
+
+	// A restarted worker reconnects with the credential from its file.
+	r.stopWorker()
+	if _, err := c.Status(ctx, false); !isUnavailable(err, remote.CodeMachineOffline) {
+		t.Fatalf("offline status: %v", err)
+	}
+	if sum := c.Summary(ctx); sum.Connected || sum.ConnectionID != id {
+		t.Fatalf("offline summary %+v", sum)
+	}
+	r.startWorker()
+	st, err := c.Status(ctx, true)
+	if err != nil || st.State != "connected" {
+		t.Fatalf("after restart %+v %v", st, err)
+	}
+
+	if err := c.Disconnect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.openCodeCred(); got.Password != "" {
+		t.Fatalf("disconnect kept the credential %+v", got)
+	}
+}
+
+func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
+	r := newRig(t, map[string]string{})
+	ctx := t.Context()
+	local := r.store.ActiveID(db.LocalMachine, t3.Kind)
+	if local == 0 {
+		t.Fatal("no local T3 connection")
+	}
+	// A worker-side port calling as the remote machine.
+	var p workersetup.Ports
+	p.Creds = worker.NewCredentialStore(filepath.Join(t.TempDir(), "w", worker.ConfigFile))
+	p.Call = func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		env, err := r.hub.Deliver(ctx, r.id, sessionOf(t, r), workerchan.Envelope{ID: "t1", Kind: kind, Body: raw})
+		if err != nil {
+			return nil, err
+		}
+		if env.Error != nil {
+			return nil, &workerchan.RemoteError{Code: env.Error.Code, Message: env.Error.Message}
+		}
+		return env.Body, nil
+	}
+	if _, err := p.GetHarnessConnection(ctx, local); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("read another machine's connection: %v", err)
+	}
+	if err := p.SetConnectionIdentity(ctx, local, "x", "x"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("stamped another machine's connection: %v", err)
+	}
+	if _, _, _, err := p.ConnectionEvidence(ctx, local); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("read another machine's evidence: %v", err)
+	}
+	if err := p.SetT3URL(ctx, "http://laptop:3773"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := r.store.GetConnection(ctx, db.LocalMachine); c.T3URL != nil {
+		t.Fatal("set the local machine's T3 URL")
+	}
+	if c, _ := r.store.GetConnection(ctx, r.id); c.T3URL == nil || *c.T3URL != "http://laptop:3773" {
+		t.Fatalf("remote T3 URL %+v", c.T3URL)
+	}
+}
+
+// sessionOf is the remote machine's live channel session id (from a
+// worker-side call's point of view the hub needs it).
+func sessionOf(t *testing.T, r *rig) string {
+	t.Helper()
+	id := r.hub.SessionID(r.id)
+	if id == "" {
+		t.Fatal("no live session")
+	}
+	return id
+}
+
+func isUnavailable(err error, code string) bool {
+	var u *remote.UnavailableError
+	return errors.As(err, &u) && u.Code == code
+}

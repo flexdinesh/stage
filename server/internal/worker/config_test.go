@@ -122,12 +122,46 @@ func TestLeaveLocalWithoutServer(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("config deleted after a failed leave")
 	}
+	creds := NewCredentialStore(path)
+	if err := creds.Set("k", map[string]string{"password": "secret"}); err != nil {
+		t.Fatal(err)
+	}
 	res, err := Leave(context.Background(), LeaveOptions{ConfigPath: path, Local: true})
 	if err != nil || res.Removed {
 		t.Fatalf("local leave %+v %v", res, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("config kept")
+	}
+	if _, err := os.Stat(creds.Path()); !os.IsNotExist(err) {
+		t.Fatal("harness credentials kept after leave")
+	}
+}
+
+func TestCredentialStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker", ConfigFile)
+	s := NewCredentialStore(path)
+	type cred struct{ Token string }
+	var a cred
+	if err := s.Get("a", &a); err != nil || a.Token != "" {
+		t.Fatalf("missing file: %+v %v", a, err)
+	}
+	if err := s.Set("a", cred{Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("b", cred{Token: "pw"}); err != nil {
+		t.Fatal(err)
+	}
+	var b cred
+	if err := s.Get("a", &a); err != nil || a.Token != "tok" {
+		t.Fatalf("a %+v %v", a, err)
+	}
+	if err := s.Get("b", &b); err != nil || b.Token != "pw" {
+		t.Fatalf("b %+v %v", b, err)
+	}
+	info, err := os.Stat(s.Path())
+	if err != nil || info.Mode().Perm() != 0o600 || filepath.Dir(s.Path()) != Dir(path) {
+		t.Fatalf("%v %v", info, err)
 	}
 }
 

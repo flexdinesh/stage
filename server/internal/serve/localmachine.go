@@ -13,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -87,4 +88,32 @@ func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.
 	m.SetConnector(t3.Kind, t3setup.NewConnector(m.setup, progress))
 	m.SetConnector(opencode.Kind, opencodesetup.NewConnector(openCode))
 	return nil
+}
+
+// remoteSetupHooks connect remote machines' connectors to this server: the
+// connected kinds every worker sets up, the active connection from the
+// store, the full sync on a T3 status, and a sync after a setup change
+// (as onPaired does for the local machine).
+func remoteSetupHooks(store *db.Store, reg *harness.Registry, progress func(connection int64) t3setup.SyncProgress, kick func()) remote.SetupHooks {
+	var kinds []string
+	for _, d := range reg.All() {
+		if d.Hosting == harness.Connected {
+			kinds = append(kinds, d.Kind)
+		}
+	}
+	return remote.SetupHooks{
+		Kinds:  kinds,
+		Active: store.ActiveID,
+		Decorate: func(_ int64, kind string, st *harness.Status) {
+			if kind != t3.Kind || progress == nil {
+				return
+			}
+			d, ok := st.Details.(map[string]any)
+			if !ok {
+				return
+			}
+			d["sync"] = progress(st.ConnectionID)
+		},
+		Changed: func(int64, string, string) { kick() },
+	}
 }

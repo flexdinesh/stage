@@ -129,7 +129,7 @@ func TestOpenCodeEnvironmentManaged(t *testing.T) {
 		{"POST", "/api/harnesses/opencode/actions/pair", `{"link":"http://127.0.0.1:1/auth/connect/x"}`},
 		{"DELETE", "/api/harnesses/opencode/connection", ""},
 	} {
-		if code, body := e.raw(r.method, r.path, r.body); code != 409 || !strings.Contains(body["error"].(string), "managed by the Stage server environment") {
+		if code, body := e.raw(r.method, r.path, r.body); code != 409 || !strings.Contains(body["error"].(string), "managed by this machine's Stage environment") {
 			t.Errorf("%s %s: %d %v", r.method, r.path, code, body)
 		}
 	}

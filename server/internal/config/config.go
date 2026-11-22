@@ -55,22 +55,9 @@ func Load(listenFlags []string) (Config, error) { return LoadFrom(os.Getenv, lis
 
 // LoadFrom is Load over getenv.
 func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) {
-	cfg := Config{
-		OpenCode:     OpenCodeSettings{Endpoint: getenv("OPENCODE_URL"), BrowserEndpoint: getenv("OPENCODE_PUBLIC_URL"), WebClient: getenv("OPENCODE_WEB_URL"), Username: getenv("OPENCODE_USERNAME"), Password: getenv("OPENCODE_PASSWORD")},
-		T3URL:        envOr(getenv, "T3_URL", DefaultT3URL),
-		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
-		T3Bin:        getenv("T3_BIN"),
-		PublicURL:    getenv("STAGE_PUBLIC_URL"),
-		T3ClientName: buildinfo.Identity,
-		T3Fake:       getenv("T3_FAKE") == "1",
-		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
-	}
-	cfg.T3PublicURL = envOr(getenv, "T3_PUBLIC_URL", cfg.T3URL)
-	cfg.T3URLFromEnv, cfg.T3PublicURLFromEnv = getenv("T3_URL") != "", getenv("T3_PUBLIC_URL") != ""
+	cfg := HarnessFrom(getenv)
+	cfg.PublicURL = getenv("STAGE_PUBLIC_URL")
 	dev := getenv("STAGE_ENV") == "dev"
-	if dev {
-		cfg.T3ClientName += " dev"
-	}
 	var err error
 	if cfg.Listen, err = loadListen(getenv, listenFlags); err != nil {
 		return Config{}, err
@@ -94,6 +81,34 @@ func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) 
 		return Config{}, fmt.Errorf("STAGE_ENV=dev refuses the default (production) data dir %s; set STAGE_DATA_DIR or use `mise run dev`", defaultDir)
 	}
 	return cfg, nil
+}
+
+// HarnessEnvKeys are the harness settings a process takes from its
+// environment (HarnessFrom): the main server's for its local machine, a
+// worker's for its machine. A key that is set locks that setting.
+var HarnessEnvKeys = []string{
+	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED", "T3_BIN",
+	"OPENCODE_URL", "OPENCODE_PUBLIC_URL", "OPENCODE_WEB_URL", "OPENCODE_USERNAME", "OPENCODE_PASSWORD",
+}
+
+// HarnessFrom is the harness part of a Config (HarnessEnvKeys, and
+// STAGE_ENV=dev for the T3 client name) from getenv.
+func HarnessFrom(getenv func(string) string) Config {
+	cfg := Config{
+		OpenCode:     OpenCodeSettings{Endpoint: getenv("OPENCODE_URL"), BrowserEndpoint: getenv("OPENCODE_PUBLIC_URL"), WebClient: getenv("OPENCODE_WEB_URL"), Username: getenv("OPENCODE_USERNAME"), Password: getenv("OPENCODE_PASSWORD")},
+		T3URL:        envOr(getenv, "T3_URL", DefaultT3URL),
+		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
+		T3Bin:        getenv("T3_BIN"),
+		T3ClientName: buildinfo.Identity,
+		T3Fake:       getenv("T3_FAKE") == "1",
+		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
+	}
+	cfg.T3PublicURL = envOr(getenv, "T3_PUBLIC_URL", cfg.T3URL)
+	cfg.T3URLFromEnv, cfg.T3PublicURLFromEnv = getenv("T3_URL") != "", getenv("T3_PUBLIC_URL") != ""
+	if getenv("STAGE_ENV") == "dev" {
+		cfg.T3ClientName += " dev"
+	}
+	return cfg
 }
 
 func loadListen(getenv func(string) string, flags []string) ([]listen.Addr, error) {

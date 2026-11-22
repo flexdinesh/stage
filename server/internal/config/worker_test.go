@@ -19,6 +19,27 @@ func TestParseWorkerEnv(t *testing.T) {
 	}
 }
 
+// worker.env may set this machine's harness settings; HarnessFrom reads
+// them (locking each one set) without the server's settings.
+func TestWorkerEnvHarnessSettings(t *testing.T) {
+	vals, err := ParseWorkerEnv(strings.NewReader("T3_URL=http://t3.laptop:3773\nOPENCODE_URL=http://127.0.0.1:4096\nT3_BIN=/opt/t3\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := HarnessFrom(func(k string) string { return vals[k] })
+	if cfg.T3URL != "http://t3.laptop:3773" || !cfg.T3URLFromEnv || cfg.T3PublicURL != cfg.T3URL || cfg.T3Bin != "/opt/t3" || cfg.OpenCode.Endpoint != "http://127.0.0.1:4096" {
+		t.Fatalf("%+v", cfg)
+	}
+	if empty := HarnessFrom(func(string) string { return "" }); empty.T3URL != DefaultT3URL || empty.T3URLFromEnv || empty.OpenCode.Endpoint != "" {
+		t.Fatalf("defaults %+v", empty)
+	}
+	for _, k := range HarnessEnvKeys {
+		if !strings.Contains(WorkerEnvTemplate, k) && k != "T3_FAKE" && k != "T3_FAKE_SEED" {
+			t.Errorf("template does not mention %s", k)
+		}
+	}
+}
+
 func TestWorkerListen(t *testing.T) {
 	for v, want := range map[string]int{"": 1, "unix": 1, "unix, 127.0.0.1:7381": 2} {
 		addrs, err := ParseWorkerListen(v)

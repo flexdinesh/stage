@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -10,31 +11,51 @@ import (
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
+// machineJSON is the machine in a harness list: its /api/machines shape
+// plus its hosting profile.
 type machineJSON struct {
-	db.Machine
+	machineInfoJSON
 	Profile harness.Profile `json:"profile"`
 }
 
-// harnessJSON is a descriptor plus whether it can run on this machine.
+// harnessJSON is a descriptor plus whether it can run on the machine.
 type harnessJSON struct {
 	harness.Descriptor
 	execution.Availability
-	// Connectable: this server has connection setup for the kind
-	// (/api/harnesses/{kind}/status and friends).
+	// Connectable: the machine has connection setup for the kind
+	// (.../harnesses/{kind}/status and friends).
 	Connectable bool `json:"connectable"`
 }
 
-// listHarnesses is GET /api/harnesses: the harness kinds this server knows,
-// their policies and copy, and which ones this machine can run.
+// harnessMachine is the {id} path value's machine (none: the local
+// machine, the /api/harnesses alias); 404 when unknown or removed.
+func (s *server) harnessMachine(r *http.Request) (db.MachineInfo, error) {
+	id := db.LocalMachine
+	if r.PathValue("id") != "" {
+		var err error
+		if id, err = pathID(r); err != nil {
+			return db.MachineInfo{}, err
+		}
+	}
+	m, err := s.Store.GetMachineInfo(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		return m, fmt.Errorf("%w: machine %d not found", db.ErrNotFound, id)
+	}
+	return m, err
+}
+
+// listHarnesses is GET /api/harnesses (the local machine) and GET
+// /api/machines/{id}/harnesses: the harness kinds this server knows, their
+// policies and copy, and which ones the machine can run and set up.
 func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
-	m, err := s.Store.GetMachine(r.Context(), db.LocalMachine)
+	m, err := s.harnessMachine(r)
 	if err != nil {
 		return err
 	}
-	// The local machine's hosting profile (its host in the machine set).
+	// The machine's hosting profile (its host in the machine set).
 	var profile harness.Profile
-	if lm, ok := s.Sync.Machines().Get(db.LocalMachine); ok {
-		profile = lm.Profile()
+	if hm, ok := s.Sync.Machines().Get(m.ID); ok {
+		profile = hm.Profile()
 	}
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
@@ -53,10 +74,10 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 		if d.Setup.Actions == nil {
 			d.Setup.Actions = []harness.Action{}
 		}
-		_, connectable := s.Connectors.Get(db.LocalMachine, d.Kind)
+		_, connectable := s.connectors().Get(m.ID, d.Kind)
 		out = append(out, harnessJSON{Descriptor: d, Availability: profile.Allows(d), Connectable: connectable})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"machine": machineJSON{Machine: m, Profile: profile}, "harnesses": out})
+	writeJSON(w, http.StatusOK, map[string]any{"machine": machineJSON{machineInfoJSON: s.toMachineJSON(m), Profile: profile}, "harnesses": out})
 	return nil
 }
 
@@ -69,16 +90,21 @@ type connectionStatusJSON struct {
 	Replaced *db.HarnessConnection `json:"replaced,omitempty"`
 }
 
-// connector is the {kind} path value's descriptor and connector: 404 for an
-// unknown kind, 409 for a kind with no connection setup here.
+// connector is the {kind} path value's descriptor and connector on the
+// {id} machine (none: the local machine): 404 for an unknown kind or
+// machine, 409 for a kind with no connection setup there.
 func (s *server) connector(r *http.Request) (harness.Descriptor, harness.Connector, error) {
+	m, err := s.harnessMachine(r)
+	if err != nil {
+		return harness.Descriptor{}, nil, err
+	}
 	d, ok := s.registry().Lookup(r.PathValue("kind"))
 	if !ok {
 		return d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
 	}
-	c, ok := s.Connectors.Get(db.LocalMachine, d.Kind)
+	c, ok := s.connectors().Get(m.ID, d.Kind)
 	if !ok {
-		return d, nil, db.Conflict("%s has no connection setup on this server.", d.Name)
+		return d, nil, db.Conflict("%s has no connection setup on %s.", d.Name, m.Label)
 	}
 	return d, c, nil
 }

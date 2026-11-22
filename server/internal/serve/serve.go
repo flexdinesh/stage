@@ -253,6 +253,21 @@ func Run(ctx context.Context, o Options) error {
 		releases.Resync()
 		schedules.Resync()
 	}, logger)
+	// Remote connection setup: each worker runs its machine's connectors;
+	// the main server proxies them and answers their setup ports from its
+	// record (never storing harness credentials).
+	progress := func(connection int64) t3setup.SyncProgress {
+		p := syncSvc.Progress(connection)
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+	}
+	hosts.SetSetup(remoteSetupHooks(store, harnesses, progress, syncSvc.Kick))
+	remote.ServeSetup(channels, func(machineID int64) machine.StorePorts {
+		return machine.NewStorePorts(store.OnMachine(machineID), harnesses)
+	}, func(_ int64, sw db.Switch) {
+		syncSvc.ConnectionsChanged(sw.Old, sw.New)
+		releases.Resync()
+		schedules.Resync()
+	})
 	remotes, err := store.ListMachines(ctx)
 	if err != nil {
 		return err
@@ -262,8 +277,7 @@ func Run(ctx context.Context, o Options) error {
 			hosts.Join(m.ID)
 		}
 	}
-	connectors, err := machines.Connectors(harnesses)
-	if err != nil {
+	if _, err := machines.Connectors(harnesses); err != nil {
 		return err
 	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
@@ -284,7 +298,14 @@ func Run(ctx context.Context, o Options) error {
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
-		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup, Connectors: connectors,
+		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup,
+		LiveConnectors: func() harness.Connectors {
+			c, err := machines.Connectors(harnesses)
+			if err != nil {
+				logger.Error("connectors", "err", err)
+			}
+			return c
+		},
 		Harnesses: harnesses, Channels: channels, Machines: hosts,
 		MCP: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHandler.ServeHTTP(w, r) }),
 	})
