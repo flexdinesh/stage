@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "rea
 import { useApi } from "../platform/context.tsx";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES, type Attachment } from "../api/types.ts";
 import { IconClose, IconImage } from "./icons.tsx";
-import { Button, cx, errorText } from "./ui.tsx";
+import { Button, IconButton, InlineError, Meta, cx, errorText } from "./ui.tsx";
 
 /** One image in an editable set: uploaded (`attachment`), uploading, or failed (`error`). */
 interface ImageItem {
@@ -207,14 +207,14 @@ export function ImageDropzone({
                 />
               ) : null}
               {disabled ? null : (
-                <button
-                  type="button"
-                  aria-label={`Remove ${it.name}`}
+                <IconButton
+                  small
+                  variant="secondary"
+                  label={`Remove ${it.name}`}
+                  icon={IconClose}
                   onClick={() => set.remove(it.key)}
-                  className="absolute -top-1.5 -right-1.5 flex size-[18px] items-center justify-center border border-line-strong bg-surface text-muted hover:text-fg"
-                >
-                  <IconClose size={10} />
-                </button>
+                  className="absolute -top-1.5 -right-1.5"
+                />
               )}
             </li>
           ))}
@@ -236,17 +236,17 @@ export function ImageDropzone({
           <IconImage size={12} />
           Add image
         </Button>
-        <span className="font-mono text-meta-sm text-muted">
+        <Meta small>
           {set.items.length === 0 ? "or drop PNG, JPEG, GIF, WebP · 10 MB each" : `${set.items.length}/${MAX_IMAGES}`}
-        </span>
+        </Meta>
       </div>
-      {set.notice === null ? null : <p className="text-meta text-bad">{set.notice}</p>}
+      {set.notice === null ? null : <InlineError>{set.notice}</InlineError>}
       {set.items
         .filter((it) => it.error !== null)
         .map((it) => (
-          <p key={it.key} className="text-meta text-bad">
+          <InlineError key={it.key}>
             {it.name}: {it.error}
-          </p>
+          </InlineError>
         ))}
     </div>
   );

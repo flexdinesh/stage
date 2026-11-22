@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Panel, Combobox } from "./ui.tsx";
+import { Button, Drawer, ErrorText, Field, Input, Muted, Panel, Combobox } from "./ui.tsx";
 
 export function SharedPaths() {
   const api = useApi();
@@ -36,10 +36,10 @@ export function SharedPaths() {
         </Button>
       }
     >
-      <p className="text-small text-muted">
+      <Muted>
         Map a harness directory to the same files on the Stage server to match Git worktrees during
         binding.
-      </p>
+      </Muted>
       {paths.data?.paths.map((p) => (
         <div
           key={p.connectionId + p.harnessRoot}

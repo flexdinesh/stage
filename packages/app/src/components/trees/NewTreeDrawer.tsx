@@ -7,7 +7,7 @@ import { useApi } from "../../platform/context.tsx";
 import { moveItem } from "../../lib/tasks.ts";
 import { treeMembers, type TreeShape } from "../../lib/trees.ts";
 import { IconChevronDown, IconChevronUp } from "../icons.tsx";
-import { Button, Drawer, ErrorText, Field, Input, Segmented } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, FieldGroup, IconButton, IdTag, Input, Meta, Row, Segmented } from "../ui.tsx";
 
 
 const SHAPES: { value: TreeShape; label: string }[] = [
@@ -46,9 +46,9 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
   const blocked = title.trim() === "" || order.length === 0;
   const footer = (
     <>
-      <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted md:text-right">
+      <Meta small className="min-w-0 flex-1 md:text-right">
         {title.trim() === "" ? "required: title" : shape === "chain" ? `${order.length} in a chain` : `${order.length} roots`}
-      </span>
+      </Meta>
       <Button variant="primary" busy={create.isPending} disabled={blocked} onClick={() => create.mutate()}>
         Create tree
       </Button>
@@ -59,55 +59,53 @@ export function NewTreeDrawer({ tasks, onClose, onCreated }: { tasks: readonly T
     <Drawer title={`New tree from ${tasks.length}`} onClose={onClose} footer={footer}>
       <div className="flex flex-col gap-4">
         <Field label="Title">{(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}</Field>
-        <div className="flex min-w-0 flex-col items-start gap-1.5">
-          <span className="label-caps">Shape</span>
-          <Segmented label="Shape" options={SHAPES} value={shape} onChange={setShape} />
-          <p className="font-mono text-meta text-muted">
-            {shape === "parallel" ? "Every task is a root: none waits on another." : "Each task needs the one above it, so they run one after another."}
-          </p>
-        </div>
+        <FieldGroup
+          start
+          label="Shape"
+          hint={shape === "parallel" ? "Every task is a root: none waits on another." : "Each task needs the one above it, so they run one after another."}
+        >
+          <div>
+            <Segmented label="Shape" options={SHAPES} value={shape} onChange={setShape} />
+          </div>
+        </FieldGroup>
         <ol aria-label="Tasks" className="border border-line">
           {order.map((t, i) => (
-            <li key={t.id} className="flex min-h-11 items-center gap-2 border-b border-line px-3 py-1.5 last:border-b-0 md:min-h-9">
-              {shape === "chain" ? <span className="w-4 shrink-0 font-mono text-meta text-muted tabular">{i + 1}</span> : null}
+            <Row key={t.id} className="flex min-h-11 items-center gap-2 md:min-h-9">
+              {shape === "chain" ? <Meta className="w-4 shrink-0 tabular">{i + 1}</Meta> : null}
               <span className="min-w-0 flex-1 truncate text-small">
-                <span className="mr-1.5 font-mono text-meta text-muted tabular">#{t.id}</span>
+                <IdTag id={t.id} className="mr-1.5" />
                 {t.title}
               </span>
               {shape === "chain" ? (
                 <span className="flex shrink-0">
-                  <Button
-                    variant="ghost"
+                  <IconButton
                     small
-                    aria-label={`Move #${t.id} up`}
+                    label={`Move #${t.id} up`}
+                    icon={IconChevronUp}
                     disabled={i === 0}
                     onClick={() => setOrder((o) => moveItem(o, i, -1))}
-                    className="w-control-sm px-0"
-                  >
-                    <IconChevronUp size={12} />
-                  </Button>
-                  <Button
-                    variant="ghost"
+                  />
+                  <IconButton
                     small
-                    aria-label={`Move #${t.id} down`}
+                    label={`Move #${t.id} down`}
+                    icon={IconChevronDown}
                     disabled={i === order.length - 1}
                     onClick={() => setOrder((o) => moveItem(o, i, 1))}
-                    className="w-control-sm px-0"
-                  >
-                    <IconChevronDown size={12} />
-                  </Button>
+                  />
                 </span>
               ) : null}
-            </li>
+            </Row>
           ))}
         </ol>
-        <div className="flex min-w-0 flex-col items-start gap-1.5">
-          <span className="label-caps">Start mode</span>
-          <Segmented label="Start mode" options={MODES} value={mode} onChange={setMode} />
-          <p className="font-mono text-meta text-muted">
-            {mode === "auto" ? "A task starts on its own once every need is completed. Roots wait for you." : "A task reads ready when its needs are completed; you start it."}
-          </p>
-        </div>
+        <FieldGroup
+          start
+          label="Start mode"
+          hint={mode === "auto" ? "A task starts on its own once every need is completed. Roots wait for you." : "A task reads ready when its needs are completed; you start it."}
+        >
+          <div>
+            <Segmented label="Start mode" options={MODES} value={mode} onChange={setMode} />
+          </div>
+        </FieldGroup>
         <ErrorText error={create.error} />
       </div>
     </Drawer>

@@ -14,7 +14,7 @@ import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeGraph } from "../components/trees/TreeGraph.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { Alert, Button, Chip, ErrorText, Input, PageHeader, Panel, Segmented, SkeletonBar, buttonClass, cx } from "../components/ui.tsx";
+import { Alert, Button, Chip, EmptyState, ErrorText, Hint, Input, PageHeader, Panel, Segmented, SkeletonBar, buttonClass, cx } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
 import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
@@ -305,9 +305,10 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
         }
       />
       {tree.closedAt === null || !closed ? null : (
-        <p className="-mt-2 mb-4 font-mono text-meta text-muted" title={dateTime(tree.closedAt)}>
-          {tree.status === "archived" ? "Archived" : "Marked done"} {shortDate(tree.closedAt)}. Remaining tasks won&apos;t start.
-        </p>
+        <Hint className="-mt-2 mb-4">
+          {tree.status === "archived" ? "Archived" : "Marked done"} <time dateTime={tree.closedAt} title={dateTime(tree.closedAt)}>{shortDate(tree.closedAt)}</time>.
+          Remaining tasks won&apos;t start.
+        </Hint>
       )}
 
       <div className="flex flex-col gap-3.5">
@@ -375,7 +376,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             actions={<Segmented label="Tree layout" small options={LAYOUT_OPTIONS} value={layout} onChange={setLayout} />}
           >
             {tree.tasks.length === 0 ? (
-              <p className="p-3 text-small text-muted">No tasks remain in this tree. Its notes and history are retained.</p>
+              <EmptyState inset>No tasks remain in this tree. Its notes and history are retained.</EmptyState>
             ) : layout === "graph" ? (
               <TreeGraph tree={tree} selected={picked} onSelect={(id) => setPicked(picked === id ? null : id)} />
             ) : (

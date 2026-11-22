@@ -6,7 +6,7 @@ import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { RowCopyLink } from "../StageLinks.tsx";
-import { Button, Chip, Skeleton, SkeletonBar, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
+import { Button, Chip, InlineError, MetaLine, Row, RowList, Skeleton, SkeletonBar, TextLink, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
 const CELL_LIMIT = 30;
@@ -48,9 +48,10 @@ function TreeWhen({ tree, inline = false }: { tree: TreeSummary; inline?: boolea
   const created = <span title={`Created ${dateTime(tree.createdAt)}`}>created {shortDate(tree.createdAt)}</span>;
   if (inline)
     return (
-      <p className="font-mono text-meta text-muted tabular lg:hidden">
-        {active} · {created}
-      </p>
+      <MetaLine className="tabular lg:hidden">
+        {active}
+        {created}
+      </MetaLine>
     );
   return (
     <p className="flex flex-col items-end font-mono text-meta whitespace-nowrap text-muted tabular max-lg:hidden">
@@ -70,9 +71,9 @@ const TREE_TITLE_WIDTHS = ["w-48", "w-36", "w-56"];
 export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <Skeleton label="Loading trees">
-      <ul>
+      <RowList>
         {Array.from({ length: count }, (_, i) => (
-          <li key={i} className="flex items-stretch border-b border-line last:border-b-0">
+          <Row key={i} bare className="flex items-stretch">
             <span className="w-9 shrink-0" />
             <div className="min-w-0 flex-1 [&>div]:pl-0">
               <div className={TREE_ROW_GRID}>
@@ -97,9 +98,9 @@ export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
                 </div>
               </div>
             </div>
-          </li>
+          </Row>
         ))}
-      </ul>
+      </RowList>
     </Skeleton>
   );
 }
@@ -124,9 +125,9 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
     <div className={cx("group/row", TREE_ROW_GRID)}>
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <Link to={to} className="min-w-0 text-body font-medium break-words hover:underline">
+          <TextLink to={to} className="min-w-0 text-body font-medium break-words">
             {tree.title}
-          </Link>
+          </TextLink>
           {tree.settledAt === null ? null : (
             <Chip tone="ok" dot title={`Settled ${dateTime(tree.settledAt)}`}>
               settled {relativeTime(tree.settledAt)}
@@ -135,9 +136,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
           {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
         </div>
         <p className="mt-0.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</p>
-        <p className="mt-0.5 font-mono text-meta text-muted tabular">
-          {treeMeta(tree)}
-        </p>
+        <MetaLine className="mt-0.5 tabular">{treeMeta(tree)}</MetaLine>
         <TreeWhen tree={tree} inline />
       </div>
 
@@ -177,9 +176,9 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
       </div>
 
       {error === null ? null : (
-        <p className="order-4 col-span-2 truncate font-mono text-meta text-bad md:col-span-3" title={error}>
+        <InlineError truncate className="order-4 col-span-2 md:col-span-3">
           {error}
-        </p>
+        </InlineError>
       )}
     </div>
   );

@@ -1,6 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 import type { Acceptance, AcceptanceRequest, AcceptedEvidence, HarnessConnection, Task } from "../api/types.ts";
 import { useScopeMachineId } from "../api/harnessScope.tsx";
 import { useConnections, useHarnesses, useInvalidateWork, useSetAutoComplete } from "../api/queries.ts";
@@ -12,7 +11,27 @@ import { MAX_NOTE_BYTES, noteBytes, noteRequest } from "../lib/journal.ts";
 import { isActive, statusChips, type StatusChip } from "../lib/tasks.ts";
 import { IconArrowRight } from "./icons.tsx";
 import { statusChipView, taskStateLabel } from "./StateBadge.tsx";
-import { Alert, Button, Checkbox, Chip, Drawer, ErrorText, Field, Panel, QueryState, Textarea, cx } from "./ui.tsx";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Chip,
+  ChoiceRow,
+  Drawer,
+  EmptyState,
+  ErrorText,
+  ExternalLink,
+  Field,
+  Hint,
+  InlineError,
+  Muted,
+  Panel,
+  QueryState,
+  SubHeading,
+  TextLink,
+  Textarea,
+  cx,
+} from "./ui.tsx";
 
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 
@@ -20,20 +39,20 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
   const earlier = e.runId === null || e.replyRunId === null || e.runId !== e.replyRunId;
   return <div className="flex min-w-0 flex-col gap-3">
     <p className="text-small">Execution at capture: {taskStateLabel(e.executionState)}.</p>
-    <p className="font-mono text-meta text-muted">{e.observedAt === null ? "Execution observation unavailable." : `Cached execution observation: ${dateTime(e.observedAt)}.`} Later harness activity may have occurred.</p>
-    {e.reply === null || e.reply.trim() === "" ? <p className="text-small text-muted">Final reply missing. No reply was available in Stage.</p> : <>
+    <Hint>{e.observedAt === null ? "Execution observation unavailable." : `Cached execution observation: ${dateTime(e.observedAt)}.`} Later harness activity may have occurred.</Hint>
+    {e.reply === null || e.reply.trim() === "" ? <Muted>Final reply missing. No reply was available in Stage.</Muted> : <>
       {earlier ? <Alert>Reply belongs to an earlier or unverified run. It is not a verified current-run result.</Alert> : null}
       <Suspense fallback={<p className="whitespace-pre-wrap break-words">{e.reply}</p>}><ReplyMarkdown text={e.reply} /></Suspense>
-      {e.replyTruncated ? <p className="font-mono text-meta text-muted">Reply excerpt truncated at capture.</p> : null}
+      {e.replyTruncated ? <Hint>Reply excerpt truncated at capture.</Hint> : null}
     </>}
     <div className="border-t border-line pt-3 text-small">
-      <Link to={`/tasks/${e.taskId}?view=notes`} className="underline">Task #{e.taskId} journal</Link>
-      <p className="font-mono text-meta text-muted">{e.journalThroughId === 0 ? "No journal entries at capture." : `Journal context through entry #${e.journalThroughId}.`}</p>
-      {e.treeId === null ? null : <Link to={`/trees/${e.treeId}?view=notes`} className="underline">Tree #{e.treeId} journal</Link>}
+      <TextLink to={`/tasks/${e.taskId}?view=notes`} variant="rest">Task #{e.taskId} journal</TextLink>
+      <Hint>{e.journalThroughId === 0 ? "No journal entries at capture." : `Journal context through entry #${e.journalThroughId}.`}</Hint>
+      {e.treeId === null ? null : <TextLink to={`/trees/${e.treeId}?view=notes`} variant="rest">Tree #{e.treeId} journal</TextLink>}
       {e.branch === null ? null : <p className="font-mono text-meta break-all">Branch: {e.branch}</p>}
       {/* Snapshots captured before sessions carried a connection keep only the thread id. */}
-      {(e.session?.externalSessionId ?? e.threadId) === null ? <p className="text-muted">No execution reference.</p> : <p className="font-mono text-meta break-all">Session: {e.session?.externalSessionId ?? e.threadId}</p>}
-      {e.artifacts.length === 0 ? <p className="text-muted">No artifact links captured.</p> : <ul className="mt-2 space-y-1">{e.artifacts.map((link) => <li key={link.url}><a href={link.url} target="_blank" rel="noopener noreferrer" className="break-all underline">{link.repository || link.url}{link.number > 0 ? ` #${link.number}` : ""}</a></li>)}</ul>}
+      {(e.session?.externalSessionId ?? e.threadId) === null ? <Muted>No execution reference.</Muted> : <p className="font-mono text-meta break-all">Session: {e.session?.externalSessionId ?? e.threadId}</p>}
+      {e.artifacts.length === 0 ? <Muted>No artifact links captured.</Muted> : <ul className="mt-2 space-y-1">{e.artifacts.map((link) => <li key={link.url}><ExternalLink href={link.url} className="break-all">{link.repository || link.url}{link.number > 0 ? ` #${link.number}` : ""}</ExternalLink></li>)}</ul>}
     </div>
   </div>;
 }
@@ -42,8 +61,8 @@ export function AcceptedResult({ acceptance, current, harness }: { acceptance: A
   const descriptor = useHarnesses().descriptor(harness);
   return <Panel title={current ? "Accepted result" : "Previous accepted result"} meta={`#${acceptance.id} · ${relativeTime(acceptance.acceptedAt)}`}>
     <div className="flex flex-col gap-3">
-      <p className="text-small text-muted">{provenanceText(acceptance.provenance, descriptor)}</p>
-      {acceptance.note === "" ? null : <section><h3 className="label-caps mb-2">Acceptance note</h3><p className="whitespace-pre-wrap break-words text-small">{acceptance.note}</p></section>}
+      <Muted>{provenanceText(acceptance.provenance, descriptor)}</Muted>
+      {acceptance.note === "" ? null : <section><SubHeading title="Acceptance note" className="mb-1" /><p className="whitespace-pre-wrap break-words text-small">{acceptance.note}</p></section>}
       <Evidence evidence={acceptance.evidence} />
     </div>
   </Panel>;
@@ -88,10 +107,10 @@ export function CompletionDrawer({ task, reopen, to, onClose }: { task: Task; re
       <StateChange task={task} to={to} />
       <QueryState isPending={preview.isPending} error={preview.error}>
         {p === undefined ? null : <>
-          {reopen ? <p className="text-small">Remove current acceptance. Previous results stay in the journal and accepted-result history. This does not start execution.</p> : <><Evidence evidence={p.evidence} /><Field label="Acceptance note (optional)">{(id) => <Textarea id={id} value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder="Why you accept this work" />}</Field>{tooLong ? <p className="text-small text-bad">Keep the note under 16 KiB.</p> : null}</>}
+          {reopen ? <p className="text-small">Remove current acceptance. Previous results stay in the journal and accepted-result history. This does not start execution.</p> : <><Evidence evidence={p.evidence} /><Field label="Acceptance note (optional)">{(id) => <Textarea id={id} value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder="Why you accept this work" />}</Field>{tooLong ? <InlineError>Keep the note under 16 KiB.</InlineError> : null}</>}
           {task.treeStatus !== null && task.treeStatus !== "open" ? <Alert>The tree stays closed. Reopen the tree separately to resume scheduling.</Alert> : null}
-          <section className="border-t border-line pt-3"><h3 className="label-caps mb-2">Dependent tasks</h3>
-            {p.dependents.length === 0 ? <p className="text-small text-muted">No dependent tasks.</p> : <ul className="divide-y divide-line">{p.dependents.map((d) => <li key={d.taskId} className="py-2 text-small"><Link to={`/tasks/${d.taskId}`} className="underline">#{d.taskId} {d.title}</Link><p className="text-muted">{d.claimed ? "Already claimed or run. Existing work and accepted inputs stay unchanged." : reopen ? "Blocked until this task is completed again." : d.startMode === "auto" ? "Starts automatically when every prerequisite is completed and the tree is open." : "Becomes ready when every prerequisite is completed; you start it."}</p></li>)}</ul>}
+          <section className="border-t border-line pt-3"><SubHeading title="Dependent tasks" className="mb-1" />
+            {p.dependents.length === 0 ? <EmptyState>No dependent tasks.</EmptyState> : <ul className="divide-y divide-line">{p.dependents.map((d) => <li key={d.taskId} className="py-2 text-small"><TextLink to={`/tasks/${d.taskId}`} variant="rest">#{d.taskId} {d.title}</TextLink><Muted>{d.claimed ? "Already claimed or run. Existing work and accepted inputs stay unchanged." : reopen ? "Blocked until this task is completed again." : d.startMode === "auto" ? "Starts automatically when every prerequisite is completed and the tree is open." : "Becomes ready when every prerequisite is completed; you start it."}</Muted></li>)}</ul>}
           </section>
           {!reopen && p.blockedReason !== "" ? <Alert>{p.blockedReason}</Alert> : null}
         </>}
@@ -128,11 +147,10 @@ export function AutoCompleteToggle({ harness, className }: { harness: HarnessCon
   if (connection === undefined || closure === undefined) return null;
   return (
     <div className={cx("flex min-w-0 flex-col gap-0.5", className)} aria-busy={save.isPending}>
-      <label className="-mx-1.5 flex min-h-11 cursor-pointer items-center gap-3 px-1.5 transition-colors duration-150 hover:bg-panel md:min-h-8">
-        <Checkbox checked={connection.autoComplete} aria-describedby={hintId} onChange={(e) => save.mutate({ id: connection.id, on: e.target.checked })} />
-        <span className="text-small text-fg">{closure.setting}</span>
-      </label>
-      <p id={hintId} className="font-mono text-meta text-muted">Only successful runs. Change the task's state to undo it.</p>
+      <ChoiceRow control={<Checkbox checked={connection.autoComplete} aria-describedby={hintId} onChange={(e) => save.mutate({ id: connection.id, on: e.target.checked })} />}>
+        {closure.setting}
+      </ChoiceRow>
+      <Hint id={hintId}>Only successful runs. Change the task's state to undo it.</Hint>
       <ErrorText error={save.error} />
     </div>
   );

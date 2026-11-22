@@ -13,7 +13,7 @@ import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
+import { Alert, Button, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
@@ -145,13 +145,13 @@ export function T3UrlEditor({ status }: { status: T3Status }) {
   });
   if (status.t3UrlSource === "env") {
     return (
-      <div className="flex flex-col gap-1.5">
-        <span className="label-caps">T3 URL</span>
-        <div className="flex min-h-10 items-center border border-line bg-panel px-2.5 md:min-h-8">
-          <code className="font-mono text-detail break-all text-fg">{status.t3Url}</code>
-        </div>
-        <p className="font-mono text-meta text-muted">set by T3_URL{copy.on}</p>
-      </div>
+      <Field label="T3 URL" hint={`set by T3_URL${copy.on}`}>
+        {(id) => (
+          <output id={id} className="flex min-h-control items-center border border-line bg-panel px-2.5">
+            <code className="font-mono text-detail break-all text-fg">{status.t3Url}</code>
+          </output>
+        )}
+      </Field>
     );
   }
   const url = draft.trim();
@@ -219,7 +219,7 @@ export function DisconnectT3({ status }: { status: T3Status }) {
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-        {availability === "locked" ? <span className="font-mono text-meta text-muted">renewed by T3_ADMIN_TOKEN{copy.on}</span> : null}
+        {availability === "locked" ? <Hint>renewed by T3_ADMIN_TOKEN{copy.on}</Hint> : null}
         <Button small variant="danger" disabled={availability === "locked" || confirm} onClick={() => setConfirm(true)}>
           Disconnect
         </Button>
@@ -423,7 +423,7 @@ function StatusCard({ status }: { status: T3Status }) {
     >
       <div className="flex flex-col gap-3">
         <Details>
-          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <span className="text-bad">{status.probeError ?? "not reachable"}</span>)}</Detail>
+          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <InlineError>{status.probeError ?? "not reachable"}</InlineError>)}</Detail>
           <Detail label="T3 URL">{status.t3Url}</Detail>
           <Detail label="Public URL">{status.publicUrl}</Detail>
           <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
@@ -434,7 +434,7 @@ function StatusCard({ status }: { status: T3Status }) {
           </Detail>
           <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
           <Detail label="Last error">
-            {status.lastError === null ? "-" : <span className="text-bad">{status.lastError}</span>}
+            {status.lastError === null ? "-" : <InlineError>{status.lastError}</InlineError>}
           </Detail>
         </Details>
         <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />

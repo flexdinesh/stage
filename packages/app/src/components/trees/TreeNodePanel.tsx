@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState, type ReactNode } from "react";
-import { Link } from "react-router";
 import { useInvalidateWork } from "../../api/queries.ts";
 import { useNewTask } from "../NewTask.tsx";
 import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "../../api/types.ts";
@@ -11,7 +10,7 @@ import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconArrowRight, IconChainLink, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
-import { Button, ErrorText, Panel, Segmented, Combobox } from "../ui.tsx";
+import { Button, EmptyState, ErrorText, Hint, IconButton, IdTag, MetaLine, Muted, Panel, Segmented, Combobox, SubHeading, TextButton, TextLink, cx, rowClass } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeAction, NodeChip } from "./TreeNode.tsx";
 
@@ -25,11 +24,8 @@ const MODE_OPTIONS: { value: ModeChoice; label: string }[] = [
 
 function Section({ label, meta, children }: { label: string; meta?: ReactNode; children: ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2 border-b border-line px-3 py-3 last:border-b-0">
-      <h3 className="label-caps">
-        {label}
-        {meta === undefined ? null : <span className="ml-1.5 tracking-normal tabular">· {meta}</span>}
-      </h3>
+    <section className={cx(rowClass, "flex min-w-0 flex-col gap-2")}>
+      <SubHeading title={label} {...(meta === undefined ? {} : { meta: <span className="tabular">{meta}</span> })} />
       {children}
     </section>
   );
@@ -37,23 +33,23 @@ function Section({ label, meta, children }: { label: string; meta?: ReactNode; c
 
 /** A member line: `#id` and title (selects that node, else opens the task), with an optional trailing control. */
 function MemberLine({ task, onSelect, trailing }: { task: Task; onSelect?: ((id: number) => void) | undefined; trailing?: ReactNode }) {
-  const cls = "flex min-w-0 flex-1 items-baseline gap-1.5 text-left text-small hover:underline";
+  const cls = "flex min-w-0 flex-1 items-baseline gap-1.5 text-small";
   const label = (
     <>
-      <span className="font-mono text-meta text-muted tabular">#{task.id}</span>
+      <IdTag id={task.id} />
       <span className="min-w-0 truncate">{task.title}</span>
     </>
   );
   return (
     <li className="flex min-h-8 items-center gap-2">
       {onSelect === undefined ? (
-        <Link to={`/tasks/${task.id}`} className={cls}>
+        <TextLink to={`/tasks/${task.id}`} className={cx(cls, "text-left")}>
           {label}
-        </Link>
+        </TextLink>
       ) : (
-        <button type="button" onClick={() => onSelect(task.id)} className={cls}>
+        <TextButton onClick={() => onSelect(task.id)} className={cls}>
           {label}
-        </button>
+        </TextButton>
       )}
       {trailing}
     </li>
@@ -88,23 +84,21 @@ export function TreeNodePanel({
       flush
       actions={
         <>
-          <Link
+          <TextLink
             to={`/tasks/${task.id}`}
             aria-label={`Open task #${task.id}`}
-            className="inline-flex min-h-7 items-center gap-1 px-1.5 font-mono text-meta text-fg hover:underline"
+            className="inline-flex min-h-7 items-center gap-1 px-1.5 font-mono text-meta text-fg"
           >
             Open
             <IconArrowRight size={12} />
-          </Link>
-          <Button variant="ghost" small onClick={onClose} aria-label="Close task panel">
-            <IconClose size={14} />
-          </Button>
+          </TextLink>
+          <IconButton small label="Close task panel" icon={IconClose} onClick={onClose} />
         </>
       }
     >
-      <div className="flex min-w-0 flex-col gap-1.5 border-b border-line px-3 py-3">
+      <div className={cx(rowClass, "flex min-w-0 flex-col gap-1.5")}>
         <p className="text-body font-medium break-words">{task.title}</p>
-        <p className="font-mono text-meta text-muted">{task.projectTitle}</p>
+        <MetaLine>{task.projectTitle}</MetaLine>
       </div>
       <Section label="State">
         <StateControl task={task} tree={tree} action={<NodeAction task={task} pending={[]} review={false} />} />
@@ -176,7 +170,7 @@ export function TreeNodeEditor({
     <>
       <Section label="Needs" meta={needs.length}>
         {needs.length === 0 ? (
-          <p className="text-small text-muted">{editable ? "None. A root: runs in parallel, starts when you start it." : "None."}</p>
+          <EmptyState>{editable ? "None. A root: runs in parallel, starts when you start it." : "None."}</EmptyState>
         ) : (
           <ul className="flex flex-col">
             {needs.map((n) => (
@@ -188,17 +182,13 @@ export function TreeNodeEditor({
                   <>
                     <NodeChip task={n} />
                     {editable ? (
-                        <Button
-                          variant="ghost"
+                        <IconButton
                           small
-                          aria-label={`Remove need #${n.id}`}
-                          title={`Remove need #${n.id}`}
+                          label={`Remove need #${n.id}`}
+                          icon={IconClose}
                           disabled={setNeeds.isPending}
                           onClick={() => setNeeds.mutate(task.needs.filter((id) => id !== n.id))}
-                          className="w-control-sm px-0"
-                        >
-                          <IconClose size={12} />
-                        </Button>
+                        />
                     ) : null}
                   </>
                 }
@@ -209,15 +199,13 @@ export function TreeNodeEditor({
         {editable ? (
           <NeedsPicker candidates={candidates} disabled={setNeeds.isPending} onAdd={(id) => setNeeds.mutate([...task.needs, id])} />
         ) : (
-          <p className="font-mono text-meta text-muted">
-            {closed ? "Reopen the tree to change needs." : "Needs change only while it is in backlog."}
-          </p>
+          <Hint>{closed ? "Reopen the tree to change needs." : "Needs change only while it is in backlog."}</Hint>
         )}
       </Section>
 
       <Section label="Dependents" meta={dependents.length}>
         {dependents.length === 0 ? (
-          <p className="text-small text-muted">Nothing runs after it yet.</p>
+          <EmptyState>Nothing runs after it yet.</EmptyState>
         ) : (
           <ul className="flex flex-col">
             {dependents.map((d) => (
@@ -237,18 +225,14 @@ export function TreeNodeEditor({
                 <IconPlus size={12} />
                 New task
               </Button>
-              <p id={newHintId} className="font-mono text-meta text-muted">
-                Create a new task that waits for #{task.id}.
-              </p>
+              <Hint id={newHintId}>Create a new task that waits for #{task.id}.</Hint>
             </div>
             <div className="flex flex-col gap-1">
               <Button small aria-describedby={existingHintId} className="w-full justify-start" onClick={() => setLinking(true)}>
                 <IconChainLink />
                 Existing task
               </Button>
-              <p id={existingHintId} className="font-mono text-meta text-muted">
-                Pick one from any project. It moves into this tree and waits for #{task.id}.
-              </p>
+              <Hint id={existingHintId}>Pick one from any project. It moves into this tree and waits for #{task.id}.</Hint>
             </div>
           </div>
         )}
@@ -266,10 +250,10 @@ export function TreeNodeEditor({
             onChange={(m) => update.mutate({ startMode: m === "inherit" ? null : m })}
           />
         </fieldset>
-        <p className="font-mono text-meta text-muted">
+        <Hint>
           {mode === "inherit" ? `Tree is ${tree.startMode}. ` : ""}
           {startModeCaption(task)}
-        </p>
+        </Hint>
       </Section>
 
       ) : null}
@@ -277,7 +261,7 @@ export function TreeNodeEditor({
       {!editable || task.needs.length === 0 ? null : (
         <Section label="Worktree base">
           {w.type !== "worktree" ? (
-            <p className="text-small text-muted">Runs at the project root, so there is no base to pick.</p>
+            <Muted>Runs at the project root, so there is no base to pick.</Muted>
           ) : (
             <>
               <Combobox
@@ -297,18 +281,18 @@ export function TreeNodeEditor({
                   ...bases.map((b) => ({ value: String(b.id), label: `#${b.id}'s branch` })),
                 ]}
               />
-              <p className="font-mono text-meta text-muted">
+              <Hint>
                 {bases.length === 0
                   ? "No eligible predecessor. Choose the stable base explicitly."
                   : "An unavailable predecessor blocks launch. Choose the stable base explicitly to continue."}
-              </p>
+              </Hint>
             </>
           )}
         </Section>
       )}
 
       {!editable || task.needs.length === 0 ? null : (
-        <div className="border-b border-line px-3 py-2">
+        <div className={rowClass}>
           <HandoffToggle
             checked={task.handoff}
             disabled={!editable || update.isPending}

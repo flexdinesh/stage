@@ -1,6 +1,6 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import {
   keys,
@@ -12,12 +12,34 @@ import {
   useHarnesses,
 } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, WaitingSession } from "../api/types.ts";
-import { dateTime, relativeTime } from "../lib/format.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { reconcileToasts } from "../lib/notification-toasts.ts";
-import { IconBell, IconChevronDown, IconClose } from "./icons.tsx";
+import { IconBell, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
-import { AppButton, Button, Chip, Drawer, ErrorText, Muted, QueryState, cx, errorText, toneClass } from "./ui.tsx";
+import {
+  AppButton,
+  Button,
+  Chip,
+  DisclosureChevron,
+  Drawer,
+  EmptyState,
+  ErrorText,
+  Hint,
+  IconButton,
+  InlineError,
+  Marker,
+  Meta,
+  PanelHeader,
+  QueryState,
+  RelTime,
+  Row,
+  RowList,
+  TextLink,
+  cx,
+  errorText,
+  needEdgeClass,
+  toneClass,
+} from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 const TOAST_MS = 8000;
@@ -43,9 +65,9 @@ function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => 
   return (
     <>
       {error === null ? null : (
-        <span className="min-w-0 basis-full truncate text-right font-mono text-meta-sm text-bad" title={error}>
+        <InlineError truncate className="min-w-0 basis-full text-right">
           {error}
-        </span>
+        </InlineError>
       )}
       <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()} title={`Start task #${taskId}`}>
         Start
@@ -253,24 +275,22 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
       onBlur={() => setPaused(false)}
       className={cx(
         "toast-in pointer-events-auto flex flex-col gap-1 border border-line-strong bg-surface py-2 pr-3",
-        sticky ? "border-l-2 border-l-need pl-[11px]" : "pl-3",
+        sticky ? cx(needEdgeClass(true), "pl-[11px]") : "pl-3",
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <Link to={notificationPath(n)} onClick={onDismiss} title={n.title} className="min-w-0 truncate text-body font-medium hover:underline">
+        <TextLink to={notificationPath(n)} onClick={onDismiss} title={n.title} className="min-w-0 truncate text-body font-medium">
           {n.title}
-        </Link>
-        <Button variant="ghost" small onClick={onDismiss} aria-label="Dismiss notification" className="-my-1 -mr-1.5 w-6 shrink-0 px-0">
-          <IconClose />
-        </Button>
+        </TextLink>
+        <IconButton variant="ghost" small onClick={onDismiss} label="Dismiss notification" icon={IconClose} className="-my-1 -mr-1.5" />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <NotificationEventBadge event={n.event} />
-          <span className="min-w-0 truncate font-mono text-meta text-muted">
+          <Meta className="min-w-0 truncate">
             {project === "" ? "" : `${project} · `}
-            <span className="tabular">{relativeTime(n.createdAt)}</span>
-          </span>
+            <RelTime at={n.createdAt} className="tabular" />
+          </Meta>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
@@ -406,34 +426,31 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const note = pushFooterNote(push.data, notifications?.channel);
   const footer =
     note === null ? null : (
-      <p className="font-mono text-meta text-muted">
+      <Hint>
         {note} ·{" "}
-        <Link to="/settings" onClick={onClose} className="text-fg underline underline-offset-2">
+        <TextLink to="/settings" onClick={onClose} variant="rest" className="text-fg">
           Settings
-        </Link>
-      </p>
+        </TextLink>
+      </Hint>
     );
 
   return (
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
       <QueryState isPending={inbox.isPending} error={items.length === 0 ? inbox.error : null}>
         {items.length === 0 && silent.length === 0 ? (
-          <Muted>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</Muted>
+          <EmptyState>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</EmptyState>
         ) : (
           <div className="flex flex-col gap-2">
             {silent.length === 0 ? null : <section className="border border-line">
-              <h3 className="label-caps flex min-h-7 items-center justify-between border-b border-line bg-panel px-3 py-1">Waiting in T3 <span className="tabular text-muted">{silent.length}</span></h3>
-              <ul>{silent.map((session) => <li key={`${session.connectionId}:${session.externalSessionId}`} className="border-b border-line last:border-b-0"><SilentWaitingRow session={session} /></li>)}</ul>
+              <PanelHeader as="h3" title="Waiting in T3" meta={<span className="tabular">{silent.length}</span>} />
+              <RowList>{silent.map((session) => <Row bare key={`${session.connectionId}:${session.externalSessionId}`}><SilentWaitingRow session={session} /></Row>)}</RowList>
             </section>}
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
-                <h3 className="label-caps flex min-h-7 items-center justify-between gap-3 border-b border-line bg-panel px-3 py-1 text-fg">
-                  {g.label}
-                  <span className="tabular text-muted">{g.items.length}</span>
-                </h3>
-                <ul>
+                <PanelHeader as="h3" title={g.label} meta={<span className="tabular">{g.items.length}</span>} />
+                <RowList>
                   {g.items.map((n) => (
-                    <li key={n.key} className="border-b border-line last:border-b-0">
+                    <Row bare key={n.key}>
                       <NotificationRow
                         n={n}
                         unread={isUnread(n)}
@@ -441,9 +458,9 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
                         onToggle={() => toggleHistory(n.key)}
                         onNavigate={onClose}
                       />
-                    </li>
+                    </Row>
                   ))}
-                </ul>
+                </RowList>
               </section>
             ))}
             {inbox.hasNextPage ? (
@@ -483,18 +500,18 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   const ready = startable(n);
   const changed = n.currentState !== null && n.currentState !== n.event && !ready;
   return (
-    <div className={cx("border-l-2 px-3 py-2", waiting ? "border-l-need" : "border-l-transparent")}>
+    <div className={cx(needEdgeClass(waiting), "px-3 py-row")}>
       <div className="flex items-center justify-between gap-2.5">
         <div className="flex min-w-0 items-center gap-2">
           {unread ? <span className="size-1.5 shrink-0 bg-fg" role="img" aria-label="Unread" /> : null}
-          <Link
+          <TextLink
             to={notificationPath(n)}
             onClick={onNavigate}
             title={n.title}
-            className={cx("min-w-0 truncate text-body hover:underline", unread ? "font-semibold" : "font-medium")}
+            className={cx("min-w-0 truncate text-body", unread ? "font-semibold" : "font-medium")}
           >
             {n.title}
-          </Link>
+          </TextLink>
         </div>
         <div className="shrink-0">
           {ready ? (
@@ -510,9 +527,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-meta text-muted">
           <span className="flex min-w-0 items-center gap-2">
             {project === "" ? null : <><span className="min-w-0 truncate">{project}</span><MetaDot /></>}
-            <span title={dateTime(n.createdAt)} className="shrink-0 tabular">
-              {relativeTime(n.createdAt)}
-            </span>
+            <RelTime at={n.createdAt} className="shrink-0 tabular" />
           </span>
           {changed || n.currentState === null ? (
             <>
@@ -536,9 +551,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
               aria-controls={historyId}
               aria-label={`${expanded ? "Hide" : "Show"} notification history for ${n.title}`}
             >
-              <span className={cx("inline-flex", !expanded && "-rotate-90")}>
-                <IconChevronDown size={14} />
-              </span>
+              <DisclosureChevron open={expanded} size={14} />
               <span className="font-mono tabular">{n.eventCount} updates</span>
             </Button>
           ) : null}
@@ -578,22 +591,16 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
   return (
     <div className="mt-2 flex flex-col gap-2">
       <QueryState isPending={history.isPending} error={unique.length === 0 ? history.error : null}>
-        {unique.length === 0 ? <Muted>No notifications in the last 30 days.</Muted> : (
+        {unique.length === 0 ? <EmptyState>No notifications in the last 30 days.</EmptyState> : (
           <ol aria-label="Notification history, newest first" className="ml-[3px] w-[calc(100%-3px)] border-l border-line-strong pl-4">
             {unique.map((event) => (
               <li
                 key={event.id}
                 className={cx(toneClass(notificationEventTone(event.event)), "relative flex items-baseline justify-between gap-3 py-1")}
               >
-                <span aria-hidden="true" className="absolute top-2.5 -left-[19.5px] size-1.5 bg-[var(--c)] outline-3 outline-surface" />
+                <Marker tone={notificationEventTone(event.event)} className="absolute top-2.5 -left-[19.5px] outline-3 outline-surface" />
                 <NotificationEventLabel event={event.event} />
-                <time
-                  dateTime={event.createdAt}
-                  title={dateTime(event.createdAt)}
-                  className="shrink-0 font-mono text-meta-sm tabular text-muted"
-                >
-                  {relativeTime(event.createdAt)}
-                </time>
+                <RelTime at={event.createdAt} className="shrink-0 font-mono text-meta-sm tabular text-muted" />
               </li>
             ))}
           </ol>
@@ -622,13 +629,13 @@ function SilentWaitingRow({ session }: { session: WaitingSession }) {
   const { name } = useHarnesses();
   const href = destination(session);
   const fallback = `Open in ${name(session.connectionId)}: ${session.externalSessionId}`;
-  return <div className="border-l-2 border-l-need px-3 py-2">
+  return <div className={cx(needEdgeClass(true), "px-3 py-row")}>
     <div className="flex items-center justify-between gap-2.5">
       <p title={session.title} className="min-w-0 truncate text-body font-medium">{session.title}</p>
       <div className="shrink-0"><TaskStateBadge state="needs_input" /></div>
     </div>
     <div className="mt-1 flex items-center justify-between gap-2.5">
-      <span className="min-w-0 truncate font-mono text-meta text-muted">{session.projectTitle ?? name(session.connectionId)}</span>
+      <Meta className="min-w-0 truncate">{session.projectTitle ?? name(session.connectionId)}</Meta>
       {href === null ? <span title={fallback} className="min-w-0 truncate text-small text-muted">{fallback}</span> : <AppButton small href={href} variant="primary">Open in {name(session.connectionId)}</AppButton>}
     </div>
   </div>;

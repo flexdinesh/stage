@@ -18,7 +18,7 @@ import {
 import { usePlatform } from "../platform/context.tsx";
 import { IconChainLink, IconCheck } from "./icons.tsx";
 import { taskStateLabel, taskStateTone } from "./StateBadge.tsx";
-import { Button, cx, toneClass, useCopy, type CopyStatus } from "./ui.tsx";
+import { Button, ExternalLink, IconButton, Marker, Meta, copyStatusText, cx, linkClass, useCopy } from "./ui.tsx";
 
 /** What a copied link points at: a task or a tree. */
 export type LinkSubject = { kind: "task" | "tree"; id: number; title: string };
@@ -27,8 +27,6 @@ export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: strin
   if (s.kind === "tree") return { markdown: treeMarkdown(link, s.id, s.title), url: treeUrl(link, s.id), name: `tree #${s.id}` };
   return { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` };
 }
-
-const statusText = (s: CopyStatus, idle: string) => (s === "copied" ? "Copied" : s === "failed" ? "Copy failed" : idle);
 
 /** Detail-page header: "Copy link" (self-describing markdown, for prompts) joined to "URL" (bare). */
 export function CopyLinkPair({ subject }: { subject: LinkSubject }) {
@@ -40,10 +38,10 @@ export function CopyLinkPair({ subject }: { subject: LinkSubject }) {
     <span role="group" aria-label={`Copy link to ${name}`} className="inline-flex">
       <Button small title={markdown} onClick={() => copyMd(markdown)}>
         <IconChainLink />
-        {statusText(mdStatus, "Copy link")}
+        {copyStatusText(mdStatus, "Copy link")}
       </Button>
       <Button small title={url} aria-label={urlStatus === "idle" ? "Copy URL" : undefined} className="-ml-px" onClick={() => copyUrl(url)}>
-        {statusText(urlStatus, "URL")}
+        {copyStatusText(urlStatus, "URL")}
       </Button>
       <span className="sr-only" aria-live="polite">
         {mdStatus === "copied" || urlStatus === "copied" ? "Copied" : mdStatus === "failed" || urlStatus === "failed" ? "Copy failed" : ""}
@@ -57,25 +55,25 @@ export function RowCopyLink({ subject, className }: { subject: LinkSubject; clas
   const { links } = usePlatform();
   const { markdown, name } = subjectLinks(subject, (path) => links.stageLink(path));
   const [status, copy] = useCopy();
-  const label = status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : `Copy link to ${name}`;
+  const label = copyStatusText(status, `Copy link to ${name}`);
   return (
-    <button
-      type="button"
-      title={status === "idle" ? `Copy link to ${name}` : label}
-      aria-label={label}
-      onClick={() => copy(markdown)}
-      className={cx(
-        "hidden size-6 shrink-0 items-center justify-center text-muted transition-[opacity,color,background-color] duration-150 hover:bg-panel hover:text-fg focus-visible:opacity-100 md:inline-flex",
-        status === "idle" ? "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100" : "opacity-100",
-        status === "failed" && "text-bad",
-        className,
-      )}
-    >
-      {status === "copied" ? <IconCheck size={12} /> : <IconChainLink size={14} />}
+    <>
+      <IconButton
+        small
+        label={label}
+        icon={status === "copied" ? IconCheck : IconChainLink}
+        onClick={() => copy(markdown)}
+        data-failed={status === "failed" || undefined}
+        className={cx(
+          "focus-visible:opacity-100 data-failed:text-bad max-md:hidden",
+          status === "idle" ? "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100" : "opacity-100",
+          className,
+        )}
+      />
       <span className="sr-only" aria-live="polite">
         {status === "idle" ? "" : label}
       </span>
-    </button>
+    </>
   );
 }
 
@@ -118,24 +116,22 @@ export function RefChip({ stageRef, text, href }: { stageRef: StageRef; text: st
   if (data === null) {
     // Loading, or not this stage's task/session: keep what was written.
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-line-strong underline-offset-2 break-all">
+      <ExternalLink href={href} className="break-all">
         {text}
-      </a>
+      </ExternalLink>
     );
   }
   const tag = data.number === null ? "session" : `#${data.number}`;
   const state = data.state === null ? "session" : taskStateLabel(data.state);
+  const tone = data.state === null ? "idle" : taskStateTone(data.state);
   return (
     <a
       href={data.href ?? undefined}
       title={`${stageRef.kind === "task" ? `Task ${tag}` : "Session"}: ${data.title} (${state})`}
-      className={cx(
-        "mx-px inline-flex max-w-full items-center gap-1.5 border border-line-strong bg-surface px-1.5 align-middle font-sans text-small leading-[18px] font-medium whitespace-nowrap text-fg no-underline transition-colors duration-150 hover:bg-panel",
-        toneClass(data.state === null ? "idle" : taskStateTone(data.state)),
-      )}
+      className="mx-px inline-flex max-w-full items-center gap-1.5 border border-line-strong bg-surface px-1.5 align-middle font-sans text-small leading-[18px] font-medium whitespace-nowrap text-fg no-underline transition-colors duration-150 hover:bg-panel"
     >
-      <span aria-hidden className="size-[7px] shrink-0 bg-[var(--c)]" />
-      <span className="font-mono text-meta font-normal text-muted tabular">{tag}</span>
+      <Marker tone={tone} size="md" />
+      <Meta className="font-normal tabular">{tag}</Meta>
       <span className="max-w-[36ch] min-w-0 truncate">{data.title}</span>
       <span className="sr-only">, {state}</span>
     </a>
@@ -184,5 +180,5 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
 export function SourceSessionLink({ id, connectionId }: { id: string; connectionId?: number }) {
   const { data } = useResolved(connectionId === undefined ? { kind: "session", id } : { kind: "session", id, connectionId });
   if (data?.href == null) return <span title={id}>source session</span>;
-  return <a href={data.href} className="underline hover:text-fg">source session</a>;
+  return <a href={data.href} className={linkClass("rest")}>source session</a>;
 }

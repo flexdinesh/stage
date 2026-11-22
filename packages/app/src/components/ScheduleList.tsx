@@ -7,7 +7,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { cronSummary, lastRun, wallTime } from "../lib/schedules.ts";
 import { IconRepeat } from "./icons.tsx";
 import { TaskStateBadge, taskStateTone } from "./StateBadge.tsx";
-import { Button, Chip, ErrorText, Skeleton, SkeletonBar, cx, toneClass } from "./ui.tsx";
+import { Button, Chip, EmptyState, ErrorText, Row, RowList, Skeleton, SkeletonBar, TextLink, cx, needEdgeClass, toneClass } from "./ui.tsx";
 
 /** "paused" (idle) or a plain "repeat" chip: a schedule has no state of its own, its runs do. */
 export function ScheduleChip({ paused }: { paused: boolean }) {
@@ -45,21 +45,22 @@ export function ScheduleRows({
   showProject?: boolean;
   actions?: "full" | "run";
 }) {
-  if (schedules.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  if (schedules.length === 0) return <EmptyState inset>{emptyText}</EmptyState>;
   return (
-    <ul>
+    <RowList>
       {schedules.map((s) => (
-        <li key={s.id} className="border-b border-line last:border-b-0">
+        <Row key={s.id} bare>
           <ScheduleRow schedule={s} showProject={showProject} actions={actions} />
-        </li>
+        </Row>
       ))}
-    </ul>
+    </RowList>
   );
 }
 
 function scheduleRowGrid(showProject: boolean): string {
   return cx(
-    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 border-l-transparent px-3 py-row md:gap-x-3.5",
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 px-3 py-row md:gap-x-3.5",
+    needEdgeClass(false),
     showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
   );
 }
@@ -70,9 +71,9 @@ const SCHEDULE_TITLE_WIDTHS = ["w-2/5", "w-1/2", "w-1/3"];
 export function ScheduleRowsSkeleton({ count = 3, showProject = false }: { count?: number; showProject?: boolean }) {
   return (
     <Skeleton label="Loading schedules">
-      <ul>
+      <RowList>
         {Array.from({ length: count }, (_, i) => (
-          <li key={i} className="border-b border-line last:border-b-0">
+          <Row key={i} bare>
             <div className={scheduleRowGrid(showProject)}>
               <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
                 <SkeletonBar className="h-[22px] w-20" />
@@ -92,9 +93,9 @@ export function ScheduleRowsSkeleton({ count = 3, showProject = false }: { count
                 <SkeletonBar className="h-control-sm w-14" />
               </div>
             </div>
-          </li>
+          </Row>
         ))}
-      </ul>
+      </RowList>
     </Skeleton>
   );
 }
@@ -130,33 +131,26 @@ export function ScheduleRow({
 
       {showProject ? (
         <div className="hidden min-w-0 md:order-2 md:block">
-          <Link
-            to={`/projects/${s.projectId}`}
-            title={s.projectTitle}
-            className="block truncate font-mono text-detail font-medium text-fg hover:underline"
-          >
+          <TextLink to={`/projects/${s.projectId}`} title={s.projectTitle} className="block truncate font-mono text-detail font-medium text-fg">
             {s.projectTitle}
-          </Link>
+          </TextLink>
         </div>
       ) : null}
 
       <div className="order-1 min-w-0 md:order-2">
         {showProject ? (
-          <Link
-            to={`/projects/${s.projectId}`}
-            className="mb-0.5 block font-mono text-detail font-medium break-words text-fg hover:underline md:hidden"
-          >
+          <TextLink to={`/projects/${s.projectId}`} className="mb-0.5 block font-mono text-detail font-medium break-words text-fg md:hidden">
             {s.projectTitle}
-          </Link>
+          </TextLink>
         ) : null}
-        <Link to={`/schedules/${s.id}`} className="text-body font-medium break-words hover:underline">
+        <TextLink to={`/schedules/${s.id}`} className="text-body font-medium break-words">
           {s.title}
-        </Link>
+        </TextLink>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
           {showProject ? null : (
-            <Link to={`/projects/${s.projectId}`} className="hover:text-fg hover:underline">
+            <TextLink to={`/projects/${s.projectId}`} variant="muted">
               {s.projectTitle}
-            </Link>
+            </TextLink>
           )}
           <span>{cronSummary(s.cron)}</span>
           <span>{s.tz}</span>
@@ -165,15 +159,15 @@ export function ScheduleRow({
             <span className={cx(toneClass(taskStateTone(flag.state)), "text-[var(--cf)]")}>{flag.skip}</span>
           ) : null}
           {s.lastTaskId === null ? null : flag === null ? (
-            <Link to={`/tasks/${s.lastTaskId}`} title={`Last run: task #${s.lastTaskId}`} className="tabular hover:text-fg hover:underline">
+            <TextLink to={`/tasks/${s.lastTaskId}`} variant="muted" title={`Last run: task #${s.lastTaskId}`} className="tabular">
               last #{s.lastTaskId}
               {quietWord === null ? null : ` ${quietWord}`}
-            </Link>
+            </TextLink>
           ) : (
-            <Link to={`/tasks/${s.lastTaskId}`} className="tabular hover:text-fg hover:underline md:hidden">
+            <TextLink to={`/tasks/${s.lastTaskId}`} variant="muted" className="tabular md:hidden">
               last #{s.lastTaskId}{" "}
               <span className={cx(toneClass(taskStateTone(flag.state)), "text-[var(--cf)]")}>{flag.state.replace("_", " ")}</span>
-            </Link>
+            </TextLink>
           )}
         </div>
       </div>

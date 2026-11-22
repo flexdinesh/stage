@@ -5,7 +5,7 @@ import { stateMove, stateSummary } from "../lib/completion.ts";
 import { statusChips } from "../lib/tasks.ts";
 import { CompletionDrawer } from "./Completion.tsx";
 import { statusChipView } from "./StateBadge.tsx";
-import { cx, toneClass, Combobox } from "./ui.tsx";
+import { Combobox, Marker, Muted } from "./ui.tsx";
 
 /**
  * The State picker: the task's current status and the one manual change it allows (Completed, or back from it), each
@@ -26,13 +26,13 @@ export function StateControl({ task, tree, action }: { task: Task; tree: TreeDet
         value="current"
         onChange={() => setConfirming(true)}
         className="w-full font-mono"
-        leading={<span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c)", toneClass(current.tone))} />}
+        leading={<Marker tone={current.tone} />}
         options={[
           { value: "current", label: current.label, detail: "current" },
           { value: "move", label: statusChipView(move.to).label, detail: move.detail, disabled: move.disabled },
         ]}
       />
-      <p className="text-small text-muted">{stateSummary(task, undefined, descriptor(task.harness))}</p>
+      <Muted>{stateSummary(task, undefined, descriptor(task.harness))}</Muted>
       {action}
       {confirming ? <CompletionDrawer task={task} reopen={move.kind === "uncomplete"} to={move.to} onClose={() => setConfirming(false)} /> : null}
     </div>

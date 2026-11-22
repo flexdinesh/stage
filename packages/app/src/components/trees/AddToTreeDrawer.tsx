@@ -4,7 +4,7 @@ import { useInvalidateWork, useTree, useTrees } from "../../api/queries.ts";
 import type { StartMode, Task } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { joinSummary, treeMeta } from "../../lib/trees.ts";
-import { Button, Drawer, ErrorText, Field, Input, QueryState, Radio, Segmented, cx, Combobox } from "../ui.tsx";
+import { Button, Drawer, ErrorText, Field, FieldGroup, Input, Meta, Muted, QueryState, Radio, Segmented, cx, Combobox, rowButtonClass } from "../ui.tsx";
 
 const MODE_OPTIONS: { value: StartMode; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -52,13 +52,13 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const blocked = picked === "new" && title.trim() === "";
   const footer = (
     <>
-      <span className="min-w-0 flex-1 font-mono text-meta-sm text-muted md:text-right">
+      <Meta small className="min-w-0 flex-1 md:text-right">
         {blocked
           ? "required: title"
           : target === null
             ? `#${task.id} roots a new tree`
             : joinSummary(task.id, afterTask === null ? [] : [afterTask], task.startMode ?? target.startMode, target.title)}
-      </span>
+      </Meta>
       <Button variant="primary" busy={add.isPending} disabled={blocked} onClick={() => add.mutate(picked)}>
         {picked === "new" ? "Create tree" : "Add to tree"}
       </Button>
@@ -68,15 +68,12 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   const option = (key: TreeChoice, label: string, meta: string) => (
     <label
       key={key}
-      className={cx(
-        "flex min-h-11 cursor-pointer items-center gap-3 border-b border-line px-3 py-2 last:border-b-0 hover:bg-panel md:min-h-10",
-        picked === key && "bg-accent/5",
-      )}
+      className={cx(rowButtonClass(picked === key), "cursor-pointer border-b border-line last:border-b-0")}
     >
       <Radio name="tree" checked={picked === key} onChange={() => pick(key)} />
       <span className="min-w-0 flex-1">
         <span className="block text-small font-medium break-words">{label}</span>
-        <span className="mt-0.5 block truncate font-mono text-meta text-muted tabular">{meta}</span>
+        <Meta className="mt-0.5 block truncate tabular">{meta}</Meta>
       </span>
     </label>
   );
@@ -84,10 +81,10 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
   return (
     <Drawer title="Add to tree" onClose={onClose} footer={footer}>
       <div className="flex flex-col gap-4">
-        <p className="text-small text-muted">
+        <Muted>
           <span className="font-mono tabular">#{task.id}</span> {task.title} joins as a parallel root: it waits on nothing. To run it
           after a task, pick its tree, then that task under After.
-        </p>
+        </Muted>
         <QueryState isPending={trees.isPending} error={trees.error}>
           <div role="radiogroup" aria-label="Tree" className="border border-line">
             {option("new", "New tree", "with this task as its root")}
@@ -97,40 +94,42 @@ export function AddToTreeDrawer({ task, onClose }: { task: Task; onClose: () => 
         {picked === "new" ? (
           <>
             <Field label="Title">{(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}</Field>
-            <div className="flex min-w-0 flex-col items-start gap-1.5">
-              <span className="label-caps">Start mode</span>
-              <Segmented label="Start mode" options={MODE_OPTIONS} value={mode} onChange={setMode} />
-              <p className="font-mono text-meta text-muted">
-                {mode === "auto" ? "A task starts on its own once every need is completed." : "A task reads ready when its needs are completed; you start it."}
-              </p>
-            </div>
+            <FieldGroup
+              start
+              label="Start mode"
+              hint={mode === "auto" ? "A task starts on its own once every need is completed." : "A task reads ready when its needs are completed; you start it."}
+            >
+              <div>
+                <Segmented label="Start mode" options={MODE_OPTIONS} value={mode} onChange={setMode} />
+              </div>
+            </FieldGroup>
           </>
         ) : (
-          <Field label="After">
+          <Field
+            label="After"
+            hint={
+              !canNeed
+                ? task.state !== "backlog"
+                  ? "It has already run, so it joins as a parallel root."
+                  : "It has a start time, so it joins as a parallel root."
+                : afterTask === null
+                  ? "A parallel root starts when you start it."
+                  : `Waits until #${afterTask.id} is completed.`
+            }
+          >
             {(id) => (
-              <>
-                <Combobox
-                  id={id}
-                  value={afterTask === null ? "" : String(afterTask.id)}
-                  disabled={!canNeed || detail.isPending}
-                  onChange={(next) => setAfter(next === "" ? null : Number(next))}
-                  listLabel="Tree members"
-                  className="w-full"
-                  options={[
-                    { value: "", label: "Nothing: runs in parallel" },
-                    ...members.map((m) => ({ value: String(m.id), label: `#${m.id} ${m.title}` })),
-                  ]}
-                />
-                <p className="font-mono text-meta text-muted">
-                  {!canNeed
-                    ? task.state !== "backlog"
-                      ? "It has already run, so it joins as a parallel root."
-                      : "It has a start time, so it joins as a parallel root."
-                    : afterTask === null
-                      ? "A parallel root starts when you start it."
-                      : `Waits until #${afterTask.id} is completed.`}
-                </p>
-              </>
+              <Combobox
+                id={id}
+                value={afterTask === null ? "" : String(afterTask.id)}
+                disabled={!canNeed || detail.isPending}
+                onChange={(next) => setAfter(next === "" ? null : Number(next))}
+                listLabel="Tree members"
+                className="w-full"
+                options={[
+                  { value: "", label: "Nothing: runs in parallel" },
+                  ...members.map((m) => ({ value: String(m.id), label: `#${m.id} ${m.title}` })),
+                ]}
+              />
             )}
           </Field>
         )}

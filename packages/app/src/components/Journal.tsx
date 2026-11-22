@@ -1,15 +1,34 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useInvalidateWork, useJournal, useJournalEntry } from "../api/queries.ts";
 import type { JournalEntry, JournalKind, JournalOwner, JournalQuery, NoteCategory, Task } from "../api/types.ts";
 import { useApi } from "../platform/context.tsx";
-import { dateTime, relativeTime } from "../lib/format.ts";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
-import { Button, Chip, ErrorText, Field, Input, Muted, Panel, Segmented, Skeleton, SkeletonBar, Combobox } from "./ui.tsx";
+import {
+  Alert,
+  Button,
+  Chip,
+  EmptyState,
+  ErrorText,
+  Field,
+  InlineError,
+  Input,
+  MetaLine,
+  Muted,
+  Panel,
+  RelTime,
+  Segmented,
+  Skeleton,
+  SkeletonBar,
+  Combobox,
+  TextLink,
+  cx,
+  rowClass,
+} from "./ui.tsx";
 
 const Markdown = lazy(() => import("./ReplyMarkdown.tsx"));
 const KIND_OPTIONS: { value: JournalKind; label: string }[] = [
@@ -17,7 +36,6 @@ const KIND_OPTIONS: { value: JournalKind; label: string }[] = [
   { value: "events", label: "Events" },
   { value: "all", label: "All" },
 ];
-const linkClass = "underline underline-offset-2 hover:text-fg";
 
 /** One composer per owner; query changes never replace its draft or retry key. */
 function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projectId: number | null; tasks: Task[] }) {
@@ -73,7 +91,7 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
           )}
         </Field>
       )}
-      {missingMember ? <p role="alert" className="text-small text-bad">This task left the tree. Choose where to save your note.</p> : null}
+      {missingMember ? <Alert tone="bad">This task left the tree. Choose where to save your note.</Alert> : null}
       <Field label="Add note" hint={target.taskId === undefined ? "Saved to this tree. Notes stay here when tasks move." : "Saved to this task. Notes follow it between trees."}>
         {(id) => (
           <SnippetTextarea
@@ -104,11 +122,14 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
         </div>
         <Button type="submit" variant="primary" disabled={!valid} busy={append.isPending}>Append note</Button>
       </div>
-      <p className="font-mono text-meta-sm text-muted">Append-only · {bytes.toLocaleString()} / {MAX_NOTE_BYTES.toLocaleString()} bytes</p>
-      {bytes > MAX_NOTE_BYTES ? <p role="alert" className="text-small text-bad">Note exceeds 16 KiB. Shorten it before appending.</p> : null}
+      <MetaLine>
+        Append-only
+        {`${bytes.toLocaleString()} / ${MAX_NOTE_BYTES.toLocaleString()} bytes`}
+      </MetaLine>
+      {bytes > MAX_NOTE_BYTES ? <Alert tone="bad">Note exceeds 16 KiB. Shorten it before appending.</Alert> : null}
       <ErrorText error={append.error} />
       <div role="status" className="text-small text-muted empty:hidden">
-        {saved === null ? null : <>Note appended. <Link to={journalEntryPath(saved)} className={linkClass}>View entry #{saved.id}</Link></>}
+        {saved === null ? null : <>Note appended. <TextLink to={journalEntryPath(saved)} variant="rest">View entry #{saved.id}</TextLink></>}
       </div>
     </form>
   );
@@ -123,12 +144,12 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
     if (anchored) root.current?.scrollIntoView({ block: "start" });
   }, [anchored]);
   return (
-    <article ref={root} id={`journal-${entry.id}`} className="min-w-0 scroll-mt-20 border-b border-line p-3 last:border-b-0">
+    <article ref={root} id={`journal-${entry.id}`} className={cx("min-w-0 scroll-mt-20", rowClass)}>
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta text-muted">
-        <Link to={journalEntryPath(entry)} className={linkClass} aria-label={`Link to journal entry ${entry.id}`}>#{entry.id}</Link>
-        <time dateTime={entry.createdAt} title={dateTime(entry.createdAt)}>{relativeTime(entry.createdAt)}</time>
+        <TextLink to={journalEntryPath(entry)} variant="rest" aria-label={`Link to journal entry ${entry.id}`}>#{entry.id}</TextLink>
+        <RelTime at={entry.createdAt} />
         {entry.kind === "event" ? <span>{entry.eventType.replaceAll("_", " ")}</span> : <Chip>{entry.category || "uncategorized"}</Chip>}
-        {entry.taskId === null ? <span>tree {entry.kind}</span> : <Link to={`/tasks/${entry.taskId}`} className={linkClass}>task #{entry.taskId}</Link>}
+        {entry.taskId === null ? <span>tree {entry.kind}</span> : <TextLink to={`/tasks/${entry.taskId}`} variant="rest">task #{entry.taskId}</TextLink>}
         {entry.attempt === null ? null : <span>attempt {entry.attempt}</span>}
       </div>
       <div className="min-w-0 break-words">
@@ -146,10 +167,10 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
         </div>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-meta-sm text-muted empty:hidden">
-        {entry.sourceTaskId === null ? null : <Link to={`/tasks/${entry.sourceTaskId}`} className={linkClass}>source task #{entry.sourceTaskId}</Link>}
+        {entry.sourceTaskId === null ? null : <TextLink to={`/tasks/${entry.sourceTaskId}`} variant="rest">source task #{entry.sourceTaskId}</TextLink>}
         {entry.sourceSession ? <SourceSessionLink id={entry.sourceSession.externalSessionId} connectionId={entry.sourceSession.connectionId}/> : entry.sourceThreadId ? <SourceSessionLink id={entry.sourceThreadId}/> : null}
-        {entry.fromTreeId === null ? null : <Link to={`/trees/${entry.fromTreeId}`} className={linkClass}>from tree #{entry.fromTreeId}</Link>}
-        {entry.toTreeId === null ? null : <Link to={`/trees/${entry.toTreeId}`} className={linkClass}>to tree #{entry.toTreeId}</Link>}
+        {entry.fromTreeId === null ? null : <TextLink to={`/trees/${entry.fromTreeId}`} variant="rest">from tree #{entry.fromTreeId}</TextLink>}
+        {entry.toTreeId === null ? null : <TextLink to={`/trees/${entry.toTreeId}`} variant="rest">to tree #{entry.toTreeId}</TextLink>}
       </div>
     </article>
   );
@@ -195,9 +216,9 @@ export function JournalFeed({ owner, query, linkedId = null }: { owner: JournalO
         </div>
       ) : null}
       {!journal.isPending && !journal.isError && entries.length === 0 ? (
-        <p className="p-3 text-small text-muted">
+        <EmptyState inset>
           {query.kind === "events" ? "No events match these filters." : "No entries match. Append a note or change the filters."}
-        </p>
+        </EmptyState>
       ) : null}
       <div>{entries.filter((entry) => entry.id !== linkedId).map((entry) => <JournalRow key={entry.id} entry={entry} />)}</div>
       {journal.hasNextPage ? (
@@ -251,7 +272,7 @@ export function JournalPanel({ owner, projectId = null, tasks = [], active = tru
             <Button variant="ghost" onClick={() => { setCategory(""); setSearch(""); setTask(""); setFilters({}); }}>Clear</Button>
           </div>
         </div>
-        {invalidTask ? <p className="text-small text-bad">Enter a positive task ID.</p> : null}
+        {invalidTask ? <InlineError>Enter a positive task ID.</InlineError> : null}
       </form>
       <JournalFeed owner={owner} query={{ ...filters, kind }} linkedId={active ? journalEntryId(params.get("entry")) : null} />
     </Panel>

@@ -9,38 +9,49 @@ import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostServers, HostServerTest, HostState } from "../platform/index.ts";
 import { IconCheck, IconChevronDown } from "./icons.tsx";
 import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, Chip, Drawer, ErrorText, Field, Input, Muted, Panel, SkeletonRows, buttonClass, cx, toneClass, CommandBox } from "./ui.tsx";
-
-/** 6px square state marker in the server's tone. */
-function Marker({ tone }: { tone: ServerTone }) {
-  return <span aria-hidden className={cx("size-1.5 shrink-0 bg-(--c) transition-colors duration-150", toneClass(tone))} />;
-}
+import {
+  Alert,
+  Button,
+  Chip,
+  Drawer,
+  ErrorText,
+  Field,
+  Hint,
+  Input,
+  Marker,
+  Muted,
+  Panel,
+  PanelHeader,
+  Row,
+  RowButton,
+  RowList,
+  SkeletonRows,
+  buttonClass,
+  cx,
+  rowButtonClass,
+  CommandBox,
+} from "./ui.tsx";
 
 /** Needs-input count of a server, in the Dashboard tab's count chip. */
 function NeedCount({ n }: { n: number | null }) {
   if (n === null || n === 0) return null;
   return (
-    <span title={`${n} need input`} className="chip tone-need tabular px-1.5 text-meta-sm leading-4">
+    <Chip tone="need" title={`${n} need input`} className="tabular px-1.5 text-meta-sm leading-4">
       {n}
       <span className="sr-only"> need input</span>
-    </span>
+    </Chip>
   );
 }
 
 /** Ruled list of servers to pick from: marker, name, where, needs-input count, a check on the active one. */
 function ServerChoices({ servers, state, onPick }: { servers: HostServerEntry[]; state: HostState | null; onPick: (entry: HostServerEntry) => void }) {
   return (
-    <ul>
+    <RowList>
       {servers.map((s) => {
         const status = serverStatus(s, state);
         return (
-          <li key={s.id} className="border-b border-line last:border-b-0">
-            <button
-              type="button"
-              aria-current={s.active || undefined}
-              onClick={() => onPick(s)}
-              className="flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left transition-colors duration-150 hover:bg-panel md:min-h-10 md:py-1.5"
-            >
+          <Row key={s.id} bare>
+            <RowButton selected={s.active} aria-current={s.active || undefined} onClick={() => onPick(s)} className="gap-3">
               <Marker tone={status.tone} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-small font-medium text-fg">{s.name}</span>
@@ -58,11 +69,11 @@ function ServerChoices({ servers, state, onPick }: { servers: HostServerEntry[];
                   </>
                 ) : null}
               </span>
-            </button>
-          </li>
+            </RowButton>
+          </Row>
         );
       })}
-    </ul>
+    </RowList>
   );
 }
 
@@ -187,10 +198,7 @@ export function ServerMenu({ className }: { className?: string }) {
           id={panelId}
           className="z-50 border border-line-strong bg-surface text-fg max-md:fixed max-md:inset-x-3 max-md:top-[calc(3.25rem+var(--inset-top)+0.25rem)] md:absolute md:w-[320px] md:max-lg:top-full md:max-lg:right-0 md:max-lg:mt-1 lg:bottom-full lg:left-0 lg:mb-1"
         >
-          <div className="flex min-h-8 items-center gap-2 border-b border-line bg-panel px-3 py-1">
-            <span className="label-caps text-fg">Servers</span>
-            <span className="font-mono text-meta-sm text-muted">{servers.length}</span>
-          </div>
+          <PanelHeader title="Servers" meta={servers.length} />
           <ServerChoices servers={servers} state={state} onPick={pick} />
           {error === null ? null : (
             <div className="border-t border-line p-2">
@@ -200,7 +208,7 @@ export function ServerMenu({ className }: { className?: string }) {
           <Link
             to="/settings"
             onClick={close}
-            className="flex min-h-11 items-center border-t border-line px-3 text-small text-fg transition-colors duration-150 hover:bg-panel md:min-h-9"
+            className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}
           >
             Manage servers
           </Link>
@@ -236,13 +244,13 @@ export function ServersCard() {
         {servers === null ? (
           error === null ? <SkeletonRows rows={2} label="Loading servers" /> : <div className="p-3"><ErrorText error={error} /></div>
         ) : (
-          <ul>
+          <RowList>
             {servers.map((s) => (
               <ServerRow key={s.id} api={api} entry={s} state={state} onEdit={() => setDrawer({ mode: "edit", entry: s })} />
             ))}
-          </ul>
+          </RowList>
         )}
-        <p className="border-t border-line px-3 py-2 font-mono text-meta text-muted">One server at a time. Remotes: trusted network, no sign-in.</p>
+        <Hint className="border-t border-line px-3 py-2">One server at a time. Remotes: trusted network, no sign-in.</Hint>
       </Panel>
       {drawer === null ? null : (
         <ServerDrawer api={api} entry={drawer.mode === "edit" ? drawer.entry : null} onClose={() => setDrawer(null)} />
@@ -266,7 +274,7 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
   };
   const needs = entry.needsInput ?? 0;
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-3 py-row last:border-b-0">
+    <Row className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Marker tone={status.tone} />
         <div className="min-w-0 flex-1">
@@ -320,7 +328,7 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
         </Alert>
       ) : null}
       <ErrorText error={error} />
-    </li>
+    </Row>
   );
 }
 
@@ -373,7 +381,7 @@ function ServerDrawer({ api, entry, onClose }: { api: HostServers; entry: HostSe
             {entry === null ? "Save server" : "Save"}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-          {entry === null ? <span className="ml-auto font-mono text-meta-sm text-muted">saves without switching</span> : null}
+          {entry === null ? <Hint className="ml-auto">saves without switching</Hint> : null}
         </>
       }
     >

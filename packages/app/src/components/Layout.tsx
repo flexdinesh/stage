@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, matchPath, useLocation, useSearchParams } from "react-router";
 import { useBadge } from "../api/queries.ts";
 import { usePlatform } from "../platform/context.tsx";
@@ -32,7 +32,7 @@ import { ScopeProvider, useScope } from "./Scope.tsx";
 import { ServerMenu } from "./Servers.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
 import { StatusRow, useStatusAlert } from "./StatusRow.tsx";
-import { Button, Drawer, Kbd, buttonClass, cx, toneClass } from "./ui.tsx";
+import { Drawer, IconButton, Kbd, buttonClass, cx, toneClass, type IconComponent } from "./ui.tsx";
 
 /** Phone tab bar icon size (iOS tab bars use ~22-25px glyphs). */
 const TAB_ICON = 22;
@@ -54,10 +54,10 @@ function tabClass(active: boolean) {
   );
 }
 
-const THEME_ICON: Record<Theme, ReactNode> = {
-  system: <IconThemeSystem />,
-  light: <IconSun />,
-  dark: <IconMoon />,
+const THEME_ICON: Record<Theme, IconComponent> = {
+  system: IconThemeSystem,
+  light: IconSun,
+  dark: IconMoon,
 };
 
 /** Stepped-bars glyph + wordmark; the top step turns Waiting Yellow while anything needs input. */
@@ -87,9 +87,7 @@ function Mark({ needsInput, compact = false }: { needsInput: number; compact?: b
 function ThemeButton() {
   const { theme, cycle } = useTheme();
   return (
-    <Button variant="secondary" onClick={cycle} title={`Theme: ${theme} (click to change)`} aria-label={`Theme: ${theme}`} className="w-8 px-0">
-      {THEME_ICON[theme]}
-    </Button>
+    <IconButton variant="secondary" onClick={cycle} title={`Theme: ${theme} (click to change)`} label={`Theme: ${theme}`} icon={THEME_ICON[theme]} />
   );
 }
 
@@ -189,9 +187,7 @@ function Shell() {
             Search
             <Kbd className="ml-auto">Ctrl K</Kbd>
           </button>
-          <Button variant="primary" onClick={() => newTask()} title="New task (N)" aria-label="New task" className="w-8 shrink-0 px-0">
-            <IconPlus size={14} />
-          </Button>
+          <IconButton variant="primary" onClick={() => newTask()} title="New task (N)" label="New task" icon={IconPlus} />
         </div>
         <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
           <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<LoadCount load={scopeLoad} />} />
@@ -229,12 +225,8 @@ function Shell() {
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <NotificationsBell onOpen={openInbox} />
           <ServerMenu />
-          <Button variant="secondary" onClick={() => setPalette(true)} aria-label="Search" className="w-10 shrink-0 px-0">
-            <IconSearch size={16} />
-          </Button>
-          <Button variant="primary" onClick={() => newTask()} aria-label="New task" className="w-10 shrink-0 px-0">
-            <IconPlus size={16} />
-          </Button>
+          <IconButton variant="secondary" onClick={() => setPalette(true)} label="Search" icon={IconSearch} />
+          <IconButton variant="primary" onClick={() => newTask()} label="New task" icon={IconPlus} />
         </div>
       </header>
 

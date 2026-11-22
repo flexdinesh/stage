@@ -2,7 +2,6 @@ import { bindingsSummary } from "../lib/harnesses.ts";
 import { importNotice, projectWorkspace } from "../lib/projects.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import type { PreferenceStorage } from "../platform/index.ts";
 import { keys, useHarnesses, useProjects, useTasks } from "../api/queries.ts";
@@ -15,12 +14,17 @@ import {
   ErrorText,
   Field,
   Input,
+  Meta,
+  Muted,
   PageHeader,
   Panel,
   QueryState,
+  Row,
+  RowList,
   Segmented,
   Skeleton,
   SkeletonBar,
+  TextLink,
   cx,
 } from "../components/ui.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
@@ -61,7 +65,7 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}
         </Field>
-        <p className="text-small text-muted">Plan tasks now. Bind a harness workspace when you are ready to run them.</p>
+        <Muted>Plan tasks now. Bind a harness workspace when you are ready to run them.</Muted>
         <ErrorText error={create.error} />
       </form>
     </Drawer>
@@ -105,8 +109,7 @@ const ARCHIVED_OPTIONS = [
 ] as const;
 
 /** Project row grid: name over path, harness chip, counts (below the name on phone). Shared with the skeleton. */
-const PROJECT_ROW =
-  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_128px]";
+const PROJECT_ROW = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:grid-cols-[minmax(0,1fr)_auto_128px]";
 
 const NAME_WIDTHS = ["w-24", "w-16", "w-28", "w-20", "w-32"];
 
@@ -114,9 +117,9 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
   return (
     <Panel flush title={title}>
       <Skeleton label="Loading projects">
-        <ul>
+        <RowList>
           {NAME_WIDTHS.map((w, i) => (
-            <li key={i} className={PROJECT_ROW}>
+            <Row key={i} className={PROJECT_ROW}>
               <div className="flex min-w-0 flex-col gap-1.5 py-0.5">
                 <SkeletonBar className={cx("h-4", w)} />
                 <SkeletonBar className="h-3 w-56 max-w-full" />
@@ -126,9 +129,9 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
                 <SkeletonBar className="h-3 w-14" />
                 <SkeletonBar className="h-3 w-20" />
               </div>
-            </li>
+            </Row>
           ))}
-        </ul>
+        </RowList>
       </Skeleton>
     </Panel>
   );
@@ -180,24 +183,24 @@ export function ProjectsPage() {
         emptyText="No projects yet. Create one to start planning."
       >
         <Panel flush title={filter === "all" ? "All projects" : "Active projects"} meta={list.length}>
-          <ul>
+          <RowList>
             {list.map((p) => {
               const c = counts?.get(p.id) ?? { total: 0, active: 0 };
               return (
-                <li key={p.id} className={PROJECT_ROW}>
+                <Row key={p.id} className={PROJECT_ROW}>
                   <div className="min-w-0">
-                    <Link to={`/projects/${p.id}`} className="block truncate text-body font-medium hover:underline">
+                    <TextLink to={`/projects/${p.id}`} className="block truncate text-body font-medium">
                       {p.title}
-                    </Link>
-                    <div className="truncate font-mono text-meta text-muted" title={projectWorkspace(p)}>
+                    </TextLink>
+                    <Meta className="block truncate" title={projectWorkspace(p)}>
                       {projectWorkspace(p)}
-                    </div>
+                    </Meta>
                   </div>
                   <div className="flex items-center gap-1.5 justify-self-end md:justify-self-start">
                     {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
                     <Chip>{bindingsSummary(p.bindings, kindName)}</Chip>
                   </div>
-                  <div className="flex flex-col font-mono text-meta text-muted tabular">
+                  <Meta className="flex flex-col tabular">
                     <span>
                       {counts === null ? null : (
                         <>
@@ -209,11 +212,11 @@ export function ProjectsPage() {
                     {p.lastActivityAt === null ? null : (
                       <span title={`Last activity ${dateTime(p.lastActivityAt)}`}>active {relativeTime(p.lastActivityAt)}</span>
                     )}
-                  </div>
-                </li>
+                  </Meta>
+                </Row>
               );
             })}
-          </ul>
+          </RowList>
         </Panel>
       </QueryState>
       {creating ? <CreateProjectDrawer onClose={() => setCreating(false)} /> : null}

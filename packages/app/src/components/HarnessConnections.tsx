@@ -12,7 +12,7 @@ import { AutoCompleteToggle } from "./Completion.tsx";
 import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
 import { T3ConnectionPanel } from "./T3Setup.tsx";
-import { Button, Checkbox, Chip, Detail, Details, ErrorText, Field, Input, Muted, Panel, QueryState } from "./ui.tsx";
+import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, InlineError, Input, Muted, Panel, QueryState } from "./ui.tsx";
 
 /** Harness-specific setup panels by kind; the generic card covers the rest. */
 const CONNECTION_PANELS: Record<string, ComponentType> = {
@@ -72,7 +72,7 @@ function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor;
   const reason = status.reason ?? status.lastError;
   return (
     <div className="flex flex-col gap-3">
-      {reason === undefined || reason === "" || status.connected ? null : <p className="text-meta text-bad">{reason}</p>}
+      {reason === undefined || reason === "" || status.connected ? null : <InlineError>{reason}</InlineError>}
       {descriptor.setup.fields.length === 0 ? null : <SettingsForm descriptor={descriptor} status={status} />}
       {descriptor.setup.actions.map((a) => (
         <ActionForm key={a.id} kind={descriptor.kind} action={a} state={status.actions.find((s) => s.id === a.id)} />
@@ -107,10 +107,9 @@ function Inputs({ fields, status, values, onChange }: { fields: SetupField[]; st
         const value = values[f.id];
         if (f.kind === "bool") {
           return (
-            <label key={f.id} className="flex items-center gap-2 text-meta">
-              <Checkbox checked={value === true} disabled={locked} onChange={(e) => onChange(f.id, e.target.checked)} />
+            <ChoiceRow key={f.id} control={<Checkbox checked={value === true} disabled={locked} onChange={(e) => onChange(f.id, e.target.checked)} />}>
               {f.label}
-            </label>
+            </ChoiceRow>
           );
         }
         return (

@@ -2,10 +2,9 @@ import { useState, type ReactNode } from "react";
 import type { Schedule, Task } from "../api/types.ts";
 import { isFolded, needsEpisode, parseFold, toggleFold, type GroupKey } from "../lib/dashboard.ts";
 import { usePlatform } from "../platform/context.tsx";
-import { IconChevronDown } from "./icons.tsx";
 import { ScheduleRow } from "./ScheduleList.tsx";
 import { TaskRow, TaskRowsSkeleton } from "./TaskList.tsx";
-import { Panel, SkeletonBar, cx, toneClass, type ChipTone } from "./ui.tsx";
+import { DisclosureButton, EmptyState, Marker, Meta, Panel, Row, RowList, SkeletonBar, TextButton, cx, toneClass, type ChipTone } from "./ui.tsx";
 
 export interface GroupMeta {
   title: string;
@@ -111,8 +110,8 @@ export function GroupPanel({
 }) {
   // self-baseline: flex baseline comes from the text, not the square/chevron, so Panel's cap-trimmed h2 centers the caps.
   const label = (
-    <span className={cx(toneClass(g.tone), "inline-flex items-center gap-2 self-baseline")}>
-      <span aria-hidden className="size-1.5 bg-[var(--c)]" />
+    <span className="inline-flex items-center gap-2 self-baseline">
+      <Marker tone={g.tone} />
       <span className="self-baseline">{g.title}</span>
     </span>
   );
@@ -124,18 +123,14 @@ export function GroupPanel({
         onToggle === undefined ? (
           label
         ) : (
-          <button
-            type="button"
-            aria-expanded={!collapsed}
+          <DisclosureButton
+            open={!collapsed}
             onClick={onToggle}
             // The whole header bar toggles (actions stay above it).
-            className="group/fold label-caps inline-flex items-center gap-1.5 text-fg after:absolute after:inset-0"
+            className="label-caps text-fg after:absolute after:inset-0"
           >
-            <span aria-hidden className={cx("inline-flex text-muted transition-[color,transform] duration-150 group-hover/fold:text-fg", collapsed && "-rotate-90")}>
-              <IconChevronDown size={12} />
-            </span>
             {label}
-          </button>
+          </DisclosureButton>
         )
       }
       meta={
@@ -157,6 +152,25 @@ export function GroupPanelSkeleton({ rows = 3, showProject = false }: { rows?: n
     <Panel flush title={<SkeletonBar onPanel className="h-2.5 w-32" />}>
       <TaskRowsSkeleton count={rows} showProject={showProject} />
     </Panel>
+  );
+}
+
+/**
+ * A stat cell's count: the tone square (only while non-zero) and the bold tabular number, Slate at zero. `selected`
+ * sets the number in the tone's text color. A null count is loading: a bar holds its place.
+ */
+export function StatCount({ tone, count, selected = false }: { tone: ChipTone; count: number | null; selected?: boolean }) {
+  if (count === null)
+    return (
+      <span className="skeleton-reveal flex h-6 items-center">
+        <SkeletonBar className="h-4 w-4" />
+      </span>
+    );
+  return (
+    <span className={cx(toneClass(tone), "flex items-center gap-1.5")}>
+      {count > 0 ? <Marker tone={tone} /> : null}
+      <span className={cx("tabular text-title font-bold", selected ? "text-(--cf)" : count === 0 ? "text-muted" : "text-fg")}>{count}</span>
+    </span>
   );
 }
 
@@ -202,16 +216,7 @@ export function StatStrip<K extends string>({
               on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "enabled:hover:bg-panel",
             )}
           >
-            {n === null ? (
-              <span className="skeleton-reveal flex h-6 items-center">
-                <SkeletonBar className="h-4 w-4" />
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5">
-                {n > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
-                <span className={cx("tabular text-title font-bold", on ? "text-[var(--cf)]" : n === 0 ? "text-muted" : "text-fg")}>{n}</span>
-              </span>
-            )}
+            <StatCount tone={g.tone} count={n} selected={on} />
             <span className="label-caps text-label lg:hidden">{g.short}</span>
             <span className="label-caps hidden lg:inline">{g.stat}</span>
           </button>
@@ -219,15 +224,11 @@ export function StatStrip<K extends string>({
       })}
       <div className="hidden flex-1 items-center justify-end px-3 whitespace-nowrap xl:flex">
         {selected === null ? (
-          <span className="font-mono text-meta-sm text-muted">click a count to filter</span>
+          <Meta small>click a count to filter</Meta>
         ) : (
-          <button
-            type="button"
-            onClick={() => onToggle(selected)}
-            className="font-mono text-meta-sm text-muted underline-offset-3 hover:text-fg hover:underline"
-          >
+          <TextButton onClick={() => onToggle(selected)} className="font-mono text-meta-sm text-muted hover:text-fg">
             clear filter
-          </button>
+          </TextButton>
         )}
       </div>
     </div>
@@ -254,18 +255,18 @@ export function ScheduledRows({
     ...tasks.map((task): ScheduledItem => ({ kind: "task", task, at: ms(task.startAt) })),
     ...schedules.map((schedule): ScheduledItem => ({ kind: "schedule", schedule, at: ms(schedule.nextRunAt) })),
   ].toSorted((a, b) => a.at - b.at);
-  if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  if (items.length === 0) return <EmptyState inset>{emptyText}</EmptyState>;
   return (
-    <ul>
+    <RowList>
       {items.map((item) => (
-        <li key={item.kind === "task" ? `task-${item.task.id}` : `schedule-${item.schedule.id}`} className="border-b border-line last:border-b-0">
+        <Row key={item.kind === "task" ? `task-${item.task.id}` : `schedule-${item.schedule.id}`} bare>
           {item.kind === "task" ? (
             <TaskRow task={item.task} showProject={showProject} showTree />
           ) : (
             <ScheduleRow schedule={item.schedule} showProject={showProject} actions="run" />
           )}
-        </li>
+        </Row>
       ))}
-    </ul>
+    </RowList>
   );
 }

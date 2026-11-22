@@ -2,7 +2,7 @@
 // rows (a square marker in the step's tone, or the square run-tone spinner on
 // the active step). The remedy command box is CommandBox in ui.
 import type { ReactNode } from "react";
-import { cx, toneClass, type ChipTone } from "./ui.tsx";
+import { Marker, Row, cx, type ChipTone } from "./ui.tsx";
 
 export type StepStatus = "idle" | "active" | "ok" | "need" | "bad";
 
@@ -24,18 +24,18 @@ export function Steps({ label, children }: { label: string; children: ReactNode 
 /** `tabular` keeps a live count from jittering. */
 export function Step({ label, note, status, tabular = false }: { label: string; note: string; status: StepStatus; tabular?: boolean }) {
   return (
-    <li className="flex min-h-10 items-center gap-3 border-b border-line px-3 last:border-b-0 md:min-h-8">
+    <Row bare className="flex min-h-10 items-center gap-3 px-3 md:min-h-8">
       <span aria-hidden className="flex size-2 shrink-0 items-center justify-center">
         {status === "active" ? (
           <span className="size-2 animate-spin border-[1.5px] border-run border-t-transparent motion-reduce:animate-none" />
         ) : (
-          <span className={cx("size-1.5 bg-(--c) transition-colors duration-150", toneClass(STEP_TONE[status]))} />
+          <Marker tone={STEP_TONE[status]} />
         )}
       </span>
       <span className="font-mono text-meta whitespace-nowrap text-fg">{label}</span>
       <span title={note} className={cx("ml-auto min-w-0 truncate font-mono text-meta", tabular && "tabular", NOTE_CLASS[status])}>
         {note}
       </span>
-    </li>
+    </Row>
   );
 }

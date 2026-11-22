@@ -5,14 +5,14 @@ import { useProjects, useSchedules, useT3Status, useOpenCodeStatus, useHarnesses
 import type { Task } from "../api/types.ts";
 import { IconCheck } from "../components/icons.tsx";
 import { useScope } from "../components/Scope.tsx";
-import { GROUP_META, GroupPanel, GroupPanelSkeleton, useGroupFold } from "../components/TaskGroups.tsx";
+import { GROUP_META, GroupPanel, GroupPanelSkeleton, StatCount, useGroupFold } from "../components/TaskGroups.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
 import { ATTENTION_GROUPS, awaitingReview, inGroup, type GroupKey } from "../lib/dashboard.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
-import { AppButton, PageHeader, QueryState, Skeleton, SkeletonBar, buttonClass, cx, toneClass, type ChipTone } from "../components/ui.tsx";
+import { Alert, AppButton, PageHeader, QueryState, SectionHeading, Skeleton, SkeletonBar, TextLink, buttonClass, type ChipTone } from "../components/ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 
 /** Per-device collapsed groups (`GroupFold`). */
@@ -36,30 +36,16 @@ type InFlightCell = { key: GroupKey; label: string; tone: ChipTone; count: numbe
 /** Work in motion that asks nothing: counts that open the Tasks view filtered to them. A null count is loading. */
 function InFlight({ cells }: { cells: InFlightCell[] }) {
   return (
-    <section aria-labelledby="in-flight" className="mt-6">
-      <div className="mb-2 flex items-baseline gap-3">
-        <h2 id="in-flight" className="text-title font-semibold">
-          In flight
-        </h2>
-        <span className="font-mono text-meta-sm text-muted">no action needed</span>
-      </div>
+    <section aria-labelledby="in-flight-heading" className="mt-6">
+      <SectionHeading id="in-flight-heading" title="In flight" meta="no action needed" />
       <ul className="grid grid-cols-3 border border-line bg-surface">
         {cells.map((c) => (
           <li key={c.key} className="border-r border-line last:border-r-0">
             <Link
               to={`/tasks?state=${c.key}`}
-              className={cx(toneClass(c.tone), "flex flex-col gap-1 px-3 py-2.5 transition-colors duration-150 hover:bg-panel")}
+              className="flex flex-col gap-1 px-3 py-2.5 transition-colors duration-150 hover:bg-panel"
             >
-              {c.count === null ? (
-                <span className="skeleton-reveal flex h-6 items-center">
-                  <SkeletonBar className="h-4 w-5" />
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  {c.count > 0 ? <span aria-hidden className="size-1.5 bg-[var(--c)]" /> : null}
-                  <span className={cx("tabular text-title font-bold", c.count === 0 ? "text-muted" : "text-fg")}>{c.count}</span>
-                </span>
-              )}
+              <StatCount tone={c.tone} count={c.count} />
               <span className="label-caps text-muted">{c.label}</span>
             </Link>
           </li>
@@ -69,6 +55,7 @@ function InFlight({ cells }: { cells: InFlightCell[] }) {
   );
 }
 
+/** A harness connection notice above the dashboard, spaced like T3Alert. */
 /** Planning remains available before pairing and during connection failures. */
 export function DashboardPage() {
   const t3 = useT3Status();
@@ -78,9 +65,23 @@ export function DashboardPage() {
   const t3Configured = harnesses.activeConnection("t3")?.configured ?? false;
   return (
     <>
-      {t3Configured ? <T3Alert status={t3.data} /> : openCode.data?.state === "unconfigured" ? <p className="mb-3 text-small"><Link className="underline" to="/settings">Connect a harness</Link> to start tasks in T3 or OpenCode.</p> : null}
-      {openCode.data?.state === "unavailable" ? <p className="mb-3 text-small">OpenCode is unavailable. <Link className="underline" to="/settings">Check connection</Link></p> : null}
-      {openCode.data?.state === "rejected" ? <p className="mb-3 text-small">OpenCode no longer accepts Stage's sign-in. <Link className="underline" to="/settings">Reconnect</Link></p> : null}
+      {t3Configured ? (
+        <T3Alert status={t3.data} />
+      ) : openCode.data?.state === "unconfigured" ? (
+        <Alert tone="need" className="mb-3.5">
+          <TextLink variant="rest" to="/settings">Connect a harness</TextLink> to start tasks in T3 or OpenCode.
+        </Alert>
+      ) : null}
+      {openCode.data?.state === "unavailable" ? (
+        <Alert tone="need" className="mb-3.5">
+          OpenCode is unavailable. <TextLink variant="rest" to="/settings">Check connection</TextLink>
+        </Alert>
+      ) : null}
+      {openCode.data?.state === "rejected" ? (
+        <Alert tone="need" className="mb-3.5">
+          OpenCode no longer accepts Stage's sign-in. <TextLink variant="rest" to="/settings">Reconnect</TextLink>
+        </Alert>
+      ) : null}
       <CompletionLinger>
         <Dashboard />
       </CompletionLinger>

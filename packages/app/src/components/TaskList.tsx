@@ -16,14 +16,14 @@ import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickC
 import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { AppButton, Button, Chip, ErrorText, Muted, SkeletonBar, cx } from "./ui.tsx";
+import { AppButton, Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
 /** Standalone bordered task list. Inside a `Panel flush`, use `TaskRows` instead. */
 export function TaskList({ tasks, emptyText = "No tasks." }: { tasks: Task[]; emptyText?: string }) {
-  if (tasks.length === 0) return <Muted>{emptyText}</Muted>;
+  if (tasks.length === 0) return <EmptyState>{emptyText}</EmptyState>;
   return (
     <div className="border border-line bg-surface">
       <TaskRows tasks={tasks} emptyText={emptyText} />
@@ -47,15 +47,15 @@ export function TaskRows({
   /** Tree members name their tree in the meta line, linking it with the task selected. */
   showTree?: boolean;
 }) {
-  if (tasks.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  if (tasks.length === 0) return <EmptyState inset>{emptyText}</EmptyState>;
   return (
-    <ul>
+    <RowList>
       {tasks.map((t) => (
-        <li key={t.id} className="border-b border-line last:border-b-0">
+        <Row key={t.id} bare>
           <TaskRow task={t} showProject={showProject} showTree={showTree} />
-        </li>
+        </Row>
       ))}
-    </ul>
+    </RowList>
   );
 }
 
@@ -69,9 +69,9 @@ function ProjectName({ projectId, title, className }: { projectId: number | null
       </span>
     );
   return (
-    <Link to={`/projects/${projectId}`} title={title} className={cx(cls, "hover:underline")}>
+    <TextLink to={`/projects/${projectId}`} title={title} className={cls}>
       {title}
-    </Link>
+    </TextLink>
   );
 }
 
@@ -172,7 +172,7 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
 /** Task row grid (laptop columns: chip, project, title, actions, copy), shared with its skeleton. */
 function taskRowGrid(showProject: boolean): string {
   return cx(
-    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-l-2 px-3 py-row md:gap-x-3.5",
+    "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 px-3 py-row md:gap-x-3.5",
     showProject ? "md:grid-cols-[118px_150px_minmax(0,1fr)_auto_auto]" : "md:grid-cols-[118px_minmax(0,1fr)_auto_auto]",
   );
 }
@@ -182,10 +182,10 @@ const TITLE_WIDTHS = ["w-3/5", "w-2/5", "w-1/2", "w-2/3", "w-1/3"];
 /** Loading rows in the task row grid: chip, project, title over meta and last word, an action. */
 export function TaskRowsSkeleton({ count = 3, showProject = false }: { count?: number; showProject?: boolean }) {
   return (
-    <ul>
+    <RowList>
       {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="border-b border-line last:border-b-0">
-          <div className={cx(taskRowGrid(showProject), "border-l-transparent")}>
+        <Row key={i} bare>
+          <div className={cx(taskRowGrid(showProject), needEdgeClass(false))}>
             <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
               <SkeletonBar className="h-[22px] w-20" />
             </div>
@@ -204,9 +204,9 @@ export function TaskRowsSkeleton({ count = 3, showProject = false }: { count?: n
               <SkeletonBar className="h-control-sm w-24" />
             </div>
           </div>
-        </li>
+        </Row>
       ))}
-    </ul>
+    </RowList>
   );
 }
 
@@ -251,7 +251,7 @@ export function TaskRow({
 
   return (
     <div
-      className={cx("group/row", taskRowGrid(showProject), needsInput ? "border-l-need" : "border-l-transparent")}
+      className={cx("group/row", taskRowGrid(showProject), needEdgeClass(needsInput))}
     >
       <div className="order-2 justify-self-end md:order-1 md:justify-self-start">
         <NodeChip task={task} />
@@ -263,45 +263,38 @@ export function TaskRow({
         {showProject ? (
           <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
         ) : null}
-        <span title={`Task #${task.id}`} className="mr-1.5 font-mono text-meta whitespace-nowrap text-muted tabular">
-          #{task.id}
-        </span>
-        <Link to={`/tasks/${task.id}`} className="text-body font-medium break-words hover:underline">
+        <IdTag id={task.id} title={`Task #${task.id}`} className="mr-1.5" />
+        <TextLink to={`/tasks/${task.id}`} className="text-body font-medium break-words">
           {task.title}
-        </Link>
+        </TextLink>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">
           {showProject ? null : (
-            <Link to={`/projects/${task.projectId}`} className="hover:text-fg hover:underline">
+            <TextLink to={`/projects/${task.projectId}`} variant="muted">
               {task.projectTitle}
-            </Link>
+            </TextLink>
           )}
           <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {configModelText(task.executionConfig)}</span>
           {task.completedAt !== null ? (
             <SettledMeta settledAt={task.completedAt} via={autoMeta} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (
-            <span title={dateTime(since)} className="tabular">
-              {relativeTime(since)}
-            </span>
+            <RelTime at={since} className="tabular" />
           )}
           {treeLink === null ? null : (
-            <Link
+            <TextLink
               to={treeTaskPath(treeLink, task.id)}
+              variant="rest"
               title={`In tree: ${task.treeTitle ?? treeLink}. Open it with this task selected`}
-              className="inline-flex min-w-0 items-center gap-1 text-fg underline decoration-line-strong underline-offset-3 hover:decoration-fg"
+              className="inline-flex min-w-0 items-center gap-1 text-fg"
             >
               <IconTree />
               <span className="max-w-[26ch] truncate">{task.treeTitle ?? `tree ${treeLink}`}</span>
-            </Link>
+            </TextLink>
           )}
           {chip === null ? null : (
-            <Link
-              to={chip.to}
-              title={chip.title}
-              className="inline-flex items-center gap-1 tabular hover:text-fg hover:underline md:hidden"
-            >
+            <TextLink to={chip.to} variant="muted" title={chip.title} className="inline-flex items-center gap-1 tabular md:hidden">
               {chip.icon}
               <span className="max-w-[24ch] truncate">{chip.label}</span>
-            </Link>
+            </TextLink>
           )}
         </div>
         <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
@@ -330,7 +323,7 @@ export function TaskRow({
           </>
         ) : confirming !== null ? (
           <>
-            <span className="font-mono text-meta text-muted tabular">{confirming.starts}</span>
+            <Meta className="tabular">{confirming.starts}</Meta>
             <Button small variant="primary" busy={quick.busy} onClick={confirming.submit}>
               Complete
             </Button>
@@ -361,9 +354,9 @@ export function TaskRow({
       </div>
 
       {task.lastError === null ? null : (
-        <p className={cx("order-5 col-span-2 truncate font-mono text-meta text-bad", underTitle)} title={task.lastError}>
+        <InlineError truncate className={cx("order-5 col-span-2", underTitle)}>
           {task.lastError}
-        </p>
+        </InlineError>
       )}
       {start.error === null ? null : (
         <div className={cx("order-6 col-span-2", underTitle)}>
@@ -381,21 +374,18 @@ export function TaskRow({
 
 /** Completed group: tasks and trees in one list (already ordered by settle time). */
 export function SettledRows({ items, emptyText, showProject = true }: { items: SettledItem[]; emptyText: string; showProject?: boolean }) {
-  if (items.length === 0) return <p className="px-3 py-2.5 text-small text-muted">{emptyText}</p>;
+  if (items.length === 0) return <EmptyState inset>{emptyText}</EmptyState>;
   return (
-    <ul>
+    <RowList>
       {items.map((item) => (
-        <li
-          key={item.kind === "task" ? `task-${item.task.id}` : `tree-${item.tree.id}`}
-          className="border-b border-line last:border-b-0"
-        >
+        <Row key={item.kind === "task" ? `task-${item.task.id}` : `tree-${item.tree.id}`} bare>
           {item.kind === "task" ? (
             <TaskRow task={item.task} showProject={showProject} />
           ) : (
             <TreeRow tree={item.tree} />
           )}
-        </li>
+        </Row>
       ))}
-    </ul>
+    </RowList>
   );
 }

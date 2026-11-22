@@ -8,8 +8,7 @@ import { HarnessScopeProvider, type HarnessScope } from "../api/harnessScope.tsx
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import type { Machine } from "../api/types.ts";
 import { HarnessConnections } from "../components/HarnessConnections.tsx";
-import { Marker } from "../components/Machines.tsx";
-import { Alert, Muted, PageHeader, Panel, QueryState } from "../components/ui.tsx";
+import { Alert, EmptyState, Hint, Marker, Meta, PageHeader, Panel, QueryState, Row, RowList } from "../components/ui.tsx";
 import { dateTime } from "../lib/format.ts";
 import { machineSetupAlert, machineSetupState, machineStatusLine, machineTone, serverVersion, versionDiffers } from "../lib/machines.ts";
 import { useIdParam } from "../lib/params.ts";
@@ -75,9 +74,9 @@ function MachineView({ machine: m, server }: { machine: Machine; server: string 
 
 function Footnote({ label }: { label: string }) {
   return (
-    <p className="max-w-[72ch] font-mono text-meta text-muted">
+    <Hint className="max-w-[72ch]">
       Harness credentials stay on {label}, in its worker&apos;s data dir. This server keeps each connection&apos;s identity, status and settings.
-    </p>
+    </Hint>
   );
 }
 
@@ -87,18 +86,16 @@ function RecordedConnections({ machine: m }: { machine: Machine }) {
   return (
     <Panel title="Connections on record" meta={`${m.connections.length}`} flush>
       {m.connections.length === 0 ? (
-        <div className="px-3 py-2.5">
-          <Muted>No harness connections yet. Connect one here once {m.label} is back online.</Muted>
-        </div>
+        <EmptyState inset>No harness connections yet. Connect one here once {m.label} is back online.</EmptyState>
       ) : (
-        <ul>
+        <RowList>
           {m.connections.map((c) => (
-            <li key={c.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-line px-3 py-2 last:border-b-0">
+            <Row key={c.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
               <span className="text-body font-medium text-fg">{kindName(c.harness)}</span>
-              <span className="min-w-0 font-mono text-meta break-all text-muted">{c.label === "" ? `connection #${c.id}` : c.label}</span>
-            </li>
+              <Meta className="min-w-0 break-all">{c.label === "" ? `connection #${c.id}` : c.label}</Meta>
+            </Row>
           ))}
-        </ul>
+        </RowList>
       )}
     </Panel>
   );
