@@ -383,9 +383,25 @@ func (h *host) menu() *mygo.Menu {
 	if h.dev {
 		view = append(view, mygo.Separator(), &mygo.MenuItem{Role: mygo.RoleToggleDevTools})
 	}
+	back, forward := "Alt+Left", "Alt+Right"
+	if runtime.GOOS == "darwin" {
+		back, forward = "Cmd+[", "Cmd+]"
+	}
+	page := func(fn func(*mygo.Page)) func(*mygo.MenuItem, *mygo.Window) {
+		return click(func() {
+			if w := h.win.Load(); w != nil {
+				fn(w.Page())
+			}
+		})
+	}
+	goMenu := []*mygo.MenuItem{
+		{Label: "Back", Accelerator: back, Click: page((*mygo.Page).GoBack)},
+		{Label: "Forward", Accelerator: forward, Click: page((*mygo.Page).GoForward)},
+	}
 	items = append(items,
 		&mygo.MenuItem{Role: mygo.RoleEditMenu},
 		&mygo.MenuItem{Label: "View", Submenu: view},
+		&mygo.MenuItem{Label: "Go", Submenu: goMenu},
 		&mygo.MenuItem{Label: "Window", Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleMinimize},
 			{Label: "Close", Accelerator: "CmdOrCtrl+W", Click: func(_ *mygo.MenuItem, w *mygo.Window) {

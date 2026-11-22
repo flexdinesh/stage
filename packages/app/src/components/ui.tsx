@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { IconCheck, IconClose } from "./icons.tsx";
+import { NavLabelContext, TrailSlotContext, type TrailSegment } from "./navContext.ts";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -381,27 +383,68 @@ export function Panel({
 }
 
 /** Page title with a `//` meta line under it. `subtitle` is accepted as an alias of `meta`. */
+/** A page's location as links ("stage / nav-history / task 12"); the last step is the current page. */
+export function Trail({ segments, linkClass }: { segments: readonly TrailSegment[]; linkClass: string }) {
+  return segments.map((s, i) => (
+    <Fragment key={`${i}:${s.label}`}>
+      {i === 0 ? null : <span aria-hidden> / </span>}
+      {s.to === undefined ? (
+        <span className={i === segments.length - 1 ? "text-fg" : undefined}>{s.label}</span>
+      ) : (
+        <Link to={s.to} className={linkClass}>
+          {s.label}
+        </Link>
+      )}
+    </Fragment>
+  ));
+}
+
+const metaLinkClass = "text-fg underline-offset-2 hover:underline";
+const barLinkClass = "text-muted underline-offset-2 transition-colors duration-150 hover:text-fg hover:underline";
+
+/**
+ * Page title, meta line and actions. `trail` is the page's location: in the laptop content bar when the shell has one,
+ * and at the start of the meta line on narrower screens. The title (or the trail's last step) names the page in the
+ * history list.
+ */
 export function PageHeader({
   title,
   meta,
   subtitle,
   actions,
+  trail,
 }: {
   title: ReactNode;
   meta?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  trail?: readonly TrailSegment[];
 }) {
   const line = meta ?? subtitle;
+  const slot = useContext(TrailSlotContext);
+  const nameEntry = useContext(NavLabelContext);
+  const name = typeof title === "string" ? title : trail?.at(-1)?.label;
+  useEffect(() => {
+    if (name !== undefined) nameEntry?.(name);
+  }, [name, nameEntry]);
+  const inBar = slot !== null && trail !== undefined;
   return (
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      {inBar ? createPortal(<Trail segments={trail} linkClass={barLinkClass} />, slot) : null}
       <div className="min-w-0">
         <h1 className="text-headline leading-tight font-bold tracking-[-0.025em] break-words text-balance">
           {title}
         </h1>
-        {line === undefined ? null : (
-          <div className="mt-1 font-mono text-detail text-muted">
-            <span className="font-bold text-fg">{"//"}</span> {line}
+        {line === undefined && trail === undefined ? null : (
+          <div className={cx("mt-1 font-mono text-detail text-muted", inBar && line === undefined && "lg:hidden")}>
+            <span className="font-bold text-fg">{"//"}</span>{" "}
+            {trail === undefined ? null : (
+              <span className={cx(inBar && "lg:hidden")}>
+                <Trail segments={trail} linkClass={metaLinkClass} />
+                {line === undefined ? null : " · "}
+              </span>
+            )}
+            {line}
           </div>
         )}
       </div>

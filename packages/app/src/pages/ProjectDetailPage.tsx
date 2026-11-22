@@ -51,6 +51,7 @@ function ProjectDetail({ id }: { id: number }) {
         <>
           <PageHeader
             title={project.data.title}
+            trail={[{ label: "Projects", to: "/projects" }, { label: `project ${project.data.id}` }]}
             meta={
               <span title={`Stage project #${project.data.id}`} className="break-all">
                 {projectWorkspace(project.data)}
