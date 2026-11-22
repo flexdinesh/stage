@@ -64,10 +64,25 @@ export function PanelHeader({
 }
 
 /** A page section's heading outside a Panel (Dashboard "In flight"): title size, mono meta beside it, actions right. */
-export function SectionHeading({ title, meta, actions, className }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; className?: string }) {
+export function SectionHeading({
+  id,
+  title,
+  meta,
+  actions,
+  className,
+}: {
+  /** For `aria-labelledby` on the section. */
+  id?: string;
+  title: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cx("mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1", className)}>
-      <h2 className="text-title font-semibold">{title}</h2>
+      <h2 id={id} className="text-title font-semibold">
+        {title}
+      </h2>
       {meta === undefined ? null : <span className="font-mono text-meta text-muted">{meta}</span>}
       {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -75,10 +90,25 @@ export function SectionHeading({ title, meta, actions, className }: { title: Rea
 }
 
 /** A group's label inside a panel body or drawer ("Needs", "Add note", "This device"): uppercase mono Slate. */
-export function SubHeading({ title, meta, actions, className }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; className?: string }) {
+export function SubHeading({
+  id,
+  title,
+  meta,
+  actions,
+  className,
+}: {
+  /** For `aria-labelledby` on the group. */
+  id?: string;
+  title: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cx("flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1", className)}>
-      <h3 className="label-caps">{title}</h3>
+      <h3 id={id} className="label-caps">
+        {title}
+      </h3>
       {meta === undefined ? null : <span className="font-mono text-meta-sm text-muted">{meta}</span>}
       {actions === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
     </div>

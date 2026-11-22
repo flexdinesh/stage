@@ -39,16 +39,33 @@ export function MetaLine({ className, children }: { className?: string; children
 }
 
 /** A task or tree number before its title: `#51`, mono Slate, tabular, never wrapped apart from the title. */
-export function IdTag({ id, className }: { id: number; className?: string }) {
-  return <span className={cx("shrink-0 font-mono text-meta whitespace-nowrap text-muted tabular", className)}>#{id}</span>;
+export function IdTag({ id, title, className }: { id: number; title?: string; className?: string }) {
+  return (
+    <span title={title} className={cx("shrink-0 font-mono text-meta whitespace-nowrap text-muted tabular", className)}>
+      #{id}
+    </span>
+  );
 }
 
-/** Help text under or beside a control: Geist (prose is never mono), Slate. */
-export function Hint({ id, className, children }: { id?: string; className?: string; children: ReactNode }) {
+/** Help text under or beside a control: Geist (prose is never mono), Slate. `inline` for a span inside a label or line. */
+export function Hint({
+  id,
+  inline = false,
+  title,
+  className,
+  children,
+}: {
+  id?: string;
+  inline?: boolean;
+  title?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const Tag = inline ? "span" : "p";
   return (
-    <p id={id} className={cx("text-meta text-muted", className)}>
+    <Tag id={id} title={title} className={cx("text-meta text-muted", className)}>
       {children}
-    </p>
+    </Tag>
   );
 }
 

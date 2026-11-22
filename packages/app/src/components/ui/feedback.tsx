@@ -15,10 +15,13 @@ export function errorText(error: unknown): string | null {
 export function Alert({
   tone = "need",
   actions,
+  className,
   children,
 }: {
   tone?: "need" | "bad" | "plain";
   actions?: ReactNode;
+  /** Outer spacing only (margins). */
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -27,6 +30,7 @@ export function Alert({
       className={cx(
         toneClass(tone),
         "flex flex-wrap items-center gap-x-3 gap-y-2 border border-[color-mix(in_srgb,var(--c)_50%,transparent)] bg-[color-mix(in_srgb,var(--c)_9%,var(--surface))] px-3 py-2 text-small",
+        className,
       )}
     >
       <span aria-hidden className="size-[7px] shrink-0 bg-(--c)" />
@@ -42,8 +46,8 @@ export function ErrorText({ error }: { error: unknown }) {
   return <Alert tone="bad">{text}</Alert>;
 }
 
-export function Muted({ children }: { children: ReactNode }) {
-  return <p className="text-small text-muted">{children}</p>;
+export function Muted({ className, children }: { className?: string; children: ReactNode }) {
+  return <p className={cx("text-small text-muted", className)}>{children}</p>;
 }
 
 /**
@@ -52,18 +56,22 @@ export function Muted({ children }: { children: ReactNode }) {
  */
 export function InlineError({
   truncate = false,
+  inline = false,
   className,
   children,
 }: {
   /** One line with the full text in the tooltip. */
   truncate?: boolean;
+  /** A span inside a line (a status note in a mono meta line). */
+  inline?: boolean;
   className?: string;
   children: ReactNode;
 }) {
+  const Tag = inline ? "span" : "p";
   return (
-    <p title={truncate && typeof children === "string" ? children : undefined} className={cx("font-mono text-meta break-words text-bad", truncate && "truncate", className)}>
+    <Tag title={truncate && typeof children === "string" ? children : undefined} className={cx("font-mono break-words text-bad", !inline && "text-meta", truncate && "truncate", className)}>
       {children}
-    </p>
+    </Tag>
   );
 }
 
