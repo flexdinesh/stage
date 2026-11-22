@@ -2,12 +2,15 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter } from "./client.ts";
+import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import type { HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
+  openCodeStatus: ["opencode-status"],
+  harnessStatus: ["harness-status"],
   connections: ["connections"],
   machines: ["machines"],
   pairing: ["pairing"],
@@ -83,6 +86,14 @@ export function useHarnessDescriptors() {
   return useQuery({ queryKey: keys.harnesses, queryFn: api.harnesses, staleTime: Infinity });
 }
 
+/** The harness scope's machine and its harness kinds with what it can run and set up (GET /api/machines/{id}/harnesses; the local machine's are useHarnessDescriptors). */
+export function useScopedHarnessDescriptors() {
+  const api = useHarnessApi();
+  const key = useScopedKey();
+  const local = useHarnessScope().machineId === null;
+  return useQuery({ queryKey: key(keys.harnesses), queryFn: api.harnesses, staleTime: local ? Infinity : 0 });
+}
+
 /** Harness lookups by connection id (name, harness, active, label), by kind (descriptor) and the active connection per harness. */
 export function useHarnesses(): Harnesses & { loaded: boolean; error: unknown } {
   const connections = useConnections();
@@ -130,22 +141,26 @@ export function useSetAutoComplete() {
   });
 }
 
+/** OpenCode's setup status on the harness scope's machine. */
 export function useOpenCodeStatus() {
-  const api = useApi();
-  return useQuery({queryKey:["opencode-status"], queryFn: api.openCodeStatus, refetchInterval: 15000});
+  const api = useHarnessApi();
+  const key = useScopedKey();
+  return useQuery({ queryKey: key(keys.openCodeStatus), queryFn: api.openCodeStatus, refetchInterval: 15000 });
 }
 
 const T3_STATUS_POLL_MS = 5000;
 const T3_SYNC_POLL_MS = 1000;
 
+/** T3's setup status on the harness scope's machine. */
 export const useT3Status = () => {
-  const api = useApi();
+  const api = useHarnessApi();
+  const key = useScopedKey()(keys.t3Status);
   const qc = useQueryClient();
   return useQuery({
-    queryKey: keys.t3Status,
+    queryKey: key,
     // Compared here (once per fetch, however many observers) so the first sync refreshes the views it fills.
     queryFn: async () => {
-      const prev = qc.getQueryData<T3Status>(keys.t3Status);
+      const prev = qc.getQueryData<T3Status>(key);
       const next = await api.t3Status();
       if (firstSyncLanded(prev, next)) void refreshAfterFirstSync(qc);
       return next;

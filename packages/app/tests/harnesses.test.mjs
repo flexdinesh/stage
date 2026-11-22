@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "../src/api/client.ts";
 import {
+  activeOn,
   bindingsSummary,
   forgetPrompt,
   harnessLookup,
@@ -185,6 +186,19 @@ test("PREVIOUS lists a harness's retired, not forgotten connections", () => {
     forgetPrompt(oldT3),
     "Forget desktop? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.",
   );
+});
+
+test("a machine's previous and active connections stay on that machine", () => {
+  const remote = connection(9, "t3", { machineId: 2, label: "desk" });
+  const remoteOld = connection(8, "t3", { machineId: 2, active: false, label: "desk-old", retiredAt: "2026-11-11T00:00:00Z" });
+  const here = [t3, oldT3].map((c) => ({ ...c, machineId: 1 }));
+  const all = [...here, remote, remoteOld];
+  assert.deepEqual(previousConnections(all, "t3", 1).map((c) => c.id), [1]);
+  assert.deepEqual(previousConnections(all, "t3", 2).map((c) => c.id), [8]);
+  assert.deepEqual(previousConnections(all, "t3").map((c) => c.id), [1, 8]);
+  assert.equal(activeOn(all, "t3", 1)?.id, 5);
+  assert.equal(activeOn(all, "t3", 2)?.id, 9);
+  assert.equal(activeOn(all, "opencode", 2), undefined);
 });
 
 test("Forget deletes the retired connection", async () => {

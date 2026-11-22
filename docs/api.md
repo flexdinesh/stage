@@ -200,7 +200,7 @@ The up half: one envelope per request (at most 32 MiB), header `Stage-Channel-Se
 #### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
 A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
 
-- Machine management is refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`) work.
+- Machine management and per-machine harness setup changes are refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping`, `PUT /api/machines/{id}/harnesses/{kind}/settings`, `POST /api/machines/{id}/harnesses/{kind}/actions/{action}` and `DELETE /api/machines/{id}/harnesses/{kind}/connection` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`, `GET /api/machines/{id}/harnesses...`) work.
 - `/api/worker/*` and any path that is neither `/api/...` nor `/mcp`: 404.
 
 ## Harness connections (API v6)
@@ -238,6 +238,9 @@ Body: the action's input object (strict; empty means `{}`). 200 `HarnessStatus` 
 
 ### `DELETE /api/harnesses/{kind}/connection`
 Forget the connection's credentials; the connection keeps its identity, tasks and history. 200 `HarnessStatus`. 409 when the descriptor's `setup.disconnect` is false or the environment manages the connection.
+
+### Per machine (`/api/machines/{id}/harnesses...`)
+`GET /api/machines/{id}/harnesses`, `GET .../{kind}/status`, `PUT .../{kind}/settings`, `POST .../{kind}/actions/{action}` and `DELETE .../{kind}/connection` are the routes above for machine `{id}`; `/api/harnesses...` is machine 1 (this server). Unknown or removed machine: 404. A remote machine's setup runs on its worker ([execution.md](execution.md#remote-machines)): credentials stay there, and its environment, not this server's, locks fields (`locked`, `source: env`). When its worker cannot answer: 503 `{error, code}` with `machine_offline` (not connected, or no reply in time), `machine_needs_update` (another API version, or a worker without this harness's setup) or `machine_setup_starting` (connected, still composing its setup; retry). Health and `GET /api/harnesses` report an offline remote connection as not connected with the offline reason as `lastError`. A remote machine's connection is created by its first pairing or connect.
 
 ## T3 connection, sync, catalog
 

@@ -340,7 +340,8 @@ export interface HarnessStatus<D = unknown> {
 }
 /** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
 export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }
-export interface HarnessesReply { machine: { id: number; label: string; createdBy: number; profile: MachineProfile }; harnesses: HarnessDescriptor[] }
+/** GET /api/harnesses (the local machine) and GET /api/machines/{id}/harnesses. */
+export interface HarnessesReply { machine: Machine & { profile: MachineProfile }; harnesses: HarnessDescriptor[] }
 /** GET /api/machines: a host that runs harnesses. Machine 1 is local (this server); others run `stage worker`. */
 export interface Machine {
   id: number;

@@ -4,10 +4,10 @@
 // the generic card rendered from its setup schema (GET /api/harnesses).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
-import { keys, useHarnessDescriptors } from "../api/queries.ts";
+import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
+import { keys, useScopedHarnessDescriptors } from "../api/queries.ts";
 import type { HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
-import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
 import { PreviousConnections } from "./PreviousConnections.tsx";
@@ -20,8 +20,9 @@ const CONNECTION_PANELS: Record<string, ComponentType> = {
   opencode: OpenCodeSetup,
 };
 
+/** The harness scope's machine's connection setup. */
 export function HarnessConnections() {
-  const descriptors = useHarnessDescriptors();
+  const descriptors = useScopedHarnessDescriptors();
   const connectable = (descriptors.data?.harnesses ?? []).filter((d) => d.connectable);
   return (
     <QueryState isPending={descriptors.isPending} error={descriptors.error}>
@@ -33,12 +34,10 @@ export function HarnessConnections() {
   );
 }
 
-const statusKey = (kind: string) => ["harness-status", kind];
-
 /** The generic card: state, settings, actions and disconnect from the setup schema. */
 export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }) {
-  const api = useApi();
-  const status = useQuery({ queryKey: statusKey(descriptor.kind), queryFn: () => api.harnessStatus(descriptor.kind), refetchInterval: 15000 });
+  const api = useHarnessApi();
+  const status = useQuery({ queryKey: useScopedKey()([...keys.harnessStatus, descriptor.kind]), queryFn: () => api.harnessStatus(descriptor.kind), refetchInterval: 15000 });
   return (
     <Panel
       title={`${descriptor.name} connection`}
@@ -59,14 +58,15 @@ export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }
 
 function useApply(kind: string) {
   const qc = useQueryClient();
+  const key = useScopedKey()([...keys.harnessStatus, kind]);
   return (s: HarnessStatus) => {
-    qc.setQueryData(statusKey(kind), s);
+    qc.setQueryData(key, s);
     void qc.invalidateQueries({ queryKey: keys.connections });
   };
 }
 
 function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor; status: HarnessStatus }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const apply = useApply(descriptor.kind);
   const disconnect = useMutation({ mutationFn: () => api.disconnectHarness(descriptor.kind), onSuccess: apply });
   const reason = status.reason ?? status.lastError;
@@ -97,12 +97,13 @@ type Values = SetupValues;
 
 /** Inputs for fields; locked ones are read-only. */
 function Inputs({ fields, status, values, onChange }: { fields: SetupField[]; status?: HarnessStatus; values: Values; onChange: (id: string, v: string | boolean) => void }) {
+  const copy = useSetupCopy();
   return (
     <>
       {fields.map((f) => {
         const st = status?.fields.find((s) => s.id === f.id);
         const locked = st?.locked === true;
-        const hint = locked ? `Set by ${f.env ?? "the server environment"}.` : f.help;
+        const hint = locked ? copy.envLock(f.env) : f.help;
         const value = values[f.id];
         if (f.kind === "bool") {
           return (
@@ -134,7 +135,7 @@ function Inputs({ fields, status, values, onChange }: { fields: SetupField[]; st
 }
 
 function SettingsForm({ descriptor, status }: { descriptor: HarnessDescriptor; status: HarnessStatus }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const apply = useApply(descriptor.kind);
   const fields = descriptor.setup.fields;
   const [values, setValues] = useState<Values>(() => initialValues(fields, status.fields));
@@ -167,7 +168,7 @@ function SettingsForm({ descriptor, status }: { descriptor: HarnessDescriptor; s
 }
 
 function ActionForm({ kind, action, state }: { kind: string; action: SetupAction; state: HarnessStatus["actions"][number] | undefined }) {
-  const api = useApi();
+  const api = useHarnessApi();
   const apply = useApply(kind);
   const input = action.input ?? [];
   const [values, setValues] = useState<Values>(() => initialValues(input, []));
