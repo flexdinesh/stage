@@ -1021,9 +1021,9 @@ func TestReadRefTool(t *testing.T) {
 
 func TestGuideNamesEveryInterface(t *testing.T) {
 	for _, w := range []string{
-		"Use whichever Stage interface you have: Stage MCP tools (names here), the stage CLI, or the Stage server's HTTP API (/api).",
+		"Use whichever Stage interface you have: the stage CLI (stage help; stage call TOOL JSON runs any tool named here, stage tools NAME shows its input), Stage MCP tools (names here), or the Stage server's HTTP API (/api).",
 		"If none is reachable, say so and continue; never install one.",
-		"MCP: a harness that sends session metadata on each call (OpenCode) needs nothing",
+		"The stage CLI and stdio MCP detect it from your harness's session variable (T3: T3CODE_THREAD_ID, OpenCode: OPENCODE_SESSION_ID; stage context shows it), and OpenCode MCP sends it per call.",
 		"CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session.",
 		"over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>",
 		"HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption",
@@ -1036,7 +1036,7 @@ func TestGuideNamesEveryInterface(t *testing.T) {
 
 func TestGuideNamesInstalledCLI(t *testing.T) {
 	g := agenttools.Guide("stage-dev")
-	for _, w := range []string{"the stage-dev CLI,", "through stage-dev task, tree,", "Run stage-dev help"} {
+	for _, w := range []string{"the stage-dev CLI (stage-dev help;", "stage-dev call TOOL JSON", "through stage-dev task, tree,", "Run stage-dev help"} {
 		if !strings.Contains(g, w) {
 			t.Errorf("guide missing %q", w)
 		}

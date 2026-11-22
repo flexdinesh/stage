@@ -826,6 +826,15 @@ func (c *Client) Connections(ctx context.Context) ([]db.HarnessConnection, error
 	return out.Connections, err
 }
 
+// ResolveConnection is GET /api/connections/resolve: the active configured
+// connection of harness kind on this caller's machine (through a worker's
+// agent gateway, that machine; else the server's).
+func (c *Client) ResolveConnection(ctx context.Context, kind string) (db.HarnessConnection, error) {
+	var out db.HarnessConnection
+	err := c.do(ctx, http.MethodGet, "/api/connections/resolve?harness="+url.QueryEscape(kind), nil, &out)
+	return out, err
+}
+
 // SetAutoComplete is PUT /api/connections/{id}/auto-complete.
 func (c *Client) SetAutoComplete(ctx context.Context, id int64, on bool) (db.HarnessConnection, error) {
 	var out struct {

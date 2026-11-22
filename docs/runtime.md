@@ -182,7 +182,7 @@ binary knows; `/api/health` `schema` is the database's.
   Resolution is read-only: no agent command starts a server.
 - **`stage service`** ignores `--url`/`STAGE_URL`: it targets this
   installation's service and its socket only ([service.md](service.md)).
-- **`stage setup mcp`** passes `STAGE_URL` to the stdio server only when one was given explicitly; otherwise the stdio server resolves the server itself. `--http` needs an http(s) URL; if the server is only on a socket, pass `--url`.
+- **`stage setup mcp`** (and `stage setup --mcp`) passes `STAGE_URL` to the stdio server only when one was given explicitly; otherwise the stdio server resolves the server itself. `--http` needs an http(s) URL; if the server is only on a socket, pass `--url`. `stage setup --check` reports which server the CLI resolves and whether it answers with this API version.
 
 ## Health and version
 

@@ -38,6 +38,11 @@ func printContext(w io.Writer, c agenttools.ContextOut) {
 	session := ""
 	if c.Session != nil {
 		session = fmt.Sprintf("%s (connection %d)", c.Session.ExternalSessionID, c.Session.ConnectionID)
+		if c.SessionSource != "" {
+			session += ", from " + c.SessionSource
+		}
+	} else if c.CallerWarning != "" {
+		session = "- (" + c.CallerWarning + ")"
 	}
 	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(session), dash(c.Cwd), c.APIURL)
 	if c.Project != nil {

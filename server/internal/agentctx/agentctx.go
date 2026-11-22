@@ -21,6 +21,16 @@ const (
 	CallerHeader = "Stage-Caller-Session"
 )
 
+// Caller sources, strongest first: the per-call transport claim (harness
+// request metadata or CallerHeader), an explicit callerSession argument or
+// CLI flags, then CallerEnv. A harness's own environment variable is the
+// weakest (agenttools derives it when nothing else names the caller).
+const (
+	SourceRequest  = "request"
+	SourceArgument = "argument"
+	SourceEnv      = CallerEnv
+)
+
 // ParseSession reads "<connectionId>:<externalSessionId>".
 func ParseSession(v string) (db.SessionRef, error) {
 	id, session, ok := strings.Cut(strings.TrimSpace(v), ":")
@@ -35,6 +45,10 @@ func ParseSession(v string) (db.SessionRef, error) {
 type Caller struct {
 	Session *db.SessionRef `json:"session"`
 	Cwd     string         `json:"cwd"`
+	// Source names where Session came from: SourceRequest, SourceArgument,
+	// SourceEnv, or a harness's environment variable (agenttools); "" when
+	// unknown.
+	Source string `json:"-"`
 	// invalid is a malformed CallerEnv, reported by Resolve when nothing
 	// else names the caller.
 	invalid error
@@ -52,6 +66,7 @@ func fromEnv(getenv func(string) string) Caller {
 			c.invalid = fmt.Errorf("%s: %w", CallerEnv, err)
 		} else {
 			c.Session = &ref
+			c.Source = SourceEnv
 		}
 	}
 	if wd, err := os.Getwd(); err == nil {
@@ -72,9 +87,9 @@ func (c Caller) Resolve(explicit *db.SessionRef, cwd string, claim *db.SessionRe
 	}
 	switch {
 	case claim != nil:
-		c.Session = claim
+		c.Session, c.Source = claim, SourceRequest
 	case explicit != nil:
-		c.Session = explicit
+		c.Session, c.Source = explicit, SourceArgument
 	case c.invalid != nil:
 		return Caller{}, c.invalid
 	}

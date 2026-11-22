@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
@@ -21,15 +21,19 @@ const (
 // mcpName is the MCP server name registered with agents.
 const mcpName = "stage"
 
-func runSetup(env Env, args []string) error {
+func runSetup(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "")
 	switch v {
+	case "":
+		return setupAgents(ctx, env, rest)
 	case "mcp":
 		return setupMCP(env, rest)
 	case "instructions":
 		return setupInstructions(env, rest)
+	case "skill":
+		return setupSkill(env, rest)
 	}
-	return usagef("setup: want mcp or instructions")
+	return usagef("setup: want no verb, skill, mcp or instructions")
 }
 
 // setupMCP registers the stdio server (or the HTTP endpoint with --http) in
@@ -114,9 +118,13 @@ func register(env Env, tool string, args []string) error {
 	return nil
 }
 
-// instructionsBlock is the marked block written to agent instruction files.
+// instructionsBlock is the marked block written to agent instruction
+// files: a pointer to the skill and the guide, so the full guide is not in
+// every session's context.
 func instructionsBlock(cli string) string {
-	return blockBegin + "\n## stage (task queue)\n\n" + agenttools.Guide(cli) + "\n" + blockEnd + "\n"
+	return blockBegin + "\n## stage (task queue)\n\n" +
+		"Stage tracks tasks, trees, journals and schedules for agents. Use the `" + cli + "` skill, or run `" + cli + " guide` for the workflow and `" + cli + " help` for commands.\n" +
+		blockEnd + "\n"
 }
 
 // upsertBlock replaces the marked block in content, or appends it.
@@ -172,19 +180,27 @@ func setupInstructions(env Env, args []string) error {
 			fmt.Fprintf(env.Stdout, "skipped %s: directory missing\n", path)
 			continue
 		}
-		cur, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := upsertInstructions(env, path); err != nil {
 			return err
 		}
-		next := upsertBlock(string(cur), env.cliName())
-		if next == string(cur) {
-			fmt.Fprintf(env.Stdout, "unchanged %s\n", path)
-			continue
-		}
-		if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
-			return err
-		}
-		fmt.Fprintf(env.Stdout, "wrote %s\n", path)
 	}
+	return nil
+}
+
+// upsertInstructions writes the instruction pointer block into path.
+func upsertInstructions(env Env, path string) error {
+	cur, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	next := upsertBlock(string(cur), env.cliName())
+	if next == string(cur) {
+		fmt.Fprintf(env.Stdout, "unchanged %s\n", path)
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "wrote %s\n", path)
 	return nil
 }

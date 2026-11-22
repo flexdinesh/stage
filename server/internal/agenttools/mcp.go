@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,8 +18,8 @@ const Version = "1.0.0"
 // guide is the agent workflow guidance; {cli} is the installed CLI's name.
 const guide = `Stage owns projects, tasks, trees, accepted results and journals. Open conversations in the selected harness.
 - Call get_context to see your scoped session, project, owning task and current tree. Before work, read the task journal and the current tree journal. Refresh membership before contributing a tree note.
-- Use whichever Stage interface you have: Stage MCP tools (names here), the {cli} CLI, or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
-- Caller session: {connectionId, externalSessionId}, your harness connection in Stage and your session there (your launch instructions say how to name it). MCP: a harness that sends session metadata on each call (OpenCode) needs nothing; otherwise pass callerSession, or over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>. CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
+- Use whichever Stage interface you have: the {cli} CLI ({cli} help; {cli} call TOOL JSON runs any tool named here, {cli} tools NAME shows its input), Stage MCP tools (names here), or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
+- Caller session: {connectionId, externalSessionId}, your harness connection in Stage and your session there. The {cli} CLI and stdio MCP detect it from your harness's session variable (T3: T3CODE_THREAD_ID, OpenCode: OPENCODE_SESSION_ID; {cli} context shows it), and OpenCode MCP sends it per call. Otherwise pass callerSession, or over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>. CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
 - Create work with create_task. Supply a self-contained prompt. The default is backlog. Specify project by ID or exact title when context is missing. list_projects shows bindings and configured connections. Set connectionId to choose the execution harness independently of the creator. list_models with connectionId and projectId shows workspace-specific executionConfig choices.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks for manual. Auto is safe for planned work: roots never start on their own, and other members launch only once the user completes their needs in Stage (a task added after its needs are completed launches at once; that is expected). Do not pick manual to avoid launches; ask the user if unsure. Only user completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. A predecessor worktree base requires an available branch in the same harness and project.
@@ -31,6 +32,31 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 // block `stage setup instructions` writes.
 func Guide(cli string) string {
 	return strings.ReplaceAll(guide, "{cli}", cli)
+}
+
+// skill is the Agent Skill (SKILL.md) `stage setup` installs: the guide,
+// led by how to use it through the CLI; {cli} is the installed CLI's name.
+const skill = `---
+name: {cli}
+description: Use Stage, the task queue, through the {cli} CLI. Use when the user mentions Stage, a Stage task, tree, schedule or journal, a Stage link (…/tasks/<id>, …/trees/<id>), a <stage-journal> block, or asks to queue, plan, fan out, schedule or track work for later or for other agents.
+---
+
+# Stage
+
+Stage owns projects, tasks, trees (dependencies), accepted results, schedules and journals. Drive it with the {cli} CLI:
+
+- ` + "`{cli} context`" + `: your session (detected from your harness), project, owning task and tree.
+- ` + "`{cli} task|tree|schedule ...`" + `, ` + "`{cli} task|tree notes ID [add]`" + `, ` + "`{cli} show REF`" + `: typed commands; ` + "`{cli} help`" + ` lists them.
+- ` + "`{cli} tools`" + ` lists every tool named below, ` + "`{cli} tools NAME`" + ` shows its input schema, and ` + "`{cli} call NAME '{\"id\": 12}'`" + ` (or ` + "`-`" + ` for stdin) runs it and prints JSON.
+- ` + "`{cli} status`" + `: which server the CLI reaches. If none is reachable, say so and continue; never install one.
+
+## Workflow
+
+`
+
+// Skill is the SKILL.md `stage setup` writes for agents, naming cli.
+func Skill(cli string) string {
+	return strings.ReplaceAll(skill, "{cli}", cli) + Guide(cli) + "\n"
 }
 
 // NewServer returns an MCP server exposing every operation as a tool.
@@ -111,7 +137,7 @@ func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnn
 
 // metaClaim is the caller a harness names in MCP request _meta: a key its
 // descriptor declares (harness.Attribution.MetaKeys), resolved to that
-// kind's active configured connection.
+// kind's active configured connection on the caller's machine.
 func (o *Ops) metaClaim(ctx context.Context, meta map[string]any) (*db.SessionRef, error) {
 	candidate := false
 	for k := range meta {
@@ -134,16 +160,14 @@ func (o *Ops) metaClaim(ctx context.Context, meta map[string]any) (*db.SessionRe
 			if !ok || strings.TrimSpace(id) == "" {
 				return nil, fmt.Errorf("%s request metadata %s must be a nonempty session ID", d.Name, key)
 			}
-			connections, err := o.Client.Connections(ctx)
+			c, err := o.Client.ResolveConnection(ctx, d.Kind)
+			if client.IsStatus(err, http.StatusNotFound) {
+				return nil, fmt.Errorf("configure the %s connection in Stage before using %s session metadata", d.Name, d.Name)
+			}
 			if err != nil {
 				return nil, err
 			}
-			for _, c := range connections {
-				if c.Harness == d.Kind && c.Configured {
-					return &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: id}, nil
-				}
-			}
-			return nil, fmt.Errorf("configure the %s connection in Stage before using %s session metadata", d.Name, d.Name)
+			return &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: id}, nil
 		}
 	}
 	return nil, nil

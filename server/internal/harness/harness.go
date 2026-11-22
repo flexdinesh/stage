@@ -89,15 +89,17 @@ func (d Descriptor) OwnsProcesses() bool { return d.Hosting == Hosted }
 // Attribution is how a calling agent's session reaches Stage. Every harness
 // can use the generic channels: an explicit callerSession argument, the
 // Stage-Caller-Session header on HTTP MCP, and STAGE_CALLER_SESSION for the
-// CLI (agentctx). A harness may add its own per-call channel and must
-// describe the session its agents can name.
+// CLI (agentctx). A harness may add its own per-call channel and its
+// session variable (Env), and must describe the session its agents can name.
 type Attribution struct {
 	// MetaKeys are MCP request _meta keys whose string value is the
 	// caller's external session id on the kind's active connection (sent by
 	// the harness itself on each call).
 	MetaKeys []string `json:"metaKeys"`
 	// Env is the environment variable the harness sets in agent processes
-	// to the session id. A hint for agents; Stage never reads it.
+	// to the session id. The CLI and stdio MCP (agent child processes) read
+	// it as the weakest caller source, on the kind's active connection on
+	// their machine (GET /api/connections/resolve).
 	Env string `json:"env,omitempty"`
 	// Hint is the caller line of launch journal instructions; {connectionId}
 	// and {cli} are filled in. Empty: the generic hint.

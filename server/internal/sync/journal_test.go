@@ -18,7 +18,7 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 	t3 := db.Task{ID: 8, ConnectionID: 1, Harness: db.HarnessT3}
 	both := []string{
 		"<stage-journal>\n",
-		"Use whichever Stage interface you have: Stage MCP tools (names below), the stage CLI",
+		"Use whichever Stage interface you have: the stage CLI (stage context, stage task show, stage task|tree notes; stage call TOOL JSON runs any tool named below), Stage MCP tools (names below), or",
 		"If none is reachable, say so and continue; never install one.",
 		"get_context is GET /api/connections/{connectionId}/sessions/{externalSessionId}/context",
 		"GET and POST /api/tasks/{id}/journal or /api/trees/{id}/journal",
@@ -47,10 +47,10 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 			want: []string{"or the HTTP API through this machine's Stage agent gateway (the CLI and its mcp command find it)."},
 			not:  []string{"stage.example"}},
 		{"opencode without public url", "", openCode,
-			[]string{"Stage taskId: 7. TreeId at launch: 4. ConnectionId: 2.\n", "or the Stage server's HTTP API.", "direct OpenCode MCP supplies it per call", "CLI: export STAGE_CALLER_SESSION=2:<session id>, or pass --caller-connection 2 --caller-session ID."},
+			[]string{"Stage taskId: 7. TreeId at launch: 4. ConnectionId: 2.\n", "or the Stage server's HTTP API.", "direct OpenCode MCP supplies it per call", "The stage CLI and its stdio MCP detect it from OPENCODE_SESSION_ID (stage context shows it); otherwise pass --caller-connection 2 --caller-session ID."},
 			[]string{"T3CODE_THREAD_ID", "/mcp)", "http", "connectionId: {connectionId}", "{connectionId}:"}, false, nil},
 		{"t3 with public url", "https://stage.example/", t3,
-			[]string{"Stage taskId: 8. TreeId at launch: none. ConnectionId: 1.\n", "or the HTTP API at https://stage.example/api (MCP at https://stage.example/mcp).", "MCP: pass callerSession {connectionId: 1, externalSessionId: $T3CODE_THREAD_ID}", "Stage-Caller-Session: 1:$T3CODE_THREAD_ID", "CLI: export STAGE_CALLER_SESSION=1:$T3CODE_THREAD_ID"},
+			[]string{"Stage taskId: 8. TreeId at launch: none. ConnectionId: 1.\n", "or the HTTP API at https://stage.example/api (MCP at https://stage.example/mcp).", "T3 sets your session id in T3CODE_THREAD_ID; the stage CLI and its stdio MCP detect it (stage context shows it).", "MCP: pass callerSession {connectionId: 1, externalSessionId: $T3CODE_THREAD_ID}", "Stage-Caller-Session: 1:$T3CODE_THREAD_ID"},
 			[]string{"OpenCode", "the Stage server's HTTP API", "example//", "callerThreadId", "t3-session-env", "gateway"}, false, nil},
 		{"generic hint for a harness without one", "", db.Task{ID: 9, ConnectionID: 5, Harness: "document"},
 			[]string{"MCP: pass callerSession {connectionId: 5, externalSessionId: <your session id>}", "Stage-Caller-Session: 5:<your session id>", "STAGE_CALLER_SESSION=5:<your session id>"},
@@ -78,7 +78,7 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 
 func TestJournalInstructionsNameInstalledCLI(t *testing.T) {
 	got := journalInstructions(db.Task{ID: 1, ConnectionID: 1, Harness: db.HarnessOpenCode}, opencode.Descriptor.Attribution, httpAPI("", false, nil), "stage-dev")
-	want := "the stage-dev CLI (stage-dev context, stage-dev task show, stage-dev task|tree notes), or the Stage server's HTTP API."
+	want := "the stage-dev CLI (stage-dev context, stage-dev task show, stage-dev task|tree notes; stage-dev call TOOL JSON runs any tool named below), Stage MCP tools (names below), or the Stage server's HTTP API."
 	if !strings.Contains(got, want) {
 		t.Errorf("missing %q in:\n%s", want, got)
 	}

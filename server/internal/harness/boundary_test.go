@@ -16,9 +16,10 @@ import (
 var harnessBranch = regexp.MustCompile(`HarnessT3|HarnessOpenCode|IsT3\(|T3ID\(|"t3"|"opencode"|\bt3\.Kind\b|\bopencode\.Kind\b`)
 
 // owners may name their harness: the adapters, their connection setup, this
-// package, the server and worker compositions and the CLI's per-harness
-// status panels.
-var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/", "internal/opencodesetup/", "internal/harness/", "internal/serve/", "internal/workersetup/", "internal/cli/slots_"}
+// package, the server and worker compositions, the CLI's per-harness
+// status panels and `stage setup`'s coding-agent targets (OpenCode as an
+// agent to install a skill for, not a harness branch).
+var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/", "internal/opencodesetup/", "internal/harness/", "internal/serve/", "internal/workersetup/", "internal/cli/slots_", "internal/cli/setup_agents.go"}
 
 // pending still branches on a harness and is being moved behind the
 // boundary. Shrink it; never grow it.

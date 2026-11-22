@@ -37,7 +37,7 @@ var Descriptor = harness.Descriptor{
 	},
 	Attribution: harness.Attribution{
 		Env:  "T3CODE_THREAD_ID",
-		Hint: "T3 sets your session id in T3CODE_THREAD_ID. MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $T3CODE_THREAD_ID}, or over HTTP MCP send the header Stage-Caller-Session: {connectionId}:$T3CODE_THREAD_ID. CLI: export STAGE_CALLER_SESSION={connectionId}:$T3CODE_THREAD_ID, or pass --caller-connection {connectionId} --caller-session $T3CODE_THREAD_ID.",
+		Hint: "T3 sets your session id in T3CODE_THREAD_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $T3CODE_THREAD_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$T3CODE_THREAD_ID.",
 	},
 	LegacyConfig: legacyConfiguration,
 }

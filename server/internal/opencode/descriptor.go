@@ -44,7 +44,7 @@ var Descriptor = harness.Descriptor{
 	Attribution: harness.Attribution{
 		MetaKeys: []string{"ai.opencode/sessionID"},
 		Env:      "OPENCODE_SESSION_ID",
-		Hint:     "MCP: direct OpenCode MCP supplies it per call; an intermediary passes callerSession {connectionId: {connectionId}, externalSessionId}. CLI: export STAGE_CALLER_SESSION={connectionId}:<session id>, or pass --caller-connection {connectionId} --caller-session ID.",
+		Hint:     "MCP: direct OpenCode MCP supplies it per call; an intermediary passes callerSession {connectionId: {connectionId}, externalSessionId}. The {cli} CLI and its stdio MCP detect it from OPENCODE_SESSION_ID ({cli} context shows it); otherwise pass --caller-connection {connectionId} --caller-session ID.",
 	},
 }
 
