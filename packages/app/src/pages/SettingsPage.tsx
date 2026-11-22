@@ -1,5 +1,8 @@
+// Settings: three tabs, each its own route (lib/settings.ts). General: user, theme, T3 default model, Info.
+// Connections: machines and their harness connections (components/Machines.tsx). Notifications: events and this
+// device's delivery.
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
 import {
@@ -7,13 +10,11 @@ import {
   type NotificationEvent,
   type Preferences,
 } from "../api/types.ts";
-import { DesktopAppCard } from "../components/Host.tsx";
-import { SharedPaths } from "../components/SharedPaths.tsx";
-import { HarnessConnections } from "../components/HarnessConnections.tsx";
-import { MachinesCard } from "../components/Machines.tsx";
-import { ServersCard } from "../components/Servers.tsx";
+import { InfoPanel } from "../components/InfoPanel.tsx";
+import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
 import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
+import { useStatusAlert } from "../components/StatusRow.tsx";
 import {
   Alert,
   Button,
@@ -31,13 +32,15 @@ import {
   QueryState,
   Row,
   RowList,
-  SectionHeading,
   Segmented,
   SubHeading,
+  TabNav,
   type ChipTone,
 } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
+import { connectionRows } from "../lib/connectionRows.ts";
+import { SETTINGS_TABS, settingsTabLabel } from "../lib/settings.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, shortDate } from "../lib/format.ts";
 
@@ -66,43 +69,6 @@ function UserCard() {
   );
 }
 
-
-function SyncCard() {
-  const api = useApi();
-  const harnesses = useHarnesses();
-  const qc = useQueryClient();
-  const sync = useMutation({
-    mutationFn: api.sync,
-    onSuccess: async () => {
-      await Promise.all([
-        invalidateWork(qc),
-        qc.invalidateQueries({ queryKey: keys.projects }),
-        qc.invalidateQueries({ queryKey: keys.t3Status }),
-      ]);
-    },
-  });
-  return (
-    <Panel title="Sync" meta="every 5 min">
-      <div className="flex flex-col gap-3">
-        <Muted>Refresh workspace inventory and tracked sessions. Stage checks them every five minutes.</Muted>
-        <div>
-          <Button variant="primary" busy={sync.isPending} onClick={() => sync.mutate()}>
-            Sync now
-          </Button>
-        </div>
-        {sync.data === undefined ? null : (
-          <Alert tone="plain">
-            Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
-            <span className="tabular font-mono">{sync.data.threads}</span> sessions at{" "}
-            <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
-            {sync.data.unavailableConnections?.map(id => <p key={id}>{harnesses.name(id)} could not finish syncing. Check its connection above.</p>)}
-          </Alert>
-        )}
-        <ErrorText error={sync.error} />
-      </div>
-    </Panel>
-  );
-}
 
 const FALLBACK: ModelDefaults = {
   providerInstanceId: null,
@@ -385,45 +351,94 @@ function ThemeCard() {
   );
 }
 
-/**
- * Harness setup (T3, OpenCode, shared paths) serves this server's machine. With more than one machine it sits under
- * that machine's name; remote machines list their connections under Machines.
- */
-function LocalHarnessSetup() {
-  const { machines } = useMachines();
-  const local = machines.find((m) => m.kind === "local");
-  const cards = (
-    <>
-      <HarnessConnections />
-      <SharedPaths />
-    </>
-  );
-  if (machines.length < 2 || local === undefined) return cards;
+/** Settings' title, meta and tabs; each tab is its own route. */
+function SettingsHeader({ meta, actions }: { meta: string; actions?: ReactNode }) {
+  const alert = useStatusAlert();
+  const items = SETTINGS_TABS.map((t) => ({
+    to: t.to,
+    label: t.label,
+    end: t.tab === "general",
+    ...(t.tab === "connections" && alert !== null ? { marker: <Marker tone={alert} /> } : {}),
+  }));
   return (
-    <section aria-label={`${local.label} harness setup`} className="flex flex-col gap-3.5">
-      <SectionHeading title={local.label} meta="harness setup · this server" className="mt-2" />
-      {cards}
-    </section>
+    <>
+      <PageHeader title="Settings" meta={meta} {...(actions === undefined ? {} : { actions })} />
+      <TabNav label="Settings" items={items} className="mb-4" />
+    </>
   );
 }
 
-export function SettingsPage() {
+/** /settings: the user, appearance, the T3 default model and Info. */
+export function SettingsGeneralPage() {
   return (
     <>
-      <PageHeader title="Settings" meta="User, machines, harness connections, defaults, notifications, appearance" />
-      <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2">
-        <div className="flex flex-col gap-3.5 lg:row-span-6">
-          <MachinesCard />
-          <LocalHarnessSetup />
-          <ServersCard />
-        </div>
+      <SettingsHeader meta={settingsTabLabel("general")} />
+      <div className="flex max-w-[720px] flex-col gap-3.5">
         <UserCard />
-        <SyncCard />
-        <DefaultModelCard />
-        <NotificationsCard />
         <ThemeCard />
-        <DesktopAppCard />
+        <DefaultModelCard />
+        <InfoPanel />
       </div>
     </>
   );
 }
+
+/** /settings/connections: every machine with its harness connections; Sync now and Add machine. */
+export function SettingsConnectionsPage() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const harnesses = useHarnesses();
+  const { machines, data } = useMachines();
+  const [adding, setAdding] = useState(false);
+  const sync = useMutation({
+    mutationFn: api.sync,
+    onSuccess: async () => {
+      await Promise.all([invalidateWork(qc), qc.invalidateQueries({ queryKey: keys.projects }), qc.invalidateQueries({ queryKey: keys.t3Status })]);
+    },
+  });
+  const connections = machines.reduce((n, m) => n + connectionRows(m, harnesses.connection).length, 0);
+  const counts = data === undefined ? "" : ` · ${count(machines.length, "machine")} · ${count(connections, "connection")}`;
+  return (
+    <>
+      <SettingsHeader
+        meta={`${settingsTabLabel("connections")}${counts}`}
+        actions={
+          <>
+            <Button busy={sync.isPending} onClick={() => sync.mutate()} title="Refresh workspace inventory and tracked sessions (also every 5 minutes)">
+              Sync now
+            </Button>
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              Add machine
+            </Button>
+          </>
+        }
+      />
+      <div className="flex flex-col gap-3.5">
+        {sync.data === undefined ? null : (
+          <Alert tone="plain">
+            Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
+            <span className="tabular font-mono">{sync.data.threads}</span> sessions at <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
+            {sync.data.unavailableConnections?.map((id) => <p key={id}>{harnesses.name(id)} could not finish syncing. Check its connection below.</p>)}
+          </Alert>
+        )}
+        <ErrorText error={sync.error} />
+        <MachinesPanel meta="synced every 5 min" />
+      </div>
+      {adding ? <AddMachineDrawer onClose={() => setAdding(false)} /> : null}
+    </>
+  );
+}
+
+/** /settings/notifications: the global event filter and this device's delivery. */
+export function SettingsNotificationsPage() {
+  return (
+    <>
+      <SettingsHeader meta={settingsTabLabel("notifications")} />
+      <div className="flex max-w-[720px] flex-col gap-3.5">
+        <NotificationsCard />
+      </div>
+    </>
+  );
+}
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;

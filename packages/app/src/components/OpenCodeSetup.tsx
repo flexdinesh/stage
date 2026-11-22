@@ -6,7 +6,6 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import type { OpenCodeStatus } from "../api/types.ts";
 import { invalidateConnectionChange, keys, useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
 import { activeOn, isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
-import { PreviousConnections } from "./PreviousConnections.tsx";
 import { usePlatform } from "../platform/context.tsx";
 import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { dateTime } from "../lib/format.ts";
@@ -77,7 +76,6 @@ export function OpenCodeSetup() {
           <Connection info={info} checking={status.isFetching} check={() => void status.refetch()} advanced={() => setEditing(true)} />
         )}
         <AutoCompleteToggle harness="opencode" className="w-full border-t border-line pt-2" />
-        <PreviousConnections harness="opencode" className="w-full border-t border-line pt-3" />
       </div>
       {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
     </Panel>
@@ -325,17 +323,9 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
 
 /** Check connection, Advanced, and Disconnect with an inline confirm (locked while OPENCODE_URL sets the service). */
 function ConnectionActions({ info, checking, check, advanced }: { info: OpenCodeStatus; checking: boolean; check: () => void; advanced: () => void }) {
-  const api = useHarnessApi();
-  const refresh = useRefresh();
   const [confirm, setConfirm] = useState(false);
-  const disconnect = useMutation({
-    mutationFn: api.disconnectOpenCode,
-    onSuccess: async () => {
-      setConfirm(false);
-      await refresh();
-    },
-  });
-  const locked = info.environmentFields.includes("endpoint");
+  const disconnect = useDisconnectOpenCode(() => setConfirm(false));
+  const locked = openCodeDisconnectLocked(info);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -354,12 +344,30 @@ function ConnectionActions({ info, checking, check, advanced }: { info: OpenCode
       </div>
       {confirm ? (
         <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          Disconnect OpenCode? Tasks and history stay. You can connect again any time.
+          {OPENCODE_DISCONNECT_PROMPT}
         </ConfirmInline>
       ) : null}
       <ErrorText error={disconnect.error} />
     </div>
   );
+}
+
+export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time.";
+
+/** OPENCODE_URL sets the service: Disconnect is locked. */
+export const openCodeDisconnectLocked = (info: Pick<OpenCodeStatus, "environmentFields">): boolean => info.environmentFields.includes("endpoint");
+
+/** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
+export function useDisconnectOpenCode(onDone?: () => void) {
+  const api = useHarnessApi();
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: api.disconnectOpenCode,
+    onSuccess: async () => {
+      onDone?.();
+      await refresh();
+    },
+  });
 }
 
 function BrowserSetupHint({ client, service }: { client: string; service: string }) {

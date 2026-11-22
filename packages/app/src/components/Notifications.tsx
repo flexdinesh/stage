@@ -428,7 +428,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     note === null ? null : (
       <Hint>
         {note} ·{" "}
-        <TextLink to="/settings" onClick={onClose} variant="rest" className="text-fg">
+        <TextLink to="/settings/notifications" onClick={onClose} variant="rest" className="text-fg">
           Settings
         </TextLink>
       </Hint>

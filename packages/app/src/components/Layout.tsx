@@ -26,7 +26,6 @@ import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
-import { ServerMenu } from "./Servers.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
 import { StatusButton, useStatusAlert } from "./StatusRow.tsx";
 import { Drawer, IconButton, Kbd, PickerButton, cx, toneClass, type IconComponent } from "./ui.tsx";
@@ -202,7 +201,6 @@ function Shell() {
           <StatusButton />
           <ThemeButton />
           <NotificationsBell onOpen={openInbox} />
-          <ServerMenu className="flex-1 lg:static" />
         </div>
       </aside>
 
@@ -223,7 +221,6 @@ function Shell() {
         </PickerButton>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <NotificationsBell onOpen={openInbox} />
-          <ServerMenu />
           <IconButton variant="secondary" onClick={() => setPalette(true)} label="Search" icon={IconSearch} />
           <IconButton variant="primary" onClick={() => newTask()} label="New task" icon={IconPlus} />
         </div>

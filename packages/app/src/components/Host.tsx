@@ -1,8 +1,9 @@
 // Host-managed connection UI (desktop): the connection screen shown until the
 // active Stage server first answers, the banner for later trouble, and the
-// Settings panel for the desktop app, with this machine as a worker of the
-// active remote (join, state, leave). A host without `platform.host` (the
-// browser) renders none of it. Server switching: Servers.tsx.
+// desktop app's lines and controls in Settings > General > Info (login
+// startup, this machine as a worker of another server: state, leave). A host
+// without `platform.host` (the browser) renders none of it. Server switching
+// (Servers.tsx) is kept but not offered in the UI.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -11,7 +12,6 @@ import {
   ACTION_LABEL,
   activeWorker,
   canRestartWorker,
-  canSetUpWorker,
   gateView,
   leavePrompt,
   primaryAction,
@@ -26,8 +26,7 @@ import {
 } from "../lib/host.ts";
 import { useHostState } from "../lib/hostState.ts";
 import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../platform/index.ts";
-import { useApi, usePlatform } from "../platform/context.tsx";
-import { ServerPicker, useCanSwitchServer } from "./Servers.tsx";
+import { usePlatform } from "../platform/context.tsx";
 import { Step, Steps } from "./Steps.tsx";
 import {
   Alert,
@@ -35,8 +34,6 @@ import {
   Checkbox,
   ChoiceRow,
   ConfirmInline,
-  Detail,
-  Details,
   ErrorText,
   Hint,
   Marker,
@@ -180,8 +177,6 @@ function Diagnostics({ host, logTail }: { host: HostServices; logTail: string[] 
 export function ConnectionScreen({ state, host }: { state: HostState; host: HostServices }) {
   const remote = state.target.kind === "remote";
   const primary = primaryAction(state.phase, state.target.kind);
-  const canSwitch = useCanSwitchServer();
-  const [picker, setPicker] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   const run = (action: (h: HostServices) => Promise<void>) => {
     setActionError(null);
@@ -205,7 +200,7 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
         </Panel>
         <Remedy state={state} />
         <ErrorText error={actionError} />
-        {primary === null && state.phase !== "incompatible" && !canSwitch ? null : (
+        {primary === null && state.phase !== "incompatible" ? null : (
           <div className="flex flex-wrap gap-2">
             {primary === null ? null : (
               <Button variant="primary" busy={state.busy} onClick={() => run(ACTIONS[primary])}>
@@ -217,28 +212,21 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
                 Retry
               </Button>
             ) : null}
-            {canSwitch ? <Button onClick={() => setPicker(true)}>Switch server</Button> : null}
           </div>
         )}
         {state.phase === "starting" ? null : <Diagnostics host={host} logTail={remote ? [] : state.logTail} />}
       </div>
-      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
     </main>
   );
 }
 
 /**
- * This machine's target while it is a worker of a remote: its own server is off. Offers the remote it serves (when
- * saved) and Leave, which brings this machine's server back.
+ * This machine's target while it is a worker of a remote: its own server is off. Offers Leave, which brings this
+ * machine's server back (server switching is not offered in the UI).
  */
 function WorkerScreen({ state, worker, host }: { state: HostState; worker: HostWorker; host: HostServices }) {
-  const canSwitch = useCanSwitchServer();
-  const [picker, setPicker] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [switchError, setSwitchError] = useState<unknown>(null);
-  const serverId = worker.serverId;
   const control = host.worker;
-  const servers = host.servers;
   return (
     <main className="min-h-dvh bg-bg text-fg">
       <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3.5 px-4 pt-[max(2.5rem,14vh)] pb-12">
@@ -249,32 +237,15 @@ function WorkerScreen({ state, worker, host }: { state: HostState; worker: HostW
         <Panel title="This machine" meta={state.app.identity} flush>
           <WorkerRow worker={worker} className="px-3 py-2.5" />
         </Panel>
-        <ErrorText error={switchError} />
-        <div className="flex flex-wrap gap-2">
-          {serverId !== null && servers !== undefined ? (
-            <Button
-              variant="primary"
-              onClick={() => {
-                setSwitchError(null);
-                servers.switch(serverId).catch((err: unknown) => setSwitchError(err));
-              }}
-            >
-              Switch to {worker.serverName}
-            </Button>
-          ) : canSwitch ? (
-            <Button variant="primary" onClick={() => setPicker(true)}>
-              Switch server
-            </Button>
-          ) : null}
-          {control === undefined ? null : (
+        {control === undefined ? null : (
+          <div className="flex flex-wrap gap-2">
             <Button variant="danger" disabled={leaving} onClick={() => setLeaving(true)}>
               Leave and use this machine
             </Button>
-          )}
-        </div>
+          </div>
+        )}
         {leaving && control !== undefined ? <LeaveConfirm worker={worker} control={control} onThisMachine onCancel={() => setLeaving(false)} /> : null}
       </div>
-      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
     </main>
   );
 }
@@ -369,59 +340,10 @@ function useRestartWorker(control: HostWorkerControl | undefined) {
 }
 
 /**
- * Settings > Desktop app: join the active remote as a worker, or this machine's worker state with Set up harnesses,
- * Restart and Leave. Joining creates a pairing on the active server (as Settings > Machines > Add does), then the
- * host joins with its link; the code is revoked when the join fails.
+ * Info: this machine as a worker of another server (desktop apps are expected to be the main machine; joining is not
+ * offered in the UI), with Restart and Leave.
  */
-function WorkerSection({ state, control }: { state: HostState; control: HostWorkerControl }) {
-  const worker = state.worker;
-  if (worker !== null) {
-    // Keyed by the join, so a confirm left open never carries over to a later join.
-    return <JoinedWorker key={`${worker.url} ${worker.machineId}`} worker={worker} ofActive={activeWorker(state) !== null} control={control} />;
-  }
-  return state.target.kind === "remote" ? <JoinRemote serverName={state.target.name} control={control} /> : null;
-}
-
-function JoinRemote({ serverName, control }: { serverName: string; control: HostWorkerControl }) {
-  const api = useApi();
-  const qc = useQueryClient();
-  const [joining, setJoining] = useState(false);
-  const [joinError, setJoinError] = useState<unknown>(null);
-  const join = async () => {
-    setJoining(true);
-    setJoinError(null);
-    try {
-      const pairing = await api.createPairing("");
-      try {
-        await control.join(pairing.link);
-      } catch (err) {
-        api.revokePairing(pairing.id).catch(() => undefined);
-        throw err;
-      }
-      void qc.invalidateQueries({ queryKey: keys.machines });
-    } catch (err) {
-      setJoinError(err);
-    } finally {
-      setJoining(false);
-    }
-  };
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-line py-row">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-small text-fg">Run {serverName}'s tasks on this machine</span>
-          <Hint>its harnesses join as a worker; this machine's own server stops, its data stays</Hint>
-        </div>
-        <Button small busy={joining} onClick={() => void join()}>
-          Join as worker
-        </Button>
-      </div>
-      <ErrorText error={joinError} />
-    </div>
-  );
-}
-
-function JoinedWorker({ worker, ofActive, control }: { worker: HostWorker; ofActive: boolean; control: HostWorkerControl }) {
+function JoinedWorker({ worker, control }: { worker: HostWorker; control: HostWorkerControl }) {
   const [leaving, setLeaving] = useState(false);
   const restart = useRestartWorker(control);
   return (
@@ -432,11 +354,6 @@ function JoinedWorker({ worker, ofActive, control }: { worker: HostWorker; ofAct
           className="py-2.5"
           actions={
             <>
-              {canSetUpWorker(worker, ofActive) ? (
-                <Link to={`/settings/machines/${worker.machineId}`} className={buttonClass("secondary", true)}>
-                  Set up harnesses
-                </Link>
-              ) : null}
               {canRestartWorker(worker) ? (
                 <Button small busy={restart.busy} onClick={restart.restart}>
                   Restart worker
@@ -461,18 +378,10 @@ function JoinedWorker({ worker, ofActive, control }: { worker: HostWorker; ofAct
 export function HostBanner() {
   const { host } = usePlatform();
   const state = useHostState();
-  const canSwitch = useCanSwitchServer();
-  const [picker, setPicker] = useState(false);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [actionError, setActionError] = useState<unknown>(null);
   if (host === undefined || state === null || state.serverEpoch === 0) return null;
   const remote = state.target.kind === "remote";
-  const switchButton =
-    remote && canSwitch ? (
-      <Button small variant="ghost" onClick={() => setPicker(true)}>
-        Switch server
-      </Button>
-    ) : null;
   const run = (action: (h: HostServices) => Promise<void>) => {
     setActionError(null);
     action(host).catch((err: unknown) => setActionError(err));
@@ -486,12 +395,9 @@ export function HostBanner() {
         key="conn"
         tone="plain"
         actions={
-          <>
-            <Button small onClick={() => run((h) => h.connection.retry())}>
-              Retry now
-            </Button>
-            {switchButton}
-          </>
+          <Button small onClick={() => run((h) => h.connection.retry())}>
+            Retry now
+          </Button>
         }
       >
         <span className="font-medium">{state.title}</span>
@@ -505,15 +411,10 @@ export function HostBanner() {
         key="conn"
         tone="bad"
         actions={
-          primary === null && switchButton === null ? undefined : (
-            <>
-              {primary === null ? null : (
-                <Button small busy={state.busy} onClick={() => run(ACTIONS[primary])}>
-                  {ACTION_LABEL[primary]}
-                </Button>
-              )}
-              {switchButton}
-            </>
+          primary === null ? undefined : (
+            <Button small busy={state.busy} onClick={() => run(ACTIONS[primary])}>
+              {ACTION_LABEL[primary]}
+            </Button>
           )
         }
       >
@@ -567,7 +468,6 @@ export function HostBanner() {
     <div className="mb-3.5 flex flex-col gap-2" role="status">
       {items}
       <ErrorText error={actionError} />
-      {picker ? <ServerPicker onClose={() => setPicker(false)} /> : null}
     </div>
   );
 }
@@ -603,8 +503,43 @@ function WorkerAlert({ worker, tone, control }: { worker: HostWorker; tone: "pla
 
 // ---- Settings ----
 
-/** Settings panel of the desktop app: login startup (this machine's server or worker), the worker, versions, diagnostics. */
-export function DesktopAppCard() {
+/** The desktop app's lines in Settings > General > Info; null outside the desktop app. */
+export interface DesktopInfo {
+  /** "Stage 0.9.4". */
+  app: string;
+  /** How this machine's server runs ("per-user service", "started from a terminal"); null for a remote. */
+  runs: string | null;
+  /** The socket it is reached over, or a remote's URL. */
+  where: { label: string; value: string };
+  /** Diagnostics text for Copy diagnostics; null until collected. */
+  diagnostics: string | null;
+}
+
+export function useDesktopInfo(): DesktopInfo | null {
+  const { host } = usePlatform();
+  const state = useHostState();
+  const diagnostics = useQuery({
+    queryKey: [...keys.host.diagnostics, "settings"],
+    queryFn: () => host?.connection.diagnostics() ?? Promise.resolve(""),
+    enabled: host !== undefined,
+    refetchInterval: false,
+    // Collected per Settings visit for the Copy button, not on every window focus.
+    refetchOnWindowFocus: false,
+  });
+  if (host === undefined || state === null) return null;
+  const server = state.server;
+  const remote = state.target.kind === "remote";
+  const current = server !== null && server.id === state.target.id;
+  return {
+    app: `${state.app.name} ${state.app.version}`,
+    runs: remote || !current ? null : server.managed ? "per-user service" : "started from a terminal",
+    where: remote ? { label: "URL", value: state.target.url } : { label: "Socket", value: server?.socket ?? "-" },
+    diagnostics: diagnostics.data === undefined || diagnostics.data === "" ? null : diagnostics.data,
+  };
+}
+
+/** The desktop app's controls in Info: Open Stage at login, and this machine's worker when it joined another server. */
+export function DesktopControls() {
   const { host } = usePlatform();
   const state = useHostState();
   const qc = useQueryClient();
@@ -616,14 +551,6 @@ export function DesktopAppCard() {
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const diagnostics = useQuery({
-    queryKey: [...keys.host.diagnostics, "settings"],
-    queryFn: () => host?.connection.diagnostics() ?? Promise.resolve(""),
-    enabled: host !== undefined,
-    refetchInterval: false,
-    // Collected per Settings visit for the Copy button, not on every window focus.
-    refetchOnWindowFocus: false,
-  });
   if (host === undefined || state === null) return null;
   const toggle = (enabled: boolean) => {
     setSaving(true);
@@ -637,38 +564,23 @@ export function DesktopAppCard() {
         void qc.invalidateQueries({ queryKey: keys.host.loginStartup });
       });
   };
-  const server = state.server;
   const remote = state.target.kind === "remote";
-  const serverLine =
-    server === null || server.id !== state.target.id
-      ? state.target.name
-      : `${state.target.name} · ${server.version}${remote ? "" : ` · ${server.managed ? "per-user service" : "started from a terminal"}`}`;
-  const joined = state.worker !== null;
+  const worker = state.worker;
   return (
-    <Panel title="Desktop app" meta={`${state.app.name} ${state.app.version}`}>
-      <div className="flex flex-col gap-4">
-        {remote && !joined ? null : (
-          <ChoiceRow
-            control={<Checkbox checked={login.data === true} disabled={login.isPending || saving} onChange={(e) => toggle(e.target.checked)} />}
-            detail={joined ? "starts hidden, with the worker" : "starts hidden, with the server"}
-          >
-            Open Stage at login
-          </ChoiceRow>
-        )}
-        <ErrorText error={saveError ?? login.error} />
-        {host.worker === undefined ? null : <WorkerSection state={state} control={host.worker} />}
-        <Details>
-          <Detail label="App">{`${state.app.name} ${state.app.version}`}</Detail>
-          <Detail label="Server">{serverLine}</Detail>
-          {remote ? <Detail label="URL">{state.target.url}</Detail> : <Detail label="Socket">{server?.socket ?? "-"}</Detail>}
-          <Detail label="Identity">{state.app.identity}</Detail>
-        </Details>
-        {diagnostics.data === undefined || diagnostics.data === "" ? null : (
-          <div>
-            <CopyButton text={diagnostics.data} label="Copy diagnostics" small={false} />
-          </div>
-        )}
-      </div>
-    </Panel>
+    <>
+      {remote && worker === null ? null : (
+        <ChoiceRow
+          control={<Checkbox checked={login.data === true} disabled={login.isPending || saving} onChange={(e) => toggle(e.target.checked)} />}
+          detail={worker === null ? "starts hidden, with Stage" : "starts hidden, with the worker"}
+        >
+          Open Stage at login
+        </ChoiceRow>
+      )}
+      <ErrorText error={saveError ?? login.error} />
+      {host.worker === undefined || worker === null ? null : (
+        // Keyed by the join, so a confirm left open never carries over to a later join.
+        <JoinedWorker key={`${worker.url} ${worker.machineId}`} worker={worker} control={host.worker} />
+      )}
+    </>
   );
 }

@@ -1,4 +1,4 @@
-// Machines (GET /api/machines): hosts that run harness connections. Machine 1 is local (this server's process); others
+// Machines (GET /api/machines): hosts that run harness connections. Machine 1 is local (the main machine, Stage's own process); others
 // run `stage worker` and join by pairing. Settings lists them; connection pickers name a connection's machine only when
 // more than one exists, so a single-machine install reads exactly as before. Rendering: components/Machines.tsx.
 import type { Harness, HarnessConnection, Machine, PairingStatus } from "../api/types.ts";
@@ -113,13 +113,13 @@ export const withMachine = (name: string, tag: string | undefined): string => (t
 export const machineKey = (machineId: number | null, key: readonly unknown[]): readonly unknown[] =>
   machineId === null ? key : ["machine", machineId, ...key];
 
-/** Where a machine's harness setup stands on its page: ready (online), offline, or needs_update (another API version). */
+/** Where a machine's harness setup stands: ready (online), offline, or needs_update (another API version). */
 export type MachineSetupState = "ready" | "offline" | "needs_update";
 
 export const machineSetupState = (m: Pick<Machine, "kind" | "status">): MachineSetupState =>
   m.kind === "local" || m.status === "online" ? "ready" : m.status;
 
-/** The machine page's alert when its setup cannot be driven; null when it can. */
+/** Why a machine's harness setup cannot be driven (Settings Connections); null when it can. */
 export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" | "version">, server: string | null): string | null {
   switch (machineSetupState(m)) {
     case "ready":
@@ -127,7 +127,7 @@ export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" |
     case "offline":
       return `${m.label} is offline. Its harness setup returns when its worker reconnects (stage worker run, or its service).`;
     case "needs_update": {
-      const versions = m.version !== null && server !== null ? ` It runs ${m.version}; this server runs ${server}.` : "";
+      const versions = m.version !== null && server !== null ? ` It runs ${m.version}; the main machine runs ${server}.` : "";
       return `${m.label} needs an update: its worker speaks another API version.${versions} Install the same Stage version there.`;
     }
   }

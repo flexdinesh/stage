@@ -8,7 +8,11 @@ Each server stays the sole owner of its SQLite, T3 connection, scheduling
 and business rules; this machine's per-user service supervises the local
 one ([service.md](service.md)). With a remote active, the desktop can make
 this machine a worker of it, so this machine's harnesses run that server's
-tasks ([Worker](#worker)). The desktop owns windows, OS integration
+tasks ([Worker](#worker)). The page offers only this machine's server: it
+mounts no server switching (no Settings Servers panel, top-bar server menu
+or "Switch server") and no Join as worker. The shell, its bound service and
+`components/Servers.tsx` keep both, unused, for later. Desktop apps are
+expected to be the main machine. The desktop owns windows, OS integration
 and transport. It never opens `stage.db`, holds no business logic and
 never manages a remote server. Browsers keep using TCP.
 Decisions: [ADR 0001](adr/0001-desktop-shell.md).
@@ -54,17 +58,17 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 | --- | --- | --- | --- |
 | `starting` | ensuring the service, waiting for health | connection screen after 400 ms (no flash on a fast start, again after each switch), steps service / server / api (remote: server / api) | none |
 | `ready` | healthy, same API | the app | none |
-| `reconnecting` | was ready, stopped answering | banner over the page | Retry now (remote: and Switch server) |
+| `reconnecting` | was ready, stopped answering | banner over the page | Retry now |
 | `stopped` | not running after 30 s, or stopped | screen before the first ready, banner after | Start Stage server |
 | `failed` | `start` exit 1, crash loop, unhealthy | same, with the log tail | Start Stage server |
 | `unsupported` | exit 6: no usable service manager | screen with the cause and a foreground command | Retry |
 | `misconfigured` | exit 7 (invalid `service.env`, foreign or shadowed definition, masked unit), or the app runs from a temporary location (`/tmp`, `/var/folders`, App Translocation, Trash) | screen with fix and problems | Retry |
 | `conflict` | exit 5 and the terminal server cannot be used | screen with fix and command | Retry |
-| `incompatible` | another API version | blocking screen, also after the app ran | Restart Stage server (remote: Retry once that machine is updated; Switch server) |
-| `unreachable` | remote only: no answer at its URL, or its origin policy refused this app (403); polling continues | screen before the server's first ready (since the switch), banner after | Retry (and Switch server) |
-| `worker` | this machine only: it is a worker of a main server, so its own server is off ([Worker](#worker)) | screen "This machine is a worker of Studio" with the worker's state | Switch to Studio (else Switch server), Leave and use this machine |
+| `incompatible` | another API version | blocking screen, also after the app ran | Restart Stage server (remote: Retry once that machine is updated) |
+| `unreachable` | remote only: no answer at its URL, or its origin policy refused this app (403); polling continues | screen before the server's first ready (since the switch), banner after | Retry |
+| `worker` | this machine only: it is a worker of a main server, so its own server is off ([Worker](#worker)) | screen "This machine is a worker of Studio" with the worker's state | Leave and use this machine |
 
-"Before the first ready" counts per server: the page gates on `serverEpoch`, so after a switch the app stays unmounted until the new server answers. The screen and the banner offer "Switch server" (a drawer listing the saved servers) whenever more than one is saved; for a remote it sits next to Retry.
+"Before the first ready" counts per server: the page gates on `serverEpoch`, so after a switch the app stays unmounted until the new server answers. The screen and the banner offer no server switching.
 
 - **Terminal server (exit 5).** When a foreground `stage serve` holds the data dir and its socket answers health with the same identity and API version, the desktop uses it and shows a quiet banner: "Connected to a Stage server started from a terminal (pid N). It stops when that terminal does." A default foreground server listens on TCP only, so this usually lands on `conflict`, whose command adds a socket (`stage serve --listen unix,127.0.0.1:7380`).
 - **Version skew.** A server build different from the bundled CLI shows a dismissible banner with "Restart Stage server" (`stage service restart --exe <cli> --wait 30s --json`).
@@ -72,6 +76,8 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 - **Diagnostics.** "Show details" lists the server log tail; "Copy diagnostics" (screen, Settings, Help menu) copies app, CLI and server versions, the identity, `service status --json` without secrets and the last 50 log lines.
 
 ## Servers
+
+Not offered in the UI today (see the introduction): the page assumes this machine's server. The shell keeps saved servers and switching as described here.
 
 The desktop connects to one Stage server at a time. Each server is bound to its own T3 backend; the desktop never manages a server's T3 beyond showing that server's onboarding.
 
@@ -97,7 +103,7 @@ Missing: local only. Corrupt or another version: logged, local only, replaced on
 
 ### Switching
 
-`SwitchServer(id)` (the Settings `SERVERS` panel, the top-bar menu with more than one server, the connection screen, a notification click):
+`SwitchServer(id)` (a notification click from another saved server; the page mounts no switching UI):
 
 1. The choice is saved as `active`.
 2. The bridge is unset at once: every open request and stream to the old server ends (in-flight JSON gets 503 `unavailable`, streams end and EventSource reconnects into the wait), so nothing of the old server reaches the page afterwards.
@@ -114,7 +120,7 @@ Switching to the active server only refreshes its name. Editing the active serve
 - For T3, the local target opens its native link and a remote target opens its web link. OpenCode uses its configured web client for both targets.
 - Bridge requests carry the remote's Host and no `Cookie`, `Origin` or `Sec-Fetch-*`: the server sees a non-browser client, so its cross-origin checks pass over TCP; the bridge enforces the page origin itself first (a cross-site request, or an unsafe method from another origin, gets 403 without reaching any server).
 - `desktop:dev` loads the page from Vite, whose `/api` proxy goes to the dev socket: switching there changes the launcher and notifications, not the page's `/api`. Use a packaged build to try remotes in the UI.
-- Settings "Desktop app" names the active server (`Studio · 1.4.0`) and shows its URL instead of the socket.
+- Settings, General, Info shows a remote's URL instead of the socket and no "per-user service" line.
 
 ### Test connection
 
@@ -122,8 +128,9 @@ Switching to the active server only refreshes its name. Editing the active serve
 
 ## Worker
 
-With a remote server active, Settings, Desktop app can make this machine a
-**worker** of it ([ADR 0002](adr/0002-machines-and-workers.md),
+Joining is not offered in the UI today (see the introduction); an existing
+join still shows in Settings, General, Info with Restart and Leave. With a
+remote server active, the shell can make this machine a **worker** of it ([ADR 0002](adr/0002-machines-and-workers.md),
 [runtime.md](runtime.md#worker-process)): this machine's T3 and OpenCode run
 that server's tasks, its agents reach that server through the worker's
 agent gateway, and harness credentials stay here. "This machine" stays the
@@ -144,7 +151,7 @@ by absolute path.
 
 | Action | Steps |
 | --- | --- |
-| **Join as worker** (remote active, not joined) | The page creates a pairing on the active server (`POST /api/machines/pairings`, as Settings, Machines, Add), so the link uses that server's `STAGE_PUBLIC_URL`; without one its 409 message shows. The host then runs `stage worker join --json <link>`, `stage service uninstall --wait 30s --json` and `stage worker service start --exe <cli> --wait 30s --json`. When the server service cannot be uninstalled (a foreign definition) or no service manager can run the worker (exit 6), the join is undone (`stage worker leave`, else `--local`). A failed worker start keeps the machine joined and shows `failed` with its fix. When the join fails the page revokes the code. Login startup moves to the worker (`stage worker service enable`). |
+| **Join as worker** (remote active, not joined; not offered in the UI) | The page creates a pairing on the active server (`POST /api/machines/pairings`, as Settings, Machines, Add), so the link uses that server's `STAGE_PUBLIC_URL`; without one its 409 message shows. The host then runs `stage worker join --json <link>`, `stage service uninstall --wait 30s --json` and `stage worker service start --exe <cli> --wait 30s --json`. When the server service cannot be uninstalled (a foreign definition) or no service manager can run the worker (exit 6), the join is undone (`stage worker leave`, else `--local`). A failed worker start keeps the machine joined and shows `failed` with its fix. When the join fails the page revokes the code. Login startup moves to the worker (`stage worker service enable`). |
 | **Leave** (inline confirm, as removing a machine) | `stage worker service uninstall --wait 30s --json`, then `stage worker leave --json`, which removes the machine on the main server (its connections are retired). When that server cannot be told (unreachable), the error shows with "Forget it on this machine only" (`stage worker leave --local --json`; the server keeps the machine as offline until it is removed there). Login startup moves back (`stage service enable`). With this machine's target active, its server starts; with a remote active, nothing local starts. |
 | **Restart worker** (offline, failed, needs update) | `stage worker service restart --exe <cli> --wait 30s --json`, e.g. after an app update changed the bundled version. |
 
@@ -165,13 +172,10 @@ active remote whose `publicUrl` it is); otherwise the URL's host.
 | `removed` | the main server removed this machine (token revoked; the worker stopped) | bad |
 | `failed` | the service failed, or the service manager is unreachable | bad |
 
-- **Settings, Desktop app.** Not joined, remote active: "Run Studio's tasks
-  on this machine" with Join as worker. Joined: "Worker of Studio" with the
-  marker, `online · machine 4 · <url>` and the message; Set up harnesses
-  (the machine's page on the active server, `/settings/machines/:id`, only
-  when the worker belongs to it and was not removed), Restart worker and Leave. "Open Stage at
-  login" shows while joined, also with a remote active ("starts hidden, with
-  the worker").
+- **Settings, General, Info.** Joined: "Worker of Studio" with the marker,
+  `online · machine 4 · <url>` and the message; Restart worker and Leave.
+  "Open Stage at login" shows while joined, also with a remote active
+  ("starts hidden, with the worker"). Not joined: no worker row.
 - **Banner.** Problems only, while the active remote is the worker's server
   and ready: `offline` plain, `needs_update`, `removed` and `failed` bad,
   with Restart worker (when it helps) and Settings. Online and starting stay
@@ -255,7 +259,7 @@ Missing: defaults (on, no cursors). Version 1 (`{"version":1,"enabled":true,"cur
 
 ## Login startup
 
-Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin` (XDG autostart on Linux, a login item on macOS 13+, a launch agent on macOS 12) and `stage service enable` (while this machine is a worker, `stage worker service enable`); off turns both off. A login launch starts the app resident without a window and ensures the service.
+Settings, General, Info, "Open Stage at login" turns on both MyGo `SetOpenAtLogin` (XDG autostart on Linux, a login item on macOS 13+, a launch agent on macOS 12) and `stage service enable` (while this machine is a worker, `stage worker service enable`); off turns both off. A login launch starts the app resident without a window and ensures the service.
 
 ## Links
 
@@ -274,7 +278,7 @@ Settings, Desktop app, "Open Stage at login" turns on both MyGo `SetOpenAtLogin`
 
 ## Host differences (restrained)
 
-Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the Settings "Desktop app" panel (with this machine as a worker, [Worker](#worker)), server switching ([Servers](#servers): Settings `SERVERS`, the top-bar server menu with more than one server), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). No service worker and no Web Push: Settings "This device" controls the native notifications (the platform's `notifications` has `channel: "native"`), and the page's `attention` is a no-op.
+Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the desktop lines of Settings, General, Info (with this machine as a worker, [Worker](#worker)), server switching in the shell ([Servers](#servers); not offered in the UI), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). No service worker and no Web Push: Settings "This device" controls the native notifications (the platform's `notifications` has `channel: "native"`), and the page's `attention` is a no-op.
 
 ## Identities
 

@@ -2,16 +2,11 @@ import { Link } from "react-router";
 import { useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import { relativeTime } from "../lib/format.ts";
 import { t3Identity } from "../lib/onboarding.ts";
-import { openCodeErrorText, openCodeSummary, t3ErrorText, t3Summary, type HarnessSummary, type StatusRead } from "../lib/connections.ts";
+import { openCodeErrorText, openCodeSummary, statusRead, t3ErrorText, t3Summary, type HarnessSummary } from "../lib/connections.ts";
 import { serviceHostText, signInText } from "../lib/opencode.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
 import { IconCheck, IconPlug, IconRefresh, IconSettings, IconTriangleAlert } from "./icons.tsx";
 import { Button, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, toneClass, usePopover, type IconComponent } from "./ui.tsx";
-
-/** A status query as the row reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
-function statusRead<T>(q: { data: T | undefined; isPending: boolean; errorUpdateCount: number; error: Error | null }): StatusRead<T> {
-  return { data: q.data, checking: q.isPending && q.errorUpdateCount === 0, error: q.error?.message ?? null };
-}
 
 const item = (s: HarnessSummary, name: string): StatusItem => ({
   key: s.harness,
@@ -85,7 +80,7 @@ export function StatusSections({ row, details, touch = false, onPick }: { row: R
           return (
             <ListRow key={i.key} bare>
               <Link
-                to="/settings"
+                to="/settings/connections"
                 onClick={onPick}
                 className="grid grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 px-3 py-row hover:bg-panel"
               >
@@ -143,7 +138,7 @@ export function StatusButton() {
       </Button>
       <PopoverPanel popover={popover} label="Status" className="absolute bottom-full left-3 mb-1 w-[300px]">
         <StatusSections row={row} details={details} onPick={popover.close} />
-        <Link to="/settings" onClick={popover.close} className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}>
+        <Link to="/settings/connections" onClick={popover.close} className={cx(rowButtonClass(), "border-t border-line text-small text-fg")}>
           <IconSettings size={14} />
           Open settings
         </Link>

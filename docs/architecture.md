@@ -72,7 +72,7 @@ below directly or imports MyGo.
 | `notifications?` | System notification delivery: `channel` (`web-push` when absent, `native`), state, enable/disable/test, close shown, cross-device sync, `onDelivered`, `openSystemSettings?`. Absent: Settings shows only the global event filter | `webPush.ts`: service worker + Web Push | `notifications.ts`: `channel: "native"` over the generated MyGo client; the Go process shows OS notifications from the server's notification stream ([desktop.md](desktop.md#notifications)) |
 | `attention.setNeedsInput` | Needs-input signal outside the page | `attention.ts`: tab favicon + Badging API | no-op: the Go process owns the Dock/launcher badge |
 | `storage` | Per-device preferences (theme, projects sort). Never throws | `storage.ts`: `localStorage` | `storage.ts`: the webview's `localStorage` |
-| `host?` | Native shell services: the host-managed server connection (`HostState`, retry/start/restart, diagnostics), login startup, navigation requests (deep links). Drives `HostGate`, `HostBanner` and Settings "Desktop app" (`components/Host.tsx`) | absent | `host.ts` over the generated MyGo client |
+| `host?` | Native shell services: the host-managed server connection (`HostState`, retry/start/restart, diagnostics), login startup, navigation requests (deep links). Drives `HostGate`, `HostBanner` and the desktop lines of Settings, General, Info (`components/Host.tsx`) | absent | `host.ts` over the generated MyGo client |
 
 Not part of the contract: plain DOM and layout (`document` visibility,
 `matchMedia`, `history`, reload). A webview provides them as a browser does.

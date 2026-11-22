@@ -1,5 +1,5 @@
 import { Fragment, useContext, useEffect, type ReactNode } from "react";
-import { Link } from "react-router";
+import { Link, NavLink } from "react-router";
 import { NavLabelContext, type TrailSegment } from "../navContext.ts";
 import { cx } from "./cx.ts";
 
@@ -59,6 +59,42 @@ export function PanelHeader({
       {meta === undefined ? null : <span className="block font-mono text-meta-sm text-muted [text-box:trim-both_cap_alphabetic]">{meta}</span>}
       {actions === undefined ? null : <div className="relative ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>}
     </div>
+  );
+}
+
+export interface TabNavItem {
+  to: string;
+  label: string;
+  /** Match the path exactly (the index tab), not as a prefix. */
+  end?: boolean;
+  /** A square after the label (a tab whose content needs attention). */
+  marker?: ReactNode;
+}
+
+/**
+ * A page's sub-navigation as links (Settings: General, Connections, Notifications): boxed mono caps cells, the current
+ * one with Ink text and a 2px Ink underline. Phone: equal cells across the full width.
+ */
+export function TabNav({ label, items, className }: { label: string; items: readonly TabNavItem[]; className?: string }) {
+  return (
+    <nav aria-label={label} className={cx("flex max-w-full border border-line-strong bg-surface md:inline-flex", className)}>
+      {items.map((t) => (
+        <NavLink
+          key={t.to}
+          to={t.to}
+          end={t.end === true}
+          className={({ isActive }) =>
+            cx(
+              "flex h-10 min-w-0 flex-1 items-center justify-center gap-2 border-r border-line-strong px-1 font-mono text-meta-sm tracking-[0.04em] whitespace-nowrap uppercase transition-colors duration-150 last:border-r-0 focus-visible:z-10 md:h-[calc(var(--control-h)+2px)] md:flex-none md:px-4 md:tracking-[0.1em]",
+              isActive ? "bg-bg text-fg shadow-[inset_0_-2px_var(--fg)]" : "text-muted hover:bg-panel hover:text-fg",
+            )
+          }
+        >
+          <span className="min-w-0 truncate">{t.label}</span>
+          {t.marker}
+        </NavLink>
+      ))}
+    </nav>
   );
 }
 

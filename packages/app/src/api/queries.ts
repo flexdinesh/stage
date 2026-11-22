@@ -24,6 +24,7 @@ export const keys = {
   snippets: ["snippets"],
   preferences: ["preferences"],
   me: ["me"],
+  health: ["health"],
   badge: ["badge"],
   notifications: ["notifications"],
   schedules: ["schedules"],

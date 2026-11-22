@@ -120,7 +120,7 @@ test("machine page: setup state and alert per presence", () => {
   assert.match(machineSetupAlert(desk, "v1.6.0"), /^desk is offline\. Its harness setup returns when its worker reconnects/);
   const old = { ...desk, status: "needs_update" };
   assert.equal(machineSetupState(old), "needs_update");
-  assert.equal(machineSetupAlert(old, "v1.6.0"), "desk needs an update: its worker speaks another API version. It runs v1.5.0; this server runs v1.6.0. Install the same Stage version there.");
+  assert.equal(machineSetupAlert(old, "v1.6.0"), "desk needs an update: its worker speaks another API version. It runs v1.5.0; the main machine runs v1.6.0. Install the same Stage version there.");
   assert.equal(machineSetupAlert({ ...old, version: null }, "v1.6.0"), "desk needs an update: its worker speaks another API version. Install the same Stage version there.");
 });
 
