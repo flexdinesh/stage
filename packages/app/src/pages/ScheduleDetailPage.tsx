@@ -5,6 +5,7 @@ import { useApi } from "../platform/context.tsx";
 import { isNotFound, useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { RefText } from "../components/StageLinks.tsx";
+import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
 import { NodeChip } from "../components/trees/TreeNode.tsx";
@@ -190,7 +191,12 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
         <Detail label="Project">
           <TextLink to={`/projects/${s.projectId}`}>{s.projectTitle}</TextLink>
         </Detail>
-        <Detail label="Harness">{harnesses.name(s.connectionId)}{harnesses.retired(s.connectionId) ? <span className="text-muted"> (replaced)</span> : null}</Detail>
+        <Detail label="Harness">
+          <HarnessConnectionState connectionId={s.connectionId}>
+            {harnesses.name(s.connectionId)}
+            {harnesses.retired(s.connectionId) ? <span className="text-muted"> (replaced)</span> : null}
+          </HarnessConnectionState>
+        </Detail>
         <Detail label="Model">{configModelText(s.executionConfig)}</Detail>
         <Detail label="Permission">{executionModes(s).permission || "Harness default"}</Detail>
         <Detail label="Mode">{executionModes(s).mode || "Harness default"}</Detail>
