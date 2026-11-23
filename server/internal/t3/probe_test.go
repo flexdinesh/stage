@@ -324,3 +324,38 @@ func TestFakeProbeAndReconfigure(t *testing.T) {
 		t.Fatalf("reconfigure not recorded: %q %q", f.BaseURL, f.PublicURL)
 	}
 }
+
+// An unpaired client (no token, no admin token) is never contacted in the
+// background: Run starts no probe and adapter health does not probe.
+func TestUnpairedClientIsNeverContacted(t *testing.T) {
+	e := newEnvServer(t, "env-a")
+	c := NewMCPClient(Options{BaseURL: e.srv.URL, Logger: slog.New(slog.DiscardHandler)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	if h := NewConnectionAdapter(c, 1).Health(context.Background()); h.Available || !strings.Contains(h.Reason, "not connected") {
+		t.Fatalf("unpaired health %+v", h)
+	}
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+	if n := e.hits.Load(); n != 0 {
+		t.Fatalf("unpaired client contacted T3 %d times", n)
+	}
+	// Paired: Run learns reachability early.
+	store := NewMemoryTokenStore()
+	if err := store.SaveToken(context.Background(), StoredToken{Token: "tok", ExpiresAt: time.Now().Add(24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	c = NewMCPClient(Options{BaseURL: e.srv.URL, Store: store, Logger: slog.New(slog.DiscardHandler)})
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for e.hits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.hits.Load() == 0 {
+		t.Fatal("paired client never probed")
+	}
+}

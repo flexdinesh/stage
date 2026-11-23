@@ -37,6 +37,11 @@ export function addConnectionOptions(descriptors: readonly Pick<HarnessDescripto
     .map((d) => ({ kind: d.kind, name: d.name, reason: rows.some((r) => r.harness === d.kind) ? "already connected" : null }));
 }
 
+/** The empty machine's shortcuts: a Connect button per harness it can add now. */
+export function connectShortcuts(options: readonly AddConnectionOption[] | null): { kind: Harness; label: string }[] {
+  return (options ?? []).filter((o) => o.reason === null).map((o) => ({ kind: o.kind, label: `Connect ${o.name}` }));
+}
+
 /** Why Add connection is disabled on the machine (offline, needs an update, nothing left to add); null when enabled. */
 export function addConnectionReason(m: Pick<Machine, "kind" | "status" | "label">, options: readonly AddConnectionOption[] | null): string | null {
   switch (machineSetupState(m)) {

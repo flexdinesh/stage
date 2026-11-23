@@ -216,11 +216,7 @@ func printHarnessStatus(w io.Writer, d client.HarnessDescriptor, st client.Harne
 		if val == "" && f.Set {
 			val = "(set)"
 		}
-		lock := ""
-		if f.Locked {
-			lock = " (set by the server environment)"
-		}
-		fmt.Fprintf(w, "  %-20s %s%s\n", label, val, lock)
+		fmt.Fprintf(w, "  %-20s %s\n", label, val)
 	}
 	for _, a := range st.Actions {
 		if !a.Available && a.Reason != "" {

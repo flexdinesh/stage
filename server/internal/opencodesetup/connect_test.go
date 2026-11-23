@@ -27,12 +27,12 @@ type setupHarness struct {
 	installs  int
 }
 
-func newHarness(t *testing.T, env config.OpenCodeSettings) *setupHarness {
+func newHarness(t *testing.T) *setupHarness {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var temp dbtest.DB
 	h := &setupHarness{store: db.NewStore(temp.Reset(t))}
-	s, err := New(t.Context(), storePorts(h.store, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }), env, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s, err := New(t.Context(), storePorts(h.store, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func conflictCode(err error) string {
 }
 
 func TestConnectLocal(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{})
+	h := newHarness(t)
 	err := h.s.ConnectLocal(t.Context(), false)
 	if conflictCode(err) != CodeLocalUnavailable || !strings.Contains(err.Error(), "No OpenCode service file found at") {
 		t.Fatalf("missing registration: %v", err)
@@ -150,7 +150,7 @@ func TestConnectLocal(t *testing.T) {
 }
 
 func TestPair(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{})
+	h := newHarness(t)
 	fake := opencodetest.New(t, "server-password")
 	for _, link := range []string{"", fake.URL, fake.URL + "/auth/connect/", fake.URL + "/auth/connect/x?y=1", "http://u:p@host/auth/connect/x"} {
 		var invalid *db.InvalidError
@@ -184,7 +184,7 @@ func TestPair(t *testing.T) {
 }
 
 func TestRenewal(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{})
+	h := newHarness(t)
 	fake := opencodetest.New(t, "server-password")
 	if err := h.s.Pair(t.Context(), fake.Link(), false); err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestRenewal(t *testing.T) {
 }
 
 func TestSaveAuthModes(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{})
+	h := newHarness(t)
 	fake := opencodetest.New(t, "server-password")
 	if err := h.s.Pair(t.Context(), fake.Link(), false); err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func TestSaveAuthModes(t *testing.T) {
 }
 
 func TestDisconnect(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{})
+	h := newHarness(t)
 	fake := opencodetest.New(t, "server-password")
 	if err := h.s.Pair(t.Context(), fake.Link(), false); err != nil {
 		t.Fatal(err)
@@ -296,22 +296,5 @@ func TestDisconnect(t *testing.T) {
 	other := opencodetest.New(t, "")
 	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Endpoint: &other.URL}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestEnvironmentManagedConnection(t *testing.T) {
-	h := newHarness(t, config.OpenCodeSettings{Endpoint: "http://127.0.0.1:1"})
-	for name, err := range map[string]error{
-		"connect-local": h.s.ConnectLocal(t.Context(), false),
-		"pair":          h.s.Pair(t.Context(), "http://127.0.0.1:1/auth/connect/x", false),
-		"disconnect":    h.s.Disconnect(t.Context()),
-	} {
-		var c *db.ConflictError
-		if !errors.As(err, &c) || !strings.Contains(c.Msg, "managed by this machine's Stage environment") {
-			t.Errorf("%s: %v", name, err)
-		}
-	}
-	if st := h.status(t); st.Local.Reason != "environment" || st.Local.Available {
-		t.Fatalf("%+v", st.Local)
 	}
 }

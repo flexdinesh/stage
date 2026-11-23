@@ -79,7 +79,7 @@ func (s *server) createdTasks(env string, c db.CreatedTasks) createdTasksJSON {
 	return out
 }
 
-// webURL = T3_PUBLIC_URL/<environmentId>/<threadId> (path-escaped: provider
+// webURL = <T3 browser URL>/<environmentId>/<threadId> (path-escaped: provider
 // thread ids contain ':' and '%').
 func (s *server) webURL(envID string, threadID *string) *string {
 	if threadID == nil {

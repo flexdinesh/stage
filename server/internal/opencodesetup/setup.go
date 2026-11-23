@@ -32,21 +32,19 @@ const (
 	localCache = 10 * time.Second   // Status's local registration probe
 )
 
-var errManaged = errors.New("This connection is managed by this machine's Stage environment.")
-
 type Service struct {
-	mu         sync.Mutex
-	ctx        context.Context // background refresh and renewal end with it
-	log        *slog.Logger
-	id         int64
-	settings   Settings // the machine this OpenCode setup runs on
-	identity   Identity
-	local      Local
-	env, saved config.OpenCodeSettings
-	verified   string
-	problem    string
-	active     *opencode.Adapter
-	current    config.OpenCodeSettings // active's resolved settings
+	mu       sync.Mutex
+	ctx      context.Context // background refresh and renewal end with it
+	log      *slog.Logger
+	id       int64
+	settings Settings // the machine this OpenCode setup runs on
+	identity Identity
+	local    Local
+	saved    config.OpenCodeSettings
+	verified string
+	problem  string
+	active   *opencode.Adapter
+	current  config.OpenCodeSettings // active's resolved settings
 	// install moves the OpenCode adapter from connection old to next
 	// (equal unless the service was replaced); a nil adapter disconnects.
 	install func(old, next int64, a execution.Adapter)
@@ -124,7 +122,7 @@ type Ports struct {
 	Active func(ctx context.Context) (int64, error)
 }
 
-func New(ctx context.Context, p Ports, env config.OpenCodeSettings, log *slog.Logger) (*Service, error) {
+func New(ctx context.Context, p Ports, log *slog.Logger) (*Service, error) {
 	if p.Local == nil {
 		p.Local = LocalService{}
 	}
@@ -146,8 +144,8 @@ func New(ctx context.Context, p Ports, env config.OpenCodeSettings, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{ctx: ctx, log: log, id: id, settings: p.Settings, identity: p.Identity, local: p.Local, env: env, saved: saved, verified: verified, install: p.Install, now: time.Now}
-	cfg, _, err := s.resolve(saved)
+	s := &Service{ctx: ctx, log: log, id: id, settings: p.Settings, identity: p.Identity, local: p.Local, saved: saved, verified: verified, install: p.Install, now: time.Now}
+	cfg, err := s.resolve(saved)
 	switch {
 	case err != nil:
 		s.problem = err.Error()
@@ -271,7 +269,7 @@ func (s *Service) refreshLocal(ctx context.Context) {
 	}
 	next := s.saved
 	next.Endpoint = reg.URL
-	cfg, _, err := s.resolve(next)
+	cfg, err := s.resolve(next)
 	if err != nil {
 		return
 	}
@@ -351,7 +349,7 @@ func (s *Service) useToken(ctx context.Context, token string) error {
 	now := s.now().UTC()
 	next := s.saved
 	next.Password, next.TokenIssuedAt = token, &now
-	cfg, _, err := s.resolve(next)
+	cfg, err := s.resolve(next)
 	if err != nil {
 		return err
 	}
@@ -367,38 +365,20 @@ func (s *Service) useToken(ctx context.Context, token string) error {
 	return nil
 }
 
-func (s *Service) resolve(saved config.OpenCodeSettings) (config.OpenCodeSettings, []string, error) {
+func (s *Service) resolve(saved config.OpenCodeSettings) (config.OpenCodeSettings, error) {
 	c := saved
-	locked := []string{}
-	overlay := func(key, value string, dest *string) {
-		if value != "" {
-			locked = append(locked, key)
-			*dest = value
-		}
-	}
-	overlay("endpoint", s.env.Endpoint, &c.Endpoint)
-	overlay("browserEndpoint", s.env.BrowserEndpoint, &c.BrowserEndpoint)
-	overlay("webClient", s.env.WebClient, &c.WebClient)
 	c.Endpoint = strings.TrimRight(strings.TrimSpace(c.Endpoint), "/")
 	if c.Endpoint != saved.Endpoint {
 		c.Username, c.Password = "", ""
 		c.Auth, c.TokenIssuedAt = config.OpenCodeAuthNone, nil
 	}
-	if c.Auth == "" || (c.Auth == config.OpenCodeAuthLocal && s.env.Endpoint != "") {
+	if c.Auth == "" {
 		c.Auth, c.TokenIssuedAt = config.OpenCodeAuthNone, nil
 	}
-	if s.env.Username != "" || s.env.Password != "" {
-		locked = append(locked, "credentials")
-		if s.env.Endpoint == "" || s.env.Username == "" || s.env.Password == "" {
-			return c, locked, db.Invalid("Set OPENCODE_URL, OPENCODE_USERNAME and OPENCODE_PASSWORD together to scope environment credentials to the service.")
-		}
-		c.Username, c.Password = s.env.Username, s.env.Password
-		c.Auth, c.TokenIssuedAt = config.OpenCodeAuthBasic, nil
-	}
-	return c, locked, nil
+	return c, nil
 }
 
-// Invalid environment input may itself contain credentials. Status must never
+// A saved address may itself contain credentials. Status must never
 // echo a userinfo, query string or fragment, even when configuration failed.
 func publicAddress(raw string) string {
 	u, err := url.Parse(raw)
@@ -409,11 +389,11 @@ func publicAddress(raw string) string {
 }
 func (s *Service) Status(ctx context.Context) config.OpenCodeStatus {
 	s.mu.Lock()
-	c, locked, _ := s.resolve(s.saved)
+	c, _ := s.resolve(s.saved)
 	a, problem := s.active, s.problem
 	id := s.id
 	s.mu.Unlock()
-	out := config.OpenCodeStatus{ConnectionID: id, Endpoint: publicAddress(c.Endpoint), BrowserEndpoint: publicAddress(c.BrowserEndpoint), WebClient: publicAddress(c.WebClient), HasCredentials: c.Password != "", EnvironmentFields: locked, State: "unconfigured", Auth: c.Auth}
+	out := config.OpenCodeStatus{ConnectionID: id, Endpoint: publicAddress(c.Endpoint), BrowserEndpoint: publicAddress(c.BrowserEndpoint), WebClient: publicAddress(c.WebClient), HasCredentials: c.Password != "", State: "unconfigured", Auth: c.Auth}
 	if c.Auth == config.OpenCodeAuthPaired && c.TokenIssuedAt != nil {
 		at := c.TokenIssuedAt.Add(opencode.TokenTTL).UTC().Truncate(time.Second)
 		out.ExpiresAt = &at
@@ -441,9 +421,6 @@ func (s *Service) Status(ctx context.Context) config.OpenCodeStatus {
 
 // localStatus describes the registration on this machine (cached briefly).
 func (s *Service) localStatus(ctx context.Context) config.OpenCodeLocal {
-	if s.env.Endpoint != "" {
-		return config.OpenCodeLocal{Reason: "environment"}
-	}
 	s.localMu.Lock()
 	defer s.localMu.Unlock()
 	if !s.localAt.IsZero() && time.Since(s.localAt) < localCache {
@@ -485,33 +462,20 @@ func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.saved
-	edit := func(field *string, env string, dest *string) error {
+	edit := func(field *string, dest *string) {
 		if field == nil {
-			return nil
-		}
-		if env != "" {
-			return db.Conflict("This field is managed by this machine's Stage environment.")
+			return
 		}
 		*dest = strings.TrimRight(strings.TrimSpace(*field), "/")
-		return nil
 	}
-	if err := edit(in.Endpoint, s.env.Endpoint, &next.Endpoint); err != nil {
-		return err
-	}
-	if err := edit(in.BrowserEndpoint, s.env.BrowserEndpoint, &next.BrowserEndpoint); err != nil {
-		return err
-	}
-	if err := edit(in.WebClient, s.env.WebClient, &next.WebClient); err != nil {
-		return err
-	}
+	edit(in.Endpoint, &next.Endpoint)
+	edit(in.BrowserEndpoint, &next.BrowserEndpoint)
+	edit(in.WebClient, &next.WebClient)
 	if next.Endpoint != s.saved.Endpoint {
 		next.Username, next.Password = "", ""
 		next.Auth, next.TokenIssuedAt = config.OpenCodeAuthNone, nil
 	}
 	if in.Password != nil || in.Username != nil {
-		if s.env.Username != "" || s.env.Password != "" {
-			return db.Conflict("Credentials are managed by this machine's Stage environment.")
-		}
 		if in.Username == nil || in.Password == nil {
 			return db.Invalid("Supply both username and password to replace or clear credentials.")
 		}
@@ -519,9 +483,6 @@ func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
 		next.Auth, next.TokenIssuedAt = config.OpenCodeAuthBasic, nil
 		if next.Username == "" && next.Password == "" {
 			next.Auth = config.OpenCodeAuthNone
-		}
-		if s.env.Endpoint != "" {
-			next.Endpoint = strings.TrimRight(s.env.Endpoint, "/")
 		}
 	}
 	return s.commit(ctx, next, "", in.NewInstance)
@@ -534,9 +495,6 @@ func (s *Service) ConnectLocal(ctx context.Context, newInstance bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.forgetLocalStatus()
-	if s.env.Endpoint != "" {
-		return db.Conflict("%s", errManaged)
-	}
 	next := s.saved
 	next.Username, next.Password = "", ""
 	next.Auth, next.TokenIssuedAt = config.OpenCodeAuthLocal, nil
@@ -550,9 +508,6 @@ func (s *Service) ConnectLocal(ctx context.Context, newInstance bool) error {
 func (s *Service) Pair(ctx context.Context, link string, newInstance bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.env.Endpoint != "" {
-		return db.Conflict("%s", errManaged)
-	}
 	link = strings.TrimSpace(link)
 	endpoint, code, err := opencode.ParsePairLink(link)
 	if err != nil {
@@ -591,9 +546,6 @@ func (s *Service) Pair(ctx context.Context, link string, newInstance bool) error
 func (s *Service) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.env.Endpoint != "" {
-		return db.Conflict("%s", errManaged)
-	}
 	next := config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}
 	if err := s.save(ctx, next); err != nil {
 		return err
@@ -610,7 +562,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 // conflict code for a service that does not answer; newInstance confirms a
 // different or earlier service (instance_changed / instance_returned).
 func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, failCode string, newInstance bool) error {
-	cfg, _, err := s.resolve(next)
+	cfg, err := s.resolve(next)
 	if err != nil {
 		return err
 	}

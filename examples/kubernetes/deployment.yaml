@@ -53,13 +53,8 @@ spec:
               value: 0.0.0.0:7380
             - name: STAGE_DATA_DIR
               value: /data
-            # Optional: a T3 the main server's own machine connects to. Usually
-            # harnesses run on workers instead and these stay unset.
-            # - name: T3_URL
-            #   value: http://t3.example.internal:3773
-            # - name: T3_ADMIN_TOKEN
-            #   valueFrom:
-            #     secretKeyRef: {name: stage-t3, key: admin-token}
+            # Harness connections are set in Settings > Connections, not here.
+            # Usually harnesses run on workers.
           volumeMounts:
             - name: data
               mountPath: /data

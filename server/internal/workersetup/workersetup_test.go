@@ -211,7 +211,7 @@ func TestRemoteT3PairCreatesTheMachinesConnectionAndInstallsItsAdapter(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f := st.Fields[0]; f.ID != "url" || f.Locked || f.Source != "default" {
+	if f := st.Fields[0]; f.ID != "url" || f.Source != "default" {
 		t.Fatalf("url field %+v", f)
 	}
 	res, err := c.Run(ctx, t3.ActionPair, json.RawMessage(`{"code":"ABCD-1234"}`))
@@ -241,29 +241,42 @@ func TestRemoteT3PairCreatesTheMachinesConnectionAndInstallsItsAdapter(t *testin
 	}
 }
 
-func TestRemoteEnvironmentLocksTheMachinesSettings(t *testing.T) {
-	r := newRig(t, map[string]string{"T3_URL": "http://t3.laptop:3773", "OPENCODE_URL": "http://127.0.0.1:1"})
+// A remote machine's T3 URLs are recorded on the main server; its admin
+// token stays in the worker's credentials file. Disconnect clears both.
+func TestRemoteT3SettingsStayWhereTheyBelong(t *testing.T) {
+	r := newRig(t, map[string]string{})
 	ctx := t.Context()
-	st, err := r.connector(t3.Kind).Status(ctx, false)
-	if err != nil {
+	c := r.connector(t3.Kind)
+	if _, err := c.Configure(ctx, json.RawMessage(`{"url":"http://t3.laptop:3773","publicUrl":"https://t3.example"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if f := st.Fields[0]; !f.Locked || f.Source != "env" || f.Value != "http://t3.laptop:3773" {
-		t.Fatalf("T3 url field %+v", f)
+	conn, err := r.store.GetConnection(ctx, r.id)
+	if err != nil || conn.T3URL == nil || *conn.T3URL != "http://t3.laptop:3773" || conn.T3PublicURL == nil || *conn.T3PublicURL != "https://t3.example" {
+		t.Fatalf("main server record %+v %v", conn, err)
 	}
-	_, err = r.connector(t3.Kind).Configure(ctx, json.RawMessage(`{"url":"http://other:3773"}`))
-	var conflict *db.ConflictError
-	if !errors.As(err, &conflict) || !strings.Contains(conflict.Msg, "T3_URL") {
-		t.Fatalf("locked url change: %v", err)
-	}
-	oc, err := r.connector(opencode.Kind).Status(ctx, false)
-	if err != nil {
+	if _, err := c.Configure(ctx, json.RawMessage(`{"adminToken":"admin-secret"}`)); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range oc.Fields {
-		if f.ID == "endpoint" && (!f.Locked || f.Source != "env") {
-			t.Fatalf("OpenCode endpoint field %+v", f)
-		}
+	if tok, _ := r.store.LoadT3AdminToken(ctx, r.id); tok != "" {
+		t.Fatalf("admin token reached the main server: %q", tok)
+	}
+	creds, err := os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path())
+	if err != nil || !strings.Contains(string(creds), "admin-secret") {
+		t.Fatalf("worker credentials %q %v", creds, err)
+	}
+	if sum := c.Summary(ctx); !sum.Configured {
+		t.Fatalf("admin token did not configure T3: %+v", sum)
+	}
+	if err := c.Disconnect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if sum := c.Summary(ctx); sum.Configured {
+		t.Fatalf("disconnected T3 configured: %+v", sum)
+	}
+	conn, _ = r.store.GetConnection(ctx, r.id)
+	creds, _ = os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path())
+	if conn.T3URL != nil || conn.T3PublicURL != nil || strings.Contains(string(creds), "admin-secret") {
+		t.Fatalf("disconnect kept settings: %+v %q", conn, creds)
 	}
 }
 

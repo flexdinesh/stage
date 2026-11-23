@@ -312,8 +312,7 @@ func TestRealUI(t *testing.T) {
 	stageCmd := start(t, []string{
 		"STAGE_ENV=dev",
 		"STAGE_DATA_DIR=" + filepath.Join(dir, "data"),
-		"STAGE_LISTEN=unix:" + sock,
-		"T3_URL=http://127.0.0.1:9", // never the machine's real T3
+		"STAGE_LISTEN=unix:" + sock, // a fresh data dir: T3 is unpaired, so never contacted
 	}, stage, "serve")
 	waitSocket(t, sock)
 

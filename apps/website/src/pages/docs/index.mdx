@@ -10,7 +10,7 @@ Stage manages tasks, schedules, dependency trees and journals across T3 Code and
 
 ## Connect a harness
 
-Open Settings to pair T3 or connect an existing OpenCode V2 service (tested with 2.3.0); any version whose API has the operations Stage uses. For OpenCode on the Stage server's machine, click **Connect** (or run `stage harness opencode run connect-local`); Stage signs in with the service's own password. For another machine, run `opencode pair` there and paste one link (or `stage harness opencode run pair link=LINK`); Stage renews that session automatically. **Advanced** takes a plain service address. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
+A new install has no connections; the Dashboard shows **Connect a harness** until one is set up. Open Settings > Connections to pair T3 or connect an existing OpenCode V2 service (tested with 2.3.0); any version whose API has the operations Stage uses. For OpenCode on the Stage server's machine, click **Connect** (or run `stage harness opencode run connect-local`); Stage signs in with the service's own password. For another machine, run `opencode pair` there and paste one link (or `stage harness opencode run pair link=LINK`); Stage renews that session automatically. **Advanced** takes a plain service address. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
 
 Create a Stage project and bind its workspace on each harness you use. Select the destination on each new task when a project has both bindings. Planning and accepted-result handoff work with a disconnected predecessor.
 
@@ -40,7 +40,7 @@ Details: [Security](/docs/deploy#security).
 - **Storage**: SQLite (`stage.db`) in the data dir: `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`).
 - **Web app**: React, served by the server, installable as a PWA with Web Push.
 - **Desktop app**: the same UI in a native window. It bundles the CLI/server, starts the per-user service and connects over its Unix socket ([Desktop app](/docs/desktop)).
-- **T3 integration**: T3's MCP endpoint (`T3_URL/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, refreshes projects and tracked tasks every 5 min, and discovers active external sessions for notifications.
+- **T3 integration**: T3's MCP endpoint (`<T3 URL>/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, refreshes projects and tracked tasks every 5 min, and discovers active external sessions for notifications.
 - **OpenCode integration**: V2 HTTP API for execution, workspace discovery and supported model and agent choices.
 - **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API.
 

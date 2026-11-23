@@ -68,8 +68,6 @@ func printT3Status(w io.Writer, s client.T3Status, cli string) {
 
 func urlSource(src string) string {
 	switch src {
-	case "env":
-		return "set by T3_URL"
 	case "settings":
 		return "saved setting"
 	}

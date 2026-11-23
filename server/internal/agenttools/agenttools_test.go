@@ -71,9 +71,9 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
-		Config:    config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
+		Config:    config.Config{},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{T3PublicURL: "http://localhost:3773"}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

@@ -44,7 +44,7 @@ import type {
   PushConfig,
   PushEndpointBody,
   PushSubscriptionBody,
-  SetT3UrlRequest,
+  T3SettingsRequest,
   SyncResult,
   T3State,
   T3Status,
@@ -141,7 +141,7 @@ export function normalizeOpenCodeStatus(w: OpenCodeStatusWire): OpenCodeStatus {
   return {
     ...w,
     auth: w.auth ?? (w.hasCredentials ? "basic" : "none"),
-    local: w.local ?? { available: false, url: "", version: "", reason: "environment" },
+    local: w.local ?? { available: false, url: "", version: "", reason: "" },
   };
 }
 
@@ -170,7 +170,7 @@ function harnessCalls(apiFetch: Fetch, apiSend: Send, base: string) {
     harnesses: () => apiFetch<HarnessesReply>(`${base}/harnesses`),
     /** Connection setup of a connectable harness (404 unknown kind, 409 none on the machine). */
     harnessStatus: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(path(kind, "/status")),
-    /** Saves settings keyed by setup field id (null resets); 409 when the environment locks one. */
+    /** Saves settings keyed by setup field id (null resets). */
     configureHarness: <D = unknown>(kind: Harness, settings: Record<string, unknown>) => apiFetch<HarnessStatus<D>>(path(kind, "/settings"), put(settings)),
     runHarnessAction: <D = unknown>(kind: Harness, action: string, input?: Record<string, unknown>) =>
       apiFetch<HarnessStatus<D>>(path(kind, `/actions/${encodeURIComponent(action)}`), post(input)),
@@ -183,16 +183,16 @@ function harnessCalls(apiFetch: Fetch, apiSend: Send, base: string) {
     connectLocalOpenCode: (newInstance = false) => apiSend(path("opencode", "/actions/connect-local"), post(newInstance ? { newInstance: true } : undefined)),
     /** Redeems a link from `opencode pair` (400 when invalid, 409 `opencode_pairing_expired`, or instance_changed / instance_returned: resend the same link with newInstance). */
     pairOpenCode: (link: string, newInstance = false) => apiSend(path("opencode", "/actions/pair"), post(newInstance ? { link, newInstance: true } : { link })),
-    /** Forgets the OpenCode connection; tasks and history stay (409 when environment-managed). */
+    /** Forgets the OpenCode connection; tasks and history stay. */
     disconnectOpenCode: () => apiSend(path("opencode", "/connection"), del),
     t3Status: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/status")).then((s) => t3Details(s)),
     pair: (body: PairRequest) => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/actions/pair"), post(body)).then((s) => t3Details(s)),
     /** Pairs through the t3 CLI on the machine (409 when unavailable, 502 when it fails). */
     autoPair: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/actions/auto-pair"), post()).then((s) => t3Details(s)),
-    /** Forgets the T3 token; the environment binding stays (409 while T3_ADMIN_TOKEN renews it). */
+    /** Forgets the T3 token, URL, browser URL and admin token; the connection record stays, so pairing the same T3 resumes it. */
     disconnectT3: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/connection"), del).then((s) => t3Details(s)),
-    /** 409 when T3_URL locks it or the URL is another T3; 400 when invalid. */
-    setT3Url: (body: SetT3UrlRequest) => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/settings"), put(body)).then((s) => t3Details(s)),
+    /** 400 when a URL is invalid; 409 when paired and the URL serves another T3 environment. */
+    saveT3Settings: (body: T3SettingsRequest) => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/settings"), put(body)).then((s) => t3Details(s)),
     };
 }
 

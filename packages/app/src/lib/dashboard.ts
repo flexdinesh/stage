@@ -1,4 +1,4 @@
-import type { Task } from "../api/types.ts";
+import type { HarnessConnection, Task } from "../api/types.ts";
 
 /** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
 export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "settled";
@@ -39,6 +39,17 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
     case "scheduled":
       return t.state === "backlog" && t.startAt !== null;
   }
+}
+
+/**
+ * The harness notice above the Dashboard: `connect` when no T3 or OpenCode connection is set up anywhere, `t3` (its
+ * own alert) when T3 is set up on `machineId`, else none. None while connections load (null).
+ */
+export function harnessNotice(connections: readonly Pick<HarnessConnection, "harness" | "machineId" | "active" | "configured">[] | null, machineId: number): "connect" | "t3" | null {
+  if (connections === null) return null;
+  const set = connections.filter((c) => c.active && c.configured && (c.harness === "t3" || c.harness === "opencode"));
+  if (set.length === 0) return "connect";
+  return set.some((c) => c.harness === "t3" && c.machineId === machineId) ? "t3" : null;
 }
 
 /** Tasks view tree filter (`?tree=`): every task, or only tasks outside any tree. */

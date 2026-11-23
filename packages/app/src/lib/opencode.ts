@@ -79,24 +79,23 @@ export function signInText(s: OpenCodeStatus, now = Date.now()): string {
   }
 }
 
-/** Line shown above the pairing field when no local service can be connected; none when the environment manages it. */
+/** Line shown above the pairing field when no local service can be connected (none when the server did not look). */
 export function localNote(s: OpenCodeStatus): string | null {
-  if (s.local.available) return null;
-  return s.local.reason === "missing" || s.local.reason === "unreachable" || s.local.reason === "invalid" ? "No OpenCode service on this machine." : null;
+  return s.local.available || s.local.reason === "" ? null : "No OpenCode service on this machine.";
 }
 
 export type AdvancedDraft = { endpoint: string; browserEndpoint: string; webClient: string };
 
 /**
- * Advanced drawer save body: only the URL fields that changed (trimmed) and
- * are not environment-locked, plus credentials when replaced, so an untouched
+ * Advanced drawer save body: only the URL fields that changed (trimmed),
+ * plus credentials when replaced, so an untouched
  * service URL keeps the server's sign-in mode.
  */
 export function advancedChanges(s: OpenCodeStatus, draft: AdvancedDraft, credentials: { username: string; password: string } | null): OpenCodeSettings {
   const body: OpenCodeSettings = {};
   for (const key of ["endpoint", "browserEndpoint", "webClient"] as const) {
     const value = draft[key].trim();
-    if (!s.environmentFields.includes(key) && value !== s[key]) body[key] = value;
+    if (value !== s[key]) body[key] = value;
   }
   if (credentials !== null) {
     body.username = credentials.username.trim();

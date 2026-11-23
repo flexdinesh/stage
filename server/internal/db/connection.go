@@ -66,6 +66,8 @@ type Connection struct {
 	LastFullSyncAt *time.Time
 	// T3URL is the T3 URL saved in Settings (nil = default).
 	T3URL *string
+	// T3PublicURL is the browser URL saved in Settings (nil = the T3 URL).
+	T3PublicURL *string
 	// EnvironmentID is the identity of the machine's active T3 connection
 	// (nil until the first successful pairing).
 	EnvironmentID *string
@@ -77,10 +79,10 @@ type Connection struct {
 func (s *Store) GetConnection(ctx context.Context, machine int64) (Connection, error) {
 	var c Connection
 	err := s.pool.QueryRow(ctx,
-		`SELECT (SELECT last_error FROM t3_connection WHERE machine_id=$1), (SELECT last_full_sync_at FROM t3_connection WHERE machine_id=$1), (SELECT t3_url FROM t3_connection WHERE machine_id=$1),
+		`SELECT (SELECT last_error FROM t3_connection WHERE machine_id=$1), (SELECT last_full_sync_at FROM t3_connection WHERE machine_id=$1), (SELECT t3_url FROM t3_connection WHERE machine_id=$1), (SELECT public_url FROM t3_connection WHERE machine_id=$1),
  (SELECT NULLIF(identity,'') FROM harness_connections WHERE machine_id=$1 AND harness='t3' AND active=1),
  COALESCE((SELECT id FROM harness_connections WHERE machine_id=$1 AND harness='t3' AND active=1),0)`, machine,
-	).Scan(&c.LastError, &c.LastFullSyncAt, &c.T3URL, &c.EnvironmentID, &c.ConnectionID)
+	).Scan(&c.LastError, &c.LastFullSyncAt, &c.T3URL, &c.T3PublicURL, &c.EnvironmentID, &c.ConnectionID)
 	return c, err
 }
 
@@ -89,6 +91,32 @@ func (s *Store) SetT3URL(ctx context.Context, machine int64, u string) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO t3_connection(machine_id, t3_url) VALUES($1, $2)
  ON CONFLICT(machine_id) DO UPDATE SET t3_url = excluded.t3_url, updated_at = `+nowSQL, machine, nullIfEmpty(u))
+	return err
+}
+
+// SetT3PublicURL saves machine's T3 browser URL ("" clears it: the T3 URL).
+func (s *Store) SetT3PublicURL(ctx context.Context, machine int64, u string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO t3_connection(machine_id, public_url) VALUES($1, $2)
+ ON CONFLICT(machine_id) DO UPDATE SET public_url = excluded.public_url, updated_at = `+nowSQL, machine, nullIfEmpty(u))
+	return err
+}
+
+// LoadT3AdminToken reads machine's T3 admin token ("" when none).
+func (s *Store) LoadT3AdminToken(ctx context.Context, machine int64) (string, error) {
+	var tok *string
+	err := s.pool.QueryRow(ctx, `SELECT admin_token FROM t3_connection WHERE machine_id = $1`, machine).Scan(&tok)
+	if errors.Is(err, sql.ErrNoRows) || tok == nil {
+		return "", nil
+	}
+	return *tok, err
+}
+
+// SaveT3AdminToken saves machine's T3 admin token ("" clears it).
+func (s *Store) SaveT3AdminToken(ctx context.Context, machine int64, tok string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO t3_connection(machine_id, admin_token) VALUES($1, $2)
+ ON CONFLICT(machine_id) DO UPDATE SET admin_token = excluded.admin_token, updated_at = `+nowSQL, machine, nullIfEmpty(tok))
 	return err
 }
 

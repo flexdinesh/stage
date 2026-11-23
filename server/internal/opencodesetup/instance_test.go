@@ -150,7 +150,7 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, storePorts(store, in.install), config.OpenCodeSettings{}, nil)
+	s, err := New(ctx, storePorts(store, in.install), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, storePorts(store, in.install), config.OpenCodeSettings{}, nil)
+	s, err := New(ctx, storePorts(store, in.install), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,11 @@ var Descriptor = harness.Descriptor{
 		Event:     "Completed from T3 settle; accepted evidence saved in Stage.",
 	}},
 	Setup: harness.Setup{
-		Fields: []harness.Field{{ID: "url", Label: "T3 URL", Kind: harness.FieldURL, Env: "T3_URL", Help: "scheme://host[:port] of the T3 server; null resets to the default."}},
+		Fields: []harness.Field{
+			{ID: "url", Label: "T3 URL", Kind: harness.FieldURL, Help: "scheme://host[:port] of the T3 server; null resets to the default."},
+			{ID: "publicUrl", Label: "Browser URL", Kind: harness.FieldURL, Help: "T3 address for Open in T3 links in the browser; null follows the T3 URL."},
+			{ID: "adminToken", Label: "Admin token", Kind: harness.FieldSecret, Help: "Optional; lets Stage renew its T3 token itself. null clears it."},
+		},
 		Actions: []harness.Action{
 			{ID: ActionPair, Label: "Pair with code", Input: []harness.Field{{ID: "code", Label: "Pairing code", Kind: harness.FieldSecret, Help: "Printed by `t3 pair` on the T3 host."}}},
 			{ID: ActionAutoPair, Label: "Pair automatically"},

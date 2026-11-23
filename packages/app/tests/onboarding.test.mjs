@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizeT3Status } from "../src/api/client.ts";
-import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, setupSteps, t3DisconnectPrompt } from "../src/lib/onboarding.ts";
+import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3SettingsChanges } from "../src/lib/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const SYNCED = "2026-11-17T10:00:00Z";
@@ -121,13 +121,32 @@ test("an older server without onboarding fields gets a derived state and safe de
   assert.deepEqual(normalizeT3Status(base, now), base, "a current server passes through unchanged");
 });
 
-test("disconnect shows only with a stored token and locks while an admin token renews it", () => {
+test("T3 is set up once paired: a stored token or a saved admin token; unpaired it is not", () => {
+  assert.equal(t3Configured(status({})), false, "never paired");
+  assert.equal(t3Configured(status({ t3UrlSource: "settings", t3Url: "http://box:3773" })), false, "a saved URL alone is not set up");
+  assert.equal(t3Configured(connected), true);
+  assert.equal(t3Configured(status({ adminTokenConfigured: true })), true, "an admin token pairs on its own");
+});
+
+test("disconnect shows whenever T3 is set up (token or admin token), never while unpaired", () => {
   assert.equal(disconnectAvailability(status({})), "hidden", "never paired");
   assert.equal(disconnectAvailability(connected), "ready");
   assert.equal(disconnectAvailability(status({ state: "expired", tokenExpiresAt: "2026-11-01T00:00:00Z" })), "ready");
   assert.equal(disconnectAvailability({ ...unreachable, tokenExpiresAt: "2026-12-17T00:00:00Z" }), "ready", "T3 away, token still stored");
-  assert.equal(disconnectAvailability({ ...connected, adminTokenConfigured: true }), "locked");
-  assert.equal(disconnectAvailability(status({ adminTokenConfigured: true })), "hidden");
+  assert.equal(disconnectAvailability({ ...connected, adminTokenConfigured: true }), "ready", "an admin token no longer locks it");
+  assert.equal(disconnectAvailability(status({ adminTokenConfigured: true })), "ready", "admin token without a stored token");
+});
+
+test("T3 settings send only what changed: URL (empty ignored), Browser URL (empty clears), an entered admin token", () => {
+  const draft = { url: base.t3Url, browserUrl: "", adminToken: "" };
+  assert.equal(savedBrowserUrl(base), "", "publicUrl equal to the T3 URL means none is saved");
+  assert.equal(savedBrowserUrl(status({ publicUrl: "https://t3.tail" })), "https://t3.tail");
+  assert.deepEqual(t3SettingsChanges(base, draft), {}, "nothing changed");
+  assert.deepEqual(t3SettingsChanges(base, { ...draft, url: " http://box:3773 " }), { url: "http://box:3773" });
+  assert.deepEqual(t3SettingsChanges(base, { ...draft, url: "  " }), {}, "an emptied URL is not sent; Reset restores the default");
+  assert.deepEqual(t3SettingsChanges(base, { ...draft, browserUrl: " https://t3.tail " }), { publicUrl: "https://t3.tail" });
+  assert.deepEqual(t3SettingsChanges(status({ publicUrl: "https://t3.tail" }), { ...draft, browserUrl: "" }), { publicUrl: null }, "emptied Browser URL clears it");
+  assert.deepEqual(t3SettingsChanges(base, { ...draft, adminToken: "secret" }), { adminToken: "secret" });
 });
 
 const isoDate = (iso) => iso.slice(0, 10);
@@ -136,12 +155,12 @@ test("disconnect prompt names the T3, what stays, and the token's validity only 
   const date = isoDate;
   assert.equal(
     t3DisconnectPrompt(connected, date),
-    "Disconnect from controlbox? Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only. The token stays valid in T3 until 2026-12-17.",
+    "Disconnect from controlbox? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume. The token stays valid in T3 until 2026-12-17.",
   );
   const expired = status({ state: "expired", t3: null, tokenExpiresAt: "2026-11-01T00:00:00Z" });
   assert.equal(
     t3DisconnectPrompt(expired, date),
-    "Disconnect T3? Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.",
+    "Disconnect T3? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume.",
   );
 });
 
@@ -159,7 +178,7 @@ test("disconnect sends DELETE /harnesses/t3/connection and returns the normalize
   assert.deepEqual(seen, [{ path: "/harnesses/t3/connection", method: "DELETE", body: undefined }]);
 });
 
-test("auto-pair and set-URL hit their harness endpoints and return the normalized details", async () => {
+test("auto-pair and T3 settings hit their harness endpoints and return the normalized details", async () => {
   const seen = [];
   const replaced = { id: 1, harness: "t3", label: "box a", active: false };
   const { api } = fakeApi(async (path, init) => {
@@ -169,11 +188,11 @@ test("auto-pair and set-URL hit their harness endpoints and return the normalize
   const paired = await api.autoPair();
   assert.equal(paired.state, "connected");
   assert.deepEqual(paired.replaced, replaced, "the replaced connection rides along with the details");
-  assert.equal((await api.setT3Url({ url: "http://127.0.0.1:4000" })).state, "connected");
-  await api.setT3Url({ url: null });
+  assert.equal((await api.saveT3Settings({ url: "http://127.0.0.1:4000" })).state, "connected");
+  await api.saveT3Settings({ url: null, publicUrl: null, adminToken: "tok" });
   assert.deepEqual(seen, [
     { path: "/harnesses/t3/actions/auto-pair", method: "POST", body: undefined },
     { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: "http://127.0.0.1:4000" }) },
-    { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: null }) },
+    { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: null, publicUrl: null, adminToken: "tok" }) },
   ]);
 });

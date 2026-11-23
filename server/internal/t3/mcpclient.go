@@ -35,9 +35,9 @@ const (
 
 // Options configures NewMCPClient.
 type Options struct {
-	BaseURL    string // T3_URL, e.g. http://127.0.0.1:3773 (OAuth + /mcp)
-	AdminToken string // T3_ADMIN_TOKEN; "" disables auto-renew (Pair only)
-	PublicURL  string // T3_PUBLIC_URL, browser base for "Open in T3" links
+	BaseURL    string // the T3 URL, e.g. http://127.0.0.1:3773 (OAuth + /mcp)
+	AdminToken string // the saved admin token; "" disables auto-renew (Pair only)
+	PublicURL  string // browser base for "Open in T3" links
 	Store      TokenStore
 	HTTPClient *http.Client // nil = http.DefaultClient transport
 	Logger     *slog.Logger // nil = slog.Default()
@@ -60,8 +60,9 @@ type MCPClient struct {
 	upHC  *http.Client
 	now   func() time.Time
 
-	// authMu serializes token acquisition and Reconfigure, so an OAuth
-	// flow never straddles two base URLs.
+	// authMu serializes token acquisition, Reconfigure and SetAdminToken,
+	// so an OAuth flow never straddles two base URLs; it guards
+	// opts.AdminToken.
 	authMu sync.Mutex
 
 	mu         sync.Mutex // guards fields below
@@ -136,7 +137,9 @@ func NewMCPClient(opts Options) *MCPClient {
 // remain (or none/expired), retrying with backoff and recording errors via
 // Store.SetLastError. Without an AdminToken it only reports expiry.
 func (c *MCPClient) Run(ctx context.Context) {
-	c.startProbe() // learn reachability and the environment id early
+	if c.credentialed(ctx) {
+		c.startProbe() // learn reachability and the environment id early
+	}
 	backoff := time.Duration(0)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -261,6 +264,26 @@ func (c *MCPClient) base() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.baseURL
+}
+
+// credentialed: a token is stored or an admin token can mint one. An
+// uncredentialed client (not paired) is never contacted in the background.
+func (c *MCPClient) credentialed(ctx context.Context) bool {
+	c.authMu.Lock()
+	admin := c.opts.AdminToken
+	c.authMu.Unlock()
+	return admin != "" || c.current(ctx).Token != ""
+}
+
+// SetAdminToken implements Client. It waits for a running OAuth flow.
+func (c *MCPClient) SetAdminToken(ctx context.Context, token string) error {
+	c.authMu.Lock()
+	c.opts.AdminToken = token
+	c.authMu.Unlock()
+	if token == "" {
+		return nil
+	}
+	return c.refreshIfNeeded(ctx)
 }
 
 // Reconfigure implements Client. It waits for a running OAuth flow.

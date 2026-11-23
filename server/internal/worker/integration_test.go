@@ -82,7 +82,7 @@ func newMain(t *testing.T, short string) *mainServer {
 	}
 	m := &mainServer{t: t, url: "http://" + addr, cfg: config.Config{
 		Listen: ls, DataDir: filepath.Join(t.TempDir(), "main"), PublicURL: "http://" + addr,
-		T3URL: "http://127.0.0.1:1", T3PublicURL: "http://t3.test", T3ClientName: "stage",
+		T3ClientName: "stage",
 	}}
 	m.start()
 	t.Cleanup(func() { m.stop() })

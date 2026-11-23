@@ -151,7 +151,7 @@ test("harness setup calls: local routes stay, forMachine drives a remote machine
   const seen = [];
   const { api } = fakeApi(async (path, init) => {
     seen.push(`${init.method} ${path}`);
-    return Response.json({ details: { state: "unpaired", t3Url: "u", local: { available: false }, environmentFields: [] }, fields: [], actions: [] });
+    return Response.json({ details: { state: "unpaired", t3Url: "u", local: { available: false } }, fields: [], actions: [] });
   });
   await api.harnesses();
   await api.harnessStatus("t3");

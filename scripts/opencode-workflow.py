@@ -138,7 +138,7 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
     threading.Thread(target=model.serve_forever, daemon=True).start()
     cleanup.callback(model.server_close)
     cleanup.callback(model.shutdown)
-    stage_port, oc_port, absent_t3_port = port(), port(), port()
+    stage_port, oc_port = port(), port()
     stage = f"http://127.0.0.1:{stage_port}"
     oc = f"http://127.0.0.1:{oc_port}"
 
@@ -166,7 +166,6 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
 
     stage_env = env | {
         "STAGE_DATA_DIR": str(root / "data"),
-        "T3_URL": f"http://127.0.0.1:{absent_t3_port}",
         "STAGE_LISTEN": f"127.0.0.1:{stage_port}",
     }
 

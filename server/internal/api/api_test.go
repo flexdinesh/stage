@@ -178,7 +178,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	push := notify.New(store, "https://stage.test", log)
 	runner.OnReady = push.OnReady
 	deps := api.Deps{
-		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: publicURL},
+		Config: config.Config{},
 		Store:  store, Sync: svc, Push: push, Logger: log, Harnesses: testHarnesses,
 	}
 	for _, opt := range opts {
@@ -999,7 +999,7 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 	}
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &reply)
 	st := reply.Details
-	if st.LastFullSyncAt == nil || !st.Connected || st.EnvironmentID == nil || st.PublicURL != publicURL {
+	if st.LastFullSyncAt == nil || !st.Connected || st.EnvironmentID == nil || st.PublicURL != "http://127.0.0.1:3773" {
 		t.Fatalf("status %+v", st)
 	}
 	var projects struct {

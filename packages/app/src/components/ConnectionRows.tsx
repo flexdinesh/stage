@@ -7,13 +7,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
 import { useHarnesses, useOpenCodeStatus, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
-import { addConnectionOptions, addConnectionReason, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
+import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
 import { shortDate } from "../lib/format.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
 import { ConnectionSetup, useDisconnectHarness, useHarnessStatus } from "./HarnessConnections.tsx";
 import { IconStep } from "./icons.tsx";
-import { OPENCODE_DISCONNECT_PROMPT, openCodeDisconnectLocked, useDisconnectOpenCode } from "./OpenCodeSetup.tsx";
+import { OPENCODE_DISCONNECT_PROMPT, useDisconnectOpenCode } from "./OpenCodeSetup.tsx";
 import { useDisconnectT3 } from "./T3Setup.tsx";
 import { Button, Chip, ConfirmInline, Drawer, Hint, Menu, MenuItem, Row, RowButton, RowList, useMenu, type ChipTone } from "./ui.tsx";
 
@@ -65,10 +65,29 @@ export function AddConnection({ machine, connections, onPick }: { machine: Machi
   );
 }
 
-/** The machine's connection rows. */
+/** The machine's connection rows; a live machine without any offers a Connect button per harness it can add. */
 export function ConnectionRowList({ machine, connections, onManage }: { machine: Machine; connections: ReturnType<typeof useMachineConnections>; onManage: (t: ManageTarget) => void }) {
   if (connections.rows.length === 0) {
-    return <Hint className="border-t border-line py-2 pr-3 pl-[30px]">No harness connections{connections.live ? ". Add one to run tasks here." : "."}</Hint>;
+    if (!connections.live) return <Hint className="border-t border-line py-2 pr-3 pl-[30px]">No harness connections.</Hint>;
+    return (
+      <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 border-t border-line py-2 pr-3 pl-[30px] md:min-h-control">
+        <Hint>No connections. Connect a harness to run tasks here.</Hint>
+        {connectShortcuts(connections.options).map((o) => (
+          <Button
+            key={o.kind}
+            small
+            className="max-md:h-11"
+            aria-label={`${o.label} on ${machine.label}`}
+            onClick={() => {
+              const descriptor = connections.descriptor(o.kind);
+              if (descriptor !== undefined) onManage({ descriptor });
+            }}
+          >
+            {o.label}
+          </Button>
+        ))}
+      </div>
+    );
   }
   return (
     <RowList label={`${machine.label} connections`} className="border-t border-line">
@@ -105,8 +124,6 @@ export function ManageDrawer({ machine, target, onClose }: { machine: Machine; t
 // ---- Rows ----
 
 interface Disconnect {
-  /** Why Disconnect is unavailable ("set by OPENCODE_URL"); null when it can run. */
-  locked: string | null;
   prompt: string;
   busy: boolean;
   error: unknown;
@@ -174,8 +191,7 @@ function ConnectionRow({
                 <Button
                   small
                   variant="ghost"
-                  disabled={disconnect.locked !== null || confirm}
-                  title={disconnect.locked ?? undefined}
+                  disabled={confirm}
                   aria-label={`Disconnect ${name} on ${machine.label}`}
                   onClick={() => {
                     disconnect.reset();
@@ -206,7 +222,6 @@ function T3Row({ name, machine, onManage }: { name: string; machine: Machine; on
   const summary = t3Summary(read);
   const disconnect = useDisconnectT3();
   const s = read.data;
-  const availability = s === undefined ? "hidden" : disconnectAvailability(s);
   return (
     <ConnectionRow
       name={name}
@@ -215,10 +230,9 @@ function T3Row({ name, machine, onManage }: { name: string; machine: Machine; on
       chip={{ tone: summary.tone, label: summary.state }}
       onManage={onManage}
       disconnect={
-        s === undefined || availability === "hidden"
+        s === undefined || disconnectAvailability(s) === "hidden"
           ? null
           : {
-              locked: availability === "locked" ? "renewed by T3_ADMIN_TOKEN" : null,
               prompt: t3DisconnectPrompt(s, shortDate),
               busy: disconnect.isPending,
               error: disconnect.error,
@@ -247,7 +261,6 @@ function OpenCodeRow({ name, machine, onManage }: { name: string; machine: Machi
         s === undefined || s.state === "unconfigured"
           ? null
           : {
-              locked: openCodeDisconnectLocked(s) ? "set by OPENCODE_URL" : null,
               prompt: OPENCODE_DISCONNECT_PROMPT,
               busy: disconnect.isPending,
               error: disconnect.error,
@@ -275,7 +288,6 @@ function GenericRow({ descriptor, machine, onManage }: { descriptor: HarnessDesc
         s === undefined || !descriptor.setup.disconnect || !s.configured
           ? null
           : {
-              locked: null,
               prompt: `Disconnect ${descriptor.name}? Tasks and history stay. You can connect again any time.`,
               busy: disconnect.isPending,
               error: disconnect.error,

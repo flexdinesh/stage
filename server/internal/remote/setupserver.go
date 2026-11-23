@@ -37,6 +37,13 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		}
 		return Empty{}, p.SetT3URL(ctx, r.URL)
 	})
+	handle(KindT3SetPublicURL, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r URLRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		return Empty{}, p.SetT3PublicURL(ctx, r.URL)
+	})
 	handle(KindT3LastError, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r MessageRequest
 		if err := decodeBody(body, &r); err != nil {

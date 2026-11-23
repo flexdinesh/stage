@@ -15,13 +15,13 @@ export function initialValues(fields: SetupField[], current: FieldStates): Setup
   return out;
 }
 
-/** PUT settings body: changed text fields (cleared: null resets), entered secrets, checked flags; never a locked field. */
+/** PUT settings body: changed text fields (cleared: null resets), entered secrets, checked flags. */
 export function settingsBody(fields: SetupField[], current: FieldStates, values: SetupValues): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const f of fields) {
     const st = current.find((s) => s.id === f.id);
     const v = values[f.id];
-    if (st?.locked === true || v === undefined) continue;
+    if (v === undefined) continue;
     if (f.kind === "bool") {
       if (v === true) body[f.id] = true;
     } else if (f.kind === "secret") {

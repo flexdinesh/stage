@@ -59,7 +59,7 @@ func TestInstallSmoke(t *testing.T) {
 	if err := os.MkdirAll(cfg, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg, "service.env"), []byte("STAGE_LISTEN=unix\nT3_URL=http://127.0.0.1:9\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, "service.env"), []byte("STAGE_LISTEN=unix\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(s.home, ".local", "bin", smokeID)

@@ -48,7 +48,7 @@ The task builds the probe page, then runs `go test -tags e2e ./e2e`. For each br
 5. Closing the window hides it and the app keeps running. The test logs `visibilityState` and the open stream count.
 6. Quit exits the app and ends its streams; the stub keeps running and stays healthy.
 
-With `STAGE_FIXTURE_REAL_UI=1`, `TestRealUI` also builds the real UI (`apps/web/dist`) and a real `stage serve`. The server runs on a temp socket with a temp `STAGE_DATA_DIR` and `T3_URL=http://127.0.0.1:9`, so it never reaches the machine's real T3. The real UI loads through bridge B with no web changes and renders. The test then checks `/api/health` through the page, a `/schedules` deep link, and that neither the app nor the server listens on TCP.
+With `STAGE_FIXTURE_REAL_UI=1`, `TestRealUI` also builds the real UI (`apps/web/dist`) and a real `stage serve`. The server runs on a temp socket with a temp `STAGE_DATA_DIR`, where T3 is unpaired, so it never reaches the machine's real T3. The real UI loads through bridge B with no web changes and renders. The test then checks `/api/health` through the page, a `/schedules` deep link, and that neither the app nor the server listens on TCP.
 
 Linux setup: install `webkit2gtk-4.1` (Arch) / `libwebkit2gtk-4.1-0` (Debian, Ubuntu) / `webkit2gtk4.1` (Fedora), then run `go tool mygo doctor` in `desktop/fixture`.
 

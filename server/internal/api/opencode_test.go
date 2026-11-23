@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -19,11 +18,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 )
 
-func withOpenCode(t *testing.T, env config.OpenCodeSettings) func(*api.Deps) {
+func withOpenCode(t *testing.T) func(*api.Deps) {
 	return func(d *api.Deps) {
 		local, _ := d.Sync.Machines().Local(db.LocalMachine)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(opencode.Descriptor))
-		s, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ports, Identity: ports, Install: local.Install}, env, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		s, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ports, Identity: ports, Install: local.Install}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +57,7 @@ func (e *env) raw(method, path string, body string) (int, map[string]any) {
 
 func TestOpenCodeConnectionEndpoints(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	e := newEnv(t, withOpenCode(t, config.OpenCodeSettings{}))
+	e := newEnv(t, withOpenCode(t))
 
 	code, st := e.status("opencode")
 	local, _ := st["local"].(map[string]any)
@@ -119,22 +118,4 @@ func (e *env) openCodeID(t *testing.T) int64 {
 		t.Fatal(err)
 	}
 	return id
-}
-
-func TestOpenCodeEnvironmentManaged(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	e := newEnv(t, withOpenCode(t, config.OpenCodeSettings{Endpoint: "http://127.0.0.1:1"}))
-	for _, r := range []struct{ method, path, body string }{
-		{"POST", "/api/harnesses/opencode/actions/connect-local", ""},
-		{"POST", "/api/harnesses/opencode/actions/pair", `{"link":"http://127.0.0.1:1/auth/connect/x"}`},
-		{"DELETE", "/api/harnesses/opencode/connection", ""},
-	} {
-		if code, body := e.raw(r.method, r.path, r.body); code != 409 || !strings.Contains(body["error"].(string), "managed by this machine's Stage environment") {
-			t.Errorf("%s %s: %d %v", r.method, r.path, code, body)
-		}
-	}
-	_, st := e.status("opencode")
-	if local, _ := st["local"].(map[string]any); local["reason"] != "environment" {
-		t.Fatalf("%v", st)
-	}
 }

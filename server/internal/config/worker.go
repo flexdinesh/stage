@@ -27,8 +27,8 @@ const WorkerConfigEnv = "STAGE_WORKER_CONFIG"
 const WorkerListenEnv = "STAGE_WORKER_LISTEN"
 
 // WorkerEnvKeys are the keys worker.env may set: the worker config, the
-// gateway's listeners, and the harness settings of this machine
-// (HarnessEnvKeys; each locks its setting in the machine's harness setup).
+// gateway's listeners, and the harness options of this machine
+// (HarnessEnvKeys).
 var WorkerEnvKeys = append([]string{WorkerConfigEnv, WorkerListenEnv}, HarnessEnvKeys...)
 
 // WorkerEnvTemplate is the worker.env `stage worker service start` creates.
@@ -46,17 +46,9 @@ const WorkerEnvTemplate = `# Stage worker service configuration (docs/service.md
 # the CLI and stage mcp find) is required; add host:port for HTTP MCP clients.
 # STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
 
-# Harness settings of this machine. Each one set here locks that setting
-# in Settings > Machines > this machine (unset: set it up there).
-# T3_URL=http://127.0.0.1:3773
-# T3_PUBLIC_URL=
+# The t3 CLI auto-pair runs (default: looked up on PATH). Harness
+# connections are set up in Settings > Connections, never here.
 # T3_BIN=
-# T3_ADMIN_TOKEN=
-# OPENCODE_URL=
-# OPENCODE_PUBLIC_URL=
-# OPENCODE_WEB_URL=
-# OPENCODE_USERNAME=
-# OPENCODE_PASSWORD=
 `
 
 // ParseWorkerListen parses a gateway listen list (WorkerListenEnv, or

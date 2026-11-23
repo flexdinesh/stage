@@ -84,11 +84,10 @@ Environment variables: `service.env` for the service (a `KEY=VALUE` file, mode `
 | `STAGE_LISTEN` | foreground `127.0.0.1:7380`; service `unix` | listen addresses ([Listeners](#listeners)) |
 | `STAGE_PUBLIC_URL` | unset | HTTPS URL the PWA is served at. Its origin is trusted by the [request origin policy](#security); when `https` it is the Web Push VAPID subject (a fallback is used otherwise). Push works without it. |
 | `STAGE_ALLOWED_ORIGINS` | unset | comma list of extra trusted browser origins (`https://host[:port]`), e.g. a Tailscale or Caddy hostname other than `STAGE_PUBLIC_URL`'s |
-| `T3_URL` | `http://127.0.0.1:3773` | the T3 server stage calls. Without it, the URL saved in the app applies; with it, that setting is locked ([T3 address](/docs/t3#t3-address)) |
-| `T3_PUBLIC_URL` | `T3_URL` | the T3 address browsers use for "Open in T3" links |
-| `T3_ADMIN_TOKEN` | unset | optional; lets stage mint and renew its own T3 session ([Admin token](/docs/t3#admin-token)) |
 | `T3_BIN` | unset | the `t3` CLI that Pair with T3 runs, when it is not on `PATH` or in a usual install dir |
 | `STAGE_DATA_DIR` | see [Data](#data) | data dir for a foreground server. Not allowed in `service.env`: the service always uses the default. |
+
+Harness connections (T3 and OpenCode addresses, tokens and passwords) are set in Settings > Connections, never in the environment ([T3 address](/docs/t3#t3-address)). `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN` and the `OPENCODE_*` variables are no longer read: a server logs a warning naming any still set, and in `service.env` they are errors.
 
 In `service.env`, unknown keys, `STAGE_DATA_DIR`, or a file readable by group or others make `stage service start` fail (exit 7) instead of a restart loop.
 
@@ -109,7 +108,6 @@ stage has no authentication. Anyone who can reach a listener can read tasks and 
 - That policy is not authentication. Any process or person that can reach a listener directly has full access. A private socket (`unix`, mode `0600`) limits that to your user.
 - Before exposing stage to a network, put an authenticating HTTPS reverse proxy in front and keep stage itself unreachable except through it. A tailnet limits who can connect, not what they can do.
 - The one exception is `/api/worker/*`: workers authenticate there themselves, with a one-time pairing code and then a revocable machine token. Your proxy passes that prefix through without user auth ([Auth proxy](#auth-proxy)).
-- `service.env` may hold `T3_ADMIN_TOKEN`; keep it private.
 
 ## HTTPS and push notifications
 
@@ -220,7 +218,7 @@ Click the machine's **Harnesses** link (or **Set up harnesses** after it joins):
 | `stage worker leave [--local]` | remove this machine on the main server, then delete the local config; `--local` deletes only locally |
 | `stage worker service start\|stop\|restart\|status\|logs\|enable\|disable\|uninstall` | the worker service, like `stage service` |
 
-- **Config**: the worker service reads only `worker.env` next to `service.env` (`~/.config/stage/worker.env` on Linux, `~/Library/Application Support/stage/worker.env` on macOS), never your shell. It takes `STAGE_WORKER_LISTEN` ([Agent gateway](#agent-gateway)) and the T3 and OpenCode settings (`T3_URL`, `T3_ADMIN_TOKEN`, …), which lock those settings for that machine. A foreground `stage worker run` reads its shell.
+- **Config**: the worker service reads only `worker.env` next to `service.env` (`~/.config/stage/worker.env` on Linux, `~/Library/Application Support/stage/worker.env` on macOS), never your shell. It takes `STAGE_WORKER_LISTEN` ([Agent gateway](#agent-gateway)) and `T3_BIN`; the machine's T3 and OpenCode connections are set in Settings > Connections. A foreground `stage worker run` reads its shell.
 - **One role per install**: a machine runs either this install's server or its worker, not both. The desktop app switches roles for you: **Join as worker** turns its server off (data kept) until you leave ([Desktop](/docs/desktop#this-machine-as-a-worker)).
 - **Remove**: removing a machine in Settings > Machines revokes its token at once; its worker stops, and `stage worker status` says it was revoked. Its connections become history; its tasks stay.
 - `stage update` restarts a running worker service and rolls back if the new one does not start.

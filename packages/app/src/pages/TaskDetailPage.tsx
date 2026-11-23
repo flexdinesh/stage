@@ -48,6 +48,7 @@ import { configModelText, dateTime, executionModes, workspaceText } from "../lib
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
+import { SETTINGS_PATH } from "../lib/settings.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { canStart, canStop, isActive } from "../lib/tasks.ts";
@@ -456,7 +457,7 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
         </Detail>
       </Details>
       {destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
-        <TextLink to="/settings" className="mt-3 inline-block text-small text-fg">
+        <TextLink to={SETTINGS_PATH.connections} className="mt-3 inline-block text-small text-fg">
           Configure browser address
         </TextLink>
       ) : null}

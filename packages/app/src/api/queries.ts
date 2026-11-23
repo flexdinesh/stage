@@ -158,8 +158,8 @@ export function useOpenCodeStatus() {
 const T3_STATUS_POLL_MS = 5000;
 const T3_SYNC_POLL_MS = 1000;
 
-/** T3's setup status on the harness scope's machine. */
-export const useT3Status = () => {
+/** T3's setup status on the harness scope's machine; `enabled: false` (T3 not set up there) reads only what is cached. */
+export const useT3Status = ({ enabled = true }: { enabled?: boolean } = {}) => {
   const api = useHarnessApi();
   const key = useScopedKey()(keys.t3Status);
   const qc = useQueryClient();
@@ -173,6 +173,7 @@ export const useT3Status = () => {
       return next;
     },
     refetchInterval: (q) => (q.state.data?.sync.running === true ? T3_SYNC_POLL_MS : T3_STATUS_POLL_MS),
+    enabled,
   });
 };
 

@@ -124,21 +124,9 @@ test("machine page: setup state and alert per presence", () => {
   assert.equal(machineSetupAlert({ ...old, version: null }, "v1.6.0"), "desk needs an update: its worker speaks another API version. Install the same Stage version there.");
 });
 
-test("setup copy names the remote machine and its worker environment; local copy is unchanged", () => {
-  const here = setupCopy(null);
-  assert.equal(here.machine, "this machine");
-  assert.equal(here.envLock("T3_URL"), "Set by T3_URL.");
-  assert.equal(here.envLock(undefined), "Set by the server environment.");
-  assert.equal(here.on, "");
-  assert.equal(here.managedBy, "the Stage server environment");
-  assert.equal(here.restart, "restart stage");
-  const there = setupCopy("desk");
-  assert.equal(there.machine, "desk");
-  assert.equal(there.envLock("T3_URL"), "Set by T3_URL on desk.");
-  assert.equal(there.envLock(undefined), "Set by the worker environment on desk.");
-  assert.equal(there.on, " on desk");
-  assert.equal(there.managedBy, "desk's worker environment");
-  assert.equal(there.restart, "restart its worker");
+test("setup copy names the remote machine; locally it is this machine", () => {
+  assert.deepEqual(setupCopy(null), { machine: "this machine" });
+  assert.deepEqual(setupCopy("desk"), { machine: "desk" });
 });
 
 test("harness query keys: the local machine keeps its keys, a remote machine's are its own", () => {

@@ -11,7 +11,7 @@ const t3Base = {
   state: "connected",
   t3Url: "http://127.0.0.1:3773",
   publicUrl: "http://127.0.0.1:3773",
-  t3UrlSource: "env",
+  t3UrlSource: "settings",
   environmentId: "env-1",
   clientId: "c",
   tokenExpiresAt: "2026-12-14T00:00:00Z",
@@ -33,7 +33,6 @@ const ocBase = {
   browserEndpoint: "",
   webClient: "",
   hasCredentials: false,
-  environmentFields: [],
   auth: "local",
   local: { available: true, url: "http://127.0.0.1:49374", version: "2.3.2", reason: "" },
 };
