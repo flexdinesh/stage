@@ -1,7 +1,9 @@
 // Per-harness status summaries for the sidebar status button and its details panel (lib/status.ts,
-// components/StatusRow.tsx), and the one-line detail of a Settings connection row.
-import type { Harness, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
+// components/StatusRow.tsx), the one-line detail of a Settings connection row, and the state chip of a Config
+// panel's Harness row (components/ConnectionState.tsx).
+import type { Harness, HarnessConnection, HarnessStatus, Machine, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
 import { relativeTime } from "./format.ts";
+import { machineSetupState } from "./machines.ts";
 import { T3_STATE_TONE, t3Identity } from "./onboarding.ts";
 import { openCodeChip, serviceHostText, signInText } from "./opencode.ts";
 
@@ -76,4 +78,48 @@ export function openCodeErrorText(read: StatusRead<OpenCodeStatus>): string | nu
   const data = read.data;
   if (data === undefined) return read.error;
   return data.state === "unavailable" || data.state === "rejected" ? (data.reason ?? null) : null;
+}
+
+/** A generic harness's summary, as its Settings row reads it: connected ok, configured but down bad, else idle. */
+export function harnessSummary(read: StatusRead<HarnessStatus>, kind: Harness, name: string): HarnessSummary {
+  if (read.checking) return { harness: kind, state: "checking", tone: "idle", label: `Checking ${name}` };
+  const s = read.data;
+  if (s === undefined) return { harness: kind, state: "offline", tone: "bad", label: `${name} offline` };
+  const tone: HarnessTone = s.connected ? "ok" : s.configured ? "bad" : "idle";
+  return { harness: kind, state: s.state, tone, label: `${name} ${s.state}` };
+}
+
+/** A Config panel Harness row's chip; `fixable`: Settings can fix it, so the row links there. */
+export interface ConnectionChip {
+  tone: HarnessTone;
+  label: string;
+  /** The chip's title: what it is and why (detail, error). */
+  title: string;
+  fixable: boolean;
+}
+
+/**
+ * What a Config panel's Harness row shows before reading its connection: null for no chip (a replaced connection is
+ * history and the row says so; one not loaded yet), a fixed chip when its machine cannot answer (as Settings records
+ * it) or it is disconnected, else `live`: read its status on its machine (liveChip).
+ */
+export function connectionGate(
+  connection: Pick<HarnessConnection, "active" | "configured"> | undefined,
+  machine: Pick<Machine, "kind" | "status" | "label"> | undefined,
+): ConnectionChip | "live" | null {
+  if (connection === undefined || !connection.active || machine === undefined) return null;
+  switch (machineSetupState(machine)) {
+    case "offline":
+      return { tone: "idle", label: "offline", title: `${machine.label} is offline`, fixable: false };
+    case "needs_update":
+      return { tone: "idle", label: "needs update", title: `${machine.label} needs an update`, fixable: false };
+    case "ready":
+      return connection.configured ? "live" : { tone: "idle", label: "disconnected", title: "Not connected. Connect it in Settings.", fixable: true };
+  }
+}
+
+/** The chip from a connection's live status: its summary state and tone, titled with the Settings row's detail and the error; a problem links to Settings. */
+export function liveChip(summary: Pick<HarnessSummary, "tone" | "state" | "label">, detail: string, error: string | null): ConnectionChip {
+  const title = [summary.label, detail, error].filter((p) => p !== null && p !== "").join("\n");
+  return { tone: summary.tone, label: summary.state, title, fixable: summary.tone === "need" || summary.tone === "bad" };
 }

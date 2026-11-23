@@ -54,6 +54,7 @@ import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { treeTaskPath } from "../lib/trees.ts";
 import { isRetired, resumeCommand, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
+import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -454,9 +455,11 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
     <Panel title="Config">
       <Details>
         <Detail label="Harness">
-          {kindName(task.harness)}
-          {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
-          {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
+          <HarnessConnectionState connectionId={task.connectionId}>
+            {kindName(task.harness)}
+            {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
+            {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
+          </HarnessConnectionState>
         </Detail>
         <Detail label="Model">{configModelText(task.executionConfig)}</Detail>
         <Detail label="Permission">{executionModes(task).permission || "Harness default"}</Detail>

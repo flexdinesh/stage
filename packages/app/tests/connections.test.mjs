@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openCodeErrorText, openCodeRowDetail, openCodeSummary, statusRead, t3ErrorText, t3RowDetail, t3Summary } from "../src/lib/connections.ts";
+import {
+  connectionGate,
+  harnessSummary,
+  liveChip,
+  openCodeErrorText,
+  openCodeRowDetail,
+  openCodeSummary,
+  statusRead,
+  t3ErrorText,
+  t3RowDetail,
+  t3Summary,
+} from "../src/lib/connections.ts";
 import { statusRow } from "../src/lib/status.ts";
 import { serviceHostText } from "../src/lib/opencode.ts";
 
@@ -125,4 +136,72 @@ test("row detail: OpenCode's host and how Stage signs in", () => {
 test("statusRead: only the first data-less fetch counts as checking", () => {
   assert.deepEqual(statusRead({ data: undefined, isPending: true, errorUpdateCount: 0, error: null }), { data: undefined, checking: true, error: null });
   assert.deepEqual(statusRead({ data: undefined, isPending: true, errorUpdateCount: 1, error: new Error("down") }), { data: undefined, checking: false, error: "down" });
+});
+
+// ---- Config panel Harness row chip ----
+
+const local = { kind: "local", status: "online", label: "controlbox" };
+const worker = (status) => ({ kind: "remote", status, label: "studio" });
+const conn = (over = {}) => ({ active: true, configured: true, ...over });
+
+test("connectionGate: no chip for a replaced connection or one not loaded", () => {
+  assert.equal(connectionGate(conn({ active: false }), local), null);
+  assert.equal(connectionGate(undefined, local), null);
+  assert.equal(connectionGate(conn(), undefined), null);
+});
+
+test("connectionGate: a worker that cannot answer reads as Settings records it, no Settings link", () => {
+  assert.deepEqual(connectionGate(conn(), worker("offline")), { tone: "idle", label: "offline", title: "studio is offline", fixable: false });
+  assert.deepEqual(connectionGate(conn(), worker("needs_update")), { tone: "idle", label: "needs update", title: "studio needs an update", fixable: false });
+});
+
+test("connectionGate: disconnected links to Settings; a set-up connection on a ready machine is read live", () => {
+  assert.deepEqual(connectionGate(conn({ configured: false }), local), { tone: "idle", label: "disconnected", title: "Not connected. Connect it in Settings.", fixable: true });
+  assert.equal(connectionGate(conn(), local), "live");
+  assert.equal(connectionGate(conn(), worker("online")), "live");
+  // The local machine is always ready, whatever its recorded status.
+  assert.equal(connectionGate(conn(), { ...local, status: "offline" }), "live");
+});
+
+test("liveChip: healthy T3 shows its state, titled with the Settings detail, no link", () => {
+  const read = t3();
+  const chip = liveChip(t3Summary(read), t3RowDetail(read.data, NOW), t3ErrorText(read));
+  assert.equal(chip.tone, "ok");
+  assert.equal(chip.label, "connected");
+  assert.equal(chip.fixable, false);
+  assert.equal(chip.title, "T3 connected\ncontrolbox · v0.1.10 · token expires in 23d");
+});
+
+test("liveChip: a T3 problem carries its tone and error and links to Settings", () => {
+  const expired = t3({ state: "expired" });
+  const e = liveChip(t3Summary(expired), "", t3ErrorText(expired));
+  assert.equal(e.tone, "need");
+  assert.equal(e.label, "expired");
+  assert.equal(e.fixable, true);
+  const down = t3({ state: "unreachable", probeError: "dial tcp: refused" });
+  const d = liveChip(t3Summary(down), "", t3ErrorText(down));
+  assert.equal(d.tone, "bad");
+  assert.equal(d.label, "unreachable");
+  assert.equal(d.title, "T3 unreachable\ndial tcp: refused");
+  assert.equal(d.fixable, true);
+});
+
+test("liveChip: OpenCode rejected links to Settings; checking does not", () => {
+  const rejected = loaded({ ...ocBase, state: "rejected", reason: "401" });
+  const r = liveChip(openCodeSummary(rejected, NOW), "", openCodeErrorText(rejected));
+  assert.equal(r.fixable, true);
+  assert.match(r.title, /401/);
+  const pending = liveChip(t3Summary({ data: undefined, checking: true, error: null }), "", null);
+  assert.equal(pending.fixable, false);
+  assert.equal(pending.label, "checking");
+});
+
+const status = (over) => loaded({ kind: "x", name: "X", connectionId: 9, configured: true, connected: true, state: "connected", fields: [], actions: [], ...over });
+
+test("harnessSummary: a generic harness reads as its Settings row does", () => {
+  assert.deepEqual(harnessSummary(status({}), "x", "X"), { harness: "x", state: "connected", tone: "ok", label: "X connected" });
+  assert.equal(harnessSummary(status({ connected: false, state: "unavailable" }), "x", "X").tone, "bad");
+  assert.equal(harnessSummary(status({ connected: false, configured: false, state: "not connected" }), "x", "X").tone, "idle");
+  assert.equal(harnessSummary({ data: undefined, checking: false, error: "boom" }, "x", "X").tone, "bad");
+  assert.equal(harnessSummary({ data: undefined, checking: true, error: null }, "x", "X").state, "checking");
 });
