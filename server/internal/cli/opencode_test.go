@@ -13,7 +13,7 @@ func TestOpenCodeCommands(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "harness", "opencode")
 	if code != 0 || !strings.Contains(out, "opencode not connected") || !strings.Contains(out, "no OpenCode service registered") ||
-		!strings.Contains(out, "next: run `opencode pair`") {
+		!strings.Contains(out, "Next:\n  opencode pair ") {
 		t.Fatalf("opencode: %d %q %q", code, out, errOut)
 	}
 	if code, _, errOut := h.run("", "harness", "opencode", "run", "connect-local"); code != 1 || !strings.Contains(errOut, "stage API 409: No OpenCode service file found") {
@@ -27,7 +27,7 @@ func TestOpenCodeCommands(t *testing.T) {
 	}
 	fake := opencodetest.New(t, "server-password")
 	code, out, errOut = h.run("", "harness", "opencode", "run", "pair", "link="+fake.Link())
-	if code != 0 || !strings.Contains(out, "opencode connected at "+fake.URL+" (paired)") || !strings.Contains(out, "token     expires") {
+	if code != 0 || !strings.Contains(out, "opencode connected at "+fake.URL+" (paired)") || !strings.Contains(out, "token       expires") {
 		t.Fatalf("pair: %d %q %q", code, out, errOut)
 	}
 	code, out, _ = h.run("", "harness", "opencode", "status", "--json")

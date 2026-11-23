@@ -3,6 +3,8 @@ package cli_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,11 +49,11 @@ func TestMachineCommands(t *testing.T) {
 	}
 	id := strconv.FormatInt(ms[1].ID, 10)
 	code, out, _ = h.run("", "machine", "rename", id, "work", "laptop")
-	if code != 0 || !strings.Contains(out, "renamed to work laptop") {
+	if code != 0 || !strings.Contains(out, "✓ Renamed machine "+id+" to work laptop") {
 		t.Fatalf("rename %d %q", code, out)
 	}
 	code, out, _ = h.run("", "machine", "rm", id)
-	if code != 0 || !strings.Contains(out, "removed") {
+	if code != 0 || !strings.Contains(out, "✓ Removed machine "+id) {
 		t.Fatalf("rm %d %q", code, out)
 	}
 	if code, _, errb := h.run("", "machine", "rm", "1"); code != 1 || !strings.Contains(errb, "cannot be removed") {
@@ -75,7 +77,7 @@ func TestMachinePairNeedsPublicURL(t *testing.T) {
 func TestMachinePing(t *testing.T) {
 	h := newHarness(t)
 	code, out, errb := h.run("", "machine", "ping", "1")
-	if code != 0 || !strings.Contains(out, "machine 1") {
+	if code != 0 || !strings.Contains(out, "✓ Machine 1 answered in") {
 		t.Fatalf("ping local %d %q %q", code, out, errb)
 	}
 	if code, _, errb := h.run("", "machine", "ping", "99"); code != 1 || !strings.Contains(errb, "not found") {
@@ -102,7 +104,7 @@ func TestWorkerCommandsWithoutJoin(t *testing.T) {
 		t.Fatalf("run --managed --config: %d", code)
 	}
 	code, out, _ := h.run("", "worker", "status", "--config", cfg)
-	if code != 4 || !strings.Contains(out, "not joined") {
+	if code != 4 || !strings.Contains(out, "! Not joined") || !strings.Contains(out, "join with   stage worker join <link>") {
 		t.Fatalf("status %d %q", code, out)
 	}
 	if code, _, errb := h.run("", "worker", "run", "--config", cfg); code != 78 || !strings.Contains(errb, "not joined") {
@@ -110,5 +112,34 @@ func TestWorkerCommandsWithoutJoin(t *testing.T) {
 	}
 	if code, _, errb := h.run("", "worker", "join", "--config", cfg, "https://h.example/other#c"); code == 0 || errb == "" {
 		t.Fatalf("join bad link %d %q", code, errb)
+	}
+}
+
+// TestWorkerJoinOutput: join prints the outcome, the config path and the
+// next steps under this install's CLI name.
+func TestWorkerJoinOutput(t *testing.T) {
+	h := newHarness(t, func(d *api.Deps) { d.Config.PublicURL = "https://stage.example.test" })
+	h.home = t.TempDir()
+	rec := filepath.Join(h.home, ".local", "lib", buildinfo.Identity, "install.json")
+	if err := os.MkdirAll(filepath.Dir(rec), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rec, []byte(`{"schema":1,"cliName":"stage-dev"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errb := h.run("", "machine", "pair", "--label", "box", "--json")
+	if code != 0 {
+		t.Fatalf("pair %d %q", code, errb)
+	}
+	p := decode[client.Pairing](t, out)
+	cfg := filepath.Join(t.TempDir(), "worker.json")
+	code, out, errb = h.run("", "worker", "join", "--config", cfg, h.url+"/join#"+p.Code)
+	want := "✓ Joined " + h.url + " as machine 2 (box)\n" +
+		"  config      " + cfg + "\n" +
+		"\nNext:\n" +
+		"  stage-dev worker service start   run in the background, restarted by the OS\n" +
+		"  stage-dev worker run             run in the foreground\n"
+	if code != 0 || out != want {
+		t.Fatalf("join %d %q\nwant %q\nstderr %q", code, out, want, errb)
 	}
 }

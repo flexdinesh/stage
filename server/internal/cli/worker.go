@@ -88,7 +88,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 		if *asJSON {
 			return writeJSON(env.Stdout, v)
 		}
-		human(env.Stdout)
+		human(env.stdout())
 		return nil
 	}
 	switch verb {
@@ -98,8 +98,12 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return out(map[string]any{"machineId": c.MachineID, "label": c.Label, "url": c.URL, "config": path}, func(w io.Writer) {
-			fmt.Fprintf(w, "joined %s as machine %d (%s); config %s\n", c.URL, c.MachineID, c.Label, path)
-			fmt.Fprintln(w, "next: `stage worker service start` (runs it in the background, restarted by the OS), or `stage worker run` in the foreground")
+			cli := env.cliName()
+			success(w, "Joined %s as machine %d (%s)", c.URL, c.MachineID, c.Label)
+			kv(w, "config", "%s", path)
+			nextSteps(w,
+				step{cli + " worker service start", "run in the background, restarted by the OS"},
+				step{cli + " worker run", "run in the foreground"})
 		})
 	case "status":
 		st, code := worker.ReadStatus(ctx, path, nil)
@@ -108,7 +112,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 				return err
 			}
 		} else {
-			printWorkerStatus(env.Stdout, st)
+			printWorkerStatus(env.stdout(), st, env.cliName())
 		}
 		return codeErr(code)
 	default: // leave
@@ -118,19 +122,23 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 		}
 		svc := workerServiceInstalled(ctx, env)
 		return out(map[string]any{"removed": res.Removed, "alreadyRemoved": res.AlreadyRemoved, "running": res.Running, "serviceInstalled": svc, "config": path}, func(w io.Writer) {
+			cli := env.cliName()
 			switch {
 			case res.Removed:
-				fmt.Fprintf(w, "left %s: machine %d removed there; deleted %s\n", res.Config.URL, res.Config.MachineID, path)
+				success(w, "Left %s: machine %d removed there", res.Config.URL, res.Config.MachineID)
+				kv(w, "deleted", "%s", path)
 			case res.AlreadyRemoved:
-				fmt.Fprintf(w, "the server had already removed machine %d; deleted %s\n", res.Config.MachineID, path)
+				success(w, "The server had already removed machine %d", res.Config.MachineID)
+				kv(w, "deleted", "%s", path)
 			default:
-				fmt.Fprintf(w, "deleted %s (the server still lists the machine: remove it in Settings > Machines or `stage machine rm`)\n", path)
+				warn(w, "Deleted %s, but the server still lists machine %d", path, res.Config.MachineID)
+				fixLine(w, fmt.Sprintf("remove it in Settings > Machines, or %s", cmdText(fmt.Sprintf("%s machine rm %d", cli, res.Config.MachineID))))
 			}
 			if res.Running {
-				fmt.Fprintln(w, "note: a worker process still runs here; it stops at its next request (its token is revoked)")
+				warn(w, "A worker process still runs here; it stops at its next request (its token is revoked)")
 			}
 			if svc {
-				fmt.Fprintln(w, "note: the worker service is still installed: `stage worker service uninstall`")
+				warn(w, "The worker service is still installed: %s", cmdText(cli+" worker service uninstall"))
 			}
 		})
 	}
@@ -280,29 +288,33 @@ func managedWorkerLog(getenv func(string) string, stderr io.Writer) *slog.Logger
 	return slog.New(slog.NewTextHandler(r, nil))
 }
 
-func printWorkerStatus(w io.Writer, st worker.Status) {
+func printWorkerStatus(w io.Writer, st worker.Status, cli string) {
 	c := st.Config
 	if !c.Joined {
-		fmt.Fprintf(w, "not joined (%s)\n", c.Path)
+		t := toneWarn
 		if c.Error != "" {
-			fmt.Fprintf(w, "  error       %s\n", c.Error)
+			t = toneBad
+		}
+		line(w, t, "Not joined (%s)", c.Path)
+		if c.Error != "" {
+			kv(w, "error", "%s", toneBad.paint(c.Error))
 		} else {
-			fmt.Fprintln(w, "  join with   stage worker join <link> (Settings > Machines > Add, or `stage machine pair`)")
+			kv(w, "join with", "%s %s", cmdText(cli+" worker join <link>"), dim("(Settings > Machines > Add, or "+cli+" machine pair)"))
 		}
 	} else {
-		fmt.Fprintf(w, "machine %d (%s) of %s\n", c.MachineID, c.Label, c.URL)
-		fmt.Fprintf(w, "  config      %s\n", c.Path)
+		line(w, workerTone(st), "Machine %d (%s) of %s", c.MachineID, c.Label, c.URL)
+		kv(w, "config", "%s", c.Path)
 	}
 	if s := st.Server; s != nil {
 		switch {
 		case s.Status != "":
-			fmt.Fprintf(w, "  server says %s", s.Status)
+			seen := ""
 			if s.LastSeenAt != nil {
-				fmt.Fprintf(w, " (last seen %s)", s.LastSeenAt.Local().Format(time.DateTime))
+				seen = dim(" (last seen " + s.LastSeenAt.Local().Format(time.DateTime) + ")")
 			}
-			fmt.Fprintln(w)
+			kv(w, "server says", "%s%s", stateTone(s.Status).paint(s.Status), seen)
 		default:
-			fmt.Fprintf(w, "  server      unreachable: %s\n", s.Error)
+			kv(w, "server", "%s %s", toneBad.paint("unreachable:"), s.Error)
 		}
 	}
 	if p := st.Process; p != nil {
@@ -310,14 +322,31 @@ func printWorkerStatus(w io.Writer, st worker.Status) {
 		if p.Managed {
 			mode = "worker service"
 		}
-		fmt.Fprintf(w, "  process     pid %d (%s, %s), channel %s\n", p.PID, mode, p.Version, orNone(p.State))
+		state := orNone(p.State)
+		kv(w, "process", "pid %d (%s, %s), channel %s", p.PID, mode, p.Version, stateTone(state).paint(state))
 		if len(p.Gateway) > 0 {
-			fmt.Fprintf(w, "  gateway     %s\n", strings.Join(p.Gateway, ", "))
+			kv(w, "gateway", "%s", strings.Join(p.Gateway, ", "))
 		}
 		if p.LastError != "" {
-			fmt.Fprintf(w, "  last error  %s\n", p.LastError)
+			kv(w, "last error", "%s", toneBad.paint(p.LastError))
 		}
 	} else if c.Joined {
-		fmt.Fprintln(w, "  process     not running (`stage worker service start` or `stage worker run`)")
+		kv(w, "process", "%s %s", toneWarn.paint("not running"), dim("("+cli+" worker service start, or "+cli+" worker run)"))
 	}
+}
+
+// workerTone is a joined worker's heading tone: ok when the server reports
+// it online, warn while connecting or not running, bad when unreachable,
+// offline or revoked.
+func workerTone(st worker.Status) tone {
+	if s := st.Server; s != nil {
+		if s.Status == "" {
+			return toneBad
+		}
+		return stateTone(s.Status)
+	}
+	if st.Process == nil {
+		return toneWarn
+	}
+	return stateTone(st.Process.State)
 }

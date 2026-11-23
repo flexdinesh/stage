@@ -377,7 +377,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted task %d\n", id) })
+		return c.out(res, func(w io.Writer) { success(w, "Deleted task %d", id) })
 	case "archive":
 		var undo bool
 		c.fs.BoolVar(&undo, "undo", false, "unarchive")
@@ -433,7 +433,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		if err := c.out(res, func(w io.Writer) {
 			printAnyTask(w, res.Task)
 			if res.TimedOut {
-				fmt.Fprintln(w, "timed out")
+				warn(w, "Timed out")
 			}
 		}); err != nil {
 			return err
@@ -555,7 +555,7 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted schedule %d\n", id) })
+		return c.out(res, func(w io.Writer) { success(w, "Deleted schedule %d", id) })
 	case "run":
 		if err := c.parse(rest); err != nil {
 			return err
@@ -627,9 +627,9 @@ func runSessions(ctx context.Context, env Env, args []string) error {
 		}
 		return c.out(res, func(w io.Writer) {
 			if res.Created {
-				fmt.Fprintln(w, "adopted session as a task")
+				success(w, "Adopted session as a task")
 			} else {
-				fmt.Fprintln(w, "session already tracked")
+				success(w, "Session already tracked")
 			}
 			printTask(w, res.Task)
 		})

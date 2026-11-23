@@ -32,7 +32,7 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(hs, func(w io.Writer) { printHarnesses(w, hs) })
+		return c.out(hs, func(w io.Writer) { printHarnesses(w, hs, env.cliName()) })
 	}
 	v, rest := verb(rest, "status")
 	c := newCmd(env, "harness "+kind+" "+v)
@@ -178,23 +178,23 @@ func assignments(fs []client.SetupField, args []string) (map[string]any, error) 
 	return out, nil
 }
 
-func printHarnesses(w io.Writer, hs client.Harnesses) {
+func printHarnesses(w io.Writer, hs client.Harnesses, cli string) {
 	p := hs.Machine.Profile
 	local := "no local harness processes"
 	if p.LocalProcesses {
 		local = "local harness processes allowed"
 	}
-	fmt.Fprintf(w, "machine %s (%s; %s)\n", hs.Machine.Label, p.Kind, local)
+	fmt.Fprintf(w, "machine %s %s\n", hs.Machine.Label, dim("("+p.Kind+"; "+local+")"))
 	for _, d := range hs.Harnesses {
-		state := "available"
+		state := toneOK.paint("available")
 		if !d.Available {
-			state = "unavailable: " + d.Reason
+			state = toneBad.paint("unavailable:") + " " + d.Reason
 		}
 		setup := ""
 		if d.Connectable {
-			setup = "; stage harness " + d.Kind + " status"
+			setup = dim("; " + cli + " harness " + d.Kind + " status")
 		}
-		fmt.Fprintf(w, "  %-9s %s, %s, %s%s\n", d.Kind, d.Name, d.Hosting, state, setup)
+		kv(w, d.Kind, "%s, %s, %s%s", d.Name, d.Hosting, state, setup)
 	}
 }
 
@@ -206,7 +206,9 @@ func printHarnessStatus(w io.Writer, d client.HarnessDescriptor, st client.Harne
 			return
 		}
 	}
-	fmt.Fprintf(w, "%s %s\n", d.Kind, st.State)
+	t := stateTone(st.State)
+	line(w, t, "%s %s", d.Kind, t.paint(st.State))
+	const width = 20
 	for _, f := range st.Fields {
 		label := f.ID
 		if sf, ok := field(d.Setup.Fields, f.ID); ok {
@@ -214,17 +216,17 @@ func printHarnessStatus(w io.Writer, d client.HarnessDescriptor, st client.Harne
 		}
 		val := f.Value
 		if val == "" && f.Set {
-			val = "(set)"
+			val = dim("(set)")
 		}
-		fmt.Fprintf(w, "  %-20s %s\n", label, val)
+		kvPad(w, width, label, "%s", val)
 	}
 	for _, a := range st.Actions {
 		if !a.Available && a.Reason != "" {
-			fmt.Fprintf(w, "  %-20s unavailable (%s)\n", a.ID, a.Reason)
+			kvPad(w, width, a.ID, "%s %s", toneWarn.paint("unavailable"), dim("("+a.Reason+")"))
 		}
 	}
 	if st.Reason != "" && !st.Connected {
-		fmt.Fprintf(w, "  error                %s\n", st.Reason)
+		kvPad(w, width, "error", "%s", toneBad.paint(st.Reason))
 	}
 }
 

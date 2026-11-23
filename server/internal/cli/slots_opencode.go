@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -24,45 +23,51 @@ func init() {
 
 func printOpenCodeStatus(w io.Writer, s client.OpenCodeStatus, cli string) {
 	if s.State == "unconfigured" {
-		fmt.Fprintln(w, "opencode not connected")
+		line(w, toneWarn, "opencode %s", toneWarn.paint("not connected"))
 	} else {
-		fmt.Fprintf(w, "opencode %s at %s (%s)\n", s.State, s.Endpoint, openCodeAuth(s.Auth))
+		t := stateTone(s.State)
+		line(w, t, "opencode %s at %s %s", t.paint(s.State), s.Endpoint, dim("("+openCodeAuth(s.Auth)+")"))
 	}
 	if s.BrowserEndpoint != "" {
-		fmt.Fprintf(w, "  browser   %s\n", s.BrowserEndpoint)
+		kv(w, "browser", "%s", s.BrowserEndpoint)
 	}
 	if s.WebClient != "" {
-		fmt.Fprintf(w, "  web       %s\n", s.WebClient)
+		kv(w, "web", "%s", s.WebClient)
 	}
 	if len(s.EnvironmentFields) > 0 {
-		fmt.Fprintf(w, "  managed   by the server environment: %s\n", strings.Join(s.EnvironmentFields, ", "))
+		kv(w, "managed", "by the server environment: %s", strings.Join(s.EnvironmentFields, ", "))
 	}
 	if s.ExpiresAt != nil {
-		fmt.Fprintf(w, "  token     expires %s (renewed automatically)\n", s.ExpiresAt.Local().Format(time.RFC3339))
+		kv(w, "token", "expires %s %s", s.ExpiresAt.Local().Format(time.RFC3339), dim("(renewed automatically)"))
 	}
 	switch l := s.Local; {
 	case l.Available:
-		fmt.Fprintf(w, "  local     OpenCode %s at %s\n", l.Version, l.URL)
+		kv(w, "local", "OpenCode %s at %s", l.Version, l.URL)
 	case l.Reason == "missing":
-		fmt.Fprintln(w, "  local     no OpenCode service registered on the server's machine")
+		kv(w, "local", "%s", dim("no OpenCode service registered on the server's machine"))
 	case l.Reason == "invalid":
-		fmt.Fprintln(w, "  local     the OpenCode service file on the server's machine is invalid")
+		kv(w, "local", "%s", toneWarn.paint("the OpenCode service file on the server's machine is invalid"))
 	case l.Reason == "unreachable":
-		fmt.Fprintf(w, "  local     OpenCode registered at %s is not answering\n", l.URL)
+		kv(w, "local", "OpenCode registered at %s %s", l.URL, toneWarn.paint("is not answering"))
 	}
 	if s.Reason != "" && s.State != "connected" {
-		fmt.Fprintf(w, "  error     %s\n", s.Reason)
+		kv(w, "error", "%s", toneBad.paint(s.Reason))
 	}
-	pair := "next: run `opencode pair` on the OpenCode host, then: " + cli + " harness opencode run pair link=LINK"
+	pair := []step{
+		{"opencode pair", "on the OpenCode host"},
+		{cli + " harness opencode run pair link=LINK", "with the link it prints"},
+	}
 	switch {
 	case s.State == "unconfigured" && s.Local.Available:
-		fmt.Fprintf(w, "next: %[1]s harness opencode run connect-local (or pair a remote service: %[1]s harness opencode run pair link=LINK)\n", cli)
+		nextSteps(w,
+			step{cli + " harness opencode run connect-local", "connect the local OpenCode"},
+			step{cli + " harness opencode run pair link=LINK", "or pair a remote service"})
 	case s.State == "unconfigured", s.State == "rejected" && s.Auth == "paired":
-		fmt.Fprintln(w, pair)
+		nextSteps(w, pair...)
 	case s.State == "rejected" && s.Auth == "local":
-		fmt.Fprintf(w, "next: %s harness opencode run connect-local\n", cli)
+		nextSteps(w, step{cli + " harness opencode run connect-local", ""})
 	case s.State == "rejected":
-		fmt.Fprintf(w, "next: update the OpenCode credentials in Settings, or: %s harness opencode run pair link=LINK\n", cli)
+		nextSteps(w, step{cli + " harness opencode run pair link=LINK", "or update the OpenCode credentials in Settings"})
 	}
 }
 

@@ -44,6 +44,11 @@ The desktop runs its bundled CLI by absolute path:
 ```
 
 `--json` prints exactly one JSON document on stdout, even on failure.
+Without it the report is text: `✓ message` and notes on stdout; warnings
+(`! …`), `✗ error: …`, its `fix:` and recent log lines on stderr. Status
+leads with a ✓/!/✗ heading, then aligned rows. Color marks state only and
+appears on a terminal; pipes, `TERM=dumb` and `NO_COLOR` get the same text
+without it (`CLICOLOR_FORCE=1` forces it, unless `NO_COLOR` is set).
 Mutating commands print a report:
 
 ```json

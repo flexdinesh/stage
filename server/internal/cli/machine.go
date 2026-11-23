@@ -49,7 +49,7 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(m, func(w io.Writer) { fmt.Fprintf(w, "machine %d renamed to %s\n", m.ID, m.Label) })
+		return c.out(m, func(w io.Writer) { success(w, "Renamed machine %d to %s", m.ID, m.Label) })
 	case "rm":
 		id, err := c.oneID()
 		if err != nil {
@@ -59,7 +59,7 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(map[string]any{"id": id, "removed": true}, func(w io.Writer) {
-			fmt.Fprintf(w, "machine %d removed: its token is revoked and its connections retire as history\n", id)
+			success(w, "Removed machine %d %s", id, dim("(its token is revoked; its connections retire as history)"))
 		})
 	case "ping":
 		id, err := c.oneID()
@@ -71,7 +71,7 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(p, func(w io.Writer) {
-			fmt.Fprintf(w, "machine %d answered in %d ms (stage %s)\n", p.MachineID, p.LatencyMs, p.Version)
+			success(w, "Machine %d answered in %d ms %s", p.MachineID, p.LatencyMs, dim("(stage "+p.Version+")"))
 		})
 	default: // pair
 		if len(c.pos) > 0 {
@@ -109,9 +109,10 @@ func printMachines(w io.Writer, ms []client.Machine) {
 }
 
 func printPairing(w io.Writer, p client.Pairing) {
-	fmt.Fprintf(w, "On the machine to add, run (expires %s, works once):\n\n  %s\n\n", p.ExpiresAt.Local().Format(time.Kitchen), p.Command)
-	fmt.Fprintf(w, "link  %s\n", p.Link)
+	success(w, "Pairing link ready %s", dim("(expires "+p.ExpiresAt.Local().Format(time.Kitchen)+", works once)"))
+	kv(w, "link", "%s", p.Link)
 	if p.Label != "" {
-		fmt.Fprintf(w, "name  %s\n", p.Label)
+		kv(w, "name", "%s", p.Label)
 	}
+	nextStepsOn(w, "on the machine to add", step{p.Command, ""})
 }

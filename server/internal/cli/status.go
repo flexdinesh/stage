@@ -60,7 +60,7 @@ func runStatus(ctx context.Context, env Env, args []string) error {
 			case err == nil:
 				return nil
 			case wait > 0 && verr == nil:
-				fmt.Fprintf(env.Stderr, "error: not ready after %s: %s\n", wait, err)
+				fail(env.stderr(), "not ready after %s: %s", wait, err)
 				return errTimeout
 			}
 			return err
@@ -75,36 +75,27 @@ func runStatus(ctx context.Context, env Env, args []string) error {
 func printStatus(w io.Writer, s statusOut) {
 	h := s.Health
 	if !s.Ready && h == nil {
-		fmt.Fprintf(w, "stage not reachable at %s (%s)\n", s.URL, s.Source)
+		line(w, toneBad, "stage not reachable at %s %s", s.URL, dim("("+s.Source+")"))
 		return
 	}
-	state := "ready"
+	t, state := toneOK, "ready"
 	if !s.Ready {
-		state = "not ready"
+		t, state = toneWarn, "not ready"
 	}
-	fmt.Fprintf(w, "stage %s %s at %s (%s)\n", h.Version, state, s.URL, s.Source)
-	fmt.Fprintf(w, "  identity  %s\n", h.Identity)
+	line(w, t, "stage %s %s at %s %s", h.Version, t.paint(state), s.URL, dim("("+s.Source+")"))
+	kv(w, "identity", "%s", h.Identity)
 	if h.Commit != "" {
-		fmt.Fprintf(w, "  commit    %s\n", h.Commit)
+		kv(w, "commit", "%s", h.Commit)
 	}
-	fmt.Fprintf(w, "  api       v%d\n", h.APIVersion)
+	kv(w, "api", "v%d", h.APIVersion)
 	if h.InstanceID != "" && h.StartedAt != nil {
-		fmt.Fprintf(w, "  instance  %s since %s\n", h.InstanceID, h.StartedAt.Local().Format(time.RFC3339))
+		kv(w, "instance", "%s %s", h.InstanceID, dim("since "+h.StartedAt.Local().Format(time.RFC3339)))
 	}
-	fmt.Fprintf(w, "  database  %s\n", h.DB)
+	kv(w, "database", "%s", h.DB)
 	for _, hh := range h.Harnesses {
-		switch {
-		case hh.Connected:
-			fmt.Fprintf(w, "  %-9s connected\n", hh.Kind)
-		case !hh.Configured:
-			fmt.Fprintf(w, "  %-9s not set up\n", hh.Kind)
-		case hh.LastError != nil:
-			fmt.Fprintf(w, "  %-9s offline: %s\n", hh.Kind, *hh.LastError)
-		default:
-			fmt.Fprintf(w, "  %-9s offline\n", hh.Kind)
-		}
+		printHarnessState(w, hh.Kind, hh.Connected, hh.Configured, hh.LastError)
 	}
 	if h.Version != s.ClientVersion {
-		fmt.Fprintf(w, "note: server version %s differs from this CLI (%s)\n", h.Version, s.ClientVersion)
+		warn(w, "Server version %s differs from this CLI (%s)", h.Version, s.ClientVersion)
 	}
 }

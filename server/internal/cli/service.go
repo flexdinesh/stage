@@ -145,7 +145,7 @@ func runRoleService(ctx context.Context, env Env, args []string, role service.Ro
 				return err
 			}
 		} else {
-			printServiceStatus(env.Stdout, st)
+			printServiceStatus(env.stdout(), st, env.cliName())
 		}
 		return codeErr(code)
 	case "logs":
@@ -177,47 +177,62 @@ func runRoleService(ctx context.Context, env Env, args []string, role service.Ro
 			return err
 		}
 	} else {
-		printReport(env.Stdout, env.Stderr, rep)
+		printReport(env.stdout(), env.stderr(), rep)
 	}
 	return codeErr(rep.Code)
 }
 
 // printWorkerServiceStatus is the rest of `stage worker service status`.
-func printWorkerServiceStatus(w io.Writer, s service.Status, wk *service.WorkerStatus) {
+func printWorkerServiceStatus(w io.Writer, s service.Status, wk *service.WorkerStatus, cli string) {
 	if wk.Joined {
-		fmt.Fprintf(w, "  machine     %d at %s\n", wk.MachineID, wk.URL)
+		kv(w, "machine", "%d at %s", wk.MachineID, wk.URL)
 	} else {
-		fmt.Fprintln(w, "  machine     not joined")
+		kv(w, "machine", "%s", toneWarn.paint("not joined"))
 	}
 	if wk.State != "" {
-		fmt.Fprintf(w, "  channel     %s\n", wk.State)
+		kv(w, "channel", "%s", stateTone(wk.State).paint(wk.State))
 	}
+	printServiceDefinition(w, s)
+	kv(w, "worker", "%s", wk.Config)
+	kv(w, "config", "%s", s.ServiceEnv.Path)
+	printServiceLogs(w, s, cli+" worker service logs")
+	if h := wk.Holder; h != nil && !wk.OwnedByService {
+		kv(w, "held by", "pid %d (managed %t) holds the worker dir", h.PID, h.Managed)
+	}
+	printProblems(w, s.Problems)
+}
+
+// printServiceDefinition is the login start, linger, definition and exe rows.
+func printServiceDefinition(w io.Writer, s service.Status) {
 	login := "off"
 	if s.Definition.LoginStartup {
 		login = "on"
 	}
-	fmt.Fprintf(w, "  login start %s\n", login)
+	kv(w, "login start", "%s", login)
 	if s.Manager.Linger != nil {
-		fmt.Fprintf(w, "  linger      %t\n", *s.Manager.Linger)
+		kv(w, "linger", "%t", *s.Manager.Linger)
 	}
 	if s.Definition.Present {
-		fmt.Fprintf(w, "  definition  %s\n", s.Definition.Path)
-		fmt.Fprintf(w, "  exe         %s\n", s.Definition.Exe)
+		kv(w, "definition", "%s", s.Definition.Path)
+		kv(w, "exe", "%s", s.Definition.Exe)
 	}
-	fmt.Fprintf(w, "  worker      %s\n", wk.Config)
-	fmt.Fprintf(w, "  config      %s\n", s.ServiceEnv.Path)
+}
+
+// printServiceLogs is the logs row: where the logs are and the command that
+// prints them.
+func printServiceLogs(w io.Writer, s service.Status, logsCmd string) {
+	where := s.Logs.Path
 	if s.Logs.Kind == "journald" {
-		fmt.Fprintf(w, "  logs        journalctl --user -u %s (stage worker service logs)\n", s.Logs.Unit)
-	} else {
-		fmt.Fprintf(w, "  logs        %s (stage worker service logs)\n", s.Logs.Path)
+		where = "journalctl --user -u " + s.Logs.Unit
 	}
-	if h := wk.Holder; h != nil && !wk.OwnedByService {
-		fmt.Fprintf(w, "  worker dir held by pid %d (managed %t)\n", h.PID, h.Managed)
-	}
-	for _, p := range s.Problems {
-		fmt.Fprintf(w, "problem: %s\n", p.Message)
+	kv(w, "logs", "%s %s", where, dim("("+logsCmd+")"))
+}
+
+func printProblems(w io.Writer, ps []service.Problem) {
+	for _, p := range ps {
+		line(w, toneBad, "%s", prose(p.Message))
 		if p.Fix != "" {
-			fmt.Fprintf(w, "  fix: %s\n", p.Fix)
+			fixLine(w, inlineCmds(p.Fix))
 		}
 	}
 }
@@ -230,91 +245,105 @@ func codeErr(code int) error {
 }
 
 func printReport(out, errw io.Writer, r service.Report) {
-	for _, w := range r.Warnings {
-		fmt.Fprintf(errw, "warning: %s\n", w)
+	printOutcome(out, errw, outcome{ok: r.OK, message: r.Message, fix: r.Fix, logTail: r.LogTail, notes: r.Notes, warnings: r.Warnings})
+}
+
+// outcome is a service or install command's result: its message (with a
+// fix and recent log lines on failure), warnings and notes.
+type outcome struct {
+	ok                       bool
+	message, fix             string
+	logTail, notes, warnings []string
+}
+
+// printOutcome prints warnings and failures to errw; the success and notes
+// to out.
+func printOutcome(out, errw io.Writer, o outcome) {
+	for _, w := range o.warnings {
+		warn(errw, "%s", prose(w))
 	}
-	if r.OK {
-		fmt.Fprintln(out, r.Message)
+	if o.ok {
+		success(out, "%s", prose(o.message))
 	} else {
-		fmt.Fprintf(errw, "error: %s\n", r.Message)
-		if r.Fix != "" {
-			fmt.Fprintf(errw, "fix: %s\n", r.Fix)
+		fail(errw, "%s", inlineCmds(o.message))
+		if o.fix != "" {
+			fixLine(errw, inlineCmds(o.fix))
 		}
-		if len(r.LogTail) > 0 {
-			fmt.Fprintln(errw, "recent log lines:")
-			for _, l := range r.LogTail {
-				fmt.Fprintf(errw, "  %s\n", l)
+		if len(o.logTail) > 0 {
+			fmt.Fprintf(errw, "  %s\n", dim("recent log lines:"))
+			for _, l := range o.logTail {
+				fmt.Fprintf(errw, "    %s\n", dim(l))
 			}
 		}
 	}
-	for _, n := range r.Notes {
-		fmt.Fprintf(out, "note: %s\n", n)
+	for _, n := range o.notes {
+		fmt.Fprintf(out, "  %s %s\n", dim("note:"), inlineCmds(n))
 	}
 }
 
-func printServiceStatus(w io.Writer, s service.Status) {
+// serviceTone is a service's heading tone: ok when running (and ready, for
+// the server), bad when failed or unknown, warn otherwise.
+func serviceTone(s service.Status) tone {
+	switch s.State {
+	case string(service.PhaseRunning):
+		if s.Ready || s.Worker != nil {
+			return toneOK
+		}
+	case string(service.PhaseFailed), "unknown":
+		return toneBad
+	}
+	return toneWarn
+}
+
+func printServiceStatus(w io.Writer, s service.Status, cli string) {
 	kind := "service"
 	if s.Worker != nil {
 		kind = "worker service"
 	}
-	fmt.Fprintf(w, "%s %s (%s %s): %s", s.Identity, kind, s.Manager.Kind, s.Definition.Name, s.State)
+	ready := ""
 	if s.Ready {
-		fmt.Fprint(w, ", ready")
+		ready = ", ready"
 	}
-	fmt.Fprintln(w)
+	t := serviceTone(s)
+	line(w, t, "%s %s %s: %s", s.Identity, kind, dim("("+s.Manager.Kind+" "+s.Definition.Name+")"), t.paint(s.State+ready))
 	if s.Process.PID != 0 {
-		fmt.Fprintf(w, "  pid         %d (restarts %d)\n", s.Process.PID, s.Process.Restarts)
+		kv(w, "pid", "%d (restarts %d)", s.Process.PID, s.Process.Restarts)
 	}
 	if wk := s.Worker; wk != nil {
-		printWorkerServiceStatus(w, s, wk)
+		printWorkerServiceStatus(w, s, wk, cli)
 		return
 	}
 	if s.Stage.Reachable {
-		fmt.Fprintf(w, "  stage       %s at %s (db %s)\n", s.Stage.Version, s.Stage.URL, s.Stage.DB)
+		kv(w, "stage", "%s at %s %s", s.Stage.Version, s.Stage.URL, dim("(db "+s.Stage.DB+")"))
 	} else {
-		fmt.Fprintf(w, "  stage       not reachable at %s\n", s.Stage.URL)
+		kv(w, "stage", "%s at %s", toneBad.paint("not reachable"), s.Stage.URL)
 	}
 	if s.Harnesses == nil {
-		fmt.Fprintln(w, "  harnesses   unknown (Stage not reachable)")
+		kv(w, "harnesses", "%s", dim("unknown (Stage not reachable)"))
 	}
 	for _, h := range s.Harnesses {
-		switch {
-		case h.Connected:
-			fmt.Fprintf(w, "  %-11s connected\n", h.Kind)
-		case !h.Configured:
-			fmt.Fprintf(w, "  %-11s not set up\n", h.Kind)
-		case h.LastError != nil:
-			fmt.Fprintf(w, "  %-11s offline: %s\n", h.Kind, *h.LastError)
-		default:
-			fmt.Fprintf(w, "  %-11s offline\n", h.Kind)
-		}
+		printHarnessState(w, h.Kind, h.Connected, h.Configured, h.LastError)
 	}
-	login := "off"
-	if s.Definition.LoginStartup {
-		login = "on"
-	}
-	fmt.Fprintf(w, "  login start %s\n", login)
-	if s.Manager.Linger != nil {
-		fmt.Fprintf(w, "  linger      %t\n", *s.Manager.Linger)
-	}
-	if s.Definition.Present {
-		fmt.Fprintf(w, "  definition  %s\n", s.Definition.Path)
-		fmt.Fprintf(w, "  exe         %s\n", s.Definition.Exe)
-	}
-	fmt.Fprintf(w, "  data dir    %s\n", s.DataDir)
-	fmt.Fprintf(w, "  config      %s\n", s.ServiceEnv.Path)
-	if s.Logs.Kind == "journald" {
-		fmt.Fprintf(w, "  logs        journalctl --user -u %s (stage service logs)\n", s.Logs.Unit)
-	} else {
-		fmt.Fprintf(w, "  logs        %s (stage service logs)\n", s.Logs.Path)
-	}
+	printServiceDefinition(w, s)
+	kv(w, "data dir", "%s", s.DataDir)
+	kv(w, "config", "%s", s.ServiceEnv.Path)
+	printServiceLogs(w, s, cli+" service logs")
 	if h := s.Lock.Holder; h != nil && !s.Lock.OwnedByService {
-		fmt.Fprintf(w, "  data dir held by pid %d (managed %t)\n", h.PID, h.Managed)
+		kv(w, "held by", "pid %d (managed %t) holds the data dir", h.PID, h.Managed)
 	}
-	for _, p := range s.Problems {
-		fmt.Fprintf(w, "problem: %s\n", p.Message)
-		if p.Fix != "" {
-			fmt.Fprintf(w, "  fix: %s\n", p.Fix)
-		}
+	printProblems(w, s.Problems)
+}
+
+// printHarnessState is a harness row: connected, not set up, or offline.
+func printHarnessState(w io.Writer, kind string, connected, configured bool, lastError *string) {
+	switch {
+	case connected:
+		kv(w, kind, "%s", toneOK.paint("connected"))
+	case !configured:
+		kv(w, kind, "%s", toneWarn.paint("not set up"))
+	case lastError != nil:
+		kv(w, kind, "%s %s", toneBad.paint("offline:"), *lastError)
+	default:
+		kv(w, kind, "%s", toneBad.paint("offline"))
 	}
 }

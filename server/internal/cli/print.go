@@ -349,13 +349,13 @@ func printTree(w io.Writer, t client.TreeDetail) {
 
 func printTreeStart(w io.Writer, res client.TreeStart) {
 	if len(res.Started) == 0 && len(res.Errors) == 0 {
-		fmt.Fprintln(w, "no ready tasks")
+		warn(w, "No ready tasks")
 	}
 	for _, t := range res.Started {
-		fmt.Fprintf(w, "started #%d [%s] %s\n", t.ID, t.State, t.Title)
+		success(w, "Started #%d %s %s", t.ID, dim("["+string(t.State)+"]"), t.Title)
 	}
 	for _, e := range res.Errors {
-		fmt.Fprintf(w, "failed  #%d: %s\n", e.TaskID, e.Error)
+		line(w, toneBad, "Failed #%d: %s", e.TaskID, e.Error)
 	}
 }
 
