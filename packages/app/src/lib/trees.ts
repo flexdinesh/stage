@@ -324,6 +324,11 @@ export function treeProjectLabel(tree: TreeSummary | TreeDetail): string {
 
 /** "7 tasks · 3 levels · 2 projects · auto" for a tree list row or a tree detail. */
 export function treeMeta(tree: TreeSummary | TreeDetail): string {
+  return treeMetaParts(tree).join(" · ");
+}
+
+/** The parts of `treeMeta`, the task count first (a tree list row makes it the members toggle). */
+export function treeMetaParts(tree: TreeSummary | TreeDetail): [tasks: string, ...rest: string[]] {
   const shape: { tasks: number; levels: number; projects: number; mode: StartMode } =
     "tasks" in tree
       ? {
@@ -333,7 +338,7 @@ export function treeMeta(tree: TreeSummary | TreeDetail): string {
           mode: tree.startMode,
         }
       : { tasks: tree.counts.total, levels: tree.levels, projects: tree.projects.length, mode: tree.startMode };
-  return [plural(shape.tasks, "task"), plural(shape.levels, "level"), plural(shape.projects, "project"), shape.mode].join(" · ");
+  return [plural(shape.tasks, "task"), plural(shape.levels, "level"), plural(shape.projects, "project"), shape.mode];
 }
 
 /** Needs a task's worktree may start from: its needs in the same project (another project's branch cannot be used). */
