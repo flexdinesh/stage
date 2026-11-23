@@ -10,6 +10,7 @@ import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
 import { shortDate } from "../lib/format.ts";
+import { machineScopeId } from "../lib/machines.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
 import { ConnectionSetup, useDisconnectHarness, useHarnessStatus } from "./HarnessConnections.tsx";
 import { IconStep } from "./icons.tsx";
@@ -19,7 +20,11 @@ import { Button, Chip, ConfirmInline, Drawer, Hint, Menu, MenuItem, Row, RowButt
 
 /** The harness scope of a machine: the local routes for the main machine, its worker's for a remote one. */
 export function MachineScope({ machine, children }: { machine: Pick<Machine, "id" | "kind" | "label">; children: ReactNode }) {
-  const scope = useMemo<HarnessScope>(() => (machine.kind === "local" ? LOCAL_SCOPE : { machineId: machine.id, label: machine.label }), [machine.id, machine.kind, machine.label]);
+  const { id, kind, label } = machine;
+  const scope = useMemo<HarnessScope>(() => {
+    const machineId = machineScopeId({ id, kind });
+    return machineId === null ? LOCAL_SCOPE : { machineId, label };
+  }, [id, kind, label]);
   return <HarnessScopeProvider scope={scope}>{children}</HarnessScopeProvider>;
 }
 

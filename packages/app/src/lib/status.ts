@@ -1,5 +1,5 @@
-// The sidebar status: one kind, one tone and one sentence over everything Stage depends on. Harnesses today; other
-// groups (workers) add their own items. The button shows the kind as an icon; the details panel lists the items.
+// The sidebar status: one kind, one tone and one sentence over everything Stage depends on: every set-up harness
+// connection on every machine (lib/connections.ts connectionStatusItem). The button shows the kind as an icon; the details panel lists the items.
 
 export type StatusTone = "ok" | "need" | "bad" | "idle";
 
