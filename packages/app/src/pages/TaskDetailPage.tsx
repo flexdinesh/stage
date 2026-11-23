@@ -17,7 +17,6 @@ import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
-import { NodeChip } from "../components/trees/TreeNode.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
@@ -46,7 +45,7 @@ import {
 } from "../components/ui.tsx";
 import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
-import { pendingBaseNote, predecessorChip, predecessorWorkspaceText } from "../lib/launchbase.ts";
+import { pendingBaseNote, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
@@ -115,11 +114,6 @@ function TaskDetailSkeleton() {
         </div>
         <SkeletonBar className="h-control-sm w-32" />
       </div>
-      <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
-        {["w-24", "w-32", "w-24"].map((w) => (
-          <SkeletonBar key={w} className={cx("h-[22px]", w)} />
-        ))}
-      </div>
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center gap-2">
           <SkeletonBar className="h-control w-24" />
@@ -169,14 +163,6 @@ function stamp(iso: string): string {
   return `${day} ${time.slice(0, 5)}`;
 }
 
-function workspaceChip(task: TaskDetail): string {
-  const w = task.workspace;
-  if (w.type === "root") return "project root";
-  const branch = w.branch ?? task.thread?.branch ?? null;
-  if (branch !== null) return `worktree ${branch}`;
-  return predecessorChip(task, task.currentLaunchBase) ?? `worktree from ${w.baseRef}`;
-}
-
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
   const { kindName } = useHarnesses();
@@ -207,7 +193,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
   });
   const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
   const archived = task.archivedAt !== null;
-  const modes = executionModes(task);
 
   const pending = task.thread?.pendingRequestCount ?? 0;
   const waiting = task.state === "needs_input" || pending > 0;
@@ -272,16 +257,14 @@ function TaskBody({ task }: { task: TaskDetail }) {
               ),
             })}
       />
-      <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
-        <NodeChip task={task} />
-        {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
-        {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
-        <ReplacedChip task={task} />
-        <Chip>{configModelText(task.executionConfig)}</Chip>
-        {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
-        {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
-        <Chip>{workspaceChip(task)}</Chip>
-      </div>
+      {/* Flags only: state lives in the State panel, model and workspace in Config. */}
+      {archived || task.adopted || retired ? (
+        <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
+          {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
+          {task.adopted ? <Chip title="An existing harness session tracked by Stage">tracked session</Chip> : null}
+          <ReplacedChip task={task} />
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-3.5">
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}

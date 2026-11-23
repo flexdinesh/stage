@@ -71,7 +71,6 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
   });
   const actionError = run.error ?? pause.error ?? remove.error;
 
-  const modes = executionModes(s);
   return (
     <div>
       <PageHeader
@@ -81,10 +80,6 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />
-        <Chip>{configModelText(s.executionConfig)}</Chip>
-        {modes.permission === "" ? null : <Chip>{modes.permission}</Chip>}
-        {modes.mode === "plan" ? <Chip>plan mode</Chip> : null}
-        <Chip>{workspaceText(s.workspace)}</Chip>
       </div>
 
       <div className="flex flex-col gap-3.5">

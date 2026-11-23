@@ -4,7 +4,6 @@ import {
   choiceToWorkspace,
   effectiveChoice,
   pendingBaseNote,
-  predecessorChip,
   predecessorName,
   predecessorWorkspaceText,
   workspaceChoice,
@@ -89,10 +88,7 @@ test("config line names the planned base, then the resolved one", () => {
   assert.equal(predecessorWorkspaceText(task({ workspace: { ...stacked, base: "ref" } }), null), null);
 });
 
-test("chip and pending note", () => {
-  assert.equal(predecessorChip(task(), null), "worktree from #12's branch");
-  assert.equal(predecessorChip(task(), base()), "worktree from feat/api");
-  assert.equal(predecessorChip(task({ workspace: { type: "root" } }), null), null);
+test("pending note", () => {
   assert.equal(pendingBaseNote(task()), "+ on launch: worktree from #12's branch (requires available branch)");
   assert.equal(pendingBaseNote(task({ state: "running" })), null);
   assert.equal(pendingBaseNote(task({ needs: [] })), null);
