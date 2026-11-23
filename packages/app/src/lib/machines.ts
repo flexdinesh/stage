@@ -116,6 +116,9 @@ export function connectionOptions(
 export const withMachine = (name: string, tag: string | undefined): string => (tag === undefined ? name : `${name} · ${tag}`);
 
 /** A harness query key on a machine: the local machine (null) keeps key; a remote machine's lives under ["machine", id]. */
+/** The harness scope id of a machine: null for the local machine (its own routes and keys), else its id. */
+export const machineScopeId = (m: Pick<Machine, "id" | "kind">): number | null => (m.kind === "local" ? null : m.id);
+
 export const machineKey = (machineId: number | null, key: readonly unknown[]): readonly unknown[] =>
   machineId === null ? key : ["machine", machineId, ...key];
 

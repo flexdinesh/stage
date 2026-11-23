@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
 import { useHarnessApi, useScopedKey } from "../api/harnessScope.tsx";
-import { invalidateConnectionChange, keys } from "../api/queries.ts";
+import { harnessStatusQuery, invalidateConnectionChange, keys } from "../api/queries.ts";
 import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
@@ -35,7 +35,7 @@ export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor 
 /** A generic harness's status on the harness scope's machine (shared by its card and its Settings row). */
 export function useHarnessStatus(kind: Harness) {
   const api = useHarnessApi();
-  return useQuery({ queryKey: useScopedKey()([...keys.harnessStatus, kind]), queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
+  return useQuery(harnessStatusQuery(api, useScopedKey()([...keys.harnessStatus, kind]), kind));
 }
 
 /** Disconnects a generic harness on the harness scope's machine. */

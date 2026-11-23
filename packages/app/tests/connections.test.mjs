@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   connectionGate,
+  connectionStatusItem,
   harnessSummary,
   liveChip,
   openCodeErrorText,
   openCodeRowDetail,
   openCodeSummary,
   statusRead,
+  statusTargets,
   t3ErrorText,
   t3RowDetail,
   t3Summary,
+  unreachableDetail,
 } from "../src/lib/connections.ts";
 import { statusRow } from "../src/lib/status.ts";
 import { serviceHostText } from "../src/lib/opencode.ts";
@@ -204,4 +207,56 @@ test("harnessSummary: a generic harness reads as its Settings row does", () => {
   assert.equal(harnessSummary(status({ connected: false, configured: false, state: "not connected" }), "x", "X").tone, "idle");
   assert.equal(harnessSummary({ data: undefined, checking: false, error: "boom" }, "x", "X").tone, "bad");
   assert.equal(harnessSummary({ data: undefined, checking: true, error: null }, "x", "X").state, "checking");
+});
+
+// The status button reads every machine's set-up connections, not just the main machine's.
+const statusMain = { id: 1, kind: "local", label: "stage.local", status: "online", lastSeenAt: null, version: "dev", connections: [{ id: 1, harness: "t3", label: "" }, { id: 2, harness: "opencode", label: "" }] };
+const statusWorker = { id: 2, kind: "remote", label: "controlbox", status: "online", lastSeenAt: "2026-01-01T00:00:00Z", version: "dev", connections: [{ id: 4, harness: "t3", label: "controlbox" }] };
+const configured = new Map([[1, { configured: false }], [2, { configured: false }], [4, { configured: true }]]);
+
+test("statusTargets lists a worker's connection when the main machine has none set up", () => {
+  const targets = statusTargets([statusMain, statusWorker], (id) => configured.get(id));
+  assert.deepEqual(
+    targets.map((t) => [t.connectionId, t.harness, t.machine.label]),
+    [[4, "t3", "controlbox"]],
+  );
+});
+
+test("a worker's connected T3 makes the row All connected, in the worker's section", () => {
+  const [target] = statusTargets([statusMain, statusWorker], (id) => configured.get(id));
+  const item = connectionStatusItem(target, "T3", { tone: "ok", state: "connected", label: "T3 connected" }, true);
+  assert.deepEqual(item, { key: "4", group: "controlbox", name: "T3", tone: "ok", state: "connected", label: "T3 connected on controlbox" });
+  const summary = statusRow([item], { checking: false, empty: "Connect a harness" });
+  assert.deepEqual([summary.kind, summary.text], ["ok", "All connected"]);
+});
+
+test("one machine keeps the Harnesses section and unqualified sentence", () => {
+  const single = { ...statusMain, connections: [{ id: 1, harness: "t3", label: "" }] };
+  const [target] = statusTargets([single], () => ({ configured: true }));
+  const item = connectionStatusItem(target, "T3", { tone: "need", state: "expired", label: "T3 pairing expired" }, false);
+  assert.deepEqual([item.group, item.label], ["Harnesses", "T3 pairing expired"]);
+});
+
+test("an offline or outdated worker's connection is a red problem naming the machine", () => {
+  const offline = { ...statusWorker, status: "offline", online: false };
+  const [target] = statusTargets([statusMain, offline], (id) => configured.get(id));
+  const item = connectionStatusItem(target, "T3", undefined, true);
+  assert.deepEqual([item.tone, item.state, item.label], ["bad", "offline", "controlbox offline"]);
+  assert.deepEqual(statusRow([item], { checking: false, empty: "" }).text, "controlbox offline");
+  const outdated = connectionStatusItem({ ...target, machine: { ...statusWorker, status: "needs_update" } }, "T3", undefined, true);
+  assert.deepEqual([outdated.tone, outdated.state, outdated.label], ["bad", "needs update", "controlbox needs an update"]);
+});
+
+test("a ready machine's connection without a read yet is checking", () => {
+  const [target] = statusTargets([statusMain, statusWorker], (id) => configured.get(id));
+  const item = connectionStatusItem(target, "T3", undefined, true);
+  assert.deepEqual([item.tone, item.state], ["idle", "checking"]);
+});
+
+test("unreachableDetail says when an offline machine was last seen, or what an outdated one runs", () => {
+  const now = Date.parse("2026-01-01T00:05:00Z");
+  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "offline" }, now), ["seen 5m ago"]);
+  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "offline", lastSeenAt: null }, now), ["never seen"]);
+  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "needs_update", version: "0.9.0" }, now), ["runs 0.9.0"]);
+  assert.deepEqual(unreachableDetail(statusWorker, now), []);
 });

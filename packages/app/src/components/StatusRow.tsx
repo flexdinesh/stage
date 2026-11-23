@@ -1,61 +1,97 @@
 import { Link } from "react-router";
-import { useHarnesses, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { useConnectionStatuses, useHarnesses, useMachines } from "../api/queries.ts";
+import type { OpenCodeStatus, T3Status } from "../api/types.ts";
 import { relativeTime } from "../lib/format.ts";
+import { machineSetupState } from "../lib/machines.ts";
 import { t3Identity } from "../lib/onboarding.ts";
-import { openCodeErrorText, openCodeSummary, statusRead, t3ErrorText, t3Summary, type HarnessSummary } from "../lib/connections.ts";
+import {
+  connectionStatusItem,
+  harnessSummary,
+  openCodeErrorText,
+  openCodeSummary,
+  statusRead,
+  statusTargets,
+  t3ErrorText,
+  t3Summary,
+  unreachableDetail,
+  type HarnessSummary,
+  type StatusRead,
+} from "../lib/connections.ts";
 import { serviceHostText, signInText } from "../lib/opencode.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
 import { IconCheck, IconPlug, IconRefresh, IconSettings, IconTriangleAlert } from "./icons.tsx";
 import { Button, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, toneClass, usePopover, type IconComponent } from "./ui.tsx";
 
-const item = (s: HarnessSummary, name: string): StatusItem => ({
-  key: s.harness,
-  group: "Harnesses",
-  name,
-  tone: s.tone,
-  state: s.state,
-  label: s.label,
-});
+/** An item's detail lines and error, for the panel. */
+type Detail = { lines: string[]; error: string | null };
 
-/** Detail lines per item key, for the panel. */
-type Details = Record<string, { lines: string[]; error: string | null }>;
+/** Detail per item key, for the panel. */
+type Details = Record<string, Detail>;
 
-/** The status sentence, kind and tone, and each item's detail lines: every configured harness (workers join later). */
+function t3Detail(read: StatusRead<T3Status>): Detail {
+  const d = read.data;
+  const expires = d?.tokenExpiresAt ?? null;
+  return {
+    lines: [
+      [d === undefined ? null : t3Identity(d), d?.t3Url ?? null].filter((p) => p !== null && p !== "").join(" · "),
+      [
+        d?.lastFullSyncAt == null ? null : `synced ${relativeTime(d.lastFullSyncAt)}`,
+        expires === null ? null : `token ${d?.state === "expired" ? "expired" : "expires"} ${relativeTime(expires)}`,
+      ]
+        .filter((p) => p !== null)
+        .join(" · "),
+    ].filter((l) => l !== ""),
+    error: t3ErrorText(read),
+  };
+}
+
+function openCodeDetail(read: StatusRead<OpenCodeStatus>): Detail {
+  const d = read.data;
+  return {
+    lines: d === undefined ? [] : [[d.endpoint === "" ? null : serviceHostText(d), signInText(d)].filter((p) => p !== null).join(" · "), `checked ${relativeTime(d.checkedAt ?? null)}`],
+    error: openCodeErrorText(read),
+  };
+}
+
+/**
+ * The status sentence, kind and tone, and each item's detail lines: every set-up connection on every machine, read on
+ * its machine. A machine that cannot answer counts its connections as problems; with two or more machines the panel
+ * has a section per machine.
+ */
 export function useStatus(): { row: Row; details: Details } {
   const harnesses = useHarnesses();
-  // Until connections load, keep checking.
-  const showT3 = harnesses.loaded && harnesses.activeConnection("t3")?.configured === true;
-  const t3 = statusRead(useT3Status({ enabled: showT3 }));
-  const openCode = statusRead(useOpenCodeStatus());
-  const showOpenCode = harnesses.loaded && harnesses.activeConnection("opencode")?.configured === true;
+  const { machines, data } = useMachines();
+  // Until connections and machines load, keep checking.
+  const loaded = harnesses.loaded && data !== undefined;
+  const targets = loaded ? statusTargets(machines, harnesses.connection) : [];
+  const reads = useConnectionStatuses(targets.filter((t) => machineSetupState(t.machine) === "ready"));
+  const live = new Map<number, { summary: HarnessSummary; detail: Detail }>();
+  for (const { connection, query } of reads.t3) {
+    const read = statusRead(query);
+    live.set(connection.connectionId, { summary: t3Summary(read), detail: t3Detail(read) });
+  }
+  for (const { connection, query } of reads.openCode) {
+    const read = statusRead(query);
+    live.set(connection.connectionId, { summary: openCodeSummary(read), detail: openCodeDetail(read) });
+  }
+  for (const { connection, query } of reads.other) {
+    const read = statusRead(query);
+    const reason = read.data?.reason ?? read.data?.lastError ?? "";
+    live.set(connection.connectionId, {
+      summary: harnessSummary(read, connection.harness, harnesses.kindName(connection.harness)),
+      detail: { lines: reason === "" ? [] : [reason], error: read.error },
+    });
+  }
+  const grouped = machines.length > 1;
   const items: StatusItem[] = [];
   const details: Details = {};
-  if (showT3) {
-    items.push(item(t3Summary(t3), harnesses.kindName("t3")));
-    const d = t3.data;
-    const expires = d?.tokenExpiresAt ?? null;
-    details.t3 = {
-      lines: [
-        [d === undefined ? null : t3Identity(d), d?.t3Url ?? null].filter((p) => p !== null && p !== "").join(" · "),
-        [
-          d?.lastFullSyncAt == null ? null : `synced ${relativeTime(d.lastFullSyncAt)}`,
-          expires === null ? null : `token ${d?.state === "expired" ? "expired" : "expires"} ${relativeTime(expires)}`,
-        ]
-          .filter((p) => p !== null)
-          .join(" · "),
-      ].filter((l) => l !== ""),
-      error: t3ErrorText(t3),
-    };
+  for (const target of targets) {
+    const entry = live.get(target.connectionId);
+    const item = connectionStatusItem(target, harnesses.kindName(target.harness), entry?.summary, grouped);
+    items.push(item);
+    details[item.key] = entry?.detail ?? { lines: unreachableDetail(target.machine), error: null };
   }
-  if (showOpenCode) {
-    items.push(item(openCodeSummary(openCode), harnesses.kindName("opencode")));
-    const d = openCode.data;
-    details.opencode = {
-      lines: d === undefined ? [] : [[d.endpoint === "" ? null : serviceHostText(d), signInText(d)].filter((p) => p !== null).join(" · "), `checked ${relativeTime(d.checkedAt ?? null)}`],
-      error: openCodeErrorText(openCode),
-    };
-  }
-  return { row: statusRow(items, { checking: !harnesses.loaded, empty: "Connect a harness" }), details };
+  return { row: statusRow(items, { checking: !loaded, empty: "Connect a harness" }), details };
 }
 
 const TEXT: Record<StatusTone, string> = { ok: "text-muted", idle: "text-muted", need: "text-need-fg", bad: "text-bad" };

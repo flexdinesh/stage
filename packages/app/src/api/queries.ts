@@ -1,12 +1,13 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
-import { ApiError, type ArchivedFilter } from "./client.ts";
+import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
+import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { ExecutionConfig, HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -175,8 +176,15 @@ export function useSetDefaultConnection() {
 export function useOpenCodeStatus() {
   const api = useHarnessApi();
   const key = useScopedKey();
-  return useQuery({ queryKey: key(keys.openCodeStatus), queryFn: api.openCodeStatus, refetchInterval: 15000 });
+  return useQuery(openCodeStatusQuery(api, key(keys.openCodeStatus)));
 }
+
+/** OpenCode's status on a machine (`api`, `key`: that machine's calls and scoped key). */
+const openCodeStatusQuery = (api: HarnessApi, key: readonly unknown[]) => queryOptions({ queryKey: key, queryFn: api.openCodeStatus, refetchInterval: 15000 });
+
+/** A generic harness's status on a machine (`key`: that machine's scoped harnessStatus key for the kind). */
+export const harnessStatusQuery = (api: HarnessApi, key: readonly unknown[], kind: Harness) =>
+  queryOptions({ queryKey: key, queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
 
 const T3_STATUS_POLL_MS = 5000;
 const T3_SYNC_POLL_MS = 1000;
@@ -186,7 +194,12 @@ export const useT3Status = ({ enabled = true }: { enabled?: boolean } = {}) => {
   const api = useHarnessApi();
   const key = useScopedKey()(keys.t3Status);
   const qc = useQueryClient();
-  return useQuery({
+  return useQuery({ ...t3StatusQuery(api, key, qc), enabled });
+};
+
+/** T3's status on a machine (`api`, `key`: that machine's calls and scoped key). */
+function t3StatusQuery(api: HarnessApi, key: readonly unknown[], qc: QueryClient) {
+  return queryOptions({
     queryKey: key,
     // Compared here (once per fetch, however many observers) so the first sync refreshes the views it fills.
     queryFn: async () => {
@@ -196,9 +209,56 @@ export const useT3Status = ({ enabled = true }: { enabled?: boolean } = {}) => {
       return next;
     },
     refetchInterval: (q) => (q.state.data?.sync.running === true ? T3_SYNC_POLL_MS : T3_STATUS_POLL_MS),
-    enabled,
   });
-};
+}
+
+/** A connection whose status is read on its machine. */
+export interface MachineConnection {
+  harness: Harness;
+  machine: Pick<Machine, "id" | "kind">;
+}
+
+/**
+ * Each connection's status on its own machine (the queries Settings' rows run there, so the cache is shared): T3,
+ * OpenCode and generic harnesses, each paired with its connection.
+ */
+export function useConnectionStatuses<C extends MachineConnection>(connections: readonly C[]) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const on = (m: MachineConnection["machine"]) => {
+    const id = machineScopeId(m);
+    return { api: id === null ? api : api.forMachine(id), key: (k: readonly unknown[]) => machineKey(id, k) };
+  };
+  const t3 = connections.filter((c) => c.harness === "t3");
+  const openCode = connections.filter((c) => c.harness === "opencode");
+  const other = connections.filter((c) => c.harness !== "t3" && c.harness !== "opencode");
+  const t3Queries = useQueries({
+    queries: t3.map((c) => {
+      const m = on(c.machine);
+      return t3StatusQuery(m.api, m.key(keys.t3Status), qc);
+    }),
+  });
+  const openCodeQueries = useQueries({
+    queries: openCode.map((c) => {
+      const m = on(c.machine);
+      return openCodeStatusQuery(m.api, m.key(keys.openCodeStatus));
+    }),
+  });
+  const otherQueries = useQueries({
+    queries: other.map((c) => {
+      const m = on(c.machine);
+      return harnessStatusQuery(m.api, m.key([...keys.harnessStatus, c.harness]), c.harness);
+    }),
+  });
+  return { t3: paired(t3, t3Queries), openCode: paired(openCode, openCodeQueries), other: paired(other, otherQueries) };
+}
+
+/** Each connection with its query (useQueries returns one per option, in order). */
+const paired = <C, Q>(connections: readonly C[], queries: readonly Q[]): { connection: C; query: Q }[] =>
+  connections.flatMap((connection, i) => {
+    const query = queries[i];
+    return query === undefined ? [] : [{ connection, query }];
+  });
 
 /** The first full sync filled projects, threads and the catalog: refetch everything that read them empty. */
 function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
