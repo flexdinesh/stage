@@ -342,6 +342,11 @@ export interface Platform {
   notifications?: NotificationDelivery;
   attention: Attention;
   storage: PreferenceStorage;
+  /**
+   * The host shows its own back and forward (a browser tab), so the app hides its arrows. Absent or false: the app
+   * shows them (desktop shell, installed web app window).
+   */
+  hostHistoryControls?: boolean;
   /** Native shell services; absent in the browser. */
   host?: HostServices;
 }

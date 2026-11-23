@@ -5,6 +5,7 @@ import { useScope } from "../components/Scope.tsx";
 import { ScheduleRows, ScheduleRowsSkeleton } from "../components/ScheduleList.tsx";
 import { Button, PageHeader, Panel, QueryState } from "../components/ui.tsx";
 import { relativeTime } from "../lib/format.ts";
+import { scopedPageName } from "../lib/history.ts";
 
 export function SchedulesPage() {
   const scope = useScope();
@@ -31,6 +32,7 @@ export function SchedulesPage() {
     <>
       <PageHeader
         title={scope.project === null ? "Schedules" : <><span className="text-muted">{scope.project.title} / </span>Schedules</>}
+        name={scopedPageName("Schedules", scope.project?.title ?? null)}
         {...(meta === undefined ? {} : { meta })}
         actions={
           <>

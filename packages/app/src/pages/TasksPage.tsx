@@ -20,6 +20,7 @@ import {
   type GroupKey,
   type TreeFilter,
 } from "../lib/dashboard.ts";
+import { scopedPageName } from "../lib/history.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
 import { mergeSettled, settledSince } from "../lib/settled.ts";
@@ -66,6 +67,7 @@ export function TasksPage() {
     <>
       <PageHeader
         title={scope.project === null ? "Tasks" : <><span className="text-muted">{scope.project.title} / </span>Tasks</>}
+        name={scopedPageName("Tasks", scope.project?.title ?? null)}
         meta={scope.project === null ? "Tasks across projects" : projectWorkspace(scope.project)}
         actions={
           <>

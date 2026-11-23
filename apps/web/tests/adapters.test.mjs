@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FAVICON_IDLE, FAVICON_NEED, browserAttention } from "../src/platform/attention.ts";
 import { browserClipboard } from "../src/platform/clipboard.ts";
+import { browserHistoryControls } from "../src/platform/historyControls.ts";
 import { browserLinks } from "../src/platform/links.ts";
 import { browserStorage } from "../src/platform/storage.ts";
 
@@ -82,4 +83,13 @@ test("attention without the Badging API still swaps the favicon; badge failures 
   failing.setNeedsInput(1);
   failing.setNeedsInput(0);
   await new Promise((r) => setTimeout(r, 0));
+});
+
+const displayMode = (m) => (q) => q === `(display-mode: ${m})`;
+
+test("history controls: a browser tab or minimal-ui window has its own arrows; a standalone app window does not", () => {
+  assert.equal(browserHistoryControls(displayMode("browser")), true);
+  assert.equal(browserHistoryControls(displayMode("standalone")), false);
+  assert.equal(browserHistoryControls(displayMode("minimal-ui")), true);
+  assert.equal(browserHistoryControls(displayMode("fullscreen")), false);
 });

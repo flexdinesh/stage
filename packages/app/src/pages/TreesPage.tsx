@@ -8,6 +8,7 @@ import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { TreeRow, TreeRowsSkeleton } from "../components/trees/TreeRow.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { DisclosureButton, EmptyState, ErrorText, PageHeader, Panel, QueryState, Row, RowList, Segmented, buttonClass } from "../components/ui.tsx";
+import { scopedPageName } from "../lib/history.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { settledSince } from "../lib/settled.ts";
 import { TREE_GROUP_KEYS, byTreeGroup, parseTreeGroup, treeClosed, treeGroup, type TreeGroupKey } from "../lib/trees.ts";
@@ -55,6 +56,7 @@ export function TreesPage() {
     <>
       <PageHeader
         title={scope.project === null ? "Trees" : <><span className="text-muted">{scope.project.title} / </span>Trees</>}
+        name={scopedPageName("Trees", scope.project?.title ?? null)}
         meta={scope.project === null ? "Plans of dependent tasks across projects" : projectWorkspace(scope.project)}
         actions={
           <>

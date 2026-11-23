@@ -169,17 +169,20 @@ export function Trail({ segments, linkClass }: { segments: readonly TrailSegment
 const metaLinkClass = "text-fg underline-offset-2 hover:underline";
 
 /**
- * Page title, meta line and actions. `trail` is the page's location, at the start of the meta line. The title (or the
- * trail's last step) names the page in the history list. `subtitle` is accepted as an alias of `meta`.
+ * Page title, meta line and actions. `trail` is the page's location, at the start of the meta line. `name` names the
+ * page in the history list and the tab title; it defaults to the title when that is a string, else the trail's last
+ * step. `subtitle` is accepted as an alias of `meta`.
  */
 export function PageHeader({
   title,
+  name: givenName,
   meta,
   subtitle,
   actions,
   trail,
 }: {
   title: ReactNode;
+  name?: string;
   meta?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
@@ -187,7 +190,7 @@ export function PageHeader({
 }) {
   const line = meta ?? subtitle;
   const nameEntry = useContext(NavLabelContext);
-  const name = typeof title === "string" ? title : trail?.at(-1)?.label;
+  const name = givenName ?? (typeof title === "string" ? title : trail?.at(-1)?.label);
   useEffect(() => {
     if (name !== undefined) nameEntry?.(name);
   }, [name, nameEntry]);
