@@ -9,7 +9,11 @@ import (
 	"strings"
 )
 
-var nonAlnum = regexp.MustCompile(`[^0-9a-z]+`)
+var (
+	nonAlnum = regexp.MustCompile(`[^0-9a-z]+`)
+	// releaseRe is a release version: X.Y.Z, no pre-release (docs/release.md).
+	releaseRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+)
 
 // devVersion is a developer build's version: 0.0.0-dev.<branch>, the
 // branch lowercased with every run of other characters as one dot, or
@@ -50,7 +54,7 @@ func devVersion(branch, commit string) (string, error) {
 func cmdVersion(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
 	mode := fs.String("mode", "", "dev or release")
-	version := fs.String("version", "", "release version X.Y.Z[-pre]")
+	version := fs.String("version", "", "release version X.Y.Z")
 	branch := fs.String("branch", "", "dev: current branch (HEAD when detached)")
 	commit := fs.String("commit", "", "dev: full revision, -dirty suffix allowed")
 	if err := fs.Parse(args); err != nil {
@@ -58,8 +62,8 @@ func cmdVersion(args []string, w io.Writer) error {
 	}
 	switch *mode {
 	case "release":
-		if !validVersion(*version) {
-			return fmt.Errorf("VERSION %q is not X.Y.Z or X.Y.Z-pre (lowercase letters, digits, dots)", *version)
+		if !releaseRe.MatchString(*version) {
+			return fmt.Errorf("version %q is not X.Y.Z", *version)
 		}
 		fmt.Fprintln(w, *version)
 		return nil

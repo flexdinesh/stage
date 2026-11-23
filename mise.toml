@@ -6,6 +6,7 @@ go = "1.27.3"   # server/go.mod
 node = "26.13.0" # Dockerfile (node:26)
 pnpm = "12.15.0" # Dockerfile
 shellcheck = "0.11.0" # scripts/release.sh (check:release)
+svu = "3.4.4" # next release version (scripts/release.sh next, docs/release.md)
 
 [tasks.dev]
 description = "Branch db + Go server (:7390, real T3) + browser host on Vite (proxies /api)"
@@ -153,15 +154,19 @@ description = "Developer build of the working tree (stage-dev, 0.0.0-dev.<branch
 run = "scripts/release.sh dist"
 
 [tasks.release]
-description = "Release build of clean HEAD (VERSION=X.Y.Z, identity stage) from a git archive export: every target, manifest, checksums, verify; out STAGE_RELEASE_OUT (.scratch/release/v<version>)"
+description = "Release build of clean HEAD (version from release:next, identity stage) from a git archive export: every target, manifest, checksums, verify; out STAGE_RELEASE_OUT (.scratch/release/v<version>)"
 run = "scripts/release.sh release"
+
+[tasks."release:next"]
+description = "Print the next release version: MAJOR.MINOR from the VERSION file, patch from git tags (svu)"
+run = "scripts/release.sh next"
 
 [tasks."release:verify"]
 description = "Verify an asset directory (DIR=...): manifest, checksums, names, versions, bundled CLI, no secrets, smoke on this machine"
 run = 'scripts/release.sh verify "${DIR:?set DIR to an asset directory}"'
 
 [tasks."check:release"]
-description = "Release tool (tools/release) go vet + go test (incl. scripts/install.sh against fixture releases, scripts/install-dev.sh and uninstall-dev.sh against a fixture origin), shellcheck of scripts/*.sh"
+description = "Release tool (tools/release) go vet + go test (incl. scripts/release.sh next against temp repos with svu, scripts/install.sh against fixture releases, scripts/install-dev.sh and uninstall-dev.sh against a fixture origin), shellcheck of scripts/*.sh"
 run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh && shellcheck -s sh scripts/install.sh scripts/install-dev.sh scripts/uninstall-dev.sh"
 
 [tasks."install:smoke"]
