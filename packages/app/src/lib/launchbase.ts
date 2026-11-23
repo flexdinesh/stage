@@ -77,13 +77,6 @@ export function predecessorWorkspaceText(t: Predecessor, base: LaunchBase | null
   return `worktree from ${base.baseRef} · fallback${into}`;
 }
 
-/** Header chip text for a predecessor-base task with no worktree branch known yet. */
-export function predecessorChip(t: Predecessor, base: LaunchBase | null): string | null {
-  if (!fromPredecessor(t.workspace)) return null;
-  if (base !== null) return `worktree from ${base.baseRef}`;
-  return `worktree from ${branchLabel(predecessorName(t))}`;
-}
-
 /** Prompt panel note for a backlog task with needs that will stack on a need's branch; null otherwise. */
 export function pendingBaseNote(t: Predecessor & Pick<Task, "state">): string | null {
   const name = predecessorName(t);
