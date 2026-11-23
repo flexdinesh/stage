@@ -314,7 +314,10 @@ task/schedule field; do not combine it with legacy model/permission fields in a
 create or update request. Existing responses and historical settlement/run/PR records
 remain readable. Newly observed execution uses Stage states; T3 settlement
 never hides active work and accepts a task only through inferred completion.
-The T3 thread mirror's `settled` follows the observation.
+The T3 thread mirror's `settled` follows the observation. T3 reports a thread's
+newest run; a cancelled or rolled-back run that never started (a queued
+follow-up) did no work, so the newest other run decides the observed state and
+end time.
 
 Contract tests use a second fake harness with document IDs, a non-T3 model,
 two-step creation, optional capabilities, lost replies, restart, offline reads,

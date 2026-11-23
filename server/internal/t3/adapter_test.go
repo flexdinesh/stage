@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"testing"
+	"time"
 )
 
 func TestAdapterNormalizesExecutionWithoutSettlementAuthority(t *testing.T) {
@@ -33,6 +34,31 @@ func TestAdapterNormalizesExecutionWithoutSettlementAuthority(t *testing.T) {
 	malformed := (ThreadDetail{Thread: Thread{ThreadID: "thread", ProjectID: "project", Status: "surprise"}}).Observation()
 	if malformed.Valid() == nil {
 		t.Fatal("unknown status accepted")
+	}
+}
+func TestUnstartedCancelledRunDoesNotDecideState(t *testing.T) {
+	at := func(m int) *time.Time { v := time.Date(2026, 11, 22, 5, m, 0, 0, time.UTC); return &v }
+	unstarted := Run{RunID: "r3", Status: StatusCancelled, RequestedAt: *at(49), CompletedAt: at(51)}
+	for _, tc := range []struct {
+		name   string
+		status ThreadStatus
+		runs   []Run
+		want   string
+		ended  *time.Time
+	}{
+		{"completed then unstarted cancel", StatusCancelled, []Run{unstarted, {RunID: "r2", Status: StatusCompleted, StartedAt: at(30), CompletedAt: at(50)}}, "done", at(50)},
+		{"unstarted cancels skipped", StatusCancelled, []Run{unstarted, unstarted, {RunID: "r2", Status: StatusCompleted, StartedAt: at(30), CompletedAt: at(50)}}, "done", at(50)},
+		{"idle thread", StatusIdle, []Run{unstarted, {RunID: "r2", Status: StatusCompleted, StartedAt: at(30), CompletedAt: at(50)}}, "done", at(50)},
+		{"unstarted rollback", StatusRolledBack, []Run{{RunID: "r3", Status: StatusRolledBack, CompletedAt: at(51)}, {RunID: "r2", Status: StatusCompleted, StartedAt: at(30), CompletedAt: at(50)}}, "done", at(50)},
+		{"failed then unstarted cancel", StatusCancelled, []Run{unstarted, {RunID: "r2", Status: StatusFailed, StartedAt: at(30), CompletedAt: at(50)}}, "failed", at(50)},
+		{"started cancel", StatusCancelled, []Run{{RunID: "r3", Status: StatusCancelled, StartedAt: at(49), CompletedAt: at(51)}, {RunID: "r2", Status: StatusCompleted, StartedAt: at(30), CompletedAt: at(50)}}, "cancelled", at(51)},
+		{"only unstarted cancel", StatusCancelled, []Run{unstarted}, "cancelled", at(51)},
+	} {
+		d := ThreadDetail{Thread: Thread{ThreadID: "thread", ProjectID: "project", Status: tc.status, Settled: true}, RunCount: len(tc.runs), RecentRuns: tc.runs}
+		o := d.Observation()
+		if err := o.Valid(); err != nil || o.State != tc.want || o.EndedAt == nil || !o.EndedAt.Equal(*tc.ended) {
+			t.Fatalf("%s: state %q ended %v err %v; want %q ended %v", tc.name, o.State, o.EndedAt, err, tc.want, tc.ended)
+		}
 	}
 }
 func TestSettledThreadReportsClosure(t *testing.T) {
