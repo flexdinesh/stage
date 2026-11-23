@@ -107,7 +107,7 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 	}
 	e.must("GET", "/api/harnesses", nil, 200, &list)
 	t3h, oc, hosted := list.Harnesses[0], list.Harnesses[1], list.Harnesses[2]
-	if !t3h.Connectable || len(t3h.Setup.Fields) != 1 || t3h.Setup.Fields[0].Env != "T3_URL" || len(t3h.Setup.Actions) != 2 || !t3h.Setup.Disconnect {
+	if !t3h.Connectable || len(t3h.Setup.Fields) != 3 || t3h.Setup.Fields[0].ID != "url" || t3h.Setup.Fields[1].ID != "publicUrl" || t3h.Setup.Fields[2].ID != "adminToken" || len(t3h.Setup.Actions) != 2 || !t3h.Setup.Disconnect {
 		t.Fatalf("t3 setup %+v", t3h)
 	}
 	// newEnv composes no OpenCode connector; a hosted harness has none.
@@ -133,8 +133,8 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 	}
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.Kind != "t3" || st.Name != "T3" || st.ConnectionID != e.store.LegacyT3ID() || !st.Connected || !st.Configured || st.State != "connected" ||
-		len(st.Fields) != 1 || st.Fields[0].ID != "url" || st.Fields[0].Source != "default" || st.Fields[0].Locked ||
-		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || st.Actions[1].Reason != "fake" || st.Details["publicUrl"] != publicURL {
+		len(st.Fields) != 3 || st.Fields[0].ID != "url" || st.Fields[0].Source != "default" || st.Fields[2].ID != "adminToken" || st.Fields[2].Set ||
+		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || st.Actions[1].Reason != "fake" || st.Details["publicUrl"] != "http://127.0.0.1:3773" {
 		t.Fatalf("status %+v", st)
 	}
 

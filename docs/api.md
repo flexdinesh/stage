@@ -23,7 +23,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | 401 | worker routes only: bad, used or expired pairing code, missing, invalid or revoked machine token; any route: a machine token outside `/api/worker/*` ([Machines](#machines)) |
 | 403 | rejected by the request origin policy (Host, cross-site, cross-origin) |
 | 404 | resource not found |
-| 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (URL locked, other T3 environment, auto-pair unavailable) |
+| 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (other T3 environment, auto-pair unavailable) |
 | 415 | write body not `application/json` / `multipart/form-data` |
 | 502 | T3 call failed (T3 error message in `error`), or the `t3` CLI failed (auto-pair) |
 | 503 | T3 not connected (no valid token) or DB unavailable |
@@ -83,7 +83,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   ]
 }
 ```
-- A live Stage server answers 200 whenever its database works; a harness being offline is still 200. `harnesses` lists each connectable harness in registry order with its connector's last known state from memory: `configured` (setup done: saved settings, paired or set by the environment), `connected` (T3: a valid token T3 has not rejected; OpenCode: an adapter installed without a known problem). Health never calls a harness (reachability and the setup state are in `GET /api/harnesses/{kind}/status`).
+- A live Stage server answers 200 whenever its database works; a harness being offline is still 200. `harnesses` lists each connectable harness in registry order with its connector's last known state from memory: `configured` (setup done: T3 paired, with a stored token or a saved admin token; OpenCode saved settings), `connected` (T3: a valid token T3 has not rejected; OpenCode: an adapter installed without a known problem). Health never calls a harness (reachability and the setup state are in `GET /api/harnesses/{kind}/status`).
 - 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
 - `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `harnesses[].lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
@@ -205,7 +205,7 @@ A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of ag
 
 ## Harness connections (API v6)
 
-A connectable harness (a `connected` harness this server composes a connector for; `connectable` in `GET /api/harnesses`) is set up through four generic routes. Its descriptor's `setup` describes them: `fields` (`[{id, label, kind: text|url|secret|bool, env?, help?}]`; `env` is the server environment variable that locks the field), `actions` (`[{id, label, input?: [field]}]`) and `disconnect` (bool). Hosts render that schema unless they register a harness-specific panel for the kind; product code never branches on the kind. `{kind}` unknown: 404. A kind without connection setup here (a hosted harness): 409.
+A connectable harness (a `connected` harness this server composes a connector for; `connectable` in `GET /api/harnesses`) is set up through four generic routes. Its descriptor's `setup` describes them: `fields` (`[{id, label, kind: text|url|secret|bool, help?}]`), `actions` (`[{id, label, input?: [field]}]`) and `disconnect` (bool). Hosts render that schema unless they register a harness-specific panel for the kind; product code never branches on the kind. `{kind}` unknown: 404. A kind without connection setup here (a hosted harness): 409.
 
 ### `GET /api/harnesses/{kind}/status`
 200 `HarnessStatus`:
@@ -219,32 +219,32 @@ A connectable harness (a `connected` harness this server composes a connector fo
   "lastError": "",
   "state": "connected",
   "reason": "",
-  "fields": [{ "id": "url", "value": "http://127.0.0.1:3773", "set": false, "source": "default", "locked": false }],
+  "fields": [{ "id": "url", "value": "http://127.0.0.1:3773", "set": false, "source": "default" }],
   "actions": [{ "id": "pair", "available": true }, { "id": "auto-pair", "available": false, "reason": "not_local" }],
   "details": { "...": "the harness's own setup state, below" }
 }
 ```
 - `connectionId`, `configured`, `connected`, `lastError`: as in health, from the same connector (`lastError` and `reason` are omitted when empty). `state` is a harness-defined word (T3: T3State; OpenCode: `unconfigured`, `connected`, `unavailable`, `rejected`). `reason`: why it is not connected.
-- `fields`: each setting's current value (`source`: `env`, `saved` or `default`; `locked` when the environment sets it). A secret's `value` is always `""`; `set` says whether one is stored.
+- `fields`: each setting's current value (`source`: `saved` or `default`). No environment variable sets a field. A secret's `value` is always `""`; `set` says whether one is stored.
 - `actions`: whether each setup action can run now, with a `reason` when not.
 - `details`: the harness's setup panel state (T3: the T3 details; OpenCode: the OpenCode details). Generic clients ignore it.
 - Refreshes a stale probe first (bounded, T3: 3s; OpenCode health check: 4s).
 
 ### `PUT /api/harnesses/{kind}/settings`
-Body: one strict JSON object keyed by setup field id; `null` resets a setting to its default. 200 `HarnessStatus` (freshly probed), plus `replaced` (the retired connection, as in `GET /api/connections`) when the change retired the active connection. 400 invalid or unknown field. 409 locked by the environment, or the harness's own conflicts (below).
+Body: one strict JSON object keyed by setup field id; `null` resets a setting to its default. 200 `HarnessStatus` (freshly probed), plus `replaced` (the retired connection, as in `GET /api/connections`) when the change retired the active connection. 400 invalid or unknown field. 409 the harness's own conflicts (below).
 
 ### `POST /api/harnesses/{kind}/actions/{action}`
 Body: the action's input object (strict; empty means `{}`). 200 `HarnessStatus` (not re-probed), plus `replaced` as above. 404 unknown action. Errors are the harness's (below).
 
 ### `DELETE /api/harnesses/{kind}/connection`
-Forget the connection's credentials; the connection keeps its identity, tasks and history. 200 `HarnessStatus`. 409 when the descriptor's `setup.disconnect` is false or the environment manages the connection.
+Forget the connection's credentials; the connection keeps its identity, tasks and history. 200 `HarnessStatus`. 409 when the descriptor's `setup.disconnect` is false.
 
 ### Per machine (`/api/machines/{id}/harnesses...`)
-`GET /api/machines/{id}/harnesses`, `GET .../{kind}/status`, `PUT .../{kind}/settings`, `POST .../{kind}/actions/{action}` and `DELETE .../{kind}/connection` are the routes above for machine `{id}`; `/api/harnesses...` is machine 1 (this server). Unknown or removed machine: 404. A remote machine's setup runs on its worker ([execution.md](execution.md#remote-machines)): credentials stay there, and its environment, not this server's, locks fields (`locked`, `source: env`). When its worker cannot answer: 503 `{error, code}` with `machine_offline` (not connected, or no reply in time), `machine_needs_update` (another API version, or a worker without this harness's setup) or `machine_setup_starting` (connected, still composing its setup; retry). Health and `GET /api/harnesses` report an offline remote connection as not connected with the offline reason as `lastError`. A remote machine's connection is created by its first pairing or connect.
+`GET /api/machines/{id}/harnesses`, `GET .../{kind}/status`, `PUT .../{kind}/settings`, `POST .../{kind}/actions/{action}` and `DELETE .../{kind}/connection` are the routes above for machine `{id}`; `/api/harnesses...` is machine 1 (this server). Unknown or removed machine: 404. A remote machine's setup runs on its worker ([execution.md](execution.md#remote-machines)): credentials stay there. When its worker cannot answer: 503 `{error, code}` with `machine_offline` (not connected, or no reply in time), `machine_needs_update` (another API version, or a worker without this harness's setup) or `machine_setup_starting` (connected, still composing its setup; retry). Health and `GET /api/harnesses` report an offline remote connection as not connected with the offline reason as `lastError`. A remote machine's connection is created by its first pairing or connect.
 
 ## T3 connection, sync, catalog
 
-T3's setup: field `url` (env `T3_URL`), actions `pair` (`{code}`) and `auto-pair` (`{}`), disconnect.
+T3's setup: fields `url`, `publicUrl` and `adminToken` (secret), actions `pair` (`{code}`) and `auto-pair` (`{}`), disconnect.
 
 ### T3 details
 `GET /api/harnesses/t3/status` `details`:
@@ -272,9 +272,9 @@ T3's setup: field `url` (env `T3_URL`), actions `pair` (`{code}`) and `auto-pair
 ```
 `environmentId`, `clientId`, `tokenExpiresAt`, `lastError`, `lastFullSyncAt`, `checkedAt`, `probeError`, `t3`, `autoPair.reason` and `sync.startedAt` are nullable.
 
-- `connected`: a valid token T3 has not rejected (same as the T3 entry of `/api/health` `harnesses`).
+- `connected`: a valid token T3 has not rejected (same as the T3 entry of `/api/health` `harnesses`). T3 is configured only when paired: a stored token or a saved admin token. An unpaired T3 is never contacted in the background (no probes or sync until paired).
 - `state` (T3State), the first problem in this order: `unreachable` (nothing answered as T3 at `t3Url`), `unpaired` (no token), `expired` (token past expiry), `rejected` (T3 answered 401 to the token), else `connected`.
-- `t3UrlSource`: `env` (`T3_URL`, which locks the setting), `settings` (saved through the `url` setting), `default` (`http://127.0.0.1:3773`). `publicUrl` is `T3_PUBLIC_URL` when set, else `t3Url`.
+- `t3UrlSource`: `settings` (saved through the `url` setting) or `default` (`http://127.0.0.1:3773`). `publicUrl` is the saved Browser URL (`publicUrl` setting), else `t3Url`. `adminTokenConfigured`: an admin token is saved.
 - `reachable`, `checkedAt`, `probeError`, `t3`: the last unauthenticated probe of `{t3Url}/.well-known/t3/environment` (`probeError` is a short reason such as `connection refused`, `timed out`, `not a T3 server (HTTP 404)`). Probes are cached 10s, success or failure, and concurrent refreshes share one request. The status route refreshes a stale probe (waiting at most 3s); `/api/health` never probes.
 - `autoPair`: whether the `auto-pair` action can work. `reason` when not: `not_local` (`t3Url` is not loopback: `localhost`, `127.0.0.0/8`, `::1`), `cli_not_found` (no `t3` CLI: `T3_BIN`, then `PATH`, `~/.local/bin`, `~/.bun/bin`, `~/.local/share/pnpm`, `~/.npm-global/bin`, `~/.volta/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), `fake` (`T3_FAKE=1`).
 - `sync`: the running full sync (`projects` and `threads` mirrored so far); all zero when none runs.
@@ -290,10 +290,10 @@ Body: `{ "code": "ABCD-1234" }`. 200 `HarnessStatus`, plus `replaced` when this 
 Pair with no code: runs `t3 auth pairing create --json --label "<client name> mcp" --ttl 5m --scope ...` (the full-access scopes) with the `t3` CLI on the server's machine (15s limit) and redeems the code like `pair`. Body `{}`. 200 `HarnessStatus` (with `replaced` like `pair`). 409 auto-pair unavailable (`autoPair.reason`, named in `error`). 502 T3 is not answering at `t3Url` (checked first, so nothing is minted), or the CLI or the pairing failed (its error in `error`; a T3 with a custom `T3CODE_HOME` can make the CLI mint for another instance: pair with a code instead).
 
 ### Disconnect (`DELETE /api/harnesses/t3/connection`)
-Disconnect: forget the stored token. The connection keeps its environment: pairing the same T3 resumes it, pairing another replaces it (see Instances). Tasks, projects, journals and mirrored data stay; nothing is sent to T3, so the token stays valid there until it expires. Active T3 tasks keep running in T3, untracked until a pairing. No body. 200 `HarnessStatus` (`unpaired`). Idempotent. 409 `T3_ADMIN_TOKEN` is set (it would mint a new token at once).
+Disconnect: forget the stored token, the T3 URL, the Browser URL and the admin token, and stop syncing. The connection record keeps its environment: pairing the same T3 resumes it, pairing another replaces it (see Instances). Tasks, projects, bindings, journals and mirrored data stay; nothing is sent to T3, so the token stays valid there until it expires. Active T3 tasks keep running in T3, untracked until a pairing. No body. 200 `HarnessStatus` (`unpaired`). Idempotent. Never locked.
 
-### Setting `url` (`PUT /api/harnesses/t3/settings`)
-Body `{ "url": string | null }` (`null` = back to the default; `url` is required). The URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `HarnessStatus` (new URL, freshly probed). 400 invalid or missing `url`. 409 `T3_URL` is set (locked), or the server is paired and the new URL does not serve that environment (`This stage server is paired with T3 '<label>'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only.`), or cannot be checked because nothing answers there. Unpaired, any URL is accepted. The change applies at once (the MCP session reconnects; the token is kept) and survives restarts; `T3_URL` still wins over it.
+### Settings (`PUT /api/harnesses/t3/settings`)
+Body: any of `{ "url": string | null, "publicUrl": string | null, "adminToken": string | null }`, at least one; `null` clears. `url`: the T3 URL (cleared: `http://127.0.0.1:3773`). `publicUrl`: the Browser URL for Open in T3 links (empty: the T3 URL). `adminToken`: optional secret that lets Stage renew the T3 token automatically; never returned. A URL must be `http(s)://host[:port]` (no path, query or credentials; a trailing `/` is dropped). 200 `HarnessStatus` (freshly probed). 400 invalid field or empty body. 409 only while paired, when the new `url` does not serve that environment (`This stage server is paired with T3 '<label>'. Disconnect it first, then change the URL and pair the other T3; its tasks stay here, read-only.`) or nothing answers there to check it. Unpaired, any URL is accepted. A change applies at once (the MCP session reconnects; the token is kept) and survives restarts. On a worker the admin token stays in the worker's credentials file (like the T3 token); the URLs are stored on the main server. `stage harness t3 set` writes the same settings.
 
 ### `POST /api/sync`
 
@@ -380,20 +380,20 @@ includes tracked sessions, tasks and journals.
 
 Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject on the same machine can bind. A Git remote match (with the same subproject when both are known) requires confirmation. DELETE the scoped binding to unbind.
 
-OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` (envs `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`, `OPENCODE_WEB_URL`, `OPENCODE_USERNAME`, `OPENCODE_PASSWORD`) and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, environmentFields, and:
+OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, and:
 
 - `auth`: `none`, `local` (the service on the Stage server's machine, authenticated from its registration file), `paired` (a token from an `opencode pair` link) or `basic` (entered credentials).
 - `expiresAt`: RFC3339 expiry of a paired token (issued + 30 days); omitted otherwise. Stage renews a token older than 7 days on the next health check (at most one attempt at a time, retried hourly after a failure, keeping the old token).
-- `local`: `{available, url, version, reason}` for the OpenCode service registered on the Stage server's machine now (cached ~10s). `reason` is `""` when available, else `missing`, `invalid`, `unreachable` or `environment` (`OPENCODE_URL` set). Never includes the password.
+- `local`: `{available, url, version, reason}` for the OpenCode service registered on the Stage server's machine now (cached ~10s). `reason` is `""` when available, else `missing`, `invalid` or `unreachable`. Never includes the password.
 
 Each connect tests the service and returns 200 `HarnessStatus`. Credentials and tokens are write-only. PUT, connect-local and pair accept `newInstance` and share the instance check below.
 
 - `PUT /api/harnesses/opencode/settings`: changed endpoint, browserEndpoint, webClient, username, password and `newInstance`. A new endpoint clears stored credentials (auth `none`, or `basic` with credentials in the same request); credentials set `basic`; browserEndpoint/webClient alone keep the auth mode and token. URL errors name the field (`Service URL`, `Browser service URL`, `Web client URL`) and any invisible character with its code point.
 - `POST /api/harnesses/opencode/actions/connect-local` (`{newInstance}` optional): connect the service registered on the Stage server's machine; its password is read from the registration file and never stored.
 - `POST /api/harnesses/opencode/actions/pair`: `{link}` from `opencode pair` (`http(s)://host:port/auth/connect/CODE`, no credentials, query or fragment; else 400). The link origin becomes the endpoint. A link stopped by `instance_changed`/`instance_returned` keeps its redeemed token for 10 minutes, so resending the same link with `newInstance: true` confirms it (links work once).
-- `DELETE /api/harnesses/opencode/connection`: disconnect. Clears the addresses, credentials and token and deactivates the adapter; keeps the connection's identity, tasks and history.
+- `DELETE /api/harnesses/opencode/connection`: disconnect. Clears the addresses, credentials and token and deactivates the adapter; keeps the connection's identity, tasks and history. Never locked.
 
-409 codes: `opencode_local_unavailable` (no, unreadable or invalid registration file, or the service is not answering), `opencode_pairing_expired` (the code expired or was used), `opencode_auth_required` (the service answered 401/403). With `OPENCODE_URL` set, connect-local, pair and disconnect return 409 (managed by the machine's Stage environment).
+409 codes: `opencode_local_unavailable` (no, unreadable or invalid registration file, or the service is not answering), `opencode_pairing_expired` (the code expired or was used), `opencode_auth_required` (the service answered 401/403).
 
 Instance check: an address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service with the same repository at the same path is never bound silently. `connectionId` in the status changes with it.
 
@@ -502,7 +502,7 @@ attempt is consumed.
 - `originSession` / `originSessionTitle`: the session that created the task (agent CLI/MCP provenance; spawned schedule tasks inherit the schedule's). Title is the mirrored session title, null when not mirrored. Not editable.
 - `handoff`: append one handoff block per accepted need to the launch prompt (see "Handoff"). Default `true`; editable in `backlog` only.
 - `attachments`: the task's images (`Attachment`, upload order), sent with the prompt on every launch. Default `[]`. See "Images".
-- `links`: where the session opens, from the harness adapter: `web`, `native` (an app scheme), `service`, `command` (a copyable resume command); each omitted when the harness has none. T3: `web` = `T3_PUBLIC_URL/<environmentId>/<externalSessionId>`, `native` = `t3code://threads/<environmentId>/<externalSessionId>`.
+- `links`: where the session opens, from the harness adapter: `web`, `native` (an app scheme), `service`, `command` (a copyable resume command); each omitted when the harness has none. T3: `web` = `publicUrl/<environmentId>/<externalSessionId>` (the Browser URL), `native` = `t3code://threads/<environmentId>/<externalSessionId>`.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
@@ -835,7 +835,7 @@ Removed outright, returning 404: `GET /api/threads`, `GET /api/threads/search`, 
 ## References
 
 ### `GET /api/refs/resolve?ref=`
-What a pasted reference names. `ref` accepts: a stage task, tree or session link (`…/tasks/<id>`, `…/trees/<id>`, `…/sessions/<id>`; any host, query and fragment ignored, a sub-path prefix allowed), the markdown link the web UI copies (`[stage task #12: Title](…/tasks/12)`, `[stage tree #4: Title](…/trees/4)`), a desktop deep link (`stage://tasks/<id>`, `stage://trees/<id>`, `stage://sessions/<id>`, also under `stage://localhost/`; any `stage-<suffix>://` developer scheme), a T3 web thread link (`T3_PUBLIC_URL/<environmentId>/<threadId>`, matched only on that host), a `t3code://threads/<environmentId>/<threadId>` app link, `#12` or `12` (task), or any other single token (T3 thread id). Stage paths win over T3 links on the same host. 200:
+What a pasted reference names. `ref` accepts: a stage task, tree or session link (`…/tasks/<id>`, `…/trees/<id>`, `…/sessions/<id>`; any host, query and fragment ignored, a sub-path prefix allowed), the markdown link the web UI copies (`[stage task #12: Title](…/tasks/12)`, `[stage tree #4: Title](…/trees/4)`), a desktop deep link (`stage://tasks/<id>`, `stage://trees/<id>`, `stage://sessions/<id>`, also under `stage://localhost/`; any `stage-<suffix>://` developer scheme), a T3 web thread link (`publicUrl/<environmentId>/<threadId>`, the Browser URL, matched only on that host), a `t3code://threads/<environmentId>/<threadId>` app link, `#12` or `12` (task), or any other single token (T3 thread id). Stage paths win over T3 links on the same host. 200:
 ```json
 { "kind": "task", "taskId": 12, "session": { "connectionId": 1, "externalSessionId": "th-1" }, "links": { "web": "…", "native": "…" }, "state": "running" }
 ```

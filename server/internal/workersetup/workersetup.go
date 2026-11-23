@@ -54,6 +54,9 @@ func Attach(o Options) *Setup {
 		o.Logger = slog.Default()
 	}
 	s := &Setup{o: o, log: o.Logger.With("component", "workersetup")}
+	if w := o.Config.WarnRemovedEnv(); w != "" {
+		s.log.Warn(w)
+	}
 	o.Host.OnAttached(s.compose)
 	return s
 }
@@ -92,7 +95,11 @@ func (s *Setup) build(ctx context.Context) error {
 			stopClient()
 		}
 	}()
-	endpoint := t3setup.Resolve(cfg, conn.T3URL)
+	endpoint := t3setup.Resolve(conn)
+	admin, err := ports.LoadT3AdminToken(call)
+	if err != nil {
+		return err
+	}
 	client := s.o.T3
 	switch {
 	case client != nil:
@@ -105,7 +112,7 @@ func (s *Setup) build(ctx context.Context) error {
 		s.log.Info("using fake T3 client")
 	default:
 		mc := t3.NewMCPClient(t3.Options{
-			BaseURL: endpoint.URL, AdminToken: cfg.T3AdminToken, PublicURL: endpoint.PublicURL, ClientName: cfg.T3ClientName,
+			BaseURL: endpoint.URL, AdminToken: admin, PublicURL: endpoint.PublicURL, ClientName: cfg.T3ClientName,
 			Store: ports, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: s.log,
 		})
 		go func() {
@@ -120,12 +127,13 @@ func (s *Setup) build(ctx context.Context) error {
 		// The machine's OpenCode connection is created by the first service
 		// that connects.
 		Active: func(ctx context.Context) (int64, error) { return ports.Active(ctx, opencode.Kind) },
-	}, cfg.OpenCode, s.log)
+	}, s.log)
 	if err != nil {
 		return err
 	}
 	t3Setup := t3setup.New(t3setup.Options{
 		Config: cfg, Settings: ports, Identity: ports, Client: client, Endpoint: endpoint, Fake: t3setup.IsFake(client), Logger: s.log,
+		AdminTokens: ports, AdminToken: admin,
 		// Pairing created the machine's T3 connection, or moved T3 to
 		// another one.
 		OnSwitched: func(sw db.Switch) { local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New)) },

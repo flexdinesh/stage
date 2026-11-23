@@ -134,23 +134,26 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
 `stage service restart`.
 
 - Allowed keys: `STAGE_LISTEN`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`,
-  `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `T3_FAKE`, `T3_FAKE_SEED`,
-  `T3_BIN` (the t3 CLI auto-pair runs, when it is not in a usual install
-  dir). Unknown keys, `STAGE_DATA_DIR` and `STAGE_ENV` are errors.
+  `T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN` (the t3 CLI auto-pair runs, when it
+  is not in a usual install dir). Unknown keys, `STAGE_DATA_DIR` and
+  `STAGE_ENV` are errors. So are the removed harness keys (`T3_URL`,
+  `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`,
+  `OPENCODE_WEB_URL`, `OPENCODE_USERNAME`, `OPENCODE_PASSWORD`): the error
+  says to remove the line and set the connection up in Settings >
+  Connections.
 - `STAGE_LISTEN` must include `unix` (the socket desktop and CLI use); add
   TCP for a browser with `unix,127.0.0.1:7380`.
 - A file readable or writable by group or others is refused (it may hold
-  `T3_ADMIN_TOKEN`).
+  secrets).
 - `--managed` ignores those keys, `STAGE_DATA_DIR` and `STAGE_ENV` in the
   inherited environment (`systemctl --user import-environment`,
   `launchctl setenv` can leak them), so the service never depends on a shell
   or on webview storage. A missing file means the template defaults.
 - T3 credentials: pairing (Settings, `stage harness t3 run auto-pair`, or a
   `t3 pair` code: `stage harness t3 run pair code=CODE`) stores Stage's T3
-  token in `stage.db`, so a service needs nothing else. A T3 URL saved in
-  Settings (`stage harness t3 set url=URL`) is stored there too; `T3_URL` wins
-  over it. `T3_ADMIN_TOKEN` is optional
-  (auto-renew) and is never assumed inherited by GUI launches.
+  token in `stage.db`, so a service needs nothing else. The T3 URL, Browser
+  URL and optional admin token (auto-renew) saved in Settings (or `stage
+  harness t3 set`) are stored there too.
 - OpenCode credentials: an `opencode pair` token (Settings, `stage harness
   opencode run pair link=LINK`) or entered credentials are stored in
   `stage.db`. A local connection (`stage harness opencode run connect-local`)
@@ -310,11 +313,12 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   the identity's default data dir) and `STAGE_WORKER_LISTEN` (the agent
   gateway's listeners, default `unix`, which is required; add a loopback
   `host:port` for HTTP MCP clients;
-  [runtime.md](runtime.md#agent-gateway)), plus the harness settings the
-  server's `service.env` takes (`T3_*`, `OPENCODE_*`): they lock those
-  settings for this machine ([execution.md](execution.md#remote-machines)).
+  [runtime.md](runtime.md#agent-gateway)), plus the harness options the
+  server's `service.env` takes (`T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN`). The
+  removed harness keys are errors, as in `service.env`; connections are set
+  up in Settings > Connections ([execution.md](execution.md#remote-machines)).
   `--managed` ignores `STAGE_DATA_DIR`, `STAGE_WORKER_CONFIG`,
-  `STAGE_WORKER_LISTEN` and the harness settings in the inherited
+  `STAGE_WORKER_LISTEN` and the harness options in the inherited
   environment, like the server, and refuses `--listen`.
 - **One role per identity.** `start` and `restart` refuse (exit 7) while the
   other role's generated definition exists; `status` reports

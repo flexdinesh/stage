@@ -76,15 +76,16 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// configured: paired, connected or pointed at a chosen URL.
-func configured(st Status) bool {
-	return st.Conn.HasToken || st.Conn.Connected || st.Endpoint.Source != SourceDefault
+// configured: paired (a stored token, or an admin token that mints one).
+// An unpaired T3 is not a connection, whatever URL is saved.
+func (c *Connector) configured(st Status) bool {
+	return st.Conn.HasToken || st.Conn.Connected || c.svc.AdminTokenSet()
 }
 
 func (c *Connector) Summary(ctx context.Context) harness.Summary {
 	st := c.svc.Status(ctx, false)
 	conn, _ := c.svc.o.Settings.GetConnection(ctx)
-	out := harness.Summary{ConnectionID: conn.ConnectionID, Configured: configured(st), Connected: st.Conn.Connected, LastError: st.Conn.LastError}
+	out := harness.Summary{ConnectionID: conn.ConnectionID, Configured: c.configured(st), Connected: st.Conn.Connected, LastError: st.Conn.LastError}
 	if out.LastError == "" && conn.LastError != nil {
 		out.LastError = *conn.LastError
 	}
@@ -105,7 +106,7 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		T3URLSource:          st.Endpoint.Source,
 		EnvironmentID:        strPtr(st.Conn.EnvironmentID),
 		ClientID:             strPtr(st.Conn.ClientID),
-		AdminTokenConfigured: c.svc.o.Config.T3AdminToken != "",
+		AdminTokenConfigured: c.svc.AdminTokenSet(),
 		ConnectionID:         conn.ConnectionID,
 		LastError:            strPtr(st.Conn.LastError),
 		LastFullSyncAt:       conn.LastFullSyncAt,
@@ -131,13 +132,14 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		d.Sync = c.progress(conn.ConnectionID)
 	}
 	out := harness.Status{
-		Summary: harness.Summary{ConnectionID: conn.ConnectionID, Configured: configured(st), Connected: st.Conn.Connected},
+		Summary: harness.Summary{ConnectionID: conn.ConnectionID, Configured: c.configured(st), Connected: st.Conn.Connected},
 		State:   string(st.State),
 		Details: d,
-		Fields: []harness.FieldState{{
-			ID: "url", Value: st.Endpoint.URL, Set: st.Endpoint.Source != SourceDefault,
-			Source: urlSource(st.Endpoint.Source), Locked: st.Endpoint.Source == SourceEnv,
-		}},
+		Fields: []harness.FieldState{
+			{ID: "url", Value: st.Endpoint.URL, Set: st.Endpoint.Source != SourceDefault, Source: urlSource(st.Endpoint.Source)},
+			{ID: "publicUrl", Value: publicValue(st.Endpoint), Set: st.Endpoint.PublicSet, Source: setSource(st.Endpoint.PublicSet)},
+			{ID: "adminToken", Set: d.AdminTokenConfigured, Source: setSource(d.AdminTokenConfigured)},
+		},
 		Actions: []harness.ActionState{
 			{ID: t3.ActionPair, Available: true},
 			{ID: t3.ActionAutoPair, Available: st.AutoPair.Available, Reason: st.AutoPair.Reason},
@@ -160,18 +162,58 @@ func urlSource(s string) string {
 	return s
 }
 
-// Configure takes {"url": string|null}; null goes back to the default.
+// setSource is a field's source from whether it is saved.
+func setSource(set bool) string {
+	if set {
+		return "saved"
+	}
+	return "default"
+}
+
+// publicValue is the saved browser URL ("" when it follows the T3 URL).
+func publicValue(ep Endpoint) string {
+	if ep.PublicSet {
+		return ep.PublicURL
+	}
+	return ""
+}
+
+// Configure takes any of {"url", "publicUrl", "adminToken"} (at least one):
+// a string sets it, null clears it (url: the default; publicUrl: the T3
+// URL; adminToken: none). They apply in that order; the first failure
+// stops.
 func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (harness.Result, error) {
 	var body struct {
-		URL db.Optional[string] `json:"url"`
+		URL        db.Optional[string] `json:"url"`
+		PublicURL  db.Optional[string] `json:"publicUrl"`
+		AdminToken db.Optional[string] `json:"adminToken"`
 	}
 	if err := db.DecodeStrict(settings, &body); err != nil {
 		return harness.Result{}, err
 	}
-	if !body.URL.Set {
-		return harness.Result{}, db.Invalid("url is required (null resets to the default)")
+	if !body.URL.Set && !body.PublicURL.Set && !body.AdminToken.Set {
+		return harness.Result{}, db.Invalid("set url, publicUrl or adminToken (null clears it)")
 	}
-	return harness.Result{}, c.svc.SetURL(ctx, body.URL.Ptr())
+	if body.URL.Set {
+		if err := c.svc.SetURL(ctx, body.URL.Ptr()); err != nil {
+			return harness.Result{}, err
+		}
+	}
+	if body.PublicURL.Set {
+		if err := c.svc.SetPublicURL(ctx, body.PublicURL.Ptr()); err != nil {
+			return harness.Result{}, err
+		}
+	}
+	if body.AdminToken.Set {
+		tok := ""
+		if p := body.AdminToken.Ptr(); p != nil {
+			tok = *p
+		}
+		if err := c.svc.SetAdminToken(ctx, tok); err != nil {
+			return harness.Result{}, err
+		}
+	}
+	return harness.Result{}, nil
 }
 
 // Run runs pair {"code"} or auto-pair {}.
@@ -209,5 +251,5 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 	return out, nil
 }
 
-// Disconnect forgets the token (Unpair).
+// Disconnect forgets the token and the saved settings (Unpair).
 func (c *Connector) Disconnect(ctx context.Context) error { return c.svc.Unpair(ctx) }

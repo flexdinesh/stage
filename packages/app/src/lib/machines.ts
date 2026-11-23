@@ -133,21 +133,10 @@ export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" |
   }
 }
 
-/**
- * Setup copy that names the machine (`remote`: a remote machine's label, null for the local machine): settings its
- * environment locks, where its CLIs run, and what to restart after an environment change.
- */
+/** Setup copy that names the machine where its CLIs run (`remote`: a remote machine's label, null for the local machine). */
 export function setupCopy(remote: string | null) {
   return {
     /** "this machine", or the remote machine's label. */
     machine: remote ?? "this machine",
-    /** The hint under a field the environment locks. */
-    envLock: (env: string | undefined) => (remote === null ? `Set by ${env ?? "the server environment"}.` : `Set by ${env ?? "the worker environment"} on ${remote}.`),
-    /** Suffix naming a remote machine after an environment note ("set by T3_URL on desk"); "" locally. */
-    on: remote === null ? "" : ` on ${remote}`,
-    /** Whose environment manages a setting. */
-    managedBy: remote === null ? "the Stage server environment" : `${remote}'s worker environment`,
-    /** What reads an environment change. */
-    restart: remote === null ? "restart stage" : "restart its worker",
   };
 }

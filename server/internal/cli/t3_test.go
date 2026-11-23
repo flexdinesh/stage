@@ -12,7 +12,7 @@ func TestT3Status(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "harness", "t3")
 	if code != 0 || !strings.Contains(out, "t3 connected at http://127.0.0.1:3773 (default)") ||
-		!strings.Contains(out, "public    http://t3.test") || !strings.Contains(out, "server    fake vfake (environment fake-env)") ||
+		strings.Contains(out, "public ") || !strings.Contains(out, "server    fake vfake (environment fake-env)") ||
 		!strings.Contains(out, "sync      never") || !strings.Contains(out, "auto-pair unavailable (fake T3)") || strings.Contains(out, "next:") {
 		t.Fatalf("t3: %d %q %q", code, out, errOut)
 	}
@@ -92,11 +92,15 @@ func TestT3URL(t *testing.T) {
 	if code, _, errOut := h.run("", "harness", "t3", "set", "url=ftp://x"); code != 1 || !strings.Contains(errOut, "stage API 400: url must start with http:// or https://") {
 		t.Fatalf("bad url: %d %q", code, errOut)
 	}
-	if code, _, errOut := h.run("", "harness", "t3", "set", "nope=1"); code != 2 || !strings.Contains(errOut, `unknown field "nope" (want url)`) {
+	if code, _, errOut := h.run("", "harness", "t3", "set", "nope=1"); code != 2 || !strings.Contains(errOut, `unknown field "nope" (want url, publicUrl, adminToken)`) {
 		t.Fatalf("url and reset: %d %q", code, errOut)
 	}
 	code, out, errOut = h.run("", "harness", "t3", "set", "--reset", "url")
 	if code != 0 || !strings.Contains(out, "at http://127.0.0.1:3773 (default)") || h.fake.BaseURL != "http://127.0.0.1:3773" {
 		t.Fatalf("reset: %d %q %q", code, out, errOut)
+	}
+	code, out, errOut = h.run("", "harness", "t3", "set", "publicUrl=https://t3.example")
+	if code != 0 || !strings.Contains(out, "public    https://t3.example") || h.fake.PublicURL != "https://t3.example" {
+		t.Fatalf("browser url: %d %q %q", code, out, errOut)
 	}
 }

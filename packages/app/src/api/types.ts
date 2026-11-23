@@ -104,8 +104,8 @@ export interface Health {
 /** Precedence: unreachable > unpaired > expired > rejected > connected. */
 export type T3State = "unreachable" | "unpaired" | "expired" | "rejected" | "connected";
 
-/** Where the T3 URL comes from; `env` (T3_URL) locks it. */
-export type T3UrlSource = "env" | "settings" | "default";
+/** Where the T3 URL comes from: saved in Settings, or the default. */
+export type T3UrlSource = "settings" | "default";
 
 /** Why the server cannot pair through the local t3 CLI. */
 export type AutoPairReason = "not_local" | "cli_not_found" | "fake";
@@ -131,11 +131,13 @@ export interface T3Status {
   connected: boolean;
   state: T3State;
   t3Url: string;
+  /** The saved Browser URL, else the T3 URL. */
   publicUrl: string;
   t3UrlSource: T3UrlSource;
   environmentId: string | null;
   clientId: string | null;
   tokenExpiresAt: string | null;
+  /** An admin token is saved in Settings (Stage renews its token itself). */
   adminTokenConfigured: boolean;
   lastError: string | null;
   lastFullSyncAt: string | null;
@@ -157,9 +159,13 @@ export type T3StatusWire = Omit<
 > &
   Partial<Pick<T3Status, "state" | "t3UrlSource" | "reachable" | "checkedAt" | "probeError" | "t3" | "autoPair" | "sync">>;
 
-export interface SetT3UrlRequest {
-  /** null resets to the default. */
-  url: string | null;
+/** PUT T3 settings: at least one field; a string sets it, null clears it (url: the default, publicUrl: the T3 URL, adminToken: none). */
+export interface T3SettingsRequest {
+  url?: string | null;
+  /** Browser URL for Open in T3 links. */
+  publicUrl?: string | null;
+  /** Lets Stage renew its token itself. */
+  adminToken?: string | null;
 }
 
 export interface PairRequest {
@@ -299,8 +305,6 @@ export interface SetupField {
   id: string;
   label: string;
   kind: "text" | "url" | "secret" | "bool";
-  /** The server environment variable that locks it when set. */
-  env?: string;
   help?: string;
 }
 export interface SetupAction { id: string; label: string; input?: SetupField[] }
@@ -332,7 +336,7 @@ export interface HarnessStatus<D = unknown> {
   /** A harness-defined word: connected, unpaired, unavailable... */
   state: string;
   reason?: string;
-  fields: { id: string; value: string; set: boolean; source: "env" | "saved" | "default"; locked: boolean }[];
+  fields: { id: string; value: string; set: boolean; source: "saved" | "default" }[];
   actions: { id: string; available: boolean; reason?: string }[];
   details?: D;
   /** The connection a setting change or action just retired. */
@@ -408,7 +412,6 @@ export interface OpenCodeStatus {
   browserEndpoint: string;
   webClient: string;
   hasCredentials: boolean;
-  environmentFields: string[];
   /** `rejected`: OpenCode answered but refused Stage's sign-in (pairing expired or password changed). */
   state: "unconfigured" | "connected" | "unavailable" | "rejected";
   reason?: string;
@@ -427,7 +430,7 @@ export interface OpenCodeLocal {
   available: boolean;
   url: string;
   version: string;
-  reason: "" | "missing" | "invalid" | "unreachable" | "environment";
+  reason: "" | "missing" | "invalid" | "unreachable";
 }
 export interface HarnessChoice {id: string; label: string; available: boolean; reason?: string}
 export interface HarnessOption {id: string; values: (string | boolean)[]; default?: string | boolean}

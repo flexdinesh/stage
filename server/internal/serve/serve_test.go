@@ -82,7 +82,7 @@ func cfg(t *testing.T, dataDir string, listens ...string) config.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return config.Config{Listen: addrs, DataDir: dataDir, T3URL: "http://127.0.0.1:1", T3PublicURL: "http://t3.test", T3ClientName: "stage"}
+	return config.Config{Listen: addrs, DataDir: dataDir, T3ClientName: "stage"}
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

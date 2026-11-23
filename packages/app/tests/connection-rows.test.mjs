@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addConnectionOptions, addConnectionReason, connectionRows, machineLive, machineRole } from "../src/lib/connectionRows.ts";
+import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, machineRole } from "../src/lib/connectionRows.ts";
 
 const main = { id: 1, label: "deebox", kind: "local", status: "online", connections: [] };
 const studio = { id: 2, label: "studio", kind: "remote", status: "online", connections: [] };
@@ -55,4 +55,14 @@ test("Add connection is disabled offline, on another API version, while checking
   assert.equal(addConnectionReason(main, []), "no harness to connect");
   assert.equal(addConnectionReason({ ...studio, status: "offline" }, some), "studio is offline");
   assert.equal(addConnectionReason({ ...studio, status: "needs_update" }, some), "studio needs an update");
+});
+
+test("empty machine: a Connect button per harness it can add, none while options load", () => {
+  assert.deepEqual(connectShortcuts(addConnectionOptions(KINDS, [])), [
+    { kind: "t3", label: "Connect T3 Code" },
+    { kind: "opencode", label: "Connect OpenCode" },
+  ]);
+  assert.deepEqual(connectShortcuts(addConnectionOptions(KINDS, [{ harness: "t3" }])), [{ kind: "opencode", label: "Connect OpenCode" }], "a connected harness is not offered");
+  assert.deepEqual(connectShortcuts(null), [], "options loading: text only");
+  assert.deepEqual(connectShortcuts([]), []);
 });

@@ -54,6 +54,21 @@ func (m MachineStore) SetT3URL(ctx context.Context, u string) error {
 	return m.Store.SetT3URL(ctx, m.machine, u)
 }
 
+// SetT3PublicURL saves the machine's T3 browser URL.
+func (m MachineStore) SetT3PublicURL(ctx context.Context, u string) error {
+	return m.Store.SetT3PublicURL(ctx, m.machine, u)
+}
+
+// LoadT3AdminToken reads the machine's T3 admin token.
+func (m MachineStore) LoadT3AdminToken(ctx context.Context) (string, error) {
+	return m.Store.LoadT3AdminToken(ctx, m.machine)
+}
+
+// SaveT3AdminToken saves the machine's T3 admin token.
+func (m MachineStore) SaveT3AdminToken(ctx context.Context, tok string) error {
+	return m.Store.SaveT3AdminToken(ctx, m.machine, tok)
+}
+
 // SetLastFullSync records the machine's last T3 full sync.
 func (m MachineStore) SetLastFullSync(ctx context.Context, at time.Time) error {
 	return m.Store.SetLastFullSync(ctx, m.machine, at)

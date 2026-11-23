@@ -9,12 +9,12 @@ import (
 )
 
 func TestParseServiceEnv(t *testing.T) {
-	in := "\ufeff# comment\r\nSTAGE_LISTEN=unix,127.0.0.1:7380\r\n\nT3_URL = \"http://t3:3773/?a=b\"\nT3_ADMIN_TOKEN='x=y'\n"
+	in := "\ufeff# comment\r\nSTAGE_LISTEN=unix,127.0.0.1:7380\r\n\nSTAGE_PUBLIC_URL = \"http://stage:7380/?a=b\"\nT3_BIN='x=y'\n"
 	got, err := ParseServiceEnv(strings.NewReader(in))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380", "T3_URL": "http://t3:3773/?a=b", "T3_ADMIN_TOKEN": "x=y"}
+	want := map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380", "STAGE_PUBLIC_URL": "http://stage:7380/?a=b", "T3_BIN": "x=y"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
 	}
@@ -23,7 +23,7 @@ func TestParseServiceEnv(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", k, got[k], v)
 		}
 	}
-	for _, bad := range []string{"STAGE_DATA_DIR=/x\n", "STAGE_ENV=dev\n", "HOME=/x\n", "noequals\n", "T3_URL=a\nT3_URL=b\n"} {
+	for _, bad := range []string{"STAGE_DATA_DIR=/x\n", "STAGE_ENV=dev\n", "HOME=/x\n", "noequals\n", "T3_BIN=a\nT3_BIN=b\n", "T3_URL=http://t3:3773\n", "T3_ADMIN_TOKEN=x\n", "OPENCODE_URL=http://oc\n"} {
 		if _, err := ParseServiceEnv(strings.NewReader(bad)); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -43,14 +43,14 @@ func TestReadServiceEnv(t *testing.T) {
 	if v, err := ReadServiceEnv(path); err != nil || v["STAGE_LISTEN"] != "unix" {
 		t.Fatalf("missing file: %v %v", v, err)
 	}
-	if err := os.WriteFile(path, []byte("T3_URL=http://x\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("T3_BIN=/x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ReadServiceEnv(path); err == nil || !strings.Contains(err.Error(), "chmod 600") {
 		t.Fatalf("0644 accepted: %v", err)
 	}
 	_ = os.Chmod(path, 0o600)
-	if v, err := ReadServiceEnv(path); err != nil || v["STAGE_LISTEN"] != "unix" || v["T3_URL"] != "http://x" {
+	if v, err := ReadServiceEnv(path); err != nil || v["STAGE_LISTEN"] != "unix" || v["T3_BIN"] != "/x" {
 		t.Fatalf("defaults: %v %v", v, err)
 	}
 }
@@ -59,10 +59,10 @@ func TestLoadManaged(t *testing.T) {
 	home := t.TempDir()
 	inherited := map[string]string{
 		"HOME": home, "STAGE_DATA_DIR": "/elsewhere", "STAGE_ENV": "dev", "STAGE_LISTEN": "127.0.0.1:1",
-		"T3_URL": "http://inherited", "T3_FAKE": "1", "STAGE_ALLOWED_ORIGINS": "bogus",
+		"T3_BIN": "/inherited", "T3_FAKE": "1", "STAGE_ALLOWED_ORIGINS": "bogus",
 	}
 	getenv := func(k string) string { return inherited[k] }
-	cfg, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix", "T3_URL": "http://file"})
+	cfg, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix", "T3_BIN": "/file"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestLoadManaged(t *testing.T) {
 	if cfg.DataDir != def {
 		t.Fatalf("data dir %s, want default %s", cfg.DataDir, def)
 	}
-	if cfg.T3URL != "http://file" || cfg.T3Fake || len(cfg.AllowedOrigins) != 0 || cfg.T3ClientName != "stage" {
+	if cfg.T3Bin != "/file" || cfg.T3Fake || len(cfg.AllowedOrigins) != 0 || cfg.T3ClientName != "stage" {
 		t.Fatalf("inherited values leaked: %+v", cfg)
 	}
 	if len(cfg.Listen) != 1 || cfg.Listen[0].Network != "unix" || !cfg.Listen[0].Private {

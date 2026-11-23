@@ -129,9 +129,9 @@ suite cannot tell a remote machine from the local one.
   online, over ports that call the main server (`setup.*` worker-to-main
   kinds, `remote.ServeSetup`, always scoped to the token's machine; a
   connection of another machine is `not_found`). The main server keeps the
-  connection rows, identity, status, non-secret settings (T3 URL, OpenCode
-  addresses and auth mode) and sync bookkeeping; harness credentials (the
-  T3 token, OpenCode Basic credentials or paired token) stay in the
+  connection rows, identity, status, non-secret settings (T3 URL and Browser
+  URL, OpenCode addresses and auth mode) and sync bookkeeping; harness credentials (the
+  T3 token and admin token, OpenCode Basic credentials or paired token) stay in the
   worker's `credentials.json` (`0600`, deleted on join and leave) and never
   cross the channel. The main server's `remote.Connector` per machine and
   kind forwards `Status`, `Configure`, `Run` and `Disconnect` as
@@ -143,9 +143,7 @@ suite cannot tell a remote machine from the local one.
   `machine_setup_starting`). A remote machine's connection row is created
   on first connect (T3 pairing, OpenCode connect or pair), and a switch on
   the worker follows the connections on the main server (runners, sync).
-  Harness environment settings come from the worker's environment
-  (managed: `worker.env`; foreground: its shell) and lock those settings
-  for that machine only.
+  No environment variable sets a connection.
 - **Verification.** Every `TestContract*` in `server/internal/sync` runs
   twice, in process and behind a real worker channel
   (`remote/remotetest`: the hub and its HTTP serving on a loopback server
@@ -153,7 +151,7 @@ suite cannot tell a remote machine from the local one.
   worker restart mid-launch, an offline machine, refused and late saves,
   images, traits and ops. Setup runs end to end over a real channel and
   store in `workersetup` (T3 pair creating the machine's connection,
-  environment locks, OpenCode credentials kept on the worker, calls scoped
+  OpenCode credentials kept on the worker, calls scoped
   to the caller's machine).
 
 ## Harness registry

@@ -3,7 +3,6 @@ package opencodesetup
 import (
 	"context"
 	"encoding/json"
-	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -37,34 +36,26 @@ func (c *Connector) Status(ctx context.Context, _ bool) (harness.Status, error) 
 	if st.Reason != "" {
 		sum.LastError = st.Reason
 	}
-	field := func(id, value string, envKey string) harness.FieldState {
-		locked := slices.Contains(st.EnvironmentFields, envKey)
+	field := func(id, value string) harness.FieldState {
 		src := "saved"
-		switch {
-		case locked:
-			src = "env"
-		case value == "":
+		if value == "" {
 			src = "default"
 		}
-		return harness.FieldState{ID: id, Value: value, Set: value != "", Source: src, Locked: locked}
+		return harness.FieldState{ID: id, Value: value, Set: value != "", Source: src}
 	}
-	creds := field("password", "", "credentials")
+	creds := field("password", "")
 	creds.Set = st.HasCredentials
-	user := field("username", "", "credentials")
+	user := field("username", "")
 	local := harness.ActionState{ID: opencode.ActionConnectLocal, Available: st.Local.Available, Reason: st.Local.Reason}
 	pair := harness.ActionState{ID: opencode.ActionPair, Available: true}
-	if slices.Contains(st.EnvironmentFields, "endpoint") {
-		local.Available, local.Reason = false, "environment"
-		pair.Available, pair.Reason = false, "environment"
-	}
 	return harness.Status{
 		Summary: sum,
 		State:   st.State,
 		Reason:  st.Reason,
 		Fields: []harness.FieldState{
-			field("endpoint", st.Endpoint, "endpoint"),
-			field("browserEndpoint", st.BrowserEndpoint, "browserEndpoint"),
-			field("webClient", st.WebClient, "webClient"),
+			field("endpoint", st.Endpoint),
+			field("browserEndpoint", st.BrowserEndpoint),
+			field("webClient", st.WebClient),
 			user, creds,
 		},
 		Actions: []harness.ActionState{local, pair},

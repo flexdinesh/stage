@@ -396,7 +396,7 @@ func (c *Controller) ensureServiceEnv(rep *Report) error {
 			return werr
 		}
 		rep.Changes.ServiceEnvCreated = true
-		rep.Notes = append(rep.Notes, "created "+c.p.ServiceEnv+" (edit it to set T3_URL and other settings, then `stage service restart`)")
+		rep.Notes = append(rep.Notes, "created "+c.p.ServiceEnv+" (edit it to set listeners and other settings, then `stage service restart`)")
 	case !errors.Is(err, fs.ErrExist):
 		return err
 	}

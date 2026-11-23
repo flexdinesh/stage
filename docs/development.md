@@ -10,7 +10,7 @@ Tools (Go, Node, pnpm) and tasks live in `mise.toml`: `mise install`, then
 a SQLite file per branch (`.scratch/dev/<branch>/stage.db`), tests use a temp
 file per test, and only `mise run up` / `mise run down` touch the compose stack.
 
-- `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and the browser host on Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. Set `T3_FAKE=1` in `.env.dev` to work without T3.
+- `mise run dev`: the branch database, the Go server on `127.0.0.1:7390` and the browser host on Vite, which proxies `/api` to it. It talks to the real T3 as its own session (`stage dev`). It loads `.env.dev` (copy `.env.dev.example`), never `.env`, and always sets `STAGE_DATA_DIR` itself. A fresh dev database has no connections: pair T3 in Settings > Connections (harness URLs and tokens are never read from the environment), or set `T3_FAKE=1` in `.env.dev` to work without T3.
 - `mise run test`: Go vet and tests; shared app, browser host and desktop UI tests, typecheck and lint.
 - `mise run check`: everything CI-like (Go vet and tests, workspace install with a frozen lockfile, tests, typecheck, lint, website checks, desktop app and fixture Go tests, release tool). Run before a PR.
 - `mise run build`: the browser bundle (`apps/web/dist`) embedded into `bin/stage` (static, pure Go SQLite; `./bin/stage serve` runs it, config from the environment only).
@@ -166,10 +166,10 @@ from the stable install. Connecting it to the same T3 is a deliberate step:
 the Dashboard's T3 setup ("Pair with T3" when T3 and its `t3` CLI are on
 this machine, else a code from `t3 pair`), Settings, or `stage-dev t3 pair
 [--code CODE]`. Auto-pair labels the code `stage dev mcp`; a `mise run dev`
-server pairs the same way. The T3 URL can be saved there too (`stage-dev t3
-url URL`); a `T3_ADMIN_TOKEN`, `T3_URL` or `T3_BIN` goes in Stage Dev's own
-`service.env` (`~/.config/stage-dev/service.env`, then `stage-dev service
-restart`). Both installs then run agents on that T3 as separate clients;
+server pairs the same way. The T3 URL, Browser URL and optional admin token
+are saved there too (Settings > Connections > T3, or `stage-dev harness t3
+set`); a `T3_BIN` goes in Stage Dev's own `service.env`
+(`~/.config/stage-dev/service.env`, then `stage-dev service restart`). Both installs then run agents on that T3 as separate clients;
 each Stage server is bound to the T3 environment it first paired with.
 
 ## Troubleshooting

@@ -23,10 +23,10 @@ type Details = Record<string, { lines: string[]; error: string | null }>;
 /** The status sentence, kind and tone, and each item's detail lines: every configured harness (workers join later). */
 export function useStatus(): { row: Row; details: Details } {
   const harnesses = useHarnesses();
-  const t3 = statusRead(useT3Status());
+  // Until connections load, keep checking.
+  const showT3 = harnesses.loaded && harnesses.activeConnection("t3")?.configured === true;
+  const t3 = statusRead(useT3Status({ enabled: showT3 }));
   const openCode = statusRead(useOpenCodeStatus());
-  // Until connections load, keep checking; if they never load, fall back to T3 alone.
-  const showT3 = harnesses.loaded ? harnesses.activeConnection("t3")?.configured === true : harnesses.error != null;
   const showOpenCode = harnesses.loaded && harnesses.activeConnection("opencode")?.configured === true;
   const items: StatusItem[] = [];
   const details: Details = {};
@@ -55,7 +55,7 @@ export function useStatus(): { row: Row; details: Details } {
       error: openCodeErrorText(openCode),
     };
   }
-  return { row: statusRow(items, { checking: !harnesses.loaded && !showT3, empty: "Connect a harness" }), details };
+  return { row: statusRow(items, { checking: !harnesses.loaded, empty: "Connect a harness" }), details };
 }
 
 const TEXT: Record<StatusTone, string> = { ok: "text-muted", idle: "text-muted", need: "text-need-fg", bad: "text-bad" };

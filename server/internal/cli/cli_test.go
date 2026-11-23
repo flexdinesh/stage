@@ -63,11 +63,11 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
 	local, _ := h.sync.Machines().Local(db.LocalMachine)
 	ocPorts := machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(opencode.Descriptor))
-	openCode, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ocPorts, Identity: ocPorts, Install: local.Install}, config.OpenCodeSettings{}, log)
+	openCode, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ocPorts, Identity: ocPorts, Install: local.Install}, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := t3setup.New(t3setup.Options{Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(t3.Descriptor)), Client: h.fake, Fake: true, Logger: log})
+	setup := t3setup.New(t3setup.Options{Config: config.Config{}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(t3.Descriptor)), Client: h.fake, Fake: true, Logger: log})
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
 	h.sync.Harnesses = reg
 	connectors, err := stageharness.NewConnectors(reg, map[int64]map[string]stageharness.Connector{db.LocalMachine: {
@@ -77,7 +77,7 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 		t.Fatal(err)
 	}
 	deps := api.Deps{
-		Config: config.Config{T3URL: "http://127.0.0.1:3773", T3PublicURL: "http://t3.test"},
+		Config: config.Config{},
 		Store:  store, Setup: setup, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 		Harnesses: reg, Connectors: connectors,
 	}

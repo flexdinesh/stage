@@ -31,16 +31,15 @@ type OpenCodeEdit struct {
 }
 
 type OpenCodeStatus struct {
-	ConnectionID      int64      `json:"connectionId"`
-	Endpoint          string     `json:"endpoint"`
-	BrowserEndpoint   string     `json:"browserEndpoint"`
-	WebClient         string     `json:"webClient"`
-	HasCredentials    bool       `json:"hasCredentials"`
-	EnvironmentFields []string   `json:"environmentFields"`
-	State             string     `json:"state"`
-	Reason            string     `json:"reason,omitempty"`
-	CheckedAt         *time.Time `json:"checkedAt,omitempty"`
-	Auth              string     `json:"auth"`
+	ConnectionID    int64      `json:"connectionId"`
+	Endpoint        string     `json:"endpoint"`
+	BrowserEndpoint string     `json:"browserEndpoint"`
+	WebClient       string     `json:"webClient"`
+	HasCredentials  bool       `json:"hasCredentials"`
+	State           string     `json:"state"`
+	Reason          string     `json:"reason,omitempty"`
+	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
+	Auth            string     `json:"auth"`
 	// ExpiresAt is when a paired session token expires (paired only).
 	ExpiresAt *time.Time    `json:"expiresAt,omitempty"`
 	Local     OpenCodeLocal `json:"local"`

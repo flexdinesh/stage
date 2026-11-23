@@ -9,7 +9,9 @@ import { GROUP_META, GroupPanel, GroupPanelSkeleton, StatCount, useGroupFold } f
 import { TaskRows } from "../components/TaskList.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
-import { ATTENTION_GROUPS, awaitingReview, inGroup, type GroupKey } from "../lib/dashboard.ts";
+import { ATTENTION_GROUPS, awaitingReview, harnessNotice, inGroup, type GroupKey } from "../lib/dashboard.ts";
+import { LOCAL_MACHINE_ID } from "../lib/machines.ts";
+import { SETTINGS_PATH } from "../lib/settings.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
 import { Alert, AppButton, PageHeader, QueryState, SectionHeading, Skeleton, SkeletonBar, TextLink, buttonClass, type ChipTone } from "../components/ui.tsx";
@@ -58,28 +60,28 @@ function InFlight({ cells }: { cells: InFlightCell[] }) {
 /** A harness connection notice above the dashboard, spaced like T3Alert. */
 /** Planning remains available before pairing and during connection failures. */
 export function DashboardPage() {
-  const t3 = useT3Status();
-  const openCode = useOpenCodeStatus();
   const harnesses = useHarnesses();
-  // The server's view (a token, or a saved/env T3 URL), as the top-bar control uses: a disconnected T3 stays quiet.
-  const t3Configured = harnesses.activeConnection("t3")?.configured ?? false;
+  // The server's view (paired T3, set-up OpenCode), as the status control uses: a disconnected harness stays quiet.
+  const notice = harnessNotice(harnesses.loaded ? harnesses.list : null, LOCAL_MACHINE_ID);
+  const t3 = useT3Status({ enabled: notice === "t3" });
+  const openCode = useOpenCodeStatus();
   return (
     <>
-      {t3Configured ? (
+      {notice === "t3" ? (
         <T3Alert status={t3.data} />
-      ) : openCode.data?.state === "unconfigured" ? (
+      ) : notice === "connect" ? (
         <Alert tone="need" className="mb-3.5">
-          <TextLink variant="rest" to="/settings">Connect a harness</TextLink> to start tasks in T3 or OpenCode.
+          <TextLink variant="rest" to={SETTINGS_PATH.connections}>Connect a harness</TextLink> to start tasks in T3 or OpenCode.
         </Alert>
       ) : null}
       {openCode.data?.state === "unavailable" ? (
         <Alert tone="need" className="mb-3.5">
-          OpenCode is unavailable. <TextLink variant="rest" to="/settings">Check connection</TextLink>
+          OpenCode is unavailable. <TextLink variant="rest" to={SETTINGS_PATH.connections}>Check connection</TextLink>
         </Alert>
       ) : null}
       {openCode.data?.state === "rejected" ? (
         <Alert tone="need" className="mb-3.5">
-          OpenCode no longer accepts Stage's sign-in. <TextLink variant="rest" to="/settings">Reconnect</TextLink>
+          OpenCode no longer accepts Stage's sign-in. <TextLink variant="rest" to={SETTINGS_PATH.connections}>Reconnect</TextLink>
         </Alert>
       ) : null}
       <CompletionLinger>

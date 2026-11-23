@@ -1,5 +1,5 @@
 // Package t3 is the boundary to T3 Code. Everything T3-specific (MCP over
-// streamable HTTP at T3_URL/mcp, OAuth auto-renew, tool result decoding) lives
+// streamable HTTP at <T3 URL>/mcp, OAuth auto-renew, tool result decoding) lives
 // behind the Client interface. The rest of the backend uses only these types.
 //
 // Field sources: t3code packages/contracts/src/orchestratorMcp.ts,
@@ -28,6 +28,10 @@ type Client interface {
 	// public URL (browser links). A base URL change drops the MCP session,
 	// the known environment id and the probe cache; the token is kept.
 	Reconfigure(base, public string)
+	// SetAdminToken replaces the admin token that renews the T3 token (""
+	// disables renewal). A non-empty one obtains a token now when there is
+	// no valid one, so a bad admin token fails here.
+	SetAdminToken(ctx context.Context, token string) error
 	// Pair exchanges a pairing code (from `t3 pair`) for a full-access
 	// mcp-client token and stores it (paste fallback for auto-renew).
 	Pair(ctx context.Context, code string) error
@@ -52,7 +56,7 @@ type Client interface {
 	// LaunchThread calls t3_thread_launch. Idempotent per ClientRequestID.
 	LaunchThread(ctx context.Context, in LaunchInput) (LaunchResult, error)
 	// UploadAttachment calls t3_attachment_prepare_upload, then POSTs data to
-	// the returned signed relativeUrl on T3_URL. The pending id is usable in
+	// the returned signed relativeUrl on the T3 URL. The pending id is usable in
 	// LaunchInput.Attachments until it expires (~10 min).
 	UploadAttachment(ctx context.Context, in UploadInput) (Attachment, error)
 	// DiscardAttachment calls t3_attachment_discard (pending uploads only).

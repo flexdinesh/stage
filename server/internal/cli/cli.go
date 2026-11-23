@@ -121,7 +121,7 @@ Usage:
                                       ones can run here
   stage harness KIND [status]         KIND's connection setup on the server: state, settings, actions
   stage harness KIND set FIELD=VALUE... [--reset FIELD]...
-                                      save connection settings (an environment variable locks a field)
+                                      save connection settings
   stage harness KIND run ACTION [FIELD=VALUE...]
                                       run a setup action, e.g. t3: pair code=CODE, auto-pair;
                                       opencode: connect-local, pair link=LINK [newInstance=true]

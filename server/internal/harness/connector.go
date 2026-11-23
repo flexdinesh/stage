@@ -25,10 +25,7 @@ type Field struct {
 	ID    string    `json:"id"`
 	Label string    `json:"label"`
 	Kind  FieldKind `json:"kind"`
-	// Env is the environment variable that, when set on the server, locks
-	// this setting.
-	Env  string `json:"env,omitempty"`
-	Help string `json:"help,omitempty"`
+	Help  string    `json:"help,omitempty"`
 }
 
 // Action is a named setup operation (POST
@@ -77,9 +74,8 @@ type FieldState struct {
 	ID    string `json:"id"`
 	Value string `json:"value"`
 	Set   bool   `json:"set"`
-	// Source is env, saved or default.
+	// Source is saved or default.
 	Source string `json:"source"`
-	Locked bool   `json:"locked"`
 }
 
 // ActionState is whether an action can run now.

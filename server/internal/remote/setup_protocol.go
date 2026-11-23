@@ -34,6 +34,7 @@ const (
 const (
 	KindT3Get            = "setup.t3.get"
 	KindT3SetURL         = "setup.t3.setURL"
+	KindT3SetPublicURL   = "setup.t3.setPublicURL"
 	KindT3LastError      = "setup.t3.lastError"
 	KindOpenCodeGet      = "setup.opencode.get"
 	KindOpenCodeSave     = "setup.opencode.save"
@@ -87,18 +88,19 @@ type T3Settings struct {
 	LastError      *string    `json:"lastError"`
 	LastFullSyncAt *time.Time `json:"lastFullSyncAt"`
 	T3URL          *string    `json:"t3Url"`
+	T3PublicURL    *string    `json:"t3PublicUrl"`
 	EnvironmentID  *string    `json:"environmentId"`
 	ConnectionID   int64      `json:"connectionId"`
 }
 
 // T3SettingsOf is c on the wire.
 func T3SettingsOf(c db.Connection) T3Settings {
-	return T3Settings{LastError: c.LastError, LastFullSyncAt: c.LastFullSyncAt, T3URL: c.T3URL, EnvironmentID: c.EnvironmentID, ConnectionID: c.ConnectionID}
+	return T3Settings{LastError: c.LastError, LastFullSyncAt: c.LastFullSyncAt, T3URL: c.T3URL, T3PublicURL: c.T3PublicURL, EnvironmentID: c.EnvironmentID, ConnectionID: c.ConnectionID}
 }
 
 // Connection is s as the store's type.
 func (s T3Settings) Connection() db.Connection {
-	return db.Connection{LastError: s.LastError, LastFullSyncAt: s.LastFullSyncAt, T3URL: s.T3URL, EnvironmentID: s.EnvironmentID, ConnectionID: s.ConnectionID}
+	return db.Connection{LastError: s.LastError, LastFullSyncAt: s.LastFullSyncAt, T3URL: s.T3URL, T3PublicURL: s.T3PublicURL, EnvironmentID: s.EnvironmentID, ConnectionID: s.ConnectionID}
 }
 
 // URLRequest is setup.t3.setURL ("" clears).

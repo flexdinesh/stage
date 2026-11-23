@@ -28,11 +28,11 @@ var Descriptor = harness.Descriptor{
 	}},
 	Setup: harness.Setup{
 		Fields: []harness.Field{
-			{ID: "endpoint", Label: "Server URL", Kind: harness.FieldURL, Env: "OPENCODE_URL"},
-			{ID: "browserEndpoint", Label: "Browser URL", Kind: harness.FieldURL, Env: "OPENCODE_PUBLIC_URL"},
-			{ID: "webClient", Label: "Web client URL", Kind: harness.FieldURL, Env: "OPENCODE_WEB_URL"},
-			{ID: "username", Label: "Username", Kind: harness.FieldText, Env: "OPENCODE_USERNAME"},
-			{ID: "password", Label: "Password", Kind: harness.FieldSecret, Env: "OPENCODE_PASSWORD"},
+			{ID: "endpoint", Label: "Server URL", Kind: harness.FieldURL},
+			{ID: "browserEndpoint", Label: "Browser URL", Kind: harness.FieldURL},
+			{ID: "webClient", Label: "Web client URL", Kind: harness.FieldURL},
+			{ID: "username", Label: "Username", Kind: harness.FieldText},
+			{ID: "password", Label: "Password", Kind: harness.FieldSecret},
 			{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool, Help: "Confirms a different OpenCode service; the current connection retires."},
 		},
 		Actions: []harness.Action{

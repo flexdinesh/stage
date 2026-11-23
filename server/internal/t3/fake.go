@@ -52,6 +52,8 @@ type Fake struct {
 	askAt       map[string]time.Time
 	// probe overrides the default probe (SetProbe).
 	probe *Probe
+	// AdminToken: the last SetAdminToken.
+	AdminToken string
 	// BaseURL, PublicURL: the last Reconfigure.
 	BaseURL, PublicURL string
 	// Pairs: every accepted Pair code.
@@ -169,6 +171,18 @@ func (f *Fake) Reconfigure(base, public string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.BaseURL, f.PublicURL = base, public
+}
+
+// SetAdminToken records the admin token; a non-empty one pairs the fake
+// (it mints a token at once).
+func (f *Fake) SetAdminToken(_ context.Context, token string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.AdminToken = token
+	if token != "" {
+		f.unpaired = false
+	}
+	return nil
 }
 
 // WebBase is the configured public URL (the browser base for web links).

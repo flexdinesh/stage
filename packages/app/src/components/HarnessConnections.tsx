@@ -4,7 +4,7 @@
 // the generic card rendered from its setup schema (GET /api/harnesses).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
-import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
+import { useHarnessApi, useScopedKey } from "../api/harnessScope.tsx";
 import { invalidateConnectionChange, keys } from "../api/queries.ts";
 import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
@@ -101,32 +101,28 @@ function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor;
 
 type Values = SetupValues;
 
-/** Inputs for fields; locked ones are read-only. */
+/** Inputs for fields. */
 function Inputs({ fields, status, values, onChange }: { fields: SetupField[]; status?: HarnessStatus; values: Values; onChange: (id: string, v: string | boolean) => void }) {
-  const copy = useSetupCopy();
   return (
     <>
       {fields.map((f) => {
         const st = status?.fields.find((s) => s.id === f.id);
-        const locked = st?.locked === true;
-        const hint = locked ? copy.envLock(f.env) : f.help;
         const value = values[f.id];
         if (f.kind === "bool") {
           return (
-            <ChoiceRow key={f.id} control={<Checkbox checked={value === true} disabled={locked} onChange={(e) => onChange(f.id, e.target.checked)} />}>
+            <ChoiceRow key={f.id} control={<Checkbox checked={value === true} onChange={(e) => onChange(f.id, e.target.checked)} />}>
               {f.label}
             </ChoiceRow>
           );
         }
         return (
-          <Field key={f.id} label={f.label} hint={hint}>
+          <Field key={f.id} label={f.label} hint={f.help}>
             {(id) => (
               <Input
                 id={id}
                 type={f.kind === "secret" ? "password" : f.kind === "url" ? "url" : "text"}
                 value={typeof value === "string" ? value : ""}
                 placeholder={f.kind === "secret" && st?.set === true ? "(set)" : undefined}
-                disabled={locked}
                 autoComplete="off"
                 spellCheck={false}
                 onChange={(e) => onChange(f.id, e.target.value)}

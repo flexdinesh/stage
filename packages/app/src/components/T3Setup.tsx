@@ -1,13 +1,13 @@
 // T3 onboarding: the setup screen that is the Dashboard until the first full
-// sync, the Dashboard alert for later trouble, and the pairing, T3 URL and
+// sync, the Dashboard alert for later trouble, and the pairing, settings and
 // disconnect controls Settings shares. Logic lives in lib/onboarding.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { invalidateConnectionChange, keys, useT3Status } from "../api/queries.ts";
-import type { ReplacedConnection, T3Status } from "../api/types.ts";
+import type { ReplacedConnection, T3SettingsRequest, T3Status } from "../api/types.ts";
 import { replacedNotice } from "../lib/harnesses.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, setupSteps, t3DisconnectPrompt, t3Identity } from "../lib/onboarding.ts";
+import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3Identity, t3SettingsChanges } from "../lib/onboarding.ts";
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
@@ -129,86 +129,124 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
   );
 }
 
-/** The T3 URL: editable (Save, Reset to default), or locked by the T3_URL env. */
-export function T3UrlEditor({ status }: { status: T3Status }) {
+type SettingsSave = { which: "save" | "resetUrl" | "clearToken"; body: T3SettingsRequest };
+
+/**
+ * T3 settings: the T3 URL (Reset to default), and unless `urlOnly` the Browser URL and the admin token. Save sends
+ * only the fields that changed.
+ */
+export function T3SettingsForm({ status, urlOnly = false }: { status: T3Status; urlOnly?: boolean }) {
   const api = useHarnessApi();
-  const copy = useSetupCopy();
   const setStatus = useSetStatus();
-  const [draft, setDraft] = useState(status.t3Url);
+  const [url, setUrl] = useState(status.t3Url);
+  const [browser, setBrowser] = useState(savedBrowserUrl(status));
+  const [token, setToken] = useState("");
   const save = useMutation({
-    mutationFn: (url: string | null) => api.setT3Url({ url }),
+    mutationFn: (v: SettingsSave) => api.saveT3Settings(v.body),
     onSuccess: (s) => {
-      setDraft(s.t3Url);
+      setUrl(s.t3Url);
+      setBrowser(savedBrowserUrl(s));
+      setToken("");
       setStatus(s);
     },
   });
-  if (status.t3UrlSource === "env") {
-    return (
-      <Field label="T3 URL" hint={`set by T3_URL${copy.on}`}>
-        {(id) => (
-          <output id={id} className="flex min-h-control items-center border border-line bg-panel px-2.5">
-            <code className="font-mono text-detail break-all text-fg">{status.t3Url}</code>
-          </output>
-        )}
-      </Field>
-    );
-  }
-  const url = draft.trim();
+  // urlOnly leaves the other fields as saved, so they never send.
+  const body = t3SettingsChanges(status, urlOnly ? { url, browserUrl: savedBrowserUrl(status), adminToken: "" } : { url, browserUrl: browser, adminToken: token });
+  const changed = Object.keys(body).length > 0;
+  const busy = (which: SettingsSave["which"]) => save.isPending && save.variables?.which === which;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (url !== "" && url !== status.t3Url) save.mutate(url);
+    if (changed) save.mutate({ which: "save", body });
   };
   return (
-    <form onSubmit={submit} className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-end gap-2">
-        <Field label="T3 URL" className="min-w-60 flex-1">
-          {(id) => (
-            <Input
-              id={id}
-              type="url"
-              inputMode="url"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="http://127.0.0.1:3773"
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono"
-            />
-          )}
-        </Field>
-        <div className="flex gap-2">
-          <Button type="submit" busy={save.isPending && save.variables !== null} disabled={save.isPending || url === "" || url === status.t3Url}>
-            Save
-          </Button>
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="T3 URL" className="min-w-60 flex-1">
+            {(id) => (
+              <Input
+                id={id}
+                type="url"
+                inputMode="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="http://127.0.0.1:3773"
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono"
+              />
+            )}
+          </Field>
           {status.t3UrlSource === "settings" ? (
-            <Button variant="ghost" busy={save.isPending && save.variables === null} disabled={save.isPending} onClick={() => save.mutate(null)}>
+            <Button variant="ghost" busy={busy("resetUrl")} disabled={save.isPending} onClick={() => save.mutate({ which: "resetUrl", body: { url: null } })}>
               Reset
             </Button>
           ) : null}
         </div>
+        <Hint>{status.t3UrlSource === "settings" ? "Saved in stage." : "Default."}</Hint>
       </div>
-      <p className="font-mono text-meta text-muted">{status.t3UrlSource === "settings" ? "saved in stage" : "default"}</p>
+      {urlOnly ? null : (
+        <>
+          <Field label="Browser URL" hint="Used for Open in T3 links. Empty uses the T3 URL.">
+            {(id) => (
+              <Input
+                id={id}
+                type="url"
+                inputMode="url"
+                value={browser}
+                onChange={(e) => setBrowser(e.target.value)}
+                placeholder={status.t3Url}
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono"
+              />
+            )}
+          </Field>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label="Admin token" className="min-w-60 flex-1">
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder={status.adminTokenConfigured ? "saved" : undefined}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    className="font-mono"
+                  />
+                )}
+              </Field>
+              {status.adminTokenConfigured ? (
+                <Button variant="ghost" busy={busy("clearToken")} disabled={save.isPending} onClick={() => save.mutate({ which: "clearToken", body: { adminToken: null } })}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <Hint>{status.adminTokenConfigured ? "Saved. Stage renews its token automatically; type a new one to replace it." : "Optional. Lets Stage renew its token automatically."}</Hint>
+          </div>
+        </>
+      )}
+      <div>
+        <Button type="submit" busy={busy("save")} disabled={save.isPending || !changed}>
+          Save
+        </Button>
+      </div>
       <ErrorText error={save.error} />
     </form>
   );
 }
 
-/**
- * Disconnect (Settings T3 connection footer): forgets the token after an
- * inline confirm; the environment binding stays, so pairing this T3 resumes it. Locked while T3_ADMIN_TOKEN
- * would mint a new token at once.
- */
+/** Disconnect (Settings T3 connection footer): forgets the token and settings after an inline confirm; pairing this T3 again resumes. */
 export function DisconnectT3({ status }: { status: T3Status }) {
-  const copy = useSetupCopy();
   const [confirm, setConfirm] = useState(false);
   const disconnect = useDisconnectT3(() => setConfirm(false));
-  const availability = disconnectAvailability(status);
-  if (availability === "hidden") return null;
+  if (disconnectAvailability(status) === "hidden") return null;
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
-      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-        {availability === "locked" ? <Hint>renewed by T3_ADMIN_TOKEN{copy.on}</Hint> : null}
-        <Button small variant="danger" disabled={availability === "locked" || confirm} onClick={() => setConfirm(true)}>
+      <div className="flex justify-end">
+        <Button small variant="danger" disabled={confirm} onClick={() => setConfirm(true)}>
           Disconnect
         </Button>
       </div>
@@ -261,11 +299,7 @@ function ReachFix({ status, retry }: { status: T3Status; retry: ReturnType<typeo
   const copy = useSetupCopy();
   return (
     <div className="flex flex-col gap-3">
-      <Muted>
-        {status.t3UrlSource === "env"
-          ? `Start T3 on ${copy.machine}, or change T3_URL and ${copy.restart}.`
-          : `Start T3 on ${copy.machine}, or point stage at the T3 server.`}
-      </Muted>
+      <Muted>Start T3 on {copy.machine}, or change the T3 URL to point stage at the T3 server.</Muted>
       <CommandBox command="t3 serve" />
       {retry === null ? null : (
         <>
@@ -278,7 +312,7 @@ function ReachFix({ status, retry }: { status: T3Status; retry: ReturnType<typeo
         </>
       )}
       <div className="border-t border-line pt-3">
-        <T3UrlEditor status={status} />
+        <T3SettingsForm status={status} urlOnly />
       </div>
     </div>
   );
@@ -385,14 +419,14 @@ export function T3Alert({ status }: { status: T3Status | undefined }) {
 
 const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
 
-/** The T3 setup panel in Settings (registered for kind t3 in HarnessConnections). */
+/** The T3 setup panel in Settings (registered for kind t3 in HarnessConnections); the status card once T3 is set up. */
 export function T3ConnectionPanel() {
   const status = useT3Status();
   return (
     <QueryState isPending={status.isPending} error={status.error} hasData={status.data !== undefined}>
       {status.data === undefined ? null : (
         <>
-          <StatusCard status={status.data} />
+          {t3Configured(status.data) ? <StatusCard status={status.data} /> : null}
           <PairCard status={status.data} />
         </>
       )}
@@ -414,12 +448,12 @@ function StatusCard({ status }: { status: T3Status }) {
         <Details>
           <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <InlineError>{status.probeError ?? "not reachable"}</InlineError>)}</Detail>
           <Detail label="T3 URL">{status.t3Url}</Detail>
-          <Detail label="Public URL">{status.publicUrl}</Detail>
+          <Detail label="Browser URL">{status.publicUrl}</Detail>
           <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
           <Detail label="Client id">{status.clientId ?? "-"}</Detail>
           <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
           <Detail label="Admin token">
-            {status.adminTokenConfigured ? "configured (auto-renew)" : "not configured"}
+            {status.adminTokenConfigured ? "saved (auto-renew)" : "not set"}
           </Detail>
           <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
           <Detail label="Last error">
@@ -433,7 +467,7 @@ function StatusCard({ status }: { status: T3Status }) {
   );
 }
 
-/** Pairing (auto through the t3 CLI, or a code) and the T3 URL. */
+/** Pairing (auto through the t3 CLI, or a code) and the T3 settings. */
 function PairCard({ status }: { status: T3Status }) {
   const paired = status.state === "connected";
   return (
@@ -441,7 +475,7 @@ function PairCard({ status }: { status: T3Status }) {
       <div className="flex flex-col gap-4">
         <PairActions status={status} primary={!paired} />
         <section className="flex flex-col gap-3 border-t border-line pt-3">
-          <T3UrlEditor status={status} />
+          <T3SettingsForm status={status} />
         </section>
       </div>
     </Panel>

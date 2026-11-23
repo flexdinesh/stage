@@ -9,6 +9,7 @@ import {
   completedSince,
   endLinger,
   filterByTree,
+  harnessNotice,
   inGroup,
   isFolded,
   needsEpisode,
@@ -121,4 +122,17 @@ test("collapsed Needs input reopens for a new needs-input episode", () => {
   assert.equal(isFolded(again, "needs", [a, b]), true);
   assert.deepEqual(again.collapsed, ["needs"]);
   assert.equal(isFolded(toggleFold(again, "needs", [a, b]), "needs", [a, b]), false);
+});
+
+const conn = (harness, over = {}) => ({ harness, machineId: 1, active: true, configured: true, ...over });
+
+test("harness notice: connect when no T3 or OpenCode is set up, T3's alert when T3 is set up here, nothing while loading", () => {
+  assert.equal(harnessNotice(null, 1), null, "connections loading");
+  assert.equal(harnessNotice([], 1), "connect", "first run: no connections");
+  assert.equal(harnessNotice([conn("t3", { configured: false }), conn("opencode", { configured: false })], 1), "connect", "unpaired T3 and unconfigured OpenCode");
+  assert.equal(harnessNotice([conn("t3", { active: false })], 1), "connect", "a replaced connection does not count");
+  assert.equal(harnessNotice([conn("t3")], 1), "t3");
+  assert.equal(harnessNotice([conn("opencode")], 1), null, "OpenCode alone: its own alerts");
+  assert.equal(harnessNotice([conn("t3", { machineId: 2 })], 1), null, "T3 set up on another machine only");
+  assert.equal(harnessNotice([conn("t3", { configured: false }), conn("opencode")], 1), null);
 });

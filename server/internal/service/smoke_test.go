@@ -69,7 +69,7 @@ func TestSmoke(t *testing.T) {
 	if err := os.MkdirAll(cfg, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg, "service.env"), []byte("STAGE_LISTEN=unix\nT3_URL=http://127.0.0.1:9\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, "service.env"), []byte("STAGE_LISTEN=unix\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,7 +303,7 @@ func (s *smoke) startMain(addr string) *mainServer {
 		_ = l.Close()
 	}
 	m := &mainServer{s: s, url: "http://" + addr,
-		env:  append(slices.Clone(s.env), "STAGE_DATA_DIR="+filepath.Join(s.dir, "data", "main"), "STAGE_PUBLIC_URL=http://"+addr, "T3_URL=http://127.0.0.1:9"),
+		env:  append(slices.Clone(s.env), "STAGE_DATA_DIR="+filepath.Join(s.dir, "data", "main"), "STAGE_PUBLIC_URL=http://"+addr),
 		args: []string{"serve", "--listen", "unix:" + filepath.Join(s.short, "main.sock") + "," + addr}}
 	m.cmd = exec.Command(s.bin, m.args...)
 	m.cmd.Env = m.env

@@ -97,12 +97,9 @@ const ServiceEnvTemplate = `# Stage service configuration (docs/service.md). Rea
 # Add TCP for a browser, e.g. unix,127.0.0.1:7380
 STAGE_LISTEN=unix
 
-# T3_URL=http://127.0.0.1:3773
-# T3_PUBLIC_URL=http://localhost:3773
 # STAGE_PUBLIC_URL=
 # STAGE_ALLOWED_ORIGINS=
-# Optional: lets Stage renew its T3 access itself; otherwise pair in Settings.
-# T3_ADMIN_TOKEN=
+# Harness connections (T3, OpenCode) are set up in Settings > Connections.
 `
 
 // ParseServiceEnv reads service.env: KEY=VALUE lines, '#' comments, blank
@@ -139,6 +136,9 @@ func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[s
 				}
 			}
 		}
+		if slices.Contains(RemovedHarnessEnvKeys, k) {
+			return nil, fmt.Errorf("%s line %d: %s is no longer read; remove it and set the connection up in Settings > Connections", name, n, k)
+		}
 		if !slices.Contains(allowed, k) {
 			keys := append([]string(nil), allowed...)
 			sort.Strings(keys)
@@ -170,7 +170,7 @@ func allowedServiceKey(k string) bool {
 
 // ReadServiceEnv reads and validates the service.env at path. A missing
 // file means the template defaults (STAGE_LISTEN=unix). A file readable or
-// writable by group or others is refused (it may hold T3_ADMIN_TOKEN).
+// writable by group or others is refused (it may hold secrets).
 func ReadServiceEnv(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -185,7 +185,7 @@ func ReadServiceEnv(path string) (map[string]string, error) {
 		return nil, err
 	}
 	if st.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s has mode %v; want 0600 (it may hold T3_ADMIN_TOKEN): chmod 600 %s", path, st.Mode().Perm(), path)
+		return nil, fmt.Errorf("%s has mode %v; want 0600 (it may hold secrets): chmod 600 %s", path, st.Mode().Perm(), path)
 	}
 	vals, err := ParseServiceEnv(f)
 	if err != nil {

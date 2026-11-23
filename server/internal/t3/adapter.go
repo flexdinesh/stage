@@ -28,6 +28,10 @@ func NewAdapter(c Client) *Adapter { return &Adapter{Client: c, ConnectionID: 1}
 func NewConnectionAdapter(c Client, id int64) *Adapter { return &Adapter{Client: c, ConnectionID: id} }
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	st := a.Client.Status(ctx)
+	if !st.HasToken {
+		// Not paired: never contacted in the background.
+		return execution.Health{Availability: execution.Availability{Reason: "T3 is not connected. Connect it in Settings."}, Identity: st.EnvironmentID}
+	}
 	p := a.Client.Probe(ctx)
 	reason := ""
 	ok := st.Connected && p.Reachable

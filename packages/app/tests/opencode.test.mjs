@@ -24,7 +24,6 @@ const base = {
   browserEndpoint: "",
   webClient: "",
   hasCredentials: false,
-  environmentFields: [],
   auth: "local",
   local: { available: true, url: "http://127.0.0.1:4096", version: "2.3.0", reason: "" },
 };
@@ -121,14 +120,14 @@ test("sign-in lost names the service host", () => {
   assert.equal(serviceHost("garbage"), "garbage");
 });
 
-test("local note: shown when nothing local can connect, never for the environment", () => {
+test("local note: shown when nothing local can connect, never when the server did not look", () => {
   const local = (over) => status({ state: "unconfigured", local: { available: false, url: "", version: "", ...over } });
   for (const reason of ["missing", "unreachable", "invalid"]) assert.equal(localNote(local({ reason })), "No OpenCode service on this machine.", reason);
-  assert.equal(localNote(local({ reason: "environment" })), null);
+  assert.equal(localNote(local({ reason: "" })), null);
   assert.equal(localNote(status({ state: "unconfigured" })), null, "available shows Connect instead");
 });
 
-test("advanced: sends only changed, trimmed, unlocked fields", () => {
+test("advanced: sends only changed, trimmed fields", () => {
   const draft = { endpoint: base.endpoint, browserEndpoint: "", webClient: "" };
   assert.deepEqual(advancedChanges(status({}), draft, null), {}, "nothing changed");
   assert.deepEqual(
@@ -138,11 +137,7 @@ test("advanced: sends only changed, trimmed, unlocked fields", () => {
   );
   assert.deepEqual(advancedChanges(status({}), { ...draft, endpoint: ` ${base.endpoint} ` }, null), {}, "whitespace is no change");
   assert.deepEqual(advancedChanges(status({}), { ...draft, endpoint: "http://studio.lan:4096" }, null), { endpoint: "http://studio.lan:4096" });
-  assert.deepEqual(
-    advancedChanges(status({ environmentFields: ["webClient"] }), { ...draft, webClient: "http://client" }, null),
-    {},
-    "locked fields are never sent",
-  );
+  assert.deepEqual(advancedChanges(status({}), { ...draft, webClient: "http://client" }, null), { webClient: "http://client" });
   assert.deepEqual(advancedChanges(status({}), draft, { username: " opencode ", password: "pw" }), { username: "opencode", password: "pw" });
   assert.deepEqual(advancedChanges(status({}), draft, { username: "", password: "" }), { username: "", password: "" }, "empty pair clears");
 });
@@ -151,7 +146,7 @@ test("older servers without pairing fields read as Basic or none, with no local 
   const { auth, local, ...legacy } = base;
   assert.equal(normalizeOpenCodeStatus(legacy).auth, "none");
   assert.equal(normalizeOpenCodeStatus({ ...legacy, hasCredentials: true }).auth, "basic");
-  assert.deepEqual(normalizeOpenCodeStatus(legacy).local, { available: false, url: "", version: "", reason: "environment" });
+  assert.deepEqual(normalizeOpenCodeStatus(legacy).local, { available: false, url: "", version: "", reason: "" });
   assert.deepEqual(normalizeOpenCodeStatus(base), base, "a current server passes through");
   assert.equal(auth, "local");
   assert.equal(local.available, true);

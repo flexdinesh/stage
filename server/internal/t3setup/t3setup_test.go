@@ -50,6 +50,17 @@ func (c *client) Pair(ctx context.Context, code string) error {
 	return nil
 }
 
+// SetAdminToken: a non-empty admin token mints a token at once.
+func (c *client) SetAdminToken(ctx context.Context, token string) error {
+	if err := c.Fake.SetAdminToken(ctx, token); err != nil {
+		return err
+	}
+	if token != "" {
+		c.paired.Store(true)
+	}
+	return nil
+}
+
 func (c *client) Unpair(ctx context.Context) error {
 	if err := c.Fake.Unpair(ctx); err != nil {
 		return err
@@ -90,7 +101,8 @@ func newEnv(t *testing.T, cfg config.Config, fake bool) *env {
 		t.Fatal(err)
 	}
 	e.svc = t3setup.New(t3setup.Options{
-		Config: cfg, Settings: e.store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(e.store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: e.client, Endpoint: t3setup.Resolve(cfg, conn.T3URL), Fake: fake,
+		Config: cfg, Settings: e.store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(e.store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: e.client, Endpoint: t3setup.Resolve(conn), Fake: fake,
+		AdminTokens: e.store.OnMachine(db.LocalMachine),
 		OnPaired:   func() { e.kicks.Add(1) },
 		OnSwitched: func(sw db.Switch) { e.switches = append(e.switches, sw) },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -122,7 +134,7 @@ func newEnv(t *testing.T, cfg config.Config, fake bool) *env {
 }
 
 func defaultCfg() config.Config {
-	return config.Config{T3URL: config.DefaultT3URL, T3PublicURL: config.DefaultT3URL, T3ClientName: "stage"}
+	return config.Config{T3ClientName: "stage"}
 }
 
 func (e *env) bound() string {
@@ -143,21 +155,19 @@ func isConflict(err error, contains string) bool {
 }
 
 func TestResolve(t *testing.T) {
-	saved := "http://127.0.0.1:4000"
+	saved, public, empty := "http://127.0.0.1:4000", "https://t3.example", ""
 	for _, tc := range []struct {
-		name  string
-		cfg   config.Config
-		saved *string
-		want  t3setup.Endpoint
+		name string
+		conn db.Connection
+		want t3setup.Endpoint
 	}{
-		{"default", defaultCfg(), nil, t3setup.Endpoint{URL: config.DefaultT3URL, PublicURL: config.DefaultT3URL, Source: "default"}},
-		{"settings", defaultCfg(), &saved, t3setup.Endpoint{URL: saved, PublicURL: saved, Source: "settings"}},
-		{"env wins", config.Config{T3URL: "http://t3.lan:3773/", T3PublicURL: "http://t3.lan:3773/", T3URLFromEnv: true}, &saved,
-			t3setup.Endpoint{URL: "http://t3.lan:3773", PublicURL: "http://t3.lan:3773", Source: "env"}},
-		{"env public URL kept", config.Config{T3URL: config.DefaultT3URL, T3PublicURL: "https://t3.example", T3PublicURLFromEnv: true}, &saved,
-			t3setup.Endpoint{URL: saved, PublicURL: "https://t3.example", Source: "settings"}},
+		{"default", db.Connection{}, t3setup.Endpoint{URL: config.DefaultT3URL, PublicURL: config.DefaultT3URL, Source: "default"}},
+		{"empty", db.Connection{T3URL: &empty, T3PublicURL: &empty}, t3setup.Endpoint{URL: config.DefaultT3URL, PublicURL: config.DefaultT3URL, Source: "default"}},
+		{"settings", db.Connection{T3URL: &saved}, t3setup.Endpoint{URL: saved, PublicURL: saved, Source: "settings"}},
+		{"browser URL", db.Connection{T3URL: &saved, T3PublicURL: &public}, t3setup.Endpoint{URL: saved, PublicURL: public, Source: "settings", PublicSet: true}},
+		{"browser URL, default T3 URL", db.Connection{T3PublicURL: &public}, t3setup.Endpoint{URL: config.DefaultT3URL, PublicURL: public, Source: "default", PublicSet: true}},
 	} {
-		if got := t3setup.Resolve(tc.cfg, tc.saved); got != tc.want {
+		if got := t3setup.Resolve(tc.conn); got != tc.want {
 			t.Errorf("%s: %+v, want %+v", tc.name, got, tc.want)
 		}
 	}
@@ -204,9 +214,10 @@ func TestAutoPairAvailability(t *testing.T) {
 		t.Fatalf("fake: %v %q", ok, r)
 	}
 
-	remote := defaultCfg()
-	remote.T3URL, remote.T3URLFromEnv = "http://192.168.1.5:3773", true
-	e = newEnv(t, remote, false)
+	e = newEnv(t, defaultCfg(), false)
+	if err := e.svc.SetURL(ctx, ptr("http://192.168.1.5:3773")); err != nil {
+		t.Fatal(err)
+	}
 	e.paths["t3"] = true
 	if ok, r := reason(e); ok || r != "not_local" {
 		t.Fatalf("remote: %v %q", ok, r)
@@ -402,19 +413,91 @@ func TestPairingAnotherEnvironmentRestampsAnEmptyConnection(t *testing.T) {
 	}
 }
 
-func TestUnpairRefusedWithAdminToken(t *testing.T) {
+// A saved admin token pairs T3 (it mints a token) and Disconnect forgets it
+// with the token and the saved URLs, back to the defaults.
+func TestAdminTokenAndDisconnect(t *testing.T) {
 	ctx := context.Background()
-	cfg := defaultCfg()
-	cfg.T3AdminToken = "admin"
-	e := newEnv(t, cfg, false)
-	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
+	e := newEnv(t, defaultCfg(), false)
+	conn := t3setup.NewConnector(e.svc, nil)
+	if conn.Summary(ctx).Configured {
+		t.Fatal("a fresh T3 is configured")
+	}
+	if err := e.svc.SetURL(ctx, ptr("http://127.0.0.1:4000")); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Unpair(ctx); !isConflict(err, "T3_ADMIN_TOKEN") {
-		t.Fatalf("unpair with admin token: %v", err)
+	if err := e.svc.SetPublicURL(ctx, ptr("https://t3.example")); err != nil {
+		t.Fatal(err)
 	}
-	if st := e.svc.Status(ctx, false); !st.Conn.HasToken || e.bound() != "env-a" {
-		t.Fatalf("refused unpair changed state: %+v bound %q", st.Conn, e.bound())
+	if conn.Summary(ctx).Configured {
+		t.Fatal("a saved URL alone made T3 configured")
+	}
+	if err := e.svc.SetAdminToken(ctx, " admin "); err != nil {
+		t.Fatal(err)
+	}
+	if tok, _ := e.store.LoadT3AdminToken(ctx, db.LocalMachine); tok != "admin" || e.client.AdminToken != "admin" || !e.svc.AdminTokenSet() {
+		t.Fatalf("admin token saved %q, client %q", tok, e.client.AdminToken)
+	}
+	if !conn.Summary(ctx).Configured || e.bound() != "env-a" || e.kicks.Load() != 1 {
+		t.Fatalf("admin token did not pair: %+v bound %q kicks %d", conn.Summary(ctx), e.bound(), e.kicks.Load())
+	}
+	st, err := conn.Status(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range st.Fields {
+		if f.ID == "adminToken" && (f.Value != "" || !f.Set) {
+			t.Fatalf("admin token field %+v", f)
+		}
+	}
+	if err := conn.Disconnect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if conn.Summary(ctx).Configured || e.svc.AdminTokenSet() || e.client.AdminToken != "" {
+		t.Fatalf("disconnected T3 still configured: %+v", conn.Summary(ctx))
+	}
+	if tok, _ := e.store.LoadT3AdminToken(ctx, db.LocalMachine); tok != "" {
+		t.Fatalf("admin token kept %q", tok)
+	}
+	c, _ := e.store.GetConnection(ctx, db.LocalMachine)
+	want := t3setup.Endpoint{URL: config.DefaultT3URL, PublicURL: config.DefaultT3URL, Source: "default"}
+	if c.T3URL != nil || c.T3PublicURL != nil || e.svc.Endpoint() != want || e.client.BaseURL != want.URL || e.client.PublicURL != want.PublicURL {
+		t.Fatalf("settings kept: %v %v %+v", c.T3URL, c.T3PublicURL, e.svc.Endpoint())
+	}
+	// The connection keeps its environment: pairing it again resumes it.
+	if e.bound() != "env-a" {
+		t.Fatalf("environment lost: %q", e.bound())
+	}
+}
+
+func TestSetPublicURL(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, defaultCfg(), false)
+	var inv *db.InvalidError
+	if err := e.svc.SetPublicURL(ctx, ptr("http://h/path")); !errors.As(err, &inv) {
+		t.Fatalf("invalid url: %v", err)
+	}
+	if err := e.svc.SetPublicURL(ctx, ptr("https://t3.example/")); err != nil {
+		t.Fatal(err)
+	}
+	if ep := e.svc.Endpoint(); ep.PublicURL != "https://t3.example" || !ep.PublicSet || e.client.PublicURL != ep.PublicURL || ep.URL != config.DefaultT3URL {
+		t.Fatalf("endpoint %+v", ep)
+	}
+	// A URL change keeps the saved browser URL.
+	if err := e.svc.SetURL(ctx, ptr("http://127.0.0.1:4000")); err != nil {
+		t.Fatal(err)
+	}
+	if ep := e.svc.Endpoint(); ep.PublicURL != "https://t3.example" || e.client.PublicURL != ep.PublicURL {
+		t.Fatalf("browser URL lost: %+v", ep)
+	}
+	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); t3setup.Resolve(c) != e.svc.Endpoint() {
+		t.Fatalf("restart resolves %+v, want %+v", t3setup.Resolve(c), e.svc.Endpoint())
+	}
+	// Cleared: it follows the T3 URL again.
+	if err := e.svc.SetPublicURL(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ep := e.svc.Endpoint(); ep.PublicURL != "http://127.0.0.1:4000" || ep.PublicSet || e.client.PublicURL != ep.PublicURL {
+		t.Fatalf("cleared %+v", ep)
 	}
 }
 
@@ -437,7 +520,7 @@ func TestSetURL(t *testing.T) {
 		t.Fatalf("saved %v", c.T3URL)
 	}
 	// A restart resolves the saved URL.
-	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); t3setup.Resolve(defaultCfg(), c.T3URL) != want {
+	if c, _ := e.store.GetConnection(ctx, db.LocalMachine); t3setup.Resolve(c) != want {
 		t.Fatal("saved URL not resolved at startup")
 	}
 
@@ -478,20 +561,6 @@ func TestSetURL(t *testing.T) {
 	}
 	if err := e.svc.SetURL(ctx, ptr("http://127.0.0.1:5000")); err != nil {
 		t.Fatalf("disconnected switch: %v", err)
-	}
-}
-
-func TestSetURLLockedByEnv(t *testing.T) {
-	cfg := defaultCfg()
-	cfg.T3URL, cfg.T3URLFromEnv = "http://t3.lan:3773", true
-	e := newEnv(t, cfg, false)
-	for _, u := range []*string{ptr("http://127.0.0.1:4000"), nil} {
-		if err := e.svc.SetURL(context.Background(), u); !isConflict(err, "T3_URL") {
-			t.Fatalf("env-locked: %v", err)
-		}
-	}
-	if ep := e.svc.Endpoint(); ep.Source != "env" || ep.URL != "http://t3.lan:3773" {
-		t.Fatalf("endpoint %+v", ep)
 	}
 }
 

@@ -159,6 +159,9 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	logger.Info("database", "path", dbPath)
+	if w := cfg.WarnRemovedEnv(); w != "" {
+		logger.Warn(w)
+	}
 	store := db.NewStore(pool)
 
 	var wg sync.WaitGroup

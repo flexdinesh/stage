@@ -1,5 +1,5 @@
 // T3 connection status and recovery actions. Planning remains available offline.
-import type { AutoPairReason, T3State, T3Status } from "../api/types.ts";
+import type { AutoPairReason, T3SettingsRequest, T3State, T3Status } from "../api/types.ts";
 
 /** True once, when a refetch sees the first full sync land: work, projects and catalog refresh then. */
 export function firstSyncLanded(prev: T3Status | undefined, next: T3Status): boolean {
@@ -92,12 +92,16 @@ export function primaryAction(s: T3Status): SetupAction | null {
   }
 }
 
-/** Settings Disconnect: hidden without a stored token; locked while T3_ADMIN_TOKEN would mint a new one at once. */
-export type DisconnectAvailability = "hidden" | "locked" | "ready";
+/** T3 is set up (paired): a stored token or a saved admin token. Unpaired, it has no connection row, status card or Disconnect. */
+export function t3Configured(s: Pick<T3Status, "connected" | "tokenExpiresAt" | "adminTokenConfigured">): boolean {
+  return s.connected || s.tokenExpiresAt !== null || s.adminTokenConfigured;
+}
 
-export function disconnectAvailability(s: T3Status): DisconnectAvailability {
-  if (!s.connected && s.tokenExpiresAt === null) return "hidden";
-  return s.adminTokenConfigured ? "locked" : "ready";
+/** Settings Disconnect: shown whenever T3 is set up. */
+export type DisconnectAvailability = "hidden" | "ready";
+
+export function disconnectAvailability(s: Pick<T3Status, "connected" | "tokenExpiresAt" | "adminTokenConfigured">): DisconnectAvailability {
+  return t3Configured(s) ? "ready" : "hidden";
 }
 
 /** The Disconnect confirm's copy: what Stage forgets, what stays, and until when the token still works in T3. */
@@ -107,11 +111,30 @@ export function t3DisconnectPrompt(s: Pick<T3Status, "t3" | "connected" | "token
   const expires = s.connected ? s.tokenExpiresAt : null;
   return [
     label === null ? "Disconnect T3?" : `Disconnect from ${label}?`,
-    "Stage forgets its token and stops syncing. Pair this T3 again to resume, or pair another T3 to replace this connection: its tasks and bindings stay here, read-only.",
+    "Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume.",
     expires === null ? null : `The token stays valid in T3 until ${date(expires)}.`,
   ]
     .filter((p) => p !== null)
     .join(" ");
+}
+
+/** The Browser URL as saved: publicUrl falls back to the T3 URL when none is. */
+export const savedBrowserUrl = (s: Pick<T3Status, "publicUrl" | "t3Url">): string => (s.publicUrl === s.t3Url ? "" : s.publicUrl);
+
+export type T3SettingsDraft = { url: string; browserUrl: string; adminToken: string };
+
+/**
+ * T3 settings save body, only what changed (trimmed): the T3 URL (empty is ignored: Reset restores the default), the
+ * Browser URL (empty clears it), and an entered admin token.
+ */
+export function t3SettingsChanges(s: Pick<T3Status, "publicUrl" | "t3Url">, d: T3SettingsDraft): T3SettingsRequest {
+  const body: T3SettingsRequest = {};
+  const url = d.url.trim();
+  const browser = d.browserUrl.trim();
+  if (url !== "" && url !== s.t3Url) body.url = url;
+  if (browser !== savedBrowserUrl(s)) body.publicUrl = browser === "" ? null : browser;
+  if (d.adminToken !== "") body.adminToken = d.adminToken;
+  return body;
 }
 
 /** Why pairing needs a code, when auto-pair is unavailable. */

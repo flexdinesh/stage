@@ -257,7 +257,7 @@ function Connection({ info, checking, check, advanced }: { info: OpenCodeStatus;
       {info.webClient && info.webClient !== browser ? (
         <BrowserSetupHint key={info.webClient + "|" + browser} client={info.webClient} service={browser} />
       ) : null}
-      <ConnectionActions info={info} checking={checking} check={check} advanced={advanced} />
+      <ConnectionActions checking={checking} check={check} advanced={advanced} />
     </div>
   );
 }
@@ -321,11 +321,10 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
   }
 }
 
-/** Check connection, Advanced, and Disconnect with an inline confirm (locked while OPENCODE_URL sets the service). */
-function ConnectionActions({ info, checking, check, advanced }: { info: OpenCodeStatus; checking: boolean; check: () => void; advanced: () => void }) {
+/** Check connection, Advanced, and Disconnect with an inline confirm. */
+function ConnectionActions({ checking, check, advanced }: { checking: boolean; check: () => void; advanced: () => void }) {
   const [confirm, setConfirm] = useState(false);
   const disconnect = useDisconnectOpenCode(() => setConfirm(false));
-  const locked = openCodeDisconnectLocked(info);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -335,12 +334,9 @@ function ConnectionActions({ info, checking, check, advanced }: { info: OpenCode
         <Button small onClick={advanced}>
           Advanced
         </Button>
-        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-          {locked ? <Hint>set by OPENCODE_URL</Hint> : null}
-          <Button small variant="danger" disabled={locked || confirm} onClick={() => setConfirm(true)}>
-            Disconnect
-          </Button>
-        </div>
+        <Button small variant="danger" className="ml-auto" disabled={confirm} onClick={() => setConfirm(true)}>
+          Disconnect
+        </Button>
       </div>
       {confirm ? (
         <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
@@ -353,9 +349,6 @@ function ConnectionActions({ info, checking, check, advanced }: { info: OpenCode
 }
 
 export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time.";
-
-/** OPENCODE_URL sets the service: Disconnect is locked. */
-export const openCodeDisconnectLocked = (info: Pick<OpenCodeStatus, "environmentFields">): boolean => info.environmentFields.includes("endpoint");
 
 /** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
 export function useDisconnectOpenCode(onDone?: () => void) {
@@ -405,14 +398,12 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const [replace, setReplace] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const locked = (key: string) => info.environmentFields.includes(key);
-  const copy = useSetupCopy();
   const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
   // Which confirm (a replaced service returning, or a different one): kept while its resend runs, so the copy does not flip.
   const [returned, setReturned] = useState(false);
   // Compared with the status as the editor opened, not the live poll: an untouched field never reverts a change made elsewhere.
   const [opened] = useState(info);
-  const body = advancedChanges(opened, urls, replace && !locked("credentials") ? { username, password } : null);
+  const body = advancedChanges(opened, urls, replace ? { username, password } : null);
   // A different service answers 409 instance_changed (a replaced one instance_returned): the same body is resent with newInstance once confirmed.
   const save = useMutation({
     mutationFn: (newInstance: boolean) => api.saveOpenCode(newInstance ? { ...body, newInstance: true } : body),
@@ -428,13 +419,12 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const changed = isInstanceChanged(save.error) || (save.isPending && save.variables === true);
   function address(key: keyof typeof urls, label: string, hint: string) {
     return (
-      <Field label={label} hint={locked(key) ? `Managed by ${copy.managedBy}.` : hint}>
+      <Field label={label} hint={hint}>
         {(id) => (
           <Input
             id={id}
             type="url"
             value={urls[key]}
-            disabled={locked(key)}
             onChange={(e) => {
               setUrls({ ...urls, [key]: e.target.value });
               if (isInstanceChanged(save.error)) save.reset();
@@ -477,44 +467,40 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
         {urls.webClient && urls.webClient !== (urls.browserEndpoint || urls.endpoint) ? (
           <Muted>Add the address for other devices to this web client once on each device.</Muted>
         ) : null}
-        {locked("credentials") ? (
-          <p className="text-small">Credentials are managed by {copy.managedBy}.</p>
-        ) : (
-          <div className="flex flex-col items-start gap-2">
-            <Button small variant="ghost" onClick={() => setReplace(!replace)}>
-              {replace
-                ? "Keep current credentials"
-                : info.hasCredentials
-                  ? "Replace or clear credentials"
-                  : "Add Basic credentials"}
-            </Button>
-            {replace ? (
-              <>
-                <Field label="Username">
-                  {(id) => (
-                    <Input
-                      id={id}
-                      autoComplete="off"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field label="Password" hint="Leave both fields empty to clear stored credentials.">
-                  {(id) => (
-                    <Input
-                      id={id}
-                      type="password"
-                      autoComplete="new-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                  )}
-                </Field>
-              </>
-            ) : null}
-          </div>
-        )}
+        <div className="flex flex-col items-start gap-2">
+          <Button small variant="ghost" onClick={() => setReplace(!replace)}>
+            {replace
+              ? "Keep current credentials"
+              : info.hasCredentials
+                ? "Replace or clear credentials"
+                : "Add Basic credentials"}
+          </Button>
+          {replace ? (
+            <>
+              <Field label="Username">
+                {(id) => (
+                  <Input
+                    id={id}
+                    autoComplete="off"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field label="Password" hint="Leave both fields empty to clear stored credentials.">
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                )}
+              </Field>
+            </>
+          ) : null}
+        </div>
         {changed ? (
           <ConfirmInline
             confirmLabel={returned ? "Connect again" : "Connect as new service"}

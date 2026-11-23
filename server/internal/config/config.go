@@ -17,23 +17,16 @@ import (
 	"github.com/flexdinesh/stage/server/internal/listen"
 )
 
-// DefaultT3URL is the T3 server address without T3_URL or a saved setting.
+// DefaultT3URL is the T3 server address without a saved setting.
 const DefaultT3URL = "http://127.0.0.1:3773"
 
 type Config struct {
-	OpenCode OpenCodeSettings
 	// Listen: STAGE_LISTEN (comma list) or `stage serve --listen` (repeatable),
 	// default listen.Default. A listen.DefaultSocket item stays unresolved
 	// (Address "") until ResolveSockets.
-	Listen       []listen.Addr
-	DataDir      string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With STAGE_ENV=dev never the default.
-	T3URL        string // T3_URL, default DefaultT3URL (server-side MCP/OAuth calls)
-	T3PublicURL  string // T3_PUBLIC_URL, default T3_URL (browser "Open in T3" links)
-	T3AdminToken string // T3_ADMIN_TOKEN, optional; enables OAuth auto-renew
-	PublicURL    string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
-	// T3URLFromEnv / T3PublicURLFromEnv: T3_URL / T3_PUBLIC_URL were set
-	// (not the defaults). An env T3_URL locks the T3 URL setting.
-	T3URLFromEnv, T3PublicURLFromEnv bool
+	Listen    []listen.Addr
+	DataDir   string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With STAGE_ENV=dev never the default.
+	PublicURL string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
 	// T3Bin (T3_BIN) is the t3 CLI auto-pair runs; "" = look it up.
 	T3Bin string
 	// AllowedOrigins are the browser origins trusted besides loopback ones
@@ -47,6 +40,9 @@ type Config struct {
 	// T3Fake (T3_FAKE=1) uses the in-memory fake T3 client; T3FakeSeed
 	// (T3_FAKE_SEED=1) seeds it with demo threads.
 	T3Fake, T3FakeSeed bool
+	// RemovedEnv are the RemovedHarnessEnvKeys set in the environment
+	// (ignored; startup warns).
+	RemovedEnv []string
 }
 
 // Load reads the process environment. listenFlags (`stage serve
@@ -83,28 +79,49 @@ func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) 
 	return cfg, nil
 }
 
-// HarnessEnvKeys are the harness settings a process takes from its
+// HarnessEnvKeys are the harness options a process takes from its
 // environment (HarnessFrom): the main server's for its local machine, a
-// worker's for its machine. A key that is set locks that setting.
-var HarnessEnvKeys = []string{
-	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN", "T3_FAKE", "T3_FAKE_SEED", "T3_BIN",
+// worker's for its machine. Connection settings (URLs, credentials) are
+// never taken from the environment: they are set up in Settings.
+var HarnessEnvKeys = []string{"T3_FAKE", "T3_FAKE_SEED", "T3_BIN"}
+
+// RemovedHarnessEnvKeys are harness connection settings that were once
+// read from the environment and no longer are (set them up in Settings >
+// Connections). Startup warns about each one still set.
+var RemovedHarnessEnvKeys = []string{
+	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN",
 	"OPENCODE_URL", "OPENCODE_PUBLIC_URL", "OPENCODE_WEB_URL", "OPENCODE_USERNAME", "OPENCODE_PASSWORD",
+}
+
+// WarnRemovedEnv is the startup warning for RemovedEnv ("" when none).
+func (c Config) WarnRemovedEnv() string {
+	if len(c.RemovedEnv) == 0 {
+		return ""
+	}
+	return strings.Join(c.RemovedEnv, ", ") + " no longer read; set the connection up in Settings > Connections"
+}
+
+// RemovedHarnessEnv lists the RemovedHarnessEnvKeys set in getenv.
+func RemovedHarnessEnv(getenv func(string) string) []string {
+	var out []string
+	for _, k := range RemovedHarnessEnvKeys {
+		if getenv(k) != "" {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // HarnessFrom is the harness part of a Config (HarnessEnvKeys, and
 // STAGE_ENV=dev for the T3 client name) from getenv.
 func HarnessFrom(getenv func(string) string) Config {
 	cfg := Config{
-		OpenCode:     OpenCodeSettings{Endpoint: getenv("OPENCODE_URL"), BrowserEndpoint: getenv("OPENCODE_PUBLIC_URL"), WebClient: getenv("OPENCODE_WEB_URL"), Username: getenv("OPENCODE_USERNAME"), Password: getenv("OPENCODE_PASSWORD")},
-		T3URL:        envOr(getenv, "T3_URL", DefaultT3URL),
-		T3AdminToken: getenv("T3_ADMIN_TOKEN"),
 		T3Bin:        getenv("T3_BIN"),
 		T3ClientName: buildinfo.Identity,
 		T3Fake:       getenv("T3_FAKE") == "1",
 		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
+		RemovedEnv:   RemovedHarnessEnv(getenv),
 	}
-	cfg.T3PublicURL = envOr(getenv, "T3_PUBLIC_URL", cfg.T3URL)
-	cfg.T3URLFromEnv, cfg.T3PublicURLFromEnv = getenv("T3_URL") != "", getenv("T3_PUBLIC_URL") != ""
 	if getenv("STAGE_ENV") == "dev" {
 		cfg.T3ClientName += " dev"
 	}

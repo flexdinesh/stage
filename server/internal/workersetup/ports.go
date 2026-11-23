@@ -28,6 +28,7 @@ type Ports struct {
 
 var (
 	_ t3setup.Settings       = Ports{}
+	_ t3setup.AdminTokens    = Ports{}
 	_ t3setup.Identity       = Ports{}
 	_ t3.TokenStore          = Ports{}
 	_ opencodesetup.Settings = Ports{}
@@ -58,6 +59,25 @@ func (p Ports) GetConnection(ctx context.Context) (db.Connection, error) {
 
 func (p Ports) SetT3URL(ctx context.Context, u string) error {
 	return p.call(ctx, remote.KindT3SetURL, remote.URLRequest{URL: u}, nil)
+}
+
+func (p Ports) SetT3PublicURL(ctx context.Context, u string) error {
+	return p.call(ctx, remote.KindT3SetPublicURL, remote.URLRequest{URL: u}, nil)
+}
+
+// t3AdminKey is the credentials file entry of the T3 admin token.
+const t3AdminKey = "t3-admin"
+
+// LoadT3AdminToken reads the T3 admin token from the credentials file.
+func (p Ports) LoadT3AdminToken(context.Context) (string, error) {
+	var tok string
+	err := p.Creds.Get(t3AdminKey, &tok)
+	return tok, err
+}
+
+// SaveT3AdminToken writes the T3 admin token to the credentials file.
+func (p Ports) SaveT3AdminToken(_ context.Context, tok string) error {
+	return p.Creds.Set(t3AdminKey, tok)
 }
 
 // LoadToken reads the T3 token from the credentials file.

@@ -55,7 +55,7 @@ func (f *fakeLocal) Probe(context.Context, opencode.Registration) (string, error
 func TestSetupRunsOnPortsAlone(t *testing.T) {
 	settings := &fakeSettings{setup: config.OpenCodeSetup{Auth: config.OpenCodeAuthBasic}, cred: config.OpenCodeCredential{Username: "u", Password: "p"}}
 	local := &fakeLocal{}
-	s, err := New(t.Context(), Ports{Settings: settings, Identity: fakeIdentity{}, Install: func(int64, int64, execution.Adapter) {}, Local: local}, config.OpenCodeSettings{}, nil)
+	s, err := New(t.Context(), Ports{Settings: settings, Identity: fakeIdentity{}, Install: func(int64, int64, execution.Adapter) {}, Local: local}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
