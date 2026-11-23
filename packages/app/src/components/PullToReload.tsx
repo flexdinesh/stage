@@ -132,7 +132,7 @@ export function PullToReload({ contentRef }: { contentRef: RefObject<HTMLElement
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className="pointer-events-none fixed inset-x-0 top-[calc(3.25rem+var(--inset-top))] z-40 flex justify-center pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] lg:top-0"
+      className="pointer-events-none fixed inset-x-0 top-[calc(3.25rem+var(--inset-top))] z-40 flex justify-center pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] lg:top-[var(--edge-band)]"
     >
       {phase === "idle" ? null : (
         <div className="mt-2 flex items-center gap-2 border border-line-strong bg-surface px-3 py-2 text-small text-fg">
