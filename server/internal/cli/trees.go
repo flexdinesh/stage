@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 
@@ -122,7 +121,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "removed task %d from tree %d\n", res.TaskID, res.TreeID) })
+		return c.out(res, func(w io.Writer) { success(w, "Removed task %d from tree %d", res.TaskID, res.TreeID) })
 	case "edit", "update":
 		var title, mode string
 		c.fs.StringVar(&title, "title", "", "tree title")
@@ -186,7 +185,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "deleted tree %d and its tasks\n", id) })
+		return c.out(res, func(w io.Writer) { success(w, "Deleted tree %d and its tasks", id) })
 	}
 	return usagef("tree %s: unknown", v)
 }

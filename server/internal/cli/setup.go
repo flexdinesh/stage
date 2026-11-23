@@ -108,13 +108,13 @@ func setupMCP(env Env, args []string) error {
 
 func register(env Env, tool string, args []string) error {
 	if err := env.LookPath(tool); err != nil {
-		fmt.Fprintf(env.Stdout, "skipped %s: not installed\n", tool)
+		warn(env.stdout(), "Skipped %s: not installed", tool)
 		return nil
 	}
 	if err := env.Exec(tool, args...); err != nil {
 		return fmt.Errorf("%s %s: %w", tool, strings.Join(args, " "), err)
 	}
-	fmt.Fprintf(env.Stdout, "registered %s MCP server with %s\n", mcpName, tool)
+	success(env.stdout(), "Registered %s MCP server with %s", mcpName, tool)
 	return nil
 }
 
@@ -177,7 +177,7 @@ func setupInstructions(env Env, args []string) error {
 	}
 	for _, path := range targets {
 		if st, err := os.Stat(filepath.Dir(path)); err != nil || !st.IsDir() {
-			fmt.Fprintf(env.Stdout, "skipped %s: directory missing\n", path)
+			warn(env.stdout(), "Skipped %s: directory missing", path)
 			continue
 		}
 		if err := upsertInstructions(env, path); err != nil {
@@ -195,12 +195,12 @@ func upsertInstructions(env Env, path string) error {
 	}
 	next := upsertBlock(string(cur), env.cliName())
 	if next == string(cur) {
-		fmt.Fprintf(env.Stdout, "unchanged %s\n", path)
+		unchanged(env.stdout(), path)
 		return nil
 	}
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "wrote %s\n", path)
+	success(env.stdout(), "Wrote %s", path)
 	return nil
 }

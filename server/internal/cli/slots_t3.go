@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"time"
 
@@ -22,46 +21,51 @@ func init() {
 }
 
 func printT3Status(w io.Writer, s client.T3Status, cli string) {
-	fmt.Fprintf(w, "t3 %s at %s (%s)\n", s.State, s.T3URL, urlSource(s.T3URLSource))
+	t := stateTone(s.State)
+	line(w, t, "t3 %s at %s %s", t.paint(s.State), s.T3URL, dim("("+urlSource(s.T3URLSource)+")"))
 	if s.PublicURL != s.T3URL {
-		fmt.Fprintf(w, "  public    %s\n", s.PublicURL)
+		kv(w, "public", "%s", s.PublicURL)
 	}
 	if s.T3 != nil {
 		label := s.T3.Label
 		if label == "" {
 			label = s.T3.EnvironmentID
 		}
-		fmt.Fprintf(w, "  server    %s v%s (environment %s)\n", label, s.T3.ServerVersion, s.T3.EnvironmentID)
+		kv(w, "server", "%s v%s %s", label, s.T3.ServerVersion, dim("(environment "+s.T3.EnvironmentID+")"))
 	} else if s.ProbeError != nil {
-		fmt.Fprintf(w, "  server    not answering: %s\n", *s.ProbeError)
+		kv(w, "server", "%s %s", toneBad.paint("not answering:"), *s.ProbeError)
 	}
 	if s.TokenExpiresAt != nil {
-		fmt.Fprintf(w, "  token     expires %s\n", s.TokenExpiresAt.Local().Format(time.RFC3339))
+		kv(w, "token", "expires %s", s.TokenExpiresAt.Local().Format(time.RFC3339))
 	}
 	switch {
 	case s.Sync.Running:
-		fmt.Fprintf(w, "  sync      running: %d projects, %d threads so far\n", s.Sync.Projects, s.Sync.Threads)
+		kv(w, "sync", "running: %d projects, %d threads so far", s.Sync.Projects, s.Sync.Threads)
 	case s.LastFullSyncAt != nil:
-		fmt.Fprintf(w, "  sync      last full sync %s\n", s.LastFullSyncAt.Local().Format(time.RFC3339))
+		kv(w, "sync", "last full sync %s", s.LastFullSyncAt.Local().Format(time.RFC3339))
 	default:
-		fmt.Fprintln(w, "  sync      never")
+		kv(w, "sync", "never")
 	}
 	if s.AutoPair.Available {
-		fmt.Fprintln(w, "  auto-pair available")
+		kv(w, "auto-pair", "available")
 	} else if s.AutoPair.Reason != nil {
-		fmt.Fprintf(w, "  auto-pair unavailable (%s)\n", autoPairReason(*s.AutoPair.Reason))
+		kv(w, "auto-pair", "unavailable %s", dim("("+autoPairReason(*s.AutoPair.Reason)+")"))
 	}
 	if s.LastError != nil && s.State != "connected" {
-		fmt.Fprintf(w, "  error     %s\n", *s.LastError)
+		kv(w, "error", "%s", toneBad.paint(*s.LastError))
 	}
 	switch s.State {
 	case "unreachable":
-		fmt.Fprintf(w, "next: start T3 (`t3 serve`) on that machine, or point %[1]s at it: %[1]s harness t3 set url=URL\n", cli)
+		nextSteps(w,
+			step{"t3 serve", "start T3 on that machine"},
+			step{cli + " harness t3 set url=URL", "or point " + cli + " at it"})
 	case "unpaired", "expired", "rejected":
 		if s.AutoPair.Available {
-			fmt.Fprintf(w, "next: %s harness t3 run auto-pair\n", cli)
+			nextSteps(w, step{cli + " harness t3 run auto-pair", ""})
 		} else {
-			fmt.Fprintf(w, "next: run `t3 pair` on the T3 host, then: %s harness t3 run pair code=CODE\n", cli)
+			nextSteps(w,
+				step{"t3 pair", "on the T3 host"},
+				step{cli + " harness t3 run pair code=CODE", "with the code it prints"})
 		}
 	}
 }

@@ -203,7 +203,7 @@ func TestTaskCommands(t *testing.T) {
 		t.Fatalf("wait timeout exit %d", code)
 	}
 	code, stdout, _ = h.run("", "task", "rm", fmt.Sprint(tk.ID))
-	if code != 0 || !strings.Contains(stdout, "deleted task") {
+	if code != 0 || !strings.Contains(stdout, "✓ Deleted task") {
 		t.Fatalf("rm: %d %s", code, stdout)
 	}
 
@@ -316,14 +316,14 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 		t.Fatalf("task show tree + readiness:\n%s", stdout)
 	}
 	code, stdout, _ = h.run("", "tree", "rm", fmt.Sprint(loose.ID))
-	if code != 0 || stdout != fmt.Sprintf("removed task %d from tree %d\n", loose.ID, tree.ID) {
+	if code != 0 || stdout != fmt.Sprintf("✓ Removed task %d from tree %d\n", loose.ID, tree.ID) {
 		t.Fatalf("tree rm: %q", stdout)
 	}
 	if code, _, stderr := h.run("", "tree", "rm", fmt.Sprint(loose.ID)); code != 1 || !strings.Contains(stderr, "not in a tree") {
 		t.Fatalf("tree rm twice: %d %s", code, stderr)
 	}
 	code, stdout, _ = h.run("", "tree", "start", fmt.Sprint(tree.ID))
-	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("started #%d [running] third", third.ID)) || strings.Contains(stdout, "fourth") {
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("✓ Started #%d [running] third", third.ID)) || strings.Contains(stdout, "fourth") {
 		t.Fatalf("tree start:\n%s", stdout)
 	}
 	if code, _, _ := h.run("", "tree", "frob"); code != 2 {
@@ -354,7 +354,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 	}
 	h.caller = agentctx.Caller{Session: t3Session(me)}
 	code, stdout, stderr := h.run("", "sessions", "adopt")
-	if code != 0 || !strings.Contains(stdout, "adopted session as a task") || !strings.Contains(stdout, "adopted  tracks an existing session") {
+	if code != 0 || !strings.Contains(stdout, "✓ Adopted session as a task") || !strings.Contains(stdout, "adopted  tracks an existing session") {
 		t.Fatalf("adopt own: %d %s %s", code, stdout, stderr)
 	}
 	code, stdout, _ = h.run("", "sessions", "adopt", "--json")
@@ -474,7 +474,7 @@ func TestSetupInstructionsIdempotent(t *testing.T) {
 	if strings.Count(s, "<!-- stage:begin -->") != 1 || !strings.HasPrefix(s, "# Mine\n\nkeep this\n\n") || !strings.Contains(s, "`stage guide`") || strings.Contains(s, "afterMe") {
 		t.Fatalf("file:\n%s", s)
 	}
-	if code, stdout, _ := h.run("", "setup", "instructions", "--file", path); code != 0 || !strings.Contains(stdout, "unchanged") {
+	if code, stdout, _ := h.run("", "setup", "instructions", "--file", path); code != 0 || !strings.Contains(stdout, "✓ Unchanged "+path) {
 		t.Fatalf("rerun: %s", stdout)
 	}
 }
@@ -488,7 +488,7 @@ func TestSetupMCP(t *testing.T) {
 	}
 	got := fmt.Sprint(h.execs)
 	want := "[[claude mcp remove --scope user stage] [claude mcp add --scope user -e STAGE_URL=http://localhost:7380 stage -- /usr/local/bin/stage mcp] [codex mcp remove stage]]"
-	if got != want || !strings.Contains(stdout, "skipped codex") {
+	if got != want || !strings.Contains(stdout, "! Skipped codex: not installed") {
 		t.Fatalf("execs %s\nstdout %s", got, stdout)
 	}
 	h.execs = nil

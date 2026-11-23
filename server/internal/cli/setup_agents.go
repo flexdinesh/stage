@@ -87,7 +87,7 @@ func writeFile(env Env, path, content string) error {
 		return err
 	}
 	if string(cur) == content {
-		fmt.Fprintf(env.Stdout, "unchanged %s\n", path)
+		unchanged(env.stdout(), path)
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -96,7 +96,7 @@ func writeFile(env Env, path, content string) error {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "wrote %s\n", path)
+	success(env.stdout(), "Wrote %s", path)
 	return nil
 }
 
@@ -128,7 +128,7 @@ func setupSkill(env Env, args []string) error {
 	}
 	chosen := agents(true)
 	if len(chosen) == 0 {
-		fmt.Fprintln(env.Stdout, "no agents found (Claude Code, Codex, OpenCode); pass --claude, --codex or --opencode")
+		warn(env.stdout(), "No agents found (Claude Code, Codex, OpenCode); pass --claude, --codex or --opencode")
 		return nil
 	}
 	return installSkills(env, chosen)
@@ -153,7 +153,7 @@ func setupAgents(ctx context.Context, env Env, args []string) error {
 	chosen := agents(true)
 	if !check {
 		if len(chosen) == 0 {
-			fmt.Fprintln(env.Stdout, "no agents found (Claude Code, Codex, OpenCode); pass --claude, --codex or --opencode")
+			warn(env.stdout(), "No agents found (Claude Code, Codex, OpenCode); pass --claude, --codex or --opencode")
 		}
 		if err := installSkills(env, chosen); err != nil {
 			return err
@@ -176,7 +176,7 @@ func setupAgents(ctx context.Context, env Env, args []string) error {
 				if a.mcp {
 					mcpArgs = append(mcpArgs, "--"+a.name)
 				} else {
-					fmt.Fprintf(env.Stdout, "skipped %s MCP: register `%s mcp` as a local MCP server named %s in its config yourself\n", a.label, env.Executable, mcpName)
+					warn(env.stdout(), "Skipped %s MCP: register %s as a local MCP server named %s in its config yourself", a.label, cmdText(env.Executable+" mcp"), mcpName)
 				}
 			}
 			if len(mcpArgs) > 0 {
@@ -359,21 +359,29 @@ func sameFile(a, b string) bool {
 }
 
 func printSetupReport(w io.Writer, r setupReport) {
-	line := func(label string, l checkLine) {
-		fmt.Fprintf(w, "%-8s %-13s %s\n", l.Status, label, l.Detail)
+	row := func(label string, l checkLine) {
+		t := toneOK
+		switch l.Status {
+		case "note":
+			t = toneWarn
+		case "problem":
+			t = toneBad
+		}
+		fmt.Fprintf(w, "%s %s %s\n", t.glyph(), dim(fmt.Sprintf("%-13s", label)), l.Detail)
 	}
-	line("cli", r.CLI)
-	line("server", r.Server)
-	line("caller", r.Caller)
+	row("cli", r.CLI)
+	row("server", r.Server)
+	row("caller", r.Caller)
 	for _, a := range r.Agents {
-		line(a.Agent, a.Skill)
-		line("", a.Instructions)
-		line("", a.MCP)
+		row(a.Agent, a.Skill)
+		row("", a.Instructions)
+		row("", a.MCP)
 	}
 	if len(r.Agents) == 0 {
-		fmt.Fprintln(w, "note     agents        none found (Claude Code, Codex, OpenCode)")
+		row("agents", note("none found (Claude Code, Codex, OpenCode)"))
 	}
 	if r.Problems > 0 {
-		fmt.Fprintf(w, "\n%d problem(s)\n", r.Problems)
+		fmt.Fprintln(w)
+		line(w, toneBad, "%d problem(s)", r.Problems)
 	}
 }

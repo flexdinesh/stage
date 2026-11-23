@@ -64,7 +64,7 @@ func TestServiceNoManager(t *testing.T) {
 		t.Fatalf("status: %d %s", code, out)
 	}
 	code, out, _ = runService(t, &noManager{}, "service", "status")
-	if code != 6 || !strings.Contains(out, "stage service (systemd stage.service): unknown") || !strings.Contains(out, "problem: no systemd user manager") {
+	if code != 6 || !strings.Contains(out, "✗ stage service (systemd stage.service): unknown") || !strings.Contains(out, "✗ No systemd user manager") {
 		t.Fatalf("status text: %d %s", code, out)
 	}
 }

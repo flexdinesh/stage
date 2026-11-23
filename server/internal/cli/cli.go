@@ -97,12 +97,13 @@ func Run(ctx context.Context, args []string, env Env) int {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
 	case errors.As(err, &u):
-		fmt.Fprintf(env.Stderr, "error: %s\n\n%s", u.msg, usage)
+		fail(env.stderr(), "%s", u.msg)
+		fmt.Fprintf(env.Stderr, "\n%s", usage)
 		return 2
 	case errors.Is(err, errTimeout):
 		return 3
 	default:
-		fmt.Fprintf(env.Stderr, "error: %s\n", err)
+		fail(env.stderr(), "%s", err)
 		return 1
 	}
 }
@@ -321,7 +322,7 @@ func (c *cmd) out(v any, human func(io.Writer)) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(v)
 	}
-	human(c.env.Stdout)
+	human(c.env.stdout())
 	return nil
 }
 

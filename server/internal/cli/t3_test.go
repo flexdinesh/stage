@@ -12,8 +12,8 @@ func TestT3Status(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "harness", "t3")
 	if code != 0 || !strings.Contains(out, "t3 connected at http://127.0.0.1:3773 (default)") ||
-		strings.Contains(out, "public ") || !strings.Contains(out, "server    fake vfake (environment fake-env)") ||
-		!strings.Contains(out, "sync      never") || !strings.Contains(out, "auto-pair unavailable (fake T3)") || strings.Contains(out, "next:") {
+		strings.Contains(out, "public ") || !strings.Contains(out, "server      fake vfake (environment fake-env)") ||
+		!strings.Contains(out, "sync        never") || !strings.Contains(out, "auto-pair   unavailable (fake T3)") || strings.Contains(out, "Next:") {
 		t.Fatalf("t3: %d %q %q", code, out, errOut)
 	}
 	code, out, _ = h.run("", "harness", "t3", "status", "--json")
@@ -33,8 +33,8 @@ func TestT3Status(t *testing.T) {
 	}
 	h.fake.SetProbe(t3.Probe{CheckedAt: time.Now(), Err: "connection refused"})
 	code, out, _ = h.run("", "harness", "t3", "status")
-	if code != 0 || !strings.Contains(out, "t3 unreachable at") || !strings.Contains(out, "server    not answering: connection refused") ||
-		!strings.Contains(out, "next: start T3 (`t3 serve`)") {
+	if code != 0 || !strings.Contains(out, "t3 unreachable at") || !strings.Contains(out, "server      not answering: connection refused") ||
+		!strings.Contains(out, "Next:\n  t3 serve ") {
 		t.Fatalf("unreachable: %d %q", code, out)
 	}
 	if code, _, errOut := h.run("", "harness", "t3", "nope"); code != 2 || !strings.Contains(errOut, "harness t3 nope: unknown") {
@@ -63,7 +63,7 @@ func TestT3Pair(t *testing.T) {
 func TestT3Disconnect(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "harness", "t3", "disconnect")
-	if code != 0 || !strings.Contains(out, "t3 unpaired") || !strings.Contains(out, "next: run `t3 pair`") {
+	if code != 0 || !strings.Contains(out, "t3 unpaired") || !strings.Contains(out, "Next:\n  t3 pair ") || !strings.Contains(out, "stage harness t3 run pair code=CODE") {
 		t.Fatalf("disconnect: %d %q %q", code, out, errOut)
 	}
 	if code, _, errOut := h.run("", "harness", "t3", "disconnect", "now"); code != 2 || !strings.Contains(errOut, "unexpected argument") {
@@ -100,7 +100,7 @@ func TestT3URL(t *testing.T) {
 		t.Fatalf("reset: %d %q %q", code, out, errOut)
 	}
 	code, out, errOut = h.run("", "harness", "t3", "set", "publicUrl=https://t3.example")
-	if code != 0 || !strings.Contains(out, "public    https://t3.example") || h.fake.PublicURL != "https://t3.example" {
+	if code != 0 || !strings.Contains(out, "public      https://t3.example") || h.fake.PublicURL != "https://t3.example" {
 		t.Fatalf("browser url: %d %q %q", code, out, errOut)
 	}
 }

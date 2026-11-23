@@ -114,13 +114,19 @@ func runUpdate(ctx context.Context, env Env, args []string) error {
 		if *asJSON {
 			return writeJSON(env.Stdout, c)
 		}
-		fmt.Fprintf(env.Stdout, "installed %s (%s mode)\n", c.Installed, c.Mode)
-		fmt.Fprintf(env.Stdout, "latest    %s\n", c.Latest)
+		w := env.stdout()
+		if newer {
+			warn(w, "Update available: %s", c.Latest)
+		} else {
+			success(w, "Up to date")
+		}
+		kv(w, "installed", "%s %s", c.Installed, dim("("+c.Mode+" mode)"))
+		kv(w, "latest", "%s", c.Latest)
 		if c.Server != "" {
-			fmt.Fprintf(env.Stdout, "server    %s\n", c.Server)
+			kv(w, "server", "%s", c.Server)
 		}
 		if newer {
-			fmt.Fprintf(env.Stdout, "update available: %s update\n", rec.CLIName)
+			nextSteps(w, step{rec.CLIName + " update", "install " + c.Latest})
 		}
 		return nil
 	}
@@ -169,30 +175,12 @@ func printInstall(env Env, asJSON bool, r *install.Result) error {
 		}
 		return codeErr(r.Code)
 	}
-	for _, w := range r.Warnings {
-		fmt.Fprintf(env.Stderr, "warning: %s\n", w)
-	}
-	if r.OK {
-		fmt.Fprintln(env.Stdout, r.Message)
-	} else {
-		fmt.Fprintf(env.Stderr, "error: %s\n", r.Message)
-		if r.Fix != "" {
-			fmt.Fprintf(env.Stderr, "fix: %s\n", r.Fix)
-		}
-		if len(r.LogTail) > 0 {
-			fmt.Fprintln(env.Stderr, "recent log lines:")
-			for _, l := range r.LogTail {
-				fmt.Fprintf(env.Stderr, "  %s\n", l)
-			}
-		}
-	}
-	for _, n := range r.Notes {
-		fmt.Fprintf(env.Stdout, "note: %s\n", n)
-	}
+	out := env.stdout()
+	printOutcome(out, env.stderr(), outcome{ok: r.OK, message: r.Message, fix: r.Fix, logTail: r.LogTail, notes: r.Notes, warnings: r.Warnings})
 	if len(r.Retained) > 0 {
-		fmt.Fprintln(env.Stdout, "kept:")
+		fmt.Fprintf(out, "  %s\n", dim("kept:"))
 		for _, p := range r.Retained {
-			fmt.Fprintf(env.Stdout, "  %s\n", p)
+			fmt.Fprintf(out, "    %s\n", p)
 		}
 	}
 	return codeErr(r.Code)
