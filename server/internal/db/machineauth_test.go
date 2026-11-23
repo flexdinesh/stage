@@ -232,8 +232,14 @@ func TestRemoveMachineRevokesTokenAndRetiresConnections(t *testing.T) {
 	if m, _ := s.GetMachineInfo(ctx, g.MachineID); len(m.Connections) != 2 {
 		t.Fatalf("connections before removal %+v", m.Connections)
 	}
+	if _, err := s.SetDefaultConnection(ctx, &used.New); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.RemoveMachine(ctx, g.MachineID); err != nil {
 		t.Fatal(err)
+	}
+	if p, _ := s.GetPreferences(ctx); p.DefaultConnectionID != nil {
+		t.Fatalf("removed machine's connection still the default: %d", *p.DefaultConnectionID)
 	}
 	if _, err := s.AuthenticateMachine(ctx, g.Token); !errors.Is(err, db.ErrInvalidMachineToken) {
 		t.Fatalf("token after removal: %v", err)

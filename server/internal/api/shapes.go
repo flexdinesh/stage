@@ -104,30 +104,6 @@ func deepLink(envID string, threadID *string) *string {
 	return &u
 }
 
-// Preserve the legacy T3 response fields for older clients. The canonical
-// selection retains the distinction between a harness default and an override.
-func t3Defaults(config *execution.Config, provider, model *string, options []execution.ModelOption, permission, mode string) db.ModelDefaults {
-	d := db.ModelDefaults{ExecutionConfig: config, ProviderInstanceID: provider, Model: model, ModelOptions: options, RuntimeMode: permission, InteractionMode: mode}
-	if config == nil {
-		return d
-	}
-	d.ProviderInstanceID, d.Model = nil, nil
-	if p, m, err := t3.DecodeModelKey(config.Model); err == nil {
-		d.ProviderInstanceID, d.Model = &p, &m
-	}
-	d.ModelOptions = append([]execution.ModelOption{}, config.Options...)
-	if config.Permission != "" {
-		d.RuntimeMode = config.Permission
-	}
-	// An empty mode is the harness default: launch sends no interaction mode,
-	// so never echo a stale legacy column (e.g. "plan" from before the config).
-	d.InteractionMode = string(t3.InteractionDefault)
-	if config.Mode != "" {
-		d.InteractionMode = config.Mode
-	}
-	return d
-}
-
 // executionConfig is a row's canonical config: its own, else the one its
 // harness decodes from the legacy model columns (nil when neither).
 func (s *server) executionConfig(kind string, config *execution.Config, legacy func() json.RawMessage) *execution.Config {

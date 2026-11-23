@@ -2,11 +2,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
-import { connectionOptions } from "../lib/machines.ts";
+import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
-  type ModelDefaults,
-  type Preferences,
   type Schedule,
   type StartMode as TreeStartMode,
   type Task,
@@ -40,7 +38,7 @@ import { HandoffToggle } from "./Handoff.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
-import { prefillConfig } from "../lib/capabilities.ts";
+import { newTaskConnection, prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
 import {
@@ -105,17 +103,8 @@ interface FormState {
   tz: string;
 }
 
-type DefaultsSource = "pinned" | "last used";
-
 /** What the drawer saved: a task, or (Repeat) a schedule. */
 export type Saved = { kind: "task"; task: Task } | { kind: "schedule"; schedule: Schedule };
-
-/** New-task model prefill: pinned default, else the last created task's config. */
-function pickDefaults(p: Preferences | undefined): { defaults: ModelDefaults; source: DefaultsSource } | null {
-  if (p?.pinned != null) return { defaults: p.pinned, source: "pinned" };
-  if (p?.lastUsed != null) return { defaults: p.lastUsed, source: "last used" };
-  return null;
-}
 
 /** The task-shaped config shared by tasks and schedules. */
 type Template = Pick<
@@ -227,10 +216,10 @@ interface TaskFormProps {
   onSaved?: (saved: Saved) => void;
 }
 
-/** Create (no `task`/`schedule`) or edit form in a drawer. A new one waits for preferences (usually cached) to prefill its model config. */
+/** Create (no `task`/`schedule`) or edit form in a drawer. A new one waits for preferences (usually cached) to start on the default connection. */
 export function TaskFormModal(props: TaskFormProps) {
   const prefs = usePreferences();
-  if (props.task !== undefined || props.schedule !== undefined) return <TaskFormDrawer {...props} prefill={null} />;
+  if (props.task !== undefined || props.schedule !== undefined) return <TaskFormDrawer {...props} defaultConnection={null} />;
   if (prefs.isPending) {
     return (
       <Drawer title={props.defaultMode === "repeat" ? "New schedule" : "New task"} onClose={props.onClose} wide>
@@ -238,7 +227,7 @@ export function TaskFormModal(props: TaskFormProps) {
       </Drawer>
     );
   }
-  return <TaskFormDrawer {...props} prefill={pickDefaults(prefs.data)} />;
+  return <TaskFormDrawer {...props} defaultConnection={prefs.data?.defaultConnectionId ?? null} />;
 }
 
 function TaskFormDrawer({
@@ -249,8 +238,8 @@ function TaskFormDrawer({
   defaultTree,
   onClose,
   onSaved,
-  prefill,
-}: TaskFormProps & { prefill: { defaults: ModelDefaults; source: DefaultsSource } | null }) {
+  defaultConnection,
+}: TaskFormProps & { defaultConnection: number | null }) {
   const api = useApi();
   const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, defaultTree));
   // The task and form state as the form opened: a save sends only what differs from them.
@@ -278,7 +267,8 @@ function TaskFormDrawer({
     issues,
     unverifiedConfig,
     chooseHarness,
-  } = useHarnessConfig(existing, s.projectId, prefill);
+    fellBack,
+  } = useHarnessConfig(existing, s.projectId, defaultConnection);
   const full = task === undefined || isFullyEditable(task);
   const images = useImageSet(task?.attachments ?? schedule?.attachments);
   const isNew = task === undefined && schedule === undefined;
@@ -300,6 +290,8 @@ function TaskFormDrawer({
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
   const inheritedMode = isNew ? (defaultTree?.startMode ?? null) : task !== undefined && task.startMode === null ? task.effectiveStartMode : null;
   const { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError } = useStartTiming(s);
+  // "T3 · desk" once there is more than one machine, else "T3".
+  const connectionName = (id: number) => withMachine(harnesses.name(id), machineTag(machines, harnesses.connection(id)?.machineId ?? 0));
 
   function template(): TaskTemplate {
     return {
@@ -452,10 +444,16 @@ function TaskFormDrawer({
           <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" showTag options={[
             {value: "", label: "Choose a harness"},
             // Machine > Harness: the machine is the tag once there is more than one; a chosen project's bindings list first.
-            ...connectionOptions(harnesses.activeList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId))),
+            ...connectionOptions(harnesses.activeList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
             ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
           ]}/>}</Field>
         </div>
+        {fellBack === null || selectedProject === undefined ? null : (
+          <Hint className="-mt-1.5">
+            {selectedProject.title} is not on {connectionName(fellBack)} (default).{" "}
+            {connection ? `Using ${connectionName(connection)}.` : "Choose a harness."}
+          </Hint>
+        )}
         <ErrorText error={harnesses.error}/>
         {selectedProject === undefined || !connection || bound ? null : <Alert>
           Planning is available. Bind or confirm a workspace before launching.
@@ -518,11 +516,7 @@ function TaskFormDrawer({
           ) : null}
         </fieldset>
         {prefilled === undefined || draftConfig ? null : (
-          <Hint className="-mt-1.5">
-            {prefill?.source === "pinned"
-              ? "model and mode prefilled from your pinned default (Settings)"
-              : "model and mode prefilled from your last task · pin a default in Settings"}
-          </Hint>
+          <Hint className="-mt-1.5">model prefilled from the {connectionName(connection)} pin (Settings › Connections)</Hint>
         )}
         {modes.length > 0 ? (
           <FieldGroup label="Start">
@@ -587,7 +581,7 @@ function TaskFormDrawer({
 function useHarnessConfig(
   existing: Task | Schedule | undefined,
   projectId: string,
-  prefill: { defaults: ModelDefaults; source: DefaultsSource } | null,
+  defaultConnection: number | null,
 ) {
   const api = useApi();
   const projects = useProjects();
@@ -596,7 +590,18 @@ function useHarnessConfig(
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
   // Bindings on replaced connections are history: they never pick the destination.
   const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
-  const connection = chosen || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
+  // A default that is no longer an active connection is none.
+  const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) ? defaultConnection : null;
+  // Not chosen: the default connection, or (for a project not available there) the one the server would pick. The
+  // default never narrows the project list; only an explicit choice does.
+  const implicit = existing
+    ? 0
+    : selectedProject === undefined
+      ? (fallbackDefault ?? 0)
+      : newTaskConnection(selectedProject.bindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
+  const connection = chosen || implicit || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
+  // The project is not on the default connection: the form says where the task goes instead.
+  const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;
   // An explicitly chosen harness narrows the picker to projects it can run.
   const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, projectId), [projects.data, chosen, projectId]);
   const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
@@ -611,7 +616,8 @@ function useHarnessConfig(
   // Until the harness answers, nothing is ruled out: the server checks the launch.
   const operation = (id: string) => caps.data?.operations[id]?.available ?? true;
   const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
-  const prefilled = existing ? undefined : prefillConfig(prefill?.defaults, harnesses.harness(connection));
+  // A new task starts with the connection's pinned model; it follows the harness until the user edits the config.
+  const prefilled = existing ? undefined : prefillConfig(harnesses.connection(connection));
   const originalConfig = existing?.executionConfig ?? prefilled;
   const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : harnessDefaults;
   // New-task prefill carries model and options only; mode and permission start at the harness default.
@@ -644,6 +650,7 @@ function useHarnessConfig(
     issues: incompatibleSettings(effectiveConfig, caps.data),
     unverifiedConfig,
     chooseHarness,
+    fellBack,
   };
 }
 

@@ -1,18 +1,13 @@
-// Settings: three tabs, each its own route (lib/settings.ts). General: user, theme, T3 default model, Info.
-// Connections: machines and their harness connections (components/Machines.tsx). Notifications: events and this
-// device's delivery.
+// Settings: three tabs, each its own route (lib/settings.ts). General: user, theme, Info.
+// Connections: machines and their harness connections (components/Machines.tsx), each with its new-task defaults.
+// Notifications: events and this device's delivery.
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
-import {
-  type ModelDefaults,
-  type NotificationEvent,
-  type Preferences,
-} from "../api/types.ts";
+import { type NotificationEvent, type Preferences } from "../api/types.ts";
 import { InfoPanel } from "../components/InfoPanel.tsx";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
-import { ModelFields, type ModelConfig } from "../components/ModelFields.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
 import { useStatusAlert } from "../components/StatusRow.tsx";
 import {
@@ -69,70 +64,6 @@ function UserCard() {
   );
 }
 
-
-const FALLBACK: ModelDefaults = {
-  providerInstanceId: null,
-  model: null,
-  modelOptions: [],
-  runtimeMode: "full-access",
-  interactionMode: "default",
-};
-
-function DefaultModelCard() {
-  const prefs = usePreferences();
-  const pinned = prefs.data?.pinned != null;
-  return (
-    <Panel title="T3 default model" {...(prefs.data === undefined ? {} : { meta: pinned ? "pinned" : "last used" })}>
-      <QueryState isPending={prefs.isPending} error={prefs.error} hasData={prefs.data !== undefined}>
-        {prefs.data === undefined ? null : <DefaultModelForm prefs={prefs.data} />}
-      </QueryState>
-    </Panel>
-  );
-}
-
-function DefaultModelForm({ prefs }: { prefs: Preferences }) {
-  const api = useApi();
-  const qc = useQueryClient();
-  const start = prefs.pinned ?? prefs.lastUsed ?? FALLBACK;
-  const [config, setConfig] = useState<ModelConfig>({
-    providerInstanceId: start.providerInstanceId,
-    model: start.model,
-    modelOptions: start.modelOptions,
-    runtimeMode: start.runtimeMode,
-  });
-  const save = useMutation({
-    mutationFn: (d: ModelDefaults | null) => api.setPinned(d),
-    onSuccess: (p) => qc.setQueryData(keys.preferences, p),
-  });
-  const pinned = prefs.pinned !== null;
-  const note = pinned
-    ? "New T3 tasks use this pinned selection."
-    : prefs.lastUsed === null
-      ? "Not pinned. New tasks start from the T3 default until you create one; after that, from your last task."
-      : "New T3 tasks reuse the last T3 selection, including harness defaults. Pin the values shown below to use them explicitly.";
-  return (
-    <div className="flex flex-col gap-3">
-      <Muted>{note} Interaction mode and permission start at harness default.</Muted>
-      <ModelFields value={config} onChange={setConfig} />
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="primary"
-          busy={save.isPending && save.variables !== null}
-          disabled={save.isPending}
-          onClick={() => save.mutate({ ...config, interactionMode: start.interactionMode })}
-        >
-          {pinned ? "Save pinned default" : "Pin as default"}
-        </Button>
-        {pinned ? (
-          <Button busy={save.isPending && save.variables === null} disabled={save.isPending} onClick={() => save.mutate(null)}>
-            Unpin
-          </Button>
-        ) : null}
-      </div>
-      <ErrorText error={save.error} />
-    </div>
-  );
-}
 
 const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
   insecure: { tone: "idle", label: "needs https" },
@@ -368,7 +299,7 @@ function SettingsHeader({ tab, meta, actions }: { tab: SettingsTab; meta: string
   );
 }
 
-/** /settings: the user, appearance, the T3 default model and Info. */
+/** /settings: the user, appearance and Info. New-task defaults live with each connection (Connections). */
 export function SettingsGeneralPage() {
   return (
     <>
@@ -376,7 +307,6 @@ export function SettingsGeneralPage() {
       <div className="flex max-w-[720px] flex-col gap-3.5">
         <UserCard />
         <ThemeCard />
-        <DefaultModelCard />
         <InfoPanel />
       </div>
     </>

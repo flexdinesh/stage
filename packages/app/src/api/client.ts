@@ -1,6 +1,6 @@
 import type {
   Machine, MachinePairing, PairingStatus,
-  OpenCodeStatus, OpenCodeStatusWire, Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionLinks, TaskState,
+  OpenCodeStatus, OpenCodeStatusWire, Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -33,7 +33,6 @@ import type {
   SchedulePreviewRequest,
   UpdateScheduleRequest,
   Health,
-  ModelDefaults,
   NotificationEvent,
   NotificationGroupPage,
   NotificationPage,
@@ -250,6 +249,7 @@ export function createApi(transport: Transport) {
     /** Revokes a code not yet redeemed (409 `pairing_redeemed` once it added a machine). */
     revokePairing: (id: number) => apiSend(`/machines/pairings/${id}`, del),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
+    setNewTaskConfig: (connectionId: number, config: ExecutionConfig | null) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/new-task-config`, put({config})),
     /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
@@ -345,7 +345,8 @@ export function createApi(transport: Transport) {
     me: () => apiFetch<User>("/me"),
 
     preferences: () => apiFetch<Preferences>("/preferences"),
-    setPinned: (body: ModelDefaults | null) => apiFetch<Preferences>("/preferences/pinned", { method: "PUT", body }),
+    setDefaultConnection: (connectionId: number | null) =>
+      apiFetch<Preferences>("/preferences/default-connection", { method: "PUT", body: { connectionId } }),
     setNotifyEvents: (events: NotificationEvent[]) =>
       apiFetch<Preferences>("/preferences/notifications", { method: "PUT", body: { events } }),
 

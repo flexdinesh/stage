@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -123,12 +124,29 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pin := &execution.Config{Model: `["claude","m"]`, Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}}
+	if _, err := s.SetNewTaskConfig(ctx, first, pin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetDefaultConnection(ctx, &first); err != nil {
+		t.Fatal(err)
+	}
 
 	sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-b", "box b", 0)
 	if err != nil || !sw.Changed || sw.Revived || sw.Old != first || sw.New == first {
 		t.Fatalf("replace %+v %v", sw, err)
 	}
 	second := sw.New
+	// The replacement takes over the pin and the default.
+	if c, _ := s.GetHarnessConnection(ctx, second); c.NewTaskConfig == nil || c.NewTaskConfig.Model != pin.Model || len(c.NewTaskConfig.Options) != 1 {
+		t.Fatalf("pin not carried: %+v", c.NewTaskConfig)
+	}
+	if p, _ := s.GetPreferences(ctx); p.DefaultConnectionID == nil || *p.DefaultConnectionID != second {
+		t.Fatalf("default not carried: %v", p.DefaultConnectionID)
+	}
+	if _, err := s.SetDefaultConnection(ctx, &first); err == nil {
+		t.Fatal("replaced connection accepted as the default")
+	}
 	if s.LegacyT3ID() != second || s.ConnectionActive(first) || !s.IsT3(first) {
 		t.Fatalf("active %d", s.LegacyT3ID())
 	}
@@ -167,6 +185,16 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	}
 	if _, err := s.GetHarnessConnection(ctx, second); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty connection kept: %v", err)
+	}
+	// The default follows the revived connection, which keeps its own pin.
+	if p, _ := s.GetPreferences(ctx); p.DefaultConnectionID == nil || *p.DefaultConnectionID != first {
+		t.Fatalf("default after revive: %v", p.DefaultConnectionID)
+	}
+	if c, _ := s.GetHarnessConnection(ctx, first); c.NewTaskConfig == nil || c.NewTaskConfig.Model != pin.Model {
+		t.Fatalf("revived pin %+v", c.NewTaskConfig)
+	}
+	if foreignKeyViolations(t, pool) != 0 {
+		t.Fatal("foreign key violations")
 	}
 	if p, _ := s.GetProject(ctx, project); !p.Bindings[0].ConnectionActive {
 		t.Fatal("revived binding inactive")

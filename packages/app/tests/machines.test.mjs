@@ -111,6 +111,19 @@ test("connection options: a chosen project's bindings list first; the rest are m
   ]);
 });
 
+test("connection options: the default connection is marked, with not bound when it is", () => {
+  const opts = connectionOptions([conn(1, "t3", 1), conn(5, "opencode", 1)], [local], kindName, null, 5);
+  assert.deepEqual(opts.map((o) => [o.value, o.chip]), [
+    ["1", undefined],
+    ["5", "default"],
+  ]);
+  const bound = connectionOptions([conn(1, "t3", 1), conn(5, "opencode", 1)], [local], kindName, new Set([5]), 1);
+  assert.deepEqual(bound.map((o) => [o.value, o.chip]), [
+    ["5", undefined],
+    ["1", "default · not bound"],
+  ]);
+});
+
 test("machine page: setup state and alert per presence", () => {
   const online = { ...desk, online: true, status: "online" };
   assert.equal(machineSetupState(online), "ready");

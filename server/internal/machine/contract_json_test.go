@@ -80,7 +80,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		// Port payloads (settings, credentials, identity).
 		"Switch":             db.Switch{Old: 1, New: 2, Changed: true, Revived: true},
 		"Connection":         db.Connection{LastError: &str, LastFullSyncAt: &at, T3URL: &str, T3PublicURL: &str, EnvironmentID: &str, ConnectionID: 1},
-		"HarnessConnection":  db.HarnessConnection{Configured: true, ID: 1, MachineID: 2, Harness: "kind", AutoComplete: true, Active: true, Label: "box", RetiredAt: &str, ForgottenAt: &str, Tasks: 3, Bindings: 4},
+		"HarnessConnection":  db.HarnessConnection{Configured: true, ID: 1, MachineID: 2, Harness: "kind", AutoComplete: true, Active: true, Label: "box", RetiredAt: &str, ForgottenAt: &str, Tasks: 3, Bindings: 4, NewTaskConfig: &execution.Config{Model: "m", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}, Permission: "p", Mode: "x"}},
 		"ProjectBinding":     binding,
 		"OpenCodeSetup":      config.OpenCodeSetup{Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", Auth: config.OpenCodeAuthPaired},
 		"OpenCodeCredential": config.OpenCodeCredential{Username: "opencode", Password: "tok", TokenIssuedAt: &at},

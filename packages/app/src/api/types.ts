@@ -403,6 +403,8 @@ export interface HarnessConnection {
   forgottenAt: string | null;
   tasks: number;
   bindings: number;
+  /** The model and options new tasks here start with (permission and mode empty); null = the harness default. */
+  newTaskConfig: ExecutionConfig | null;
 }
 /** The T3 connection a pairing replaced. */
 export interface ReplacedConnection { id: number; label: string; tasks: number; bindings: number }
@@ -1108,21 +1110,13 @@ export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
 
 // ---- Preferences ----
 
-/** New-task model preset. providerInstanceId/model null = T3 default. */
-export interface ModelDefaults {
-  executionConfig?: ExecutionConfig;
-  providerInstanceId: string | null;
-  model: string | null;
-  modelOptions: ModelOption[];
-  runtimeMode: RuntimeMode;
-  interactionMode: InteractionMode;
-}
-
-/** New task prefills from `pinned`, else `lastUsed` (the latest created task). */
-/** notifyEvents: events that notify (inbox + push) on every device; others are dropped. */
+/**
+ * defaultConnectionId: the connection new tasks start on (null = none: the project's only binding). Each connection
+ * pins its own new-task model (HarnessConnection.newTaskConfig).
+ * notifyEvents: events that notify (inbox + push) on every device; others are dropped.
+ */
 export interface Preferences {
-  pinned: ModelDefaults | null;
-  lastUsed: ModelDefaults | null;
+  defaultConnectionId: number | null;
   notifyEvents: NotificationEvent[];
 }
 

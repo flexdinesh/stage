@@ -63,6 +63,14 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 	}
 	id := a.ConnectionID
 	if id == 0 {
+		prefs, err := o.Client.Preferences(ctx)
+		if err != nil {
+			return 0, err
+		}
+		// The default connection, else the only binding, like the web app's new-task form.
+		id = db.NewTaskDestination(p.Bindings, prefs.DefaultConnectionID, h.machine)
+	}
+	if id == 0 {
 		var configured []int64
 		for _, conn := range cs {
 			if conn.Configured {
@@ -70,8 +78,6 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 			}
 		}
 		switch {
-		case len(bindings) == 1:
-			id = bindings[0].ConnectionID
 		case a.legacyConfig():
 			id = h.t3()
 		case len(bindings) > 1:

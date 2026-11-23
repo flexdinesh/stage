@@ -255,7 +255,7 @@ func TestListenerModes(t *testing.T) {
 			t.Fatalf("socket mode %v, %v", st.Mode().Perm(), err)
 		}
 		h := health(t, a)
-		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 6 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
+		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 7 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
 			t.Fatalf("health %+v", h)
 		}
 		if err := i.stop(t); err != nil {

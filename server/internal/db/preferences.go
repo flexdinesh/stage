@@ -3,27 +3,15 @@ package db
 import (
 	"context"
 	"slices"
-
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// ModelDefaults is a new-task model preset (pinned or last used).
-// ProviderInstanceID / Model nil = T3 default; set together.
-type ModelDefaults struct {
-	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
-	ProviderInstanceID *string                 `json:"providerInstanceId"`
-	Model              *string                 `json:"model"`
-	ModelOptions       []execution.ModelOption `json:"modelOptions"`
-	RuntimeMode        string                  `json:"runtimeMode"`
-	InteractionMode    string                  `json:"interactionMode"`
-}
-
-// Preferences: new-task prefill is Pinned, else LastUsed. NotifyEvents:
-// events that notify (inbox + push); others are dropped.
+// Preferences: DefaultConnectionID is the connection new tasks start on (nil =
+// none, or its connection is no longer active). Each connection pins its own
+// new-task model (HarnessConnection.NewTaskConfig). NotifyEvents: events that
+// notify (inbox + push); others are dropped.
 type Preferences struct {
-	Pinned       *ModelDefaults `json:"pinned"`
-	LastUsed     *ModelDefaults `json:"lastUsed"`
-	NotifyEvents []TaskState    `json:"notifyEvents"`
+	DefaultConnectionID *int64      `json:"defaultConnectionId"`
+	NotifyEvents        []TaskState `json:"notifyEvents"`
 }
 
 // EventReady is the ready notification event: a manual tree member whose
@@ -36,8 +24,9 @@ var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, EventReady, S
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 	var p Preferences
 	var events []string
-	err := s.pool.QueryRow(ctx, `SELECT pinned, last_used, notify_events FROM preferences WHERE id = 1`).
-		Scan(&p.Pinned, &p.LastUsed, &events)
+	// A retired default (its machine removed, or replaced without a successor) reads as none.
+	err := s.pool.QueryRow(ctx, `SELECT (SELECT c.id FROM harness_connections c WHERE c.id=p.default_connection_id AND c.active=1), notify_events FROM preferences p WHERE id = 1`).
+		Scan(&p.DefaultConnectionID, &events)
 	// Display order (migrations append new events at the end).
 	p.NotifyEvents = make([]TaskState, 0, len(events))
 	for _, e := range NotificationEvents {
@@ -45,7 +34,7 @@ func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 			p.NotifyEvents = append(p.NotifyEvents, e)
 		}
 	}
-	return normalize(p), err
+	return p, err
 }
 
 // SetNotifyEvents stores the notification filter (deduplicated, display
@@ -68,26 +57,14 @@ func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Prefer
 	return s.GetPreferences(ctx)
 }
 
-// SetPinned stores (or clears, nil) the pinned defaults.
-func (s *Store) SetPinned(ctx context.Context, d *ModelDefaults) (Preferences, error) {
-	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET pinned = $1, updated_at = `+nowSQL+` WHERE id = 1`, d); err != nil {
+// SetDefaultConnection makes an active connection the one new tasks start on
+// (nil clears it). ErrInvalid for an unknown or replaced connection.
+func (s *Store) SetDefaultConnection(ctx context.Context, id *int64) (Preferences, error) {
+	if id != nil && !s.ConnectionActive(*id) {
+		return Preferences{}, Invalid("Only an active connection can be the default.")
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET default_connection_id = $1, updated_at = `+nowSQL+` WHERE id = 1`, id); err != nil {
 		return Preferences{}, err
 	}
 	return s.GetPreferences(ctx)
-}
-
-// SetLastUsed records the model config of the latest created task.
-func (s *Store) SetLastUsed(ctx context.Context, d ModelDefaults) error {
-	d.ModelOptions = nonNilOptions(d.ModelOptions)
-	_, err := s.pool.Exec(ctx, `UPDATE preferences SET last_used = $1, updated_at = `+nowSQL+` WHERE id = 1`, d)
-	return err
-}
-
-func normalize(p Preferences) Preferences {
-	for _, d := range []*ModelDefaults{p.Pinned, p.LastUsed} {
-		if d != nil {
-			d.ModelOptions = nonNilOptions(d.ModelOptions)
-		}
-	}
-	return p
 }

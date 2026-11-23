@@ -92,7 +92,9 @@ type taskConfigReq struct {
 	Start              bool                    `json:"start"`
 }
 
-// Older REST clients omit the connection on single-harness projects.
+// A request without a connection starts on the default connection when the
+// project is available there, else on the project's only binding, else (with
+// a default set) its first available binding (db.NewTaskDestination).
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	if req.ConnectionID != nil {
 		return s.plannedConnection(r.Context(), *req.ConnectionID)
@@ -104,20 +106,20 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	if err != nil {
 		return err
 	}
-	// Bindings on replaced connections take no new work.
-	var bindings []db.ProjectBinding
-	for _, b := range project.Bindings {
-		if b.ConnectionActive {
-			bindings = append(bindings, b)
-		}
+	prefs, err := s.Store.GetPreferences(r.Context())
+	if err != nil {
+		return err
 	}
-	switch len(bindings) {
-	case 0:
+	// Bindings on replaced connections take no new work.
+	active := slices.ContainsFunc(project.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionActive })
+	id := db.NewTaskDestination(project.Bindings, prefs.DefaultConnectionID, s.Store.ConnectionMachine)
+	switch {
+	case id != 0:
+		req.ConnectionID = &id
+		return s.plannedConnection(r.Context(), id)
+	case !active:
 		// Preserve legacy unbound T3 planning. New clients send an explicit destination.
 		return nil
-	case 1:
-		req.ConnectionID = &bindings[0].ConnectionID
-		return s.plannedConnection(r.Context(), *req.ConnectionID)
 	default:
 		return db.Invalid("This project has multiple harness bindings. Choose a connectionId.")
 	}
@@ -278,12 +280,6 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	if task.Harness == db.HarnessT3 {
-		defaults := t3Defaults(task.ExecutionConfig, task.ProviderInstanceID, task.Model, task.ModelOptions, task.RuntimeMode, task.InteractionMode)
-		if err := s.Store.SetLastUsed(r.Context(), defaults); err != nil {
-			s.log.Warn("record last-used model", "task", task.ID, "err", err)
-		}
-	}
 	if req.Start {
 		// Start errors after save: the task stays created (failed + lastError).
 		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {

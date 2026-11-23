@@ -11,6 +11,7 @@ import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "..
 import { dateTime } from "../lib/format.ts";
 import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
+import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: waits for the status, the rest refreshes behind. */
@@ -58,27 +59,30 @@ export function OpenCodeSetup() {
   const info = status.data;
   const chip = info === undefined ? null : openCodeChip(info);
   return (
-    <Panel
-      title="OpenCode connection"
-      actions={
-        chip === null ? undefined : (
-          <Chip tone={chip.tone} dot>
-            {chip.label}
-          </Chip>
-        )
-      }
-    >
-      <div className="flex flex-col items-stretch gap-3">
-        <ErrorText error={status.error} />
-        {info === undefined ? null : info.state === "unconfigured" ? (
-          <NotConnected info={info} />
-        ) : (
-          <Connection info={info} checking={status.isFetching} check={() => void status.refetch()} advanced={() => setEditing(true)} />
-        )}
-        <AutoCompleteToggle harness="opencode" className="w-full border-t border-line pt-2" />
-      </div>
-      {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
-    </Panel>
+    <>
+      <Panel
+        title="OpenCode connection"
+        actions={
+          chip === null ? undefined : (
+            <Chip tone={chip.tone} dot>
+              {chip.label}
+            </Chip>
+          )
+        }
+      >
+        <div className="flex flex-col items-stretch gap-3">
+          <ErrorText error={status.error} />
+          {info === undefined ? null : info.state === "unconfigured" ? (
+            <NotConnected info={info} />
+          ) : (
+            <Connection info={info} checking={status.isFetching} check={() => void status.refetch()} advanced={() => setEditing(true)} />
+          )}
+          <AutoCompleteToggle harness="opencode" className="w-full border-t border-line pt-2" />
+        </div>
+        {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
+      </Panel>
+      <NewTaskDefaults harness="opencode" />
+    </>
   );
 }
 

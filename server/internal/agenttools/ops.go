@@ -5,6 +5,7 @@ package agenttools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -301,10 +302,10 @@ func modelOptions(effort string, opts map[string]string) []execution.ModelOption
 }
 
 // resolveModel fills provider/model: explicit, provider inferred from the
-// catalog, else (applyDefaults) the pinned or last-used model and options like
-// the web app's new-task form. Runtime and interaction mode never come from
-// defaults: unset stays the harness default.
-func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, applyDefaults bool, rc *resolvedConfig) error {
+// catalog, else the connection's pinned model and options (pin, nil = none)
+// like the web app's new-task form. Runtime and interaction mode never come
+// from defaults: unset stays the harness default.
+func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, pin *execution.Config, rc *resolvedConfig) error {
 	rc.provider, rc.model = strPtr(a.Provider), strPtr(a.Model)
 	rc.runtimeMode, rc.interactionMode = strPtr(a.RuntimeMode), strPtr(a.InteractionMode)
 	if a.Effort != "" || len(a.Options) > 0 {
@@ -330,23 +331,16 @@ func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, applyDefaults bool
 	if rc.provider != nil && rc.model == nil {
 		return errors.New("provider needs a model (list_models)")
 	}
-	if rc.model != nil || !applyDefaults {
+	if rc.model != nil || pin == nil {
 		return nil
 	}
-	prefs, err := o.Client.Preferences(ctx)
-	if err != nil {
-		return err
+	// A T3 model key is the JSON pair [provider, model].
+	var pair []string
+	if json.Unmarshal([]byte(pin.Model), &pair) == nil && len(pair) == 2 && pair[0] != "" && pair[1] != "" {
+		rc.provider, rc.model = &pair[0], &pair[1]
 	}
-	d := prefs.Pinned
-	if d == nil {
-		d = prefs.LastUsed
-	}
-	if d == nil {
-		return nil
-	}
-	rc.provider, rc.model = d.ProviderInstanceID, d.Model
 	if rc.options == nil {
-		rc.options = d.ModelOptions
+		rc.options = append([]execution.ModelOption{}, pin.Options...)
 	}
 	return nil
 }
@@ -454,7 +448,9 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 		return rc, err
 	}
 	toT3 := h.isT3(rc.connectionID)
-	if a.ExecutionConfig != nil || !toT3 {
+	// Without a model choice, a new task starts with its connection's pinned model and options.
+	pin := h.newTaskConfig(rc.connectionID)
+	if a.ExecutionConfig != nil || !toT3 || (pin != nil && !a.legacyConfig()) {
 		if a.legacyConfig() {
 			return rc, errors.New("use executionConfig for the selected harness; legacy T3 configuration cannot be combined with it")
 		}
@@ -464,6 +460,9 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 			if err != nil {
 				return rc, err
 			}
+		}
+		if pin != nil && config.Model == "" && len(config.Options) == 0 {
+			config.Model, config.Options = pin.Model, append([]execution.ModelOption{}, pin.Options...)
 		}
 		rc.config = &config
 		if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || a.BaseRef != "" || a.WorkspaceType == "worktree" || len(a.ImagePaths) > 0 {
@@ -490,7 +489,7 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 				}
 			}
 		}
-	} else if err := o.resolveModel(ctx, a, true, &rc); err != nil {
+	} else if err := o.resolveModel(ctx, a, pin, &rc); err != nil {
 		return rc, err
 	}
 	if rc.workspace = workspace(a.BaseRef, a.Branch, a.Base); rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
@@ -797,7 +796,7 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 			if a.Provider != nil {
 				provider = *a.Provider
 			}
-			if err := o.resolveModel(ctx, ConfigArgs{Provider: provider, Model: *a.Model}, false, &rc); err != nil {
+			if err := o.resolveModel(ctx, ConfigArgs{Provider: provider, Model: *a.Model}, nil, &rc); err != nil {
 				return nil, err
 			}
 			p["providerInstanceId"], p["model"] = rc.provider, rc.model
