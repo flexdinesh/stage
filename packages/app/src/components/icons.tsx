@@ -34,13 +34,15 @@ type IconProps = { size?: number; label?: string };
 
 /**
  * Lucide, sharpened: square caps, miter joins and a constant 1.33px stroke at every size,
- * so the line weight matches the sharp grid. Unlabelled icons are decorative.
+ * so the line weight matches the sharp grid. `filled` fills closed shapes in the stroke color.
+ * Unlabelled icons are decorative.
  */
-function sharp(Glyph: LucideIcon, defaultSize = 16) {
+function sharp(Glyph: LucideIcon, defaultSize = 16, filled = false) {
   return function Icon({ size = defaultSize, label }: IconProps) {
     return (
       <Glyph
         size={size}
+        fill={filled ? "currentColor" : "none"}
         strokeWidth={1.33}
         absoluteStrokeWidth
         strokeLinecap="square"
@@ -90,4 +92,5 @@ export const IconClock = sharp(ClockIcon, 12);
 export const IconRepeat = sharp(RepeatIcon, 12);
 /** Task tree: a need over its dependents. */
 export const IconTree = sharp(NetworkIcon);
-export const IconPin = sharp(PinIcon, 12);
+/** Pin a project: always filled, so a 14px pin reads as one solid shape, not a knot of tiny curves. */
+export const IconPin = sharp(PinIcon, 12, true);

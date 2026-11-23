@@ -101,7 +101,7 @@ function ProjectItem({
           title={pin.pinned ? "Unpin" : "Pin to top"}
           onClick={pin.toggle}
           className={cx(
-            "self-center focus-visible:opacity-100 aria-pressed:text-fg",
+            "self-center focus-visible:opacity-100",
             !touch && !pin.pinned && "opacity-0 group-hover/project:opacity-100",
           )}
         />
