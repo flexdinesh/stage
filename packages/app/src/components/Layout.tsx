@@ -164,7 +164,7 @@ function Shell() {
   return (
     <div className="min-h-screen bg-bg text-fg lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       {/* Laptop sidebar */}
-      <aside className="sticky top-0 z-40 hidden h-screen min-w-0 flex-col border-r border-line bg-bg lg:flex">
+      <aside className="sticky top-0 z-40 hidden h-screen min-w-0 flex-col border-r border-line bg-bg pt-[var(--edge-band)] lg:flex">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line pr-3 pl-4">
           <Mark needsInput={needsInput} />
           {/* A browser tab has its own arrows; the desktop shell and an installed app window do not. */}
@@ -208,7 +208,13 @@ function Shell() {
         </div>
       </aside>
 
-      <div className="min-w-0 pt-[calc(3.25rem+var(--inset-top))] lg:pt-0">
+      {/* Laptop top band (0 high outside the installed iOS/iPadOS app): iPadOS colors the status bar from it instead of frosting it. */}
+      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 hidden h-[var(--edge-band)] bg-bg lg:block">
+        {/* Carries the sidebar rule up through the band. */}
+        <div className="absolute inset-y-0 left-[247px] w-px bg-line" />
+      </div>
+
+      <div className="min-w-0 pt-[calc(3.25rem+var(--inset-top))] lg:pt-[var(--edge-band)]">
       {/* Phone top bar: fixed, not sticky (iOS WebKit can rasterize a sticky bar blurry after a PWA reload); --inset-top clears the iOS 26 PWA edge blur. */}
       <header className="fixed inset-x-0 top-0 z-40 flex h-[calc(3.25rem+var(--inset-top))] items-center gap-2 border-b border-line bg-bg pt-[var(--inset-top)] pr-[max(0.875rem,env(safe-area-inset-right))] pl-[max(0.875rem,env(safe-area-inset-left))] lg:hidden">
         {/* Fixed slot: Back and the mark swap without moving the rest of the bar. */}
