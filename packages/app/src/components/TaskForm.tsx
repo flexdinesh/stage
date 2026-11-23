@@ -444,8 +444,10 @@ function TaskFormDrawer({
           <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" showTag options={[
             {value: "", label: "Choose a harness"},
             // Machine > Harness: the machine is the tag once there is more than one; a chosen project's bindings list first.
-            ...connectionOptions(harnesses.activeList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
+            ...connectionOptions(harnesses.connectedList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
+            // The current harness of a task or schedule that can no longer launch shows, disabled, so the field is not blank.
             ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
+            ...(connection > 0 && harnesses.unconfigured(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (disconnected)`, disabled: true}] : []),
           ]}/>}</Field>
         </div>
         {fellBack === null || selectedProject === undefined ? null : (
@@ -588,17 +590,17 @@ function useHarnessConfig(
   const harnesses = useHarnesses();
   const selectedProject = projects.data?.projects.find((project) => String(project.id) === projectId);
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
-  // Bindings on replaced connections are history: they never pick the destination.
-  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive);
-  // A default that is no longer an active connection is none.
-  const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) ? defaultConnection : null;
+  // Bindings on replaced or disconnected connections never pick the destination.
+  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive && !harnesses.unconfigured(b.connectionId));
+  // A default that is no longer an active, connected connection is none.
+  const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) && !harnesses.unconfigured(defaultConnection) ? defaultConnection : null;
   // Not chosen: the default connection, or (for a project not available there) the one the server would pick. The
   // default never narrows the project list; only an explicit choice does.
   const implicit = existing
     ? 0
     : selectedProject === undefined
       ? (fallbackDefault ?? 0)
-      : newTaskConnection(selectedProject.bindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
+      : newTaskConnection(bindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
   const connection = chosen || implicit || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
   // The project is not on the default connection: the form says where the task goes instead.
   const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;

@@ -120,13 +120,31 @@ func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.Harn
 }
 
 // forgetConnection is DELETE /api/connections/{connectionId}: lets go of a
-// replaced connection (db.Store.ForgetConnection).
+// replaced connection (db.Store.ForgetConnection), or of an active one that
+// is disconnected on a machine that answers now (db.Store.RetireAndForget).
 func (s *server) forgetConnection(w http.ResponseWriter, r *http.Request) error {
 	id, err := s.connectionPath(r)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.ForgetConnection(r.Context(), id); err != nil {
+	c, err := s.Store.GetHarnessConnection(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if !c.Active {
+		err = s.Store.ForgetConnection(r.Context(), id)
+	} else if !s.machineReachable(c.MachineID) {
+		err = db.Conflict("This connection's machine is offline. Forget it once the machine is back.")
+	} else if s.configured(r.Context(), c).Configured {
+		err = db.Conflict("This connection is in use. Disconnect it first.")
+	} else if err = s.Store.RetireAndForget(r.Context(), id); err == nil {
+		// Never polled or launched on again, even once the harness is set up
+		// anew (a remote machine's adapters follow the record).
+		if l, ok := s.Sync.Machines().Local(c.MachineID); ok {
+			l.Retired(id)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

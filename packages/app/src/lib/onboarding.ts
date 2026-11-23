@@ -112,6 +112,7 @@ export function t3DisconnectPrompt(s: Pick<T3Status, "t3" | "connected" | "token
   return [
     label === null ? "Disconnect T3?" : `Disconnect from ${label}?`,
     "Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume.",
+    "It stays listed as disconnected until you forget it.",
     expires === null ? null : `The token stays valid in T3 until ${date(expires)}.`,
   ]
     .filter((p) => p !== null)

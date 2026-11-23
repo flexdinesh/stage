@@ -109,3 +109,56 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 		}
 	}
 }
+
+func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
+	e := newEnv(t, func(d *api.Deps) {
+		a, err := d.Sync.Adapter(d.Store.LegacyT3ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := a.(*t3.Adapter).Client
+		d.Setup = t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger})
+	})
+	first := e.store.LegacyT3ID()
+	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
+		t.Fatal(err)
+	}
+	p := e.project("/w/app")
+	e.task(p.ID, "Planned", nil)
+	e.must("PUT", "/api/preferences/default-connection", map[string]any{"connectionId": first}, 200, nil)
+	// Connected: in use, never forgotten.
+	e.must("DELETE", fmt.Sprintf("/api/connections/%d", first), nil, 409, nil)
+
+	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, nil)
+	if _, ok := e.sync.Machines().Adapter(first); !ok {
+		t.Fatal("a disconnected connection keeps its adapter until it is forgotten")
+	}
+	e.must("DELETE", fmt.Sprintf("/api/connections/%d", first), nil, 204, nil)
+	var list struct {
+		Connections []connection `json:"connections"`
+	}
+	e.must("GET", "/api/connections", nil, 200, &list)
+	for _, c := range list.Connections {
+		if c.ID == first && (c.Active || c.RetiredAt == nil || c.ForgottenAt == nil || c.Bindings != 0 || c.Tasks != 1) {
+			t.Fatalf("forgotten %+v", c)
+		}
+	}
+	if e.store.LegacyT3ID() != 0 {
+		t.Fatalf("an active T3 is left: %d", e.store.LegacyT3ID())
+	}
+	// Its adapter is gone: pairing T3 again never reaches it.
+	if _, ok := e.sync.Machines().Adapter(first); ok {
+		t.Fatal("the forgotten connection's adapter is still installed")
+	}
+	if _, err := e.sync.Adapter(first); err == nil {
+		t.Fatal("the forgotten connection is still reachable")
+	}
+	var prefs struct {
+		DefaultConnectionID *int64 `json:"defaultConnectionId"`
+	}
+	e.must("GET", "/api/preferences", nil, 200, &prefs)
+	if prefs.DefaultConnectionID != nil {
+		t.Fatalf("default kept on a forgotten connection: %d", *prefs.DefaultConnectionID)
+	}
+	e.must("DELETE", fmt.Sprintf("/api/connections/%d", first), nil, 404, nil)
+}

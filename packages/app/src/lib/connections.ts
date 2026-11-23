@@ -2,7 +2,7 @@
 // components/StatusRow.tsx), the one-line detail of a Settings connection row, and the state chip of a Config
 // panel's Harness row (components/ConnectionState.tsx).
 import type { Harness, HarnessConnection, HarnessStatus, Machine, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
-import { connectionRows } from "./connectionRows.ts";
+import { connectedRows, connectionRows } from "./connectionRows.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
 import { T3_STATE_TONE, t3Identity } from "./onboarding.ts";
@@ -133,12 +133,12 @@ export interface StatusTarget {
   machine: Pick<Machine, "id" | "kind" | "label" | "status" | "lastSeenAt" | "version">;
 }
 
-/** Every machine's set-up connections (its Settings rows), in machine order. */
+/** Every machine's set-up connections (its connected Settings rows; disconnected ones are not), in machine order. */
 export function statusTargets(
   machines: readonly (StatusTarget["machine"] & Pick<Machine, "connections">)[],
-  lookup: (id: number) => Pick<HarnessConnection, "configured"> | undefined,
+  lookup: Parameters<typeof connectionRows>[1],
 ): StatusTarget[] {
-  return machines.flatMap((machine) => connectionRows(machine, lookup).map((r) => ({ connectionId: r.id, harness: r.harness, machine })));
+  return machines.flatMap((machine) => connectedRows(connectionRows(machine, lookup)).map((r) => ({ connectionId: r.id, harness: r.harness, machine })));
 }
 
 /**

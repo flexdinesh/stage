@@ -123,6 +123,11 @@ func (l *Local) Install(old, next int64, a execution.Adapter) {
 	}
 }
 
+// Retired drops a retired connection's adapter: it is never polled or
+// launched on again, even once the harness is set up for another connection.
+// The machine's change hook runs as for an install.
+func (l *Local) Retired(id int64) { l.Install(id, id, nil) }
+
 // SetConnector registers the machine's connector for kind.
 func (l *Local) SetConnector(kind string, c harness.Connector) {
 	l.mu.Lock()

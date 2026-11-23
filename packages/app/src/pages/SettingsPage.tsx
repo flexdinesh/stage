@@ -34,7 +34,7 @@ import {
 } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
-import { connectionRows } from "../lib/connectionRows.ts";
+import { connectedRows, connectionRows } from "../lib/connectionRows.ts";
 import { SETTINGS_TABS, settingsTabLabel, type SettingsTab } from "../lib/settings.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, shortDate } from "../lib/format.ts";
@@ -326,7 +326,7 @@ export function SettingsConnectionsPage() {
       await Promise.all([invalidateWork(qc), qc.invalidateQueries({ queryKey: keys.projects }), qc.invalidateQueries({ queryKey: keys.t3Status })]);
     },
   });
-  const connections = machines.reduce((n, m) => n + connectionRows(m, harnesses.connection).length, 0);
+  const connections = machines.reduce((n, m) => n + connectedRows(connectionRows(m, harnesses.connection)).length, 0);
   const counts = data === undefined ? "" : ` · ${count(machines.length, "machine")} · ${count(connections, "connection")}`;
   return (
     <>

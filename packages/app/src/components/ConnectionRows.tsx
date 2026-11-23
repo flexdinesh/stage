@@ -1,15 +1,17 @@
 // Settings > Connections: a machine's harness connections as one-line rows (name, where, state, Manage,
 // Disconnect), its Add connection menu, and the Manage drawer holding the harness's setup panel. Rows never expand;
 // Disconnect confirms inline under its row. On phone the whole row opens Manage (Disconnect lives in the drawer).
+// A disconnected connection stays a row (Reconnect, Forget) until it is forgotten or connected again.
 // A machine whose setup cannot run (offline, another API version) lists its connections on record, read-only.
 // Logic: lib/connectionRows.ts.
 import { useMemo, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
-import { useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
+import { useForgetConnection, useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
 import { shortDate } from "../lib/format.ts";
+import { forgetPrompt, usageText } from "../lib/harnesses.ts";
 import { machineScopeId } from "../lib/machines.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
 import { ConnectionSetup, useDisconnectHarness, useHarnessStatus } from "./HarnessConnections.tsx";
@@ -40,8 +42,8 @@ export function useMachineConnections(machine: Machine) {
   return { live, rows, options, addReason: addConnectionReason(machine, options), descriptor };
 }
 
-/** The Manage (or Add) drawer's subject: a harness on the machine. */
-export type ManageTarget = { descriptor: HarnessDescriptor };
+/** The Manage (or Add) drawer's subject: a harness on the machine; `disconnected` when its row is a disconnected one. */
+export type ManageTarget = { descriptor: HarnessDescriptor; disconnected?: ConnectionRowModel };
 
 /** Add connection: a menu of the machine's connectable harnesses; connected ones are listed disabled. */
 export function AddConnection({ machine, connections, onPick }: { machine: Machine; connections: ReturnType<typeof useMachineConnections>; onPick: (t: ManageTarget) => void }) {
@@ -101,6 +103,7 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
         const descriptor = connections.descriptor(r.harness);
         const isDefault = r.id === defaultId;
         if (!connections.live || descriptor === undefined) return <RecordedRow key={r.id} machine={machine} row={r} isDefault={isDefault} />;
+        if (r.disconnected) return <DisconnectedRow key={r.id} machine={machine} row={r} isDefault={isDefault} onManage={() => onManage({ descriptor, disconnected: r })} />;
         const manage = () => onManage({ descriptor });
         switch (r.harness) {
           case "t3":
@@ -122,6 +125,7 @@ export function ManageDrawer({ machine, target, onClose }: { machine: Machine; t
       <MachineScope machine={machine}>
         <div className="flex flex-col gap-3.5">
           <ConnectionSetup descriptor={target.descriptor} />
+          {target.disconnected === undefined ? null : <ForgetDisconnected row={target.disconnected} name={target.descriptor.name} onForgotten={onClose} />}
         </div>
       </MachineScope>
     </Drawer>
@@ -130,7 +134,10 @@ export function ManageDrawer({ machine, target, onClose }: { machine: Machine; t
 
 // ---- Rows ----
 
+/** The row's confirmed secondary action: Disconnect, or Forget on a disconnected row. */
 interface Disconnect {
+  /** Button and confirm label; "Disconnect" when omitted. */
+  label?: string;
   prompt: string;
   busy: boolean;
   error: unknown;
@@ -146,6 +153,7 @@ function ConnectionRow({
   detail,
   chip,
   onManage,
+  manageLabel = "Manage",
   disconnect,
   isDefault,
 }: {
@@ -154,12 +162,15 @@ function ConnectionRow({
   detail: string;
   chip: { tone: ChipTone; label: string };
   onManage?: () => void;
+  /** The primary button's label: Manage, or Reconnect on a disconnected row. */
+  manageLabel?: string;
   /** null: the harness cannot disconnect from here. */
   disconnect: Disconnect | null;
   /** New tasks start on this connection (Preferences.defaultConnectionId). */
   isDefault: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const action = disconnect?.label ?? "Disconnect";
   const state = (
     <Chip tone={chip.tone} dot className="shrink-0">
       {chip.label}
@@ -188,7 +199,7 @@ function ConnectionRow({
         </div>
       ) : (
         <>
-          <RowButton className="gap-3 pl-[30px] md:hidden" onClick={onManage} aria-label={`Manage ${name} on ${machine.label}`}>
+          <RowButton className="gap-3 pl-[30px] md:hidden" onClick={onManage} aria-label={`${manageLabel} ${name} on ${machine.label}`}>
             {title}
             {state}
             <span className="text-muted">
@@ -199,21 +210,21 @@ function ConnectionRow({
             {title}
             {state}
             <div className="flex shrink-0 items-center gap-1.5">
-              <Button small onClick={onManage} aria-label={`Manage ${name} on ${machine.label}`}>
-                Manage
+              <Button small onClick={onManage} aria-label={`${manageLabel} ${name} on ${machine.label}`}>
+                {manageLabel}
               </Button>
               {disconnect === null ? null : (
                 <Button
                   small
                   variant="ghost"
                   disabled={confirm}
-                  aria-label={`Disconnect ${name} on ${machine.label}`}
+                  aria-label={`${action} ${name} on ${machine.label}`}
                   onClick={() => {
                     disconnect.reset();
                     setConfirm(true);
                   }}
                 >
-                  Disconnect
+                  {action}
                 </Button>
               )}
             </div>
@@ -222,7 +233,7 @@ function ConnectionRow({
       )}
       {confirm && disconnect !== null ? (
         <div className="pr-3 pb-2.5 pl-[30px] max-md:hidden">
-          <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.busy} error={disconnect.error} onConfirm={() => disconnect.run(() => setConfirm(false))} onCancel={() => setConfirm(false)}>
+          <ConfirmInline danger confirmLabel={action} busy={disconnect.busy} error={disconnect.error} onConfirm={() => disconnect.run(() => setConfirm(false))} onCancel={() => setConfirm(false)}>
             {disconnect.prompt}
           </ConfirmInline>
         </div>
@@ -306,7 +317,7 @@ function GenericRow({ descriptor, machine, onManage, isDefault }: { descriptor: 
         s === undefined || !descriptor.setup.disconnect || !s.configured
           ? null
           : {
-              prompt: `Disconnect ${descriptor.name}? Tasks and history stay. You can connect again any time.`,
+              prompt: `Disconnect ${descriptor.name}? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.`,
               busy: disconnect.isPending,
               error: disconnect.error,
               run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
@@ -314,6 +325,67 @@ function GenericRow({ descriptor, machine, onManage, isDefault }: { descriptor: 
             }
       }
     />
+  );
+}
+
+/** "controlbox · 400 tasks · 27 bindings": the instance and what stays on a disconnected connection. */
+function disconnectedDetail(row: ConnectionRowModel, c: Parameters<typeof usageText>[0] | undefined): string {
+  const usage = c === undefined ? null : usageText(c);
+  return [row.label === "" ? null : row.label, usage].filter((p) => p !== null).join(" · ");
+}
+
+/** A disconnected connection: its history stays; Reconnect opens its setup, Forget lets go of it. */
+function DisconnectedRow({ machine, row, isDefault, onManage }: { machine: Machine; row: ConnectionRowModel; isDefault: boolean; onManage: () => void }) {
+  const harnesses = useHarnesses();
+  const forget = useForgetConnection();
+  const c = harnesses.connection(row.id);
+  return (
+    <ConnectionRow
+      name={harnesses.kindName(row.harness)}
+      machine={machine}
+      detail={disconnectedDetail(row, c)}
+      chip={{ tone: "idle", label: "disconnected" }}
+      onManage={onManage}
+      manageLabel="Reconnect"
+      isDefault={isDefault}
+      disconnect={{
+        label: "Forget",
+        prompt: forgetPrompt({ label: row.label }),
+        busy: forget.isPending,
+        error: forget.error,
+        run: (done) => forget.mutate(row.id, { onSuccess: done }),
+        reset: forget.reset,
+      }}
+    />
+  );
+}
+
+/** The Reconnect drawer's Forget (phone has no row actions): lets go of the disconnected connection after a confirm. */
+function ForgetDisconnected({ row, name, onForgotten }: { row: ConnectionRowModel; name: string; onForgotten: () => void }) {
+  const forget = useForgetConnection();
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3.5">
+      {confirm ? (
+        <ConfirmInline danger confirmLabel="Forget" busy={forget.isPending} error={forget.error} onConfirm={() => forget.mutate(row.id, { onSuccess: onForgotten })} onCancel={() => setConfirm(false)}>
+          {forgetPrompt({ label: row.label })}
+        </ConfirmInline>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Hint className="min-w-0 flex-1">Not using this {name} any more? Forget it; its tasks keep their history.</Hint>
+          <Button
+            small
+            variant="ghost"
+            onClick={() => {
+              forget.reset();
+              setConfirm(true);
+            }}
+          >
+            Forget
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

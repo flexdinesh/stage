@@ -39,6 +39,7 @@ type Service struct {
 	OnTransition                                                                 func(context.Context, Change)
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	OnAccepted                                                                   func()                         // a completion was inferred (tree release may follow)
+	OnFullSync                                                                   func()                         // a full sync (Sync now) finished
 	Harnesses                                                                    *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
 	PublicURL                                                                    string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	CLI                                                                          string                         // installed CLI name (install.CLIName), named in launch journal instructions
@@ -271,6 +272,9 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 	}
 	out.FinishedAt = time.Now().UTC()
 	slices.Sort(out.Unavailable)
+	if s.OnFullSync != nil {
+		s.OnFullSync()
+	}
 	if len(errs) < len(connections) {
 		return out, nil
 	}
