@@ -1,18 +1,14 @@
-# Manual release (docs/release.md). Run it from the Actions tab on main with a
-# version; it builds that exact commit with `mise run release` (the same
-# command as a local release), verifies the assets and creates a DRAFT
-# GitHub release targeting the commit. Publishing the draft (which creates
-# the vX.Y.Z tag) is done by hand in the web UI. There are no push, tag or
-# pull request triggers and no secrets.
+# Manual release (docs/release.md). Run it from the Actions tab on main. The
+# version is computed (`mise run release:next`: MAJOR.MINOR from the VERSION
+# file, the next patch from the tags, via svu); it builds that exact commit
+# with `mise run release` (the same command as a local release), verifies
+# the assets and publishes the GitHub release, which creates the vX.Y.Z tag
+# on the commit. There are no push, tag or pull request triggers and no
+# secrets.
 name: release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version X.Y.Z or X.Y.Z-pre (no leading v)"
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -27,7 +23,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      VERSION: ${{ inputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,10 +30,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Refuse a bad version or an existing release
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: 2026.10.18
+
+      - name: Next version
         run: |
-          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z]+(\.[0-9a-z]+)*)?$ ]] ||
-            { echo "version $VERSION is not X.Y.Z or X.Y.Z-pre"; exit 1; }
+          v=$(mise run -q release:next)
+          echo "VERSION=$v" >>"$GITHUB_ENV"
+
+      - name: Refuse an existing release
+        run: |
+          echo "releasing v$VERSION"
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "tag v$VERSION already exists"; exit 1
           fi
@@ -50,17 +53,13 @@ jobs:
       - name: Desktop runtime libraries
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0 libwebkit2gtk-4.1-0
 
-      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
-        with:
-          version: 2026.10.18
-
       - name: Build and verify
         run: mise run release
 
-      - name: Create the draft release
+      # The build computes the version again; the same tags give the same one.
+      - name: Publish the release
         run: |
           dir=".scratch/release/v$VERSION"
-          pre=()
-          case "$VERSION" in *-*) pre=(--prerelease) ;; esac
-          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft \
-            --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes "${pre[@]}" "$dir"/*
+          [ -f "$dir/stage-release.json" ] || { echo "no build for v$VERSION in $dir"; exit 1; }
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --latest \
+            --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes "$dir"/*

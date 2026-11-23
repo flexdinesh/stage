@@ -40,8 +40,8 @@ func TestDevVersion(t *testing.T) {
 
 func TestReleaseVersionValidation(t *testing.T) {
 	for v, ok := range map[string]bool{
-		"0.1.0": true, "1.2.3-rc.1": true, "1.2.3-beta": true,
-		"v1.2.3": false, "1.2": false, "01.2.3": false, "1.2.3+build": false, "1.2.3-RC1": false, "1.2.3-rc_1": false, "": false,
+		"0.1.0": true, "10.20.30": true,
+		"1.2.3-rc.1": false, "1.2.3-beta": false, "v1.2.3": false, "1.2": false, "01.2.3": false, "1.2.3+build": false, "1.2.3-RC1": false, "1.2.3-rc_1": false, "": false,
 	} {
 		var out bytes.Buffer
 		err := cmdVersion([]string{"-mode", "release", "-version", v}, &out)

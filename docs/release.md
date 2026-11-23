@@ -15,15 +15,23 @@ tags; installing and updating (`scripts/install.sh`, `stage update`,
 | Command | What | Identity, version | Source | Output |
 | --- | --- | --- | --- | --- |
 | `mise run dist` | developer build | `stage-dev`, `0.0.0-dev.<branch>` (`0.0.0-dev.g<sha12>` detached); commit `-dirty` when the tree is | the working tree | `STAGE_DIST_OUT`, default `.scratch/dist/<version>` |
-| `mise run release VERSION=X.Y.Z` | release build | `stage`, `X.Y.Z` or `X.Y.Z-pre` | `git archive HEAD` in a temp dir (tracked files only), HEAD must have no uncommitted changes and tag `vX.Y.Z`, if it exists, must be HEAD | `STAGE_RELEASE_OUT`, default `.scratch/release/v<version>` |
+| `mise run release` | release build | `stage`, `X.Y.Z` from `mise run release:next` ([Versions](#versions)) | `git archive HEAD` in a temp dir (tracked files only), HEAD must have no uncommitted changes and no release tag | `STAGE_RELEASE_OUT`, default `.scratch/release/v<version>` |
 | `mise run release:verify DIR=<dir>` | verify an asset directory | as built | | |
 
 - `dist` builds this machine's targets (`TARGETS=host`, the default: `linux-<arch>`, or both darwin CLIs and `darwin-universal` on a Mac) or every target (`TARGETS=all`, which replaced `desktop:package`). It skips the DMG. An earlier `dist` in the same directory is replaced; any other non-empty directory is refused. It prints `version <v>` and `out <dir>` last. Pass the variables before the command (`TARGETS=all mise run dist`): `mise run dist TARGETS=all` builds only the host.
 - `release` builds every CLI target and the Linux desktop targets. The macOS desktop needs a Mac with `MACOS_SIGNING_IDENTITY` (a Developer ID Application identity) and `MACOS_NOTARY_PROFILE` (an `xcrun notarytool store-credentials` profile); otherwise it is left out and the manifest records why (`omitted`).
-- Pre-release versions use lowercase letters, digits and dots (`1.2.0-rc.1`); there is no build metadata, so package formats need no escaping.
+- Releases are `X.Y.Z` only: no pre-releases, no build metadata. Developer versions (`0.0.0-dev.<branch>`) use lowercase letters, digits and dots, so package formats need no escaping.
 - Both run `scripts/release.sh`, which builds, then `tools/release assemble` and `tools/release verify -smoke`. `scripts/release.sh` and `tools/release` (Go standard library only) are the whole implementation.
 
 Both builds embed the web UI: `apps/web/dist` (`pnpm --filter @stage/web build`) is built once and copied into `server/internal/webui/dist` before the CLI/server is compiled (`CGO_ENABLED=0 -trimpath -ldflags "-s -w -X ..."`) for each target. The desktop's bundled CLI is the same file as the headless one for that target (byte for byte; a universal macOS CLI's two slices are the darwin binaries, apart from the code signature: on a Mac, MyGo ad-hoc signs the bundled CLI, which re-signs both slices, and verification ignores only `LC_CODE_SIGNATURE`, its blob and `__LINKEDIT`'s sizes).
+
+## Versions
+
+`mise run release:next` (`scripts/release.sh next`) prints the next release version, and `mise run release` builds that version; neither takes a version.
+
+- `MAJOR.MINOR` comes from the `VERSION` file at the root (`0.1`). Bumping major or minor is a commit to that file.
+- The patch comes from the tags: `X.Y.0` when no `vX.Y.*` tag exists, otherwise [svu](https://github.com/caarlos0/svu) (pinned in `mise.toml`) `svu patch --tag.pattern 'vX.Y.*'`, the highest such tag on any branch plus one.
+- It refuses a `VERSION` below the latest `vX.Y.Z` tag and a HEAD that already has one (a commit is released once).
 
 ## Targets
 
@@ -131,14 +139,14 @@ The repository is private for now: downloading release assets needs an authentic
 
 ## macOS
 
-There is no Developer ID yet, so releases ship only the headless darwin CLIs; on a Mac, use a developer build (`mise run dist` on the Mac builds and ad-hoc signs the `.app`). Gatekeeper is never bypassed as a way to distribute. With a Developer ID: on the Mac, `security find-identity -v -p codesigning`, `xcrun notarytool store-credentials <profile>`, then `MACOS_SIGNING_IDENTITY="Developer ID Application: ..." MACOS_NOTARY_PROFILE=<profile> mise run release VERSION=...`; MyGo signs the bundle and its `bin/stage` inside-out with the hardened runtime, notarizes and staples the DMG. Credentials stay in the keychain, never in the repository.
+There is no Developer ID yet, so releases ship only the headless darwin CLIs; on a Mac, use a developer build (`mise run dist` on the Mac builds and ad-hoc signs the `.app`). Gatekeeper is never bypassed as a way to distribute. With a Developer ID: on the Mac, `security find-identity -v -p codesigning`, `xcrun notarytool store-credentials <profile>`, then `MACOS_SIGNING_IDENTITY="Developer ID Application: ..." MACOS_NOTARY_PROFILE=<profile> mise run release`; MyGo signs the bundle and its `bin/stage` inside-out with the hardened runtime, notarizes and staples the DMG. Credentials stay in the keychain, never in the repository.
 
 ## Publishing (manual)
 
 The maintainer creates releases. Two equivalent ways:
 
-1. **GitHub Actions**, `release` workflow (`.github/workflows/release.yml`), Run workflow on `main` with a version. It refuses a bad version or an existing tag or release, builds that exact commit with `mise run release` on ubuntu-24.04 (Linux desktop + every headless CLI; the linux-amd64 smoke runs there), and creates a **draft** release `v<version>` targeting the commit with every asset and generated notes (pre-release versions are marked pre-release). Review it and publish it in the web UI; publishing creates the tag. It needs no secrets. It has no other triggers.
-2. **Locally**, from a clean `main`: `mise run release VERSION=0.1.0`, then `gh release create v0.1.0 --draft --target "$(git rev-parse HEAD)" --generate-notes .scratch/release/v0.1.0/*`.
+1. **GitHub Actions**, `release` workflow (`.github/workflows/release.yml`), Run workflow on `main`; it takes no input. It computes the version ([Versions](#versions)), refuses an existing tag or release, builds that exact commit with `mise run release` on ubuntu-24.04 (Linux desktop + every headless CLI; the linux-amd64 smoke runs there), and **publishes** release `v<version>` (latest) targeting the commit with every asset and generated notes; publishing creates the tag. Runs are serialized (`concurrency`), and a failed run creates no tag, so it reserves no version. It needs no secrets. It has no other triggers.
+2. **Locally**, from a clean `main`: `mise run release` (prints `version <v>`), then `gh release create v<v> --latest --target "$(git rev-parse HEAD)" --generate-notes .scratch/release/v<v>/*`.
 
 Never rebuild a published version: publish a new patch instead.
 

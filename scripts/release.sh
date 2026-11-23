@@ -8,12 +8,14 @@
 #                                or all; out STAGE_DIST_OUT
 #                                (.scratch/dist/<version>)
 #   scripts/release.sh release   release build of HEAD from a clean export:
-#                                VERSION=X.Y.Z[-pre] required, identity
-#                                stage; out STAGE_RELEASE_OUT
-#                                (.scratch/release/v<version>)
+#                                version from `next`, identity stage; out
+#                                STAGE_RELEASE_OUT (.scratch/release/v<version>)
+#   scripts/release.sh next      print the next release version: MAJOR.MINOR
+#                                from the VERSION file, patch from git tags
+#                                (svu)
 #   scripts/release.sh verify D  verify an asset directory (+ smoke)
 #
-# Nothing here uploads, tags or installs. mise run dist|release|release:verify
+# Nothing here uploads, tags or installs. mise run dist|release|release:next|release:verify
 # call it with the pinned toolchain.
 set -euo pipefail
 
@@ -24,8 +26,42 @@ trap 'rm -rf "$WORK"' EXIT
 
 die() { echo "release.sh: $*" >&2; exit 1; }
 
-go build -C "$ROOT/tools/release" -o "$WORK/release" .
-tool() { "$WORK/release" "$@"; }
+# The release tool is built on first use (`next` needs only git and svu).
+tool() {
+  [ -x "$WORK/release" ] || go build -C "$ROOT/tools/release" -o "$WORK/release" .
+  "$WORK/release" "$@"
+}
+
+# next_version prints the next release version X.Y.Z: MAJOR.MINOR from the
+# VERSION file; X.Y.0 when no vX.Y.* tag exists, else svu's next patch of
+# the highest one. It refuses a VERSION below the highest release tag and a
+# HEAD that is already released.
+next_version() {
+  local mm top v num='(0|[1-9][0-9]*)'
+  [ -f "$ROOT/VERSION" ] || die "VERSION file is missing"
+  mm=$(tr -d '[:space:]' <"$ROOT/VERSION")
+  [[ "$mm" =~ ^$num\.$num$ ]] || die "VERSION must be MAJOR.MINOR (like 0.4), not '$mm'"
+  local rel="^v$num\.$num\.$num\$"
+  v=$(git -C "$ROOT" tag --points-at HEAD --list 'v*' | grep -E "$rel" | head -n1 || true)
+  [ -z "$v" ] || die "HEAD is already released as $v"
+  top=$(git -C "$ROOT" tag --list 'v*' | grep -E "$rel" | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1 || true)
+  if [ -n "$top" ]; then
+    local tmaj=${top%%.*} tmin mmaj=${mm%.*} mmin=${mm#*.}
+    tmin=${top#*.} tmin=${tmin%.*}
+    if [ "$tmaj" -gt "$mmaj" ] || { [ "$tmaj" -eq "$mmaj" ] && [ "$tmin" -gt "$mmin" ]; }; then
+      die "VERSION $mm is below the latest release v$top"
+    fi
+  fi
+  if git -C "$ROOT" tag --list "v$mm.*" | grep -E "^v${mm//./\\.}\.$num" >/dev/null; then
+    command -v svu >/dev/null || die "svu not found (mise.toml pins it)"
+    v=$(cd "$ROOT" && svu patch --tag.pattern "v$mm.*")
+    v=${v#v}
+  else
+    v=$mm.0
+  fi
+  [[ "$v" =~ ^$num\.$num\.$num$ ]] || die "computed version '$v' is not X.Y.Z"
+  echo "$v"
+}
 
 host_os() { case "$(uname -s)" in Linux) echo linux ;; Darwin) echo darwin ;; *) die "unsupported OS $(uname -s)" ;; esac; }
 host_arch() { case "$(uname -m)" in x86_64 | amd64) echo amd64 ;; aarch64 | arm64) echo arm64 ;; *) die "unsupported CPU $(uname -m)" ;; esac; }
@@ -143,7 +179,8 @@ case "$mode" in
     echo "out $OUT"
     ;;
   release)
-    VERSION=$(tool version -mode release -version "${VERSION:-}")
+    VERSION=$(next_version)
+    VERSION=$(tool version -mode release -version "$VERSION")
     IDENTITY=stage CHANNEL=stable
     git diff --quiet HEAD -- || die "the working tree has uncommitted changes; release builds HEAD exactly"
     COMMIT=$(git rev-parse HEAD)
@@ -167,11 +204,14 @@ case "$mode" in
     echo "version $VERSION"
     echo "out $OUT"
     ;;
+  next)
+    next_version
+    ;;
   verify)
     [ -n "${2:-}" ] || die "usage: release.sh verify DIR"
     tool verify -smoke "$2"
     ;;
   *)
-    die "usage: release.sh dist|release|verify DIR"
+    die "usage: release.sh dist|release|next|verify DIR"
     ;;
 esac
