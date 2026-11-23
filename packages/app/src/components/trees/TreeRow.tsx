@@ -4,9 +4,9 @@ import { useInvalidateWork } from "../../api/queries.ts";
 import type { TreeSummary } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
-import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMeta, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
+import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMetaParts, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { RowCopyLink } from "../StageLinks.tsx";
-import { Button, Chip, InlineError, MetaLine, Row, RowList, Skeleton, SkeletonBar, TextLink, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
+import { Button, Chip, DisclosureButton, InlineError, MetaLine, Row, RowList, Skeleton, SkeletonBar, TextLink, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
 const CELL_LIMIT = 30;
@@ -67,35 +67,32 @@ const TREE_ROW_GRID =
 
 const TREE_TITLE_WIDTHS = ["w-48", "w-36", "w-56"];
 
-/** Loading tree list rows: the expand column, then the tree row grid in bars. */
+/** Loading tree list rows: the tree row grid in bars. */
 export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <Skeleton label="Loading trees">
       <RowList>
         {Array.from({ length: count }, (_, i) => (
-          <Row key={i} bare className="flex items-stretch">
-            <span className="w-9 shrink-0" />
-            <div className="min-w-0 flex-1 [&>div]:pl-0">
-              <div className={TREE_ROW_GRID}>
-                <div className="flex min-w-0 flex-col gap-1.5 py-0.5">
-                  <SkeletonBar className={cx("h-4 max-w-full", TREE_TITLE_WIDTHS[i % TREE_TITLE_WIDTHS.length])} />
-                  <SkeletonBar className="h-3 w-28" />
-                  <SkeletonBar className="h-3 w-44 max-w-full" />
+          <Row key={i} bare>
+            <div className={TREE_ROW_GRID}>
+              <div className="flex min-w-0 flex-col gap-1.5 py-0.5">
+                <SkeletonBar className={cx("h-4 max-w-full", TREE_TITLE_WIDTHS[i % TREE_TITLE_WIDTHS.length])} />
+                <SkeletonBar className="h-3 w-28" />
+                <SkeletonBar className="h-3 w-44 max-w-full" />
+              </div>
+              <div className="flex flex-col items-end gap-1.5 max-lg:hidden">
+                <SkeletonBar className="h-3 w-24" />
+                <SkeletonBar className="h-3 w-32" />
+              </div>
+              <div className="order-3 col-span-2 flex min-w-0 flex-col gap-1.5 md:order-none md:col-span-1">
+                <SkeletonBar className="h-2 w-full" />
+                <div className="flex justify-between gap-2">
+                  <SkeletonBar className="h-3 w-20" />
+                  <SkeletonBar className="h-3 w-16" />
                 </div>
-                <div className="flex flex-col items-end gap-1.5 max-lg:hidden">
-                  <SkeletonBar className="h-3 w-24" />
-                  <SkeletonBar className="h-3 w-32" />
-                </div>
-                <div className="order-3 col-span-2 flex min-w-0 flex-col gap-1.5 md:order-none md:col-span-1">
-                  <SkeletonBar className="h-2 w-full" />
-                  <div className="flex justify-between gap-2">
-                    <SkeletonBar className="h-3 w-20" />
-                    <SkeletonBar className="h-3 w-16" />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <SkeletonBar className="h-control-sm w-14" />
-                </div>
+              </div>
+              <div className="flex justify-end">
+                <SkeletonBar className="h-control-sm w-14" />
               </div>
             </div>
           </Row>
@@ -107,9 +104,10 @@ export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
 
 /**
  * A tree in a ruled list: title and mono meta, its times, the state bar with its next step, and one action. A done or
- * archived tree carries its chip and only offers Open.
+ * archived tree carries its chip and only offers Open. With `tasks`, the task count folds the members in place (the
+ * `controls` element holds them).
  */
-export function TreeRow({ tree }: { tree: TreeSummary }) {
+export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: boolean; onToggle: () => void; controls: string } }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
@@ -120,6 +118,7 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
   const to = `/trees/${tree.id}`;
   const failures = start.data?.errors ?? [];
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
+  const [count, ...meta] = treeMetaParts(tree);
 
   return (
     <div className={cx("group/row", TREE_ROW_GRID)}>
@@ -136,7 +135,24 @@ export function TreeRow({ tree }: { tree: TreeSummary }) {
           {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
         </div>
         <p className="mt-0.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</p>
-        <MetaLine className="mt-0.5 tabular">{treeMeta(tree)}</MetaLine>
+        <MetaLine className="mt-0.5 tabular">
+          {tasks === undefined ? (
+            count
+          ) : (
+            <DisclosureButton
+              open={tasks.open}
+              onClick={tasks.onToggle}
+              aria-controls={tasks.controls}
+              // Starts with the visible text (label in name); aria-expanded says shown or hidden.
+              aria-label={`${count} in ${tree.title}`}
+              // Inline in the meta line; the hit area reaches past the text without growing the row.
+              className="relative align-bottom transition-colors duration-150 hover:text-fg before:absolute before:-inset-x-1 before:-inset-y-2"
+            >
+              {count}
+            </DisclosureButton>
+          )}
+          {meta}
+        </MetaLine>
         <TreeWhen tree={tree} inline />
       </div>
 

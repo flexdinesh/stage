@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useTree, useTrees } from "../api/queries.ts";
 import type { TreeSummary } from "../api/types.ts";
@@ -7,7 +7,7 @@ import { GroupPanel, StatStrip, useGroupFold, type GroupMeta } from "../componen
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { TreeRow, TreeRowsSkeleton } from "../components/trees/TreeRow.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { DisclosureButton, EmptyState, ErrorText, PageHeader, Panel, QueryState, Row, RowList, Segmented, buttonClass } from "../components/ui.tsx";
+import { EmptyState, ErrorText, PageHeader, Panel, QueryState, Row, RowList, Segmented, buttonClass } from "../components/ui.tsx";
 import { scopedPageName } from "../lib/history.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { settledSince } from "../lib/settled.ts";
@@ -185,23 +185,16 @@ function TreeList({ trees, emptyText }: { trees: readonly TreeSummary[]; emptyTe
   );
 }
 
-/** A tree row that expands to its members in level order. */
+/** A tree row whose task count expands its members in level order. */
 function TreeItem({ tree }: { tree: TreeSummary }) {
   const [open, setOpen] = useState(false);
+  const membersId = useId();
   return (
     <Row bare>
-      <div className="flex items-stretch">
-        <DisclosureButton
-          open={open}
-          aria-label={`${open ? "Hide" : "Show"} tasks of ${tree.title}`}
-          onClick={() => setOpen((o) => !o)}
-          className="w-9 shrink-0 justify-center transition-colors duration-150 hover:bg-panel"
-        />
-        <div className="min-w-0 flex-1 [&>div]:pl-0">
-          <TreeRow tree={tree} />
-        </div>
+      <TreeRow tree={tree} tasks={{ open, onToggle: () => setOpen((o) => !o), controls: membersId }} />
+      <div id={membersId} hidden={!open}>
+        {open ? <TreeMembers id={tree.id} /> : null}
       </div>
-      {open ? <TreeMembers id={tree.id} /> : null}
     </Row>
   );
 }

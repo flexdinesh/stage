@@ -23,6 +23,7 @@ import {
   treeClosed,
   treeGroup,
   treeMeta,
+  treeMetaParts,
   treeProjectLabel,
   treeProjects,
   treeRollup,
@@ -209,6 +210,12 @@ test("tree meta reads the same for a list row and a detail", () => {
     levels: [[1]],
   };
   assert.equal(treeMeta(detail), "1 task · 1 level · 1 project · manual");
+});
+
+test("tree meta parts lead with the task count a list row folds its members with", () => {
+  const summary = { startMode: "auto", counts: { total: 16 }, levels: 5, projects: ["stage"] };
+  assert.deepEqual(treeMetaParts(summary), ["16 tasks", "5 levels", "1 project", "auto"]);
+  assert.equal(treeMetaParts(summary).join(" · "), treeMeta(summary));
 });
 
 test("tree projects and labels agree for a summary and its current members", () => {
