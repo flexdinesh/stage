@@ -195,6 +195,7 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
           <HarnessConnectionState connectionId={s.connectionId}>
             {harnesses.name(s.connectionId)}
             {harnesses.retired(s.connectionId) ? <span className="text-muted"> (replaced)</span> : null}
+            {harnesses.unconfigured(s.connectionId) ? <span className="text-muted"> (disconnected)</span> : null}
           </HarnessConnectionState>
         </Detail>
         <Detail label="Model">{configModelText(s.executionConfig)}</Detail>

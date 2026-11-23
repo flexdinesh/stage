@@ -112,14 +112,19 @@ export function useHarnesses(): Harnesses & { loaded: boolean; error: unknown } 
   return { ...lookup, loaded: connections.data !== undefined, error: connections.error };
 }
 
-/** Forgets a retired connection: it leaves Settings and its bindings stop asking for repair. */
+/** Forgets a retired or disconnected connection: it leaves Settings (and its machine) and its bindings stop asking for repair. */
 export function useForgetConnection() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.forgetConnection(id),
     onSuccess: async () => {
-      await Promise.all([qc.invalidateQueries({ queryKey: keys.connections }), qc.invalidateQueries({ queryKey: keys.projects }), invalidateWork(qc)]);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: keys.connections }),
+        qc.invalidateQueries({ queryKey: keys.machines }),
+        qc.invalidateQueries({ queryKey: keys.projects }),
+        invalidateWork(qc),
+      ]);
     },
   });
 }

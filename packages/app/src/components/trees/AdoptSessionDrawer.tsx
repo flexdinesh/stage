@@ -118,7 +118,7 @@ export function AdoptSessionDrawer({
                 showTag
                 options={[
                   { value: "", label: "Choose harness" },
-                  ...connectionOptions(connections.data?.connections.filter((c) => c.active) ?? [], machines, harnessNames.kindName),
+                  ...connectionOptions(available, machines, harnessNames.kindName),
                 ]}
               />
             )}

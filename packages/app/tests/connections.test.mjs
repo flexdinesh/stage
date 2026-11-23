@@ -210,11 +210,13 @@ test("harnessSummary: a generic harness reads as its Settings row does", () => {
 });
 
 // The status button reads every machine's set-up connections, not just the main machine's.
-const statusMain = { id: 1, kind: "local", label: "stage.local", status: "online", lastSeenAt: null, version: "dev", connections: [{ id: 1, harness: "t3", label: "" }, { id: 2, harness: "opencode", label: "" }] };
+// The main machine's T3 was disconnected (its Settings row stays, as Disconnected); its OpenCode was never set up.
+const statusMain = { id: 1, kind: "local", label: "stage.local", status: "online", lastSeenAt: null, version: "dev", connections: [{ id: 1, harness: "t3", label: "controlbox" }, { id: 2, harness: "opencode", label: "" }] };
 const statusWorker = { id: 2, kind: "remote", label: "controlbox", status: "online", lastSeenAt: "2026-01-01T00:00:00Z", version: "dev", connections: [{ id: 4, harness: "t3", label: "controlbox" }] };
-const configured = new Map([[1, { configured: false }], [2, { configured: false }], [4, { configured: true }]]);
+const statusConn = (configured, label, tasks) => ({ active: true, configured, label, tasks, bindings: 0 });
+const configured = new Map([[1, statusConn(false, "controlbox", 400)], [2, statusConn(false, "", 0)], [4, statusConn(true, "controlbox", 6)]]);
 
-test("statusTargets lists a worker's connection when the main machine has none set up", () => {
+test("statusTargets lists a worker's connection when the main machine has none set up; a disconnected one is not a target", () => {
   const targets = statusTargets([statusMain, statusWorker], (id) => configured.get(id));
   assert.deepEqual(
     targets.map((t) => [t.connectionId, t.harness, t.machine.label]),

@@ -352,7 +352,7 @@ function ConnectionActions({ checking, check, advanced }: { checking: boolean; c
   );
 }
 
-export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time.";
+export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.";
 
 /** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
 export function useDisconnectOpenCode(onDone?: () => void) {

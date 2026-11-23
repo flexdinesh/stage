@@ -295,7 +295,7 @@ export function ProjectWorkspace({ project }: { project: Project }) {
               {matched}
             </p>
           ) : null}
-          {harnesses.activeList.map((c) => (
+          {harnesses.connectedList.map((c) => (
             <ConnectionWorkspace
               key={c.id}
               project={project}

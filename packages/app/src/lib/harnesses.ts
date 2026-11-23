@@ -8,8 +8,10 @@ import type { ExternalProject, Harness, HarnessConnection, HarnessDescriptor, Pr
 /** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
   list: readonly HarnessConnection[];
-  /** Active connections only: the ones new work, bindings and settings pick from. */
+  /** Active connections only, connected or not. */
   activeList: readonly HarnessConnection[];
+  /** Active, set-up connections: the ones new work, adopted sessions and project workspaces pick from. */
+  connectedList: readonly HarnessConnection[];
   /** Every harness kind the server knows, in its order. */
   descriptors: readonly HarnessDescriptor[];
   descriptor: (kind: Harness) => HarnessDescriptor | undefined;
@@ -23,6 +25,8 @@ export interface Harnesses {
   active: (id: number) => boolean;
   /** True only for a loaded connection that was replaced (unknown ids are not retired). */
   retired: (id: number) => boolean;
+  /** True for a loaded active connection that is not set up (disconnected, or never connected). */
+  unconfigured: (id: number) => boolean;
   label: (id: number) => string;
   /** The active connection of a harness, or null when none. */
   activeId: (harness: Harness) => number | null;
@@ -37,6 +41,7 @@ export function harnessLookup(list: readonly HarnessConnection[], descriptors: r
   return {
     list,
     activeList: list.filter((c) => c.active),
+    connectedList: list.filter((c) => c.active && c.configured),
     descriptors,
     descriptor: (kind) => byKind.get(kind),
     kindName,
@@ -48,11 +53,22 @@ export function harnessLookup(list: readonly HarnessConnection[], descriptors: r
     harness: (id) => byId.get(id)?.harness ?? null,
     active: (id) => byId.get(id)?.active ?? false,
     retired: (id) => byId.get(id)?.active === false,
+    unconfigured: (id) => {
+      const c = byId.get(id);
+      return c !== undefined && c.active && !c.configured;
+    },
     label: (id) => byId.get(id)?.label ?? "",
     activeId: (h) => activeConnection(h)?.id ?? null,
     activeConnection,
   };
 }
+
+/**
+ * Disconnected: active but not set up, after being set up once (a label names its instance) or holding tasks or
+ * bindings. One never set up holds nothing and is a planned placeholder, not disconnected.
+ */
+export const isDisconnected = (c: Pick<HarnessConnection, "active" | "configured" | "label" | "tasks" | "bindings">): boolean =>
+  c.active && !c.configured && (c.label !== "" || c.tasks > 0 || c.bindings > 0);
 
 /** The task ran on a connection another instance replaced: read-only history. */
 export const isRetired = (t: { connectionActive?: boolean }) => t.connectionActive === false;
@@ -69,14 +85,14 @@ export function sessionLinks(links: { links?: { native?: string; web?: string; c
 /** The copyable resume command, offered when the host has no destination to open; none on a replaced connection. */
 export const resumeCommand = (links: Parameters<typeof sessionLinks>[0]): string | null => sessionLinks(links)?.command ?? null;
 
-/** Task detail Alert for a task on a replaced connection; `name` is its harness's name. */
+/** Task detail Alert for a task on a retired (replaced or forgotten) connection; `name` is its harness's name. */
 export function retiredNotice(t: Pick<Task, "connectionLabel">, name: string): string {
-  return `Ran on ${name}${quoted(t.connectionLabel)}, which was replaced. Its history and result stay here; Stage no longer follows it.`;
+  return `Ran on ${name}${quoted(t.connectionLabel)}, which Stage no longer uses. Its history and result stay here.`;
 }
 
-/** Hint on Start / Retry / Stop for a task on a replaced connection; `name` is its harness's name. */
+/** Hint on Start / Retry / Stop for a task on a retired (replaced or forgotten) connection; `name` is its harness's name. */
 export function retiredHint(name: string): string {
-  return `Its ${name} connection was replaced. Duplicate it to run again.`;
+  return `Stage no longer uses its ${name} connection. Duplicate it to run again.`;
 }
 
 /** Settings PREVIOUS list: retired, not forgotten connections of one harness. */

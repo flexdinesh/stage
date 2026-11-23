@@ -250,7 +250,7 @@ export function createApi(transport: Transport) {
     revokePairing: (id: number) => apiSend(`/machines/pairings/${id}`, del),
     setAutoComplete: (connectionId: number, autoComplete: boolean) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/auto-complete`, put({autoComplete})),
     setNewTaskConfig: (connectionId: number, config: ExecutionConfig | null) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/new-task-config`, put({config})),
-    /** Forgets a retired connection (409 while active, 404 when unknown or already forgotten). */
+    /** Forgets a retired connection, or a disconnected active one (409 while connected or its machine is offline, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     sync: () => apiFetch<SyncResult>("/sync", post()),

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -253,6 +254,104 @@ func TestForgetConnection(t *testing.T) {
 	}
 	if _, err := s.GetHarnessConnection(ctx, empty); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unreferenced connection kept: %v", err)
+	}
+	if n := foreignKeyViolations(t, pool); n != 0 {
+		t.Fatalf("%d foreign key violations", n)
+	}
+}
+
+func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
+	s, ctx, pool := connectionStore(t)
+	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'worker')`)
+	old := s.LegacyT3ID()
+	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0); err != nil {
+		t.Fatal(err)
+	}
+	sw, err := s.SwitchInstance(ctx, 2, t3.Descriptor, "env-a", "box", 0)
+	if err != nil || sw.New == old {
+		t.Fatal(sw, err)
+	}
+	moved := sw.New
+	// Another identity on the worker's OpenCode never pairs with anything.
+	if _, err := s.SwitchInstance(ctx, 2, harness.Descriptor{Kind: HarnessOpenCode, Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0); err != nil {
+		t.Fatal(err)
+	}
+	moves, err := s.MovedConnections(ctx)
+	if err != nil || len(moves) != 2 || moves[0] != (Move{Old: old, New: moved}) || moves[1] != (Move{Old: moved, New: old}) {
+		t.Fatalf("moves %+v %v", moves, err)
+	}
+	project := projectWithBinding(t, s, old, "/w/a")
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','done','thread-a',$2)`, project, old)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id) VALUES(50,$1,'planned','p','backlog',$2)`, project, old)
+	if _, err := s.SetDefaultConnection(ctx, &old); err != nil {
+		t.Fatal(err)
+	}
+	var conflict *ConflictError
+	if err := s.RetireConnection(ctx, old, old); !errors.As(err, &conflict) {
+		t.Fatalf("retired onto itself: %v", err)
+	}
+	if err := s.RetireConnection(ctx, old, moved); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.GetHarnessConnection(ctx, old)
+	if err != nil || c.Active || c.RetiredAt == nil || c.ForgottenAt != nil || c.Tasks != 1 || c.Bindings != 1 {
+		t.Fatalf("retired %+v %v", c, err)
+	}
+	var backlog int64
+	if err := pool.QueryRow(`SELECT connection_id FROM tasks WHERE id=50`).Scan(&backlog); err != nil || backlog != moved {
+		t.Fatalf("backlog on %d %v", backlog, err)
+	}
+	if p, err := s.GetPreferences(ctx); err != nil || p.DefaultConnectionID == nil || *p.DefaultConnectionID != moved {
+		t.Fatalf("default %+v %v", p, err)
+	}
+	if moves, err := s.MovedConnections(ctx); err != nil || len(moves) != 0 {
+		t.Fatalf("moves after retiring %+v %v", moves, err)
+	}
+	if err := s.RetireConnection(ctx, old, moved); !errors.As(err, &conflict) {
+		t.Fatalf("retired twice: %v", err)
+	}
+	if s.LegacyT3ID() != 0 {
+		t.Fatalf("local T3 still active: %d", s.LegacyT3ID())
+	}
+	if n := foreignKeyViolations(t, pool); n != 0 {
+		t.Fatalf("%d foreign key violations", n)
+	}
+}
+
+func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
+	s, ctx, pool := connectionStore(t)
+	used := s.LegacyT3ID()
+	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0); err != nil {
+		t.Fatal(err)
+	}
+	project := projectWithBinding(t, s, used, "/w/a")
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','done','thread-a',$2)`, project, used)
+	if _, err := s.SetDefaultConnection(ctx, &used); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireAndForget(ctx, used); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.GetHarnessConnection(ctx, used)
+	if err != nil || c.Active || c.ForgottenAt == nil || c.Bindings != 0 || c.Tasks != 1 {
+		t.Fatalf("forgotten %+v %v", c, err)
+	}
+	if p, err := s.GetPreferences(ctx); err != nil || p.DefaultConnectionID != nil {
+		t.Fatalf("default %+v %v", p, err)
+	}
+	if err := s.RetireAndForget(ctx, used); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("forgot twice: %v", err)
+	}
+	// An empty disconnected connection is deleted outright.
+	sw, err := s.SwitchInstance(ctx, LocalMachine, harness.Descriptor{Kind: HarnessOpenCode, Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireAndForget(ctx, sw.New); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetHarnessConnection(ctx, sw.New); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty connection kept: %v", err)
 	}
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)

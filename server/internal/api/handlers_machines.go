@@ -349,3 +349,9 @@ func writeAuthErr(w http.ResponseWriter, err error) bool {
 	}
 	return true
 }
+
+// machineReachable: the machine's setup answers now (the local machine, or a
+// worker online on this API version).
+func (s *server) machineReachable(machine int64) bool {
+	return machine == db.LocalMachine || s.Channels.Presence(machine).Online
+}

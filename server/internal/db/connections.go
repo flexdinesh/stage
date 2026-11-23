@@ -216,14 +216,7 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 			return err
 		}
 		out.Changed = true
-		// The default follows its replacement, like the backlog below.
-		if _, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`, cur.id, out.New); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`, cur.id, out.New); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE schedules SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1`, cur.id, out.New); err != nil {
+		if err := followReplacement(ctx, tx, cur.id, out.New); err != nil {
 			return err
 		}
 		if !related {
@@ -233,6 +226,100 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 	})
 	s.dropConnections()
 	return out, err
+}
+
+// followReplacement moves what follows the active connection from a retired
+// one to its replacement: the default connection, unlaunched backlog tasks and
+// schedules. They launch only after the user binds the project there.
+func followReplacement(ctx context.Context, tx *Tx, from, to int64) error {
+	for _, q := range []string{
+		`UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`,
+		`UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
+		`UPDATE schedules SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, q, from, to); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Move is a connection whose instance now runs on another machine: Old is
+// active there but holds the same stable identity as New, active elsewhere.
+type Move struct {
+	Old, New int64
+}
+
+// MovedConnections lists active connections whose stable identity is also the
+// identity of an active connection of the same harness on another machine.
+// Whether a pair really moved (Old disconnected, New connected) is a runtime
+// question the caller answers before RetireConnection.
+func (s *Store) MovedConnections(ctx context.Context) ([]Move, error) {
+	rows, err := s.pool.Query(ctx, `SELECT o.id,n.id FROM harness_connections o JOIN harness_connections n
+ ON n.harness=o.harness AND n.identity=o.identity AND n.machine_id<>o.machine_id AND n.active=1 AND n.stable_identity=1
+ WHERE o.active=1 AND o.identity<>'' AND o.stable_identity=1 ORDER BY o.id,n.id`)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, func(r rowScanner) (Move, error) {
+		var m Move
+		err := r.Scan(&m.Old, &m.New)
+		return m, err
+	})
+}
+
+// RetireConnection retires an active connection. With a replacement (an
+// active connection of the same harness), the default, unlaunched backlog
+// tasks and schedules follow it, and a retired connection that holds nothing
+// is deleted. Without one, the default is cleared and the rest stays; the
+// tasks keep their history, read-only. 404 unknown, 409 already retired or an
+// unusable replacement.
+func (s *Store) RetireConnection(ctx context.Context, id, replacement int64) error {
+	err := s.inTx(ctx, func(tx *Tx) error { return retireTx(ctx, tx, id, replacement) })
+	s.dropConnections()
+	return err
+}
+
+func retireTx(ctx context.Context, tx *Tx, id, replacement int64) error {
+	var harness string
+	var active bool
+	err := tx.QueryRow(ctx, `SELECT harness,active FROM harness_connections WHERE id=$1 AND forgotten_at IS NULL`, id).Scan(&harness, &active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !active {
+		return Conflict("This connection is already retired.")
+	}
+	if replacement != 0 {
+		var ok bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2 AND active=1 AND id<>$3)`, replacement, harness, id).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return Conflict("The replacement must be another active %s connection.", harness)
+		}
+	}
+	related, err := hasRelations(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=0,retired_at=stage_now() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if replacement == 0 {
+		_, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=NULL WHERE default_connection_id=$1`, id)
+		return err
+	}
+	if err := followReplacement(ctx, tx, id, replacement); err != nil {
+		return err
+	}
+	if !related {
+		return deleteConnection(ctx, tx, id)
+	}
+	return nil
 }
 
 // hasRelations: bindings, sessions or launched tasks tie a connection to its
@@ -289,46 +376,62 @@ func (s *Store) RetiredConnections(ctx context.Context, machine int64, harness s
 // no longer ask for repair, and its discovery and shared paths are dropped.
 // A connection nothing references is deleted outright.
 func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
+	err := s.inTx(ctx, func(tx *Tx) error { return forgetTx(ctx, tx, id) })
+	s.dropConnections()
+	return err
+}
+
+// RetireAndForget lets go of an active connection the caller found
+// disconnected: it retires (RetireConnection without a replacement) and is
+// forgotten (ForgetConnection) at once.
+func (s *Store) RetireAndForget(ctx context.Context, id int64) error {
 	err := s.inTx(ctx, func(tx *Tx) error {
-		var active bool
-		var forgotten *string
-		err := tx.QueryRow(ctx, `SELECT active,forgotten_at FROM harness_connections WHERE id=$1`, id).Scan(&active, &forgotten)
-		if errors.Is(err, sql.ErrNoRows) || forgotten != nil {
-			return ErrNotFound
-		}
-		if err != nil {
+		if err := retireTx(ctx, tx, id, 0); err != nil {
 			return err
 		}
-		if active {
-			return Conflict("This connection is in use. Only a replaced connection can be forgotten.")
-		}
-		var referenced bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1)
- OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)
- OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
- OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)`, id).Scan(&referenced); err != nil {
-			return err
-		}
-		if !referenced {
-			if _, err := tx.Exec(ctx, `DELETE FROM project_bindings WHERE connection_id=$1`, id); err != nil {
-				return err
-			}
-			return deleteConnection(ctx, tx, id)
-		}
-		for _, q := range []string{
-			`UPDATE harness_connections SET identity='',forgotten_at=stage_now() WHERE id=$1`,
-			`UPDATE project_bindings SET active=0 WHERE connection_id=$1`,
-			`DELETE FROM external_projects WHERE connection_id=$1`,
-			`DELETE FROM shared_paths WHERE connection_id=$1`,
-		} {
-			if _, err := tx.Exec(ctx, q, id); err != nil {
-				return err
-			}
-		}
-		return nil
+		return forgetTx(ctx, tx, id)
 	})
 	s.dropConnections()
 	return err
+}
+
+func forgetTx(ctx context.Context, tx *Tx, id int64) error {
+	var active bool
+	var forgotten *string
+	err := tx.QueryRow(ctx, `SELECT active,forgotten_at FROM harness_connections WHERE id=$1`, id).Scan(&active, &forgotten)
+	if errors.Is(err, sql.ErrNoRows) || forgotten != nil {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if active {
+		return Conflict("This connection is in use. Only a replaced connection can be forgotten.")
+	}
+	var referenced bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)`, id).Scan(&referenced); err != nil {
+		return err
+	}
+	if !referenced {
+		if _, err := tx.Exec(ctx, `DELETE FROM project_bindings WHERE connection_id=$1`, id); err != nil {
+			return err
+		}
+		return deleteConnection(ctx, tx, id)
+	}
+	for _, q := range []string{
+		`UPDATE harness_connections SET identity='',forgotten_at=stage_now() WHERE id=$1`,
+		`UPDATE project_bindings SET active=0 WHERE connection_id=$1`,
+		`DELETE FROM external_projects WHERE connection_id=$1`,
+		`DELETE FROM shared_paths WHERE connection_id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // legacyT3ConnectionID owns rows written before connections existed.

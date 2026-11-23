@@ -7,6 +7,7 @@ import {
   forgetPrompt,
   harnessLookup,
   isInstanceChanged,
+  isDisconnected,
   isInstanceReturned,
   isRetired,
   newServicePrompt,
@@ -75,6 +76,26 @@ test("useHarnesses lookups name and branch by harness, never by id", () => {
   assert.deepEqual(h.activeList.map((c) => c.id), [5, 2]);
 });
 
+test("connectedList holds active, set-up connections only; unconfigured flags active ones not set up", () => {
+  const down = connection(7, "t3", { configured: false, label: "box", tasks: 3 });
+  const h = harnessLookup([t3, down, openCode, oldT3]);
+  assert.deepEqual(h.connectedList.map((c) => c.id), [5, 2]);
+  assert.deepEqual(h.activeList.map((c) => c.id), [5, 7, 2]);
+  assert.equal(h.unconfigured(7), true);
+  assert.equal(h.unconfigured(5), false);
+  assert.equal(h.unconfigured(1), false, "a retired connection is not unconfigured");
+  assert.equal(h.unconfigured(99), false);
+});
+
+test("disconnected: active, not set up, and set up once or holding history; a never-set-up placeholder is not", () => {
+  assert.equal(isDisconnected(connection(1, "t3", { configured: false, label: "box" })), true);
+  assert.equal(isDisconnected(connection(1, "t3", { configured: false, tasks: 2 })), true);
+  assert.equal(isDisconnected(connection(1, "t3", { configured: false, bindings: 1 })), true);
+  assert.equal(isDisconnected(connection(2, "opencode", { configured: false })), false, "placeholder");
+  assert.equal(isDisconnected(connection(1, "t3", { label: "box" })), false, "connected");
+  assert.equal(isDisconnected({ ...oldT3, configured: false }), false, "retired");
+});
+
 test("activeId is null when a harness has no active connection", () => {
   const h = harnessLookup([oldT3, openCode]);
   assert.equal(h.activeId("t3"), null);
@@ -121,14 +142,14 @@ test("a session with only a resume command offers it to copy, never on a replace
   assert.equal(resumeCommand({ links: { web: "http://oc/s" } }), null);
 });
 
-test("retired notice names the harness and the replaced instance", () => {
+test("retired notice names the harness and the instance Stage no longer uses", () => {
   assert.equal(
     retiredNotice(task(), "T3"),
-    "Ran on T3 'desktop', which was replaced. Its history and result stay here; Stage no longer follows it.",
+    "Ran on T3 'desktop', which Stage no longer uses. Its history and result stay here.",
   );
   assert.equal(
     retiredNotice(task({ harness: "opencode", connectionLabel: "http://oc:4096" }), "OpenCode"),
-    "Ran on OpenCode 'http://oc:4096', which was replaced. Its history and result stay here; Stage no longer follows it.",
+    "Ran on OpenCode 'http://oc:4096', which Stage no longer uses. Its history and result stay here.",
   );
 });
 

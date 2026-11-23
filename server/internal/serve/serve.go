@@ -195,6 +195,9 @@ func Run(ctx context.Context, o Options) error {
 	syncSvc.Harnesses = harnesses
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
+	// Retires connections whose instance moved to another machine (moved.go).
+	moved := newMovedRetirer(store, syncSvc.FullSyncEvery, logger)
+	syncSvc.OnFullSync = moved.Kick
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
@@ -217,6 +220,7 @@ func Run(ctx context.Context, o Options) error {
 		syncSvc.ConnectionsChanged(old, next)
 		releases.Resync()
 		schedules.Resync()
+		moved.Kick()
 	})
 	// One inbox hub wakes notification streams on inserts (notifier), reads
 	// (API), prunes and task transitions (badge). Streams end with ctx.
@@ -256,6 +260,7 @@ func Run(ctx context.Context, o Options) error {
 		syncSvc.Kick()
 		releases.Resync()
 		schedules.Resync()
+		moved.Kick()
 	}, logger)
 	// Remote connection setup: each worker runs its machine's connectors;
 	// the main server proxies them and answers their setup ports from its
@@ -271,6 +276,7 @@ func Run(ctx context.Context, o Options) error {
 		syncSvc.ConnectionsChanged(sw.Old, sw.New)
 		releases.Resync()
 		schedules.Resync()
+		moved.Kick()
 	})
 	remotes, err := store.ListMachines(ctx)
 	if err != nil {
@@ -284,6 +290,27 @@ func Run(ctx context.Context, o Options) error {
 	if _, err := machines.Connectors(harnesses); err != nil {
 		return err
 	}
+	moved.connectors = func() harness.Connectors {
+		c, err := machines.Connectors(harnesses)
+		if err != nil {
+			logger.Error("connectors", "err", err)
+		}
+		return c
+	}
+	moved.reachable = func(machine int64) bool {
+		return machine == db.LocalMachine || channels.Presence(machine).Online
+	}
+	moved.onRetired = func(machine, old, next int64) {
+		// A local connection's adapter outlives the record; its change hook
+		// resyncs. A remote machine's adapters follow the record.
+		if l, ok := machines.Local(machine); ok {
+			l.Retired(old)
+			return
+		}
+		syncSvc.ConnectionsChanged(old, next)
+		releases.Resync()
+		schedules.Resync()
+	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)
 	wg.Add(4)
@@ -291,6 +318,7 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
 	wg.Go(func() { releases.Run(ctx) })
 	wg.Go(func() { schedules.Run(ctx) })
+	wg.Go(func() { moved.Run(ctx) })
 	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
 	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
 
