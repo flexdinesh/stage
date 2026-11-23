@@ -10,6 +10,7 @@ import { TaskRows } from "../components/TaskList.tsx";
 import { T3Alert } from "../components/T3Setup.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
 import { ATTENTION_GROUPS, awaitingReview, harnessNotice, inGroup, type GroupKey } from "../lib/dashboard.ts";
+import { scopedPageName } from "../lib/history.ts";
 import { LOCAL_MACHINE_ID } from "../lib/machines.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { projectWorkspace } from "../lib/projects.ts";
@@ -136,6 +137,7 @@ function Dashboard() {
     <>
       <PageHeader
         title={scope.project === null ? "Dashboard" : <><span className="text-muted">{scope.project.title} / </span>Dashboard</>}
+        name={scopedPageName("Dashboard", scope.project?.title ?? null)}
         {...(meta === "" ? {} : { meta })}
         actions={
           <>

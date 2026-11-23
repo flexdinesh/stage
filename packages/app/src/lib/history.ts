@@ -38,12 +38,16 @@ export function startHistory(idx: number, path: string): NavHistory {
   return { idx, maxIdx: idx, entries: new Map([[idx, { path, label: null }]]) };
 }
 
-/** Follows one navigation. A push to a new page forgets every entry ahead; a pop keeps them. */
+/**
+ * Follows one navigation. A push to a new page forgets every entry ahead; a pop keeps them. A push to the URL already
+ * shown keeps its name: the page stays mounted and does not report it again.
+ */
 export function recordNavigation(h: NavHistory, idx: number, type: NavigationType, path: string): NavHistory {
   const entries = new Map(h.entries);
   if (type === "PUSH") {
+    const from = h.entries.get(h.idx);
     for (const i of entries.keys()) if (i >= idx) entries.delete(i);
-    entries.set(idx, { path, label: null });
+    entries.set(idx, { path, label: from !== undefined && from.path === path ? from.label : null });
     return { idx, maxIdx: idx, entries };
   }
   const known = entries.get(idx);
@@ -58,6 +62,22 @@ export function labelCurrent(h: NavHistory, path: string, label: string): NavHis
   const entries = new Map(h.entries);
   entries.set(h.idx, { path, label });
   return { ...h, entries };
+}
+
+/** The current page's name: the name it reported, else its route's fallback ("task 12") until it does. */
+export function currentName(h: NavHistory): string | null {
+  const entry = h.entries.get(h.idx);
+  return entry === undefined ? null : (entry.label ?? routeLabel(entry.path));
+}
+
+/** A list page's name under a project scope ("Tasks · stage-app"); the bare page name for All projects. */
+export function scopedPageName(page: string, project: string | null): string {
+  return project === null ? page : `${page} · ${project}`;
+}
+
+/** The document title for a page name ("Tasks · stage"); the bare product name when there is none. */
+export function documentTitle(name: string | null): string {
+  return name === null ? "stage" : `${name} · stage`;
 }
 
 export const canGoBack = (h: NavHistory): boolean => h.idx > 0;

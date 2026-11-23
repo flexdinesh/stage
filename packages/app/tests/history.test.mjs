@@ -4,12 +4,15 @@ import {
   backList,
   canGoBack,
   canGoForward,
+  currentName,
+  documentTitle,
   forwardList,
   historyIndex,
   labelCurrent,
   recordNavigation,
   routeKind,
   routeLabel,
+  scopedPageName,
   startHistory,
 } from "../src/lib/history.ts";
 
@@ -131,4 +134,26 @@ test("route names and kinds", () => {
   assert.equal(routeLabel("/nowhere"), "/nowhere");
   assert.equal(routeKind("/tasks/12"), "task");
   assert.equal(routeKind("/tasks"), null);
+});
+
+test("the current name falls back to the route until the page names itself", () => {
+  let h = visited();
+  assert.equal(currentName(h), "task 12");
+  h = labelCurrent(h, "/tasks/12", "Fix login redirect");
+  assert.equal(currentName(h), "Fix login redirect");
+  assert.equal(documentTitle(currentName(h)), "Fix login redirect · stage");
+  assert.equal(documentTitle(null), "stage");
+});
+
+test("a push to a new page starts unnamed; a push to the URL already shown keeps its name", () => {
+  let h = labelCurrent(visited(), "/tasks/12", "Fix login redirect");
+  const again = recordNavigation(h, 3, "PUSH", "/tasks/12");
+  assert.equal(currentName(again), "Fix login redirect");
+  h = recordNavigation(h, 3, "PUSH", "/tasks/13");
+  assert.equal(currentName(h), "task 13");
+});
+
+test("a scoped list names its project", () => {
+  assert.equal(scopedPageName("Tasks", null), "Tasks");
+  assert.equal(scopedPageName("Tasks", "stage-app"), "Tasks · stage-app");
 });

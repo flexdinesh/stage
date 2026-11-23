@@ -4,6 +4,8 @@ import {
   backList,
   canGoBack,
   canGoForward,
+  currentName,
+  documentTitle,
   forwardList,
   historyIndex,
   labelCurrent,
@@ -40,6 +42,11 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
 
   const go = useCallback((delta: number) => void navigate(delta), [navigate]);
   const label = useCallback((name: string) => setHistory((h) => labelCurrent(h, path, name)), [path]);
+  // The tab title names the page as the history list does; browser history and tab strips show it.
+  const title = documentTitle(currentName(history));
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
   const value = useMemo<NavHistoryValue>(
     () => ({
       canBack: canGoBack(history),

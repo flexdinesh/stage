@@ -240,6 +240,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
       ) : null}
       <PageHeader
         title={renaming ? <span className="sr-only">{tree.title}</span> : tree.title}
+        name={tree.title}
         trail={[{ label: treeProjectLabel(tree) }, { label: `tree ${tree.id}` }]}
         meta={
           <>

@@ -159,6 +159,7 @@ function Shell() {
   const canGoBack = useCanGoBack();
   const showBack = canGoBack && !TAB_ROOTS.includes(location.pathname);
   const statusAlert = useStatusAlert();
+  const { hostHistoryControls } = usePlatform();
 
   return (
     <div className="min-h-screen bg-bg text-fg lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
@@ -166,9 +167,12 @@ function Shell() {
       <aside className="sticky top-0 z-40 hidden h-screen min-w-0 flex-col border-r border-line bg-bg lg:flex">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line pr-3 pl-4">
           <Mark needsInput={needsInput} />
-          <div className="ml-auto">
-            <BackForward />
-          </div>
+          {/* A browser tab has its own arrows; the desktop shell and an installed app window do not. */}
+          {hostHistoryControls === true ? null : (
+            <div className="ml-auto">
+              <BackForward />
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 gap-2 px-3 pt-3">
           <button

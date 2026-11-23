@@ -40,7 +40,7 @@ import {
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { connectionRows } from "../lib/connectionRows.ts";
-import { SETTINGS_TABS, settingsTabLabel } from "../lib/settings.ts";
+import { SETTINGS_TABS, settingsTabLabel, type SettingsTab } from "../lib/settings.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, shortDate } from "../lib/format.ts";
 
@@ -352,7 +352,7 @@ function ThemeCard() {
 }
 
 /** Settings' title, meta and tabs; each tab is its own route. */
-function SettingsHeader({ meta, actions }: { meta: string; actions?: ReactNode }) {
+function SettingsHeader({ tab, meta, actions }: { tab: SettingsTab; meta: string; actions?: ReactNode }) {
   const alert = useStatusAlert();
   const items = SETTINGS_TABS.map((t) => ({
     to: t.to,
@@ -362,7 +362,7 @@ function SettingsHeader({ meta, actions }: { meta: string; actions?: ReactNode }
   }));
   return (
     <>
-      <PageHeader title="Settings" meta={meta} {...(actions === undefined ? {} : { actions })} />
+      <PageHeader title="Settings" name={`${settingsTabLabel(tab)} · Settings`} meta={meta} {...(actions === undefined ? {} : { actions })} />
       <TabNav label="Settings" items={items} className="mb-4" />
     </>
   );
@@ -372,7 +372,7 @@ function SettingsHeader({ meta, actions }: { meta: string; actions?: ReactNode }
 export function SettingsGeneralPage() {
   return (
     <>
-      <SettingsHeader meta={settingsTabLabel("general")} />
+      <SettingsHeader tab="general" meta={settingsTabLabel("general")} />
       <div className="flex max-w-[720px] flex-col gap-3.5">
         <UserCard />
         <ThemeCard />
@@ -401,6 +401,7 @@ export function SettingsConnectionsPage() {
   return (
     <>
       <SettingsHeader
+        tab="connections"
         meta={`${settingsTabLabel("connections")}${counts}`}
         actions={
           <>
@@ -433,7 +434,7 @@ export function SettingsConnectionsPage() {
 export function SettingsNotificationsPage() {
   return (
     <>
-      <SettingsHeader meta={settingsTabLabel("notifications")} />
+      <SettingsHeader tab="notifications" meta={settingsTabLabel("notifications")} />
       <div className="flex max-w-[720px] flex-col gap-3.5">
         <NotificationsCard />
       </div>
