@@ -5,7 +5,7 @@
 // Logic: lib/connectionRows.ts.
 import { useMemo, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
-import { useHarnesses, useOpenCodeStatus, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
+import { useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
@@ -67,6 +67,7 @@ export function AddConnection({ machine, connections, onPick }: { machine: Machi
 
 /** The machine's connection rows; a live machine without any offers a Connect button per harness it can add. */
 export function ConnectionRowList({ machine, connections, onManage }: { machine: Machine; connections: ReturnType<typeof useMachineConnections>; onManage: (t: ManageTarget) => void }) {
+  const defaultId = usePreferences().data?.defaultConnectionId ?? null;
   if (connections.rows.length === 0) {
     if (!connections.live) return <Hint className="border-t border-line py-2 pr-3 pl-[30px]">No harness connections.</Hint>;
     return (
@@ -93,15 +94,16 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
     <RowList label={`${machine.label} connections`} className="border-t border-line">
       {connections.rows.map((r) => {
         const descriptor = connections.descriptor(r.harness);
-        if (!connections.live || descriptor === undefined) return <RecordedRow key={r.id} machine={machine} row={r} />;
+        const isDefault = r.id === defaultId;
+        if (!connections.live || descriptor === undefined) return <RecordedRow key={r.id} machine={machine} row={r} isDefault={isDefault} />;
         const manage = () => onManage({ descriptor });
         switch (r.harness) {
           case "t3":
-            return <T3Row key={r.id} name={descriptor.name} machine={machine} onManage={manage} />;
+            return <T3Row key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           case "opencode":
-            return <OpenCodeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} />;
+            return <OpenCodeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           default:
-            return <GenericRow key={r.id} descriptor={descriptor} machine={machine} onManage={manage} />;
+            return <GenericRow key={r.id} descriptor={descriptor} machine={machine} onManage={manage} isDefault={isDefault} />;
         }
       })}
     </RowList>
@@ -132,7 +134,7 @@ interface Disconnect {
   reset: () => void;
 }
 
-/** One connection: name and where, state chip, Manage and Disconnect (laptop) or a whole-row button (phone). */
+/** One connection: name (and the default chip) and where, state chip, Manage and Disconnect (laptop) or a whole-row button (phone). */
 function ConnectionRow({
   name,
   machine,
@@ -140,6 +142,7 @@ function ConnectionRow({
   chip,
   onManage,
   disconnect,
+  isDefault,
 }: {
   name: string;
   machine: Machine;
@@ -148,6 +151,8 @@ function ConnectionRow({
   onManage?: () => void;
   /** null: the harness cannot disconnect from here. */
   disconnect: Disconnect | null;
+  /** New tasks start on this connection (Preferences.defaultConnectionId). */
+  isDefault: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
   const state = (
@@ -158,6 +163,11 @@ function ConnectionRow({
   const title = (
     <span className="flex min-w-0 flex-1 items-baseline gap-x-2">
       <span className="shrink-0 text-body font-medium text-fg">{name}</span>
+      {isDefault ? (
+        <Chip className="shrink-0 self-center" title="New tasks start on this connection">
+          default
+        </Chip>
+      ) : null}
       <span className="min-w-0 truncate font-mono text-meta text-muted" title={detail}>
         {detail}
       </span>
@@ -216,7 +226,7 @@ function ConnectionRow({
   );
 }
 
-function T3Row({ name, machine, onManage }: { name: string; machine: Machine; onManage: () => void }) {
+function T3Row({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
   const query = useT3Status();
   const read = statusRead(query);
   const summary = t3Summary(read);
@@ -229,6 +239,7 @@ function T3Row({ name, machine, onManage }: { name: string; machine: Machine; on
       detail={s === undefined ? (read.error ?? "") : t3RowDetail(s)}
       chip={{ tone: summary.tone, label: summary.state }}
       onManage={onManage}
+      isDefault={isDefault}
       disconnect={
         s === undefined || disconnectAvailability(s) === "hidden"
           ? null
@@ -244,7 +255,7 @@ function T3Row({ name, machine, onManage }: { name: string; machine: Machine; on
   );
 }
 
-function OpenCodeRow({ name, machine, onManage }: { name: string; machine: Machine; onManage: () => void }) {
+function OpenCodeRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
   const query = useOpenCodeStatus();
   const read = statusRead(query);
   const summary = openCodeSummary(read);
@@ -257,6 +268,7 @@ function OpenCodeRow({ name, machine, onManage }: { name: string; machine: Machi
       detail={s === undefined ? (read.error ?? "") : openCodeRowDetail(s)}
       chip={{ tone: summary.tone, label: summary.state }}
       onManage={onManage}
+      isDefault={isDefault}
       disconnect={
         s === undefined || s.state === "unconfigured"
           ? null
@@ -272,7 +284,7 @@ function OpenCodeRow({ name, machine, onManage }: { name: string; machine: Machi
   );
 }
 
-function GenericRow({ descriptor, machine, onManage }: { descriptor: HarnessDescriptor; machine: Machine; onManage: () => void }) {
+function GenericRow({ descriptor, machine, onManage, isDefault }: { descriptor: HarnessDescriptor; machine: Machine; onManage: () => void; isDefault: boolean }) {
   const status = useHarnessStatus(descriptor.kind);
   const disconnect = useDisconnectHarness(descriptor.kind);
   const s = status.data;
@@ -284,6 +296,7 @@ function GenericRow({ descriptor, machine, onManage }: { descriptor: HarnessDesc
       detail={s === undefined ? (status.error?.message ?? "") : (s.reason ?? s.lastError ?? "")}
       chip={{ tone, label: s?.state ?? "checking" }}
       onManage={onManage}
+      isDefault={isDefault}
       disconnect={
         s === undefined || !descriptor.setup.disconnect || !s.configured
           ? null
@@ -300,7 +313,7 @@ function GenericRow({ descriptor, machine, onManage }: { descriptor: HarnessDesc
 }
 
 /** A connection on a machine whose setup cannot run now: as Stage last recorded it, no actions. */
-function RecordedRow({ machine, row }: { machine: Machine; row: ConnectionRowModel }) {
+function RecordedRow({ machine, row, isDefault }: { machine: Machine; row: ConnectionRowModel; isDefault: boolean }) {
   const { kindName } = useHarnesses();
   return (
     <ConnectionRow
@@ -309,6 +322,7 @@ function RecordedRow({ machine, row }: { machine: Machine; row: ConnectionRowMod
       detail={row.label === "" ? `connection #${row.id}` : `${row.label} · on record`}
       chip={{ tone: "idle", label: machine.status === "needs_update" ? "needs update" : "offline" }}
       disconnect={null}
+      isDefault={isDefault}
     />
   );
 }

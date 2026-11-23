@@ -363,12 +363,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 6 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != db.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "6" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "7" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -1107,52 +1107,63 @@ func timeAfter() <-chan time.Time { return time.After(10 * time.Millisecond) }
 
 func TestPreferences(t *testing.T) {
 	e := newEnv(t)
-	type defaults struct {
-		ProviderInstanceID *string `json:"providerInstanceId"`
-		Model              *string `json:"model"`
-		ModelOptions       []struct {
-			ID    string `json:"id"`
-			Value any    `json:"value"`
-		} `json:"modelOptions"`
-		RuntimeMode     string `json:"runtimeMode"`
-		InteractionMode string `json:"interactionMode"`
-	}
 	type prefs struct {
-		Pinned       *defaults `json:"pinned"`
-		LastUsed     *defaults `json:"lastUsed"`
-		NotifyEvents []string  `json:"notifyEvents"`
+		DefaultConnectionID *int64   `json:"defaultConnectionId"`
+		NotifyEvents        []string `json:"notifyEvents"`
 	}
 	var p prefs
 	e.must("GET", "/api/preferences", nil, 200, &p)
-	if p.Pinned != nil || p.LastUsed != nil {
+	if p.DefaultConnectionID != nil {
 		t.Fatalf("fresh %+v", p)
 	}
+	t3ID := e.store.LegacyT3ID()
 
-	// Creating a task records its model config as last used.
+	// Default connection: set, reject an unknown one, clear. The old pin route is gone.
+	e.must("PUT", "/api/preferences/default-connection", map[string]any{"connectionId": t3ID}, 200, &p)
+	if p.DefaultConnectionID == nil || *p.DefaultConnectionID != t3ID {
+		t.Fatalf("default %+v", p)
+	}
+	e.must("PUT", "/api/preferences/default-connection", map[string]any{"connectionId": 999}, 400, nil)
+	e.must("PUT", "/api/preferences/default-connection", map[string]any{"connectionId": nil}, 200, &p)
+	if p.DefaultConnectionID != nil {
+		t.Fatalf("cleared default %+v", p)
+	}
+	e.must("PUT", "/api/preferences/pinned", map[string]any{"providerInstanceId": "claude", "model": "claude-haiku-5-5"}, 404, nil)
+
+	// Creating a task no longer records anything in preferences.
 	pr := e.project("/w/prefs")
-	e.task(pr.ID, "A", map[string]any{
-		"providerInstanceId": "codex", "model": "gpt-6", "modelOptions": []map[string]any{{"id": "effort", "value": "high"}},
-		"runtimeMode": "auto", "interactionMode": "plan",
-	})
+	e.task(pr.ID, "A", map[string]any{"providerInstanceId": "codex", "model": "gpt-6", "runtimeMode": "auto"})
 	e.must("GET", "/api/preferences", nil, 200, &p)
-	lu := p.LastUsed
-	if lu == nil || *lu.ProviderInstanceID != "codex" || *lu.Model != "gpt-6" || lu.RuntimeMode != "auto" ||
-		lu.InteractionMode != "plan" || len(lu.ModelOptions) != 1 || lu.ModelOptions[0].Value != "high" || p.Pinned != nil {
-		t.Fatalf("last used %+v", p)
+	if p.DefaultConnectionID != nil {
+		t.Fatalf("after create %+v", p)
 	}
 
-	// Pin, validate, clear.
-	e.must("PUT", "/api/preferences/pinned", map[string]any{"providerInstanceId": "claude", "model": "claude-haiku-5-5"}, 200, &p)
-	if p.Pinned == nil || *p.Pinned.Model != "claude-haiku-5-5" || p.Pinned.RuntimeMode != "full-access" ||
-		p.Pinned.InteractionMode != "default" || p.Pinned.ModelOptions == nil || p.LastUsed == nil {
-		t.Fatalf("pinned %+v", p)
+	// Per-connection pin: checked against the connection, permission and mode refused, cleared by null.
+	type conn struct {
+		Connection db.HarnessConnection `json:"connection"`
 	}
-	e.must("PUT", "/api/preferences/pinned", map[string]any{"model": "x"}, 400, nil)
-	e.must("PUT", "/api/preferences/pinned", map[string]any{"runtimeMode": "yolo"}, 400, nil)
-	e.must("PUT", "/api/preferences/pinned", nil, 400, nil)
-	e.must("PUT", "/api/preferences/pinned", json.RawMessage("null"), 200, &p)
-	if p.Pinned != nil || p.LastUsed == nil {
-		t.Fatalf("cleared %+v", p)
+	var c conn
+	key := t3.ModelKey("claude", "claude-haiku-5-5")
+	path := fmt.Sprintf("/api/connections/%d/new-task-config", t3ID)
+	e.must("PUT", path, map[string]any{"config": map[string]any{"model": key, "options": []map[string]any{{"id": "effort", "value": "high"}}}}, 200, &c)
+	if nc := c.Connection.NewTaskConfig; nc == nil || nc.Model != key || len(nc.Options) != 1 || nc.Permission != "" || nc.Mode != "" {
+		t.Fatalf("pinned %+v", c.Connection.NewTaskConfig)
+	}
+	var list struct {
+		Connections []db.HarnessConnection `json:"connections"`
+	}
+	e.must("GET", "/api/connections", nil, 200, &list)
+	if i := slices.IndexFunc(list.Connections, func(x db.HarnessConnection) bool { return x.ID == t3ID }); i < 0 || list.Connections[i].NewTaskConfig == nil {
+		t.Fatalf("listing %+v", list.Connections)
+	}
+	e.must("PUT", path, map[string]any{"config": map[string]any{"model": t3.ModelKey("claude", "nope")}}, 400, nil)
+	e.must("PUT", path, map[string]any{"config": map[string]any{"model": key, "options": []map[string]any{{"id": "effort", "value": "extreme"}}}}, 400, nil)
+	e.must("PUT", path, map[string]any{"config": map[string]any{"model": key, "mode": "plan"}}, 400, nil)
+	e.must("PUT", path, map[string]any{"config": map[string]any{"model": key, "permission": "auto"}}, 400, nil)
+	e.must("PUT", "/api/connections/999/new-task-config", map[string]any{"config": nil}, 400, nil)
+	e.must("PUT", path, map[string]any{"config": nil}, 200, &c)
+	if c.Connection.NewTaskConfig != nil {
+		t.Fatalf("unpinned %+v", c.Connection.NewTaskConfig)
 	}
 
 	// Notification filter: default all; set; validate.
@@ -1160,7 +1171,7 @@ func TestPreferences(t *testing.T) {
 		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"settled", "ready", "done", "needs_input"}}, 200, &p)
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done,settled" || p.LastUsed == nil {
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done,settled" {
 		t.Fatalf("notifyEvents %+v", p)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)

@@ -41,6 +41,9 @@ type HarnessConnection struct {
 	// Tasks and Bindings count what stays on the connection.
 	Tasks    int `json:"tasks"`
 	Bindings int `json:"bindings"`
+	// NewTaskConfig is the model and options pinned for new tasks here
+	// (permission and mode empty; nil = the harness default).
+	NewTaskConfig *execution.Config `json:"newTaskConfig"`
 }
 type ProjectBinding struct {
 	ID                int64   `json:"id"`
@@ -80,11 +83,11 @@ type ExternalProject struct {
 
 const connectionCols = `id,machine_id,harness,auto_complete,active,label,retired_at,forgotten_at,
  (SELECT count(*) FROM tasks t WHERE t.connection_id=c.id),
- (SELECT count(*) FROM project_bindings b WHERE b.connection_id=c.id AND b.active=1)`
+ (SELECT count(*) FROM project_bindings b WHERE b.connection_id=c.id AND b.active=1),new_task_config`
 
 func scanConnection(r rowScanner) (HarnessConnection, error) {
 	var c HarnessConnection
-	err := r.Scan(&c.ID, &c.MachineID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings)
+	err := r.Scan(&c.ID, &c.MachineID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings, &c.NewTaskConfig)
 	return c, notFound(err)
 }
 
@@ -109,6 +112,23 @@ func (s *Store) SetAutoComplete(ctx context.Context, id int64, on bool) (Harness
 	}
 	return s.GetHarnessConnection(ctx, id)
 }
+// SetNewTaskConfig pins (or clears, nil) the model and options new tasks on a
+// connection start with. Permission and mode are never pinned: they start at
+// the harness default.
+func (s *Store) SetNewTaskConfig(ctx context.Context, id int64, c *execution.Config) (HarnessConnection, error) {
+	if c != nil {
+		c = &execution.Config{Model: c.Model, Options: append([]execution.ModelOption{}, c.Options...)}
+	}
+	res, err := s.pool.Exec(ctx, `UPDATE harness_connections SET new_task_config=$2 WHERE id=$1`, id, c)
+	if err != nil {
+		return HarnessConnection{}, err
+	}
+	if res.RowsAffected() == 0 {
+		return HarnessConnection{}, ErrNotFound
+	}
+	return s.GetHarnessConnection(ctx, id)
+}
+
 func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
 	rows, err := s.pool.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,b.project_id,e.repo FROM external_projects e
  LEFT JOIN project_bindings b ON b.connection_id=e.connection_id AND b.external_project_id=e.external_id AND b.workspace=e.workspace AND b.active=1

@@ -78,6 +78,19 @@ func TestMatchProposesRemoteAndBindsVerifiedFamily(t *testing.T) {
 	if err := service.chooseConnection(req, &taskConfigReq{ProjectID: &p.ID}); err == nil {
 		t.Fatal("dual-bound project accepted an implicit destination")
 	}
+	// With a default connection, a dual-bound project starts there.
+	if _, err := store.SetDefaultConnection(ctx, &connection); err != nil {
+		t.Fatal(err)
+	}
+	implicit := taskConfigReq{ProjectID: &p.ID}
+	if err := service.chooseConnection(req, &implicit); err != nil || implicit.ConnectionID == nil || *implicit.ConnectionID != connection {
+		t.Fatalf("default destination %v, %v", implicit.ConnectionID, err)
+	}
+	one := int64(1)
+	explicit := taskConfigReq{ProjectID: &p.ID, ConnectionID: &one}
+	if err := service.chooseConnection(req, &explicit); err != nil || *explicit.ConnectionID != 1 {
+		t.Fatalf("explicit destination %v, %v", explicit.ConnectionID, err)
+	}
 }
 
 // Checkout proof holds within one machine: the same directory seen through

@@ -171,6 +171,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/connections/resolve", s.resolveConnection)
 	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
+	h("PUT /api/connections/{connectionId}/new-task-config", s.setNewTaskConfig)
 	h("DELETE /api/connections/{connectionId}", s.forgetConnection)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
@@ -237,7 +238,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/refs/resolve", s.resolveRef)
 
 	h("GET /api/preferences", s.getPreferences)
-	h("PUT /api/preferences/pinned", s.putPinned)
+	h("PUT /api/preferences/default-connection", s.putDefaultConnection)
 	h("PUT /api/preferences/notifications", s.putNotifyEvents)
 
 	h("GET /api/push/config", s.pushConfig)

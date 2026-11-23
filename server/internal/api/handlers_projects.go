@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // plannedConnection: id has an adapter or is a connector's active
@@ -154,6 +155,43 @@ func (s *server) setAutoComplete(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]any{"connection": s.configured(r.Context(), c)})
 	return nil
 }
+
+// setNewTaskConfig is PUT /api/connections/{id}/new-task-config, body
+// {"config": {model, options} | null}: pins (or clears) the model and options
+// new tasks on the connection start with. The selection is checked against
+// the connection's capabilities. Permission and mode are never pinned.
+func (s *server) setNewTaskConfig(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.connectionPath(r)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Config *execution.Config `json:"config"`
+	}
+	if err = decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if !s.Store.ConnectionActive(id) {
+		return db.Invalid("Only an active connection takes new-task defaults.")
+	}
+	if c := in.Config; c != nil {
+		if c.Permission != "" || c.Mode != "" {
+			return db.Invalid("Permission and mode are not pinned: new tasks start at the harness default.")
+		}
+		if c.Model == "" && len(c.Options) == 0 {
+			in.Config = nil
+		} else if err := s.validateSelection(r.Context(), id, 0, c); err != nil {
+			return err
+		}
+	}
+	c, err := s.Store.SetNewTaskConfig(r.Context(), id, in.Config)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connection": s.configured(r.Context(), c)})
+	return nil
+}
+
 func (s *server) externalProjects(w http.ResponseWriter, r *http.Request) error {
 	id, err := s.connectionPath(r)
 	if err != nil {

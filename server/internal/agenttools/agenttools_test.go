@@ -280,18 +280,25 @@ func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
 	e := newEnv(t)
 	e.project("/w/defaults")
 	provider, model := "claude", "claude-haiku-5-5"
-	if _, err := e.store.SetPinned(t.Context(), &db.ModelDefaults{ProviderInstanceID: &provider, Model: &model, RuntimeMode: "approval-required", InteractionMode: "plan"}); err != nil {
+	// The pin is the connection's; permission and mode are never stored with it.
+	pin := &execution.Config{Model: t3.ModelKey(provider, model), Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}, Permission: "approval-required", Mode: "plan"}
+	if _, err := e.store.SetNewTaskConfig(t.Context(), e.store.LegacyT3ID(), pin); err != nil {
 		t.Fatal(err)
 	}
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/defaults"}})
 	var tk client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "d", "prompt": "x"}, &tk)
-	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || c.Mode == "plan" || c.Permission == "approval-required" {
-		t.Fatalf("pinned modes leaked: config %+v", tk.ExecutionConfig)
+	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || len(c.Options) != 1 || c.Mode == "plan" || c.Permission == "approval-required" {
+		t.Fatalf("pinned config %+v", tk.ExecutionConfig)
 	}
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "interactionMode": "plan", "runtimeMode": "auto"}, &tk)
-	if c := tk.ExecutionConfig; c == nil || c.Mode != "plan" || c.Permission != "auto" {
+	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || c.Mode != "plan" || c.Permission != "auto" {
 		t.Fatalf("explicit modes dropped: config %+v", tk.ExecutionConfig)
+	}
+	// An explicit model wins over the pin: none of its options are merged in.
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "f", "prompt": "x", "executionConfig": map[string]any{"model": t3.ModelKey(provider, model)}}, &tk)
+	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || len(c.Options) != 0 {
+		t.Fatalf("explicit model %+v", tk.ExecutionConfig)
 	}
 }
 

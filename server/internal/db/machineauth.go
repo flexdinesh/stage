@@ -436,6 +436,9 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 			if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=0,retired_at=stage_now() WHERE id=$1`, c); err != nil {
 				return err
 			}
+			if _, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=NULL WHERE default_connection_id=$1`, c); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

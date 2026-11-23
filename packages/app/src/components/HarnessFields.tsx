@@ -39,11 +39,14 @@ export function HarnessFields({
   caps,
   onChange,
   disabled,
+  modelOnly = false,
 }: {
   config: ExecutionConfig;
   caps: Capabilities | undefined;
   onChange: (next: ExecutionConfig) => void;
   disabled: boolean;
+  /** Model and its options only (a connection's new-task pin: mode and permission start at the harness default). */
+  modelOnly?: boolean;
 }) {
   const model = caps?.models?.find((m) => m.id === config.model);
   const options = optionsFor(caps, model);
@@ -93,8 +96,8 @@ export function HarnessFields({
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
       {choices("Model", "model", caps?.models ?? [])}
-      {choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? [])}
-      {choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
+      {modelOnly ? null : choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? [])}
+      {modelOnly ? null : choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
       {options.map((o) => {
         const current = config.options.find((v) => v.id === o.id);
         const idx = o.values.findIndex((v) => v === current?.value);

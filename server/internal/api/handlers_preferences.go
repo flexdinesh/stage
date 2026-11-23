@@ -1,11 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
@@ -19,28 +17,15 @@ func (s *server) getPreferences(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// putPinned: body ModelDefaults (pin) or null (clear).
-func (s *server) putPinned(w http.ResponseWriter, r *http.Request) error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		return db.Invalid("read body: %v", err)
+// putDefaultConnection: body {"connectionId": id | null}; null clears it.
+func (s *server) putDefaultConnection(w http.ResponseWriter, r *http.Request) error {
+	var body struct {
+		ConnectionID *int64 `json:"connectionId"`
 	}
-	if len(bytes.TrimSpace(body)) == 0 {
-		return db.Invalid("body required: defaults object or null")
+	if err := decodeStrict(r, &body); err != nil {
+		return err
 	}
-	var d *db.ModelDefaults
-	if err := json.Unmarshal(body, &d); err != nil {
-		return db.Invalid("invalid JSON: %v", err)
-	}
-	if d != nil {
-		if d.ExecutionConfig != nil {
-			return db.Invalid("Pin the T3 provider, model, permission and interaction fields explicitly.")
-		}
-		if err := validateDefaults(d); err != nil {
-			return err
-		}
-	}
-	p, err := s.Store.SetPinned(r.Context(), d)
+	p, err := s.Store.SetDefaultConnection(r.Context(), body.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -65,27 +50,4 @@ func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, http.StatusOK, p)
 	return nil
-}
-
-func validateDefaults(d *db.ModelDefaults) error {
-	d.ProviderInstanceID = trimmedPtr(d.ProviderInstanceID)
-	d.Model = trimmedPtr(d.Model)
-	if (d.ProviderInstanceID == nil) != (d.Model == nil) {
-		return db.Invalid("providerInstanceId and model must be set together")
-	}
-	opts, err := validateOptions(d.ModelOptions)
-	if err != nil {
-		return err
-	}
-	d.ModelOptions = opts
-	if strings.TrimSpace(d.RuntimeMode) == "" {
-		d.RuntimeMode = "full-access"
-	}
-	if strings.TrimSpace(d.InteractionMode) == "" {
-		d.InteractionMode = "default"
-	}
-	if err := validEnum("runtimeMode", d.RuntimeMode, db.RuntimeModes); err != nil {
-		return err
-	}
-	return validEnum("interactionMode", d.InteractionMode, db.InteractionModes)
 }

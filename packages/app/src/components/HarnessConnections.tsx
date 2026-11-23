@@ -9,20 +9,27 @@ import { invalidateConnectionChange, keys } from "../api/queries.ts";
 import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
+import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
 import { T3ConnectionPanel } from "./T3Setup.tsx";
 import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, InlineError, Input, Muted, Panel, QueryState } from "./ui.tsx";
 
-/** Harness-specific setup panels by kind; the generic card covers the rest. */
+/** Harness-specific setup panels by kind (each places its NewTaskDefaults); the generic card covers the rest. */
 const CONNECTION_PANELS: Record<string, ComponentType> = {
   t3: T3ConnectionPanel,
   opencode: OpenCodeSetup,
 };
 
-/** One harness's setup on the harness scope's machine: its own panel, or the generic card. */
+/** One harness's setup on the harness scope's machine: its own panels, or the generic card and its New tasks panel. */
 export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor }) {
   const Own = CONNECTION_PANELS[descriptor.kind];
-  return Own === undefined ? <ConnectionCard descriptor={descriptor} /> : <Own />;
+  if (Own !== undefined) return <Own />;
+  return (
+    <>
+      <ConnectionCard descriptor={descriptor} />
+      <NewTaskDefaults harness={descriptor.kind} />
+    </>
+  );
 }
 
 /** A generic harness's status on the harness scope's machine (shared by its card and its Settings row). */

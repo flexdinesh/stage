@@ -909,13 +909,12 @@ func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attac
 	return out, err
 }
 
-// Preferences is GET /api/preferences (model defaults subset).
+// Preferences is GET /api/preferences (new-task defaults subset).
 type Preferences struct {
-	Pinned   *db.ModelDefaults `json:"pinned"`
-	LastUsed *db.ModelDefaults `json:"lastUsed"`
+	DefaultConnectionID *int64 `json:"defaultConnectionId"`
 }
 
-// Preferences reads the pinned and last-used model defaults.
+// Preferences reads the default connection for new tasks.
 func (c *Client) Preferences(ctx context.Context) (Preferences, error) {
 	var out Preferences
 	err := c.do(ctx, http.MethodGet, "/api/preferences", nil, &out)

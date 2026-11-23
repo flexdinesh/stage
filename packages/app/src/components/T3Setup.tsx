@@ -11,6 +11,7 @@ import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, prim
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApi } from "../platform/context.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
+import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { Step, Steps } from "./Steps.tsx";
 import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
 
@@ -427,6 +428,7 @@ export function T3ConnectionPanel() {
       {status.data === undefined ? null : (
         <>
           {t3Configured(status.data) ? <StatusCard status={status.data} /> : null}
+          <NewTaskDefaults harness="t3" />
           <PairCard status={status.data} />
         </>
       )}

@@ -212,10 +212,14 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 				return err
 			}
 			out.New, out.Revived = target, true
-		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,auto_complete,stable_identity) VALUES($5,$1,$2,$3,$4,$6) RETURNING id`, kind, identity, label, cur.autoComplete, machine, d.StableIdentity).Scan(&out.New); err != nil {
+		} else if err := tx.QueryRow(ctx, `INSERT INTO harness_connections(machine_id,harness,identity,label,auto_complete,stable_identity,new_task_config) VALUES($5,$1,$2,$3,$4,$6,(SELECT new_task_config FROM harness_connections WHERE id=$7)) RETURNING id`, kind, identity, label, cur.autoComplete, machine, d.StableIdentity, cur.id).Scan(&out.New); err != nil {
 			return err
 		}
 		out.Changed = true
+		// The default follows its replacement, like the backlog below.
+		if _, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`, cur.id, out.New); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`, cur.id, out.New); err != nil {
 			return err
 		}

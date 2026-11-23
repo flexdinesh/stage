@@ -6,7 +6,7 @@ import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { ExecutionConfig, HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -145,6 +145,29 @@ export function useSetAutoComplete() {
     onSuccess: ({ connection }) => {
       patch(connection.id, () => connection);
     },
+  });
+}
+
+/** Pins (or clears, null) the model and options new tasks on a connection start with. */
+export function useSetNewTaskConfig() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, config }: { id: number; config: ExecutionConfig | null }) => api.setNewTaskConfig(id, config),
+    onSuccess: ({ connection }) =>
+      qc.setQueryData<Connections>(keys.connections, (prev) =>
+        prev === undefined ? prev : { connections: prev.connections.map((c) => (c.id === connection.id ? connection : c)) },
+      ),
+  });
+}
+
+/** Makes a connection the one new tasks start on (null clears it). */
+export function useSetDefaultConnection() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number | null) => api.setDefaultConnection(id),
+    onSuccess: (p) => qc.setQueryData(keys.preferences, p),
   });
 }
 
@@ -363,7 +386,7 @@ export const useSnippets = () => {
   return useQuery({ queryKey: keys.snippets, queryFn: api.snippets });
 };
 
-// Changes only on task create or pin; no polling.
+// Changes only from Settings; no polling.
 export const usePreferences = () => {
   const api = useApi();
   return useQuery({ queryKey: keys.preferences, queryFn: api.preferences, refetchInterval: false, staleTime: 30_000 });
