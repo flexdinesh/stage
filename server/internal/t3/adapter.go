@@ -163,8 +163,17 @@ func (d ThreadDetail) Observation() execution.Observation {
 	}
 	state := "idle"
 	status := d.Status
-	if status == StatusIdle && len(d.RecentRuns) > 0 {
-		status = d.RecentRuns[0].Status
+	// T3 reports the newest run, even a queued follow-up cancelled before it
+	// started. Such a run did no work, so the newest other run decides.
+	last := max(0, slices.IndexFunc(d.RecentRuns, func(r Run) bool {
+		return r.StartedAt != nil || (r.Status != StatusCancelled && r.Status != StatusRolledBack)
+	}))
+	switch {
+	case len(d.RecentRuns) == 0:
+	case status == StatusIdle, last > 0 && (status == StatusCancelled || status == StatusRolledBack):
+		status = d.RecentRuns[last].Status
+	default:
+		last = 0
 	}
 	switch status {
 	case StatusPreparing, StatusQueued, StatusStarting, StatusRunning, StatusWaiting:
@@ -198,7 +207,7 @@ func (d ThreadDetail) Observation() execution.Observation {
 		o.Closed = &execution.Closure{Signal: execution.ClosedSettled}
 	}
 	if len(d.RecentRuns) > 0 {
-		o.EndedAt = d.RecentRuns[0].CompletedAt
+		o.EndedAt = d.RecentRuns[last].CompletedAt
 		old := d.RecentRuns[len(d.RecentRuns)-1]
 		switch {
 		case d.RunCount > len(d.RecentRuns) && !d.CreatedAt.IsZero():
