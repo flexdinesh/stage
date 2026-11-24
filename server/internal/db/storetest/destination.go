@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"testing"
@@ -6,7 +6,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-func TestNewTaskDestination(t *testing.T) {
+func init() {
+	register("NewTaskDestination", caseNewTaskDestination)
+}
+
+func caseNewTaskDestination(t *testing.T, open Factory) {
 	// Connections 1 and 2 on the main machine, 3 and 4 on machine 2.
 	machine := func(id int64) int64 {
 		if id >= 3 {

@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"errors"
@@ -8,8 +8,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-func TestNotifyEvents(t *testing.T) {
-	s, ctx := setup(t)
+func init() {
+	register("NotifyEvents", caseNotifyEvents)
+}
+
+func caseNotifyEvents(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p, err := s.GetPreferences(ctx)
 	if err != nil {
 		t.Fatal(err)

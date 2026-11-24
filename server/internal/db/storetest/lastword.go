@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"strings"
@@ -9,7 +9,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-func TestPreviewText(t *testing.T) {
+func init() {
+	register("PreviewText", casePreviewText)
+	register("ThreadLastWord", caseThreadLastWord)
+}
+
+func casePreviewText(t *testing.T, open Factory) {
 	cases := []struct{ name, in, want string }{
 		{"plain", "Done.", "Done."},
 		{"heading and list", "## Summary\n\n- Fixed the race in `PollTask`\n- Added **regression** test\n1. Ran `go test`", "Summary Fixed the race in PollTask Added regression test Ran go test"},
@@ -32,8 +37,8 @@ func TestPreviewText(t *testing.T) {
 	}
 }
 
-func TestThreadLastWord(t *testing.T) {
-	s, ctx := setup(t)
+func caseThreadLastWord(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "x", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}})); err != nil {

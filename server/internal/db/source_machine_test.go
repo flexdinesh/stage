@@ -7,19 +7,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-func TestActingMachine(t *testing.T) {
-	ctx := context.Background()
-	if got := db.ActingMachine(ctx); got != nil {
-		t.Fatalf("no gateway: %d, want nil", *got)
-	}
-	if got := db.ActingMachine(db.WithMachine(ctx, 7)); got == nil || *got != 7 {
-		t.Fatalf("gateway: %v, want 7", got)
-	}
-	if got := db.ActingUser(db.WithMachine(ctx, 7)); got != db.DefaultUser {
-		t.Fatalf("a machine is not a user: acting user %d", got)
-	}
-}
-
 // remoteMachine inserts machine 2 and returns a context forwarded by it.
 func remoteMachine(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()

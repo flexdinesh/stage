@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -12,6 +12,19 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func init() {
+	register("JournalNotesQueriesAndRetry", caseJournalNotesQueriesAndRetry)
+	register("JournalConcurrentRetryAndPagination", caseJournalConcurrentRetryAndPagination)
+	register("JournalMovesFreezeEventsAndInvalidateTreeCursors", caseJournalMovesFreezeEventsAndInvalidateTreeCursors)
+	register("JournalClosedWritesAndPermanentProtection", caseJournalClosedWritesAndPermanentProtection)
+	register("JournalInitialNotesScheduleDuplicateAndRollback", caseJournalInitialNotesScheduleDuplicateAndRollback)
+	register("JournalLaunchInstructionsFrozenPerAttempt", caseJournalLaunchInstructionsFrozenPerAttempt)
+	register("JournalCreateIntoTreeInvalidatesCursor", caseJournalCreateIntoTreeInvalidatesCursor)
+	register("JournalMoveAndAppendSerialize", caseJournalMoveAndAppendSerialize)
+	register("JournalMoveRollbackAndExecutionProtection", caseJournalMoveRollbackAndExecutionProtection)
+	register("JournalTreeMutationEvents", caseJournalTreeMutationEvents)
+}
 
 func journal(t *testing.T, s *db.Store, ctx context.Context, owner db.JournalOwner, q db.JournalQuery) db.JournalPage {
 	t.Helper()
@@ -33,8 +46,8 @@ func containsEntry(page db.JournalPage, id int64) bool {
 	return slices.ContainsFunc(page.Entries, func(e db.JournalEntry) bool { return e.ID == id })
 }
 
-func TestJournalNotesQueriesAndRetry(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalNotesQueriesAndRetry(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	owner := db.JournalOwner{TaskID: &a.ID}
@@ -101,8 +114,8 @@ func TestJournalNotesQueriesAndRetry(t *testing.T) {
 	}
 }
 
-func TestJournalConcurrentRetryAndPagination(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalConcurrentRetryAndPagination(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	owner := db.JournalOwner{TaskID: &a.ID}
@@ -155,8 +168,8 @@ func TestJournalConcurrentRetryAndPagination(t *testing.T) {
 	}
 }
 
-func TestJournalMovesFreezeEventsAndInvalidateTreeCursors(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalMovesFreezeEventsAndInvalidateTreeCursors(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", nil)
@@ -235,8 +248,8 @@ func TestJournalMovesFreezeEventsAndInvalidateTreeCursors(t *testing.T) {
 	}
 }
 
-func TestJournalClosedWritesAndPermanentProtection(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalClosedWritesAndPermanentProtection(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	tr := mustTree(t, s, ctx, "tree", "", db.TreeMember{TaskID: a.ID})
@@ -284,8 +297,8 @@ func TestJournalClosedWritesAndPermanentProtection(t *testing.T) {
 	}
 }
 
-func TestJournalInitialNotesScheduleDuplicateAndRollback(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalInitialNotesScheduleDuplicateAndRollback(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	in := db.NewTask{ProjectID: p.ID, Title: "a", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, InitialNote: "initial"}
 	a, err := s.CreateTask(ctx, in)
@@ -335,8 +348,8 @@ func TestJournalInitialNotesScheduleDuplicateAndRollback(t *testing.T) {
 	}
 }
 
-func TestJournalLaunchInstructionsFrozenPerAttempt(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalLaunchInstructionsFrozenPerAttempt(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
@@ -378,8 +391,8 @@ func TestJournalLaunchInstructionsFrozenPerAttempt(t *testing.T) {
 	}
 }
 
-func TestJournalCreateIntoTreeInvalidatesCursor(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalCreateIntoTreeInvalidatesCursor(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	tr := mustTree(t, s, ctx, "tree", "", db.TreeMember{TaskID: a.ID})
@@ -402,8 +415,8 @@ func TestJournalCreateIntoTreeInvalidatesCursor(t *testing.T) {
 	}
 }
 
-func TestJournalMoveAndAppendSerialize(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalMoveAndAppendSerialize(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", nil)
@@ -436,8 +449,8 @@ func TestJournalMoveAndAppendSerialize(t *testing.T) {
 	}
 }
 
-func TestJournalMoveRollbackAndExecutionProtection(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalMoveRollbackAndExecutionProtection(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", nil)
@@ -467,8 +480,8 @@ func TestJournalMoveRollbackAndExecutionProtection(t *testing.T) {
 	}
 }
 
-func TestJournalTreeMutationEvents(t *testing.T) {
-	s, ctx := setup(t)
+func caseJournalTreeMutationEvents(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", nil)

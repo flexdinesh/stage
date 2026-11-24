@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -8,6 +8,12 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func init() {
+	register("AcceptedScheduledTaskDoesNotLaunch", caseAcceptedScheduledTaskDoesNotLaunch)
+	register("AutomaticClaimRechecksReleaseEligibility", caseAutomaticClaimRechecksReleaseEligibility)
+	register("SettlementNeverAcceptsNewWork", caseSettlementNeverAcceptsNewWork)
+}
 
 func acceptTask(t *testing.T, s *db.Store, ctx context.Context, id int64) {
 	t.Helper()
@@ -20,8 +26,8 @@ func acceptTask(t *testing.T, s *db.Store, ctx context.Context, id int64) {
 	}
 }
 
-func TestAcceptedScheduledTaskDoesNotLaunch(t *testing.T) {
-	s, ctx := setup(t)
+func caseAcceptedScheduledTaskDoesNotLaunch(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	at := time.Now().Add(-time.Minute)
 	tz := "UTC"
@@ -41,8 +47,8 @@ func TestAcceptedScheduledTaskDoesNotLaunch(t *testing.T) {
 	}
 }
 
-func TestAutomaticClaimRechecksReleaseEligibility(t *testing.T) {
-	s, ctx := setup(t)
+func caseAutomaticClaimRechecksReleaseEligibility(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "source", nil)
 	b := mustTask(t, s, ctx, p.ID, "dependent", []int64{a.ID})
@@ -73,8 +79,8 @@ func reopenTask(t *testing.T, s *db.Store, ctx context.Context, id int64) {
 	}
 }
 
-func TestSettlementNeverAcceptsNewWork(t *testing.T) {
-	s, ctx := setup(t)
+func caseSettlementNeverAcceptsNewWork(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "source", nil)
 	b := mustTask(t, s, ctx, p.ID, "dependent", []int64{a.ID})

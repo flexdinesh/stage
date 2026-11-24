@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -10,6 +10,14 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func init() {
+	register("MarkTreeDoneAndReopen", caseMarkTreeDoneAndReopen)
+	register("ClosedTreeReleasesNothing", caseClosedTreeReleasesNothing)
+	register("ActivityReopensTreeAndUnarchivesTask", caseActivityReopensTreeAndUnarchivesTask)
+	register("ArchiveTaskRules", caseArchiveTaskRules)
+	register("DeleteOnlyUnstarted", caseDeleteOnlyUnstarted)
+}
 
 // launch starts task id (attempt 1, a thread) and leaves it in end.
 func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread string, end db.TaskState) {
@@ -70,8 +78,8 @@ func lastEvent(t *testing.T, s *db.Store, ctx context.Context, id int64) string 
 	return evs[len(evs)-1].Detail
 }
 
-func TestMarkTreeDoneAndReopen(t *testing.T) {
-	s, ctx := setup(t)
+func caseMarkTreeDoneAndReopen(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -149,8 +157,8 @@ func TestMarkTreeDoneAndReopen(t *testing.T) {
 	}
 }
 
-func TestClosedTreeReleasesNothing(t *testing.T) {
-	s, ctx := setup(t)
+func caseClosedTreeReleasesNothing(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -186,8 +194,8 @@ func TestClosedTreeReleasesNothing(t *testing.T) {
 	}
 }
 
-func TestActivityReopensTreeAndUnarchivesTask(t *testing.T) {
-	s, ctx := setup(t)
+func caseActivityReopensTreeAndUnarchivesTask(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -223,8 +231,8 @@ func TestActivityReopensTreeAndUnarchivesTask(t *testing.T) {
 	}
 }
 
-func TestArchiveTaskRules(t *testing.T) {
-	s, ctx := setup(t)
+func caseArchiveTaskRules(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -283,8 +291,8 @@ func TestArchiveTaskRules(t *testing.T) {
 	}
 }
 
-func TestDeleteOnlyUnstarted(t *testing.T) {
-	s, ctx := setup(t)
+func caseDeleteOnlyUnstarted(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 
 	fresh := mustTask(t, s, ctx, p.ID, "fresh", nil)
