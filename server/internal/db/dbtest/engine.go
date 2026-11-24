@@ -8,10 +8,14 @@ import (
 
 // Engine opens a fresh migrated engine for t (closed when t ends): the
 // engine the storage contract suite (storetest) and other engine-agnostic
-// tests run on. Today a temp SQLite file; see engine_postgres.go.
+// tests run on. A temp SQLite file; under -tags postgres with
+// STAGE_TEST_DATABASE_URL set (check:postgres), a fresh Postgres database
+// (engine_postgres.go).
 func Engine(t testing.TB) store.Engine {
 	t.Helper()
-	notePostgres(t)
+	if e, ok := postgresEngine(t); ok {
+		return e
+	}
 	var d DB
 	return d.Reset(t)
 }

@@ -132,6 +132,13 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 	}
 	var out Switch
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		out = Switch{}
+		// One active connection per machine and kind: switches on a machine
+		// serialize on its row.
+		if err := tx.Machines().Lock(ctx, machine); err != nil {
+			return err
+		}
 		c := tx.Connections()
 		cur, err := c.Active(ctx, machine, kind)
 		if errors.Is(err, ErrNotFound) {
@@ -218,7 +225,12 @@ func (s *Store) MovedConnections(ctx context.Context) ([]Move, error) {
 // tasks keep their history, read-only. 404 unknown, 409 already retired or an
 // unusable replacement.
 func (s *Store) RetireConnection(ctx context.Context, id, replacement int64) error {
-	err := s.e.Write(ctx, func(tx store.Tx) error { return retireTx(ctx, tx, id, replacement) })
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockMachineOf(ctx, tx, id); err != nil {
+			return err
+		}
+		return retireTx(ctx, tx, id, replacement)
+	})
 	s.dropConnections()
 	return err
 }
@@ -282,7 +294,12 @@ func (s *Store) RetiredConnections(ctx context.Context, machine int64, harness s
 // no longer ask for repair, and its discovery and shared paths are dropped.
 // A connection nothing references is deleted outright.
 func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
-	err := s.e.Write(ctx, func(tx store.Tx) error { return forgetTx(ctx, tx, id) })
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockMachineOf(ctx, tx, id); err != nil {
+			return err
+		}
+		return forgetTx(ctx, tx, id)
+	})
 	s.dropConnections()
 	return err
 }
@@ -292,6 +309,9 @@ func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
 // forgotten (ForgetConnection) at once.
 func (s *Store) RetireAndForget(ctx context.Context, id int64) error {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockMachineOf(ctx, tx, id); err != nil {
+			return err
+		}
 		if err := retireTx(ctx, tx, id, 0); err != nil {
 			return err
 		}
@@ -351,4 +371,18 @@ func connectionUsable(ctx context.Context, tx store.Tx, id int64) error {
 		return ConnectionRetired()
 	}
 	return nil
+}
+
+// lockMachineOf locks the machine of connection id (a connection switch,
+// retire or forget changes which connection is active on it). An unknown
+// connection locks nothing; the caller reports it.
+func lockMachineOf(ctx context.Context, tx store.Tx, id int64) error {
+	machine, err := tx.Connections().MachineOf(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Machines().Lock(ctx, machine)
 }

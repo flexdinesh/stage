@@ -47,6 +47,12 @@ type PairingSecret struct {
 // Machines is the machines repository: machines, pairing codes and
 // machine tokens (secrets stored as hashes only).
 type Machines interface {
+	// Lock locks the machine rows id until the unit of work ends, on engines
+	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
+	// is skipped). SQLite's single writer already serializes writes: no-op.
+	// Take locks in the order of docs/storage.md "Transactions and locking":
+	// machine, connection, tree, task, schedule.
+	Lock(ctx context.Context, id int64) error
 	Get(ctx context.Context, id int64) (Machine, error)
 	// List lists machines not removed (only id when nonzero), by id, with
 	// their active connections.

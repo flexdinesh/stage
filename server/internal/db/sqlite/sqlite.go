@@ -99,9 +99,14 @@ func (d *DB) Ownership() store.Ownership { return ownership{} }
 
 type ownership struct{}
 
-func (ownership) Acquire(context.Context) (func() error, error) {
-	return func() error { return nil }, nil
-}
+func (ownership) Acquire(context.Context) (store.Lease, error) { return lease{}, nil }
+
+// lease is ownership through the data-dir lock: never lost while the
+// process runs.
+type lease struct{}
+
+func (lease) Release() error        { return nil }
+func (lease) Lost() <-chan struct{} { return nil }
 
 type classifier struct{}
 

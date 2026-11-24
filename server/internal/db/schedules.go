@@ -378,7 +378,13 @@ type FireResult struct {
 func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace time.Duration) (FireResult, error) {
 	var res FireResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		res = FireResult{}
 		sc := tx.Schedules()
+		// One spawn per fire time: the next fire advances under the lock.
+		if err := sc.Lock(ctx, id); err != nil {
+			return err
+		}
 		fs, err := sc.FireState(ctx, id)
 		if err != nil {
 			return err

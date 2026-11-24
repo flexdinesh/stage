@@ -16,6 +16,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
@@ -55,10 +56,12 @@ type errUsage struct{ msg string }
 
 func (e errUsage) Error() string { return e.msg }
 
-// exitCode maps a serve error: data dir held by another server 75,
-// invalid configuration 78 (neither is retried by systemd), usage 2.
+// exitCode maps a serve error: data dir or database held by another
+// server 75, invalid configuration 78 (neither is retried by systemd),
+// usage 2.
 func exitCode(err error) int {
 	var le *instance.LockedError
+	var oe *store.OwnedError
 	var ie *config.InvalidError
 	var ue errUsage
 	switch {
@@ -66,7 +69,7 @@ func exitCode(err error) int {
 		return 0
 	case errors.As(err, &ue):
 		return 2
-	case errors.As(err, &le):
+	case errors.As(err, &le), errors.As(err, &oe):
 		return service.ExitConflict
 	case errors.As(err, &ie):
 		return service.ExitConfig

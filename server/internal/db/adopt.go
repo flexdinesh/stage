@@ -27,6 +27,8 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 	var id int64
 	var created bool
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		id, created = 0, false
 		var err error
 		id, created, err = s.adoptThread(ctx, tx, in)
 		if err == nil && in.TreeID != nil {

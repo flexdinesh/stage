@@ -218,3 +218,6 @@ func (r schedules) SetNextRun(ctx context.Context, id int64, next *time.Time) er
 func (r tasks) ByIDs(ctx context.Context, ids []int64) ([]store.Task, error) {
 	return collectTasks(r.Query(ctx, taskSelect+` WHERE t.id IN (SELECT value FROM json_each($1))`, jsonArray(ids)))
 }
+
+// Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
+func (schedules) Lock(context.Context, int64) error { return nil }

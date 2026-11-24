@@ -428,3 +428,6 @@ func (r connections) SaveOpenCodeSettings(ctx context.Context, machine int64, c 
  ON CONFLICT(machine_id) DO UPDATE SET endpoint=excluded.endpoint,browser_endpoint=excluded.browser_endpoint,web_client=excluded.web_client,username=excluded.username,password=excluded.password,auth=excluded.auth,token_issued_at=excluded.token_issued_at`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, c.Auth, c.TokenIssuedAt, machine)
 	return err
 }
+
+// Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
+func (connections) Lock(context.Context, int64) error { return nil }

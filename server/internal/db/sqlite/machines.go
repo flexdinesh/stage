@@ -139,3 +139,6 @@ func (r machines) DeleteTokens(ctx context.Context, machine int64) error {
 	_, err := r.Exec(ctx, `DELETE FROM machine_tokens WHERE machine_id=$1`, machine)
 	return err
 }
+
+// Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
+func (machines) Lock(context.Context, int64) error { return nil }

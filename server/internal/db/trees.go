@@ -242,6 +242,13 @@ func (s *Store) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) 
 	}
 	var id int64
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		var tasks []int64
+		for _, m := range in.Tasks {
+			tasks = append(append(tasks, m.TaskID), m.Needs...)
+		}
+		if err := lockTreeWork(ctx, tx, nil, tasks); err != nil {
+			return err
+		}
 		var err error
 		if id, err = insertTree(ctx, tx, in.Title, mode); err != nil {
 			return err
@@ -388,6 +395,9 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 // tree is open (Conflict).
 func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, error) {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockTreeWork(ctx, tx, []int64{id}, nil); err != nil {
+			return err
+		}
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
 		}
@@ -413,6 +423,9 @@ func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, er
 // (Conflict naming it); members keep their states.
 func (s *Store) SetTreeStatus(ctx context.Context, id int64, status TreeStatus) (TreeDetail, error) {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockTreeWork(ctx, tx, []int64{id}, nil); err != nil {
+			return err
+		}
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
 		}
@@ -465,6 +478,9 @@ func treeOpen(ctx context.Context, tx store.Tx, id int64) error {
 func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 	return s.e.Write(ctx, func(tx store.Tx) error {
 		tr := tx.Trees()
+		if err := lockTreeWork(ctx, tx, []int64{id}, nil); err != nil {
+			return err
+		}
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
 		}
@@ -496,6 +512,9 @@ func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 	return s.e.Write(ctx, func(tx store.Tx) error {
 		tr := tx.Trees()
+		if err := lockTreeWork(ctx, tx, []int64{id}, nil); err != nil {
+			return err
+		}
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
 		}
@@ -513,6 +532,9 @@ func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 // it is spliced out there first) and, when needs is non-nil, sets its needs.
 func (s *Store) AddToTree(ctx context.Context, treeID, taskID int64, needs []int64) (TreeDetail, error) {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockTreeWork(ctx, tx, []int64{treeID}, append([]int64{taskID}, needs...)); err != nil {
+			return err
+		}
 		if err := treeExists(ctx, tx, treeID); err != nil {
 			return err
 		}
@@ -534,6 +556,9 @@ func (s *Store) AddToTree(ctx context.Context, treeID, taskID int64, needs []int
 // over its needs; it stays as a standalone task. The emptied tree is archived.
 func (s *Store) RemoveFromTree(ctx context.Context, treeID, taskID int64) error {
 	return s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockTreeWork(ctx, tx, []int64{treeID}, []int64{taskID}); err != nil {
+			return err
+		}
 		tree, err := tx.Tasks().TreeID(ctx, taskID)
 		if err != nil {
 			return fmt.Errorf("task: %w", err)
@@ -549,6 +574,9 @@ func (s *Store) RemoveFromTree(ctx context.Context, treeID, taskID int64) error 
 // joins its needs' tree (or a new one, resolveTree).
 func (s *Store) SetNeeds(ctx context.Context, id int64, needs []int64) (Task, error) {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := lockTreeWork(ctx, tx, nil, append([]int64{id}, needs...)); err != nil {
+			return err
+		}
 		tree, err := tx.Tasks().TreeID(ctx, id)
 		if err != nil {
 			return err
@@ -835,4 +863,53 @@ func setNeeds(ctx context.Context, tx store.Tx, id int64, needs []int64) error {
 		return err
 	}
 	return tr.ClearStaleBases(ctx)
+}
+
+// lockTreeWork takes the locks of a tree mutation before any read it checks
+// (docs/storage.md "Transactions and locking"): the trees named and the
+// trees the tasks are in, then the tasks, each in ascending id. Every
+// mutation of a tree holds that tree's lock, so membership, needs and
+// splices within it run one at a time; the task locks serialize changes to
+// tasks outside any tree. A task that moved to another tree between the
+// read and its lock gets that tree locked too (out of order: a rare
+// deadlock is retried by the engine). Engines without row locks: no-op.
+func lockTreeWork(ctx context.Context, tx store.Tx, trees, tasks []int64) error {
+	treesOf := func() ([]int64, error) {
+		var out []int64
+		for _, id := range tasks {
+			tree, err := tx.Tasks().TreeID(ctx, id)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if tree != nil {
+				out = append(out, *tree)
+			}
+		}
+		return out, nil
+	}
+	before, err := treesOf()
+	if err != nil {
+		return err
+	}
+	locked := append(slices.Clone(trees), before...)
+	if err := tx.Trees().Lock(ctx, locked...); err != nil {
+		return err
+	}
+	if err := tx.Tasks().Lock(ctx, tasks...); err != nil {
+		return err
+	}
+	after, err := treesOf()
+	if err != nil {
+		return err
+	}
+	var moved []int64
+	for _, id := range after {
+		if !slices.Contains(locked, id) {
+			moved = append(moved, id)
+		}
+	}
+	return tx.Trees().Lock(ctx, moved...)
 }

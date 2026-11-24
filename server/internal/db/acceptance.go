@@ -124,6 +124,8 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 func (s *Store) CompletionPreview(ctx context.Context, id int64) (CompletionPreview, error) {
 	var p CompletionPreview
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		p = CompletionPreview{}
 		var err error
 		p, err = completionPreview(ctx, tx, id)
 		return err
@@ -154,6 +156,12 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 		Reopen bool
 	}{in, reopen})
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		result = AcceptanceResult{}
+		// One revision sequence per task; requestId replays see the first.
+		if err := tx.Tasks().Lock(ctx, id); err != nil {
+			return err
+		}
 		ac := tx.Acceptances()
 		previous, recorded, err := ac.Request(ctx, id, in.RequestID)
 		if err == nil {
@@ -239,6 +247,8 @@ func (s *Store) InferCompletion(ctx context.Context, id int64, o execution.Obser
 	provenance, detail := closure.Provenance, closure.Event
 	inferred := false
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		inferred = false
 		ac := tx.Acceptances()
 		eligible, err := ac.InferenceEligible(ctx, id, o.Session, o.ExecutionID)
 		if errors.Is(err, ErrNotFound) {

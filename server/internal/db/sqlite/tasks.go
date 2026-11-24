@@ -405,3 +405,6 @@ func (r tasks) HoldScheduled(ctx context.Context, id int64, reason string) (bool
 	tag, err := r.Exec(ctx, `UPDATE tasks SET scheduled_hold=1,start_at=NULL,start_tz=NULL,last_error=$2,updated_at=stage_now() WHERE id=$1 AND state='backlog' AND start_at IS NOT NULL`, id, reason)
 	return err == nil && tag.RowsAffected() > 0, err
 }
+
+// Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
+func (tasks) Lock(context.Context, ...int64) error { return nil }

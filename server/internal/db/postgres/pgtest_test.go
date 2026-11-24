@@ -15,10 +15,23 @@ import (
 )
 
 // freshDB returns a pool on a new, empty database created for this test on
-// the check:postgres server (STAGE_TEST_DATABASE_URL), dropped afterwards.
+// the check:postgres server (STAGE_TEST_DATABASE_URL), dropped afterwards
+// (the pool closes first: cleanups run last in, first out).
 // Packages share that server, so every test works in its own database.
 // Without the variable the test fails: Postgres tests never skip.
 func freshDB(t *testing.T) *sql.DB {
+	t.Helper()
+	pool, err := sql.Open("pgx", freshURL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	return pool
+}
+
+// freshURL creates a new, empty database for this test (dropped afterwards)
+// and returns its URL.
+func freshURL(t *testing.T) string {
 	t.Helper()
 	admin := os.Getenv("STAGE_TEST_DATABASE_URL")
 	if admin == "" {
@@ -43,15 +56,10 @@ func freshDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
-	pool, err := sql.Open("pgx", u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
-		pool.Close()
 		if _, err := adminPool.ExecContext(ctx, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
 			t.Errorf("drop %s: %v", name, err)
 		}
 	})
-	return pool
+	return u.String()
 }

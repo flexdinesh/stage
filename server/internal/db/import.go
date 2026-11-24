@@ -31,6 +31,13 @@ type ImportResult struct{ Created, Bound, Archived, Unarchived int }
 func (s *Store) ImportWorkspaces(ctx context.Context, connectionID int64) (ImportResult, error) {
 	var r ImportResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		r = ImportResult{}
+		// One project per workspace path per machine: imports on a
+		// connection serialize on its row.
+		if err := tx.Connections().Lock(ctx, connectionID); err != nil {
+			return err
+		}
 		active, err := tx.Connections().IsActive(ctx, connectionID)
 		if err != nil {
 			return err

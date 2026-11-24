@@ -17,6 +17,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/instance"
 )
 
@@ -40,6 +41,8 @@ func TestExitCode(t *testing.T) {
 		{nil, 0},
 		{errUsage{"x"}, 2},
 		{&instance.LockedError{DataDir: "/d"}, 75},
+		{fmt.Errorf("open: %w", &store.OwnedError{Holder: "stage abc"}), 75},
+		{store.ErrOwnershipLost, 1},
 		{config.Invalid(errors.New("bad")), 78},
 		{errors.New("bind: address in use"), 1},
 	}

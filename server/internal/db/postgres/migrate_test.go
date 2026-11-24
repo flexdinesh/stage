@@ -12,11 +12,10 @@ import (
 	"testing/fstest"
 
 	"github.com/flexdinesh/stage/server/internal/db/backfill"
-	"github.com/pressly/goose/v3"
 )
 
-// testMigrations stand in for the embedded dir until the baseline (#403).
-// 00002 is slow and not idempotent: two unserialized runs collide.
+// testMigrations exercise the migrator apart from the embedded dir. 00002
+// is slow and not idempotent: two unserialized runs collide.
 var testMigrations = fstest.MapFS{
 	"00001_one.sql": {Data: []byte("-- +goose Up\nCREATE TABLE one (id bigint PRIMARY KEY);\n")},
 	"00002_two.sql": {Data: []byte("-- +goose Up\nCREATE TABLE two (id bigint PRIMARY KEY);\nSELECT pg_sleep(0.5);\nINSERT INTO one (id) VALUES (1);\n")},
@@ -147,19 +146,14 @@ func TestGoMigrationRunsInTheMigrationTransaction(t *testing.T) {
 	}
 }
 
-// The embedded migrations: before the baseline there are none and Migrate
-// says so; after it, Migrate reaches MaxVersion.
+// The embedded migrations, from the baseline: Migrate reaches MaxVersion.
 func TestMigrateEmbedded(t *testing.T) {
 	ctx := context.Background()
 	pool := freshDB(t)
-	err := NewMigrator(pool).Up(ctx)
 	if MaxVersion() == 0 {
-		if !errors.Is(err, goose.ErrNoMigrations) {
-			t.Fatalf("no baseline: %v, want goose.ErrNoMigrations", err)
-		}
-		return
+		t.Fatal("no Postgres migrations embedded: the baseline is missing")
 	}
-	if err != nil {
+	if err := NewMigrator(pool).Up(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if v, err := NewMigrator(pool).Current(ctx); err != nil || v != MaxVersion() {

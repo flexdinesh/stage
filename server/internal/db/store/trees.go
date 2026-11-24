@@ -69,6 +69,12 @@ type NeedsState struct {
 
 // Trees is the task tree repository (trees, membership and needs).
 type Trees interface {
+	// Lock locks the tree rows ids until the unit of work ends, on engines
+	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
+	// is skipped). SQLite's single writer already serializes writes: no-op.
+	// Take locks in the order of docs/storage.md "Transactions and locking":
+	// machine, connection, tree, task, schedule.
+	Lock(ctx context.Context, ids ...int64) error
 	Insert(ctx context.Context, title string, mode StartMode, createdBy int64, sourceMachine *int64) (int64, error)
 	Get(ctx context.Context, id int64) (Tree, error)
 	// List orders by last activity, newest first.
