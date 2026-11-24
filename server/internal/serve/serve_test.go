@@ -204,10 +204,16 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if res.StatusCode != 200 {
+	projectID := project.ID
+	switch res.StatusCode {
+	case 200:
+	case 409:
+		// The sync loop's discovery imported the workspace first: use the
+		// project it bound.
+		projectID = boundProject(t, c, ext.ID)
+	default:
 		t.Fatalf("bind project: %d", res.StatusCode)
 	}
-	projectID := project.ID
 	task, err := c.CreateTask(ctx, client.CreateTask{ProjectID: projectID, Title: "T", Prompt: "do it", Start: true})
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +222,24 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 		t.Fatalf("task not launched: %+v", task)
 	}
 	return task
+}
+
+// boundProject is the project bound to external project ext on connection 1.
+func boundProject(t *testing.T, c *client.Client, ext string) int64 {
+	t.Helper()
+	ps, err := c.Projects(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps {
+		for _, b := range p.Bindings {
+			if b.ConnectionID == 1 && b.ExternalProjectID == ext {
+				return p.ID
+			}
+		}
+	}
+	t.Fatalf("bind project: 409 and no project is bound to %s", ext)
+	return 0
 }
 
 func gone(t *testing.T, path string) {
