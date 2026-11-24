@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -7,6 +7,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func init() {
+	register("GroupBatch", caseGroupBatch)
+	register("CreatedBy", caseCreatedBy)
+}
 
 func ptr[T any](v T) *T { return &v }
 
@@ -40,7 +45,7 @@ func needs(t *testing.T, s *db.Store, ctx context.Context, id int64, ids ...int6
 	return got
 }
 
-func TestGroupBatch(t *testing.T) {
+func caseGroupBatch(t *testing.T, open Factory) {
 	inTree := func(id, tree int64, title string, mode db.StartMode) db.Task {
 		return db.Task{ID: id, TreeID: &tree, TreeTitle: &title, TreeStartMode: &mode}
 	}
@@ -64,8 +69,8 @@ func TestGroupBatch(t *testing.T) {
 	}
 }
 
-func TestCreatedBy(t *testing.T) {
-	s, ctx := setup(t)
+func caseCreatedBy(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := originTask(t, s, ctx, p.ID, "a", "plan")
 	b := originTask(t, s, ctx, p.ID, "b", "plan")

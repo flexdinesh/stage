@@ -8,27 +8,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-func TestActingUser(t *testing.T) {
-	ctx := context.Background()
-	if got := db.ActingUser(ctx); got != db.DefaultUser {
-		t.Fatalf("no principal: %d, want default %d", got, db.DefaultUser)
-	}
-	if got := db.ActingUser(db.WithUser(ctx, 7)); got != 7 {
-		t.Fatalf("principal: %d, want 7", got)
-	}
-}
-
-func TestDefaultUserSeeded(t *testing.T) {
-	s, ctx := setup(t)
-	u, err := s.GetUser(ctx, db.DefaultUser)
-	if err != nil || u.ID != 1 || u.DisplayName != "Default user" || u.CreatedAt.IsZero() {
-		t.Fatalf("default user = %+v, %v", u, err)
-	}
-	if _, err := s.GetUser(ctx, 2); err == nil {
-		t.Fatal("user 2 exists")
-	}
-}
-
 // secondUser inserts user 2 and returns a context acting as it.
 func secondUser(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()

@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -10,6 +10,14 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
+
+func init() {
+	register("ScheduleNotesValidatedBeforeSaving", caseScheduleNotesValidatedBeforeSaving)
+	register("WhitespaceScheduleNotesDoNotBlockRuns", caseWhitespaceScheduleNotesDoNotBlockRuns)
+	register("FireSchedule", caseFireSchedule)
+	register("SchedulePauseAndDelete", caseSchedulePauseAndDelete)
+	register("TaskStartAt", caseTaskStartAt)
+}
 
 func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int64, cron string) db.Schedule {
 	t.Helper()
@@ -27,8 +35,8 @@ func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int6
 	return sc
 }
 
-func TestScheduleNotesValidatedBeforeSaving(t *testing.T) {
-	s, ctx := setup(t)
+func caseScheduleNotesValidatedBeforeSaving(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "notes")
 	for _, notes := range []string{strings.Repeat("界", 5462), string([]byte{0xff})} {
 		_, err := s.CreateSchedule(ctx, db.NewSchedule{ProjectID: p.ID, Title: "invalid", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC", Notes: notes})
@@ -49,8 +57,8 @@ func TestScheduleNotesValidatedBeforeSaving(t *testing.T) {
 	}
 }
 
-func TestWhitespaceScheduleNotesDoNotBlockRuns(t *testing.T) {
-	s, ctx := setup(t)
+func caseWhitespaceScheduleNotesDoNotBlockRuns(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "notes")
 	sc := mustSchedule(t, s, ctx, p.ID, "*/5 * * * *")
 	if _, err := s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{Notes: db.Optional[string]{Set: true, V: " \n\t "}}); err != nil {
@@ -94,8 +102,8 @@ func lastRun(t *testing.T, s *db.Store, ctx context.Context, id int64) db.Schedu
 	return runs[0]
 }
 
-func TestFireSchedule(t *testing.T) {
-	s, ctx := setup(t)
+func caseFireSchedule(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj")
 	sc := mustSchedule(t, s, ctx, p.ID, "*/5 * * * *")
 	fire := *sc.NextRunAt
@@ -182,8 +190,8 @@ func TestFireSchedule(t *testing.T) {
 	}
 }
 
-func TestSchedulePauseAndDelete(t *testing.T) {
-	s, ctx := setup(t)
+func caseSchedulePauseAndDelete(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj")
 	sc := mustSchedule(t, s, ctx, p.ID, "0 2 * * *")
 
@@ -222,8 +230,8 @@ func TestSchedulePauseAndDelete(t *testing.T) {
 	}
 }
 
-func TestTaskStartAt(t *testing.T) {
-	s, ctx := setup(t)
+func caseTaskStartAt(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	at := time.Now().Add(time.Hour).UTC().Truncate(time.Second)

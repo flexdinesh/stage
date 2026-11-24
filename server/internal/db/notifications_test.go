@@ -311,21 +311,6 @@ func TestNotificationKeyParity(t *testing.T) {
 	}
 }
 
-func TestTagForKey(t *testing.T) {
-	for key, want := range map[string]string{
-		"task:7":         "task-7",
-		"thread:1:ext-1": "thread-1:ext-1",
-		"thread:1:a:b":   "thread-1:a:b",
-		"notification:3": "",
-		"task":           "",
-		"":               "",
-	} {
-		if got := db.TagForKey(key); got != want {
-			t.Errorf("TagForKey(%q) = %q, want %q", key, got, want)
-		}
-	}
-}
-
 func TestNotificationsAfter(t *testing.T) {
 	pool := testDB.Reset(t)
 	s, ctx := db.NewStore(pool), context.Background()

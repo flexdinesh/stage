@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"context"
@@ -11,6 +11,20 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
+
+func init() {
+	register("CreateTreeAndLevels", caseCreateTreeAndLevels)
+	register("TreeLevels", caseTreeLevels)
+	register("SetNeedsRules", caseSetNeedsRules)
+	register("SpliceDiamondDedupeAndBaseTask", caseSpliceDiamondDedupeAndBaseTask)
+	register("MoveBetweenTrees", caseMoveBetweenTrees)
+	register("DissolveAndEmptyTrees", caseDissolveAndEmptyTrees)
+	register("ReadinessAndLaunchable", caseReadinessAndLaunchable)
+	register("MarkReadyOnce", caseMarkReadyOnce)
+	register("ListTreesRollup", caseListTreesRollup)
+	register("TreeTimesAndEvents", caseTreeTimesAndEvents)
+	register("ConcurrentNeedsSerialize", caseConcurrentNeedsSerialize)
+}
 
 func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.TaskState) {
 	t.Helper()
@@ -53,8 +67,8 @@ func treeGone(t *testing.T, s *db.Store, ctx context.Context, id int64) bool {
 	return errors.Is(err, db.ErrNotFound)
 }
 
-func TestCreateTreeAndLevels(t *testing.T) {
-	s, ctx := setup(t)
+func caseCreateTreeAndLevels(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	q := mustProject(t, s, ctx, "proj-2")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
@@ -79,7 +93,7 @@ func TestCreateTreeAndLevels(t *testing.T) {
 	if got := fmt.Sprint(tree.Levels); got != fmt.Sprint([][]int64{{a.ID, b.ID, x.ID}, {c.ID, d.ID}, {e.ID}}) {
 		t.Fatalf("levels %s", got)
 	}
-	want := []db.TreeEdge{{c.ID, a.ID}, {c.ID, b.ID}, {d.ID, a.ID}, {e.ID, c.ID}, {e.ID, d.ID}}
+	want := []db.TreeEdge{{TaskID: c.ID, NeedID: a.ID}, {TaskID: c.ID, NeedID: b.ID}, {TaskID: d.ID, NeedID: a.ID}, {TaskID: e.ID, NeedID: c.ID}, {TaskID: e.ID, NeedID: d.ID}}
 	if !slices.Equal(tree.Edges, want) {
 		t.Fatalf("edges %v want %v", tree.Edges, want)
 	}
@@ -104,7 +118,7 @@ func TestCreateTreeAndLevels(t *testing.T) {
 	}
 }
 
-func TestTreeLevels(t *testing.T) {
+func caseTreeLevels(t *testing.T, open Factory) {
 	e := func(task, need int64) db.TreeEdge { return db.TreeEdge{TaskID: task, NeedID: need} }
 	cases := []struct {
 		name  string
@@ -128,8 +142,8 @@ func TestTreeLevels(t *testing.T) {
 	}
 }
 
-func TestSetNeedsRules(t *testing.T) {
-	s, ctx := setup(t)
+func caseSetNeedsRules(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	var conflict *db.ConflictError
 
@@ -221,8 +235,8 @@ func TestSetNeedsRules(t *testing.T) {
 	}
 }
 
-func TestSpliceDiamondDedupeAndBaseTask(t *testing.T) {
-	s, ctx := setup(t)
+func caseSpliceDiamondDedupeAndBaseTask(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -274,8 +288,8 @@ func TestSpliceDiamondDedupeAndBaseTask(t *testing.T) {
 	}
 }
 
-func TestMoveBetweenTrees(t *testing.T) {
-	s, ctx := setup(t)
+func caseMoveBetweenTrees(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -307,8 +321,8 @@ func TestMoveBetweenTrees(t *testing.T) {
 	}
 }
 
-func TestDissolveAndEmptyTrees(t *testing.T) {
-	s, ctx := setup(t)
+func caseDissolveAndEmptyTrees(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -349,8 +363,8 @@ func TestDissolveAndEmptyTrees(t *testing.T) {
 	}
 }
 
-func TestReadinessAndLaunchable(t *testing.T) {
-	s, ctx := setup(t)
+func caseReadinessAndLaunchable(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -439,8 +453,8 @@ func TestReadinessAndLaunchable(t *testing.T) {
 	}
 }
 
-func TestMarkReadyOnce(t *testing.T) {
-	s, ctx := setup(t)
+func caseMarkReadyOnce(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
@@ -508,8 +522,8 @@ func TestMarkReadyOnce(t *testing.T) {
 	}
 }
 
-func TestListTreesRollup(t *testing.T) {
-	s, ctx := setup(t)
+func caseListTreesRollup(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "alpha")
 	q := mustProject(t, s, ctx, "beta")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
@@ -583,8 +597,8 @@ func TestListTreesRollup(t *testing.T) {
 // Tree times: startedAt is the first member launch; lastActivityAt follows
 // member and thread updates and orders the list. Detail carries the members'
 // events newest first, and each task when it entered its state.
-func TestTreeTimesAndEvents(t *testing.T) {
-	s, ctx := setup(t)
+func caseTreeTimesAndEvents(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "alpha").ID
 	a := mustTask(t, s, ctx, p, "a", nil)
 	b := mustTask(t, s, ctx, p, "b", []int64{a.ID})
@@ -651,8 +665,8 @@ func TestTreeTimesAndEvents(t *testing.T) {
 // Need writes serialize (BEGIN IMMEDIATE): racing opposite needs between two
 // tasks get exactly one edge and a Conflict, never a loop, raw constraint
 // error or SQLITE_BUSY.
-func TestConcurrentNeedsSerialize(t *testing.T) {
-	s, ctx := setup(t)
+func caseConcurrentNeedsSerialize(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p-race").ID
 	for round := range 5 {
 		x := mustTask(t, s, ctx, p, fmt.Sprintf("x-%d", round), nil)

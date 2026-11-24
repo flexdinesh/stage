@@ -1,4 +1,4 @@
-package db_test
+package storetest
 
 import (
 	"errors"
@@ -10,8 +10,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-func TestAdoptThread(t *testing.T) {
-	s, ctx := setup(t)
+func init() {
+	register("AdoptThread", caseAdoptThread)
+	register("CreateTaskNeedsSession", caseCreateTaskNeedsSession)
+}
+
+func caseAdoptThread(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC().Truncate(time.Second)
 	thread := func(id string, edit func(d *t3.ThreadDetail)) {
@@ -99,8 +104,8 @@ func TestAdoptThread(t *testing.T) {
 	}
 }
 
-func TestCreateTaskNeedsSession(t *testing.T) {
-	s, ctx := setup(t)
+func caseCreateTaskNeedsSession(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC()
 	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "caller", ProjectID: "proj-1", Title: "Caller",
