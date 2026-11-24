@@ -1,0 +1,75 @@
+---
+title: Answer from your phone
+description: Get a push notification on your phone when a task needs input, and answer it from there.
+showAskAi: false
+---
+
+# Answer from your phone
+
+Agents stop to ask questions. This guide gets those needs-input notifications onto an iPhone or iPad and lets you answer from it. It uses Tailscale serve, which gives Stage a trusted HTTPS address on your tailnet with nothing to install on the phone beyond Tailscale.
+
+You need Stage running as a service ([Desktop app](/docs/usage/desktop) or [Self-hosted server](/docs/usage/server)), Tailscale on the Stage machine and the phone, and HTTPS certificates enabled for your tailnet.
+
+:::steps
+
+### Add a TCP listener
+
+In `service.env` (`~/.config/stage/service.env` on Linux, `~/Library/Application Support/stage/service.env` on macOS), set:
+
+```sh
+STAGE_LISTEN=unix,127.0.0.1:7380
+```
+
+### Serve it over HTTPS
+
+On the Stage machine:
+
+```sh
+tailscale serve --bg http://127.0.0.1:7380
+```
+
+Stage is now at `https://<machine>.<tailnet>.ts.net`, reachable only from your tailnet.
+
+### Trust that address
+
+Add the origin to `service.env`, then restart:
+
+```sh
+STAGE_ALLOWED_ORIGINS=https://<machine>.<tailnet>.ts.net
+```
+
+```sh
+stage service restart
+```
+
+Setting it as `STAGE_PUBLIC_URL` works too. Without either, Stage answers `403 host … not allowed`.
+
+### Install the app
+
+On iOS or iPadOS 16.4 or later, open the address in Safari and tap Share > **Add to Home Screen**. Then open Stage from the Home Screen: notifications work only in the installed app.
+
+### Enable notifications
+
+In the installed app, open Settings > Notifications. Under **This device**, tap **Enable notifications**, then **Send test**.
+
+### Pick which events notify
+
+In the same page, choose the events: needs input, failed, ready, done, completed. The choice applies to every device.
+
+### Answer
+
+When a notification arrives, tap it to open the task (or the inbox, for a session started outside Stage). A task that needs input offers **Open in T3** (or **Open in OpenCode**): answer in the harness session. The phone must reach the harness's web address too; set it in the connection's settings ([Connections reference](/docs/reference/connections)).
+
+:::
+
+:::warning
+Stage has no authentication. A tailnet limits who can connect, not what they can do: anyone on it who reaches Stage can read tasks and launch agents ([Security reference](/docs/reference/security)).
+:::
+
+With a real domain or a LAN name instead of Tailscale, use Caddy or another reverse proxy ([HTTPS and push notifications](/docs/usage/server#https-and-push-notifications)).
+
+## Next steps
+
+- [Self-hosted server](/docs/usage/server): proxies, streaming settings and the PWA on macOS.
+- [Your first tree](/docs/guides/first-tree): work worth getting notified about.
+- [App reference](/docs/reference/app): notification settings and the inbox.

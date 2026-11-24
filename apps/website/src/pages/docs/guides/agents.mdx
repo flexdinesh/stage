@@ -1,0 +1,114 @@
+---
+title: Agents that queue work
+description: Set up your coding agents to add tasks, build trees and write journal notes in Stage from inside their sessions.
+showAskAi: false
+---
+
+# Agents that queue work
+
+Agents running in T3 or OpenCode can plan follow-up work in Stage: add tasks, build [trees](/docs/concepts/trees), and record what they learned in [journals](/docs/concepts/journals). They use the `stage` CLI by default, or MCP. Only you can complete a task.
+
+## Set up each machine
+
+Every Stage install puts `stage` on your `PATH`. On each machine where your agents run (the server's, or a [worker's](/docs/usage/workers)):
+
+:::steps
+
+### Run setup
+
+```sh
+stage setup
+```
+
+It finds Claude Code, Codex and OpenCode and installs, for each one:
+
+- **The Stage skill**, which teaches the CLI and the workflow. It loads only when a session works with Stage.
+- **An instruction pointer**, a two-line block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` naming the skill and `stage guide`.
+
+### Optional: register MCP
+
+```sh
+stage setup --mcp      # also register stdio MCP with Claude Code and Codex
+```
+
+The CLI costs no context until used, while a registered MCP server loads every tool schema into every session. For OpenCode, register Stage with its own command:
+
+```sh
+opencode mcp add stage -- stage mcp
+```
+
+### Check
+
+```sh
+stage setup --check    # CLI on PATH, server, caller detection, per-agent skill and MCP
+```
+
+:::
+
+Every task Stage launches also tells the agent how to reach Stage and use its journal, so tasks you start need no extra prompting.
+
+## From inside an agent session
+
+These are the commands an agent runs. You ask in plain words ("queue a follow-up to write the docs after this"); the skill teaches the agent which command fits.
+
+:::steps
+
+### See where it is
+
+```sh
+stage context
+```
+
+Shows the calling session, its working directory and the Stage project it resolves to. The CLI detects the session from the harness on its own.
+
+### Add a task
+
+```sh
+stage task add --title "Fix flaky test" --prompt "..."
+```
+
+The task lands in the backlog of the resolved project. Add `--start` to start it right away.
+
+### Run it after this session
+
+```sh
+stage task add --title "Deploy" --prompt-file deploy.md --after-me
+```
+
+`--after-me` tracks the calling session as a task and makes it the new task's first need, so the new task waits until you complete this session's task.
+
+### Build a tree
+
+```sh
+stage tree new --title "Auth" 41 43:41 42:43           # 43 needs 41, 42 needs 43
+stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual
+```
+
+`ID:NEED,NEED` lists what each task needs. `--needs` adds a new task to the tree of the tasks it needs.
+
+### Write journal notes
+
+```sh
+stage task notes 42 add --text "Chose cookie sessions" --category decision
+stage tree notes 7 add --text "API shape agreed" --source-task 42
+```
+
+Progress goes on the task, shared conclusions on the tree. Categories are optional: `finding`, `decision`, `blocker`, `outcome`.
+
+### Wait for a task
+
+```sh
+stage task wait 42 --until done,settled --timeout 30m   # exit 3 on timeout
+```
+
+:::
+
+:::note
+Agents report outcomes, but they have no tool to complete or reopen a task. Completion stays with you, in Stage.
+:::
+
+## Next steps
+
+- [CLI reference](/docs/reference/cli): every command and flag.
+- [MCP reference](/docs/reference/mcp): the tools, stdio and HTTP MCP.
+- [Journals](/docs/concepts/journals): how notes and events work.

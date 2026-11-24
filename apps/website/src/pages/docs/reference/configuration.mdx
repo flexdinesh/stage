@@ -1,0 +1,125 @@
+---
+title: Configuration
+description: Where Stage reads its configuration, every environment variable, listeners, the data dir and worker files.
+showAskAi: false
+---
+
+# Configuration
+
+Stage is configured with a few environment variables. Harness connections (T3 and OpenCode addresses, tokens and passwords) are not among them: they are set in Settings > Connections ([Connections](/docs/reference/connections)).
+
+## Where config lives
+
+| Process | Reads | Apply edits |
+|---|---|---|
+| Per-user service | only `service.env`, never your shell: `~/.config/stage/service.env` (`$XDG_CONFIG_HOME/stage/`) on Linux, `~/Library/Application Support/stage/service.env` on macOS | `stage service restart` |
+| Foreground `stage serve` | the shell environment only (no `.env` file) | restart it |
+| Worker service | only `worker.env`, next to `service.env`, never your shell | `stage worker service restart` |
+| Foreground `stage worker run` | the shell environment | restart it |
+
+`service.env` and `worker.env` are `KEY=VALUE` files (comments with `#`, values optionally quoted), mode `0600`. `stage service start` creates `service.env` from a template (`STAGE_LISTEN=unix`) when missing and never overwrites it; `stage worker service start` does the same for `worker.env`.
+
+## Environment variables
+
+### Server
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STAGE_LISTEN` | foreground `127.0.0.1:7380`; service `unix` | listen addresses ([Listeners](#listeners)). `stage serve --listen` (repeatable) replaces it. |
+| `STAGE_PUBLIC_URL` | unset | HTTPS URL the PWA is served at. Its origin is trusted by the request origin policy ([Security](/docs/reference/security)). When `https`, it is the Web Push VAPID subject (a fallback is used otherwise); push works without it. A main server needs it for pairing workers: links are built from it and workers dial it. |
+| `STAGE_ALLOWED_ORIGINS` | unset | comma list of extra trusted browser origins (`http(s)://host[:port]`), for example a Tailscale or Caddy hostname other than `STAGE_PUBLIC_URL`'s. Invalid entries stop startup. |
+| `T3_BIN` | unset | the `t3` CLI that Pair with T3 runs, when it is not on `PATH` or in a usual install dir |
+| `STAGE_DATA_DIR` | see [Data](#data) | data dir for a foreground server. Not allowed in `service.env`: the service always uses the default. |
+
+### Worker
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STAGE_WORKER_LISTEN` | `unix` | agent gateway listeners, same syntax as `STAGE_LISTEN`; `unix` is required. Add a loopback `host:port` for HTTP MCP clients, for example `unix,127.0.0.1:7381`. `stage worker run --listen` replaces it. |
+| `STAGE_WORKER_CONFIG` | `worker/worker.json` in the data dir | absolute path to another worker config. `--config PATH` overrides it. |
+| `T3_BIN` | unset | as for the server |
+
+### CLI
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STAGE_URL` | the private default socket when a server owns it, else `http://127.0.0.1:7380` | the server the CLI and `stage mcp` reach: an `http(s)` URL or `unix:///abs/path.sock`. `--url` overrides it. Ignored by `stage service` and `stage worker`. |
+| `STAGE_CALLER_SESSION` | unset | the calling session, `<connectionId>:<externalSessionId>`, when the CLI cannot detect it ([CLI](/docs/reference/cli)) |
+
+### Retired variables
+
+`T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`, `OPENCODE_WEB_URL`, `OPENCODE_USERNAME` and `OPENCODE_PASSWORD` are no longer read. A server logs a warning naming any still set; in `service.env` and `worker.env` they are errors that say to remove the line and set the connection up in Settings > Connections.
+
+## service.env validation
+
+`stage service start` validates `service.env` before starting, so a bad file fails there (exit 7) instead of in a restart loop. It is refused when:
+
+- it has an unknown key, `STAGE_DATA_DIR` or a retired variable;
+- `STAGE_LISTEN` does not include `unix`;
+- it is readable or writable by group or others (it may hold secrets).
+
+The service ignores these keys in its inherited environment, so it never depends on a shell.
+
+`stage worker service start` validates `worker.env` the same way (only the worker keys above, `STAGE_WORKER_LISTEN` must include `unix`, no retired variables, mode `0600`) and refuses until `stage worker join` has run.
+
+## Listeners
+
+One process serves every listener. `STAGE_LISTEN` takes a comma list; `stage serve --listen` (repeatable) replaces it.
+
+| Item | Meaning |
+|---|---|
+| `host:port` | TCP. An empty host means all interfaces. |
+| `unix` | the private default socket for this data dir, mode `0600` |
+| `unix:/abs/path.sock` | an explicit socket, mode `0660` (a proxy in its group can reach it). `unix:///abs/path.sock` also works. |
+
+- **Defaults**: foreground `127.0.0.1:7380`; service `unix` only. The service requires `unix` (the socket the desktop and CLI use). For a browser, add TCP with `STAGE_LISTEN=unix,127.0.0.1:7380` in `service.env`, then `stage service restart`.
+- **Both in one process**: `stage serve --listen unix,127.0.0.1:7380`.
+- **Browsers** need TCP, or a reverse proxy in front of a socket (for example Caddy `reverse_proxy unix//run/stage/stage.sock`).
+- **Socket paths** must be absolute and fit the OS limit (107 bytes on Linux, 103 on macOS). Use a shorter explicit `unix:/path` when one does not.
+
+### Default socket path
+
+| OS | Path |
+|---|---|
+| Linux | `$XDG_RUNTIME_DIR/stage/stage.sock` (for example `/run/user/1000/stage/stage.sock`); without `XDG_RUNTIME_DIR`, `<data dir>/run/stage.sock` |
+| macOS | `~/Library/Application Support/stage/run/stage.sock` |
+
+A data dir other than the default gets `stage-<hash>.sock` in the same directory.
+
+### How the CLI finds the server
+
+The CLI, `stage mcp` and `stage status` resolve the server in this order:
+
+1. `--url`
+2. `STAGE_URL`
+3. the default socket of the data dir, only when a server owns it
+4. `http://127.0.0.1:7380`
+
+If both a socket service and a TCP server are running, the socket wins. Agent commands never start a server. `stage status` shows which server the CLI reaches.
+
+## Data
+
+The SQLite database (`stage.db`) lives in the data dir:
+
+| OS | Data dir |
+|---|---|
+| Linux | `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` |
+| macOS | `~/Library/Application Support/stage` |
+
+`STAGE_DATA_DIR` overrides it for a foreground server. One server owns one data dir: a second server, or a foreground server against the running service, exits with the holder's pid and listeners. The data dir needs a local filesystem, never NFS.
+
+- **Back it up.**
+- **Migration backups**: before migrating an existing database (after an update), the server copies it to `<data dir>/backups/stage-schema<N>-<time>.db`, keeping the newest 3. If that copy fails (for example a full disk), the server does not migrate and exits.
+- **Newer database**: a server refuses to start on a database newer than it knows, so an older binary never runs against a migrated database.
+- **Uninstall** keeps the data dir.
+
+## Worker files
+
+A worker keeps its files in `<data dir>/worker`, mode `0700`.
+
+| File | Mode | Holds |
+|---|---|---|
+| `worker.json` | `0600` | the main server's URL, this machine's id and label, and its revocable machine token. Written by `stage worker join`. |
+| `credentials.json` | `0600` | this machine's harness credentials (T3 token, admin token, OpenCode credentials). The main server keeps only the connection and its status. |
+
+`stage uninstall` and `stage worker service uninstall` keep the worker config and `worker.env`; `stage worker leave` removes the machine.

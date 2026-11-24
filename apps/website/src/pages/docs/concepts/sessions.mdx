@@ -1,0 +1,61 @@
+---
+title: Sessions and references
+description: A session is the harness conversation behind a task; references are links that point agents and people at tasks, trees and sessions.
+showAskAi: false
+---
+
+# Sessions and references
+
+A **session** is the harness conversation behind a task: a T3 thread or an OpenCode session. Stage starts a session when it launches a task and follows its state. The conversation itself, with its questions, approvals and detailed runs, stays in the harness.
+
+## Answering in the harness
+
+When a task needs input, open its session in the source harness to answer questions and approve actions. Needs-input tasks and notifications link there.
+
+- T3 opens in the T3 app on this machine, or the T3 web app from elsewhere.
+- OpenCode opens its configured web client.
+- When a separate client is configured, task detail also offers **Open on service** and **Copy session ID**.
+
+Stage has no global session browser and keeps no transcript.
+
+## What Stage keeps
+
+Task detail keeps what you need to review without the harness:
+
+- The opening prompt.
+- The **final reply**: the latest assistant reply as markdown, up to 4000 characters. Longer replies link to the harness. Task rows show a one-line preview.
+- **Artifact links** the harness reports, and links recorded earlier. Stage does not track pull request status.
+
+These stay readable while the harness is offline.
+
+## Tracking an existing session
+
+You can adopt a session started directly in a harness as a task, so it shows in Stage and can be a node in a [tree](/docs/concepts/trees).
+
+- Use **Track session** on the Dashboard, Tasks or Trees, or **Add session** in a tree.
+- Choose the harness and paste the session link or id. Preview its title, project and state, then confirm with an optional title and initial note.
+- Stage never starts the session. Its prompt is read from the harness, and Stop still works.
+- A session already tracked returns its existing task. Subagent and archived sessions cannot be tracked.
+- Tracking never completes the task, even for a finished session. You complete it, or the connection's auto-complete may on a later poll.
+
+Agents can do the same for their own session, for example to queue work that runs after it ([Let agents manage work](/docs/guides/agents)).
+
+## Linking an older launch
+
+Stage reconciles unconfirmed launches by itself. For an older launch it cannot identify safely, use **Link existing session** on task detail: paste the session link, preview, then attach. Attaching launches no work.
+
+## References
+
+A reference is a link to a task, tree or session that you can paste into a prompt.
+
+- **Copy link** in a task or tree header copies a self-describing markdown link, such as `[stage task #12: Title](…/tasks/12)` or `[stage tree #4: Title](…/trees/4)`. **URL** copies the bare link. Rows show a link icon on hover, and Alt C copies from the Ctrl K palette.
+- An agent resolves a pasted link with `read_ref` or `stage show`. A task link returns the task and its session; a tree link returns the tree, ready for the tree tools.
+- Pasted task and session links render as live chips (number or "session", title, state) in prompts, final replies and handoff text. Tree links stay plain links.
+
+A reference is context only. It never creates a dependency: use [trees](/docs/concepts/trees) for that.
+
+## Next steps
+
+- [Tasks](/docs/concepts/tasks): the states a session drives.
+- [MCP reference](/docs/reference/mcp): `read_ref` and session tools.
+- [CLI reference](/docs/reference/cli): `stage show` and `stage sessions adopt`.

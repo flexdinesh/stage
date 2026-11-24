@@ -32,16 +32,47 @@ export default defineConfig({
   ],
   sidebar: {
     '/docs': [
+      { text: 'Overview', link: '/docs' },
       {
-        text: 'Guide',
+        text: 'Concepts',
+        link: '/docs/concepts',
         items: [
-          { text: 'Introduction', link: '/docs' },
-          { text: 'Install', link: '/docs/install' },
-          { text: 'Connect to T3', link: '/docs/t3' },
-          { text: 'Desktop app', link: '/docs/desktop' },
-          { text: 'Headless server', link: '/docs/deploy' },
-          { text: 'Features', link: '/docs/features' },
-          { text: 'Agents', link: '/docs/agents' },
+          { text: 'Projects', link: '/docs/concepts/projects' },
+          { text: 'Connections', link: '/docs/concepts/connections' },
+          { text: 'Tasks', link: '/docs/concepts/tasks' },
+          { text: 'Trees', link: '/docs/concepts/trees' },
+          { text: 'Journals', link: '/docs/concepts/journals' },
+          { text: 'Schedules', link: '/docs/concepts/schedules' },
+          { text: 'Sessions and references', link: '/docs/concepts/sessions' },
+          { text: 'Machines', link: '/docs/concepts/machines' },
+        ],
+      },
+      {
+        text: 'Usage',
+        items: [
+          { text: 'Desktop app', link: '/docs/usage/desktop' },
+          { text: 'Self-hosted server', link: '/docs/usage/server' },
+          { text: 'Multiple machines', link: '/docs/usage/workers' },
+        ],
+      },
+      {
+        text: 'Guides',
+        items: [
+          { text: 'Your first tree', link: '/docs/guides/first-tree' },
+          { text: 'Agents that queue work', link: '/docs/guides/agents' },
+          { text: 'Answer from your phone', link: '/docs/guides/phone' },
+        ],
+      },
+      {
+        text: 'Reference',
+        items: [
+          { text: 'Install and update', link: '/docs/reference/install' },
+          { text: 'Connections', link: '/docs/reference/connections' },
+          { text: 'Configuration', link: '/docs/reference/configuration' },
+          { text: 'Security', link: '/docs/reference/security' },
+          { text: 'The app', link: '/docs/reference/app' },
+          { text: 'CLI', link: '/docs/reference/cli' },
+          { text: 'MCP tools', link: '/docs/reference/mcp' },
         ],
       },
     ],

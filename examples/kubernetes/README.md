@@ -2,7 +2,7 @@
 
 A minimal example for running the Stage main server in a cluster, with
 workers on laptops dialing in. It is a starting point to adapt, not a
-supported chart. Guide: [Main server and workers](https://stage.hoplabs.dev/docs/deploy#main-server-and-workers).
+supported chart. Guide: [Multiple machines](https://stage.hoplabs.dev/docs/usage/workers).
 Contract: [docs/runtime.md](../../docs/runtime.md#remote-main-server-and-workers).
 
 | File | What |
@@ -23,7 +23,7 @@ docker push registry.example.com/stage:<version>
 ```
 
 Workers and the main server must speak the same API version, so update them
-together. The image reports build version `dev`, so Settings > Machines flags
+together. The image reports build version `dev`, so Settings > Connections flags
 every worker's build as different from the server's; that note is harmless.
 
 The image runs as distroless `nonroot` (65532) with
@@ -65,5 +65,5 @@ authenticating HTTPS proxy (or ingress) in front, at `STAGE_PUBLIC_URL`:
   `/api/notifications/stream` are long-lived SSE streams with a keepalive
   every 15s), and allow request bodies of at least 32 MiB.
 
-Then pair workers from Settings > Machines > Add and run
+Then pair workers from Settings > Connections > Add machine and run
 `stage worker join <link>` on each laptop.

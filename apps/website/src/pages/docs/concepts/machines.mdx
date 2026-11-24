@@ -1,0 +1,59 @@
+---
+title: Machines
+description: A machine runs harnesses; one main server can drive harnesses on many machines through workers.
+showAskAi: false
+---
+
+# Machines
+
+A machine is a computer that runs harnesses for Stage. Every [connection](/docs/concepts/connections) belongs to one machine.
+
+## One install, one machine
+
+By default one Stage install is one machine: the server runs your harnesses on the computer it runs on, named after that computer. The [desktop app](/docs/usage/desktop) and a [self-hosted server](/docs/usage/server) both start this way.
+
+## Main server and workers
+
+You can also run one **main server** on a host every device can reach (a VM, a home server, a cluster) and join your laptops and desktops to it as **workers**.
+
+| | Main server | Worker |
+|---|---|---|
+| Database, backlog, journals, scheduling | Yes | No |
+| The UI, `/api` and `/mcp` | Yes | No (agents reach the main server through it) |
+| Runs that machine's T3 and OpenCode connections | Its own, if any | Yes |
+| Harness credentials | For its own connections | Kept on the worker |
+| Machine-local work (Git checkouts, workspace matching) | For itself | Yes |
+
+The main server keeps each worker connection's status and non-secret settings. Credentials never leave the worker.
+
+## Workers dial out
+
+A worker always connects out to the main server. Laptops need no open ports and can sleep or change networks.
+
+An offline worker is an offline harness: its tasks keep their state, a new launch on it is refused, and a launch already sent waits until the worker is back.
+
+A worker and the main server need the same API version, so update them together.
+
+## One role per install
+
+A machine runs either its own Stage server or a worker, not both. The desktop app switches roles for you: joining as a worker turns its own server off, keeping its data, until you leave.
+
+## Agents on a worker
+
+Agents on a worker's machine use Stage as usual: the `stage` CLI, `stage mcp` and HTTP MCP. The worker runs a local **agent gateway** that forwards their requests to the main server with its own machine token, so agents need no credentials or proxy access. Launch instructions for sessions on that machine name the gateway. The main server records which machine each agent write came from. The gateway cannot manage machines or change any machine's harness setup.
+
+## Managing machines
+
+Settings > Connections lists every machine, this server first, with online or offline, last seen, its build (flagged when it differs from the server's) and its harness connections.
+
+- **Add machine** creates a one-time pairing link, valid for 10 minutes, with the `stage worker join` command to run on the new machine.
+- Each machine's connections are set up from the same place, run on that machine through its worker.
+- Rename a machine inline. Removing one revokes its token at once: its worker stops, its connections become history, and its tasks stay.
+
+With more than one machine, connection pickers (task and schedule harness, tracking a session, project workspaces) tag each harness with its machine. The same repository on several machines joins one [project](/docs/concepts/projects).
+
+## Next steps
+
+- [Main server and workers](/docs/usage/workers): set up a main server and join workers.
+- [Connections](/docs/concepts/connections): what each machine runs.
+- [Security](/docs/reference/security): exposing a main server safely.

@@ -1,0 +1,126 @@
+---
+title: Install and update
+description: Install flags, requirements, installed paths, updates, recovery, uninstall and exit codes for the Stage installer.
+showAskAi: false
+---
+
+# Install and update
+
+Stage installs per user, without root, from its GitHub releases. Two modes:
+
+- **Desktop**: the desktop app with its CLI/server. The app starts the server as a per-user service for you ([Desktop](/docs/usage/desktop)).
+- **Headless**: the CLI/server only, for a remote machine or one without a display. You run the server as a per-user service ([Server](/docs/usage/server)).
+
+Both modes put the same `stage` CLI on your `PATH`. The CLI/server is one binary: `stage serve` (or `stage` with no arguments) runs the server, and every other subcommand is the [CLI](/docs/reference/cli).
+
+## Install
+
+```sh
+# desktop
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh
+# CLI/server only
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless
+```
+
+| Flag | Meaning |
+|---|---|
+| `--headless` | CLI/server only (no desktop app, no GTK/WebKit needed) |
+| `--version X.Y.Z` | install that version instead of the latest stable one (the only way to get a pre-release) |
+| `--cli-name NAME` | the CLI's name in `~/.local/bin` (default `stage`) |
+
+Never run it as root.
+
+Then connect a harness in Settings > Connections ([Connections](/docs/reference/connections)). Desktop: open Stage from your app launcher. Headless: `stage service start`.
+
+### What the script verifies
+
+1. Detects the OS (Linux, macOS) and CPU (amd64, arm64).
+2. Downloads the latest stable release's manifest (`stage-release.json`), `checksums.txt` and the one archive this machine needs, and checks the archive's sha256.
+3. Runs that release's own `stage install`, which verifies the release again (manifest, checksums, archive, its own CLI) and only then installs.
+
+Any failed check exits 11 with nothing installed.
+
+:::note
+Releases are not signed. The checks catch corrupt, truncated or substituted downloads and wrong-platform releases; trust in the release itself rests on the GitHub account and HTTPS.
+:::
+
+## Requirements
+
+| Platform | Needs |
+|---|---|
+| OS and CPU | Linux or macOS, amd64 or arm64. Windows is not supported. |
+| Linux desktop | glibc, GTK 3 and WebKitGTK 4.1. When missing, the install stops (exit 7) and prints the install command for your distribution (`apt-get`, `dnf`, `pacman`, `zypper`); it never installs packages itself. |
+| macOS | 12 or later. Releases ship the Mac desktop app only once it can be signed and notarized; until then use `--headless` on a Mac. |
+| Headless | nothing else (a static binary) |
+| Execution | an existing T3 Code or OpenCode V2 service that Stage can reach. Planning works without one. |
+
+## What it installs
+
+| What | Linux | macOS |
+|---|---|---|
+| App (desktop or headless) | `~/.local/lib/stage/app/` | desktop: `~/Applications/Stage.app`; headless: `~/.local/lib/stage/app/` |
+| Previous version (one, for rollback) | `~/.local/lib/stage/app.prev` | `~/Applications/Stage.app.prev` (headless: `app.prev`) |
+| CLI on `PATH` | `~/.local/bin/stage`, a link to the app's `bin/stage` | same |
+| Desktop entry (launcher, icon, `stage://` links) | `$XDG_DATA_HOME/applications/stage-desktop.desktop` | the app bundle |
+| Install record | `~/.local/lib/stage/install.json` | same |
+
+The app's path never changes across updates, so the service and the desktop entry keep working. Your data, config (`service.env`), logs, database backups and desktop preferences live elsewhere ([Configuration](/docs/reference/configuration)) and are never touched by install, update or uninstall.
+
+:::note
+The installer replaces a file at the CLI or desktop entry path only when it put it there. Anything else stops the install (exit 7) with the fix: for example an older `stage` built from a checkout (`mise run install-cli`, a development build) or another desktop entry. Remove it, or install under another name with `--cli-name`.
+:::
+
+### Linux packages
+
+Release assets also include `.deb`, `.rpm` and PKGBUILD packages of the Linux desktop app, installed to `/opt/stage-desktop`. Update those with your package manager; `stage update` only updates installer installs.
+
+## Update
+
+```sh
+stage update                    # latest stable release, same mode (headless stays headless)
+stage update --check            # installed, latest and running server versions
+stage update --version 1.4.0    # a specific version, also a pre-release or an older one
+stage update --from DIR         # a downloaded asset directory (offline)
+```
+
+Updates are explicit: nothing checks or updates in the background. Rerunning the install script does the same as `stage update`. A foreground `stage serve` is left alone, with a note to restart it.
+
+| Topic | Behavior |
+|---|---|
+| What restarts | The per-user service restarts only if it was running this install's CLI. In-flight requests drain for up to 100s and no task is relaunched. T3 and its running agents are never touched. A running desktop app is quit and reopened. A running worker service restarts the same way and rolls back if the new one does not start. |
+| Database | The new server migrates the database when it starts, after copying it to `<data dir>/backups/` (the newest 3 are kept). |
+| Failed start, no new migrations | The installer rolls back to the previous version (exit 12). |
+| Failed start, new migrations | It keeps the new version (exit 13) and prints the log tail and backup path. Check `stage service logs`, fix the cause and run `stage service restart`. |
+| Diagnostics | `stage version` shows the binary and its installation; `stage update --check` adds the latest release and the running server; `stage service status` shows the running server's version. |
+
+### Going back after a migration
+
+An older server refuses a migrated database, so rolling back the binary alone does not work. To return to the old version (writes made after the migration are lost):
+
+1. `stage service stop`
+2. Copy the backup over `<data dir>/stage.db` and delete `stage.db-wal` and `stage.db-shm` next to it.
+3. `stage update --version <old>` (or the install script with `--version`), then `stage service start`.
+
+## Uninstall
+
+```sh
+stage uninstall
+```
+
+Quits the desktop app and removes the service definitions, the app and its previous version, the CLI link and the desktop entry. It keeps and lists your data dir, config (`service.env`, `worker.env`), logs, database backups and desktop preferences; delete them yourself to remove everything. On macOS 13+, remove a leftover login item in System Settings > General > Login Items.
+
+## Exit codes
+
+`stage install`, `stage update` and `stage uninstall` (and the install script). Each takes `--json`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | done, or already up to date |
+| 1 | failed |
+| 2 | usage |
+| 3 | another install, update or uninstall is running |
+| 7 | unsupported: not an installer install, a file it does not own, wrong platform, missing requirements, root, a release older than the database |
+| 10 | network error |
+| 11 | verification failed; nothing installed |
+| 12 | the new version did not start; rolled back |
+| 13 | the new version did not start; kept (migrated) |

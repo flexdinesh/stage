@@ -1,0 +1,60 @@
+---
+title: Connections
+description: A connection is one harness service on one machine, the place where Stage runs a task's agent session.
+showAskAi: false
+---
+
+# Connections
+
+Stage does not run agents itself. It hands each task to a **harness**, a service that runs coding agents, and follows the result. A **connection** is one harness service on one [machine](/docs/concepts/machines).
+
+## Harnesses
+
+| Harness | How Stage talks to it |
+|---|---|
+| T3 Code | T3's MCP endpoint, with T3's OAuth and upload endpoints |
+| OpenCode V2 | OpenCode's V2 HTTP API (tested with 2.3.0) |
+
+The harness keeps what it owns: models, workspaces and worktrees, conversations and its own UI. Stage keeps tasks, trees, journals, acceptance and handoff.
+
+## One service, one machine
+
+Each harness instance is its own connection: a T3 environment, or an OpenCode service. A machine has at most one active connection per harness, so one T3 and one OpenCode. With workers, each machine has its own.
+
+## Connecting
+
+A new install has no connections. Until one is set up, the Dashboard shows **Connect a harness**, which leads to Settings > Connections.
+
+- **T3**: pair Stage with T3, in one click when T3 runs on the same machine, else with a code from `t3 pair`. T3 counts as connected only once paired; before that Stage never contacts it.
+- **OpenCode**: click **Connect** for the service on the same machine, or paste an `opencode pair` link from another machine.
+
+Setup details, addresses and tokens: [Connections reference](/docs/reference/connections).
+
+## Choosing a connection per task
+
+Every task and schedule names its connection. Pick it on the task, or let it start on your default connection. Each connection keeps its own new-task defaults, such as a pinned model ([App reference](/docs/reference/app)).
+
+## When a connection is offline
+
+Stage and its harnesses fail independently.
+
+- Planning works offline: create projects, tasks, trees and schedules with no harness connected.
+- A lost connection preserves each task's state. Launches on it wait or are refused until it is back.
+- A disconnected harness leaves the other harness, and planning, available.
+- Accepted results are saved in Stage, so handoff to the next task works with the earlier task's harness offline.
+
+The status button at the bottom of the sidebar sums up every connection on every machine. Click it for each one's state.
+
+## Replacing a connection
+
+Pairing a different T3, or confirming a different OpenCode service, retires the old connection. Its tasks stay as read-only history, unlaunched backlog tasks and schedules move to the new connection, and nothing is bound there until you rebind each project. Connecting the old instance again brings back its tasks and bindings.
+
+## Auto-complete
+
+A connection can complete a task for you. When a run succeeds and its T3 thread is settled, or its OpenCode session archived, Stage accepts the task automatically, once per run, with that provenance shown. Failed or interrupted runs never auto-complete, and changing the task's state back undoes it. Auto-complete is on by default; turn it off per connection in its setup in Settings > Connections. See [Tasks](/docs/concepts/tasks) for completion.
+
+## Next steps
+
+- [Tasks](/docs/concepts/tasks): what runs on a connection.
+- [Machines](/docs/concepts/machines): connections on more than one computer.
+- [Connections reference](/docs/reference/connections): pair T3 and connect OpenCode.

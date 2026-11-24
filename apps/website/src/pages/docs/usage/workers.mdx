@@ -1,0 +1,137 @@
+---
+title: Multiple machines
+description: Run one main Stage server that every device reaches, and join your laptops and desktops to it as workers that run their own harnesses.
+showAskAi: false
+---
+
+# Multiple machines
+
+Pick this setup when your harnesses run on more than one machine, or when Stage should live on an always-on host (a VM, a home server, a Kubernetes cluster) while the work happens on your laptops. One **main server** keeps the database, the backlog, journals, schedules and the UI. Each laptop or desktop joins it as a **worker**: it runs that machine's T3 and OpenCode connections, keeps their credentials, and does the machine-local work such as Git checkouts.
+
+```txt
+                 +-------------------------------+
+  Browser ---->  | HTTPS proxy with auth         |
+                 |   /api/worker/* passes through|
+                 +---------------+---------------+
+                                 |
+                         +-------v-------+
+                         |  Main server  |  database, UI, /api, /mcp
+                         +-------^-------+
+                                 |  workers dial out
+                 +---------------+---------------+
+                 |                               |
+         +-------+--------+              +-------+--------+
+         | Worker: laptop |              | Worker: desktop|
+         | T3, OpenCode   |              | T3, OpenCode   |
+         +----------------+              +----------------+
+```
+
+A worker always dials out to the main server, so laptops need no open ports and can sleep or change networks. An offline worker is an offline harness: its tasks keep their state, and launches wait until it is back. Settings > Connections lists every machine with its connections. Concepts: [Machines](/docs/concepts/machines).
+
+## Main server
+
+- Run it as a [self-hosted server](/docs/usage/server), with Docker ([`compose.yaml`](https://github.com/flexdinesh/stage/blob/main/compose.yaml) builds the image, keeps the database in a volume and publishes port 7380 on the host's loopback), or on [Kubernetes](#kubernetes). Put it behind HTTPS.
+- Set `STAGE_PUBLIC_URL` to the HTTPS URL users and workers reach. Pairing needs it: pairing links are built from it and workers dial it.
+- One server per data dir, on a local disk.
+- The Docker image never runs harnesses as local processes. T3 and OpenCode on your workers do the work.
+- Workers and the main server need the same API version. Update them together.
+
+## Auth proxy
+
+Stage has no user sign-in, so a main server on a network sits behind an authenticating HTTPS reverse proxy ([Security reference](/docs/reference/security)). Configure it to:
+
+1. **Require user authentication for everything**: the UI, `/api` and `/mcp`, including creating pairing links.
+2. **Pass `/api/worker/*` through without user authentication**, forwarding the `Authorization` header unchanged. Workers use it to join, for their channel and for the agent gateway. The pairing code or machine token is the authentication there; every other route refuses machine tokens.
+3. **Keep the request's Host header**, or rewrite it to an IP address or a host in `STAGE_ALLOWED_ORIGINS`. Workers send no `Origin`, so any other hostname gets 403.
+4. **Not buffer responses, and keep idle connections open past 15s**. The worker channel is a long-lived Server-Sent Events stream with a keepalive every 15s ([Reverse proxy and SSE](/docs/usage/server#https-and-push-notifications)).
+5. **Accept request bodies up to 32 MiB**. One message from a worker can be that large.
+
+## Add a worker
+
+:::steps
+
+### Install
+
+On the machine that runs harnesses:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless
+```
+
+### Create a pairing link
+
+In Settings > Connections, click **Add machine**, or run `stage machine pair --label NAME` where the CLI reaches the main server (such as its host). It shows a one-time link, valid for 10 minutes, and the command to run.
+
+### Join
+
+```sh
+stage worker join 'https://stage.example.com/join#…'
+```
+
+This saves the main server's URL and a revocable machine token on this machine. A plain `http://` link works for a LAN or loopback main server.
+
+### Start the worker service
+
+```sh
+stage worker service start     # waits until the worker runs
+stage worker service enable    # optional: start at login
+```
+
+Settings > Connections shows the machine online within seconds.
+
+### Set up harnesses
+
+In Settings > Connections, use **Add connection** on the new machine to pair T3 or connect OpenCode there. The setup runs on that machine through its worker. Credentials stay on the machine; the main server keeps only the connection and its status ([Connections reference](/docs/reference/connections)).
+
+:::
+
+A machine runs either its own Stage server or a worker, not both. The worker service reads `worker.env`, next to `service.env` ([Configuration reference](/docs/reference/configuration)).
+
+## Join from the desktop app
+
+The desktop app does not offer joining in its UI today. To make a desktop install a worker, quit the app, remove this machine's server service (its data stays), then follow the CLI steps above (skip the install) and reopen the app:
+
+```sh
+stage service uninstall
+```
+
+While joined, the app shows a screen, "This machine is a worker of" the main server, with the worker's state (online, offline, needs update, removed, failed) and **Leave and use this machine**. Leaving removes the machine on the main server and brings this machine's server back. If the main server can't be reached, you can forget it on this machine only. Use the main server's UI in a browser for everything else.
+
+## Agents on a worker
+
+Agents on a worker's machine use Stage as usual: the `stage` CLI, `stage mcp` and HTTP MCP. The worker serves a local **agent gateway** that forwards `/api` and `/mcp` to the main server with its machine token, so agents need no credentials or proxy access. The main server records which machine each agent write came from.
+
+- By default the gateway listens on this install's private socket, which the CLI and `stage mcp` find by themselves.
+- For HTTP MCP clients, add a loopback TCP address in `worker.env`, then `stage worker service restart`:
+
+  ```sh
+  STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
+  ```
+
+  Avoid a wildcard host: anything that reaches the gateway has agent access to the main server.
+- The gateway cannot manage machines or change any machine's harness setup (403). If the main server is unreachable, it answers 502.
+
+Setting up agents: [Agents that queue work](/docs/guides/agents).
+
+## Kubernetes
+
+A minimal example lives in [`examples/kubernetes`](https://github.com/flexdinesh/stage/tree/main/examples/kubernetes): a Deployment, a ClusterIP Service and a PersistentVolumeClaim for `stage.db`. There is no published image: build one from the repository `Dockerfile` at the release your workers run and push it to your registry. Then set the image and `STAGE_PUBLIC_URL`, apply the files, and put your [auth proxy](#auth-proxy) or ingress in front of the Service.
+
+- **Exactly one replica**, with `strategy: Recreate`. One server owns one data dir, and SQLite has one writer; a second pod on the volume exits at startup. Do not autoscale it.
+- **A local volume**, never NFS: use a block-backed storage class (a cloud disk, local-path, Longhorn, Ceph RBD), `ReadWriteOnce`. File locks and SQLite locking are unreliable on network filesystems.
+- **Graceful stop**: `terminationGracePeriodSeconds: 120` covers the server's 100s drain.
+- **Probes** on `/api/health`, which answers 200 while the server and its database work, whatever harnesses or workers do.
+- **Back up** the volume. Before a migration the server also copies `stage.db` into `backups/` on it.
+
+## Remove and update
+
+- **Remove** a machine in Settings > Connections (or `stage machine rm ID`). That revokes its token at once; its worker stops, and `stage worker status` says it was revoked. Its connections become history; its tasks stay. From the worker itself, run `stage worker service uninstall`, then `stage worker leave`, which removes the machine on the main server and deletes the local config.
+- **Update** with `stage update` on each machine. It restarts a running worker service and rolls back if the new one does not start. Update the main server (its image, or `stage update` on its host) at the same time, since workers need the same API version.
+
+Every `stage worker` and `stage machine` command: [CLI reference](/docs/reference/cli).
+
+## Next steps
+
+- [Agents that queue work](/docs/guides/agents): set up agents on each worker.
+- [Answer from your phone](/docs/guides/phone): push notifications through HTTPS.
+- [Machines](/docs/concepts/machines): how machines, workers and connections relate.

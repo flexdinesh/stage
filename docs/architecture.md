@@ -39,12 +39,18 @@ Two homes, no shared or generated content between them:
 
 | Contract | Website page |
 | --- | --- |
-| [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/install` |
-| [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 pairing) | `/docs/t3` |
-| [desktop.md](desktop.md) | `/docs/desktop` |
-| [service.md](service.md) (incl. worker service), [runtime.md](runtime.md) (listeners, origin policy, worker process, agent gateway, remote main server), `.env.example`, `examples/kubernetes/` | `/docs/deploy` (Headless server) |
-| [features.md](features.md) | `/docs/features`, `/docs` |
-| [api.md](api.md) (MCP, tree, journal, handoff, base rules), CLI (`server/internal/cli`), MCP tools (`server/internal/agenttools`) | `/docs/agents` |
+| [features.md](features.md), [api.md](api.md) (tree, journal, handoff, base rules), [runtime.md](runtime.md) (machines) | `/docs`, `/docs/concepts/*` |
+| [desktop.md](desktop.md) | `/docs/usage/desktop` |
+| [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy) | `/docs/usage/server`, `/docs/guides/phone` |
+| [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), `examples/kubernetes/` | `/docs/usage/workers` |
+| [features.md](features.md), [api.md](api.md) (MCP, tree rules) | `/docs/guides/first-tree`, `/docs/guides/agents` |
+| [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/reference/install` |
+| [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 and OpenCode pairing) | `/docs/reference/connections` |
+| [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), `.env.example` | `/docs/reference/configuration` |
+| [runtime.md](runtime.md) (origin policy, worker auth) | `/docs/reference/security` |
+| [features.md](features.md) (UI, Settings) | `/docs/reference/app` |
+| CLI (`server/internal/cli`), [api.md](api.md) (CLI) | `/docs/reference/cli` |
+| MCP tools (`server/internal/agenttools`), [api.md](api.md) (MCP) | `/docs/reference/mcp` |
 
 A change that alters user-visible behavior updates its contract and the mapped
 website page in the same PR (and the README only when install commands or the

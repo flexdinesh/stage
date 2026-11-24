@@ -1,0 +1,131 @@
+---
+title: Connections
+description: Pair T3 Code, connect OpenCode V2, set their addresses and tokens, and check connection status from Settings or the CLI.
+showAskAi: false
+---
+
+# Connections
+
+Stage runs tasks on existing harness services: T3 Code and OpenCode V2. Each connection is set up in Settings > Connections or with `stage harness`. Credentials and addresses are stored in the server's database (on a worker, in that machine's credentials file), so a service or desktop app needs nothing else.
+
+:::note
+Harness settings are never environment variables. `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN` and the `OPENCODE_*` variables are no longer read; a server logs a warning naming any still set ([Configuration](/docs/reference/configuration)).
+:::
+
+## First run
+
+A new install has no connections. You can create projects and plan tasks before connecting a harness. While nothing is connected, the Dashboard shows a **Connect a harness** alert that links to Settings > Connections, which offers **Connect T3** and **Connect OpenCode**.
+
+After connecting, bind each Stage project's workspace on every harness you use ([Projects](/docs/concepts/projects)). When a project has both bindings, pick the destination on each new task. Sync never imports projects automatically or overwrites Stage titles and archive state. A missing workspace keeps its Stage project and history. A changed path needs confirmation before launching.
+
+## CLI
+
+```sh
+stage harness                        # harnesses this server knows, its machine profile, which can run here
+stage harness KIND [status]          # KIND's connection: state, settings, actions
+stage harness KIND set FIELD=VALUE   # save settings; --reset FIELD restores a default
+stage harness KIND run ACTION [FIELD=VALUE...]
+stage harness KIND disconnect        # forget KIND's credentials (tasks stay)
+```
+
+`KIND` is `t3` or `opencode`.
+
+## T3 Code
+
+Stage connects to one T3 Code server through T3's MCP endpoint and OAuth. It needs a T3 session token, which it gets by pairing. T3 counts as connected only once paired; until then Stage never contacts it in the background.
+
+### Pair
+
+| Method | When | How |
+|---|---|---|
+| **Pair with T3** (one click) | T3 runs on the same machine as the Stage server (the T3 URL is `localhost` or a loopback IP) and its `t3` CLI is found | Stage runs `t3 auth pairing create` with a 5 minute code and redeems it. |
+| **Pairing code** | T3 runs on another machine, or its CLI is missing | Run `t3 pair` on the T3 host and paste the code into the Dashboard alert or Settings (Pair). |
+
+```sh
+stage harness t3 run auto-pair         # auto-pair through the t3 CLI on the server's machine
+stage harness t3 run pair code=CODE    # redeem a code from `t3 pair` on the T3 host
+```
+
+The `t3` CLI is looked up on `PATH`, then in `~/.local/bin`, `~/.bun/bin`, `~/.local/share/pnpm`, `~/.npm-global/bin`, `~/.volta/bin`, `/usr/local/bin` and `/opt/homebrew/bin`. Set `T3_BIN` when it is elsewhere (a service manager's `PATH` is minimal).
+
+Pairing starts a full sync.
+
+### Address
+
+Set both in Settings > Connections > T3 (Manage) or with `stage harness t3 set`.
+
+| Setting | Field | Default | Purpose |
+|---|---|---|---|
+| T3 URL | `url` | `http://127.0.0.1:3773` | The T3 server Stage calls. Under Docker compose, T3 on the host is `http://host.docker.internal:3773` (T3 must listen beyond loopback). |
+| Browser URL | `publicUrl` | the T3 URL | The T3 address browsers use for Open in T3 links. Set it when browsers reach T3 at another address. |
+
+```sh
+stage harness t3                              # show it
+stage harness t3 set url=http://10.0.0.5:3773 # save it (http(s)://host[:port])
+stage harness t3 set --reset url              # back to the default
+```
+
+Once the server is bound, the T3 URL can only change to an address serving the same T3 environment.
+
+### Admin token
+
+Optional. A pairing gives Stage a 30-day session that is not renewed. With a T3 admin token, Stage mints and renews its own session instead, renewing when less than 5 days remain. Issue one on the T3 host:
+
+```sh
+t3 auth session issue --ttl 3650d --label stage --scope access:write --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --token-only
+```
+
+Paste it as **Admin token** in Settings > Connections > T3 (Manage), or run `stage harness t3 set adminToken=TOKEN`. Stage stores it and never shows it again. On a worker it stays in that machine's credentials file, like the T3 token.
+
+### Disconnect and switch
+
+- **Disconnect** forgets the token, the T3 URL, the Browser URL and the admin token and stops syncing. Tasks and bindings stay; pairing the same T3 again resumes it.
+- A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Forget** (lets go of it; its tasks keep their history, read-only).
+- **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and nothing is bound to the new T3 until you rebind each project. Pairing the first T3 again restores its tasks and bindings.
+- A disconnected T3 whose environment is paired again on another machine moves onto that connection automatically at the next sync.
+
+### Status and troubleshooting
+
+```sh
+stage harness t3 status    # URL, reachability, pairing, token expiry, sync, auto-pair availability
+```
+
+- Trouble (T3 unreachable, unpaired, session expired or rejected) shows as an alert at the top of the Dashboard with the fix, and in the connection status row ([The app](/docs/reference/app)).
+- Settings shows the T3 connection, Pair, the T3 URL, the Browser URL, the admin token and Sync now. A full sync also runs every 5 minutes.
+- Stage reports itself and T3 separately: a missing or offline T3 never stops the Stage server from starting, and `stage service status` lists T3 apart from the server's own health.
+
+## OpenCode V2
+
+Stage connects to an existing OpenCode V2 service over its HTTP API. Tested with 2.3.0; any version whose API has the operations Stage uses works.
+
+### Connect
+
+| Method | When | How |
+|---|---|---|
+| **Connect** | OpenCode runs on the Stage server's machine | Click **Connect**, or `stage harness opencode run connect-local`. Stage reads the service's registration file (`$XDG_STATE_HOME/opencode/service.json`, else `~/.local/state/opencode/service.json`, also on macOS) and signs in as `opencode` with its password, which is never stored. Each health check re-reads the file. |
+| **Pairing link** | OpenCode runs on another machine | Run `opencode pair` there and paste the link, or `stage harness opencode run pair link=LINK`. The link is redeemed once for a 30-day session that Stage renews automatically after 7 days. |
+| **Advanced** | anything else | A plain service address, with optional HTTP Basic username and password. |
+
+Connecting a different OpenCode service needs confirmation (`newInstance=true` on the CLI); the current connection retires.
+
+A password change on the OpenCode host revokes a paired session: pair again.
+
+### Browser and web client
+
+| Setting | Field | Purpose |
+|---|---|---|
+| Server URL | `endpoint` | The OpenCode service Stage calls |
+| Browser URL | `browserEndpoint` | The service address browsers use, when your phone or browser reaches it at another address |
+| Web client URL | `webClient` | A separate OpenCode web client. Register the service in that browser once; Settings explains how on a fresh device. |
+
+With a separate web client configured, task detail also offers **Open on service** and **Copy session ID**.
+
+### Disconnect
+
+`stage harness opencode disconnect`, or Disconnect in Settings, forgets the address and credentials. Tasks and history stay. The row stays as Disconnected, like T3.
+
+A disconnected OpenCode leaves planning and the other harness available.
+
+## Connections on workers
+
+On a main server with workers, each machine has its own connections. Settings > Connections groups them by machine; a remote machine's setup runs on that machine through its worker, and its credentials stay there ([Workers](/docs/usage/workers)).

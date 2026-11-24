@@ -1,0 +1,57 @@
+---
+title: Schedules
+description: Start a task once at a set time, or let a schedule spawn and start a new task on a repeating cron.
+showAskAi: false
+---
+
+# Schedules
+
+Stage can start work for you at a time you choose. In the New task drawer, **Start** offers two timed options.
+
+| Option | What it creates | Runs |
+|---|---|---|
+| **At time** | A backlog task with a start time | Once, at that wall time in the zone you pick |
+| **Repeat** | A schedule, a task template | On every fire of its cron, in its own IANA time zone |
+
+## At time
+
+A one-shot start is not a schedule: it is a start time on an ordinary backlog task. When the time comes, Stage starts the task. If the server was down at that time, the task starts late rather than being skipped. Starting it by hand clears the start time.
+
+## Repeat
+
+A schedule holds a task's config (project, connection, prompt, options, workspace and images), a note template and a timing rule:
+
+- a preset: Hourly, Daily, Weekdays or Weekly, or
+- a raw 5-field cron expression.
+
+Times are evaluated in the schedule's IANA zone, so daylight saving follows the zone.
+
+**Each fire spawns a new task** with the schedule's config, images and note template, and starts it. Spawned tasks are standalone: they join no tree and have no needs.
+
+## Skipped and missed fires
+
+- A fire is **skipped** while the previous spawned task is still pending, running or needs input. A previous task that is done but not yet completed does not block.
+- Fires missed while the server was down are **skipped**, recorded once as missed. Nothing runs late.
+- If a fire cannot launch because the project is not bound on the connection, or the connection is unavailable, it becomes one backlog task with the error to repair. Later fires are held back while it waits. Start it by hand once fixed.
+
+Scheduled starts and skips do not notify. A failed launch notifies as usual.
+
+## Where schedules show
+
+- The Schedules page
+- The project panel
+- A **Scheduled (next 24h)** group in Tasks
+- The Dashboard's In flight counts
+
+## Actions
+
+- **Run now**: spawn and start a task immediately, even while paused or while a previous run is active.
+- **Pause** and **Resume**: resuming continues from the next fire and never runs a missed one.
+- **Edit**: changes apply to future fires. Tasks already spawned are not changed.
+- **Delete**: spawned tasks are kept.
+
+## Next steps
+
+- [Tasks](/docs/concepts/tasks): what each fire creates.
+- [Journals](/docs/concepts/journals): note templates on spawned tasks.
+- [CLI reference](/docs/reference/cli): manage schedules from a terminal.

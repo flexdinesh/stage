@@ -460,8 +460,8 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
 The distributed deployment: one main server on a host or cluster behind an
 authenticating HTTPS proxy, and workers on the machines that run harnesses
 ([ADR 0002](adr/0002-machines-and-workers.md)). Example:
-`examples/kubernetes/`. User guide: website `/docs/deploy` (Main server and
-workers).
+`examples/kubernetes/`. User guide: website `/docs/usage/workers` (Multiple
+machines).
 
 **Main server.**
 

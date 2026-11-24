@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/insta
 curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless  # CLI/server only
 ```
 
-Then open Settings and connect an existing T3 service, an OpenCode 2.3.0 service, or both. `stage update` installs the latest release, `stage update --check` compares versions, and `stage uninstall` removes stage and keeps your data. Headless: `stage service start` runs the server as a per-user service. Guide: [Install](https://stage.hoplabs.dev/docs/install).
+Then open Settings and connect an existing T3 service, an OpenCode 2.3.0 service, or both. `stage update` installs the latest release, `stage update --check` compares versions, and `stage uninstall` removes stage and keeps your data. Headless: `stage service start` runs the server as a per-user service. Guide: [Install and update](https://stage.hoplabs.dev/docs/reference/install).
 
 ## For agents
 
@@ -66,7 +66,7 @@ stage tree new --title "Auth" 41 43:41 42:43                               # 43 
 stage task add --title "Deploy" --prompt-file deploy.md --after-me         # after you complete this session's task
 ```
 
-OpenCode setup and the full tool list: [Agents, CLI and MCP](https://stage.hoplabs.dev/docs/agents).
+OpenCode setup and the full tool list: [Agents that queue work](https://stage.hoplabs.dev/docs/guides/agents), [MCP tools](https://stage.hoplabs.dev/docs/reference/mcp).
 
 ## HTTPS and push notifications
 
@@ -76,11 +76,11 @@ Push notifications and installing the PWA need a secure context. `http://localho
 tailscale serve --bg http://127.0.0.1:7380    # https://<machine>.<tailnet>.ts.net, tailnet only
 ```
 
-or Caddy (`reverse_proxy 127.0.0.1:7380`) with a real or mkcert certificate. Add that HTTPS origin to `STAGE_PUBLIC_URL` or `STAGE_ALLOWED_ORIGINS`, or stage answers `403 host … not allowed`. Then open the URL, add it to the Home Screen (iOS 16.4+) or Dock (macOS Safari), and enable Settings, Notifications. Full setup, proxy streaming settings and the security model: [Headless server](https://stage.hoplabs.dev/docs/deploy#https-and-push-notifications).
+or Caddy (`reverse_proxy 127.0.0.1:7380`) with a real or mkcert certificate. Add that HTTPS origin to `STAGE_PUBLIC_URL` or `STAGE_ALLOWED_ORIGINS`, or stage answers `403 host … not allowed`. Then open the URL, add it to the Home Screen (iOS 16.4+) or Dock (macOS Safari), and enable Settings, Notifications. Full setup, proxy streaming settings and the security model: [Self-hosted server](https://stage.hoplabs.dev/docs/usage/server#https-and-push-notifications).
 
 ## Docs
 
-User guides: [stage.hoplabs.dev/docs](https://stage.hoplabs.dev/docs) (install, connect a harness, desktop app, headless server, features, agents).
+User guides: [stage.hoplabs.dev/docs](https://stage.hoplabs.dev/docs) (overview, concepts, usage: desktop app, self-hosted server, multiple machines; guides; reference).
 
 Engineering contracts:
 

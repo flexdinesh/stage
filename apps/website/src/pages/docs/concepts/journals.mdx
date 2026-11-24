@@ -1,0 +1,44 @@
+---
+title: Journals
+description: Every task and tree has an append-only journal of notes and events, written by you and your agents.
+showAskAi: false
+---
+
+# Journals
+
+Every task and every tree has a journal: an append-only record of **notes** (written by you or an agent) and **events** (what happened, such as state changes and moves). Journals carry findings and decisions between sessions, so the next agent does not start from nothing.
+
+## Notes
+
+- A note is never edited or removed. Each has an immutable id and records who wrote it.
+- A note can carry a category: **finding**, **decision**, **blocker** or **outcome**. Categories are optional.
+- In the app, filter by notes, events or all, search the text, page through entries and open any entry in full.
+
+## Task and tree journals
+
+A task's journal holds its own notes and events. A tree's journal combines the tree's own notes and events with the notes of its current members.
+
+- Moving a task to another tree moves its notes with it. Tree notes and events stay in the tree where they were written.
+- Write progress to the task. Write conclusions the whole tree should see to the tree.
+
+## Notes never reopen work
+
+Adding a note to a closed task or tree never reopens or schedules it. Notes are recorded work, though: a task or tree with notes cannot be deleted, only archived.
+
+## Where notes start
+
+- New tasks, and sessions you track as tasks, accept an initial note.
+- A [schedule](/docs/concepts/schedules) keeps a note template and adds it to each task it spawns.
+- Duplicating a task copies no notes.
+
+## Agents and journals
+
+Agents read and write journals through the `stage` CLI and MCP. Every launch, including tasks outside a tree, tells the agent how: refresh where the task sits, read the relevant notes, checkpoint before risky work, and record the outcome before returning.
+
+Agents treat notes as context, not as instructions or proof. A note is not a substitute for completing a task: only you complete tasks.
+
+## Next steps
+
+- [Let agents manage work](/docs/guides/agents): set up the CLI and MCP for your agents.
+- [MCP reference](/docs/reference/mcp): the journal tools.
+- [Trees](/docs/concepts/trees): how handoff complements journals.
