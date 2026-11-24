@@ -1,8 +1,6 @@
 package db
 
 import (
-	"encoding/json"
-
 	"github.com/flexdinesh/stage/server/internal/db/store"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -63,8 +61,4 @@ func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
 		return []execution.ModelOption{}
 	}
 	return o
-}
-
-func legacyModel(provider, model *string, options []execution.ModelOption, runtime, interaction string) json.RawMessage {
-	return store.LegacyModel(provider, model, options, runtime, interaction)
 }

@@ -2,8 +2,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,39 +13,16 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// Schedule is a recurring task template (docs/api.md "Schedules").
-type Schedule struct {
-	ExecutionConfig    *execution.Config       `json:"executionConfig"`
-	ConnectionID       int64                   `json:"connectionId"`
-	OriginSession      *SessionRef             `json:"originSession"`
-	ID                 int64                   `json:"id"`
-	ProjectID          int64                   `json:"projectId"`
-	ProjectTitle       string                  `json:"projectTitle"`
-	Title              string                  `json:"title"`
-	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"-"`
-	Model              *string                 `json:"-"`
-	ModelOptions       []execution.ModelOption `json:"-"`
-	RuntimeMode        string                  `json:"-"`
-	InteractionMode    string                  `json:"-"`
-	Workspace          Workspace               `json:"workspace"`
-	Notes              string                  `json:"notes"`
-	Attachments        []Attachment            `json:"attachments"`
-	Cron               string                  `json:"cron"`
-	Tz                 string                  `json:"tz"`
-	Paused             bool                    `json:"paused"`
-	NextRunAt          *time.Time              `json:"nextRunAt"`
-	LastRunAt          *time.Time              `json:"lastRunAt"`
-	LastTaskID         *int64                  `json:"lastTaskId"`
-	LastTaskState      *TaskState              `json:"lastTaskState"`
-	OriginThreadID     *string                 `json:"-"` // T3 session that created the schedule; spawned tasks inherit it
-	CreatedAt          time.Time               `json:"createdAt"`
-	CreatedBy          int64                   `json:"createdBy"` // user who created it; spawned tasks inherit it
-	// SourceMachineID: the machine whose agent gateway forwarded the create
-	// (nil: not through a gateway). Spawned tasks do not inherit it.
-	SourceMachineID *int64    `json:"sourceMachineId"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-}
+type (
+	// Schedule is a recurring task template (docs/api.md "Schedules").
+	Schedule = store.Schedule
+	// ScheduleRun is one fire of a schedule.
+	ScheduleRun = store.ScheduleRun
+	// ScheduleFilter: ProjectID; DueBefore = unpaused with next_run_at <= it.
+	ScheduleFilter = store.ScheduleFilter
+	// DueTask is a backlog task whose one-shot start has come.
+	DueTask = store.DueTask
+)
 
 // Schedule run outcomes.
 const (
@@ -57,79 +32,13 @@ const (
 	RunManual  = "manual"
 )
 
-// ScheduleRun is one fire of a schedule.
-type ScheduleRun struct {
-	ID         int64     `json:"id"`
-	ScheduleID int64     `json:"scheduleId"`
-	FireAt     time.Time `json:"fireAt"`
-	Outcome    string    `json:"outcome"`
-	TaskID     *int64    `json:"taskId"`
-	Detail     string    `json:"detail"`
-	At         time.Time `json:"at"`
-	Task       *Task     `json:"-"` // spawned task (detail reads)
-}
-
-const scheduleSelect = `
-SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.provider_instance_id, s.model, s.model_options,
-  s.runtime_mode, s.interaction_mode, s.workspace, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
-  (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
-  (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
-  (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
-  COALESCE(s.origin_thread_id,(SELECT external_id FROM session_identities WHERE id=s.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), s.created_at, s.updated_at,
-  COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'),s.connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config,s.created_by_user_id,s.source_machine_id
-FROM schedules s
-JOIN projects p ON p.id = s.project_id`
-
-func scanSchedule(row rowScanner) (Schedule, error) {
-	var s Schedule
-	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.ProviderInstanceID, &s.Model,
-		&s.ModelOptions, &s.RuntimeMode, &s.InteractionMode, &s.Workspace, &s.Notes, &s.Cron, &s.Tz,
-		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.OriginThreadID, &s.CreatedAt, &s.UpdatedAt,
-		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig, &s.CreatedBy, &s.SourceMachineID)
-	if err != nil {
-		return Schedule{}, notFound(err)
-	}
-	s.ModelOptions = nonNilOptions(s.ModelOptions)
-	if s.Workspace.Type == "" {
-		s.Workspace.Type = "root"
-	}
-	return s, nil
-}
-
 func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
-	return scanSchedule(s.pool.QueryRow(ctx, scheduleSelect+` WHERE s.id = $1`, id))
-}
-
-// ScheduleFilter: ProjectID; DueBefore = unpaused with next_run_at <= it.
-type ScheduleFilter struct {
-	ProjectID *int64
-	DueBefore *time.Time
+	return read(ctx, s, func(tx store.Tx) (Schedule, error) { return tx.Schedules().Get(ctx, id) })
 }
 
 // ListSchedules orders by next fire (paused last), then id.
 func (s *Store) ListSchedules(ctx context.Context, f ScheduleFilter) ([]Schedule, error) {
-	var w where
-	if f.ProjectID != nil {
-		w.add("s.project_id = " + w.arg(*f.ProjectID))
-	}
-	if f.DueBefore != nil {
-		w.add("NOT s.paused AND s.next_run_at <= " + w.arg(*f.DueBefore))
-	}
-	rows, err := s.pool.Query(ctx, scheduleSelect+w.sql()+` ORDER BY s.paused, s.next_run_at ASC NULLS LAST, s.id`, w.args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Schedule{}
-	for rows.Next() {
-		sc, err := scanSchedule(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, sc)
-	}
-	return out, rows.Err()
+	return read(ctx, s, func(tx store.Tx) ([]Schedule, error) { return tx.Schedules().List(ctx, f) })
 }
 
 // NewSchedule is a validated create input (cron and tz already parse).
@@ -178,38 +87,35 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 	if err != nil {
 		return Schedule{}, err
 	}
-	var id int64
-	err = s.inTx(ctx, func(tx *Tx) error {
-		if err := requireProject(ctx, tx.st, in.ProjectID); err != nil {
-			return err
+	id, err := write(ctx, s, func(tx store.Tx) (int64, error) {
+		if err := requireProject(ctx, tx, in.ProjectID); err != nil {
+			return 0, err
 		}
 		var originID *int64
 		if in.OriginSession != nil {
 			if in.OriginThreadID != nil {
-				return Invalid("use originSession or originThreadId, not both")
+				return 0, Invalid("use originSession or originThreadId, not both")
 			}
-			value, err := ensureSession(ctx, tx.st, *in.OriginSession)
+			value, err := ensureSession(ctx, tx, *in.OriginSession)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			originID = &value
 		}
-		err := tx.QueryRow(ctx, `
-INSERT INTO schedules (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, notes, cron, tz, paused, next_run_at, origin_thread_id,origin_session_id,execution_config,connection_id,created_by_user_id,source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
-			in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-			in.RuntimeMode, in.InteractionMode, in.Workspace, in.Notes,
-			strings.TrimSpace(in.Cron), in.Tz, in.Paused, next, in.OriginThreadID, originID, in.ExecutionConfig, s.defaultConnection(in.ConnectionID),
-			ActingUser(ctx), ActingMachine(ctx),
-		).Scan(&id)
+		id, err := tx.Schedules().Insert(ctx, store.ScheduleInsert{
+			ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, ProviderInstanceID: in.ProviderInstanceID, Model: in.Model,
+			ModelOptions: nonNilOptions(in.ModelOptions), RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
+			Workspace: in.Workspace, Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
+			OriginThreadID: in.OriginThreadID, OriginSessionID: originID, ExecutionConfig: in.ExecutionConfig,
+			ConnectionID: s.defaultConnection(in.ConnectionID), CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
+		})
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if len(in.AttachmentIDs) > 0 {
-			return setOwned(ctx, tx.st, store.OwnerSchedule, id, in.AttachmentIDs)
+			return id, setOwned(ctx, tx, store.OwnerSchedule, id, in.AttachmentIDs)
 		}
-		return nil
+		return id, nil
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -248,17 +154,13 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			return Schedule{}, err
 		}
 	}
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var provider, model *string
-		var cron, tz string
-		var paused bool
-		var connection, project int64
-		err := tx.QueryRow(ctx, `SELECT provider_instance_id, model, cron, tz, paused, connection_id, project_id FROM schedules WHERE id = $1`, id).
-			Scan(&provider, &model, &cron, &tz, &paused, &connection, &project)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		e, err := tx.Schedules().EditState(ctx, id)
 		if err != nil {
-			return notFound(err)
+			return err
 		}
-		if p.ValidatedConnection != 0 && (connection != p.ValidatedConnection || project != p.ValidatedProject) {
+		provider, model, cron, tz, paused := e.Provider, e.Model, e.Cron, e.Tz, e.Paused
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if p.ProviderInstanceID.Set {
@@ -271,96 +173,67 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			return Invalid("providerInstanceId and model must be set together")
 		}
 		if p.AttachmentIDs.Set {
-			if err := setOwned(ctx, tx.st, store.OwnerSchedule, id, p.AttachmentIDs.V); err != nil {
+			if err := setOwned(ctx, tx, store.OwnerSchedule, id, p.AttachmentIDs.V); err != nil {
 				return err
 			}
 		}
-		var w where
-		w.arg(id)
-		var sets []string
-		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		u := store.ScheduleUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
+			Title: p.Title, Prompt: p.Prompt, ProviderInstanceID: p.ProviderInstanceID, Model: p.Model, ModelOptions: p.ModelOptions,
+			RuntimeMode: p.RuntimeMode, InteractionMode: p.InteractionMode, Workspace: p.Workspace, Notes: p.Notes}
 		if p.ConnectionID.Set {
-			if err := checkDestinationChange(ctx, tx.st, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			toT3, err := tx.st.Connections().HarnessIs(ctx, p.ConnectionID.V, HarnessT3)
+			toT3, err := tx.Connections().HarnessIs(ctx, p.ConnectionID.V, HarnessT3)
 			if err != nil {
 				return err
 			}
-			if p.ConnectionID.V != connection && !toT3 {
-				var hasImages bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE schedule_id=$1)`, id).Scan(&hasImages); err != nil {
+			if p.ConnectionID.V != e.ConnectionID && !toT3 {
+				hasImages, err := tx.Schedules().HasAttachments(ctx, id)
+				if err != nil {
 					return err
 				}
 				if hasImages {
 					return Invalid("Remove image attachments before switching to OpenCode.")
 				}
 			}
-			set("connection_id", p.ConnectionID.V)
 		}
-		if p.ExecutionConfig.Set {
-			set("execution_config", p.ExecutionConfig.Ptr())
-		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {
-			set("execution_config", nil)
+		if !p.ExecutionConfig.Set && (p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set) {
+			u.ExecutionConfig = Optional[execution.Config]{Set: true, Null: true}
 		}
 		if p.ProjectID.Set {
-			if err := requireProject(ctx, tx.st, p.ProjectID.V); err != nil {
+			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
 				return err
 			}
-			set("project_id", p.ProjectID.V)
-		}
-		if p.Title.Set {
-			set("title", p.Title.V)
-		}
-		if p.Prompt.Set {
-			set("prompt", p.Prompt.V)
-		}
-		if p.ProviderInstanceID.Set {
-			set("provider_instance_id", p.ProviderInstanceID.Ptr())
-		}
-		if p.Model.Set {
-			set("model", p.Model.Ptr())
-		}
-		if p.ModelOptions.Set {
-			set("model_options", nonNilOptions(p.ModelOptions.V))
-		}
-		if p.RuntimeMode.Set {
-			set("runtime_mode", p.RuntimeMode.V)
-		}
-		if p.InteractionMode.Set {
-			set("interaction_mode", p.InteractionMode.V)
-		}
-		if p.Workspace.Set {
-			set("workspace", p.Workspace.V)
-		}
-		if p.Notes.Set {
-			set("notes", p.Notes.V)
 		}
 		if p.Cron.Set || p.Tz.Set || p.Paused.Set {
 			if p.Cron.Set {
 				cron = strings.TrimSpace(p.Cron.V)
-				set("cron", cron)
+				u.Cron = Optional[string]{Set: true, V: cron}
 			}
 			if p.Tz.Set {
 				tz = p.Tz.V
-				set("tz", tz)
+				u.Tz = Optional[string]{Set: true, V: tz}
 			}
 			if p.Paused.Set {
 				paused = p.Paused.V
-				set("paused", paused)
+				u.Paused = Optional[bool]{Set: true, V: paused}
 			}
 			next, err := nextRun(cron, tz, paused, time.Now())
 			if err != nil {
 				return err
 			}
-			set("next_run_at", next)
+			u.NextRunAt = Optional[time.Time]{Set: true, Null: next == nil}
+			if next != nil {
+				u.NextRunAt.V = *next
+			}
 		}
-		if len(sets) == 0 && !p.AttachmentIDs.Set {
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
+			!p.ProviderInstanceID.Set && !p.Model.Set && !p.ModelOptions.Set && !p.RuntimeMode.Set && !p.InteractionMode.Set &&
+			!p.Workspace.Set && !p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
-		sets = append(sets, "updated_at = "+nowSQL)
-		_, err = tx.Exec(ctx, `UPDATE schedules SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
-		return err
+		return tx.Schedules().Update(ctx, id, u)
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -371,8 +244,8 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 // DeleteSchedule removes a schedule, its runs and images; spawned tasks stay
 // (schedule_id becomes NULL).
 func (s *Store) DeleteSchedule(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM schedules WHERE id = $1`, id)
-	if err == nil && tag.RowsAffected() == 0 {
+	found, err := write(ctx, s, func(tx store.Tx) (bool, error) { return tx.Schedules().Delete(ctx, id) })
+	if err == nil && !found {
 		return ErrNotFound
 	}
 	return err
@@ -380,46 +253,38 @@ func (s *Store) DeleteSchedule(ctx context.Context, id int64) error {
 
 // ScheduleRuns returns the newest limit runs, each with its spawned task.
 func (s *Store) ScheduleRuns(ctx context.Context, id int64, limit int) ([]ScheduleRun, error) {
-	rows, err := s.pool.Query(ctx, `
-SELECT id, schedule_id, fire_at, outcome, task_id, detail, at FROM schedule_runs
-WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
-	if err != nil {
-		return nil, err
-	}
-	runs, err := collectRows(rows, func(row rowScanner) (ScheduleRun, error) {
-		var r ScheduleRun
-		err := row.Scan(&r.ID, &r.ScheduleID, &r.FireAt, &r.Outcome, &r.TaskID, &r.Detail, &r.At)
-		return r, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	for _, r := range runs {
-		if r.TaskID != nil {
-			ids = append(ids, *r.TaskID)
+	return read(ctx, s, func(tx store.Tx) ([]ScheduleRun, error) {
+		runs, err := tx.Schedules().Runs(ctx, id, limit)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(ids) == 0 {
+		var ids []int64
+		for _, r := range runs {
+			if r.TaskID != nil {
+				ids = append(ids, *r.TaskID)
+			}
+		}
+		if len(ids) == 0 {
+			return runs, nil
+		}
+		tasks, err := tx.Tasks().ByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		byID := make(map[int64]Task, len(tasks))
+		for _, t := range tasks {
+			byID[t.ID] = t
+		}
+		for i, r := range runs {
+			if r.TaskID == nil {
+				continue
+			}
+			if t, ok := byID[*r.TaskID]; ok {
+				runs[i].Task = &t
+			}
+		}
 		return runs, nil
-	}
-	tasks, err := collectTasks(s.pool.Query(ctx, taskSelect+` WHERE t.id IN (SELECT value FROM json_each($1))`, jsonArray(ids)))
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[int64]Task, len(tasks))
-	for _, t := range tasks {
-		byID[t.ID] = t
-	}
-	for i, r := range runs {
-		if r.TaskID == nil {
-			continue
-		}
-		if t, ok := byID[*r.TaskID]; ok {
-			runs[i].Task = &t
-		}
-	}
-	return runs, nil
+	})
 }
 
 func validateScheduleNotes(notes string) error {
@@ -458,28 +323,24 @@ func scheduleNoteParts(text string) []string {
 
 // spawnTask inserts a backlog task from schedule id's config and images. The
 // task and its initial notes attribute to the schedule's creator.
-func (s *Store) spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64, error) {
-	var in NewTask
-	var tz, notes string
-	var creator int64
-	err := tx.QueryRow(ctx, `
-SELECT project_id, title, prompt, provider_instance_id, model, model_options, runtime_mode,
-  interaction_mode, workspace, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config,created_by_user_id FROM schedules WHERE id = $1`, id).
-		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.ProviderInstanceID, &in.Model, &in.ModelOptions,
-			&in.RuntimeMode, &in.InteractionMode, &in.Workspace, &notes, &tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig, &creator)
+func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *time.Time) (int64, error) {
+	tpl, err := tx.Schedules().Template(ctx, id)
 	if err != nil {
-		return 0, notFound(err)
+		return 0, err
 	}
+	in := NewTask{ProjectID: tpl.ProjectID, Title: tpl.Title, Prompt: tpl.Prompt, ProviderInstanceID: tpl.ProviderInstanceID,
+		Model: tpl.Model, ModelOptions: tpl.ModelOptions, RuntimeMode: tpl.RuntimeMode, InteractionMode: tpl.InteractionMode,
+		Workspace: tpl.Workspace, ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
+	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source
 	// machine.
-	ctx = withoutMachine(WithUser(ctx, creator))
+	ctx = withoutMachine(WithUser(ctx, tpl.CreatedBy))
 	in.ScheduleID = &id
 	if startAt != nil {
 		in.StartAt, in.StartTz = startAt, &tz
 	}
-	return s.insertTask(ctx, tx.st, in, func(st store.Tx, task int64) error {
-		tx := rawTx(st)
-		if err := tx.st.Attachments().CopyToTask(ctx, store.OwnerSchedule, id, task); err != nil {
+	return s.insertTask(ctx, tx, in, func(tx store.Tx, task int64) error {
+		if err := tx.Attachments().CopyToTask(ctx, store.OwnerSchedule, id, task); err != nil {
 			return err
 		}
 		parts := scheduleNoteParts(notes)
@@ -488,7 +349,7 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 			if len(parts) > 1 {
 				key = fmt.Sprintf("initial-note-%d", i+1)
 			}
-			if _, err := appendNote(ctx, st, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceSession: in.OriginSession}); err != nil {
+			if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceSession: in.OriginSession}); err != nil {
 				return err
 			}
 		}
@@ -496,27 +357,9 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 	})
 }
 
-func insertRun(ctx context.Context, tx *Tx, id int64, fireAt time.Time, outcome string, taskID *int64, detail string) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id, detail) VALUES ($1, $2, $3, $4, $5)`,
-		id, fireAt, outcome, taskID, detail)
-	return err
-}
-
 // DueSchedules: unpaused schedules whose next fire is at or before now.
 func (s *Store) DueSchedules(ctx context.Context, now time.Time, connection int64) ([]int64, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id FROM schedules WHERE NOT paused AND next_run_at <= $1 AND ($2=0 OR connection_id=$2) ORDER BY next_run_at, id`, now, connection)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, rowTo[int64])
-}
-
-// DueTask is a backlog task whose one-shot start has come.
-type DueTask struct {
-	ID      int64
-	StartAt time.Time
+	return read(ctx, s, func(tx store.Tx) ([]int64, error) { return tx.Schedules().Due(ctx, now, connection) })
 }
 
 // DueOneShots: backlog tasks with start_at at or before now, oldest first
@@ -525,17 +368,7 @@ func (s *Store) DueOneShots(ctx context.Context, now time.Time) ([]DueTask, erro
 	return s.DueForConnection(ctx, now, 0)
 }
 func (s *Store) DueForConnection(ctx context.Context, now time.Time, connection int64) ([]DueTask, error) {
-	rows, err := s.pool.Query(ctx, `
-SELECT t.id, t.start_at FROM tasks t LEFT JOIN task_trees tr ON tr.id = t.tree_id
-WHERE t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at <= $1 AND ($2=0 OR t.connection_id=$2) AND NOT `+closedSQL+` ORDER BY t.start_at, t.id`, now, connection)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(row rowScanner) (DueTask, error) {
-		var d DueTask
-		err := row.Scan(&d.ID, &d.StartAt)
-		return d, err
-	})
+	return read(ctx, s, func(tx store.Tx) ([]DueTask, error) { return tx.Schedules().DueTasks(ctx, now, connection) })
 }
 
 // FireResult is what FireSchedule did ("" outcome: not due, nothing written).
@@ -551,15 +384,13 @@ type FireResult struct {
 // next_run_at always advances past now.
 func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace time.Duration) (FireResult, error) {
 	var res FireResult
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var cron, tz string
-		var paused bool
-		var next *time.Time
-		err := tx.QueryRow(ctx, `SELECT cron, tz, paused, next_run_at FROM schedules WHERE id = $1`, id).
-			Scan(&cron, &tz, &paused, &next)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		sc := tx.Schedules()
+		fs, err := sc.FireState(ctx, id)
 		if err != nil {
-			return notFound(err)
+			return err
 		}
+		cron, tz, paused, next := fs.Cron, fs.Tz, fs.Paused, fs.NextRunAt
 		if paused || next == nil || next.After(now) {
 			return nil
 		}
@@ -580,25 +411,22 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 				detail = "missed 1 fire"
 			}
 			res.Outcome = RunMissed
-			err = insertRun(ctx, tx, id, fireAt, RunMissed, nil, detail)
+			err = sc.InsertRun(ctx, id, fireAt, RunMissed, nil, detail)
 		default:
 			var prev int64
 			var prevState TaskState
-			err = tx.QueryRow(ctx, `
-SELECT id, state FROM tasks WHERE schedule_id = $1
-  AND (state IN ('launching', 'running', 'needs_input') OR (state = 'backlog' AND acceptance_id IS NULL AND (start_at IS NOT NULL OR scheduled_hold=1)))
-ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
+			prev, prevState, err = sc.PendingTask(ctx, id)
 			switch {
 			case err == nil:
 				res.Outcome = RunSkipped
-				err = insertRun(ctx, tx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)))
-			case errors.Is(err, sql.ErrNoRows):
+				err = sc.InsertRun(ctx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)))
+			case errors.Is(err, ErrNotFound):
 				var task int64
 				if task, err = s.spawnTask(ctx, tx, id, &fireAt); err != nil {
 					return err
 				}
 				res.Outcome, res.TaskID = RunStarted, &task
-				err = insertRun(ctx, tx, id, fireAt, RunStarted, &task, "")
+				err = sc.InsertRun(ctx, id, fireAt, RunStarted, &task, "")
 			}
 		}
 		if err != nil {
@@ -608,8 +436,7 @@ ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
 		if !advance.IsZero() {
 			nextAt = &advance
 		}
-		_, err = tx.Exec(ctx, `UPDATE schedules SET next_run_at = $2 WHERE id = $1`, id, nextAt)
-		return err
+		return sc.SetNextRun(ctx, id, nextAt)
 	})
 	if err != nil {
 		return FireResult{}, err
@@ -629,24 +456,21 @@ func stateWords(s TaskState) string {
 // records a manual run; the caller starts it.
 func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 	var task int64
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var one int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM schedules WHERE id = $1`, id).Scan(&one); err != nil {
-			return notFound(err)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		exists, err := tx.Schedules().Exists(ctx, id)
+		if err != nil {
+			return err
 		}
-		var err error
+		if !exists {
+			return ErrNotFound
+		}
 		if task, err = s.spawnTask(ctx, tx, id, nil); err != nil {
 			return err
 		}
-		return insertRun(ctx, tx, id, time.Now(), RunManual, &task, "run now")
+		return tx.Schedules().InsertRun(ctx, id, time.Now(), RunManual, &task, "run now")
 	})
 	if err != nil {
 		return Task{}, err
 	}
 	return s.GetTask(ctx, task)
-}
-
-// LegacyModel is the schedule's legacy model columns (Task.LegacyModel).
-func (s Schedule) LegacyModel() json.RawMessage {
-	return legacyModel(s.ProviderInstanceID, s.Model, s.ModelOptions, s.RuntimeMode, s.InteractionMode)
 }

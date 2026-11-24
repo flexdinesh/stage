@@ -50,6 +50,7 @@ type Tx interface {
 	Observations() Observations
 	Journal() Journal
 	Acceptances() Acceptances
+	Schedules() Schedules
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

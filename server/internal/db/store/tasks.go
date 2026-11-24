@@ -447,6 +447,8 @@ type Tasks interface {
 	// Pollable: see db.Store.PollableTasks.
 	Pollable(ctx context.Context, includeStale bool) ([]Task, error)
 	BySession(ctx context.Context, ref SessionRef) (Task, error)
+	// ByIDs reads the tasks with these ids (unknown ids are skipped).
+	ByIDs(ctx context.Context, ids []int64) ([]Task, error)
 	// CreatedBySession: tasks ref created, by id.
 	CreatedBySession(ctx context.Context, ref SessionRef) ([]Task, error)
 	// BySessionID is the task owning a session identity (ErrNotFound).
