@@ -34,6 +34,9 @@ type UnitOfWork interface {
 // every repository call runs in its unit of work.
 type Tx interface {
 	Snippets() Snippets
+	Push() Push
+	Preferences() Preferences
+	Users() Users
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

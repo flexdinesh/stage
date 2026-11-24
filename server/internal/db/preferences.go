@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"slices"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
 // Preferences: DefaultConnectionID is the connection new tasks start on (nil =
@@ -22,15 +24,16 @@ const EventReady TaskState = "ready"
 var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, EventReady, StateDone, StateSettled}
 
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
-	var p Preferences
-	var events []string
-	// A retired default (its machine removed, or replaced without a successor) reads as none.
-	err := s.pool.QueryRow(ctx, `SELECT (SELECT c.id FROM harness_connections c WHERE c.id=p.default_connection_id AND c.active=1), notify_events FROM preferences p WHERE id = 1`).
-		Scan(&p.DefaultConnectionID, &events)
+	return read(ctx, s, func(tx store.Tx) (Preferences, error) { return getPreferences(ctx, tx) })
+}
+
+func getPreferences(ctx context.Context, tx store.Tx) (Preferences, error) {
+	row, err := tx.Preferences().Get(ctx)
+	p := Preferences{DefaultConnectionID: row.DefaultConnectionID}
 	// Display order (migrations append new events at the end).
-	p.NotifyEvents = make([]TaskState, 0, len(events))
+	p.NotifyEvents = make([]TaskState, 0, len(row.NotifyEvents))
 	for _, e := range NotificationEvents {
-		if slices.Contains(events, string(e)) {
+		if slices.Contains(row.NotifyEvents, string(e)) {
 			p.NotifyEvents = append(p.NotifyEvents, e)
 		}
 	}
@@ -51,10 +54,12 @@ func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Prefer
 			stored = append(stored, string(e))
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET notify_events = $1, updated_at = `+nowSQL+` WHERE id = 1`, stored); err != nil {
-		return Preferences{}, err
-	}
-	return s.GetPreferences(ctx)
+	return write(ctx, s, func(tx store.Tx) (Preferences, error) {
+		if err := tx.Preferences().SetNotifyEvents(ctx, stored); err != nil {
+			return Preferences{}, err
+		}
+		return getPreferences(ctx, tx)
+	})
 }
 
 // SetDefaultConnection makes an active connection the one new tasks start on
@@ -63,8 +68,10 @@ func (s *Store) SetDefaultConnection(ctx context.Context, id *int64) (Preference
 	if id != nil && !s.ConnectionActive(*id) {
 		return Preferences{}, Invalid("Only an active connection can be the default.")
 	}
-	if _, err := s.pool.Exec(ctx, `UPDATE preferences SET default_connection_id = $1, updated_at = `+nowSQL+` WHERE id = 1`, id); err != nil {
-		return Preferences{}, err
-	}
-	return s.GetPreferences(ctx)
+	return write(ctx, s, func(tx store.Tx) (Preferences, error) {
+		if err := tx.Preferences().SetDefaultConnection(ctx, id); err != nil {
+			return Preferences{}, err
+		}
+		return getPreferences(ctx, tx)
+	})
 }
