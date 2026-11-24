@@ -6,6 +6,7 @@ import { useApi, usePlatform } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
+import { paletteHits } from "../lib/palette.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
 import { subjectLinks, type LinkSubject } from "./StageLinks.tsx";
@@ -27,6 +28,8 @@ interface Item {
   key: string;
   group: string;
   label: string;
+  /** A task or tree's #id before the label; `matched` when the query named it. */
+  idTag?: { id: number; matched: boolean };
   hint?: string;
   /** Why it matched (e.g. "branch", "you said"); stays visible when the hint truncates. */
   tag?: string | null;
@@ -84,23 +87,24 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     };
     const out: Item[] = [];
     if (q !== "") {
-      const taskHits = (tasks.data?.tasks ?? []).filter((t) => has(t.title, q)).slice(0, 6);
-      for (const t of taskHits)
+      for (const { item: t, byId } of paletteHits(tasks.data?.tasks ?? [], q, 6))
         out.push({
           key: `task-${t.id}`,
           group: "Tasks",
           label: t.title,
+          idTag: { id: t.id, matched: byId },
           hint: t.projectTitle,
           badge: <ClosedBadge label={taskClosedLabel(t)}><NodeChip task={t} /></ClosedBadge>,
           run: go(`/tasks/${t.id}`),
           sessionUrl: destination(t),
           link: { kind: "task", id: t.id, title: t.title },
         });
-      for (const tr of (trees.data?.trees ?? []).filter((t) => has(t.title, q)).slice(0, 4))
+      for (const { item: tr, byId } of paletteHits(trees.data?.trees ?? [], q, 4))
         out.push({
           key: `tree-${tr.id}`,
           group: "Trees",
           label: tr.title,
+          idTag: { id: tr.id, matched: byId },
           hint: treeMeta(tr),
           badge: <ClosedBadge label={tr.status === "open" ? null : tr.status} />,
           run: go(`/trees/${tr.id}`),
@@ -176,7 +180,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             }}
             autoFocus
             data-autofocus
-            placeholder="Search tasks, trees, projects"
+            placeholder="Search tasks, trees, projects, #id"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"
@@ -215,6 +219,11 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
                   >
                     <div className="flex items-center gap-2.5">
                       {item.badge}
+                      {item.idTag === undefined ? null : (
+                        <span className="-mr-1 shrink-0 font-mono text-meta whitespace-nowrap text-muted tabular">
+                          <Highlight text={`#${item.idTag.id}`} range={item.idTag.matched ? { start: 0, end: `#${item.idTag.id}`.length } : null} />
+                        </span>
+                      )}
                       <span className="min-w-0 truncate text-fg/90">
                         <Highlight text={item.label} range={matchOf(item.label, q)} />
                       </span>
