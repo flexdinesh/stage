@@ -68,6 +68,11 @@ SQLite sits below it (#391 findings):
    rules layer inside the same write transaction. Legacy columns and
    compatibility triggers stay out of the Postgres baseline when nothing reads
    them (audit: #402).
+   *Amended by #402 (2026-11-24):* they are dropped from both engines, not
+   only kept out of the Postgres baseline. That covers dead items and items
+   read only as legacy fallbacks. SQLite drops them in #417, before #403, and
+   raw retired values are not preserved. The decision table is in
+   [storage.md](../storage.md#legacy-columns-and-compatibility-triggers).
 7. **Migrations.** goose, one embedded directory per engine, the same version
    numbers on both. Postgres starts with one baseline migration whose version
    is the SQLite head when the Postgres adapter lands (24 today; see
@@ -125,11 +130,12 @@ Stage tree 201 (auto start). Each task ships as its own PR.
 | #396 | This ADR and [storage.md](../storage.md) | #391 |
 | #397 | `mise` storage checks and the AGENTS.md storage rule (#185) | #391 |
 | #398 | Extract ports; SQLite adapter (no behavior change) | #396, #397 |
-| #399 | Journal-event triggers into Go | #398 |
+| #399 | Journal-event triggers into Go, plus the load-bearing compatibility-trigger logic ([#402 table](../storage.md#triggers)) | #398 |
 | #400 | `storetest` contract suite | #398 |
 | #401 | Migration framework (per-engine dirs, step-wise test) | #398 |
 | #402 | Legacy column and compatibility-trigger audit | #396 |
-| #403 | Postgres adapter | #399, #400, #401, #402 |
+| #417 | Drop legacy columns and compatibility triggers from SQLite (added by #402) | #399, #402 |
+| #403 | Postgres adapter | #399, #400, #401, #402, #417 |
 | #404 | Search port (GIN trigram / FTS5) | #403 |
 | #405 | Configuration and composition (`STAGE_DATABASE_URL`) | #403 |
 | #406 | `stage db copy` and cutover runbook | #403, #405 |

@@ -22,7 +22,7 @@ that disagrees with this file updates it in the same PR.
 | [Checks](#checks) | the tasks exist (#185); every gate reports `not present yet` | gates: #398, #400, #401, #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | none | #402 |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); every Drop row is still in the SQLite schema | drops: #399 (trigger logic to Go), #417 (SQLite contract), #403 (baseline omits them) |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -189,9 +189,8 @@ duplicate schedulers, sync and launches.
 
 - The port boundary truncates `time.Time` to microseconds in UTC, so a
   value round-trips equal on both engines.
-- Which JSON columns are evidence (accepted snapshots, journal bytes,
-  checkpoints) and which are queried: decided per column by #402 and #403,
-  recorded under [Legacy columns](#legacy-columns-and-compatibility-triggers).
+- Which JSON columns are evidence and which are queried is decided per column
+  under [JSON columns](#json-columns) (#402; #403 may amend it there).
 - Business rules never depend on the SQL clock; time comes from Go.
 
 ## Errors
@@ -240,7 +239,8 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   adapter lands (#403; 25 today). It creates the current schema natively
   (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression indexes,
   `CHECK`s) without the legacy columns and compatibility triggers
-  [#402](#legacy-columns-and-compatibility-triggers) drops. Versions below it
+  [#402](#legacy-columns-and-compatibility-triggers) drops; #417 drops them
+  from SQLite first, so the two heads match. Versions below it
   are SQLite-only history; the parity test compares versions from the
   baseline up.
 - **No business rules in triggers.** Journal events are written by Go in the
@@ -323,8 +323,10 @@ from the Docker image.
   refused.
 - **Copy:** every table in foreign-key order, IDs preserved, encodings
   converted (TEXT time to `timestamptz`, TEXT JSON to `jsonb` or `text` per
-  [Encodings](#encodings), `BLOB` to `bytea`), columns the legacy audit drops
-  handled as its table says, identity sequences reset past the highest ID.
+  [Encodings](#encodings), `BLOB` to `bytea`), identity sequences reset past
+  the highest ID. No legacy transforms: the source is at or above the
+  baseline, where #417 has already dropped the
+  [legacy columns](#legacy-columns-and-compatibility-triggers).
 - **Verify:** per-table row counts and checksums; any mismatch exits
   non-zero.
 
@@ -344,19 +346,118 @@ copied back.
 
 ## Legacy columns and compatibility triggers
 
-#402 adds the decision table here: every legacy or retired column and
-compatibility trigger (for example the legacy-id triggers of migrations 0008,
-0012 and 0018), who reads or writes it, and whether it is kept in the
-Postgres baseline, dropped from it, or a candidate to drop from SQLite later.
-Already settled: 0025 dropped `threads_parent_session_id_*` (Go writes
-`parent_session_id` on the thread's own connection), made `task_event_journal`
-and `thread_project_insert` use the row's own session, and made the
-`journal_entries` source-session triggers skip rows that carry
-`source_session_id`. The remaining legacy-id triggers still resolve the local
-machine's active T3 and apply only to legacy `*_thread_id` writes.
-[architecture.md](architecture.md#builds-and-legacy-paths) promises raw retired columns are
-preserved for historical records: a dropped column keeps its data in a
-history-preserving form, or stays.
+The #402 audit of the SQLite schema at head 25. It covers every legacy or
+retired column and every compatibility trigger. Business-rule triggers
+(`task_event_journal`, `journal_*`) are #399's and are not listed.
+
+**Policy (user decision on #402; no users yet).** Anything whose only role is
+legacy compatibility is dropped from **both** engines:
+
+- **Dead:** nothing reads or writes it.
+- **Fallback-only:** it is read only when the neutral column is empty on an
+  old row. The neutral column is backfilled first, then the column goes.
+
+Raw retired values are not preserved. A historical row keeps its meaning
+through the neutral column: a session identity, `execution_config` or a
+binding. Journal note and event text, accepted snapshot evidence and
+`acceptance_requests` bytes are untouched. A legacy id the backfill cannot
+resolve becomes NULL.
+
+**Who does what:**
+
+- The Postgres baseline (#403) omits every **Drop** row.
+- SQLite drops them in #417 (expand, backfill, contract), which lands before
+  #403, so the baseline equals the SQLite head and
+  [Data copy](#data-copy-and-cutover) needs no legacy transforms.
+- Load-bearing trigger logic moves to Go in #399, before #417.
+
+**Settled before this audit:** 0025 dropped `threads_parent_session_id_*`.
+
+Readers and writers below are live code paths reachable from the server, API,
+MCP or CLI. Test-only callers are noted where they are the only ones.
+
+### Columns
+
+| Item | Readers and writers today | Decision | Work first (#417 unless named) |
+| --- | --- | --- | --- |
+| `projects.t3_project_id` (NOT NULL UNIQUE) | Write-only inert marker (`"stage:"+uuid`, `projects.go`, `import.go`); no reader | Drop | Remove the marker writes |
+| `projects.workspace_root`, index `projects_workspace_root_idx` | Write-only `''`; no reader (0008 copied paths into bindings) | Drop | Remove the writes |
+| `projects.source` (`'app'`/`'t3'`) | Write-only `'app'`; no reader | Drop | Remove the writes |
+| `projects.t3_deleted_at` | None (read once by 0008) | Drop | None |
+| `projects.origin`, `imported_connection_id`, `imported_at`, `archive_owner` | Project import and archive-follow (`import.go`); API `origin`, `importedAt` | Keep | None |
+| `tasks.t3_thread_id` | Written with `session_id` on T3 launch and adopt (`execution.go` `FinishAttempt`, `adopt.go`); read as a fallback for `externalSessionId`, as the "has started" marker (`trees.go` `unstartedSQL`, `acceptance.go`, `recorded_work` triggers), copied by `task_event_journal`, and as evidence `threadId` | Fallback-only: Drop | Verify every row has `session_id`; markers and evidence `threadId` read `session_id`; #399's Go journal events stop copying it |
+| `tasks.origin_thread_id`, index `tasks_origin_thread_idx` | Insert column, but no caller sets `NewTask.OriginThreadID` (API v6 rejects it); read into a `json:"-"` field nothing uses | Drop | `origin_session_id` already backfilled (0008) |
+| `tasks.after_thread_id`, `after_task_id`, constraint `tasks_one_wait` | None; 0003 nulled both and dropped their indexes | Drop | None (`tasks_start_pair` stays) |
+| `tasks.launch_reuse` | Always 0 outside tests (`ReuseAttempt` is test-only, `ReusesLaunch` has no caller); 0009 moved reuse into `execution_attempts` | Drop | Remove the reads and `ReuseAttempt` |
+| `tasks` and `schedules`: `provider_instance_id`, `model`, `model_options`, `runtime_mode`, `interaction_mode` | Primary storage for the legacy T3 model inputs: stored raw on create and update, copied by duplicate and schedule spawn, translated only on read (`LegacyModel`/`LegacyConfig` in `api/shapes.go`, `sync/service.go`) | Legacy storage: Drop | Translate legacy inputs to `execution_config` on write; backfill `execution_config` where NULL. API inputs may stay, translated |
+| `tasks.launch_request_id`, `settled_at`, `handoff` | Launch intents, task API | Keep | None |
+| `schedules.origin_thread_id` | Insert column, never set by a caller; `COALESCE` puts it first, into a `json:"-"` field | Drop | `origin_session_id` already backfilled (0008) |
+| `threads.t3_thread_id`, `t3_project_id`, `status`, `parent_thread_id` | The T3 mirror's key and live fields, written by `PutObservation` and read by the session API, push and binding lookup | Keep | None |
+| `threads.provider_instance_id`, `creation_source`, `run_count` | No writer; old values still appear in session JSON | Drop | Remove them from `threadSelect` and the session API shape |
+| `threads.latest_run_status` | None | Drop | None |
+| `threads.recent_runs` | No writer; read only by `ThreadRuns`, which has no caller | Drop | Remove `ThreadRuns` |
+| `threads.pending_question_count` | No writer (`SetPendingQuestionCount` has no caller); read in `min()` into `json:"-"` fields | Drop | Remove it from the `min()` reads |
+| `threads.parent_session_id` | Written by `PutObservation` (0025); never read | Drop | Remove the write (`parent_thread_id` stays the mirror's parent) |
+| `threads.link`, `last_word_item_id` | Written by `PutObservation`; read only as acceptance-preview fallbacks that the observation overwrites | Fallback-only: Drop | Evidence reads `execution_observations` only |
+| `threads.pull_requests` | No writer (PRs arrive as observation artifacts); old values feed task `artifactLinks` and the acceptance-preview fallback | Fallback-only: Drop | Old PR links leave `artifactLinks`; accepted evidence keeps its copy |
+| Other `threads` columns (`title`, `execution_state`, `settled*`, `branch`, `worktree_path`, run ids and times, `last_word_*` except `item_id`, `model`/modes, `observed_state`, `session_id`, `stage_project_id`, ...) | `PutObservation`, `SetObservedState`; session API, push, acceptance | Keep | None |
+| `threads` indexes `threads_status_idx`, `threads_updated_at_idx`, `threads_root_created_idx`, `threads_t3_project_id_idx` | Used only by `ListThreads` and `Stats`, which have no caller since `/api/threads` and `/api/stats` were removed | Drop | Remove those store functions |
+| `notifications.t3_thread_id` | Written beside `session_id` (`notify.go`); read as a fallback for the key and `externalSessionId` | Fallback-only: Drop | Backfill `session_id`; the key reads `session_id` only |
+| `task_handoffs.source_thread_id` (NOT NULL), `task_launch_bases.source_thread_id` | Written beside `source_session_id` (`sync/handoff.go`, `sync/service.go`); read for API `sourceThreadId` | Fallback-only: Drop | Backfill `source_session_id`; `sourceThreadId` derives from it (T3 sessions) or leaves the API |
+| `journal_entries.source_thread_id` | Written by `task_event_journal` beside `source_session_id`; the note input is unreachable; `COALESCE` puts it first for API `sourceThreadId` | Fallback-only: Drop | Backfill `source_session_id`; derive `sourceThreadId`; note and event `text` unchanged |
+| `task_acceptances.source_session_id` | Filled only by `acceptance_session_insert`; read as a fallback when evidence has no `session` | Keep | #399: Go sets it on insert |
+| `question_responses` (table) | None (read once by 0008) | Drop | None |
+| `t3_connection`, `opencode_settings` (all columns) | Live harness setup | Keep | None |
+
+### Triggers
+
+The legacy-id triggers each fill a `*_session_id` column from a bare
+`*_thread_id`, under the local machine's active T3. With no active local T3
+their `session_identities` insert fails on NOT NULL `connection_id` and aborts
+the write (the 0025 failure).
+
+| Trigger | Today | Decision | Work first |
+| --- | --- | --- | --- |
+| `threads_session_id_insert/update` | Redundant: `PutObservation` always sets `session_id` | Drop | None |
+| `tasks_session_id_insert/update` (no guard) | Redundant live: launch and adopt set `session_id` with the same identity; only test-only `Transition{ThreadID}` relies on it | Drop | Tests set `session_id` |
+| `tasks_origin_session_id_*`, `schedules_origin_session_id_*` (no guard) | Fire only for `origin_thread_id`, which no live caller sets | Drop | Drop with the columns |
+| `notifications_session_id_*` | Redundant: Go resolves the session first | Drop | None |
+| `task_launch_bases_source_session_id_*` | Redundant for live writes | Drop | None |
+| `task_handoffs_source_session_id_*` | Load-bearing for legacy evidence with `threadId` and no `session` (aborts the launch without a local T3) | Drop | #399: Go resolves the source session (evidence, else `source_session_id`, else the legacy T3 rule) |
+| `journal_entries_source_session_id_*` | Redundant: notes resolve in Go; `task_event_journal` sets `source_session_id` | Drop | None |
+| `thread_project_insert` | Load-bearing: the only writer of `threads.stage_project_id` (project activity reads it) | Drop | #399: `PutObservation` sets `stage_project_id` (task's project, else the single active binding) |
+| `acceptance_session_insert` | Load-bearing for `task_acceptances.source_session_id` | Drop | #399: Go sets it |
+| `tasks_connection_insert/update`, `schedules_connection_insert/update` | Foreign-key substitute: 0008 added `connection_id` with `ALTER TABLE` and a default, which cannot carry `REFERENCES`. `schedules_connection_insert` is the only guard against an unknown schedule connection | Drop | Postgres: a real foreign key. SQLite (#417): rebuild `tasks` and `schedules` with the foreign key |
+
+### JSON columns
+
+Go marshals every JSON value it writes, so key order and whitespace are
+already Go's. **Evidence** means bytes are compared or must stay exactly as
+recorded. It is `text` on Postgres. Everything else is **queried** (by SQL or
+by Go decode) and is `jsonb`.
+
+| Column | Class | Postgres |
+| --- | --- | --- |
+| `acceptance_requests.input` | Evidence: idempotency compares bytes (`previous != string(raw)`) | `text` |
+| `task_acceptances.evidence` | Evidence: an immutable accepted snapshot (its `evidenceVersion` hash comes from the Go struct, not the stored bytes) | `text` |
+| `acceptance_requests.result` | Queried: decoded for idempotent replay | `jsonb` |
+| `execution_observations.observation` | Queried: `json_extract` in execution, acceptance, notifications, push, tasks | `jsonb` |
+| `tasks.workspace` | Queried: `json_extract`/`json_set` (tasks, trees) | `jsonb` |
+| `schedules.workspace`, `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `preferences.notify_events` | Queried (decoded) | `jsonb` |
+| `execution_attempts.intent`, `checkpoint`, `observed_session` | Queried (decoded; the checkpoint is opaque adapter state) | `jsonb` |
+| `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |
+
+`journal_entries.text` and `journal_launch_context.instructions` are plain
+text, not JSON, and stay `text`.
+
+### Doc claims this audit corrects
+
+- [execution.md](execution.md): `LegacyConfig` is not the only reader of the
+  legacy model columns. Duplicate, schedule spawn and patch validation also
+  read them.
+- [api.md](api.md): legacy model inputs are stored as sent and translated on
+  read, not on write.
+- #417 rewrites both when it drops the columns.
 
 ## Design only: Queue, Events, Leases
 
