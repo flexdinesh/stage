@@ -10,7 +10,7 @@ svu = "3.4.4" # next release version (scripts/release.sh next, docs/release.md)
 
 [env]
 # The one Postgres pin (latest major, exact tag): check:postgres and the
-# compose example use it.
+# compose example (examples/postgres) use it; check:storage enforces the match.
 STAGE_PG_IMAGE = "postgres:19.0-alpine3.24"
 
 [tasks.dev]
@@ -70,7 +70,7 @@ run = "cd server && go vet ./... && go vet -tags smoke ./... && go vet -tags pos
 
 # Storage (docs/storage.md). Gates not written yet report "not present yet".
 [tasks."check:storage"]
-description = "Storage gates: TestMigrationVersionParity, TestStepwiseMigrations, TestDriverImportBoundary (under internal/db) + internal/db/{store,sqlite,postgres,storetest} once present"
+description = "Storage gates: TestMigrationVersionParity, TestStepwiseMigrations, TestDriverImportBoundary (under internal/db) + internal/db/{store,sqlite,postgres,storetest} once present + examples/postgres image == STAGE_PG_IMAGE"
 run = "scripts/check-storage.sh"
 
 [tasks."check:postgres"]
