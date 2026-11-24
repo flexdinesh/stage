@@ -93,6 +93,7 @@ test("stateSummary says what the current state means", () => {
   assert.equal(stateSummary(st({ readiness: "ready", needs: [3] }), NOW), "Needs met. Not run yet.");
   assert.equal(stateSummary(st({ readiness: "ready" }), NOW), "Not run yet.");
   assert.equal(stateSummary(st({ readiness: "blocked", needs: [3, 5] }), NOW), "Waiting on #3, #5.");
+  assert.equal(stateSummary(st({ state: "launching" }), NOW), "Launch not confirmed yet.");
   assert.equal(stateSummary(st({ state: "running" }), NOW), "Running. Stop it before completing.");
   assert.equal(stateSummary(st({ state: "needs_input" }), NOW), "Waiting for your input in the harness.");
   assert.equal(stateSummary(st({ state: "done", finishedAt: HOUR_AGO }), NOW), "Run finished 1h ago.");

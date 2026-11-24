@@ -578,7 +578,10 @@ returns to backlog for repair. See [execution.md](execution.md).
 
 200 Task on confirmation; 409 preflight/repair required; 502/503 unconfirmed
 adapter error. Additive `launch` metadata: attempt, revision, phase, reason,
-retryAt. Internal checkpoints and frozen prompts are not exposed.
+retryAt, retryCount (failed checks) and session: the session the harness returned
+for an attempt Stage could not record yet (`{connectionId, externalSessionId,
+title, state, links}`, links as on task detail), else null. Internal checkpoints
+and frozen prompts are not exposed.
 
 ### `POST /api/tasks/:id/launch-link/preview`
 Body `{link}`: T3 session URL. Returns `{attempt,revision,environment,observation}`.

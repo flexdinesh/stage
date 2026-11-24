@@ -292,7 +292,9 @@ export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
-export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null}
+export interface LaunchRecovery {attempt:number; revision:number; phase:string; reason:string; retryAt:string|null; retryCount:number; session:LaunchSession|null}
+/** A session the harness returned for an unconfirmed launch before Stage recorded it. */
+export interface LaunchSession extends SessionRef { title: string; state: string; links?: ExecutionLinks }
 /** Session destinations; `command` resumes it in the harness's own client (copy, never run). */
 export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string; command?: string }
 /** A harness kind ("t3", "opencode", ...): the server's registry (GET /harnesses) says which exist. */

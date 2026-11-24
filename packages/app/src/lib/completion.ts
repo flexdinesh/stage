@@ -86,6 +86,7 @@ export function stateSummary(t: StateTask, now: number = Date.now(), harness?: P
       if (t.readiness === "ready" && t.needs.length > 0) return "Needs met. Not run yet.";
       return t.startAt === null ? "Not run yet." : "Scheduled. Not run yet.";
     case "launching":
+      return "Launch not confirmed yet.";
     case "running":
       return "Running. Stop it before completing.";
     case "needs_input":

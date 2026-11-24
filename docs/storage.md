@@ -17,7 +17,7 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
 | [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | one SQLite dir, `server/internal/db/migrations`, head 24; journal events by triggers | per-engine dirs #401, triggers to Go #399, Postgres baseline #403 |
+| [Migrations](#migrations) | one SQLite dir, `server/internal/db/migrations`, head 25; journal events by triggers | per-engine dirs #401, triggers to Go #399, Postgres baseline #403 |
 | [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
 | [Checks](#checks) | the tasks exist (#185); every gate reports `not present yet` | gates: #398, #400, #401, #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
@@ -237,7 +237,7 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   migration) with the same version and name in both dirs.
   `TestMigrationVersionParity` fails otherwise.
 - **Postgres baseline:** one migration at the SQLite head when the Postgres
-  adapter lands (#403; 24 today). It creates the current schema natively
+  adapter lands (#403; 25 today). It creates the current schema natively
   (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression indexes,
   `CHECK`s) without the legacy columns and compatibility triggers
   [#402](#legacy-columns-and-compatibility-triggers) drops. Versions below it
@@ -348,6 +348,12 @@ copied back.
 compatibility trigger (for example the legacy-id triggers of migrations 0008,
 0012 and 0018), who reads or writes it, and whether it is kept in the
 Postgres baseline, dropped from it, or a candidate to drop from SQLite later.
+Already settled: 0025 dropped `threads_parent_session_id_*` (Go writes
+`parent_session_id` on the thread's own connection), made `task_event_journal`
+and `thread_project_insert` use the row's own session, and made the
+`journal_entries` source-session triggers skip rows that carry
+`source_session_id`. The remaining legacy-id triggers still resolve the local
+machine's active T3 and apply only to legacy `*_thread_id` writes.
 [architecture.md](architecture.md#builds-and-legacy-paths) promises raw retired columns are
 preserved for historical records: a dropped column keeps its data in a
 history-preserving form, or stays.
