@@ -121,19 +121,19 @@ func appendNote(ctx context.Context, tx *Tx, o JournalOwner, in AppendNoteInput)
 		if in.SourceThreadID != nil {
 			return JournalEntry{}, Invalid("use sourceSession or the legacy T3 sourceThreadId, not both")
 		}
-		id, err := sessionIdentity(ctx, tx, *in.SourceSession)
+		id, err := ensureSession(ctx, tx.st, *in.SourceSession)
 		if err != nil {
 			return JournalEntry{}, err
 		}
 		sourceID = &id
 	} else if in.SourceThreadID != nil {
-		t3, err := legacyT3(ctx, tx)
+		t3, err := legacyT3Tx(ctx, tx.st)
 		if err != nil {
 			return JournalEntry{}, err
 		}
 		ref := SessionRef{ConnectionID: t3, ExternalSessionID: *in.SourceThreadID}
 		in.SourceSession = &ref
-		id, err := sessionIdentity(ctx, tx, ref)
+		id, err := ensureSession(ctx, tx.st, ref)
 		if err != nil {
 			return JournalEntry{}, err
 		}

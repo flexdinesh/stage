@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/google/uuid"
 )
 
@@ -74,7 +75,10 @@ type conn struct{ db *sql.DB }
 // Tx is a transaction started as BEGIN IMMEDIATE (Open's _txlock): it holds
 // the database write lock from its first statement, so transactions run
 // one at a time; this replaces Postgres row locks and advisory locks.
-type Tx struct{ tx *sql.Tx }
+type Tx struct {
+	tx *sql.Tx
+	st store.Tx // the same transaction behind repositories
+}
 
 func (c conn) Exec(ctx context.Context, q string, args ...any) (execResult, error) {
 	return execOn(ctx, c.db, q, args)
@@ -95,24 +99,16 @@ func (t *Tx) QueryRow(ctx context.Context, q string, args ...any) *oneRow {
 	return &oneRow{t.tx.QueryRowContext(ctx, q, convertArgs(args)...)}
 }
 
-// inTx runs fn in a BEGIN IMMEDIATE transaction, committing when fn returns
-// nil. It rolls back on error or panic, so the write lock is never left held.
-func (s *Store) inTx(ctx context.Context, fn func(tx *Tx) error) (err error) {
-	sqlTx, err := s.pool.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = sqlTx.Rollback()
-		}
-	}()
-	if err := fn(&Tx{sqlTx}); err != nil {
-		return err
-	}
-	committed = true
-	return sqlTx.Commit()
+// inTx runs fn in the engine's write transaction (store.UnitOfWork.Write),
+// for code not yet behind repositories (transitional).
+func (s *Store) inTx(ctx context.Context, fn func(tx *Tx) error) error {
+	return s.e.Write(ctx, func(st store.Tx) error { return fn(rawTx(st)) })
+}
+
+// rawTx is st as a raw transaction (transitional; SQLite only).
+func rawTx(st store.Tx) *Tx {
+	r, _ := st.(interface{ RawTx() *sql.Tx })
+	return &Tx{tx: r.RawTx(), st: st}
 }
 
 // queryRower is a conn or a *Tx, for single-statement reads.

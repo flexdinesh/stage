@@ -101,6 +101,9 @@ type Projects interface {
 	// workspace is bound elsewhere).
 	InsertBinding(ctx context.Context, b ProjectBinding) (int64, error)
 	Undecline(ctx context.Context, connectionID int64, externalID, workspace string) error
+	// AdoptionTarget is the sole project actively and availably bound to
+	// (connection, external project[, workspace]) (false: none or several).
+	AdoptionTarget(ctx context.Context, connectionID int64, externalID string, workspace *string) (int64, bool, error)
 	// BoundOn: the project has an active binding on the connection.
 	BoundOn(ctx context.Context, projectID, connectionID int64) (bool, error)
 	// AutoBindEligible: source is an active available binding of the

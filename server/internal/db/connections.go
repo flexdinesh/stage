@@ -360,20 +360,3 @@ func connectionUsable(ctx context.Context, tx store.Tx, id int64) error {
 	}
 	return nil
 }
-
-// legacyT3 (transitional raw SQL) is legacyT3Tx for a raw transaction.
-func legacyT3(ctx context.Context, tx *Tx) (int64, error) {
-	var id int64
-	err := tx.QueryRow(ctx, `SELECT COALESCE(`+legacyT3SQL+`,0)`).Scan(&id)
-	if err == nil && id == 0 {
-		err = Invalid("no T3 connection; pair T3 in Settings")
-	}
-	return id, err
-}
-
-// harnessIs (transitional raw SQL) reports whether a connection belongs to harness.
-func harnessIs(ctx context.Context, tx *Tx, id int64, harness string) (bool, error) {
-	var ok bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2)`, id, harness).Scan(&ok)
-	return ok, err
-}

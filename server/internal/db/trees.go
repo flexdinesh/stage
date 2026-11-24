@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"slices"
 	"strings"
 	"time"
@@ -12,44 +13,35 @@ import (
 // Tree mutations run inside Store.inTx (BEGIN IMMEDIATE), which serializes
 // them with every other write, so need checks and updates are atomic.
 
-// StartMode is when a tree member launches once its needs settle: auto
-// (the release runner launches it) or manual (it reads ready).
-type StartMode string
+// StartMode is when a tree member launches once its needs settle.
+type StartMode = store.StartMode
 
 const (
-	StartAuto   StartMode = "auto"
-	StartManual StartMode = "manual"
+	StartAuto   = store.StartAuto
+	StartManual = store.StartManual
 )
 
 // StartModes are the valid start modes.
-var StartModes = []string{string(StartAuto), string(StartManual)}
+var StartModes = store.StartModes
 
-func (m StartMode) Valid() bool { return slices.Contains(StartModes, string(m)) }
-
-// TreeStatus is a tree's lifecycle (docs/api.md "Done, archive and delete"):
-// open, done (marked done by hand) or archived. A tree that is not open
-// releases nothing, rejects structural changes and its members leave the
-// Dashboard; activity on a member reopens it.
-type TreeStatus string
+// TreeStatus is a tree's lifecycle.
+type TreeStatus = store.TreeStatus
 
 const (
-	TreeOpen     TreeStatus = "open"
-	TreeDone     TreeStatus = "done"
-	TreeArchived TreeStatus = "archived"
+	TreeOpen     = store.TreeOpen
+	TreeDone     = store.TreeDone
+	TreeArchived = store.TreeArchived
 )
 
 // TreeStatuses are the valid tree statuses.
-var TreeStatuses = []string{string(TreeOpen), string(TreeDone), string(TreeArchived)}
+var TreeStatuses = store.TreeStatuses
 
-func (s TreeStatus) Valid() bool { return slices.Contains(TreeStatuses, string(s)) }
-
-// Readiness of a backlog tree member: blocked (a need is not accepted) or
-// ready (every need accepted, no start time, and manual or no needs).
-type Readiness string
+// Readiness of a backlog tree member.
+type Readiness = store.Readiness
 
 const (
-	ReadinessBlocked Readiness = "blocked"
-	ReadinessReady   Readiness = "ready"
+	ReadinessBlocked = store.ReadinessBlocked
+	ReadinessReady   = store.ReadinessReady
 )
 
 // SQL over taskSelect's aliases (t = task, tr = its tree).

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/cronexpr"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -179,7 +180,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 	}
 	var id int64
 	err = s.inTx(ctx, func(tx *Tx) error {
-		if err := projectExists(ctx, tx, in.ProjectID); err != nil {
+		if err := requireProject(ctx, tx.st, in.ProjectID); err != nil {
 			return err
 		}
 		var originID *int64
@@ -187,7 +188,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 			if in.OriginThreadID != nil {
 				return Invalid("use originSession or originThreadId, not both")
 			}
-			value, err := sessionIdentity(ctx, tx, *in.OriginSession)
+			value, err := ensureSession(ctx, tx.st, *in.OriginSession)
 			if err != nil {
 				return err
 			}
@@ -206,7 +207,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) 
 			return err
 		}
 		if len(in.AttachmentIDs) > 0 {
-			return setOwnedAttachments(ctx, tx, "schedule_id", id, in.AttachmentIDs)
+			return setOwned(ctx, tx.st, store.OwnerSchedule, id, in.AttachmentIDs)
 		}
 		return nil
 	})
@@ -270,7 +271,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			return Invalid("providerInstanceId and model must be set together")
 		}
 		if p.AttachmentIDs.Set {
-			if err := setOwnedAttachments(ctx, tx, "schedule_id", id, p.AttachmentIDs.V); err != nil {
+			if err := setOwned(ctx, tx.st, store.OwnerSchedule, id, p.AttachmentIDs.V); err != nil {
 				return err
 			}
 		}
@@ -279,10 +280,10 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		var sets []string
 		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
 		if p.ConnectionID.Set {
-			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+			if err := checkDestinationChange(ctx, tx.st, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			toT3, err := harnessIs(ctx, tx, p.ConnectionID.V, HarnessT3)
+			toT3, err := tx.st.Connections().HarnessIs(ctx, p.ConnectionID.V, HarnessT3)
 			if err != nil {
 				return err
 			}
@@ -303,7 +304,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			set("execution_config", nil)
 		}
 		if p.ProjectID.Set {
-			if err := projectExists(ctx, tx, p.ProjectID.V); err != nil {
+			if err := requireProject(ctx, tx.st, p.ProjectID.V); err != nil {
 				return err
 			}
 			set("project_id", p.ProjectID.V)
@@ -457,7 +458,7 @@ func scheduleNoteParts(text string) []string {
 
 // spawnTask inserts a backlog task from schedule id's config and images. The
 // task and its initial notes attribute to the schedule's creator.
-func spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64, error) {
+func (s *Store) spawnTask(ctx context.Context, tx *Tx, id int64, startAt *time.Time) (int64, error) {
 	var in NewTask
 	var tz, notes string
 	var creator int64
@@ -476,8 +477,9 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 	if startAt != nil {
 		in.StartAt, in.StartTz = startAt, &tz
 	}
-	return insertTask(ctx, tx, in, func(tx *Tx, task int64) error {
-		if err := copyScheduleAttachments(ctx, tx, id, task); err != nil {
+	return s.insertTask(ctx, tx.st, in, func(st store.Tx, task int64) error {
+		tx := rawTx(st)
+		if err := tx.st.Attachments().CopyToTask(ctx, store.OwnerSchedule, id, task); err != nil {
 			return err
 		}
 		parts := scheduleNoteParts(notes)
@@ -592,7 +594,7 @@ ORDER BY id DESC LIMIT 1`, id).Scan(&prev, &prevState)
 				err = insertRun(ctx, tx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)))
 			case errors.Is(err, sql.ErrNoRows):
 				var task int64
-				if task, err = spawnTask(ctx, tx, id, &fireAt); err != nil {
+				if task, err = s.spawnTask(ctx, tx, id, &fireAt); err != nil {
 					return err
 				}
 				res.Outcome, res.TaskID = RunStarted, &task
@@ -633,7 +635,7 @@ func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 			return notFound(err)
 		}
 		var err error
-		if task, err = spawnTask(ctx, tx, id, nil); err != nil {
+		if task, err = s.spawnTask(ctx, tx, id, nil); err != nil {
 			return err
 		}
 		return insertRun(ctx, tx, id, time.Now(), RunManual, &task, "run now")

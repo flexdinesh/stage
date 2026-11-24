@@ -153,6 +153,11 @@ type Threads interface {
 	// SetLastWord stores r (nil: only the check time) unless a later check
 	// was stored.
 	SetLastWord(ctx context.Context, id string, checked time.Time, r *LastWordRow) error
+	// Mirror upserts o's mirror row (a newer stored row wins) and sets its
+	// model and modes.
+	Mirror(ctx context.Context, o execution.Observation, m ThreadMirror) error
+	// SetSessionLastWord is SetLastWord by session identity.
+	SetSessionLastWord(ctx context.Context, sessionID int64, checked time.Time, lw LastWordRow) error
 	// LastWord reads the stored reply (text nil: none).
 	LastWord(ctx context.Context, id string) (text *string, lw LastWord, err error)
 }

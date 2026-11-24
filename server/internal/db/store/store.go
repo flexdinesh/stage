@@ -45,6 +45,9 @@ type Tx interface {
 	Projects() Projects
 	Threads() Threads
 	Stats() Stats
+	Tasks() Tasks
+	Attempts() Attempts
+	Observations() Observations
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers
