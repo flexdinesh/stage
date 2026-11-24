@@ -307,16 +307,6 @@ type ThreadRun struct {
 	CompletedAt        *time.Time `json:"completedAt"`
 }
 
-// Snippet is reusable prompt text; ProjectID nil = global.
-type Snippet struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Body      string    `json:"body"`
-	ProjectID *int64    `json:"projectId"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
 func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
 	if o == nil {
 		return []execution.ModelOption{}

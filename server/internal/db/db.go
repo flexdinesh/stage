@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -135,30 +136,28 @@ func nullIfEmpty(s string) *string {
 }
 
 // Optional is a PATCH field: Set when present in JSON, Null when JSON null.
-type Optional[T any] struct {
-	Set  bool
-	Null bool
-	V    T
+type Optional[T any] = store.Optional[T]
+
+// read runs fn in a store Read and returns its value.
+func read[T any](ctx context.Context, s *Store, fn func(store.Tx) (T, error)) (T, error) {
+	var out T
+	err := s.e.Read(ctx, func(tx store.Tx) error {
+		var err error
+		out, err = fn(tx)
+		return err
+	})
+	return out, err
 }
 
-func (o *Optional[T]) UnmarshalJSON(b []byte) error {
-	o.Set = true
-	if string(b) == "null" {
-		o.Null = true
-		var zero T
-		o.V = zero
-		return nil
-	}
-	return json.Unmarshal(b, &o.V)
-}
-
-// Ptr returns a pointer to V, or nil when unset or null.
-func (o Optional[T]) Ptr() *T {
-	if !o.Set || o.Null {
-		return nil
-	}
-	v := o.V
-	return &v
+// write runs fn in a store Write (one transaction) and returns its value.
+func write[T any](ctx context.Context, s *Store, fn func(store.Tx) (T, error)) (T, error) {
+	var out T
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		var err error
+		out, err = fn(tx)
+		return err
+	})
+	return out, err
 }
 
 // DecodeStrict decodes one JSON object (empty: {}) into v, rejecting unknown

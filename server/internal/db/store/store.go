@@ -32,7 +32,9 @@ type UnitOfWork interface {
 
 // Tx is a transaction handle: every repository is reached through it, so
 // every repository call runs in its unit of work.
-type Tx interface{}
+type Tx interface {
+	Snippets() Snippets
+}
 
 // Migrator applies the engine's embedded migrations (same version numbers
 // on every engine).
