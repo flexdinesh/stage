@@ -154,7 +154,7 @@ and exits 0 for those two.
 
 ## Schema and backups
 
-Migrations are goose versions (`server/internal/db/migrations`, tracked in
+Migrations are goose versions (`server/internal/db/sqlite/migrations`, tracked in
 `goose_db_version`). `stage version --json` `schema` is the highest this
 binary knows; `/api/health` `schema` is the database's.
 
