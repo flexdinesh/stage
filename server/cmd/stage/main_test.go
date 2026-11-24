@@ -16,7 +16,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/instance"
 )
 
@@ -132,19 +132,19 @@ func TestServeNewerSchema(t *testing.T) {
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pool, err := db.Open(context.Background(), filepath.Join(data, db.DBFile))
+	pool, err := sqlite.Open(context.Background(), filepath.Join(data, sqlite.DBFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrate(context.Background(), pool); err != nil {
+	if err := sqlite.Migrate(context.Background(), pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)`, db.MaxVersion()+1); err != nil {
+	if _, err := pool.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)`, sqlite.MaxVersion()+1); err != nil {
 		t.Fatal(err)
 	}
 	pool.Close()
 	code, stderr := runMain(t, append(environ, "STAGE_DATA_DIR="+data), "serve", "--listen", "unix:"+filepath.Join(short, "s.sock"))
-	want := fmt.Sprintf("database schema %d is newer than this Stage (knows %d): install a newer Stage or restore a backup (docs/install.md#recovery)", db.MaxVersion()+1, db.MaxVersion())
+	want := fmt.Sprintf("database schema %d is newer than this Stage (knows %d): install a newer Stage or restore a backup (docs/install.md#recovery)", sqlite.MaxVersion()+1, sqlite.MaxVersion())
 	if code != 78 || !strings.Contains(stderr, want) {
 		t.Fatalf("newer schema: %d %s", code, stderr)
 	}

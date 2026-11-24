@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestAcceptanceMigrationPreservesHistoryAndPolicies(t *testing.T) {
  (2,1,'active again','p','running','2026-11-01T00:00:00.000000Z',2),
  (3,1,'done','p','done',NULL,1)`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(900,'note',1,'keep this','original')`)
-	migrateTo(t, pool, MaxVersion()) // the store reads the latest schema
+	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	s := NewStore(pool)
 	ctx := context.Background()
 	a, err := s.GetTask(ctx, 1)
@@ -42,7 +43,7 @@ func TestAcceptanceMigrationPreservesHistoryAndPolicies(t *testing.T) {
 			t.Fatal("policy changed")
 		}
 	}
-	if err := Migrate(ctx, pool); err != nil {
+	if err := sqlite.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
 	snapshots, err = s.Acceptances(ctx, 1)
@@ -62,7 +63,7 @@ func TestAutoCompleteMigrationKeepsAcceptances(t *testing.T) {
 	mustExec(t, pool, `UPDATE tasks SET acceptance_id=7 WHERE id=1`)
 	mustExec(t, pool, `INSERT INTO task_launch_claims VALUES(2,1)`)
 	mustExec(t, pool, `INSERT INTO task_launch_inputs VALUES(2,1,1,7)`)
-	migrateTo(t, pool, MaxVersion()) // the store reads the latest schema
+	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	s := NewStore(pool)
 	ctx := context.Background()
 	cs, err := s.Connections(ctx)

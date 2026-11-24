@@ -2,62 +2,42 @@ package db
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// DBFile is the database file name inside the data directory.
-const DBFile = "stage.db"
-
-// busyTimeoutMs: how long a writer waits for the write lock (BEGIN
-// IMMEDIATE or an autocommit write) before SQLITE_BUSY.
-const busyTimeoutMs = 10000
-
-// Open opens (creating when absent) the SQLite database at path: WAL,
-// busy_timeout, foreign keys on, and every transaction started as BEGIN
-// IMMEDIATE so writers serialize (one writer at a time).
-func Open(ctx context.Context, path string) (*sql.DB, error) {
-	q := url.Values{}
-	q.Set("_txlock", "immediate")
-	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMs))
-	q.Add("_pragma", "foreign_keys(1)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "synchronous(NORMAL)")
-	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
-	pool, err := sql.Open("sqlite", u.String())
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-	if err := pool.PingContext(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("open database %s: %w", path, err)
-	}
-	return pool, nil
-}
-
-// Store is hand-written data access over a SQLite pool.
+// Store is the data access facade: business rules over the storage ports
+// (internal/db/store) of one engine.
 type Store struct {
+	e    store.Engine
 	pool conn
 	// conns caches harness_connections (a handful of rows). Every Store
 	// write to that table drops it; nil reloads on the next read.
 	conns atomic.Pointer[connectionSnapshot]
 }
 
-func NewStore(pool *sql.DB) *Store { return &Store{pool: conn{pool}} }
+// NewStore is the Store over engine e.
+func NewStore(e store.Engine) *Store {
+	s := &Store{e: e}
+	if r, ok := e.(interface{ RawSQL() *sql.DB }); ok {
+		s.pool = conn{r.RawSQL()} // transitional: SQL not yet behind repositories
+	}
+	return s
+}
 
 // App errors shared by db, sync, links and api (api maps them to statuses).
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = store.ErrNotFound
 
 // ConflictError: action not allowed in current state / duplicate (409).
 // Code, when set, is a machine-readable reason (error body "code").

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
-	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 )
 
 // BuildInfo is `stage version --json`.
@@ -34,7 +34,7 @@ func ThisBuild() BuildInfo {
 	return BuildInfo{
 		Identity: buildinfo.Identity, Version: buildinfo.Version, Commit: buildinfo.Revision(),
 		APIVersion: buildinfo.APIVersion, ServiceLabel: buildinfo.Label(), ServiceUnit: UnitName(),
-		Schema: db.MaxVersion(), Build: buildinfo.Stamp,
+		Schema: sqlite.MaxVersion(), Build: buildinfo.Stamp,
 	}
 }
 

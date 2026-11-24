@@ -72,6 +72,7 @@ const (
 	BindingPath     = "path"
 	BindingRemote   = "remote"
 )
+
 type ExternalProject struct {
 	ConnectionID int64  `json:"connectionId"`
 	ExternalID   string `json:"externalId"`
@@ -112,6 +113,7 @@ func (s *Store) SetAutoComplete(ctx context.Context, id int64, on bool) (Harness
 	}
 	return s.GetHarnessConnection(ctx, id)
 }
+
 // SetNewTaskConfig pins (or clears, nil) the model and options new tasks on a
 // connection start with. Permission and mode are never pinned: they start at
 // the harness default.
@@ -186,6 +188,7 @@ func (s *Store) BindProject(ctx context.Context, b ProjectBinding) (Project, err
 	}
 	return s.GetProject(ctx, b.ProjectID)
 }
+
 // UnbindProject deactivates the binding and declines its workspace, so
 // discovery never binds it again until a user binds it manually.
 func (s *Store) UnbindProject(ctx context.Context, projectID, connectionID int64) (Project, error) {

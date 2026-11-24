@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"slices"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness,identity,label) VALUES(7,'opencode','http://oc:4096','oc')`)
 	mustExec(t, pool, `UPDATE t3_connection SET client_id='c',token='keep',t3_url='http://t3:3773',last_full_sync_at='2026-11-01T00:00:00Z',last_error='boom' WHERE id=1`)
 	mustExec(t, pool, `UPDATE opencode_settings SET endpoint='http://oc:4096',username='u',password='p',auth='basic' WHERE id=1`)
-	migrateTo(t, pool, MaxVersion())
+	migrateTo(t, pool, sqlite.MaxVersion())
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}

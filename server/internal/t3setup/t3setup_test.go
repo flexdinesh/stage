@@ -103,9 +103,9 @@ func newEnv(t *testing.T, cfg config.Config, fake bool) *env {
 	e.svc = t3setup.New(t3setup.Options{
 		Config: cfg, Settings: e.store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(e.store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: e.client, Endpoint: t3setup.Resolve(conn), Fake: fake,
 		AdminTokens: e.store.OnMachine(db.LocalMachine),
-		OnPaired:   func() { e.kicks.Add(1) },
-		OnSwitched: func(sw db.Switch) { e.switches = append(e.switches, sw) },
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPaired:    func() { e.kicks.Add(1) },
+		OnSwitched:  func(sw db.Switch) { e.switches = append(e.switches, sw) },
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Local: &t3setup.LocalCLI{
 			Bin:  cfg.T3Bin,
 			Home: "/home/u",

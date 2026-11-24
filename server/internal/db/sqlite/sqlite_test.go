@@ -1,13 +1,15 @@
-package db
+package sqlite
 
 import (
 	"context"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// A panic inside inTx rolls back, releasing the write lock for later writes.
+// A panic inside inTx (Write) rolls back, releasing the write lock for later writes.
 func TestInTxRollsBackOnPanic(t *testing.T) {
 	ctx := context.Background()
 	pool, err := Open(ctx, filepath.Join(t.TempDir(), DBFile))
@@ -18,14 +20,14 @@ func TestInTxRollsBackOnPanic(t *testing.T) {
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	s := NewStore(pool)
+	s := db.NewStore(pool)
 	func() {
 		defer func() {
 			if recover() == nil {
 				t.Fatal("fn did not panic")
 			}
 		}()
-		_ = s.inTx(ctx, func(tx *Tx) error {
+		_ = pool.inTx(ctx, func(tx *runner) error {
 			if _, err := tx.Exec(ctx, `UPDATE t3_connection SET last_error = 'in tx' WHERE machine_id = 1`); err != nil {
 				return err
 			}
@@ -34,10 +36,10 @@ func TestInTxRollsBackOnPanic(t *testing.T) {
 	}()
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := s.SetLastError(wctx, LocalMachine, "after"); err != nil {
+	if err := s.SetLastError(wctx, db.LocalMachine, "after"); err != nil {
 		t.Fatalf("write after panicked tx: %v", err)
 	}
-	c, err := s.GetConnection(ctx, LocalMachine)
+	c, err := s.GetConnection(ctx, db.LocalMachine)
 	if err != nil || c.LastError == nil || *c.LastError != "after" {
 		t.Fatalf("connection %+v, %v", c, err)
 	}

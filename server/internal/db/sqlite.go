@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"modernc.org/sqlite"
 )
 
 // timeLayout is the stored timestamp format: fixed-width UTC with
@@ -22,12 +21,6 @@ const timeLayout = "2006-01-02T15:04:05.000000Z"
 // writes in quick succession would share a timestamp). Schema defaults use
 // strftime('%Y-%m-%dT%H:%M:%f000Z', 'now'), the same format at ms resolution.
 const nowSQL = `stage_now()`
-
-func init() {
-	sqlite.MustRegisterScalarFunction("stage_now", 0, func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
-		return formatTime(time.Now()), nil
-	})
-}
 
 // nowPlusSQL is the current time shifted by a SQLite date modifier
 // ("-1 hour"), at millisecond resolution.

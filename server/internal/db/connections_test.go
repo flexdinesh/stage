@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -11,7 +11,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-func foreignKeyViolations(t *testing.T, pool *sql.DB) int {
+func foreignKeyViolations(t *testing.T, pool *sqlite.DB) int {
 	t.Helper()
 	rows, err := pool.Query(`PRAGMA foreign_key_check`)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,1,'thread'),(6,2,'ses_x')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,session_id,connection_id,launch_attempt) VALUES(1,1,'t3','p','running',5,1,1),(2,1,'oc','p','running',6,2,1)`)
 	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES(2,'/srv','/home')`)
-	migrateTo(t, pool, MaxVersion()) // the store reads the latest schema
+	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}
@@ -92,10 +92,10 @@ func TestLegacyThreadIdsMapToTheActiveT3Connection(t *testing.T) {
 	}
 }
 
-func connectionStore(t *testing.T) (*Store, context.Context, *sql.DB) {
+func connectionStore(t *testing.T) (*Store, context.Context, *sqlite.DB) {
 	t.Helper()
 	pool := openUnmigrated(t)
-	migrateTo(t, pool, MaxVersion())
+	migrateTo(t, pool, sqlite.MaxVersion())
 	return NewStore(pool), context.Background(), pool
 }
 

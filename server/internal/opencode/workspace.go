@@ -24,6 +24,7 @@ func millis(i int64) *time.Time {
 	t := time.UnixMilli(i).UTC()
 	return &t
 }
+
 // globalProject is OpenCode's catch-all project for directories outside any
 // repository it can identify.
 const globalProject = "global"
