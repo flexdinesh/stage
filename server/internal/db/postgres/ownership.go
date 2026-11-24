@@ -61,11 +61,14 @@ func (o ownership) Acquire(ctx context.Context) (store.Lease, error) {
 
 // lockHolder is the application_name of the session holding the owner lock
 // ("" when it cannot be read). A bigint advisory key shows in pg_locks as
-// classid (high 32 bits) and objid (low 32 bits) with objsubid 1.
+// classid (high 32 bits) and objid (low 32 bits) with objsubid 1. Advisory
+// locks are per database: pg_locks lists every database's, so it filters
+// on this one.
 func lockHolder(ctx context.Context, conn *pgx.Conn) string {
 	var name string
 	err := conn.QueryRow(ctx, `SELECT a.application_name FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
  WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+   AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
    AND l.classid = (($1::bigint >> 32) & 4294967295)::oid AND l.objid = ($1::bigint & 4294967295)::oid
  LIMIT 1`, ownerLockKey).Scan(&name)
 	if err != nil {

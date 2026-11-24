@@ -67,6 +67,25 @@ func TestOwnershipSingleOwner(t *testing.T) {
 	}
 }
 
+// Ownership is per database, and OwnedError names this database's holder,
+// not a holder of the same key in another database on the server.
+func TestOwnershipHolderPerDatabase(t *testing.T) {
+	ctx := context.Background()
+	for _, name := range []string{"stage other-db", "stage this-db"} {
+		d := openEngine(t, freshURL(t), Options{ApplicationName: name})
+		held, err := d.Ownership().Acquire(ctx)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		defer held.Release()
+		_, err = openEngine(t, d.url, Options{ApplicationName: "stage second"}).Ownership().Acquire(ctx)
+		var owned *store.OwnedError
+		if !errors.As(err, &owned) || owned.Holder != name {
+			t.Fatalf("second owner: %v, want OwnedError held by %s", err, name)
+		}
+	}
+}
+
 // Losing the lock's connection closes Lost, and another owner can then take
 // the database.
 func TestOwnershipLost(t *testing.T) {
@@ -86,7 +105,8 @@ func TestOwnershipLost(t *testing.T) {
 	admin := openEngine(t, url, Options{ApplicationName: "stage admin"})
 	var killed int
 	if err := admin.Pool().QueryRow(ctx, `SELECT count(pg_terminate_backend(l.pid)) FROM pg_locks l
- WHERE l.locktype = 'advisory' AND l.objid = ($1::bigint & 4294967295)::oid`, ownerLockKey).Scan(&killed); err != nil || killed != 1 {
+ WHERE l.locktype = 'advisory' AND l.objid = ($1::bigint & 4294967295)::oid
+   AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())`, ownerLockKey).Scan(&killed); err != nil || killed != 1 {
 		t.Fatalf("terminate holder: %d %v", killed, err)
 	}
 	select {

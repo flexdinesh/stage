@@ -58,8 +58,10 @@ Stop with `docker compose down`. `docker compose down -v` also deletes the
   `STAGE_DATABASE_URL` to your server. The role needs to own the database (or
   hold `CREATE` on it) for the `pg_trgm` extension.
 
-There is no copy from an existing SQLite `stage.db` yet: this example starts
-with an empty database.
+This example starts with an empty database. To move an existing SQLite
+`stage.db` into it, stop the server and run `stage db copy` from the image
+(the database the `app` service migrated on first start still counts as
+empty): [cutover and rollback](../../docs/storage.md#cutover).
 
 ## In front of it
 

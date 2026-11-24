@@ -143,7 +143,7 @@ docker compose up -d --build
 - **Still one server**: it holds a lock on the database for its lifetime, and a second server on the same database exits at startup. Run one replica.
 - **Back up the database yourself** with `pg_dump` or your provider's snapshots, ideally before every update. The server takes no backup; it logs a warning before it migrates.
 - **No volume for Stage**: on Postgres the data dir holds only the lock and sockets.
-- **Starting fresh**: the example starts with an empty database. There is no copy from an existing `stage.db` yet.
+- **Moving an existing `stage.db`**: the example starts with an empty database. To bring SQLite data over, stop the server and run `stage db copy --from <data dir>/stage.db --to <postgres url>` from the image: it copies every table into the empty database and verifies it, and leaves `stage.db` untouched so you can switch back. Steps: [cutover and rollback](https://github.com/flexdinesh/stage/blob/main/docs/storage.md#cutover).
 
 ## Remove and update
 

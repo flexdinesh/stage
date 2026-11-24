@@ -20,7 +20,7 @@ that disagrees with this file updates it in the same PR.
 | [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 29; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 29 (#404); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
-| [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
+| [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
 | [Docker image and compose example](#docker-image-and-compose-example) | as described (#407) | |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
@@ -481,7 +481,7 @@ All gates run in `mise run check`; there is no CI.
 | --- | --- | --- |
 | `check:go` | always | `go vet` (plain, `smoke`, `postgres` tags), `CGO_ENABLED=0 go build -tags postgres` of the server, `go test ./...` (SQLite) |
 | `check:storage` (`scripts/check-storage.sh`) | always | the gate tests by name under `server/internal/db` (`TestMigrationVersionParity`, `TestStepwiseMigrations`, `TestDriverImportBoundary`) and the `internal/db/{store,sqlite,postgres,storetest}` packages; a gate or package not written yet prints `not present yet` and passes; the Postgres pin (the image in `examples/postgres/compose.yaml` is `STAGE_PG_IMAGE`) |
-| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites, and `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database). Without Docker it fails, never skips |
+| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `server/cmd/stage/db*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/... ./cmd/stage/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites, `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database), and the [data copy](#data-copy-and-cutover) round trip and command. Without Docker it fails, never skips |
 
 - New gate tests use the names above; `check:storage` finds them by name.
 - `STAGE_PG_IMAGE` in `mise.toml` is the one Postgres pin (latest major, one
@@ -540,36 +540,103 @@ Adding a case:
 
 `stage db copy --from <sqlite path> --to <postgres url>` moves a SQLite
 database into Postgres. It needs a binary with Postgres support, so it runs
-from the Docker image.
+from the Docker image; any other binary exits 78 before touching anything.
 
-- **Offline:** refused while the SQLite data dir lock is held.
-- **Versions:** the source must be at a version this binary knows, at or
-  above the Postgres baseline. The target holds no Stage rows; an empty target
-  is migrated to the source's version, a target at another version is
-  refused.
-- **Copy:** every table in foreign-key order (not SQLite's FTS tables: the
-  Postgres trigram indexes build from the copied rows), IDs preserved, encodings
-  converted (TEXT time to `timestamptz`, TEXT JSON to `jsonb` or `text` per
-  [Encodings](#encodings), `BLOB` to `bytea`), identity sequences reset past
-  the highest ID. No legacy transforms: the source is at or above the
-  baseline, where #417 has already dropped the
+| Path | Owns |
+| --- | --- |
+| `cmd/stage` (`db.go`, `db_postgres.go`) | the command: flags, the data dir lock, opening both engines, output, exit codes |
+| `internal/db/store` (`copy.go`) | the copy ports: `CopySource`, `CopyTarget`, `CopyLoad`, `CopyKind` |
+| `internal/db/sqlite` (`copy.go`) | the read-only source and the SQLite-encoding conversions |
+| `internal/db/postgres` (`copy.go`) | the target: state, schema in foreign-key order, the load transaction |
+| `internal/db/datacopy` | the rules below and the checksums; no SQL, no driver |
+
+- **Offline:** the command takes the source data dir's `stage.lock` (the
+  directory holding the file) and holds it for the whole copy: a running
+  server there exits it 75, and no server can start on the source meanwhile.
+  It also holds the target's [ownership lock](#single-owner): a server on
+  the target exits it 75, and none can start until the copy ends.
+- **Source untouched:** opened read-only (`mode=ro`, `query_only`). Without a
+  `stage.db-wal` (a cleanly stopped server leaves none) it opens
+  `immutable`, so no `-wal` or `-shm` file appears; with one (a crashed
+  server) it reads the WAL's commits and may create a `-shm` file. Nothing
+  writes the database file.
+- **Versions:** the source must be at this binary's schema head. Below it,
+  start this image once on the SQLite database (it migrates, with its
+  [backup](#backups)), stop it, then copy; above it, use a newer image. The
+  target must be either fresh (no tables: the copy migrates it to the head) or
+  at the head holding only the baseline's seeded rows (user 1, machine 1,
+  harness connection 1, its `t3_connection` and `opencode_settings`, the
+  preferences row; for example after a server started on it once). Anything
+  else is refused: another version, other rows, or tables without a Stage
+  schema. Refusals write no rows; only a schema mismatch (below) is found
+  after a fresh target was migrated.
+- **Schemas:** both sides must hold the same tables and columns, apart from
+  engine-internal tables (SQLite's `sqlite_*`, `goose_db_version`, the FTS5
+  tables and their shadow tables: the Postgres trigram indexes build from
+  the copied rows). The target's column types decide each value's encoding.
+- **Copy:** one Postgres transaction: clear the seeded rows, copy every table
+  in foreign-key order (parents first, from the target's catalog) with its
+  IDs, converting TEXT time to `timestamptz` (UTC, microseconds), INTEGER
+  0/1 to `boolean`, TEXT JSON to `jsonb` (queried) or `text` (evidence, bytes
+  kept) per [Encodings](#encodings), `BLOB` to `bytea`. Text must be valid
+  UTF-8 without NUL. A value that does not convert fails the copy, naming the
+  table, column and row. Identity sequences restart past
+  `max(sqlite_sequence, highest ID)`, so IDs SQLite issued and deleted are
+  never reissued (`AUTOINCREMENT`'s rule). No legacy transforms: the source
+  is at the head, where #417 has already dropped the
   [legacy columns](#legacy-columns-and-compatibility-triggers).
-- **Verify:** per-table row counts and checksums; any mismatch exits
-  non-zero.
+- **Verify:** inside the same transaction, before committing, every table is
+  read back and compared with the source: row count and a checksum (sha256
+  over the sorted sha256 of each row's canonical encoding, so engine row
+  order and collation don't matter; times compare as UTC microseconds,
+  queried JSON by value since `jsonb` reorders keys and normalizes numbers,
+  everything else by bytes). Any error or mismatch rolls the transaction
+  back: the target is left as it was (or migrated with only its seeds, when
+  it was fresh), and rerunning is safe.
+- **Output:** one line naming the source, schema, table and row counts, then
+  one line per table (rows, checksum prefix, `ok`). Never the URL.
+- **Exit:** 0 copied and verified; 2 usage; 75 the source data dir or the
+  target is held by a server; 78 no Postgres support or an invalid `--to`;
+  1 refused, failed or mismatched (the target rolled back).
+- **Tests** (`check:postgres`): `datacopy/roundtrip_postgres_test.go` seeds
+  every table of a SQLite database with edge values (and fails when a table
+  has no rows, so a new table needs a seed), copies it into a fresh database,
+  compares `db.Store` reads on both engines, checks evidence bytes, new IDs
+  past the high-water mark, the refusals and the rollback, and that the
+  source directory is unchanged; `cmd/stage` runs the command (held data
+  dir, owned target, old source). Coordinator rules run against fakes in
+  `check:go`.
 
 ### Cutover
 
-1. Stop the server (Kubernetes: scale to 0; compose: stop the service).
-2. Back up `stage.db` while stopped (copy the file and any `stage.db-wal`).
-3. Start the new image once on SQLite if the source is below the Postgres
-   baseline (it migrates, with its own backup), then stop it.
-4. `stage db copy --from <data dir>/stage.db --to <url>`; require exit 0.
-5. Start with `STAGE_DATABASE_URL=<url>`; check `/api/health` reports
-   `postgres` and the expected schema.
+Plan a short write outage: the server is down from step 1 to step 6.
 
-**Rollback:** stop, unset `STAGE_DATABASE_URL`, start. The SQLite file is
-untouched by the copy. Writes made on Postgres after the cutover are not
-copied back.
+1. **Stop the server** and keep it stopped (Kubernetes: scale to 0; compose:
+   `docker compose stop <service>`). The copy refuses while it holds the data
+   dir.
+2. **Back up** `<data dir>/stage.db`, and `stage.db-wal` if present, while
+   stopped (copy the files). The copy leaves them untouched; this is for
+   anything else that goes wrong.
+3. **Prepare the target:** an empty Postgres database the server's role owns
+   (or holds `CREATE` on: migrations create `pg_trgm`), with a UTF-8 ctype
+   ([Search](#search)). Use the same image version for every step below.
+4. **Bring the source to this image's schema** if `stage db copy` reports it
+   older: start the image once on SQLite (`STAGE_DATABASE_URL` unset, same data
+   dir), wait for `/api/health`, stop it.
+5. **Copy:** run the image with the data dir mounted:
+   `stage db copy --from <data dir>/stage.db --to <url>`. Require exit 0 and
+   `verified`. On a refusal or a failure, fix the cause and rerun: a failed
+   copy leaves the target empty.
+6. **Start on Postgres** with `STAGE_DATABASE_URL=<url>` and the same data
+   dir. Check that `/api/health` reports `"engine": "postgres"` and the
+   expected schema, and that `stage status` prints `database ok (postgres)`.
+   Spot-check recent tasks and journals in the app.
+
+**Rollback:** stop the server, unset `STAGE_DATABASE_URL`, start it: it runs
+on the SQLite `stage.db` in the data dir, which the copy never wrote. Writes
+made on Postgres after the cutover are not copied back (there is no reverse
+copy); to retry the cutover later, drop and recreate the Postgres database
+first, since a copy refuses a target holding data.
 
 ## Legacy columns and compatibility triggers
 
