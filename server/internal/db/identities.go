@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -206,6 +207,31 @@ func (s *Store) UnbindProject(ctx context.Context, projectID, connectionID int64
 	}
 	return s.GetProject(ctx, projectID)
 }
+
+// ensureSession returns ref's session identity, creating it; Invalid for an
+// incomplete ref or an unknown connection.
+func ensureSession(ctx context.Context, tx store.Tx, ref SessionRef) (int64, error) {
+	if ref.ConnectionID <= 0 || ref.ExternalSessionID == "" {
+		return 0, Invalid("connectionId and externalSessionId are required")
+	}
+	if err := requireConnection(ctx, tx, ref.ConnectionID); err != nil {
+		return 0, err
+	}
+	return tx.Sessions().Ensure(ctx, ref.ConnectionID, ref.ExternalSessionID)
+}
+
+// requireConnection is Invalid for an unknown connection.
+func requireConnection(ctx context.Context, tx store.Tx, id int64) error {
+	exists, err := tx.Connections().Exists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return Invalid("unknown connection %d; select a configured harness connection", id)
+	}
+	return nil
+}
+
 func sessionIdentity(ctx context.Context, tx *Tx, ref SessionRef) (int64, error) {
 	if ref.ConnectionID <= 0 || ref.ExternalSessionID == "" {
 		return 0, Invalid("connectionId and externalSessionId are required")

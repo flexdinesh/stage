@@ -38,6 +38,9 @@ type Tx interface {
 	Preferences() Preferences
 	Users() Users
 	Attachments() Attachments
+	Notifications() Notifications
+	Sessions() Sessions
+	Connections() Connections
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers
