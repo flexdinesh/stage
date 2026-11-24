@@ -12,14 +12,14 @@ that disagrees with this file updates it in the same PR.
 | Part | Today | Task |
 | --- | --- | --- |
 | [Engines and selection](#engines-and-selection) | SQLite only, `<data dir>/stage.db` | #405 |
-| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite` and `internal/db/dbtest` (#398); no `postgres` or `storetest` package yet | Postgres: #403, `storetest`: #400 |
-| [Transactions and locking](#transactions-and-locking) | SQLite: as described | Postgres: #403, proven by #400 |
+| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite`, `internal/db/dbtest` (#398) and `internal/db/storetest` (#400); no `postgres` package yet | Postgres: #403 |
+| [Transactions and locking](#transactions-and-locking) | SQLite: as described; the `storetest` concurrency cases exist (#400) | Postgres: #403 |
 | [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
 | [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
 | [Migrations](#migrations) | one SQLite dir, `server/internal/db/sqlite/migrations`, head 25; journal events by triggers | Postgres dir and parity #401, triggers to Go #399, Postgres baseline #403 |
 | [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
-| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` runs (#398); the other gates report `not present yet` | gates: #400, #401, #403 |
+| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` runs (#398); `storetest` runs on SQLite in `check:storage` and, until #403, on SQLite again in `check:postgres` (#400); the migration gates report `not present yet` | gates: #401, #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); every Drop row is still in the SQLite schema | drops: #399 (trigger logic to Go), #417 (SQLite contract), #403 (baseline omits them) |
@@ -58,8 +58,8 @@ its API, and only `internal/serve` composes an engine.
 | `internal/db/store` | Ports: the unit of work, repositories, capability ports, and the Go types they exchange | Import a driver, `internal/db/sqlite` or `internal/db/postgres` |
 | `internal/db/sqlite` | Every SQLite statement, `modernc.org/sqlite`, pragmas, `stage_now`, `VACUUM INTO`, FTS5, SQLite error codes, the SQLite migrations dir | Hold business rules; import pgx |
 | `internal/db/postgres` (build tag `postgres`) | Every Postgres statement, pgx v5 (`database/sql` only where goose needs it), the advisory lock, SQLSTATE mapping, the Postgres migrations dir | Hold business rules; import modernc; be needed by code built without the tag |
-| `internal/db/storetest` | The adapter-agnostic contract suite: takes an engine factory, runs every port through `db.Store` and the ports | Depend on one engine's SQL |
-| `internal/db/dbtest` | Test helpers; opens stores through the engine (a temp SQLite file, or the `check:postgres` database) | Open a database any other way |
+| `internal/db/storetest` | The adapter-agnostic contract suite: `Run(t, Factory)` runs every case through `db.Store` and the ports on engines from the factory ([Contract suite](#contract-suite)) | Depend on one engine's SQL; import an adapter |
+| `internal/db/dbtest` | Test helpers; opens engines and stores (`Engine`, `DB.Reset`): a temp SQLite file, or the `check:postgres` database once #403 wires it | Open a database any other way |
 
 Code outside the Postgres adapter compiles without the tag.
 `TestDriverImportBoundary` (`internal/db/boundary_test.go`, run by
@@ -155,21 +155,23 @@ every write to that table, as today. It assumes one process
   committed data. A use case that needs one snapshot across statements says
   so and #403 gives it `REPEATABLE READ READ ONLY`.
 
-| Use case | Store entry (today) | Invariant | Postgres |
-| --- | --- | --- | --- |
-| Launch claim | `TransitionTask` (begin attempt) | one attempt begins per task and attempt number; current acceptance checked and inputs pinned atomically | task row `FOR UPDATE`; unique `(task_id, attempt)` |
-| Release and schedule runner picks | `LaunchableForConnection`, `DueForConnection` | each item launches once | the launch claim's row lock decides; the runners stay reconcilers under Leases (#409), not Queue jobs ([ADR 0004](adr/0004-queue-port.md#loops)) |
-| Acceptance | `ChangeAcceptance` | one revision sequence per task; idempotent `requestId` | task row `FOR UPDATE`; unique request key with `ON CONFLICT` |
-| Tree mutations | `CreateTree`, `SetNeeds`, membership changes | no cycles; a task in at most one tree; needs within the tree | tree rows, then task rows, `FOR UPDATE` before any need check |
-| Schedule fire | `FireSchedule` | one spawn per fire time | schedule row `FOR UPDATE`; next fire advanced in the same transaction |
-| Connection switch | `SwitchInstance`, `ForgetConnection` | at most one active connection per machine and kind; identity unique per machine | the machine's connection rows `FOR UPDATE`; partial unique indexes |
-| Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | unique `(owner, request_id)`; `ON CONFLICT DO NOTHING`, re-read, compare |
-| Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | one `UPDATE ... WHERE` unused and unexpired `... RETURNING` |
-| Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | attempt row `FOR UPDATE` |
-| Project import | `ImportWorkspaces` | one project per workspace path per machine | connection row `FOR UPDATE`; unique binding indexes |
+| Use case | Store entry (today) | Invariant | Postgres | `storetest` case |
+| --- | --- | --- | --- | --- |
+| Launch claim | `TransitionTask` (begin attempt) | one attempt begins per task and attempt number; current acceptance checked and inputs pinned atomically | task row `FOR UPDATE`; unique `(task_id, attempt)` | `ConcurrentLaunchClaim` |
+| Release and schedule runner picks | `LaunchableForConnection`, `DueForConnection` | each item launches once | the launch claim's row lock decides; the runners stay reconcilers under Leases (#409), not Queue jobs ([ADR 0004](adr/0004-queue-port.md#loops)) | `ConcurrentLaunchClaim` (the claim decides) |
+| Acceptance | `ChangeAcceptance` | one revision sequence per task; idempotent `requestId` | task row `FOR UPDATE`; unique request key with `ON CONFLICT` | `ConcurrentAcceptance`, `ConcurrentAcceptanceRequestID` |
+| Tree mutations | `CreateTree`, `SetNeeds`, membership changes | no cycles; a task in at most one tree; needs within the tree | tree rows, then task rows, `FOR UPDATE` before any need check | `ConcurrentNeedsSerialize`, `ConcurrentTreeMembership`, `ConcurrentNeedsAndRemoval`, `JournalMoveAndAppendSerialize` |
+| Schedule fire | `FireSchedule` | one spawn per fire time | schedule row `FOR UPDATE`; next fire advanced in the same transaction | `ConcurrentScheduleFire` |
+| Connection switch | `SwitchInstance`, `ForgetConnection` | at most one active connection per machine and kind; identity unique per machine | the machine's connection rows `FOR UPDATE`; partial unique indexes | `ConcurrentConnectionSwitch` |
+| Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | unique `(owner, request_id)`; `ON CONFLICT DO NOTHING`, re-read, compare | `JournalConcurrentRetryAndPagination`, `ConcurrentNoteRequestIDConflict` |
+| Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | one `UPDATE ... WHERE` unused and unexpired `... RETURNING` | `RedeemPairingConcurrentSingleWinner` |
+| Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | attempt row `FOR UPDATE` | none yet |
+| Project import | `ImportWorkspaces` | one project per workspace path per machine | connection row `FOR UPDATE`; unique binding indexes | none yet |
 
 The table is indicative until #403 lands; the `storetest` concurrency cases
-(#400) are the proof, and #403 corrects the table to what they prove.
+are the proof, and #403 corrects the table to what they prove. On SQLite the
+single writer keeps every invariant, so these cases pass there by
+construction; they bite on an engine without a global lock.
 
 ## Single owner
 
@@ -324,8 +326,49 @@ All gates run in `mise run check`; there is no CI.
 - Postgres tests use only the `stage-pgtest-*` containers; never another
   database, the prod stack or the default data dir.
 - `storetest` runs on SQLite in `check:storage` and on Postgres in
-  `check:postgres`. Adding a case: write it once in `storetest` against the
-  ports and `db.Store`; it runs on both engines.
+  `check:postgres` ([Contract suite](#contract-suite)).
+
+### Contract suite
+
+`internal/db/storetest` holds every test that needs only `db.Store` and the
+ports: business rules, port contracts (unit of work, error classification,
+ordering, microsecond time, JSON evidence bytes, blobs, Unicode) and the
+concurrency cases of [Transactions and locking](#transactions-and-locking).
+Tests that need SQL, a migration step or `internal/db` internals stay in
+`internal/db` (or the adapter's package).
+
+- **Shape:** `storetest.Run(t, Factory)` runs each registered case as a
+  subtest, `TestContract/<Name>`, in name order. `Factory` opens a fresh,
+  migrated, empty engine per call (closed when the test ends); engines from
+  separate calls share nothing.
+- **Engine:** `TestContract` (`storetest_test.go`) runs it with
+  `dbtest.Engine`: a temp SQLite file. Under `-tags postgres` with
+  `STAGE_TEST_DATABASE_URL` set, `dbtest/engine_postgres.go` only logs that
+  the Postgres adapter is not present yet and stays on SQLite. #403 replaces
+  that file with an `Engine` that opens a fresh database or schema on the
+  URL, so `check:postgres` runs the suite on Postgres with no script change.
+- **Run one case:** `go test ./internal/db/storetest -run 'TestContract/<Name>$'`.
+
+Adding a case:
+
+1. Put it in the `storetest` file for its aggregate (`concurrency.go` for a
+   race, `ports.go` for a port contract), as
+   `func caseName(t *testing.T, open Factory)`, and add
+   `register("Name", caseName)` to that file's `init`. Names are unique
+   (`register` panics on a duplicate).
+2. Open engines with `open(t)` or a Store with `setup(t, open)`, and reach data
+   only through `db.Store`, `store.Tx` repositories and the engine's capability
+   ports. No SQL, no driver, no adapter import: `storetest` is non-test code
+   to `TestDriverImportBoundary`.
+3. A concurrency case releases its racers together with `race(n, fn)`, then
+   asserts the invariant, not an ordering. A new read-check-write use case
+   adds its row to the [Transactions and locking](#transactions-and-locking)
+   table, naming the case.
+4. Assert engine-neutral facts: compare times with `Equal` at microsecond
+   precision, don't depend on collation beyond lowercase ASCII, and give
+   ordering a documented tiebreak.
+5. Run `mise run check` (`check:storage`; `check:postgres` runs because db
+   code changed).
 
 ## Data copy and cutover
 
