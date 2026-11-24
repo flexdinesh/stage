@@ -3,14 +3,13 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
-
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 )
 
 // openUnmigrated opens a fresh temp database with no migrations applied.

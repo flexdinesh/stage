@@ -2,10 +2,9 @@ package db
 
 import (
 	"context"
-	"testing"
-
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"testing"
 )
 
 func TestIdentityUpgradePreservesHistory(t *testing.T) {

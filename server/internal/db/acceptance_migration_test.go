@@ -2,9 +2,8 @@ package db
 
 import (
 	"context"
-	"testing"
-
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"testing"
 )
 
 func TestAcceptanceMigrationPreservesHistoryAndPolicies(t *testing.T) {
