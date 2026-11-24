@@ -19,14 +19,6 @@ const (
 	HarnessOpenCode = "opencode"
 )
 
-// SQL (transitional, for db code not yet behind repositories) for the legacy T3 connection id (the local machine's active T3: the
-// owner of session-less thread ids written before connections existed), and
-// for every T3 connection id on any machine.
-const (
-	legacyT3SQL      = `(SELECT id FROM harness_connections WHERE machine_id=1 AND harness='t3' AND active=1)`
-	t3ConnectionsSQL = `(SELECT id FROM harness_connections WHERE harness='t3')`
-)
-
 type connectionSnapshot struct{ rows []store.ConnectionRow }
 
 func (s *Store) snapshot() connectionSnapshot {

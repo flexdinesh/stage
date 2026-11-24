@@ -3,26 +3,18 @@ package db
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"sync/atomic"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
-
-	"modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Store is the data access facade: business rules over the storage ports
 // (internal/db/store) of one engine.
 type Store struct {
-	e    store.Engine
-	pool conn
+	e store.Engine
 	// conns caches harness_connections (a handful of rows). Every Store
 	// write to that table drops it; nil reloads on the next read.
 	conns atomic.Pointer[connectionSnapshot]
@@ -30,11 +22,7 @@ type Store struct {
 
 // NewStore is the Store over engine e.
 func NewStore(e store.Engine) *Store {
-	s := &Store{e: e}
-	if r, ok := e.(interface{ RawSQL() *sql.DB }); ok {
-		s.pool = conn{r.RawSQL()} // transitional: SQL not yet behind repositories
-	}
-	return s
+	return &Store{e: e}
 }
 
 // App errors shared by db, sync, links and api (api maps them to statuses).
@@ -70,63 +58,6 @@ type T3Error = HarnessError
 
 func (e *HarnessError) Error() string { return e.Err.Error() }
 func (e *T3Error) Unwrap() error      { return e.Err }
-
-func sqliteCode(err error) int {
-	var e *sqlite.Error
-	if errors.As(err, &e) {
-		return e.Code()
-	}
-	return 0
-}
-
-func isUniqueViolation(err error) bool {
-	c := sqliteCode(err)
-	return c == sqlite3.SQLITE_CONSTRAINT_UNIQUE || c == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
-}
-
-func isForeignKeyViolation(err error) bool {
-	return sqliteCode(err) == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY
-}
-
-func notFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	return err
-}
-
-// where builds a dynamic WHERE clause with numbered placeholders.
-type where struct {
-	conds []string
-	args  []any
-}
-
-func (w *where) arg(v any) string {
-	w.args = append(w.args, v)
-	return "$" + strconv.Itoa(len(w.args))
-}
-
-func (w *where) add(cond string) { w.conds = append(w.conds, cond) }
-
-func (w *where) sql() string {
-	if len(w.conds) == 0 {
-		return ""
-	}
-	return " WHERE " + strings.Join(w.conds, " AND ")
-}
-
-// likePattern escapes LIKE metacharacters (escape character \) for a
-// substring match; use the placeholder with likeSQL.
-func likePattern(q string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(q) + "%"
-}
-
-// likeSQL matches col against a likePattern placeholder, case-insensitively
-// (SQLite lower() folds ASCII only).
-func likeSQL(col, pattern string) string {
-	return "lower(" + col + ") LIKE lower(" + pattern + `) ESCAPE '\'`
-}
 
 func nullIfEmpty(s string) *string {
 	if s == "" {

@@ -172,7 +172,3 @@ func nullIfEmpty(s string) *string {
 	}
 	return &s
 }
-
-// RawSQL is the pool, for db code not yet behind repositories
-// (transitional; removed once every aggregate is).
-func (d *DB) RawSQL() *sql.DB { return d.DB }
