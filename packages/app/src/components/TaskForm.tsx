@@ -32,9 +32,10 @@ import {
 import { handoffHint } from "../lib/handoff.ts";
 import { effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
-import { formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
+import { blockedStartModes, formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
+import { LaunchBlockAlert, useLaunchGate } from "./LaunchGate.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
@@ -275,7 +276,11 @@ function TaskFormDrawer({
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
   const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
-  const mode = s.mode;
+  // A harness that cannot launch now leaves Backlog (and an edited task's own timing); the choice returns with it.
+  const launchGate = useLaunchGate();
+  const block = selectedProject === undefined || connection === 0 ? null : launchGate({ connectionId: connection, projectId: selectedProject.id, projectTitle: selectedProject.title });
+  const offModes = blockedStartModes(modes, block !== null, opened === null ? null : opened.state.mode);
+  const mode: StartMode = offModes.includes(s.mode) ? "backlog" : s.mode;
   // The need a worktree can stack on (editing a task with needs); baseTaskId is kept from the task.
   const taskWs = task?.workspace;
   const baseTaskId = taskWs?.type === "worktree" ? (taskWs.baseTaskId ?? null) : null;
@@ -289,7 +294,7 @@ function TaskFormDrawer({
   // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
   const inheritedMode = isNew ? (defaultTree?.startMode ?? null) : task !== undefined && task.startMode === null ? task.effectiveStartMode : null;
-  const { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError } = useStartTiming(s);
+  const { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError } = useStartTiming({ ...s, mode });
   // "T3 · desk" once there is more than one machine, else "T3".
   const connectionName = (id: number) => withMachine(harnesses.name(id), machineTag(machines, harnesses.connection(id)?.machineId ?? 0));
 
@@ -457,13 +462,9 @@ function TaskFormDrawer({
           </Hint>
         )}
         <ErrorText error={harnesses.error}/>
-        {selectedProject === undefined || !connection || bound ? null : <Alert>
-          Planning is available. Bind or confirm a workspace before launching.
-          <div className="mt-2 flex flex-wrap gap-3">
-            <TextLink to={`/projects/${selectedProject.id}`} variant="rest">Bind workspace</TextLink>
-            {mode === "now" ? <Button small onClick={() => set({mode: "backlog"})}>Save to backlog instead</Button> : null}
-          </div>
-        </Alert>}
+        {block === null || !full ? null : (
+          <LaunchBlockAlert block={block} {...(modes.includes("backlog") && mode === "backlog" ? { after: "Saves to backlog until then." } : {})} />
+        )}
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus={isNew ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
@@ -523,7 +524,13 @@ function TaskFormDrawer({
         {modes.length > 0 ? (
           <FieldGroup label="Start">
             <div className="md:self-start">
-              <Segmented label="Start" fill options={modes.map((m) => START_OPTIONS[m])} value={mode} onChange={(m) => set({ mode: m })} />
+              <Segmented
+                label="Start"
+                fill
+                options={modes.map((m) => ({ ...START_OPTIONS[m], disabled: offModes.includes(m) }))}
+                value={mode}
+                onChange={(m) => set({ mode: m })}
+              />
             </div>
           </FieldGroup>
         ) : null}

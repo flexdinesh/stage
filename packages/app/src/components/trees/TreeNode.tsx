@@ -11,13 +11,22 @@ import { AppButton, Button, Chip, IdTag, InlineError, Meta, TextButton, TextLink
 import { CompletionButton } from "../Completion.tsx";
 import { isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
+import { BlockedReason, useLaunchGate } from "../LaunchGate.tsx";
 import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
 
 /** The task's status chips (see `statusChips`). `className` styles an open task's chip (a completed one ignores it). */
-export function NodeChip({ task, className }: { task: Pick<Task, "state" | "readiness" | "acceptanceId">; className?: string | undefined }) {
-  const chips = statusChips(task).map((c) => {
+export function NodeChip({
+  task,
+  className,
+}: {
+  task: Pick<Task, "state" | "readiness" | "acceptanceId" | "connectionId" | "projectId" | "projectTitle">;
+  className?: string | undefined;
+}) {
+  // A ready task its connection cannot launch reads backlog.
+  const blocked = useLaunchGate()(task) !== null;
+  const chips = statusChips(task, { blocked }).map((c) => {
     const { label, tone } = statusChipView(c);
     return (
       <Chip key={c} tone={tone} dot className={task.acceptanceId === null ? className : undefined}>
@@ -51,6 +60,7 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
+  const block = useLaunchGate()(task);
   const appLink = useSessionDestination()(task);
   let action: ReactNode = null;
   if (task.state === "needs_input") {
@@ -64,9 +74,18 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
     action = <CompletionButton task={task} review />;
   } else if (startable) {
     action = (
-      <Button small variant={task.state === "backlog" ? "primary" : "secondary"} busy={start.isPending} onClick={() => start.mutate()} className={cls}>
-        {task.state === "backlog" ? (task.startAt === null ? "Start" : "Start now") : "Retry"}
-      </Button>
+      <BlockedReason reason={block?.reason} className={cls}>
+        <Button
+          small
+          variant={task.state === "backlog" ? "primary" : "secondary"}
+          busy={start.isPending}
+          disabled={block !== null}
+          onClick={() => start.mutate()}
+          className={cls}
+        >
+          {task.state === "backlog" ? (task.startAt === null ? "Start" : "Start now") : "Retry"}
+        </Button>
+      </BlockedReason>
     );
   } else if (appLink !== null) {
     action = (
@@ -114,7 +133,8 @@ export function TreeNode({
   onSelect: (id: number) => void;
 }) {
   const { pending, failed } = pendingNeeds(task, byId);
-  const when = inState(task);
+  const blocked = useLaunchGate()(task) !== null;
+  const when = inState(task, undefined, { blocked });
   const ran = task.state === "done" || task.state === "settled" ? duration(task.runStartedAt, task.runEndedAt) : null;
   const titleCls = "truncate text-ui font-medium after:absolute after:inset-0";
   const label = `#${task.id} ${task.title} · Project: ${task.projectTitle}`;

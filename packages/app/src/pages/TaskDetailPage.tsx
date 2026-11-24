@@ -11,6 +11,7 @@ import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { AcceptedResult } from "../components/Completion.tsx";
+import { BlockedReason, LaunchBlockAlert, useLaunchGate } from "../components/LaunchGate.tsx";
 import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
@@ -167,6 +168,7 @@ function stamp(iso: string): string {
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
   const { kindName } = useHarnesses();
+  const launchGate = useLaunchGate();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
@@ -202,7 +204,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const live = { ...task, connectionActive: true };
   const startable = canStart(live);
   const stoppable = canStop(live);
-  const lockedHint = retired ? retiredHint(kindName(task.harness)) : undefined;
+  // A live connection that cannot launch now (disconnected, offline, unreachable, no workspace): Start stays, disabled.
+  const block = startable ? launchGate(task) : null;
+  const lockedHint = retired ? retiredHint(kindName(task.harness)) : block?.reason;
   const appUrl = useSessionDestination()(task);
   // A harness without a destination to open may offer a command that resumes the session in its own client.
   const resume = appUrl === null ? resumeCommand(task) : null;
@@ -275,18 +279,21 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </Alert>
         ) : null}
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
+        {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
 
         <div className="flex flex-wrap items-center gap-2">
           {startable ? (
-            <Button
-              variant="primary"
-              busy={start.isPending}
-              disabled={retired}
-              onClick={() => start.mutate()}
-              {...(lockedHint !== undefined ? { title: lockedHint } : task.startAt === null ? {} : { title: "Starts now instead of at the scheduled time" })}
-            >
-              {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
-            </Button>
+            <BlockedReason reason={lockedHint}>
+              <Button
+                variant="primary"
+                busy={start.isPending}
+                disabled={retired || block !== null}
+                onClick={() => start.mutate()}
+                {...(lockedHint !== undefined || task.startAt === null ? {} : { title: "Starts now instead of at the scheduled time" })}
+              >
+                {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
+              </Button>
+            </BlockedReason>
           ) : null}
           {waiting ? null : openInApp("secondary", "max-md:hidden")}
           {stoppable ? stopButton("max-md:hidden") : null}

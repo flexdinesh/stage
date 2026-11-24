@@ -107,3 +107,11 @@ test("open tasks show readiness in backlog, else their execution state", () => {
   assert.deepEqual(statusChips(task(1, { state: "running" })), ["running"]);
   assert.deepEqual(statusChips(task(1, { state: "failed" })), ["failed"]);
 });
+
+test("a ready task its connection cannot launch reads backlog; other chips stay", () => {
+  assert.deepEqual(statusChips(task(1, { readiness: "ready" }), { blocked: true }), ["backlog"]);
+  assert.deepEqual(statusChips(task(1, { readiness: "ready" }), { blocked: false }), ["ready"]);
+  assert.deepEqual(statusChips(task(1, { readiness: "blocked", needs: [3] }), { blocked: true }), ["blocked"]);
+  assert.deepEqual(statusChips(task(1, { state: "failed" }), { blocked: true }), ["failed"]);
+  assert.deepEqual(statusChips(task(1, { state: "backlog", acceptanceId: 9 }), { blocked: true }), ["completed"]);
+});

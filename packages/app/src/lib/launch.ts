@@ -1,5 +1,7 @@
-import type { Task } from "../api/types.ts";
+import type { HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
+import type { HarnessSummary } from "./connections.ts";
 import { relativeTime } from "./format.ts";
+import { machineSetupState } from "./machines.ts";
 
 /** Copy for the task detail banner of a launch Stage has not confirmed; `name` is the harness's name. */
 export interface LaunchNotice {
@@ -35,4 +37,66 @@ function retryMeta(failed: number, retryAt: string | null, since: string | null,
   if (retryAt !== null) parts.push(new Date(retryAt).getTime() > now ? `next retry ${relativeTime(retryAt, now)}` : "retrying now");
   if (since !== null) parts.push(`started ${relativeTime(since, now)}`);
   return parts.join(" · ");
+}
+
+/** Why a task's connection cannot launch it right now. */
+export type LaunchBlockKind = "disconnected" | "offline" | "needs_update" | "unreachable" | "unbound";
+
+/** A task Start refuses before the request: why (a sentence for an Alert or a tooltip) and where the user fixes it. */
+export interface LaunchBlock {
+  kind: LaunchBlockKind;
+  reason: string;
+  /** The page that fixes it; null when only waiting helps (an offline machine). */
+  fix: { label: string; to: string } | null;
+}
+
+/** What `launchBlock` reads about a task's connection; undefined parts are not loaded yet and block nothing. */
+export interface LaunchContext {
+  connection: Pick<HarnessConnection, "active" | "configured"> | undefined;
+  machine: Pick<Machine, "kind" | "status" | "label"> | undefined;
+  /** Its live status on its machine; undefined until read (checking blocks nothing). */
+  live: Pick<HarnessSummary, "tone" | "label"> | undefined;
+  /** The task's project bindings; undefined until projects load. */
+  bindings: readonly Pick<ProjectBinding, "connectionId" | "status">[] | undefined;
+  /** The connection's display name ("T3", or "T3 · desk" with two or more machines). */
+  name: string;
+  /** "on desk" with two or more machines, else "". */
+  where: string;
+  /** Where Settings fixes a connection. */
+  settings: string;
+}
+
+/**
+ * Why Start cannot launch the task on its connection now, or null when it can (as far as Stage knows; the server
+ * checks again). In order: disconnected, its machine offline or out of date, the harness not answering (unreachable,
+ * unpaired, expired, rejected), the project without an available workspace there. A replaced connection is not a
+ * block here: it never launches again (isRetired).
+ */
+export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projectTitle">, c: LaunchContext): LaunchBlock | null {
+  const { connection, machine, live, bindings, name, where, settings } = c;
+  if (connection === undefined || !connection.active) return null;
+  if (!connection.configured) {
+    return { kind: "disconnected", reason: `${name} is disconnected. Connect it to start this task.`, fix: { label: "Connect in Settings", to: settings } };
+  }
+  if (machine !== undefined) {
+    switch (machineSetupState(machine)) {
+      case "offline":
+        return { kind: "offline", reason: `${machine.label} is offline. Start this task once it is back.`, fix: null };
+      case "needs_update":
+        return { kind: "needs_update", reason: `${machine.label} needs an update before it can start tasks.`, fix: { label: "Open Settings", to: settings } };
+      case "ready":
+        break;
+    }
+  }
+  if (live !== undefined && (live.tone === "bad" || live.tone === "need")) {
+    return { kind: "unreachable", reason: `${live.label}${where === "" ? "" : ` ${where}`}, so this task cannot start.`, fix: { label: "Fix in Settings", to: settings } };
+  }
+  if (bindings !== undefined && !bindings.some((b) => b.connectionId === t.connectionId && b.status === "available")) {
+    return {
+      kind: "unbound",
+      reason: `${t.projectTitle} has no workspace on ${name}. Bind one to start this task.`,
+      fix: { label: "Bind workspace", to: `/projects/${t.projectId}` },
+    };
+  }
+  return null;
 }

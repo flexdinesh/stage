@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody } from "../src/lib/taskForm.ts";
+import { blockedStartModes, formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody } from "../src/lib/taskForm.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
 const template = { projectId: 1, title: "T", prompt: "P", connectionId: 3, executionConfig: config, workspace: { type: "root" } };
@@ -75,4 +75,16 @@ test("taskUpdateBody: an unchanged start time is not resent; a new one is; leavi
   const later = { startLocal: "2026-11-23T10:00", startTz: "UTC" };
   assert.deepEqual(taskUpdateBody(update({ before: scheduled, openedStart: opened, timed: later })), later);
   assert.deepEqual(taskUpdateBody(update({ before: scheduled, openedStart: opened, timed: null })), { startLocal: null, startTz: null });
+});
+
+test("a harness that cannot launch leaves a new task Backlog only", () => {
+  const modes = ["now", "backlog", "at", "repeat"];
+  assert.deepEqual(blockedStartModes(modes, true, null), ["now", "at", "repeat"]);
+  assert.deepEqual(blockedStartModes(modes, false, null), []);
+});
+
+test("an edited task keeps the timing it opened with while its harness cannot launch", () => {
+  assert.deepEqual(blockedStartModes(["backlog", "at"], true, "at"), []);
+  assert.deepEqual(blockedStartModes(["backlog", "at"], true, "backlog"), ["at"]);
+  assert.deepEqual(blockedStartModes([], true, "backlog"), []);
 });

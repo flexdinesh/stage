@@ -227,7 +227,9 @@ export interface MachineConnection {
  * Each connection's status on its own machine (the queries Settings' rows run there, so the cache is shared): T3,
  * OpenCode and generic harnesses, each paired with its connection.
  */
-export function useConnectionStatuses<C extends MachineConnection>(connections: readonly C[]) {
+export function useConnectionStatuses<C extends MachineConnection>(connections: readonly C[], { poll = true }: { poll?: boolean } = {}) {
+  // poll false: read what another observer (the status row) keeps fresh, without a second poll of the same status.
+  const every: { refetchInterval?: false } = poll ? {} : { refetchInterval: false };
   const api = useApi();
   const qc = useQueryClient();
   const on = (m: MachineConnection["machine"]) => {
@@ -240,19 +242,19 @@ export function useConnectionStatuses<C extends MachineConnection>(connections: 
   const t3Queries = useQueries({
     queries: t3.map((c) => {
       const m = on(c.machine);
-      return t3StatusQuery(m.api, m.key(keys.t3Status), qc);
+      return { ...t3StatusQuery(m.api, m.key(keys.t3Status), qc), ...every };
     }),
   });
   const openCodeQueries = useQueries({
     queries: openCode.map((c) => {
       const m = on(c.machine);
-      return openCodeStatusQuery(m.api, m.key(keys.openCodeStatus));
+      return { ...openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), ...every };
     }),
   });
   const otherQueries = useQueries({
     queries: other.map((c) => {
       const m = on(c.machine);
-      return harnessStatusQuery(m.api, m.key([...keys.harnessStatus, c.harness]), c.harness);
+      return { ...harnessStatusQuery(m.api, m.key([...keys.harnessStatus, c.harness]), c.harness), ...every };
     }),
   });
   return { t3: paired(t3, t3Queries), openCode: paired(openCode, openCodeQueries), other: paired(other, otherQueries) };

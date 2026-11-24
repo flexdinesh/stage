@@ -10,6 +10,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { MAX_NOTE_BYTES, noteBytes, noteRequest } from "../lib/journal.ts";
 import { isActive, statusChips, type StatusChip } from "../lib/tasks.ts";
 import { IconArrowRight } from "./icons.tsx";
+import { useLaunchGate } from "./LaunchGate.tsx";
 import { statusChipView, taskStateLabel } from "./StateBadge.tsx";
 import {
   Alert,
@@ -123,7 +124,8 @@ export function CompletionDrawer({ task, reopen, to, onClose }: { task: Task; re
 
 /** "[to review] → [completed]": the state a confirm moves the task from and to. */
 function StateChange({ task, to: toChip }: { task: Task; to: StatusChip }) {
-  const from = statusChipView(statusChips(task)[0] ?? task.state);
+  const blocked = useLaunchGate()(task) !== null;
+  const from = statusChipView(statusChips(task, { blocked })[0] ?? task.state);
   const to = statusChipView(toChip);
   return (
     <p className="flex flex-wrap items-center gap-2">

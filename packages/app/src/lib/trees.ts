@@ -359,9 +359,10 @@ type Timed = Pick<Task, "state" | "readiness" | "stateSince" | "readyAt" | "crea
 
 /**
  * A member's time in its current state, for tree rows: "running 18m", "waiting 6m", "done 22h ago", "settled Nov 15",
- * "ready 3h", "queued 2d". `at` is the instant it counts from (exact time on hover).
+ * "ready 3h", "queued 2d". `at` is the instant it counts from (exact time on hover). `blocked`: its connection cannot
+ * launch it now, so a ready task reads queued.
  */
-export function inState(t: Timed, now: number = Date.now()): { text: string; at: string } {
+export function inState(t: Timed, now: number = Date.now(), { blocked = false }: { blocked?: boolean } = {}): { text: string; at: string } {
   const since = (fallback: string | null) => t.stateSince ?? fallback ?? t.createdAt;
   switch (t.state) {
     case "settled": {
@@ -388,7 +389,8 @@ export function inState(t: Timed, now: number = Date.now()): { text: string; at:
       return { text: `${t.state} ${relativeTime(at, now)}`, at };
     }
     case "backlog": {
-      if (t.readiness === "ready") {
+      // A ready task its connection cannot launch (launchBlock) waits like any other: queued.
+      if (t.readiness === "ready" && !blocked) {
         const at = t.readyAt ?? since(null);
         return { text: `ready ${age(at, now)}`, at };
       }
