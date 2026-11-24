@@ -129,3 +129,13 @@ func (r machines) Touch(ctx context.Context, id int64, at time.Time, version str
 	_, err := r.Exec(ctx, `UPDATE machines SET last_seen_at=CASE WHEN last_seen_at IS NULL OR last_seen_at<$2 THEN $2 ELSE last_seen_at END, version=CASE WHEN $3<>'' THEN $3 ELSE version END WHERE id=$1 AND id<>1 AND removed_at IS NULL`, id, at, version)
 	return err
 }
+
+func (r machines) MarkRemoved(ctx context.Context, id int64) (bool, error) {
+	res, err := r.Exec(ctx, `UPDATE machines SET removed_at=stage_now() WHERE id=$1 AND removed_at IS NULL`, id)
+	return res.RowsAffected() > 0, err
+}
+
+func (r machines) DeleteTokens(ctx context.Context, machine int64) error {
+	_, err := r.Exec(ctx, `DELETE FROM machine_tokens WHERE machine_id=$1`, machine)
+	return err
+}

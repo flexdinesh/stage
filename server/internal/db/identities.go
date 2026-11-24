@@ -26,45 +26,9 @@ func checkDestinationChange(ctx context.Context, tx *Tx, old, next int64, c Opti
 
 type SessionRef = execution.SessionRef
 
-// HarnessConnection is one harness instance. At most one per harness is
-// active; a replaced instance is retired and keeps its tasks and bindings.
-type HarnessConnection struct {
-	Configured   bool   `json:"configured"`
-	ID           int64  `json:"id"`
-	MachineID    int64  `json:"machineId"`
-	Harness      string `json:"harness"`
-	AutoComplete bool   `json:"autoComplete"`
-	Active       bool   `json:"active"`
-	// Label names the instance (T3 environment, OpenCode address).
-	Label       string  `json:"label"`
-	RetiredAt   *string `json:"retiredAt"`
-	ForgottenAt *string `json:"forgottenAt"`
-	// Tasks and Bindings count what stays on the connection.
-	Tasks    int `json:"tasks"`
-	Bindings int `json:"bindings"`
-	// NewTaskConfig is the model and options pinned for new tasks here
-	// (permission and mode empty; nil = the harness default).
-	NewTaskConfig *execution.Config `json:"newTaskConfig"`
-}
-type ProjectBinding struct {
-	ID                int64   `json:"id"`
-	ProjectID         int64   `json:"projectId"`
-	ConnectionID      int64   `json:"connectionId"`
-	Harness           string  `json:"harness"`
-	ExternalProjectID string  `json:"externalProjectId"`
-	Workspace         string  `json:"workspace"`
-	Revision          int64   `json:"revision"`
-	Status            string  `json:"status"`
-	ObservedWorkspace *string `json:"observedWorkspace"`
-	// ConnectionActive is false for a binding on a replaced instance.
-	ConnectionActive bool   `json:"connectionActive"`
-	ConnectionLabel  string `json:"connectionLabel"`
-	// Origin: manual (user bound), imported (discovery created the project
-	// for it), path (discovery bound it to the project at that path on this
-	// machine) or remote (discovery bound it to the one project with the same
-	// origin remote and subproject on another machine).
-	Origin string `json:"origin"`
-}
+type HarnessConnection = store.HarnessConnection
+
+type ProjectBinding = store.ProjectBinding
 
 // Binding origins (project_bindings.origin).
 const (
@@ -83,36 +47,24 @@ type ExternalProject struct {
 	Repo         string `json:"repo"`
 }
 
-const connectionCols = `id,machine_id,harness,auto_complete,active,label,retired_at,forgotten_at,
- (SELECT count(*) FROM tasks t WHERE t.connection_id=c.id),
- (SELECT count(*) FROM project_bindings b WHERE b.connection_id=c.id AND b.active=1),new_task_config`
-
-func scanConnection(r rowScanner) (HarnessConnection, error) {
-	var c HarnessConnection
-	err := r.Scan(&c.ID, &c.MachineID, &c.Harness, &c.AutoComplete, &c.Active, &c.Label, &c.RetiredAt, &c.ForgottenAt, &c.Tasks, &c.Bindings, &c.NewTaskConfig)
-	return c, notFound(err)
-}
-
 // Connections lists every connection: active ones first, then retired
 // ones (forgotten included, so their tasks still name the harness).
 func (s *Store) Connections(ctx context.Context) ([]HarnessConnection, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+connectionCols+` FROM harness_connections c ORDER BY active DESC,id`)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, scanConnection)
+	return read(ctx, s, func(tx store.Tx) ([]HarnessConnection, error) { return tx.Connections().List(ctx) })
 }
 
 func (s *Store) GetHarnessConnection(ctx context.Context, id int64) (HarnessConnection, error) {
-	return scanConnection(s.pool.QueryRow(ctx, `SELECT `+connectionCols+` FROM harness_connections c WHERE id=$1`, id))
+	return read(ctx, s, func(tx store.Tx) (HarnessConnection, error) { return tx.Connections().Get(ctx, id) })
 }
 
 // SetAutoComplete sets whether a harness closure may complete a done task.
 func (s *Store) SetAutoComplete(ctx context.Context, id int64, on bool) (HarnessConnection, error) {
-	if _, err := s.pool.Exec(ctx, `UPDATE harness_connections SET auto_complete=$2 WHERE id=$1`, id, on); err != nil {
-		return HarnessConnection{}, err
-	}
-	return s.GetHarnessConnection(ctx, id)
+	return write(ctx, s, func(tx store.Tx) (HarnessConnection, error) {
+		if err := tx.Connections().SetAutoComplete(ctx, id, on); err != nil {
+			return HarnessConnection{}, err
+		}
+		return tx.Connections().Get(ctx, id)
+	})
 }
 
 // SetNewTaskConfig pins (or clears, nil) the model and options new tasks on a
@@ -122,14 +74,16 @@ func (s *Store) SetNewTaskConfig(ctx context.Context, id int64, c *execution.Con
 	if c != nil {
 		c = &execution.Config{Model: c.Model, Options: append([]execution.ModelOption{}, c.Options...)}
 	}
-	res, err := s.pool.Exec(ctx, `UPDATE harness_connections SET new_task_config=$2 WHERE id=$1`, id, c)
-	if err != nil {
-		return HarnessConnection{}, err
-	}
-	if res.RowsAffected() == 0 {
-		return HarnessConnection{}, ErrNotFound
-	}
-	return s.GetHarnessConnection(ctx, id)
+	return write(ctx, s, func(tx store.Tx) (HarnessConnection, error) {
+		found, err := tx.Connections().SetNewTaskConfig(ctx, id, c)
+		if err != nil {
+			return HarnessConnection{}, err
+		}
+		if !found {
+			return HarnessConnection{}, ErrNotFound
+		}
+		return tx.Connections().Get(ctx, id)
+	})
 }
 
 func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
@@ -256,7 +210,7 @@ func connectionExists(ctx context.Context, tx *Tx, id int64) error {
 	return nil
 }
 
-// connectionInUse refuses new work on a replaced connection.
+// connectionInUse (transitional raw SQL) refuses new work on a replaced connection.
 func connectionInUse(ctx context.Context, tx *Tx, id int64) error {
 	if err := connectionExists(ctx, tx, id); err != nil {
 		return err

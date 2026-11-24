@@ -74,6 +74,9 @@ type Machines interface {
 	InsertToken(ctx context.Context, machine int64, hash []byte) (int64, error)
 	// Token reads a token of a machine not removed (ErrNotFound otherwise).
 	Token(ctx context.Context, id int64) (machine int64, hash []byte, err error)
+	// MarkRemoved hides a machine not removed; false when none.
+	MarkRemoved(ctx context.Context, id int64) (bool, error)
+	DeleteTokens(ctx context.Context, machine int64) error
 	// Touch records a remote machine heard from at (never moving back) and
 	// version when not empty; removed and local machines are left alone.
 	Touch(ctx context.Context, id int64, at time.Time, version string) error

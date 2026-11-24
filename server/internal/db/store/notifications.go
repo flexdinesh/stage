@@ -95,8 +95,3 @@ type Sessions interface {
 	// Ensure returns the identity of (connection, external id), creating it.
 	Ensure(ctx context.Context, connectionID int64, externalID string) (int64, error)
 }
-
-// Connections is the harness connections repository.
-type Connections interface {
-	Exists(ctx context.Context, id int64) (bool, error)
-}

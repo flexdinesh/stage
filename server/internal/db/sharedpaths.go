@@ -4,26 +4,24 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
-type SharedPath struct {
-	ConnectionID int64  `json:"connectionId"`
-	HarnessRoot  string `json:"harnessRoot"`
-	StageRoot    string `json:"stageRoot"`
-}
+type SharedPath = store.SharedPath
 
 // SharedPaths lists every machine's shared paths.
 func (s *Store) SharedPaths(ctx context.Context) ([]SharedPath, error) {
-	return sharedPaths(ctx, s.pool, 0)
+	return read(ctx, s, func(tx store.Tx) ([]SharedPath, error) { return tx.Connections().SharedPaths(ctx, 0) })
 }
 
 // MachineSharedPaths lists the shared paths of machine's connections: path
 // translation and checkout proof hold only within one machine.
 func (s *Store) MachineSharedPaths(ctx context.Context, machine int64) ([]SharedPath, error) {
-	return sharedPaths(ctx, s.pool, machine)
+	return read(ctx, s, func(tx store.Tx) ([]SharedPath, error) { return tx.Connections().SharedPaths(ctx, machine) })
 }
 
-// sharedPaths lists machine's shared paths (0: every machine).
+// sharedPaths (transitional raw SQL) lists machine's shared paths (0: every machine).
 func sharedPaths(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (*rowSet, error)
 }, machine int64) ([]SharedPath, error) {
@@ -45,14 +43,13 @@ func (s *Store) SetSharedPath(ctx context.Context, p SharedPath) error {
 	}
 	root := filepath.Clean(p.HarnessRoot)
 	if p.StageRoot == "" {
-		_, err := s.pool.Exec(ctx, `DELETE FROM shared_paths WHERE connection_id=$1 AND harness_root=$2`, p.ConnectionID, root)
-		return err
+		return s.e.Write(ctx, func(tx store.Tx) error { return tx.Connections().DeleteSharedPath(ctx, p.ConnectionID, root) })
 	}
 	if !filepath.IsAbs(p.StageRoot) {
 		return Invalid("Enter the absolute directory visible to Stage.")
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES($1,$2,$3) ON CONFLICT(connection_id,harness_root) DO UPDATE SET stage_root=excluded.stage_root`, p.ConnectionID, root, filepath.Clean(p.StageRoot))
-	return err
+	p = SharedPath{ConnectionID: p.ConnectionID, HarnessRoot: root, StageRoot: filepath.Clean(p.StageRoot)}
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Connections().PutSharedPath(ctx, p) })
 }
 
 // AutoBind cannot replace a manual choice or act on a retired source

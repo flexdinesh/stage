@@ -342,40 +342,37 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 	if id == LocalMachine {
 		return &ConflictError{Msg: "This computer runs the Stage server and cannot be removed.", Code: "local_machine"}
 	}
-	err := s.inTx(ctx, func(tx *Tx) error {
-		res, err := tx.Exec(ctx, `UPDATE machines SET removed_at=stage_now() WHERE id=$1 AND removed_at IS NULL`, id)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		removed, err := tx.Machines().MarkRemoved(ctx, id)
 		if err != nil {
 			return err
 		}
-		if res.RowsAffected() == 0 {
+		if !removed {
 			return ErrNotFound
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM machine_tokens WHERE machine_id=$1`, id); err != nil {
+		if err := tx.Machines().DeleteTokens(ctx, id); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id FROM harness_connections WHERE machine_id=$1 AND active=1`, id)
+		c := tx.Connections()
+		ids, err := c.ActiveOnMachine(ctx, id)
 		if err != nil {
 			return err
 		}
-		ids, err := collectRows(rows, rowTo[int64])
-		if err != nil {
-			return err
-		}
-		for _, c := range ids {
-			referenced, err := connectionReferenced(ctx, tx, c)
+		for _, conn := range ids {
+			referenced, err := connectionReferenced(ctx, tx, conn)
 			if err != nil {
 				return err
 			}
 			if !referenced {
-				if err := deleteConnection(ctx, tx, c); err != nil {
+				if err := c.Delete(ctx, conn); err != nil {
 					return err
 				}
 				continue
 			}
-			if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=0,retired_at=stage_now() WHERE id=$1`, c); err != nil {
+			if err := c.Retire(ctx, conn); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=NULL WHERE default_connection_id=$1`, c); err != nil {
+			if err := c.ClearDefault(ctx, conn); err != nil {
 				return err
 			}
 		}
@@ -385,14 +382,12 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 	return err
 }
 
-// connectionReferenced: relations (hasRelations) or unlaunched tasks and
+// connectionReferenced: relations (HasRelations) or unlaunched tasks and
 // schedules point at the connection, so it must stay as history.
-func connectionReferenced(ctx context.Context, tx *Tx, id int64) (bool, error) {
-	related, err := hasRelations(ctx, tx, id)
+func connectionReferenced(ctx context.Context, tx store.Tx, id int64) (bool, error) {
+	related, err := tx.Connections().HasRelations(ctx, id)
 	if err != nil || related {
 		return related, err
 	}
-	var pending bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1) OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)`, id).Scan(&pending)
-	return pending, err
+	return tx.Connections().HasWork(ctx, id)
 }
