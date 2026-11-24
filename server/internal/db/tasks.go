@@ -416,7 +416,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			return nil
 		}
 		if t.BeginAttempt {
-			if err := checkLaunchClaim(ctx, rawTx(tx), t, res.Attempt); err != nil {
+			if err := checkLaunchClaim(ctx, tx, t, res.Attempt); err != nil {
 				return err
 			}
 		}
