@@ -359,3 +359,6 @@ func (r trees) AddNeed(ctx context.Context, taskID, need int64) error {
 	_, err := r.Exec(ctx, `INSERT INTO task_needs (task_id, need_id) VALUES ($1, $2)`, taskID, need)
 	return err
 }
+
+// Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
+func (trees) Lock(context.Context, ...int64) error { return nil }

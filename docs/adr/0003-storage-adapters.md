@@ -75,8 +75,8 @@ SQLite sits below it (#391 findings):
    [storage.md](../storage.md#legacy-columns-and-compatibility-triggers).
 7. **Migrations.** goose, one embedded directory per engine, the same version
    numbers on both. Postgres starts with one baseline migration whose version
-   is the SQLite head when the Postgres adapter lands (24 today; see
-   [Planning note](#planning-note)). Expand then contract, shared Go
+   is the SQLite head when the Postgres adapter lands (28: `0028_baseline.sql`,
+   #403; see [Planning note](#planning-note)). Expand then contract, shared Go
    backfills, roll forward only, no down migrations.
 8. **One Postgres pin.** The latest major, one exact image tag, shared by the
    checks and the compose example (`STAGE_PG_IMAGE` in `mise.toml`).

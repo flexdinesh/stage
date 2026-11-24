@@ -74,9 +74,36 @@ type Backup interface {
 // Ownership makes this process the database's single owner
 // (docs/storage.md "Single owner").
 type Ownership interface {
-	// Acquire takes ownership; release gives it up.
-	Acquire(ctx context.Context) (release func() error, err error)
+	// Acquire takes ownership. Held by another owner: *OwnedError.
+	Acquire(ctx context.Context) (Lease, error)
 }
+
+// Lease is held ownership.
+type Lease interface {
+	// Release gives ownership up.
+	Release() error
+	// Lost is closed when ownership is lost while held (the engine can no
+	// longer prove it owns the database); the owner must stop. Nil when the
+	// engine cannot lose it.
+	Lost() <-chan struct{}
+}
+
+// OwnedError: another process owns the database (exit 75, like a held data
+// dir).
+type OwnedError struct {
+	// Holder names the owner as the engine reports it ("" when unknown).
+	Holder string
+}
+
+func (e *OwnedError) Error() string {
+	if e.Holder == "" {
+		return "database is owned by another stage server"
+	}
+	return "database is owned by another stage server (" + e.Holder + ")"
+}
+
+// ErrOwnershipLost: a held Lease reported Lost; the server stops (exit 1).
+var ErrOwnershipLost = errors.New("database ownership lost: stopping")
 
 // ErrorClassifier maps engine errors to the conditions rules decide on
 // (docs/storage.md "Errors").

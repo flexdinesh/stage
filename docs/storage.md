@@ -12,17 +12,17 @@ that disagrees with this file updates it in the same PR.
 | Part | Today | Task |
 | --- | --- | --- |
 | [Engines and selection](#engines-and-selection) | SQLite only, `<data dir>/stage.db` | #405 |
-| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite`, `internal/db/dbtest` (#398), `internal/db/storetest` (#400) and `internal/db/backfill` (#401); `internal/db/postgres` holds only the migrator (#401) | Postgres adapter: #403 |
-| [Transactions and locking](#transactions-and-locking) | SQLite: as described; the `storetest` concurrency cases exist (#400) | Postgres: #403 |
-| [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
-| [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
+| [Layout](#layout-and-ownership) and [ports](#ports) | as described, including the Postgres adapter `internal/db/postgres` (#403); `internal/serve` still composes only SQLite | composition: #405 |
+| [Transactions and locking](#transactions-and-locking) | as described on both engines; the `storetest` concurrency cases pass on Postgres (#403) | |
+| [Single owner](#single-owner) | as described on both engines (#403); `serve` stops when a lease reports loss | Postgres in `serve`: #405 |
+| [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 28; Postgres `server/internal/db/postgres/migrations` empty until the baseline; no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | Postgres baseline #403 |
-| [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
-| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` (#398), `TestMigrationVersionParity` and the SQLite `TestStepwiseMigrations` (#401) run; `storetest` runs on SQLite in `check:storage` and, until #403, on SQLite again in `check:postgres` (#400); the Postgres step-wise and schema parity tests exist and skip until the baseline (#401) | Postgres gates live: #403 |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 28; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Backups](#backups) | as described on both engines (#403) | |
+| [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) | |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract) | #403 (baseline omits them) |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -58,9 +58,9 @@ its API, and only `internal/serve` composes an engine.
 | `internal/db/backfill` | Shared Go backfills: the step list (`backfill.Steps`, version and name), each backfill's logic and the query port it declares | Hold SQL; import a driver or an adapter |
 | `internal/db/store` | Ports: the unit of work, repositories, capability ports, and the Go types they exchange | Import a driver, `internal/db/sqlite` or `internal/db/postgres` |
 | `internal/db/sqlite` | Every SQLite statement, `modernc.org/sqlite`, pragmas, `stage_now`, `VACUUM INTO`, FTS5, SQLite error codes, the SQLite migrations dir | Hold business rules; import pgx |
-| `internal/db/postgres` (build tag `postgres`) | Every Postgres statement, pgx v5 (`database/sql` only where goose needs it), the advisory lock, SQLSTATE mapping, the Postgres migrations dir | Hold business rules; import modernc; be needed by code built without the tag |
+| `internal/db/postgres` (build tag `postgres`) | Every Postgres statement, pgx v5 (`database/sql` only where goose needs it), the advisory lock, SQLSTATE mapping, the Postgres migrations dir; `postgres/pgtest` opens test engines on the `check:postgres` server | Hold business rules; import modernc; be needed by code built without the tag |
 | `internal/db/storetest` | The adapter-agnostic contract suite: `Run(t, Factory)` runs every case through `db.Store` and the ports on engines from the factory ([Contract suite](#contract-suite)) | Depend on one engine's SQL; import an adapter |
-| `internal/db/dbtest` | Test helpers; opens engines and stores (`Engine`, `DB.Reset`): a temp SQLite file, or the `check:postgres` database once #403 wires it | Open a database any other way |
+| `internal/db/dbtest` | Test helpers; opens engines and stores (`Engine`, `DB.Reset`): a temp SQLite file, or under `check:postgres` (`Engine` only) a fresh Postgres database from `postgres/pgtest` | Open a database any other way |
 
 Code outside the Postgres adapter compiles without the tag.
 `TestDriverImportBoundary` (`internal/db/boundary_test.go`, run by
@@ -99,13 +99,16 @@ watcher state, last words), `Stats` (read-only counts), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
 Repository methods are named queries: they hold no rules, return engine
 errors unchanged and `store.ErrNotFound` for a missing row; `internal/db`
-classifies errors through the `ErrorClassifier`.
+classifies errors through the `ErrorClassifier`. `Machines`, `Connections`,
+`Trees`, `Tasks` and `Schedules` also have `Lock`: the rules call it first
+in a read-check-write use case ([Transactions and
+locking](#transactions-and-locking)); a no-op on SQLite.
 
 **Capability ports**
 
 | Port | SQLite | Postgres |
 | --- | --- | --- |
-| Ownership | `flock` on `<data dir>/stage.lock`, taken by `internal/serve` with the data dir before the engine opens ([runtime.md](runtime.md#ownership-and-locks)); the port's `Acquire` holds nothing more | session advisory lock on a dedicated connection ([Single owner](#single-owner)) |
+| Ownership | `flock` on `<data dir>/stage.lock`, taken by `internal/serve` with the data dir before the engine opens ([runtime.md](runtime.md#ownership-and-locks)); the port's `Acquire` holds nothing more and its lease is never lost | session advisory lock on a dedicated connection; the lease reports loss ([Single owner](#single-owner)) |
 | Backup | `VACUUM INTO` before migrating ([Backups](#backups)) | none: logs a warning before migrating |
 | Migrator | goose `sqlite3` dialect over the SQLite dir | goose `postgres` dialect with its session locker over the Postgres dir |
 | ErrorClassifier | SQLite extended codes ([Errors](#errors)) | SQLSTATE |
@@ -116,9 +119,9 @@ they differ in more than syntax:
 
 | Repository | SQLite | Postgres |
 | --- | --- | --- |
-| tasks | claims rely on the single writer | the claim locks the task row (`FOR UPDATE`) |
-| connections | single writer keeps one active connection per machine and kind | partial unique index plus a row lock on the machine's connections |
-| journal, acceptance | `requestId` idempotency under the single writer | unique `(owner, request_id)`, `ON CONFLICT DO NOTHING`, then re-read and compare |
+| tasks | claims rely on the single writer | the claim locks the task row (`Tasks().Lock`) |
+| connections | single writer keeps one active connection per machine and kind | partial unique index plus a lock on the machine row (`Machines().Lock`) |
+| journal, acceptance | `requestId` idempotency under the single writer | the owner row's lock (`Tasks().Lock`, `Trees().Lock`) serializes appends and changes, then read, compare, insert; the unique keys stay as a backstop |
 | notifications | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` |
 | attachments, machine tokens | `BLOB` | `bytea` |
 
@@ -176,36 +179,47 @@ migration 0026 (#399).
 - Every transaction is READ COMMITTED. There is no global lock: no table
   lock, no advisory lock per write.
 - Each use case that reads, checks and writes takes the lock or constraint
-  that makes it atomic, below. A new use case of this kind adds its row to
+  that makes it atomic, below. Locks are explicit: the rule calls the
+  repository's `Lock` (`Machines`, `Connections`, `Trees`, `Tasks`,
+  `Schedules`) before its first checked read. The adapter takes
+  `SELECT ... FOR NO KEY UPDATE` in ascending id, which serializes writers
+  of the row without blocking foreign-key checks on it (inserting an event
+  or a need never waits on it). A new use case of this kind adds its row to
   the table and a concurrency case to `storetest`.
 - **Lock order** (prevents deadlocks): machine, connection, tree, task
   (ascending id), schedule. A use case that needs several takes them in this
-  order.
-- `fn` has no effects outside the transaction (external effects already go
-  through launch checkpoints), so the adapter may rerun it after
-  `40001`/`40P01`. #403 fixes whether it retries and how often; a retried
-  `fn` that still fails returns the error.
+  order. Derived writes can still update a row out of order (a task's
+  transition marks its tree's recorded work after the task lock); a deadlock
+  that causes is detected and retried.
+- **Retry:** `Write` reruns `fn` after a serialization failure (`40001`) or
+  deadlock (`40P01`), up to 3 runs in all with a short jittered backoff, then
+  returns the error. `fn` has no effects outside the transaction (external
+  effects already go through launch checkpoints), and every `Write` closure
+  in `internal/db` resets the results it captures at its start, so a rerun
+  starts from scratch. Other errors never rerun.
 - `Read` is a read-only READ COMMITTED transaction: each statement sees
-  committed data. A use case that needs one snapshot across statements says
-  so and #403 gives it `REPEATABLE READ READ ONLY`.
+  committed data, and a write inside it fails (`25006`). No use case needs
+  one snapshot across statements yet; one that does says so and gets
+  `REPEATABLE READ READ ONLY`.
 
 | Use case | Store entry (today) | Invariant | Postgres | `storetest` case |
 | --- | --- | --- | --- | --- |
-| Launch claim | `TransitionTask` (begin attempt) | one attempt begins per task and attempt number; current acceptance checked and inputs pinned atomically | task row `FOR UPDATE`; unique `(task_id, attempt)` | `ConcurrentLaunchClaim` |
+| Launch claim | `TransitionTask` (begin attempt) | one attempt begins per task and attempt number; current acceptance checked and inputs pinned atomically | task row lock; unique `(task_id, attempt)` | `ConcurrentLaunchClaim` |
 | Release and schedule runner picks | `LaunchableForConnection`, `DueForConnection` | each item launches once | the launch claim's row lock decides; the runners stay reconcilers under Leases (#409), not Queue jobs ([ADR 0004](adr/0004-queue-port.md#loops)) | `ConcurrentLaunchClaim` (the claim decides) |
-| Acceptance | `ChangeAcceptance` | one revision sequence per task; idempotent `requestId` | task row `FOR UPDATE`; unique request key with `ON CONFLICT` | `ConcurrentAcceptance`, `ConcurrentAcceptanceRequestID` |
-| Tree mutations | `CreateTree`, `SetNeeds`, membership changes | no cycles; a task in at most one tree; needs within the tree | tree rows, then task rows, `FOR UPDATE` before any need check | `ConcurrentNeedsSerialize`, `ConcurrentTreeMembership`, `ConcurrentNeedsAndRemoval`, `JournalMoveAndAppendSerialize` |
-| Schedule fire | `FireSchedule` | one spawn per fire time | schedule row `FOR UPDATE`; next fire advanced in the same transaction | `ConcurrentScheduleFire` |
-| Connection switch | `SwitchInstance`, `ForgetConnection` | at most one active connection per machine and kind; identity unique per machine | the machine's connection rows `FOR UPDATE`; partial unique indexes | `ConcurrentConnectionSwitch` |
-| Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | unique `(owner, request_id)`; `ON CONFLICT DO NOTHING`, re-read, compare | `JournalConcurrentRetryAndPagination`, `ConcurrentNoteRequestIDConflict` |
-| Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | one `UPDATE ... WHERE` unused and unexpired `... RETURNING` | `RedeemPairingConcurrentSingleWinner` |
-| Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | attempt row `FOR UPDATE` | none yet |
-| Project import | `ImportWorkspaces` | one project per workspace path per machine | connection row `FOR UPDATE`; unique binding indexes | none yet |
+| Acceptance | `ChangeAcceptance` | one revision sequence per task; idempotent `requestId` | task row lock before the request lookup; unique request key as a backstop | `ConcurrentAcceptance`, `ConcurrentAcceptanceRequestID` |
+| Tree mutations | `CreateTree`, `UpdateTree`, `SetTreeStatus`, `DeleteTree`, `DissolveTree`, `AddToTree`, `RemoveFromTree`, `SetNeeds` | no cycles; a task in at most one tree; needs within the tree | `lockTreeWork`: the named trees and the trees of the tasks involved, then the tasks (the task, its needs, the members joining), before any check; a task that moved meanwhile gets its new tree locked too | `ConcurrentNeedsSerialize`, `ConcurrentNeedsCycle`, `ConcurrentTreeMembership`, `ConcurrentNeedsAndRemoval`, `JournalMoveAndAppendSerialize` |
+| Schedule fire | `FireSchedule` | one spawn per fire time | schedule row lock; next fire advanced in the same transaction | `ConcurrentScheduleFire` |
+| Connection switch | `SwitchInstance`, `RetireConnection`, `ForgetConnection`, `RetireAndForget` | at most one active connection per machine and kind; identity unique per machine | the machine row lock; partial unique indexes | `ConcurrentConnectionSwitch` |
+| Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | the owner's row lock (task or tree), then read, compare, insert; unique `(owner, request_id)` as a backstop | `JournalConcurrentRetryAndPagination`, `ConcurrentNoteRequestIDConflict` |
+| Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | expiry read, then one `UPDATE ... WHERE redeemed_at IS NULL`: the loser updates no row | `RedeemPairingConcurrentSingleWinner` |
+| Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | one `UPDATE ... WHERE revision = $expected`: a stale writer updates no row (409) | none yet |
+| Project import | `ImportWorkspaces` | one project per workspace path per machine | connection row lock; unique binding indexes | none yet |
 
-The table is indicative until #403 lands; the `storetest` concurrency cases
-are the proof, and #403 corrects the table to what they prove. On SQLite the
-single writer keeps every invariant, so these cases pass there by
-construction; they bite on an engine without a global lock.
+Each row's lock was checked to matter: with it removed, its `storetest`
+case fails on Postgres. On SQLite the single writer keeps every invariant,
+so these cases pass there by construction; they bite on an engine without a
+global lock. The Postgres test engine opens its whole pool before a case
+runs, so racers overlap instead of waiting on connection dials.
 
 ## Single owner
 
@@ -215,12 +229,14 @@ duplicate schedulers, sync and launches.
 - **SQLite:** the data-dir `stage.lock` ([runtime.md](runtime.md#ownership-and-locks)).
   `stage.db` must sit on a local filesystem.
 - **Postgres:** a session advisory lock (`pg_try_advisory_lock` on one fixed
-  64-bit key defined once in the adapter) on a dedicated connection held for
-  the process lifetime, taken right after the data-dir lock and before
-  migrating. Held by another session: exit 75, like a held data dir, with the
-  holder's `application_name` (`stage <instanceId>`). Losing that connection
-  loses ownership: the server stops (exit 1) rather than keep running
-  unowned.
+  64-bit key, `ownerLockKey` in `ownership.go`) on a dedicated connection held
+  for the process lifetime, taken right after the data-dir lock and before
+  migrating. Held by another session: `Acquire` returns `store.OwnedError`
+  naming the holder's `application_name` (`stage <instanceId>`, from
+  `postgres.Options`), and the server exits 75, like a held data dir. The
+  lease pings its connection every 5 s; a failed ping closes `Lost()`, and
+  `serve` stops with `store.ErrOwnershipLost` (exit 1) rather than keep
+  running unowned.
 - Two servers with different data dirs on one Postgres database: the second
   exits 75. "One replica" ([ADR 0002](adr/0002-machines-and-workers.md),
   [runtime.md](runtime.md#remote-main-server-and-workers)) holds on both
@@ -230,7 +246,7 @@ duplicate schedulers, sync and launches.
 
 | Value | SQLite | Postgres |
 | --- | --- | --- |
-| Timestamps | TEXT, fixed-width UTC `2006-01-02T15:04:05.000000Z` (lexical order is time order); Go clock via `stage_now()`, schema defaults `strftime` (ms) | `timestamptz`; Go-supplied values, defaults `now()` |
+| Timestamps | TEXT, fixed-width UTC `2006-01-02T15:04:05.000000Z` (lexical order is time order); Go clock via `stage_now()`, schema defaults `strftime` (ms) | `timestamptz`; Go-supplied values; adapter stamps `clock_timestamp()` (advances within a transaction, like `stage_now()`); defaults `now()` |
 | Precision | microseconds | microseconds |
 | JSON (queried) | TEXT, read with `json_each` / `json_extract` | `jsonb` |
 | JSON (evidence: bytes must survive) | TEXT | `text`, never `jsonb` (it reorders keys and drops whitespace) |
@@ -243,8 +259,13 @@ duplicate schedulers, sync and launches.
 - The port boundary truncates `time.Time` to microseconds in UTC, so a
   value round-trips equal on both engines.
 - Which JSON columns are evidence and which are queried is decided per column
-  under [JSON columns](#json-columns) (#402; #403 may amend it there).
+  under [JSON columns](#json-columns) (#402; the #403 baseline follows it).
 - Business rules never depend on the SQL clock; time comes from Go.
+- `jsonb` keeps values, not bytes: keys come back reordered and whitespace
+  normalized. Queried columns decode to the same values; only the evidence
+  columns (`text`) keep bytes.
+- A port field that carries a time as text (`HarnessConnection.RetiredAt`,
+  `ForgottenAt`) reads in the SQLite format on both engines.
 
 ## Errors
 
@@ -287,16 +308,16 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   tracked in `goose_db_version`.
 - **Shared versions:** a schema change adds `NNNN_name.sql` (or a Go
   migration) with the same version and name in both dirs.
-  `TestMigrationVersionParity` fails otherwise. Until the Postgres baseline
-  lands, a migration goes in the SQLite dir only.
+  `TestMigrationVersionParity` fails otherwise.
 - **Postgres baseline:** one migration at the SQLite head when the Postgres
-  adapter lands (#403; 28 today). It creates the current schema natively
-  (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression indexes,
-  `CHECK`s) without the legacy columns and compatibility triggers
+  adapter landed: `0028_baseline.sql` (#403). It creates the current schema
+  natively (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression
+  indexes, `CHECK`s), with SQLite's seeded rows and IDs, without the legacy
+  columns and compatibility triggers
   [#402](#legacy-columns-and-compatibility-triggers) drops; #417 drops them
-  from SQLite first, so the two heads match. Versions below it
-  are SQLite-only history; the parity test compares versions from the
-  baseline up.
+  from SQLite first, so the two heads match. Versions below it are
+  SQLite-only history; the parity test compares versions from the baseline
+  up.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -333,8 +354,8 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
 - `TestStepwiseMigrations`: for every version `v`, `UpTo(v-1)`, seed
   representative rows, `Up(v)`, assert the data. SQLite from version 1
   (`internal/db/stepwise_migration_test.go`, `check:storage`); Postgres from
-  the baseline (`internal/db/postgres/stepwise_test.go`, `check:postgres`;
-  skips until the baseline). Each engine's `stepwiseMigrations` registry
+  the baseline (`internal/db/postgres/stepwise_test.go`, `check:postgres`).
+  Each engine's `stepwiseMigrations` registry
   holds one or more scenarios per version, a seed and a check; a version
   without an entry fails. Checks query that version's schema directly; where
   a migration's result is also read through `db.Store`, a separate test
@@ -347,20 +368,21 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   Postgres text, timestamptz, jsonb; `bytes`; `real`). Partial and
   expression indexes are engine-native and not compared. Engine-only objects
   go in its `parityAllowlist`, each with why; an entry present on neither
-  engine fails. Until the baseline only the SQLite introspection runs;
-  `TestSchemaParityCompare` proves the comparator on hand-written schemas.
+  engine fails. `TestSchemaParityCompare` proves the comparator on
+  hand-written schemas.
 - Postgres tests each create and drop their own database on the
   `check:postgres` container; without `STAGE_TEST_DATABASE_URL` they fail.
+  `postgres/pgtest` clones engine databases from a template migrated once
+  per test process.
 
 ### Adding a migration
 
 1. Pick the next version `N`: the highest in either dir or `backfill.Steps`,
    plus one.
 2. Schema change: write `N_name.sql` (`-- +goose Up` only) in
-   `internal/db/sqlite/migrations` and, once the Postgres baseline exists,
-   the same name in `internal/db/postgres/migrations`, each in its engine's
-   native types.
-3. Backfill (after the baseline only): add `backfill.Step{N, "name"}`, its
+   `internal/db/sqlite/migrations` and the same name in
+   `internal/db/postgres/migrations`, each in its engine's native types.
+3. Backfill: add `backfill.Step{N, "name"}`, its
    function and query port in `internal/db/backfill`, and a runner for `N`
    in each adapter's `goMigrations` implementing that port. No `.sql` file
    at `N`.
@@ -381,8 +403,8 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   the newest 3; a failed backup exits 1 with the database untouched
   ([runtime.md](runtime.md#schema-and-backups)).
 - **Postgres (operator-owned):** the server takes no backup. Before applying
-  pending migrations it logs a warning naming the current and target
-  versions and that no backup was taken, then migrates. Backups, snapshots and
+  pending migrations the Backup port logs a warning naming the current and
+  target versions and that no backup was taken, then the server migrates. Backups, snapshots and
   point-in-time recovery are the operator's (managed service, `pg_dump`).
 
 ## Checks
@@ -418,10 +440,10 @@ Tests that need SQL, a migration step or `internal/db` internals stay in
   separate calls share nothing.
 - **Engine:** `TestContract` (`storetest_test.go`) runs it with
   `dbtest.Engine`: a temp SQLite file. Under `-tags postgres` with
-  `STAGE_TEST_DATABASE_URL` set, `dbtest/engine_postgres.go` only logs that
-  the Postgres adapter is not present yet and stays on SQLite. #403 replaces
-  that file with an `Engine` that opens a fresh database or schema on the
-  URL, so `check:postgres` runs the suite on Postgres with no script change.
+  `STAGE_TEST_DATABASE_URL` set (`check:postgres`), a fresh Postgres database
+  per engine (`dbtest/engine_postgres.go`, `postgres/pgtest`). The other
+  `internal/db` and `internal/api` tests use `dbtest.DB` and stay on SQLite
+  under the tag: they hold SQLite SQL.
 - **Run one case:** `go test ./internal/db/storetest -run 'TestContract/<Name>$'`.
 
 Adding a case:

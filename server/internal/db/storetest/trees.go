@@ -24,6 +24,7 @@ func init() {
 	register("ListTreesRollup", caseListTreesRollup)
 	register("TreeTimesAndEvents", caseTreeTimesAndEvents)
 	register("ConcurrentNeedsSerialize", caseConcurrentNeedsSerialize)
+	register("ConcurrentNeedsCycle", caseConcurrentNeedsCycle)
 }
 
 func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.TaskState) {
@@ -694,6 +695,44 @@ func caseConcurrentNeedsSerialize(t *testing.T, open Factory) {
 		gx, gy := getTask(t, s, ctx, x.ID), getTask(t, s, ctx, y.ID)
 		if ok != 1 || len(gx.Needs)+len(gy.Needs) != 1 {
 			t.Fatalf("round %d: %d succeeded, needs x=%v y=%v", round, ok, gx.Needs, gy.Needs)
+		}
+	}
+}
+
+// Two needs changes on disjoint tasks of one tree that would close a cycle
+// together (y needs u and v needs x exist; x needs y and u needs v race):
+// no task is shared, so only the tree's serialization keeps the graph
+// acyclic. Exactly one succeeds; the other is a conflict.
+func caseConcurrentNeedsCycle(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	p := mustProject(t, s, ctx, "p-cycle").ID
+	for round := range 5 {
+		x := mustTask(t, s, ctx, p, fmt.Sprintf("x-%d", round), nil)
+		y := mustTask(t, s, ctx, p, fmt.Sprintf("y-%d", round), nil)
+		u := mustTask(t, s, ctx, p, fmt.Sprintf("u-%d", round), nil)
+		v := mustTask(t, s, ctx, p, fmt.Sprintf("v-%d", round), nil)
+		mustTree(t, s, ctx, fmt.Sprintf("cycle-%d", round), "",
+			db.TreeMember{TaskID: x.ID}, db.TreeMember{TaskID: u.ID},
+			db.TreeMember{TaskID: y.ID, Needs: []int64{u.ID}}, db.TreeMember{TaskID: v.ID, Needs: []int64{x.ID}})
+		errs := race(2, func(i int) error {
+			pair := [][2]int64{{x.ID, y.ID}, {u.ID, v.ID}}[i]
+			_, err := s.SetNeeds(ctx, pair[0], []int64{pair[1]})
+			return err
+		})
+		ok := 0
+		for _, err := range errs {
+			var conflict *db.ConflictError
+			switch {
+			case err == nil:
+				ok++
+			case errors.As(err, &conflict):
+			default:
+				t.Fatalf("round %d: unexpected error %v", round, err)
+			}
+		}
+		gx, gu := getTask(t, s, ctx, x.ID), getTask(t, s, ctx, u.ID)
+		if ok != 1 || len(gx.Needs)+len(gu.Needs) != 1 {
+			t.Fatalf("round %d: %d succeeded, needs x=%v u=%v", round, ok, gx.Needs, gu.Needs)
 		}
 	}
 }

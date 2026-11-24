@@ -210,6 +210,8 @@ func (s *Store) RedeemPairing(ctx context.Context, code, label, version string) 
 	var g MachineGrant
 	var tokenID int64
 	err = s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		g, tokenID = MachineGrant{}, 0
 		m := tx.Machines()
 		pair, err := m.RedeemablePairing(ctx, id)
 		if errors.Is(err, ErrNotFound) {

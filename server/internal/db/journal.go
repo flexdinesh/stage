@@ -71,6 +71,15 @@ func appendNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteI
 	if strings.TrimSpace(in.RequestID) == "" {
 		return JournalEntry{}, Invalid("requestId is required")
 	}
+	// requestId is idempotent per owner: appends to one owner serialize on
+	// its row, so a racing retry sees the first note.
+	if o.TreeID != nil {
+		if err := tx.Trees().Lock(ctx, *o.TreeID); err != nil {
+			return JournalEntry{}, err
+		}
+	} else if err := tx.Tasks().Lock(ctx, *o.TaskID); err != nil {
+		return JournalEntry{}, err
+	}
 	if _, err := tx.Journal().OwnerRevision(ctx, o); err != nil {
 		return JournalEntry{}, err
 	}
@@ -137,6 +146,8 @@ func (s *Store) ReadJournal(ctx context.Context, o JournalOwner, q JournalQuery)
 	}{o, q.Kind, q.Category, q.Q, q.TaskID})
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		page = JournalPage{Entries: []JournalEntry{}}
 		rev, err := tx.Journal().OwnerRevision(ctx, o)
 		if err != nil {
 			return err
@@ -178,6 +189,8 @@ func (s *Store) ReadJournal(ctx context.Context, o JournalOwner, q JournalQuery)
 func (s *Store) JournalLaunchContext(ctx context.Context, task Task, proposed string) (string, error) {
 	var result string
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		result = ""
 		ls, err := tx.Tasks().LaunchState(ctx, task.ID)
 		if err != nil {
 			return err

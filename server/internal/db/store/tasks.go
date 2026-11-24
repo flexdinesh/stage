@@ -418,6 +418,12 @@ type TaskLaunchState struct {
 
 // Tasks is the task repository (task rows and their events).
 type Tasks interface {
+	// Lock locks the task rows ids until the unit of work ends, on engines
+	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
+	// is skipped). SQLite's single writer already serializes writes: no-op.
+	// Take locks in the order of docs/storage.md "Transactions and locking":
+	// machine, connection, tree, task, schedule.
+	Lock(ctx context.Context, ids ...int64) error
 	Get(ctx context.Context, id int64) (Task, error)
 	List(ctx context.Context, f TaskFilter) ([]Task, error)
 	// Pollable: see db.Store.PollableTasks.

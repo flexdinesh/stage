@@ -143,9 +143,9 @@ An explicit desktop Quit does not stop the server.
 | Status | Meaning |
 | --- | --- |
 | 0 | clean shutdown (SIGINT/SIGTERM) |
-| 1 | any other failure (bind error, database, shutdown timeout) |
+| 1 | any other failure (bind error, database, shutdown timeout, database ownership lost while running) |
 | 2 | bad command line (for example `--managed` with `--listen`) |
-| 75 | the data dir is held by another server |
+| 75 | the data dir is held by another server, or (Postgres) the database's ownership lock is ([storage.md](storage.md#single-owner)) |
 | 78 | invalid configuration (`STAGE_*`/`T3_*` values, `service.env`, socket path), or a database schema newer than this binary |
 
 systemd does not restart on 75 or 78 (`RestartPreventExitStatus`). launchd

@@ -16,7 +16,7 @@ import (
 )
 
 // migrations is the embedded dir: its .sql files are the Postgres
-// migrations (README.md only until the baseline, #403).
+// migrations, from the baseline (0028) up.
 //
 //go:embed migrations
 var migrations embed.FS

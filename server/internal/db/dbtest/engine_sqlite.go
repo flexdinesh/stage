@@ -2,6 +2,10 @@
 
 package dbtest
 
-import "testing"
+import (
+	"testing"
 
-func notePostgres(testing.TB) {}
+	"github.com/flexdinesh/stage/server/internal/db/store"
+)
+
+func postgresEngine(testing.TB) (store.Engine, bool) { return nil, false }

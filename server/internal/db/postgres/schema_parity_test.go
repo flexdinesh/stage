@@ -353,8 +353,7 @@ func postgresSchema(t *testing.T, db querier) logicalSchema {
 	return s
 }
 
-// TestSchemaParity compares both engines' schemas at their heads. Until the
-// Postgres baseline (#403) only the SQLite side runs.
+// TestSchemaParity compares both engines' schemas at their heads.
 func TestSchemaParity(t *testing.T) {
 	ctx := context.Background()
 	lite, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), sqlite.DBFile))
@@ -369,9 +368,6 @@ func TestSchemaParity(t *testing.T) {
 	tasks, ok := liteSchema["tasks"]
 	if !ok || !slices.Equal(tasks.PK, []string{"id"}) || tasks.Columns["project_id"] != (logicalColumn{Type: "int", NotNull: true}) || !slices.Contains(tasks.FKs, "project_id->projects(id)") {
 		t.Fatalf("SQLite introspection of tasks: %+v", tasks)
-	}
-	if MaxVersion() == 0 {
-		t.Skip("no Postgres baseline yet (#403): the cross-engine comparison runs once it exists")
 	}
 	if MaxVersion() != sqlite.MaxVersion() {
 		t.Fatalf("heads differ: Postgres %d, SQLite %d", MaxVersion(), sqlite.MaxVersion())

@@ -16,6 +16,8 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		return err
 	}
 	return s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		o := o
 		id, err := ensureSession(ctx, tx, o.Session)
 		if err != nil {
 			return err

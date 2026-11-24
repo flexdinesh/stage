@@ -401,6 +401,12 @@ type (
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		res = TransitionResult{}
+		// Launch claim: one attempt begins per task and attempt number.
+		if err := tx.Tasks().Lock(ctx, t.TaskID); err != nil {
+			return err
+		}
 		ls, err := tx.Tasks().LaunchState(ctx, t.TaskID)
 		if err != nil {
 			return err

@@ -59,6 +59,12 @@ type SharedPath struct {
 // Connections is the harness connections repository, with each machine's
 // T3 and OpenCode settings and shared paths.
 type Connections interface {
+	// Lock locks the connection rows id until the unit of work ends, on engines
+	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
+	// is skipped). SQLite's single writer already serializes writes: no-op.
+	// Take locks in the order of docs/storage.md "Transactions and locking":
+	// machine, connection, tree, task, schedule.
+	Lock(ctx context.Context, id int64) error
 	Exists(ctx context.Context, id int64) (bool, error)
 	// IsActive reads a connection's active flag (ErrNotFound when unknown).
 	IsActive(ctx context.Context, id int64) (bool, error)

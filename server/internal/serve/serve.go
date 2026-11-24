@@ -156,11 +156,12 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	defer pool.Close()
-	disown, err := pool.Ownership().Acquire(ctx)
+	lease, err := pool.Ownership().Acquire(ctx)
 	if err != nil {
 		return err
 	}
-	defer disown()
+	defer lease.Release()
+	errOwnershipLost := store.ErrOwnershipLost
 	if err := migrate(ctx, pool, logger); err != nil {
 		return err
 	}
@@ -377,6 +378,9 @@ func Run(ctx context.Context, o Options) error {
 	select {
 	case serveErr = <-errCh:
 	case <-ctx.Done():
+	case <-lease.Lost():
+		logger.Error("database ownership lost")
+		serveErr = errOwnershipLost
 	}
 	_ = instance.Notify("STOPPING=1")
 	stop()
