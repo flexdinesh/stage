@@ -31,10 +31,11 @@ const QUIET_WHEN_COMPLETED: readonly TaskState[] = ["backlog", "done", "settled"
  * on (running again, needs input, failed...). A finished run not accepted yet reads "to review"; a backlog tree member
  * reads its readiness.
  */
-export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId">): StatusChip[] {
+export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId">, { blocked = false }: { blocked?: boolean } = {}): StatusChip[] {
   if (t.acceptanceId !== null) return QUIET_WHEN_COMPLETED.includes(t.state) ? ["completed"] : ["completed", t.state];
   if (t.state === "done" || t.state === "settled") return ["to_review"];
-  if (t.state === "backlog" && t.readiness !== null) return [t.readiness];
+  // A ready task its connection cannot launch (launchBlock) is not ready: it reads backlog.
+  if (t.state === "backlog" && t.readiness !== null) return [blocked && t.readiness === "ready" ? "backlog" : t.readiness];
   return [t.state];
 }
 

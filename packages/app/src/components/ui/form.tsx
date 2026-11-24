@@ -159,8 +159,8 @@ export function Segmented<T extends string>({
   small = false,
   fill = false,
 }: {
-  /** `short` replaces `label` below 768px. */
-  options: readonly { value: T; label: string; short?: string }[];
+  /** `short` replaces `label` below 768px; a `disabled` option shows but cannot be picked. */
+  options: readonly { value: T; label: string; short?: string; disabled?: boolean }[];
   value: T;
   onChange: (value: T) => void;
   label: string;
@@ -183,13 +183,14 @@ export function Segmented<T extends string>({
           type="button"
           aria-pressed={o.value === value}
           aria-label={o.short === undefined ? undefined : o.label}
+          disabled={o.disabled === true}
           onClick={() => onChange(o.value)}
           className={cx(
             "border-r border-line-strong font-mono whitespace-nowrap transition-colors duration-150 last:border-r-0",
             // The group's 1px border on each side brings it to control height.
             small ? "h-control-sm px-2.5 text-meta-sm md:px-2" : "h-[calc(var(--control-h)-2px)] px-3 text-detail md:px-2.5",
             fill && "min-w-0 flex-1 max-md:px-1 md:flex-none",
-            o.value === value ? "bg-accent text-on-accent" : "text-muted hover:bg-panel hover:text-fg",
+            o.value === value ? "bg-accent text-on-accent" : "text-muted enabled:hover:bg-panel enabled:hover:text-fg disabled:cursor-not-allowed disabled:opacity-45",
           )}
         >
           {o.short === undefined ? (

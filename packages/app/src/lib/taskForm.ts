@@ -86,3 +86,11 @@ export function taskUpdateBody(s: {
   }
   return body;
 }
+
+/**
+ * Start options a form disables while its harness cannot launch (launchBlock): every one but Backlog, except `keep`,
+ * the timing an edited task opened with, so a title edit never clears its start time.
+ */
+export function blockedStartModes<M extends string>(modes: readonly M[], blocked: boolean, keep: M | null): M[] {
+  return blocked ? modes.filter((m) => m !== "backlog" && m !== keep) : [];
+}

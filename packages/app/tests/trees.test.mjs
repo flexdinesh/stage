@@ -312,6 +312,8 @@ test("time in state reads per state from when it was entered", () => {
   assert.equal(t({ state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }).text, "ready 3h");
   // Blocked or plain backlog counts from creation when there is no later backlog event.
   assert.deepEqual(t({ state: "backlog", readiness: "blocked", acceptanceId: null }), { text: "queued 2d", at: nov(14, 9, 12) });
+  // A ready task its connection cannot launch is queued, not ready.
+  assert.equal(inState({ ...base, state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }, now, { blocked: true }).text, "queued 2d");
 });
 
 test("closed trees: chip text, blocker and task label", () => {

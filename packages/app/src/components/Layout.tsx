@@ -21,6 +21,7 @@ import {
   IconThemeSystem,
   IconTree,
 } from "./icons.tsx";
+import { LaunchGateProvider } from "./LaunchGate.tsx";
 import { BackForward, NavHistoryProvider, PhoneBack, useCanGoBack } from "./NavHistory.tsx";
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
@@ -295,9 +296,11 @@ export function Layout() {
   return (
     <NavHistoryProvider>
       <ScopeProvider>
-        <NewTaskProvider>
-          <Shell />
-        </NewTaskProvider>
+        <LaunchGateProvider>
+          <NewTaskProvider>
+            <Shell />
+          </NewTaskProvider>
+        </LaunchGateProvider>
       </ScopeProvider>
     </NavHistoryProvider>
   );

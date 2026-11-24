@@ -3,6 +3,7 @@ import type { Task, TreeDetail } from "../../api/types.ts";
 import { dateTime } from "../../lib/format.ts";
 import { bandState, edgeState, graphLayout, inState, type BandState, type EdgeState } from "../../lib/trees.ts";
 import { IdTag, Meta, TextButton, TextLink, cx, needEdgeClass } from "../ui.tsx";
+import { useLaunchGate } from "../LaunchGate.tsx";
 import { NodeChip } from "./TreeNode.tsx";
 
 const SIZE = { nodeW: 224, nodeH: 80, gapX: 16, gapY: 32 };
@@ -118,7 +119,8 @@ function GraphNode({
   selected: boolean;
   onSelect: (id: number) => void;
 }) {
-  const when = inState(task);
+  const blocked = useLaunchGate()(task) !== null;
+  const when = inState(task, undefined, { blocked });
   const titleCls = "truncate text-ui font-medium after:absolute after:inset-0";
   const label = `Step ${step}: #${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (

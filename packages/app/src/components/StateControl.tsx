@@ -4,6 +4,7 @@ import type { Task, TreeDetail } from "../api/types.ts";
 import { stateMove, stateSummary } from "../lib/completion.ts";
 import { statusChips } from "../lib/tasks.ts";
 import { CompletionDrawer } from "./Completion.tsx";
+import { useLaunchGate } from "./LaunchGate.tsx";
 import { statusChipView } from "./StateBadge.tsx";
 import { Combobox, Marker, Muted } from "./ui.tsx";
 
@@ -15,7 +16,8 @@ import { Combobox, Marker, Muted } from "./ui.tsx";
 export function StateControl({ task, tree, action }: { task: Task; tree: TreeDetail | null; action?: ReactNode }) {
   const [confirming, setConfirming] = useState(false);
   const { descriptor } = useHarnesses();
-  const current = statusChipView(statusChips(task)[0] ?? task.state);
+  const blocked = useLaunchGate()(task) !== null;
+  const current = statusChipView(statusChips(task, { blocked })[0] ?? task.state);
   const move = stateMove(task, new Set((tree?.tasks ?? []).flatMap((t) => (t.acceptanceId === null ? [] : [t.id]))));
   return (
     <div className="flex min-w-0 flex-col gap-2">

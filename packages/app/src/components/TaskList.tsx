@@ -15,6 +15,7 @@ import { CompletionButton } from "./Completion.tsx";
 import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickComplete.tsx";
 import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
+import { BlockedReason, useLaunchGate } from "./LaunchGate.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { AppButton, Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -231,6 +232,7 @@ export function TaskRow({
   const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
+  const block = useLaunchGate()(task);
   const chip = rowChip(task, contextThreadId);
   // A closed tree's row chip already links it.
   const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
@@ -340,9 +342,11 @@ export function TaskRow({
           </>
         ) : null}
         {showStart ? (
-          <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-            {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
-          </Button>
+          <BlockedReason reason={block?.reason}>
+            <Button small variant="primary" busy={start.isPending} disabled={block !== null} onClick={() => start.mutate()}>
+              {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
+            </Button>
+          </BlockedReason>
         ) : null}
         {appLink === null || justCompleted || confirming !== null ? null : (
           <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
