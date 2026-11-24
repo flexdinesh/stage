@@ -36,35 +36,10 @@ var (
 	InteractionModes = []string{"default", "plan"}
 )
 
-type Project struct {
-	ID         int64            `json:"id"`
-	Bindings   []ProjectBinding `json:"bindings"`
-	Title      string           `json:"title"`
-	ArchivedAt *time.Time       `json:"archivedAt"`
-	CreatedAt  time.Time        `json:"createdAt"`
-	CreatedBy  int64            `json:"createdBy"` // user who created it
-	// SourceMachineID: the machine whose agent gateway forwarded the create
-	// (nil: not through a gateway).
-	SourceMachineID *int64    `json:"sourceMachineId"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	// LastActivityAt: latest thread update/settle or task update; nil when none.
-	LastActivityAt *time.Time `json:"lastActivityAt"`
-	// Origin is "discovered" for a project discovery imported, else nil.
-	Origin     *string    `json:"origin"`
-	ImportedAt *time.Time `json:"importedAt"`
-	// Repos: distinct normalized origin remotes of the active bindings'
-	// workspaces. Search metadata only; titles and paths stay authoritative.
-	Repos []string `json:"repos"`
-}
-
-// ImportSummary counts the projects one connection's discovery created in
-// the recent window (ImportNoticeWindow), with the latest import time.
-type ImportSummary struct {
-	ConnectionID int64     `json:"connectionId"`
-	Harness      string    `json:"harness"`
-	Count        int       `json:"count"`
-	At           time.Time `json:"at"`
-}
+type (
+	Project       = store.Project
+	ImportSummary = store.ImportSummary
+)
 
 // Workspace bases: ref (the worktree starts from BaseRef) or predecessor
 // (from a need's branch; BaseRef is the fallback, docs/api.md "Predecessor

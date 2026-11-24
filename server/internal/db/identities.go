@@ -38,17 +38,8 @@ const (
 	BindingRemote   = "remote"
 )
 
-type ExternalProject struct {
-	ConnectionID int64  `json:"connectionId"`
-	ExternalID   string `json:"externalId"`
-	Title        string `json:"title"`
-	Workspace    string `json:"workspace"`
-	ProjectID    *int64 `json:"projectId"`
-	Repo         string `json:"repo"`
-}
+type ExternalProject = store.ExternalProject
 
-// Connections lists every connection: active ones first, then retired
-// ones (forgotten included, so their tasks still name the harness).
 func (s *Store) Connections(ctx context.Context) ([]HarnessConnection, error) {
 	return read(ctx, s, func(tx store.Tx) ([]HarnessConnection, error) { return tx.Connections().List(ctx) })
 }
@@ -87,18 +78,43 @@ func (s *Store) SetNewTaskConfig(ctx context.Context, id int64, c *execution.Con
 }
 
 func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
-	rows, err := s.pool.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,b.project_id,e.repo FROM external_projects e
- LEFT JOIN project_bindings b ON b.connection_id=e.connection_id AND b.external_project_id=e.external_id AND b.workspace=e.workspace AND b.active=1
- WHERE e.connection_id=$1 AND e.available=1 ORDER BY lower(e.title),e.workspace`, connectionID)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(r rowScanner) (ExternalProject, error) {
-		var p ExternalProject
-		err := r.Scan(&p.ConnectionID, &p.ExternalID, &p.Title, &p.Workspace, &p.ProjectID, &p.Repo)
-		return p, err
-	})
+	return read(ctx, s, func(tx store.Tx) ([]ExternalProject, error) { return tx.Projects().ExternalProjects(ctx, connectionID) })
 }
+
+// bind makes b the project's active binding on its connection.
+func (s *Store) bind(ctx context.Context, tx store.Tx, b ProjectBinding) (int64, error) {
+	if b.ConnectionID <= 0 || b.ExternalProjectID == "" || b.Workspace == "" {
+		return 0, Invalid("connection, external project and workspace are required")
+	}
+	if err := requireProject(ctx, tx, b.ProjectID); err != nil {
+		return 0, err
+	}
+	if err := connectionUsable(ctx, tx, b.ConnectionID); err != nil {
+		return 0, err
+	}
+	pr := tx.Projects()
+	// A workspace the user rebinds away from is declined like an unbind.
+	if err := pr.DeclineRebound(ctx, b); err != nil {
+		return 0, err
+	}
+	if err := pr.DeactivateBindings(ctx, b.ProjectID, b.ConnectionID); err != nil {
+		return 0, err
+	}
+	if b.Origin == "" {
+		b.Origin = BindingManual
+	}
+	id, err := pr.InsertBinding(ctx, b)
+	if s.e.Errors().IsUniqueViolation(err) {
+		return 0, Conflict("workspace is already bound to another Stage project; unbind it there first")
+	}
+	if err != nil || b.Origin != BindingManual {
+		return id, err
+	}
+	// A manual bind withdraws an earlier decline of this workspace.
+	return id, pr.Undecline(ctx, b.ConnectionID, b.ExternalProjectID, b.Workspace)
+}
+
+// bindProject (transitional raw SQL) is bind for a raw transaction.
 func bindProject(ctx context.Context, tx *Tx, b ProjectBinding) (int64, error) {
 	if b.ConnectionID <= 0 || b.ExternalProjectID == "" || b.Workspace == "" {
 		return 0, Invalid("connection, external project and workspace are required")
@@ -137,29 +153,26 @@ func bindProject(ctx context.Context, tx *Tx, b ProjectBinding) (int64, error) {
 	return id, err
 }
 func (s *Store) BindProject(ctx context.Context, b ProjectBinding) (Project, error) {
-	err := s.inTx(ctx, func(tx *Tx) error { _, err := bindProject(ctx, tx, b); return err })
-	if err != nil {
-		return Project{}, err
-	}
-	return s.GetProject(ctx, b.ProjectID)
+	return write(ctx, s, func(tx store.Tx) (Project, error) {
+		if _, err := s.bind(ctx, tx, b); err != nil {
+			return Project{}, err
+		}
+		return tx.Projects().Get(ctx, b.ProjectID)
+	})
 }
 
 // UnbindProject deactivates the binding and declines its workspace, so
 // discovery never binds it again until a user binds it manually.
 func (s *Store) UnbindProject(ctx context.Context, projectID, connectionID int64) (Project, error) {
-	err := s.inTx(ctx, func(tx *Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE external_projects SET declined_at=stage_now() WHERE EXISTS(SELECT 1 FROM project_bindings b
- WHERE b.project_id=$1 AND b.connection_id=$2 AND b.active=1 AND b.connection_id=external_projects.connection_id
- AND b.external_project_id=external_projects.external_id AND b.workspace=external_projects.workspace)`, projectID, connectionID); err != nil {
-			return err
+	return write(ctx, s, func(tx store.Tx) (Project, error) {
+		if err := tx.Projects().DeclineBound(ctx, projectID, connectionID); err != nil {
+			return Project{}, err
 		}
-		_, err := tx.Exec(ctx, `UPDATE project_bindings SET active=0 WHERE project_id=$1 AND connection_id=$2`, projectID, connectionID)
-		return err
+		if err := tx.Projects().DeactivateBindings(ctx, projectID, connectionID); err != nil {
+			return Project{}, err
+		}
+		return tx.Projects().Get(ctx, projectID)
 	})
-	if err != nil {
-		return Project{}, err
-	}
-	return s.GetProject(ctx, projectID)
 }
 
 // ensureSession returns ref's session identity, creating it; Invalid for an

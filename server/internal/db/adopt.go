@@ -182,3 +182,11 @@ func adoptionProject(ctx context.Context, tx *Tx, in AdoptInput, o execution.Obs
 	_, err = bindProject(ctx, tx, b)
 	return id, err
 }
+
+// insertProject (transitional raw SQL) inserts a Stage project. The legacy
+// columns preserve upgrade evidence only.
+func insertProject(ctx context.Context, tx *Tx, p Project) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,created_by_user_id,source_machine_id) VALUES($1,$2,'','app',$3,$4) RETURNING id`, "stage:"+newUUID(), p.Title, ActingUser(ctx), ActingMachine(ctx)).Scan(&id)
+	return id, err
+}
