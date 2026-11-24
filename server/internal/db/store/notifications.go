@@ -94,4 +94,6 @@ type Notifications interface {
 type Sessions interface {
 	// Ensure returns the identity of (connection, external id), creating it.
 	Ensure(ctx context.Context, connectionID int64, externalID string) (int64, error)
+	// Ref reads an identity (ErrNotFound when unknown).
+	Ref(ctx context.Context, id int64) (SessionRef, error)
 }

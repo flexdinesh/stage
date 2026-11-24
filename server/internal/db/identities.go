@@ -244,18 +244,14 @@ func ConnectionRetired() error {
 	return &ConflictError{Code: "connection_retired", Msg: "This harness connection was replaced. Its history stays here; start new work on the current connection."}
 }
 func (s *Store) EnsureSession(ctx context.Context, ref SessionRef) (int64, error) {
-	var id int64
-	err := s.inTx(ctx, func(tx *Tx) error { var err error; id, err = sessionIdentity(ctx, tx, ref); return err })
-	return id, err
+	return write(ctx, s, func(tx store.Tx) (int64, error) { return ensureSession(ctx, tx, ref) })
 }
 
 func (s *Store) TaskBySession(ctx context.Context, ref SessionRef) (Task, error) {
 	return scanTask(s.pool.QueryRow(ctx, taskSelect+` WHERE t.session_id=(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID))
 }
 func (s *Store) SessionIdentity(ctx context.Context, id int64) (SessionRef, error) {
-	var r SessionRef
-	err := s.pool.QueryRow(ctx, `SELECT connection_id,external_id FROM session_identities WHERE id=$1`, id).Scan(&r.ConnectionID, &r.ExternalSessionID)
-	return r, notFound(err)
+	return read(ctx, s, func(tx store.Tx) (SessionRef, error) { return tx.Sessions().Ref(ctx, id) })
 }
 
 type LaunchDestination struct {

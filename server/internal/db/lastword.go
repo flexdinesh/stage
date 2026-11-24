@@ -6,38 +6,38 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // LastWordCheckedAt is the thread updated_at the last successful last-word
 // check saw (nil = never checked). ErrNotFound if the thread is not mirrored.
 func (s *Store) LastWordCheckedAt(ctx context.Context, threadID string) (*time.Time, error) {
-	var at *time.Time
-	err := s.pool.QueryRow(ctx, `SELECT last_word_checked_at FROM threads WHERE t3_thread_id = $1`, threadID).Scan(&at)
-	return at, notFound(err)
+	return read(ctx, s, func(tx store.Tx) (*time.Time, error) { return tx.Threads().LastWordCheckedAt(ctx, threadID) })
 }
 
 // SetThreadLastWord records a last-word check at thread updated_at checked.
 // r nil (no reply found) advances the marker and keeps the stored reply. A
 // check older than the stored marker is ignored (concurrent sync loops).
 func (s *Store) SetThreadLastWord(ctx context.Context, threadID string, checked time.Time, r *execution.Reply) error {
-	if r == nil {
-		_, err := s.pool.Exec(ctx, `
-UPDATE threads SET last_word_checked_at = $2
-WHERE t3_thread_id = $1 AND (last_word_checked_at IS NULL OR last_word_checked_at <= $2)`, threadID, checked)
-		return err
+	var row *store.LastWordRow
+	if r != nil {
+		var at *time.Time
+		if !r.UpdatedAt.IsZero() {
+			at = &r.UpdatedAt
+		}
+		row = &store.LastWordRow{Text: r.Text, Preview: optionalText(PreviewText(r.Text)), Truncated: r.Truncated,
+			RunID: optionalText(r.RunID), ItemID: optionalText(r.ItemID), At: at}
 	}
-	var at *time.Time
-	if !r.UpdatedAt.IsZero() {
-		at = &r.UpdatedAt
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetLastWord(ctx, threadID, checked, row) })
+}
+
+// optionalText is s, or nil when empty (stored as NULL).
+func optionalText(s string) *string {
+	if s == "" {
+		return nil
 	}
-	_, err := s.pool.Exec(ctx, `
-UPDATE threads SET last_word_text = $3, last_word_preview = $4, last_word_truncated = $5,
-  last_word_run_id = $6, last_word_item_id = $7, last_word_at = $8, last_word_checked_at = $2
-WHERE t3_thread_id = $1 AND (last_word_checked_at IS NULL OR last_word_checked_at <= $2)`,
-		threadID, checked, r.Text, nullIfEmpty(PreviewText(r.Text)), r.Truncated,
-		nullIfEmpty(r.RunID), nullIfEmpty(r.ItemID), at)
-	return err
+	return &s
 }
 
 // GetThreadLastWord is the stored reply excerpt; nil when none has been read.
@@ -46,11 +46,13 @@ func (s *Store) GetThreadLastWord(ctx context.Context, threadID string) (*LastWo
 		text *string
 		lw   LastWord
 	)
-	err := s.pool.QueryRow(ctx, `
-SELECT last_word_text, last_word_truncated, last_word_run_id, last_word_at
-FROM threads WHERE t3_thread_id = $1`, threadID).Scan(&text, &lw.Truncated, &lw.RunID, &lw.At)
+	err := s.e.Read(ctx, func(tx store.Tx) error {
+		var err error
+		text, lw, err = tx.Threads().LastWord(ctx, threadID)
+		return err
+	})
 	if err != nil {
-		return nil, notFound(err)
+		return nil, err
 	}
 	if text == nil {
 		return nil, nil

@@ -43,6 +43,8 @@ type Tx interface {
 	Connections() Connections
 	Machines() Machines
 	Projects() Projects
+	Threads() Threads
+	Stats() Stats
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

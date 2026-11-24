@@ -16,3 +16,9 @@ func (r sessions) Ensure(ctx context.Context, connectionID int64, externalID str
  ON CONFLICT(connection_id,external_id) DO UPDATE SET external_id=excluded.external_id RETURNING id`, connectionID, externalID).Scan(&id)
 	return id, err
 }
+
+func (r sessions) Ref(ctx context.Context, id int64) (store.SessionRef, error) {
+	var ref store.SessionRef
+	err := r.QueryRow(ctx, `SELECT connection_id,external_id FROM session_identities WHERE id=$1`, id).Scan(&ref.ConnectionID, &ref.ExternalSessionID)
+	return ref, notFound(err)
+}
