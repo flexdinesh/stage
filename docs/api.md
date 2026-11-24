@@ -92,7 +92,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 
 Stage has no sign-in and no API auth (browser and API access stay behind the proxy boundary). One user exists, the default user (id 1), and every write is attributed to it ([architecture.md](architecture.md#users)). Sign-in identities will map to users later; machine tokens (ADR 0002) are machine principals, never users.
 
-**Source machine.** A write that arrived through a worker's agent gateway ([Agent gateway route](#apiworkergatewayapi-and-apiworkergatewaymcp)) also records the forwarding machine: `sourceMachineId` on `Task`, `Tree`, `JournalEntry`, `Schedule` and `Project`, next to `createdBy` (still the acting user). `null` when the write did not come through a gateway (the UI, an agent on the main server's machine, background work), for trigger-written journal events, discovered projects and schedule-spawned tasks (the schedule spawns them, also on Run now). The machine may since have been removed.
+**Source machine.** A write that arrived through a worker's agent gateway ([Agent gateway route](#apiworkergatewayapi-and-apiworkergatewaymcp)) also records the forwarding machine: `sourceMachineId` on `Task`, `Tree`, `JournalEntry`, `Schedule` and `Project`, next to `createdBy` (still the acting user). `null` when the write did not come through a gateway (the UI, an agent on the main server's machine, background work), for derived journal events (tree, membership, needs and task-state events; [storage.md](storage.md#journal-events)), discovered projects and schedule-spawned tasks (the schedule spawns them, also on Run now). The machine may since have been removed.
 
 ### `GET /api/me`
 200 `User`, the acting user:
@@ -662,7 +662,7 @@ API v2 removes task `notes`. Create and adopt accept `initialNote`; PATCH reject
 }
 ```
 
-`kind` is `note|event`. `createdBy`: the note's author, or the user behind an event Stage writes directly (acceptance, duplicate); events written by database triggers carry the default user. For notes, exactly one of `taskId` and `treeId` denotes ownership. Task events can also carry a `treeId` snapshot; tree events have `treeId` and optional `sourceTaskId`. Provenance and IDs never change. Empty `category` means uncategorized; `eventType` is empty for notes. Nullable provenance fields are always emitted.
+`kind` is `note|event`. `createdBy`: the note's author, or the user behind an event Stage writes directly (acceptance, duplicate); derived events (task state, tree, membership and needs; [storage.md](storage.md#journal-events)) carry the default user. For notes, exactly one of `taskId` and `treeId` denotes ownership. Task events can also carry a `treeId` snapshot; tree events have `treeId` and optional `sourceTaskId`. Provenance and IDs never change. Empty `category` means uncategorized; `eventType` is empty for notes. Nullable provenance fields are always emitted.
 
 ### `GET /api/journal/:id`
 

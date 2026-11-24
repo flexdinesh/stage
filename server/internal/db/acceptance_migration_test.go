@@ -74,10 +74,12 @@ func TestAutoCompleteMigrationKeepsAcceptances(t *testing.T) {
 	if err != nil || len(inputs) != 1 || inputs[0].ID != 7 || inputs[0].Evidence.Session == nil || inputs[0].Evidence.Session.ExternalSessionID != "thread" {
 		t.Fatalf("launch inputs %+v %v", inputs, err)
 	}
+	// The rebuilt table takes the new provenance. Its source session is set
+	// by Go since 0026 (TestAcceptanceSourceSessionIsTasks), not a trigger.
 	mustExec(t, pool, `INSERT INTO task_acceptances(task_id,provenance,evidence) VALUES(1,'harness_archived','{}')`)
 	var id int64
 	var session *int64
-	if err = pool.QueryRowContext(ctx, `SELECT id,source_session_id FROM task_acceptances WHERE provenance='harness_archived'`).Scan(&id, &session); err != nil || id != 8 || session == nil || *session != 5 {
+	if err = pool.QueryRowContext(ctx, `SELECT id,source_session_id FROM task_acceptances WHERE provenance='harness_archived'`).Scan(&id, &session); err != nil || id != 8 || session != nil {
 		t.Fatalf("new acceptance %d %v %v", id, session, err)
 	}
 	if _, err = pool.ExecContext(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence) VALUES(1,'harness','{}')`); err == nil {

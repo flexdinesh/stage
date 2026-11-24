@@ -42,6 +42,13 @@ func (r journal) InsertNote(ctx context.Context, o store.JournalOwner, in store.
 	return scanJournal(r.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id,source_session_id,created_by_user_id,source_machine_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID, sourceID, createdBy, sourceMachine))
 }
 
+func (r journal) InsertEvent(ctx context.Context, e store.JournalEvent) error {
+	_, err := r.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_session_id, attempt, event_type, text, from_tree_id, to_tree_id, created_at)
+VALUES ('event', $1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, `+nowSQL+`))`,
+		e.TaskID, e.TreeID, e.SourceTaskID, e.SourceSessionID, e.Attempt, e.EventType, e.Text, e.FromTreeID, e.ToTreeID, e.At)
+	return err
+}
+
 func (r journal) Read(ctx context.Context, o store.JournalOwner, q store.JournalQuery, before int64, limit int) ([]store.JournalEntry, error) {
 	var w where
 	if o.TaskID != nil {

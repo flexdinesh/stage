@@ -154,8 +154,10 @@ type Threads interface {
 	// was stored.
 	SetLastWord(ctx context.Context, id string, checked time.Time, r *LastWordRow) error
 	// Mirror upserts o's mirror row (a newer stored row wins) and sets its
-	// model and modes.
-	Mirror(ctx context.Context, o execution.Observation, m ThreadMirror) error
+	// model and modes; inserted: the row is new.
+	Mirror(ctx context.Context, o execution.Observation, m ThreadMirror) (inserted bool, err error)
+	// SetProject sets the mirrored thread's Stage project.
+	SetProject(ctx context.Context, threadID string, project *int64) error
 	// SetSessionLastWord is SetLastWord by session identity.
 	SetSessionLastWord(ctx context.Context, sessionID int64, checked time.Time, lw LastWordRow) error
 	// LastWord reads the stored reply (text nil: none).

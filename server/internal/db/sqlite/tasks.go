@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -212,14 +214,36 @@ func (r tasks) Events(ctx context.Context, taskID int64) ([]store.TaskEvent, err
 	})
 }
 
-func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string) error {
+func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string) (time.Time, error) {
 	var f *string
 	if from != nil {
 		v := string(*from)
 		f = &v
 	}
-	_, err := r.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $3, $4)`, taskID, f, string(to), detail)
+	var at time.Time
+	err := r.QueryRow(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $3, $4) RETURNING at`, taskID, f, string(to), detail).Scan(&at)
+	return at, err
+}
+
+func (r tasks) JournalState(ctx context.Context, id int64) (store.TaskJournalState, error) {
+	var s store.TaskJournalState
+	err := r.QueryRow(ctx, `SELECT tree_id, session_id, title, launch_attempt, t3_thread_id IS NOT NULL, adopted, recorded_work FROM tasks WHERE id = $1`, id).
+		Scan(&s.TreeID, &s.SessionID, &s.Title, &s.LaunchAttempt, &s.HasThread, &s.Adopted, &s.RecordedWork)
+	return s, notFound(err)
+}
+
+func (r tasks) MarkRecordedWork(ctx context.Context, id int64) error {
+	_, err := r.Exec(ctx, `UPDATE tasks SET recorded_work = 1 WHERE id = $1`, id)
 	return err
+}
+
+func (r tasks) ProjectBySession(ctx context.Context, sessionID int64) (*int64, error) {
+	var p *int64
+	err := r.QueryRow(ctx, `SELECT project_id FROM tasks WHERE session_id = $1`, sessionID).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
 }
 
 func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {

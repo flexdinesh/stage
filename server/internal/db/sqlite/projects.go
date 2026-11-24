@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
@@ -77,6 +79,15 @@ func (r projects) Insert(ctx context.Context, title string, createdBy int64, sou
 	var id int64
 	err := r.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,created_by_user_id,source_machine_id) VALUES($1,$2,'','app',$3,$4) RETURNING id`, "stage:"+newUUID(), title, createdBy, sourceMachine).Scan(&id)
 	return id, err
+}
+
+func (r projects) SoleBinding(ctx context.Context, connectionID int64, external string) (*int64, error) {
+	var p *int64
+	err := r.QueryRow(ctx, `SELECT min(project_id) FROM project_bindings WHERE connection_id = $1 AND external_project_id = $2 AND active = 1 HAVING count(*) = 1`, connectionID, external).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
 }
 
 func (r projects) InsertDiscovered(ctx context.Context, title string, connectionID, createdBy int64) (int64, error) {

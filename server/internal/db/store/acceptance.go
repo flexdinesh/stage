@@ -99,7 +99,8 @@ type Acceptances interface {
 	Current(ctx context.Context, taskID int64) (*int64, error)
 	// MarkReopened suppresses inference for the task's observed execution.
 	MarkReopened(ctx context.Context, taskID int64) error
-	Insert(ctx context.Context, taskID int64, provenance string, evidence AcceptedEvidence, note string) (int64, error)
+	// Insert records an acceptance; sourceSessionID is the task's session.
+	Insert(ctx context.Context, taskID int64, provenance string, evidence AcceptedEvidence, note string, sourceSessionID *int64) (int64, error)
 	// SetCurrent sets the task's current acceptance (nil clears) at
 	// revision and marks it and its tree as having recorded work.
 	SetCurrent(ctx context.Context, taskID, revision int64, acceptanceID *int64) error

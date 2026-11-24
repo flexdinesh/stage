@@ -30,19 +30,11 @@ func (s *Store) RecordHandoff(ctx context.Context, taskID int64, h Handoff) erro
 		detail = fmt.Sprintf("handoff from %s skipped: %s", sourceLabel(h), reason)
 	}
 	return s.e.Write(ctx, func(tx store.Tx) error {
-		var sourceID *int64
-		if h.Session != nil {
-			id, err := ensureSession(ctx, tx, *h.Session)
-			if err != nil {
-				return err
-			}
-			sourceID = &id
-		}
-		if err := tx.Attempts().RecordHandoff(ctx, taskID, h, sourceID); err != nil {
+		if err := recordHandoff(ctx, tx, taskID, h); err != nil {
 			return err
 		}
 		from := StateLaunching
-		return tx.Tasks().AddEvent(ctx, taskID, &from, StateLaunching, detail)
+		return addTaskEvent(ctx, tx, taskID, &from, StateLaunching, detail)
 	})
 }
 

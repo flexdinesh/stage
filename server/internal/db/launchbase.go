@@ -31,7 +31,7 @@ func (s *Store) RecordLaunchBase(ctx context.Context, taskID int64, b LaunchBase
 			return err
 		}
 		from := StateLaunching
-		return tx.Tasks().AddEvent(ctx, taskID, &from, StateLaunching, b.Detail())
+		return addTaskEvent(ctx, tx, taskID, &from, StateLaunching, b.Detail())
 	})
 }
 

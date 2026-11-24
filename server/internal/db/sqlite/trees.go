@@ -1,10 +1,13 @@
 package sqlite
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
@@ -131,6 +134,53 @@ func (r trees) SetStatus(ctx context.Context, id int64, status store.TreeStatus)
 	return err
 }
 
+func (r trees) Config(ctx context.Context, id int64) (string, store.StartMode, error) {
+	var title string
+	var mode store.StartMode
+	err := r.QueryRow(ctx, `SELECT title, start_mode FROM task_trees WHERE id = $1`, id).Scan(&title, &mode)
+	return title, mode, notFound(err)
+}
+
+func (r trees) MarkRecordedWork(ctx context.Context, id int64, touched *time.Time) error {
+	_, err := r.Exec(ctx, `UPDATE task_trees SET recorded_work = 1, updated_at = COALESCE($2, updated_at) WHERE id = $1`, id, touched)
+	return err
+}
+
+func (r trees) BumpMembership(ctx context.Context, trees []int64, work bool) error {
+	_, err := r.Exec(ctx, `UPDATE task_trees SET membership_revision = membership_revision + 1, updated_at = `+nowSQL+`,
+  recorded_work = max(recorded_work, $2) WHERE id IN (SELECT value FROM json_each($1))`, jsonArray(trees), work)
+	return err
+}
+
+func (r trees) ArchiveIfEmpty(ctx context.Context, id int64) (bool, error) {
+	res, err := r.Exec(ctx, `UPDATE task_trees SET status = 'archived', closed_at = `+nowSQL+`
+WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM tasks WHERE tree_id = $1)`, id)
+	return err == nil && res.RowsAffected() > 0, err
+}
+
+// edges scans need edges.
+func edges(rows *rowSet, err error) ([]store.TreeEdge, error) {
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, func(r rowScanner) (store.TreeEdge, error) {
+		var e store.TreeEdge
+		err := r.Scan(&e.TaskID, &e.NeedID)
+		return e, err
+	})
+}
+
+// deleteNeeds removes the need edges matching cond (over task_needs, args
+// from $1) and returns them, by task then need.
+func (r trees) deleteNeeds(ctx context.Context, cond string, args ...any) ([]store.TreeEdge, error) {
+	gone, err := edges(r.Query(ctx, `SELECT task_id, need_id FROM task_needs WHERE `+cond+` ORDER BY task_id, need_id`, args...))
+	if err != nil || len(gone) == 0 {
+		return gone, err
+	}
+	_, err = r.Exec(ctx, `DELETE FROM task_needs WHERE `+cond, args...)
+	return gone, err
+}
+
 // activeTask is the first task matching cond (over tasks t, arg $1) that is
 // launching, running or needing input.
 func (r trees) activeTask(ctx context.Context, cond string, arg any) (int64, store.TaskState, error) {
@@ -171,12 +221,16 @@ func (r trees) Delete(ctx context.Context, id int64) error {
 	return err
 }
 
-func (r trees) DetachMembers(ctx context.Context, id int64) error {
-	if _, err := r.Exec(ctx, `DELETE FROM task_needs WHERE task_id IN (SELECT id FROM tasks WHERE tree_id = $1)`, id); err != nil {
-		return err
+func (r trees) MemberIDs(ctx context.Context, id int64) ([]int64, error) {
+	rows, err := r.Query(ctx, `SELECT id FROM tasks WHERE tree_id = $1 ORDER BY id`, id)
+	if err != nil {
+		return nil, err
 	}
-	_, err := r.Exec(ctx, `UPDATE tasks SET tree_id = NULL, updated_at = `+nowSQL+` WHERE tree_id = $1`, id)
-	return err
+	return collectRows(rows, rowTo[int64])
+}
+
+func (r trees) DropMemberNeeds(ctx context.Context, id int64) ([]store.TreeEdge, error) {
+	return r.deleteNeeds(ctx, `task_id IN (SELECT id FROM tasks WHERE tree_id = $1)`, id)
 }
 
 func (r trees) ArchiveDissolved(ctx context.Context, id int64) error {
@@ -242,12 +296,16 @@ func (r trees) SetMembership(ctx context.Context, taskID int64, tree *int64) err
 	return err
 }
 
-func (r trees) InheritNeeds(ctx context.Context, taskID int64) error {
-	_, err := r.Exec(ctx, `
+func (r trees) InheritNeeds(ctx context.Context, taskID int64) ([]store.TreeEdge, error) {
+	added, err := edges(r.Query(ctx, `
 INSERT OR IGNORE INTO task_needs (task_id, need_id)
 SELECT d.task_id, n.need_id FROM task_needs d JOIN task_needs n ON n.task_id = d.need_id
-WHERE d.need_id = $1 AND n.need_id <> d.task_id`, taskID)
-	return err
+WHERE d.need_id = $1 AND n.need_id <> d.task_id
+RETURNING task_id, need_id`, taskID))
+	slices.SortFunc(added, func(a, b store.TreeEdge) int {
+		return cmp.Or(cmp.Compare(a.TaskID, b.TaskID), cmp.Compare(a.NeedID, b.NeedID))
+	})
+	return added, err
 }
 
 func (r trees) TouchDependents(ctx context.Context, taskID int64) error {
@@ -255,9 +313,8 @@ func (r trees) TouchDependents(ctx context.Context, taskID int64) error {
 	return err
 }
 
-func (r trees) DropNeeds(ctx context.Context, taskID int64) error {
-	_, err := r.Exec(ctx, `DELETE FROM task_needs WHERE task_id = $1 OR need_id = $1`, taskID)
-	return err
+func (r trees) DropNeeds(ctx context.Context, taskID int64) ([]store.TreeEdge, error) {
+	return r.deleteNeeds(ctx, `task_id = $1 OR need_id = $1`, taskID)
 }
 
 func (r trees) ClearStaleBases(ctx context.Context) error {
@@ -294,9 +351,8 @@ SELECT EXISTS (SELECT 1 FROM up WHERE x = $2)`, need, taskID).Scan(&cycle)
 	return cycle, err
 }
 
-func (r trees) KeepNeeds(ctx context.Context, taskID int64, keep []int64) error {
-	_, err := r.Exec(ctx, `DELETE FROM task_needs WHERE task_id = $1 AND need_id NOT IN (SELECT value FROM json_each($2))`, taskID, jsonArray(keep))
-	return err
+func (r trees) KeepNeeds(ctx context.Context, taskID int64, keep []int64) ([]store.TreeEdge, error) {
+	return r.deleteNeeds(ctx, `task_id = $1 AND need_id NOT IN (SELECT value FROM json_each($2))`, taskID, jsonArray(keep))
 }
 
 func (r trees) AddNeed(ctx context.Context, taskID, need int64) error {

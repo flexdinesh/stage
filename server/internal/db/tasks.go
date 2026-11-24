@@ -155,7 +155,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 			return 0, err
 		}
 	}
-	if err := tx.Tasks().AddEvent(ctx, id, nil, StateBacklog, "created"); err != nil {
+	if err := addTaskEvent(ctx, tx, id, nil, StateBacklog, "created"); err != nil {
 		return 0, err
 	}
 	if err := checkBaseTask(ctx, tx, id); err != nil {
@@ -443,7 +443,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			}
 		}
 		from := res.From
-		if err := tx.Tasks().AddEvent(ctx, t.TaskID, &from, t.To, t.Detail); err != nil {
+		if err := addTaskEvent(ctx, tx, t.TaskID, &from, t.To, t.Detail); err != nil {
 			return err
 		}
 		if t.To.Active() {
@@ -470,7 +470,7 @@ func reopenOnActivity(ctx context.Context, tx store.Tx, id int64, to TaskState) 
 		return err
 	}
 	if unarchived {
-		if err := tx.Tasks().AddEvent(ctx, id, &to, to, "unarchived: became "+label); err != nil {
+		if err := addTaskEvent(ctx, tx, id, &to, to, "unarchived: became "+label); err != nil {
 			return err
 		}
 	}

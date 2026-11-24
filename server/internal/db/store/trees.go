@@ -82,9 +82,20 @@ type Trees interface {
 	Edges(ctx context.Context, trees []int64) ([]TreeEdge, error)
 	// Events are the members' newest task events, newest first.
 	Events(ctx context.Context, id int64, limit int) ([]TaskEvent, error)
+	// Config is the tree's title and start mode (ErrNotFound).
+	Config(ctx context.Context, id int64) (string, StartMode, error)
 	// Update sets the title and start mode when set, and updated_at.
 	Update(ctx context.Context, id int64, title Optional[string], mode Optional[StartMode]) error
 	SetStatus(ctx context.Context, id int64, status TreeStatus) error
+	// MarkRecordedWork protects the tree from deletion and, with touched,
+	// sets its updated_at.
+	MarkRecordedWork(ctx context.Context, id int64, touched *time.Time) error
+	// BumpMembership counts a membership change in each tree: revision + 1,
+	// updated_at now, recorded work when work is set.
+	BumpMembership(ctx context.Context, trees []int64, work bool) error
+	// ArchiveIfEmpty archives the tree, closed now, when it has no members
+	// (false: it has).
+	ArchiveIfEmpty(ctx context.Context, id int64) (bool, error)
 	// ActiveMember is the tree's first member launching, running or
 	// needing input (ErrNotFound: none).
 	ActiveMember(ctx context.Context, id int64) (int64, TaskState, error)
@@ -96,8 +107,11 @@ type Trees interface {
 	FirstStarted(ctx context.Context, id int64) (*int64, error)
 	DeleteMembers(ctx context.Context, id int64) error
 	Delete(ctx context.Context, id int64) error
-	// DetachMembers drops the members' needs and takes them out of the tree.
-	DetachMembers(ctx context.Context, id int64) error
+	// MemberIDs are the tree's tasks, by id.
+	MemberIDs(ctx context.Context, id int64) ([]int64, error)
+	// DropMemberNeeds removes the members' needs and returns them, by task
+	// then need.
+	DropMemberNeeds(ctx context.Context, id int64) ([]TreeEdge, error)
 	// ArchiveDissolved archives a dissolved tree.
 	ArchiveDissolved(ctx context.Context, id int64) error
 	// Startable: the tree's ready members, by id.
@@ -114,12 +128,14 @@ type Trees interface {
 	IsArchived(ctx context.Context, taskID int64) (bool, error)
 	// SetMembership puts the task in tree (nil: none) and bumps updated_at.
 	SetMembership(ctx context.Context, taskID int64, tree *int64) error
-	// InheritNeeds gives the task's dependents its needs.
-	InheritNeeds(ctx context.Context, taskID int64) error
+	// InheritNeeds gives the task's dependents its needs and returns the
+	// added edges, by task then need.
+	InheritNeeds(ctx context.Context, taskID int64) ([]TreeEdge, error)
 	// TouchDependents bumps the task's dependents' updated_at.
 	TouchDependents(ctx context.Context, taskID int64) error
-	// DropNeeds removes every need edge of the task, both ways.
-	DropNeeds(ctx context.Context, taskID int64) error
+	// DropNeeds removes every need edge of the task, both ways, and returns
+	// them, by task then need.
+	DropNeeds(ctx context.Context, taskID int64) ([]TreeEdge, error)
 	// ClearStaleBases drops workspace.baseTaskId where it no longer names a
 	// need.
 	ClearStaleBases(ctx context.Context) error
@@ -128,7 +144,8 @@ type Trees interface {
 	Needs(ctx context.Context, taskID int64) ([]int64, error)
 	// WouldCycle: need already (transitively) needs taskID.
 	WouldCycle(ctx context.Context, taskID, need int64) (bool, error)
-	// KeepNeeds drops the task's needs not in keep.
-	KeepNeeds(ctx context.Context, taskID int64, keep []int64) error
+	// KeepNeeds drops the task's needs not in keep and returns them, by
+	// need.
+	KeepNeeds(ctx context.Context, taskID int64, keep []int64) ([]TreeEdge, error)
 	AddNeed(ctx context.Context, taskID, need int64) error
 }

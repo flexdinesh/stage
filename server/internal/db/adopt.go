@@ -128,7 +128,7 @@ func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (in
 	if err != nil {
 		return 0, false, err
 	}
-	if err = tx.Tasks().AddEvent(ctx, id, nil, state, "adopted session"); err != nil {
+	if err = addTaskEvent(ctx, tx, id, nil, state, "adopted session"); err != nil {
 		return 0, false, err
 	}
 	if in.InitialNote != nil && *in.InitialNote != "" {
