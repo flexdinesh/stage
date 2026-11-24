@@ -1,19 +1,22 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+)
 
 // Migration 0017: users seeded with the default user, empty identities, and
 // existing rows of every attributed table backfilled to the default user.
-func TestUsersMigration(t *testing.T) {
-	pool := openUnmigrated(t)
-	migrateTo(t, pool, 16)
+func seedV0017Users(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `INSERT INTO projects(id,title,t3_project_id,workspace_root,source) VALUES(1,'P','stage:p','','app')`)
 	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(1,'tree')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,tree_id) VALUES(1,1,'t','p','backlog',1)`)
 	mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,cron,tz) VALUES(1,1,'s','p','* * * * *','UTC')`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(901,'note',1,'old','k')`)
-	migrateTo(t, pool, 17)
+}
 
+func checkV0017Users(t *testing.T, pool *sqlite.DB) {
 	var name string
 	if err := pool.QueryRow(`SELECT display_name FROM users WHERE id=1`).Scan(&name); err != nil || name != "Default user" {
 		t.Fatalf("default user %q, %v", name, err)

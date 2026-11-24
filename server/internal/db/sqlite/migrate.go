@@ -14,13 +14,32 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// newProvider is the goose provider over the embedded migrations.
+// goRunner runs one Go migration inside goose's migration transaction.
+type goRunner func(ctx context.Context, tx *sql.Tx) error
+
+// goMigrations holds the SQLite runner of every backfill.Steps version: the
+// shared logic in internal/db/backfill over this adapter's SQL. Empty until
+// the first backfill (docs/storage.md "Adding a migration").
+var goMigrations = map[int64]goRunner{}
+
+// newProvider is the goose provider over the embedded migrations and the Go
+// migrations.
 func newProvider(pool *sql.DB) (*goose.Provider, error) {
 	fsys, err := fs.Sub(migrations, "migrations")
 	if err != nil {
 		return nil, err
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, pool, fsys)
+	return providerFor(pool, fsys, goMigrations)
+}
+
+// providerFor is the goose sqlite3 provider over fsys's .sql migrations plus
+// runners registered as Go migrations at their versions.
+func providerFor(pool *sql.DB, fsys fs.FS, runners map[int64]goRunner) (*goose.Provider, error) {
+	gos := make([]*goose.Migration, 0, len(runners))
+	for v, run := range runners {
+		gos = append(gos, goose.NewGoMigration(v, &goose.GoFunc{RunTx: run}, nil))
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, pool, fsys, goose.WithGoMigrations(gos...))
 	if err != nil {
 		return nil, fmt.Errorf("goose provider: %w", err)
 	}
@@ -51,7 +70,7 @@ func MigrateTo(ctx context.Context, d *DB, version int64) error {
 	return nil
 }
 
-// MaxVersion is the highest embedded migration version.
+// MaxVersion is the highest embedded migration version, .sql or Go.
 func MaxVersion() int64 {
 	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {
@@ -63,6 +82,9 @@ func MaxVersion() int64 {
 		if err != nil {
 			panic(fmt.Sprintf("migration %s: %v", n, err))
 		}
+		highest = max(highest, v)
+	}
+	for v := range goMigrations {
 		highest = max(highest, v)
 	}
 	return highest
@@ -89,7 +111,7 @@ func CurrentVersion(ctx context.Context, d *DB) (int64, error) {
 	return v, nil
 }
 
-// Migrator is goose's sqlite3 dialect over the embedded migrations.
+// Migrator is goose's sqlite3 dialect over the embedded and Go migrations.
 func (d *DB) Migrator() store.Migrator { return migrator{d} }
 
 type migrator struct{ d *DB }

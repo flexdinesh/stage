@@ -1,11 +1,16 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+)
 
 // Migration 0024: the global pin moves to the local machine's active T3
 // connection (legacy provider/model become its model key); last_used and the
 // pinned column go; there is no default connection.
-func TestConnectionDefaultsMigration(t *testing.T) {
+func connectionDefaultsSteps() []migrationStep {
+	var steps []migrationStep
 	for _, tc := range []struct {
 		name, pinned, want string
 	}{
@@ -15,14 +20,11 @@ func TestConnectionDefaultsMigration(t *testing.T) {
 			`{"model":"[\"codex\",\"gpt\"]","options":[{"id":"fast","value":true}],"permission":"","mode":""}`},
 		{"harness default", `{"providerInstanceId":null,"model":null,"modelOptions":[]}`, ""},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pool := openUnmigrated(t)
-			migrateTo(t, pool, 23)
+		steps = append(steps, migrationStep{tc.name, func(t *testing.T, pool *sqlite.DB) {
 			mustExec(t, pool, `UPDATE harness_connections SET identity='env-a' WHERE id=1`)
 			mustExec(t, pool, `INSERT INTO harness_connections(machine_id,harness) VALUES(1,'opencode')`)
 			mustExec(t, pool, `UPDATE preferences SET pinned=$1, last_used=$1`, tc.pinned)
-			migrateTo(t, pool, 24)
-
+		}, func(t *testing.T, pool *sqlite.DB) {
 			var got *string
 			if err := pool.QueryRow(`SELECT new_task_config FROM harness_connections WHERE id=1`).Scan(&got); err != nil {
 				t.Fatal(err)
@@ -47,6 +49,7 @@ func TestConnectionDefaultsMigration(t *testing.T) {
 			if foreignKeyViolations(t, pool) != 0 {
 				t.Fatal("foreign key violations after 0024")
 			}
-		})
+		}})
 	}
+	return steps
 }
