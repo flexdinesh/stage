@@ -41,7 +41,8 @@ func (s *Store) ListSchedules(ctx context.Context, f ScheduleFilter) ([]Schedule
 	return read(ctx, s, func(tx store.Tx) ([]Schedule, error) { return tx.Schedules().List(ctx, f) })
 }
 
-// NewSchedule is a validated create input (cron and tz already parse).
+// NewSchedule is a validated create input (cron and tz already parse); the
+// legacy T3 model inputs translate as NewTask's do.
 type NewSchedule struct {
 	ConnectionID       int64
 	ExecutionConfig    *execution.Config
@@ -60,7 +61,6 @@ type NewSchedule struct {
 	Cron               string
 	Tz                 string
 	Paused             bool
-	OriginThreadID     *string
 }
 
 // nextRun is the first fire after now, or nil while paused.
@@ -91,11 +91,13 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		if err := requireProject(ctx, tx, in.ProjectID); err != nil {
 			return 0, err
 		}
+		connection := s.defaultConnection(in.ConnectionID)
+		config, err := legacyT3Config(ctx, tx, connection, in.ExecutionConfig, in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode)
+		if err != nil {
+			return 0, err
+		}
 		var originID *int64
 		if in.OriginSession != nil {
-			if in.OriginThreadID != nil {
-				return 0, Invalid("use originSession or originThreadId, not both")
-			}
 			value, err := ensureSession(ctx, tx, *in.OriginSession)
 			if err != nil {
 				return 0, err
@@ -103,11 +105,10 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 			originID = &value
 		}
 		id, err := tx.Schedules().Insert(ctx, store.ScheduleInsert{
-			ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, ProviderInstanceID: in.ProviderInstanceID, Model: in.Model,
-			ModelOptions: nonNilOptions(in.ModelOptions), RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode,
+			ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
 			Workspace: in.Workspace, Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
-			OriginThreadID: in.OriginThreadID, OriginSessionID: originID, ExecutionConfig: in.ExecutionConfig,
-			ConnectionID: s.defaultConnection(in.ConnectionID), CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
+			OriginSessionID: originID, ExecutionConfig: config,
+			ConnectionID: connection, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
 		})
 		if err != nil {
 			return 0, err
@@ -159,18 +160,13 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		if err != nil {
 			return err
 		}
-		provider, model, cron, tz, paused := e.Provider, e.Model, e.Cron, e.Tz, e.Paused
+		cron, tz, paused := e.Cron, e.Tz, e.Paused
 		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
-		if p.ProviderInstanceID.Set {
-			provider = p.ProviderInstanceID.Ptr()
-		}
-		if p.Model.Set {
-			model = p.Model.Ptr()
-		}
-		if (provider == nil) != (model == nil) {
-			return Invalid("providerInstanceId and model must be set together")
+		legacy, err := mergeLegacyT3(e.ExecutionConfig, p.ProviderInstanceID, p.Model, p.ModelOptions, p.RuntimeMode, p.InteractionMode)
+		if err != nil {
+			return err
 		}
 		if p.AttachmentIDs.Set {
 			if err := setOwned(ctx, tx, store.OwnerSchedule, id, p.AttachmentIDs.V); err != nil {
@@ -178,8 +174,10 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			}
 		}
 		u := store.ScheduleUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
-			Title: p.Title, Prompt: p.Prompt, ProviderInstanceID: p.ProviderInstanceID, Model: p.Model, ModelOptions: p.ModelOptions,
-			RuntimeMode: p.RuntimeMode, InteractionMode: p.InteractionMode, Workspace: p.Workspace, Notes: p.Notes}
+			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Notes: p.Notes}
+		if legacy != nil {
+			u.ExecutionConfig = Optional[execution.Config]{Set: true, V: *legacy}
+		}
 		if p.ConnectionID.Set {
 			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
@@ -197,9 +195,6 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 					return Invalid("Remove image attachments before switching to OpenCode.")
 				}
 			}
-		}
-		if !p.ExecutionConfig.Set && (p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set) {
-			u.ExecutionConfig = Optional[execution.Config]{Set: true, Null: true}
 		}
 		if p.ProjectID.Set {
 			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
@@ -229,7 +224,6 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			}
 		}
 		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
-			!p.ProviderInstanceID.Set && !p.Model.Set && !p.ModelOptions.Set && !p.RuntimeMode.Set && !p.InteractionMode.Set &&
 			!p.Workspace.Set && !p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
@@ -328,8 +322,7 @@ func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *t
 	if err != nil {
 		return 0, err
 	}
-	in := NewTask{ProjectID: tpl.ProjectID, Title: tpl.Title, Prompt: tpl.Prompt, ProviderInstanceID: tpl.ProviderInstanceID,
-		Model: tpl.Model, ModelOptions: tpl.ModelOptions, RuntimeMode: tpl.RuntimeMode, InteractionMode: tpl.InteractionMode,
+	in := NewTask{ProjectID: tpl.ProjectID, Title: tpl.Title, Prompt: tpl.Prompt,
 		Workspace: tpl.Workspace, ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
 	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source

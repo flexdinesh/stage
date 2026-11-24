@@ -317,7 +317,7 @@ func TestNotificationsAfter(t *testing.T) {
 	p := mustProject(t, s, ctx, "proj-1")
 	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
 	thread := "session-2"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	stale := "session-1"

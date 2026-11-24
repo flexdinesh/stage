@@ -103,7 +103,10 @@ func TestMovedT3UnrecordedLaunchKeepsSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE tasks SET state='running',t3_thread_id='thread-1' WHERE id=$1", other.ID); err != nil {
+		if _, err := testDB.Pool.ExecContext(ctx, "INSERT INTO session_identities(connection_id,external_id) VALUES(3,'thread-1') ON CONFLICT DO NOTHING"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE tasks SET state='running',session_id=(SELECT id FROM session_identities WHERE connection_id=3 AND external_id='thread-1') WHERE id=$1", other.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := svc.StartTask(ctx, task.ID); err == nil {

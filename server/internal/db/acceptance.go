@@ -44,17 +44,10 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 	e := &p.Evidence
 	e.Session = task.Session
 	e.TaskID, e.Title, e.TreeID, e.TreeTitle, e.ProjectID = id, task.Title, task.TreeID, task.TreeTitle, task.ProjectID
-	e.ThreadID, e.ThreadLink, e.ExecutionState = task.T3ThreadID, task.ThreadLink, task.State
+	e.ThreadID, e.ExecutionState = task.T3ThreadID, task.State
 	e.Artifacts = []execution.Artifact{}
-	reuse, err := tx.Tasks().ReusesLaunch(ctx, id)
-	if err != nil {
-		return p, err
-	}
 	if task.State.Active() {
 		p.BlockedReason = "Stop execution in its harness before completing this task."
-	}
-	if reuse {
-		p.BlockedReason = "Launch unconfirmed. Wait for reconciliation or link the existing session before completing."
 	}
 	if task.AcceptanceID != nil {
 		p.BlockedReason = "This task is already completed. Change its state back to accept another result."
@@ -66,8 +59,8 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 		}
 		status, pending, active := th.Status, th.Pending, th.ActiveRunID
 		if found {
-			e.Branch, e.WorktreePath, e.RunID, e.ReplyRunID, e.ReplyItemID = th.Branch, th.WorktreePath, th.RunID, th.ReplyRunID, th.ReplyItemID
-			e.Reply, e.ReplyTruncated, e.ReplyAt, e.ObservedAt, e.Artifacts = th.Reply, th.ReplyTruncated, th.ReplyAt, th.ObservedAt, th.Artifacts
+			e.Branch, e.WorktreePath, e.RunID, e.ReplyRunID = th.Branch, th.WorktreePath, th.RunID, th.ReplyRunID
+			e.Reply, e.ReplyTruncated, e.ReplyAt, e.ObservedAt = th.Reply, th.ReplyTruncated, th.ReplyAt, th.ObservedAt
 		}
 		if pending > 0 || active != nil && *active != "" || status == "running" || status == "needs_input" {
 			p.BlockedReason = "Stop execution in its harness before completing this task."
@@ -289,10 +282,6 @@ func checkLaunchClaim(ctx context.Context, tx store.Tx, t Transition, attempt in
 	}
 	if c.Accepted != nil {
 		return Conflict("Task is completed. Reopen it before starting work.")
-	}
-	// Unknown transport outcomes must reconcile the exact original attempt.
-	if c.Reuse && c.Claimed {
-		return nil
 	}
 	if c.TreeID != nil {
 		if err := treeOpen(ctx, tx, *c.TreeID); err != nil {

@@ -45,7 +45,7 @@ func addTaskEvent(ctx context.Context, tx store.Tx, taskID int64, from *TaskStat
 		Attempt: &attempt, EventType: kind, Text: text, At: &at}); err != nil {
 		return err
 	}
-	if !st.RecordedWork && (st.LaunchAttempt > 0 || st.HasThread || st.Adopted || slices.Contains(workStates, to)) {
+	if !st.RecordedWork && (st.LaunchAttempt > 0 || st.SessionID != nil || st.Adopted || slices.Contains(workStates, to)) {
 		if err := tx.Tasks().MarkRecordedWork(ctx, taskID); err != nil {
 			return err
 		}

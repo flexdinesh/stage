@@ -20,7 +20,6 @@ func init() {
 	register("RunSpan", caseRunSpan)
 	register("UpsertThreadDetailStoresRunSpan", caseUpsertThreadDetailStoresRunSpan)
 	register("ProjectLastActivity", caseProjectLastActivity)
-	register("ListThreadsAndStatsExcludeSubagents", caseListThreadsAndStatsExcludeSubagents)
 }
 
 func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db.Project {
@@ -122,7 +121,7 @@ func caseTransitionTask(t *testing.T, open Factory) {
 		t.Fatalf("begin attempt: %+v %v", res, err)
 	}
 	thread := "thread-1"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
@@ -209,13 +208,6 @@ func caseTransitionLaunchGuards(t *testing.T, open Factory) {
 	res, err := s.TransitionTask(ctx, begin)
 	if err != nil || !res.Changed || res.Attempt != 1 {
 		t.Fatalf("runner launch: %+v %v", res, err)
-	}
-	// Transport failure: outcome unknown, next start keeps attempt 1.
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: step.ID, To: db.StateFailed, ReuseAttempt: true}); err != nil {
-		t.Fatal(err)
-	}
-	if res, err = s.TransitionTask(ctx, begin); err != nil || !res.Changed || res.Attempt != 1 {
-		t.Fatalf("reuse attempt: %+v %v", res, err)
 	}
 	// Definite failure: next start is a new attempt.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: step.ID, To: db.StateFailed}); err != nil {
@@ -341,55 +333,5 @@ func caseProjectLastActivity(t *testing.T, open Factory) {
 	ps, err := s.ListProjects(ctx, "false")
 	if err != nil || len(ps) != 1 || ps[0].LastActivityAt == nil || !ps[0].LastActivityAt.Equal(latest) {
 		t.Fatalf("task and journal activity: want %v, got %+v %v", latest, ps, err)
-	}
-}
-
-func caseListThreadsAndStatsExcludeSubagents(t *testing.T, open Factory) {
-	s, ctx := setup(t, open)
-	now := time.Now().UTC()
-	threads := []t3.Thread{
-		{ThreadID: "root-1", ProjectID: "proj-1", Title: "root", Status: t3.StatusCompleted, CreatedAt: now.Add(-2 * time.Minute)},
-		{ThreadID: "sub-1", ProjectID: "proj-1", Title: "sub", Status: t3.StatusRunning, CreatedAt: now.Add(-time.Minute),
-			ParentThreadID: "root-1", RelationshipToParent: "subagent"},
-	}
-	if err := s.UpsertThreads(ctx, t3.Observations(threads)); err != nil {
-		t.Fatal(err)
-	}
-
-	all, total, err := s.ListThreads(ctx, db.ThreadFilter{Limit: 10})
-	if err != nil || total != 2 || len(all) != 2 {
-		t.Fatalf("include: %d %d %v", total, len(all), err)
-	}
-	roots, total, err := s.ListThreads(ctx, db.ThreadFilter{Limit: 10, ExcludeSubagents: true})
-	if err != nil || total != 1 || len(roots) != 1 || roots[0].T3ThreadID != "root-1" {
-		t.Fatalf("exclude: %d %+v %v", total, roots, err)
-	}
-
-	from, to := now.Add(-time.Hour), now.Add(time.Hour)
-	sum := func(st db.Stats) (day, project, status int) {
-		for _, c := range st.ThreadsByDay {
-			day += c.Count
-		}
-		for _, c := range st.ThreadsByProject {
-			project += c.Count
-		}
-		for _, c := range st.ThreadsByStatus {
-			status += c.Count
-		}
-		return
-	}
-	st, err := s.Stats(ctx, from, to, "UTC", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d, p, ss := sum(st); d != 2 || p != 2 || ss != 2 || len(st.ThreadsByStatus) != 2 {
-		t.Fatalf("stats include: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
-	}
-	st, err = s.Stats(ctx, from, to, "UTC", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d, p, ss := sum(st); d != 1 || p != 1 || ss != 1 || st.ThreadsByStatus[0].Status != "done" {
-		t.Fatalf("stats exclude: day=%d project=%d status=%d %+v", d, p, ss, st.ThreadsByStatus)
 	}
 }

@@ -27,7 +27,7 @@ func originTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64,
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{
 		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, OriginThreadID: &origin,
+		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, OriginSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: origin},
 	})
 	if err != nil {
 		t.Fatal(err)

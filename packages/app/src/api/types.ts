@@ -1027,11 +1027,7 @@ export interface Thread {
   /** Elapsed run span: first run start to newest run completion. */
   runStartedAt: string | null;
   runEndedAt: string | null;
-  /** Runs T3 reported for the thread; 0 until a detail read. */
-  runCount: number;
   pendingRequestCount: number;
-  /** Pending requests stage can answer (user-input questions); the rest are approvals handled in T3. */
-  providerInstanceId: string | null;
   model: string | null;
   runtimeMode: RuntimeMode | null;
   interactionMode: InteractionMode | null;
@@ -1039,7 +1035,6 @@ export interface Thread {
   worktreePath: string | null;
   parentThreadId: string | null;
   relationship: string | null;
-  creationSource: string | null;
   source: ThreadSource;
   taskId: number | null;
   createdAt: string;
@@ -1050,7 +1045,6 @@ export interface Thread {
   lastWordAt: string | null;
   /** Reply excerpt (markdown); set on detail reads only, null in lists. */
   lastWord: LastWord | null;
-  /** Runs, newest first (at most 50; `runCount` is the T3 total); set on detail reads only, null in lists. */
 }
 
 /** A thread's latest assistant reply as last synced: markdown excerpt capped at 4000 chars. */

@@ -622,7 +622,7 @@ func caseTreeTimesAndEvents(t *testing.T, open Factory) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	later := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)

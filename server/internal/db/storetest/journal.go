@@ -51,7 +51,7 @@ func caseJournalNotesQueriesAndRetry(t *testing.T, open Factory) {
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	owner := db.JournalOwner{TaskID: &a.ID}
-	input := db.AppendNoteInput{Text: strings.Repeat("界", 700) + " needle%_", Category: "finding", RequestID: "request-1", SourceTaskID: &a.ID, SourceThreadID: ptr("session")}
+	input := db.AppendNoteInput{Text: strings.Repeat("界", 700) + " needle%_", Category: "finding", RequestID: "request-1", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "session"}}
 	first, err := s.AppendNote(ctx, owner, input)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func caseJournalNotesQueriesAndRetry(t *testing.T, open Factory) {
 		t.Fatalf("retry: %+v %v", again, err)
 	}
 	changed := input
-	changed.SourceThreadID = ptr("other")
+	changed.SourceSession = &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "other"}
 	var conflict *db.ConflictError
 	if _, err := s.AppendNote(ctx, owner, changed); !errors.As(err, &conflict) {
 		t.Fatalf("changed provenance: %v", err)
@@ -176,7 +176,7 @@ func caseJournalMovesFreezeEventsAndInvalidateTreeCursors(t *testing.T, open Fac
 	old := mustTree(t, s, ctx, "old", "", db.TreeMember{TaskID: a.ID})
 	next := mustTree(t, s, ctx, "next", "", db.TreeMember{TaskID: b.ID})
 	own := note(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, "task work", "task-note")
-	treeInput := db.AppendNoteInput{Text: "tree conclusion", RequestID: "tree-note", SourceTaskID: &a.ID, SourceThreadID: ptr("thread")}
+	treeInput := db.AppendNoteInput{Text: "tree conclusion", RequestID: "tree-note", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "thread"}}
 	treeNote, err := s.AppendNote(ctx, db.JournalOwner{TreeID: &old.ID}, treeInput)
 	if err != nil {
 		t.Fatal(err)
@@ -360,18 +360,11 @@ func caseJournalLaunchInstructionsFrozenPerAttempt(t *testing.T, open Factory) {
 	if got, err := s.JournalLaunchContext(ctx, a, "exact\noriginal instructions"); err != nil || got != "exact\noriginal instructions" {
 		t.Fatalf("first %q %v", got, err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateFailed, ReuseAttempt: true}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
-		t.Fatal(err)
-	}
-	reused := getTask(t, s, ctx, a.ID)
-	if got, err := s.JournalLaunchContext(ctx, reused, "changed after move"); err != nil || got != "exact\noriginal instructions" {
-		t.Fatalf("reuse %q %v", got, err)
+	if got, err := s.JournalLaunchContext(ctx, a, "changed after move"); err != nil || got != "exact\noriginal instructions" {
+		t.Fatalf("same attempt %q %v", got, err)
 	}
 	after := journal(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, db.JournalQuery{Kind: "all"})
-	if len(after.Entries) != len(before.Entries)+2 {
+	if len(after.Entries) != len(before.Entries) {
 		t.Fatal("launch context emitted journal entries")
 	}
 	setState(t, s, ctx, a.ID, db.StateFailed)

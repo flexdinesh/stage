@@ -59,12 +59,10 @@ type ThreadEvidence struct {
 	WorktreePath   *string
 	RunID          *string
 	ReplyRunID     *string
-	ReplyItemID    *string
 	Reply          *string
 	ReplyTruncated bool
 	ReplyAt        *time.Time
 	ObservedAt     *time.Time
-	Artifacts      []execution.Artifact
 	Status         string
 	Pending        int
 	ActiveRunID    *string
@@ -72,8 +70,6 @@ type ThreadEvidence struct {
 
 // ClaimState is what a launch claim checks.
 type ClaimState struct {
-	Reuse     bool
-	Claimed   bool // the attempt's launch is claimed
 	Adopted   bool
 	Accepted  *int64
 	TreeID    *int64

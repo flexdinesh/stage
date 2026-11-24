@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 type tasks struct{ *runner }
@@ -28,24 +27,21 @@ const (
 	// (auto launches it; manual reads ready and notifies).
 	releasedSQL = `t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unacceptedNeedSQL
 	// unstartedSQL: task t has no notes or execution history (deletable).
-	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0 AND t.recorded_work = 0)`
+	unstartedSQL = `(t.launch_attempt = 0 AND t.session_id IS NULL AND t.adopted = 0 AND t.recorded_work = 0)`
 )
 
 // closedSQL: task t is archived or its tree tr is not open.
 const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
 
 const taskSelect = `
-SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt, t.provider_instance_id,
-  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace,
-  t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
+SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt,
+  t.workspace, t.state, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
   COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
   t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, coalesce(th.last_word_preview, substr(json_extract(obs.observation,'$.reply.text'),1,200)), coalesce(th.last_word_at,json_extract(obs.observation,'$.reply.updatedAt')),
-  COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
-  t.start_at, t.start_tz, t.schedule_id, sc.title,
-  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `),t.origin_thread_id), oth.title, t.handoff,
-  COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
+  t.created_at, t.updated_at,
+  t.start_at, t.start_tz, t.schedule_id, sc.title, oth.title, t.handoff,
   COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
   (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
@@ -66,13 +62,12 @@ LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
-		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.Workspace, &t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
-		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
-		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
+		&t.LastWordPreview, &t.LastWordAt, &t.CreatedAt,
+		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
+		&t.OriginThreadTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
 		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
 	if err != nil {
@@ -81,8 +76,6 @@ func scanTask(row rowScanner) (store.Task, error) {
 	if t.Session != nil {
 		t.T3ThreadID = &t.Session.ExternalSessionID
 	}
-	t.ModelOptions = nonNilOptions(t.ModelOptions)
-	t.PullRequests = nonNilPRs(t.PullRequests)
 	t.Needs = nonNilIDs(t.Needs)
 	t.Dependents = nonNilIDs(t.Dependents)
 	if t.Workspace.Type == "" {
@@ -96,13 +89,6 @@ func nonNilIDs(ids []int64) []int64 {
 		return []int64{}
 	}
 	return ids
-}
-
-func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
-	if o == nil {
-		return []execution.ModelOption{}
-	}
-	return o
 }
 
 func collectTasks(rows *rowSet, err error) ([]store.Task, error) {
@@ -129,9 +115,6 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 	var w where
 	if f.OriginSession != nil {
 		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
-	}
-	if f.OriginThreadID != "" {
-		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + legacyT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
 	}
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
@@ -227,8 +210,8 @@ func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState
 
 func (r tasks) JournalState(ctx context.Context, id int64) (store.TaskJournalState, error) {
 	var s store.TaskJournalState
-	err := r.QueryRow(ctx, `SELECT tree_id, session_id, title, launch_attempt, t3_thread_id IS NOT NULL, adopted, recorded_work FROM tasks WHERE id = $1`, id).
-		Scan(&s.TreeID, &s.SessionID, &s.Title, &s.LaunchAttempt, &s.HasThread, &s.Adopted, &s.RecordedWork)
+	err := r.QueryRow(ctx, `SELECT tree_id, session_id, title, launch_attempt, adopted, recorded_work FROM tasks WHERE id = $1`, id).
+		Scan(&s.TreeID, &s.SessionID, &s.Title, &s.LaunchAttempt, &s.Adopted, &s.RecordedWork)
 	return s, notFound(err)
 }
 
@@ -249,30 +232,28 @@ func (r tasks) ProjectBySession(ctx context.Context, sessionID int64) (*int64, e
 func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `
-INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config,created_by_user_id,source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18,$19,$20) RETURNING id`,
-		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-		in.RuntimeMode, in.InteractionMode, in.Workspace,
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, in.OriginSessionID, in.ExecutionConfig,
-		in.CreatedBy, in.SourceMachineID,
+INSERT INTO tasks (project_id, title, prompt, workspace, start_at, start_tz, schedule_id, handoff, start_mode,
+  connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, true),$9,$10,$11,$12,$13,$14) RETURNING id`,
+		in.ProjectID, in.Title, in.Prompt, in.Workspace, in.StartAt, in.StartTz, in.ScheduleID, in.Handoff, in.StartMode,
+		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID,
 	).Scan(&id)
 	return id, err
 }
 
 func (r tasks) InsertAdopted(ctx context.Context, in store.AdoptedInsert) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,t3_thread_id,
-	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
-	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11,$12,$13) RETURNING id`, in.ProjectID, in.Title, in.State, in.ConnectionID, in.SessionID, in.T3ThreadID, in.ExecutionConfig, in.RuntimeMode, in.InteractionMode, in.LaunchedAt, in.FinishedAt, in.CreatedBy, in.SourceMachineID).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,
+	 execution_config,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,1,1,$7,$8,$9,$10) RETURNING id`, in.ProjectID, in.Title, in.State, in.ConnectionID, in.SessionID, in.ExecutionConfig, in.LaunchedAt, in.FinishedAt, in.CreatedBy, in.SourceMachineID).Scan(&id)
 	return id, err
 }
 
 func (r tasks) EditState(ctx context.Context, id int64) (store.TaskEditState, error) {
 	var e store.TaskEditState
-	err := r.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,connection_id, project_id,
+	err := r.QueryRow(ctx, `SELECT state, execution_config, adopted, connection_id, project_id,
   (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
-		Scan(&e.State, &e.Provider, &e.Model, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.Needs)
+		Scan(&e.State, &e.ExecutionConfig, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.Needs)
 	return e, notFound(err)
 }
 
@@ -306,21 +287,6 @@ func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	}
 	if u.Prompt.Set {
 		set("prompt", u.Prompt.V)
-	}
-	if u.ProviderInstanceID.Set {
-		set("provider_instance_id", u.ProviderInstanceID.Ptr())
-	}
-	if u.Model.Set {
-		set("model", u.Model.Ptr())
-	}
-	if u.ModelOptions.Set {
-		set("model_options", nonNilOptions(u.ModelOptions.V))
-	}
-	if u.RuntimeMode.Set {
-		set("runtime_mode", u.RuntimeMode.V)
-	}
-	if u.InteractionMode.Set {
-		set("interaction_mode", u.InteractionMode.V)
 	}
 	if u.Workspace.Set {
 		set("workspace", u.Workspace.V)
@@ -390,21 +356,17 @@ func (r tasks) LaunchState(ctx context.Context, id int64) (store.TaskLaunchState
 	return s, notFound(err)
 }
 
-func (r tasks) ApplyTransition(ctx context.Context, t store.Transition) (int, string, error) {
+func (r tasks) ApplyTransition(ctx context.Context, t store.Transition, sessionID *int64) (int, string, error) {
 	var attempt int
 	var requestID string
 	err := r.QueryRow(ctx, `
 UPDATE tasks SET
   state = $2,
-  launch_attempt = launch_attempt + CASE WHEN $3 AND NOT launch_reuse THEN 1 ELSE 0 END,
-  launch_request_id = CASE WHEN $3 AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
-                           THEN 'task-' || id || '-' || $8 ELSE launch_request_id END,
-  launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
-                      WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
-  t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
-  session_id = CASE WHEN $3 THEN NULL ELSE session_id END,
+  launch_attempt = launch_attempt + CASE WHEN $3 THEN 1 ELSE 0 END,
+  launch_request_id = CASE WHEN $3 THEN 'task-' || id || '-' || $7 ELSE launch_request_id END,
+  session_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE session_id END,
   scheduled_hold = CASE WHEN $3 THEN 0 ELSE scheduled_hold END,
-  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$9) END,
+  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$8) END,
   last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
   finished_at = CASE WHEN $3 THEN NULL
                      WHEN $6 AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
@@ -414,30 +376,24 @@ UPDATE tasks SET
   ready_at = CASE WHEN $3 THEN NULL ELSE ready_at END,
   updated_at = `+nowSQL+`
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-		t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(), t.ObservedStart,
+		t.TaskID, string(t.To), t.BeginAttempt, sessionID, t.LastError, t.To.Finished(), newUUID(), t.ObservedStart,
 	).Scan(&attempt, &requestID)
 	return attempt, requestID, err
 }
 
-func (r tasks) Confirm(ctx context.Context, a store.Attempt, state string, t3ThreadID *string, sessionID int64, endedAt *time.Time) (bool, error) {
-	res, err := r.Exec(ctx, `UPDATE tasks SET state=$3,t3_thread_id=$4,session_id=$5,launch_reuse=0,last_error=NULL,launched_at=COALESCE(launched_at,stage_now()),finished_at=CASE WHEN $3 IN ('done','failed','interrupted','cancelled') THEN COALESCE($6,stage_now()) ELSE NULL END,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, state, t3ThreadID, sessionID, endedAt)
+func (r tasks) Confirm(ctx context.Context, a store.Attempt, state string, sessionID int64, endedAt *time.Time) (bool, error) {
+	res, err := r.Exec(ctx, `UPDATE tasks SET state=$3,session_id=$4,last_error=NULL,launched_at=COALESCE(launched_at,stage_now()),finished_at=CASE WHEN $3 IN ('done','failed','interrupted','cancelled') THEN COALESCE($5,stage_now()) ELSE NULL END,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, state, sessionID, endedAt)
 	return err == nil && res.RowsAffected() == 1, err
 }
 
 func (r tasks) Reject(ctx context.Context, a store.Attempt, reason string) error {
-	_, err := r.Exec(ctx, `UPDATE tasks SET state='backlog',launch_reuse=0,last_error=$3,scheduled_hold=1,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, reason)
+	_, err := r.Exec(ctx, `UPDATE tasks SET state='backlog',last_error=$3,scheduled_hold=1,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, reason)
 	return err
 }
 
 func (r tasks) SetLaunchError(ctx context.Context, a store.Attempt, msg string) error {
 	_, err := r.Exec(ctx, "UPDATE tasks SET last_error=$3 WHERE id=$1 AND launch_attempt=$2 AND state='launching'", a.TaskID, a.Number, msg)
 	return err
-}
-
-func (r tasks) ReusesLaunch(ctx context.Context, id int64) (bool, error) {
-	var reuse bool
-	err := r.QueryRow(ctx, `SELECT launch_reuse FROM tasks WHERE id=$1`, id).Scan(&reuse)
-	return reuse, notFound(err)
 }
 
 func (r tasks) NoteBlocked(ctx context.Context, id int64, reason string) (bool, error) {

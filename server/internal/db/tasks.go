@@ -36,7 +36,9 @@ func (s *Store) TaskEvents(ctx context.Context, taskID int64) ([]TaskEvent, erro
 	return read(ctx, s, func(tx store.Tx) ([]TaskEvent, error) { return tx.Tasks().Events(ctx, taskID) })
 }
 
-// NewTask is a validated create input.
+// NewTask is a validated create input. A T3 task without ExecutionConfig
+// stores the legacy model inputs (ProviderInstanceID, Model, ModelOptions,
+// RuntimeMode, InteractionMode) translated to one (legacyT3Config).
 type NewTask struct {
 	ExecutionConfig    *execution.Config
 	ConnectionID       int64
@@ -47,15 +49,14 @@ type NewTask struct {
 	ProviderInstanceID *string
 	Model              *string
 	ModelOptions       []execution.ModelOption
-	RuntimeMode        string
-	InteractionMode    string
+	RuntimeMode        string // "" = full-access
+	InteractionMode    string // "" = default
 	Workspace          Workspace
 	InitialNote        string
 	AttachmentIDs      []int64 // staged images to attach (setAttachments)
 	StartAt            *time.Time
 	StartTz            *string // set with StartAt (IANA zone)
 	ScheduleID         *int64  // spawning schedule
-	OriginThreadID     *string // T3 thread that created the task (agent interface)
 	Handoff            *bool   // append the needs' handoff at launch; nil = default (on)
 	// TreeID: join this tree (docs/api.md "Tree rules"); nil with Needs joins
 	// the needs' tree (or a new one).
@@ -108,10 +109,11 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 	if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
 		return 0, err
 	}
+	config, err := legacyT3Config(ctx, tx, in.ConnectionID, in.ExecutionConfig, in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode)
+	if err != nil {
+		return 0, err
+	}
 	if in.OriginSession != nil {
-		if in.OriginThreadID != nil {
-			return 0, Invalid("use originSession or the legacy T3 originThreadId, not both")
-		}
 		value, err := ensureSession(ctx, tx, *in.OriginSession)
 		if err != nil {
 			return 0, err
@@ -119,10 +121,9 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		originID = &value
 	}
 	id, err := tx.Tasks().Insert(ctx, store.TaskInsert{
-		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, ProviderInstanceID: in.ProviderInstanceID, Model: in.Model,
-		ModelOptions: in.ModelOptions, RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
-		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, OriginThreadID: in.OriginThreadID, Handoff: in.Handoff,
-		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: in.ExecutionConfig,
+		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, Workspace: in.Workspace,
+		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, Handoff: in.Handoff,
+		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: config,
 		CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
 	})
 	if err != nil {
@@ -167,7 +168,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		}
 	}
 	if in.InitialNote != "" {
-		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID, SourceSession: in.OriginSession}); err != nil {
+		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceSession: in.OriginSession}); err != nil {
 			return 0, err
 		}
 	}
@@ -180,7 +181,9 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 }
 
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
-// Nullable fields: providerInstanceId, model, startMode (Null clears).
+// Nullable fields: providerInstanceId, model, startMode (Null clears). The
+// legacy T3 model fields set their part of the stored executionConfig
+// (mergeLegacyT3).
 type TaskPatch struct {
 	ValidatedConnection int64                             `json:"-"`
 	ValidatedProject    int64                             `json:"-"`
@@ -220,7 +223,6 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if err != nil {
 			return err
 		}
-		provider, model := e.Provider, e.Model
 		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
@@ -229,15 +231,6 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		}
 		if e.Adopted && p.restrictedSet() {
 			return Conflict("only the title is editable for an adopted session")
-		}
-		if p.ProviderInstanceID.Set {
-			provider = p.ProviderInstanceID.Ptr()
-		}
-		if p.Model.Set {
-			model = p.Model.Ptr()
-		}
-		if (provider == nil) != (model == nil) {
-			return Invalid("providerInstanceId and model must be set together")
 		}
 		if p.StartAt.Set && !p.StartAt.Null && e.Needs > 0 {
 			return errStartAndNeeds
@@ -252,9 +245,15 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				return err
 			}
 		}
+		legacy, err := mergeLegacyT3(e.ExecutionConfig, p.ProviderInstanceID, p.Model, p.ModelOptions, p.RuntimeMode, p.InteractionMode)
+		if err != nil {
+			return err
+		}
 		u := store.TaskUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
-			Title: p.Title, Prompt: p.Prompt, ProviderInstanceID: p.ProviderInstanceID, Model: p.Model, ModelOptions: p.ModelOptions,
-			RuntimeMode: p.RuntimeMode, InteractionMode: p.InteractionMode, Workspace: p.Workspace, Handoff: p.Handoff, StartMode: p.StartMode}
+			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Handoff: p.Handoff, StartMode: p.StartMode}
+		if legacy != nil {
+			u.ExecutionConfig = Optional[execution.Config]{Set: true, V: *legacy}
+		}
 		if p.ConnectionID.Set {
 			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
@@ -273,16 +272,12 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				}
 			}
 		}
-		if !p.ExecutionConfig.Set && (p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set) {
-			u.ExecutionConfig = Optional[execution.Config]{Set: true, Null: true}
-		}
 		if p.ProjectID.Set {
 			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
 				return err
 			}
 		}
 		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
-			!p.ProviderInstanceID.Set && !p.Model.Set && !p.ModelOptions.Set && !p.RuntimeMode.Set && !p.InteractionMode.Set &&
 			!p.Workspace.Set && !p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
@@ -381,8 +376,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	}
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
-		ProviderInstanceID: src.ProviderInstanceID, Model: src.Model, ModelOptions: src.ModelOptions,
-		RuntimeMode: src.RuntimeMode, InteractionMode: src.InteractionMode, Workspace: ws,
+		Workspace: ws,
 	}, copyImages)
 }
 
@@ -420,7 +414,15 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 				return err
 			}
 		}
-		res.Attempt, res.RequestID, err = tx.Tasks().ApplyTransition(ctx, t)
+		var sessionID *int64
+		if t.Session != nil {
+			id, err := ensureSession(ctx, tx, *t.Session)
+			if err != nil {
+				return err
+			}
+			sessionID = &id
+		}
+		res.Attempt, res.RequestID, err = tx.Tasks().ApplyTransition(ctx, t, sessionID)
 		if err != nil {
 			return err
 		}
@@ -483,4 +485,62 @@ func nonNilIDs(ids []int64) []int64 {
 		return []int64{}
 	}
 	return ids
+}
+
+// legacyT3Config is a create's execution config: config when set, else on a
+// T3 connection the legacy T3 model inputs translated (docs/api.md "Create
+// task"; "" runtime and interaction modes take the T3 defaults full-access
+// and default), else nil.
+func legacyT3Config(ctx context.Context, tx store.Tx, connection int64, config *execution.Config,
+	provider, model *string, options []execution.ModelOption, runtime, interaction string) (*execution.Config, error) {
+	if config != nil {
+		return config, nil
+	}
+	t3, err := tx.Connections().HarnessIs(ctx, connection, HarnessT3)
+	if err != nil || !t3 {
+		return nil, err
+	}
+	if runtime == "" {
+		runtime = "full-access"
+	}
+	if interaction == "" {
+		interaction = "default"
+	}
+	c := store.LegacyT3Config(provider, model, options, runtime, interaction)
+	return &c, nil
+}
+
+// mergeLegacyT3 is the stored config with an edit's legacy T3 model fields
+// applied, nil when none is set: providerInstanceId and model set the model
+// together (both null clears it), modelOptions the options, runtimeMode the
+// permission and interactionMode the mode. The rest of the config is kept.
+func mergeLegacyT3(current *execution.Config, provider, model Optional[string],
+	options Optional[[]execution.ModelOption], runtime, interaction Optional[string]) (*execution.Config, error) {
+	if !provider.Set && !model.Set && !options.Set && !runtime.Set && !interaction.Set {
+		return nil, nil
+	}
+	if provider.Set != model.Set || provider.Null != model.Null {
+		return nil, Invalid("providerInstanceId and model must be set together")
+	}
+	c := execution.Config{Options: []execution.ModelOption{}}
+	if current != nil {
+		c = *current
+		c.Options = slices.Clone(c.Options)
+	}
+	if provider.Set {
+		c.Model = store.LegacyT3ModelKey(provider.Ptr(), model.Ptr())
+	}
+	if options.Set {
+		c.Options = slices.Clone(options.V)
+	}
+	if c.Options == nil {
+		c.Options = []execution.ModelOption{}
+	}
+	if runtime.Set {
+		c.Permission = runtime.V
+	}
+	if interaction.Set {
+		c.Mode = interaction.V
+	}
+	return &c, nil
 }

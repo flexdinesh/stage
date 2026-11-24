@@ -201,8 +201,10 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   Product code reads policy from these, never a harness name: `images`,
   `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
   worktree base and branch itself) gate form fields, and `ModeLabel` names the
-  mode choice in the harness's words. A harness whose tasks predate execution
-  configs supplies `Descriptor.LegacyConfig`, the only reader of those columns.
+  mode choice in the harness's words. Tasks and schedules store only an
+  execution config: legacy T3 model inputs are translated on write
+  (`store.LegacyT3Config`, equal to `t3.LegacyConfig`) and migration 0027
+  backfilled T3 rows saved before configs.
 - `Observation` is a validated snapshot: session/project, normalized state,
   activity, top-level/archive eligibility, workspace, links, bounded reply and
   available artifact links. States are running, needs_input, done, failed,
@@ -320,9 +322,9 @@ the configured base is an explicit edit. Historical fallback records remain.
 
 ## Compatibility and verification
 
-Existing T3 request fields and routes remain. `executionConfig` is an additive
-task/schedule field; do not combine it with legacy model/permission fields in a
-create or update request. Existing responses and historical settlement/run/PR records
+Existing T3 request fields and routes remain. `executionConfig` is the
+task/schedule field; legacy model/permission fields are translated into it on
+write. Do not combine the two in a create or update request. Existing responses and historical settlement/run/PR records
 remain readable. Newly observed execution uses Stage states; T3 settlement
 never hides active work and accepts a task only through inferred completion.
 The T3 thread mirror's `settled` follows the observation. T3 reports a thread's

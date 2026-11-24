@@ -613,14 +613,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	}
 	config := t.ExecutionConfig
 	if config == nil {
-		if d.LegacyConfig == nil {
-			return t, db.Invalid("executionConfig is required for this harness")
-		}
-		c, err := d.LegacyConfig(t.LegacyModel())
-		if err != nil {
-			return t, err
-		}
-		config = &c
+		return t, db.Invalid("executionConfig is required for this harness")
 	}
 	claim, e := s.transition(ctx, db.Transition{TaskID: id, From: []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}, To: db.StateLaunching, Detail: detail, BeginAttempt: true, RequireAuto: automatic})
 	if e != nil {
@@ -652,7 +645,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 			if err != nil {
 				return t, err
 			}
-			if err = s.store.RecordLaunchBase(ctx, id, db.LaunchBase{Session: need.Session, Attempt: t.LaunchAttempt, BaseRef: workspace.Base, Source: db.LaunchBasePredecessor, SourceTaskID: pick, SourceThreadID: need.T3ThreadID, SourceTitle: need.Title}); err != nil {
+			if err = s.store.RecordLaunchBase(ctx, id, db.LaunchBase{Session: need.Session, Attempt: t.LaunchAttempt, BaseRef: workspace.Base, Source: db.LaunchBasePredecessor, SourceTaskID: pick, SourceTitle: need.Title}); err != nil {
 				return t, err
 			}
 		}

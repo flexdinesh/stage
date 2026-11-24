@@ -112,20 +112,20 @@ func (r attempts) PinDestination(ctx context.Context, taskID int64, n int, b sto
 
 func (r attempts) RecordBase(ctx context.Context, taskID int64, b store.LaunchBase, sourceID *int64) error {
 	_, err := r.Exec(ctx, `
-INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, source_session_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_title, reason, source_session_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (task_id, attempt) DO UPDATE SET
   base_ref = EXCLUDED.base_ref, start_from_origin = EXCLUDED.start_from_origin, source = EXCLUDED.source,
-  source_task_id = EXCLUDED.source_task_id, source_thread_id = EXCLUDED.source_thread_id,
+  source_task_id = EXCLUDED.source_task_id,
   source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, source_session_id=excluded.source_session_id, created_at = `+nowSQL+``,
-		taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceThreadID, b.SourceTitle, b.Reason, sourceID)
+		taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceTitle, b.Reason, sourceID)
 	return err
 }
 
 func (r attempts) Base(ctx context.Context, taskID int64, attempt int) (*store.LaunchBase, error) {
 	var b store.LaunchBase
 	err := r.QueryRow(ctx, `
-SELECT attempt, base_ref, start_from_origin, source, source_task_id, source_thread_id, source_title, reason, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_launch_bases.source_session_id)
+SELECT attempt, base_ref, start_from_origin, source, source_task_id, (SELECT external_id FROM session_identities WHERE id=task_launch_bases.source_session_id), source_title, reason, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_launch_bases.source_session_id)
 FROM task_launch_bases WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
 		Scan(&b.Attempt, &b.BaseRef, &b.StartFromOrigin, &b.Source, &b.SourceTaskID, &b.SourceThreadID, &b.SourceTitle, &b.Reason, &b.At, &b.Session)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -139,19 +139,19 @@ FROM task_launch_bases WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
 
 func (r attempts) RecordHandoff(ctx context.Context, taskID int64, h store.Handoff, sourceID *int64) error {
 	_, err := r.Exec(ctx, `
-INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_thread_id, source_title, status, text, reason,source_session_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8,$9)
+INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_title, status, text, reason, source_session_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (task_id, attempt, source_task_id) DO UPDATE SET
-  source_thread_id = EXCLUDED.source_thread_id,source_session_id=excluded.source_session_id,
+  source_session_id = EXCLUDED.source_session_id,
   source_title = EXCLUDED.source_title, status = EXCLUDED.status, text = EXCLUDED.text,
   reason = EXCLUDED.reason, created_at = `+nowSQL+``,
-		taskID, h.Attempt, h.SourceTaskID, h.SourceThreadID, h.SourceTitle, h.Status, h.Text, h.Reason, sourceID)
+		taskID, h.Attempt, h.SourceTaskID, h.SourceTitle, h.Status, h.Text, h.Reason, sourceID)
 	return err
 }
 
 func (r attempts) Handoffs(ctx context.Context, taskID int64, attempt int) ([]store.Handoff, error) {
 	rows, err := r.Query(ctx, `
-SELECT attempt, status, source_task_id, source_thread_id, source_title, text, reason, created_at,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_handoffs.source_session_id)
+SELECT attempt, status, source_task_id, COALESCE((SELECT external_id FROM session_identities WHERE id=task_handoffs.source_session_id),''), source_title, text, reason, created_at,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_handoffs.source_session_id)
 FROM task_handoffs WHERE task_id = $1 AND attempt = $2 ORDER BY source_task_id, id`, taskID, attempt)
 	if err != nil {
 		return nil, err
@@ -221,18 +221,18 @@ func (r threads) Mirror(ctx context.Context, o execution.Observation, m store.Th
 	if err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM threads WHERE t3_thread_id = $1)`, o.Session.ExternalSessionID).Scan(&existed); err != nil {
 		return false, err
 	}
-	_, err := r.Exec(ctx, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,execution_state,archived,link,created_at,updated_at,synced_at,
-   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at,parent_session_id)
-   VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+	_, err := r.Exec(ctx, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,execution_state,archived,created_at,updated_at,synced_at,
+   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at)
+   VALUES($1,$2,$3,$4,$4,$5,$6,$7,stage_now(),$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
    ON CONFLICT(t3_thread_id) DO UPDATE SET title=excluded.title,status=excluded.status,execution_state=excluded.execution_state,
-   parent_thread_id=excluded.parent_thread_id,parent_session_id=excluded.parent_session_id,relationship=excluded.relationship,
-   archived=excluded.archived,link=COALESCE(excluded.link,threads.link),updated_at=excluded.updated_at,synced_at=stage_now(),
+   parent_thread_id=excluded.parent_thread_id,relationship=excluded.relationship,
+   archived=excluded.archived,updated_at=excluded.updated_at,synced_at=stage_now(),
    branch=excluded.branch,worktree_path=excluded.worktree_path,pending_request_count=excluded.pending_request_count,
    active_run_id=excluded.active_run_id,latest_run_id=excluded.latest_run_id,run_started_at=excluded.run_started_at,run_ended_at=excluded.run_ended_at,
    settled=excluded.settled,settled_at=CASE WHEN excluded.settled THEN COALESCE(threads.settled_at,excluded.settled_at) END
-   WHERE excluded.updated_at>=threads.updated_at`, o.Session.ExternalSessionID, o.Project, o.Title, o.State, o.Archived, m.Link,
+   WHERE excluded.updated_at>=threads.updated_at`, o.Session.ExternalSessionID, o.Project, o.Title, o.State, o.Archived,
 		o.CreatedAt, o.UpdatedAt, m.Branch, m.WorktreePath, m.PendingRequests, m.ActiveRunID, m.LatestRunID, o.StartedAt, o.EndedAt,
-		m.ParentThreadID, m.Relationship, m.SessionID, m.Settled, m.SettledAt, m.ParentSessionID)
+		m.ParentThreadID, m.Relationship, m.SessionID, m.Settled, m.SettledAt)
 	if err != nil {
 		return false, err
 	}
@@ -241,8 +241,8 @@ func (r threads) Mirror(ctx context.Context, o execution.Observation, m store.Th
 }
 
 func (r threads) SetSessionLastWord(ctx context.Context, sessionID int64, checked time.Time, lw store.LastWordRow) error {
-	_, err := r.Exec(ctx, `UPDATE threads SET last_word_text=$2,last_word_preview=$3,last_word_truncated=$4,last_word_run_id=$5,last_word_item_id=$6,last_word_at=$7,last_word_checked_at=$8
-    WHERE session_id=$1 AND (last_word_checked_at IS NULL OR last_word_checked_at<=$8)`, sessionID, lw.Text, lw.Preview, lw.Truncated, lw.RunID, lw.ItemID, lw.At, checked)
+	_, err := r.Exec(ctx, `UPDATE threads SET last_word_text=$2,last_word_preview=$3,last_word_truncated=$4,last_word_run_id=$5,last_word_at=$6,last_word_checked_at=$7
+    WHERE session_id=$1 AND (last_word_checked_at IS NULL OR last_word_checked_at<=$7)`, sessionID, lw.Text, lw.Preview, lw.Truncated, lw.RunID, lw.At, checked)
 	return err
 }
 

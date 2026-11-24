@@ -98,7 +98,7 @@ func caseThreadLastWord(t *testing.T, open Factory) {
 	// Tasks carry the preview of their thread.
 	task := mustTask(t, s, ctx, p.ID, "t", nil)
 	tid := "th-1"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateBacklog}, To: db.StateRunning, ThreadID: &tid}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, From: []db.TaskState{db.StateBacklog}, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: tid}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.GetTask(ctx, task.ID)

@@ -416,6 +416,9 @@ and `originSession`, journal entries `sourceSession`, accepted evidence `session
 and resolved references `session`. A raw ID is never globally unique.
 
 Bare historical session references explicitly mean the local machine's active T3 connection.
+Storage holds no bare IDs: migration 0027 resolved stored ones to session
+identities (the row's own connection, else an existing T3 identity, else the
+local active T3; unresolvable ones became null) and 0028 dropped the columns.
 Task and schedule requests use `originSession` and `needsSession`; journal notes
 use `sourceSession` (API v6 removed `originThreadId`, `needsSessionId`, `sourceThreadId` and `callerThreadId` as inputs). T3 cache tables and historical links remain intact. Migration
 does not rewrite accepted snapshot JSON or journal text.
@@ -494,7 +497,7 @@ attempt is consumed.
 ```
 - `stateSince`: when the task entered its current `state` (its latest task event into that state); null without one.
 - `archivedAt`: when the task was archived (null = not archived); `treeStatus`: its tree's `status` (null outside a tree); `deletable`: the task never launched, has no session and has no recorded work, so it can be deleted; recorded work must be archived. See "Done, archive and delete".
-- `executionConfig`: the model, options, permission and mode the launch uses (`""` = the harness default). A T3 task saved before execution configs reads its legacy columns through the T3 descriptor, so every task carries one.
+- `executionConfig`: the model, options, permission and mode the launch uses (`""` = the harness default). Legacy T3 model inputs are translated into it on write, and migration 0027 backfilled T3 tasks saved before execution configs, so every T3 task carries one.
 - `treeId` / `treeTitle`: the task's tree (see "Trees"); null outside one. `needs`: tasks in the same tree this one needs (by id); `dependents`: tasks that need this one. Both `[]` outside a tree.
 - `startMode`: the task's own start mode (null = inherit the tree's); `effectiveStartMode`: `startMode`, else the tree's; null outside a tree. `readiness`: see "Tree rules". `readyAt`: when a manual task's needs all have user acceptance (the `ready` notification); cleared when it stops being ready or launches.
 - `adopted`: the task tracks an existing T3 session (see "Adopt session"); `prompt` is `""`.
@@ -507,7 +510,7 @@ attempt is consumed.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt). `settledAt`: entry into `settled`.
 - `runStartedAt` / `runEndedAt`: the task thread's elapsed run span (see Thread); null without a thread or before a detail read.
 - `lastWordPreview` / `lastWordAt`: the task thread's last word preview and reply time (see Thread); null without a thread or before one is read.
-- `artifactLinks`: historical `{label, url}` entries, without live PR status, plus the artifacts the harness reports for the session (every harness, deduped by URL); `[]` when none.
+- `artifactLinks`: the artifacts the harness reports for the session as `{label, url}` (every harness, deduped by URL), without live PR status; `[]` when none.
 
 `TaskEvent`:
 ```json
@@ -544,13 +547,13 @@ Body `CreateTaskRequest`:
   "start": false                 // optional: true = Save & start (not with needs or needsSession)
 }
 ```
-201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSession` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSession` not adoptable. T3 tasks still accept the legacy model inputs `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` in place of `executionConfig`; responses carry only `executionConfig`. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
+201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSession` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSession` not adoptable. T3 tasks still accept the legacy model inputs `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` in place of `executionConfig`; Stage translates them into `executionConfig` on write (unset `runtimeMode` / `interactionMode` mean `full-access` / `default`) and stores only that. Responses carry only `executionConfig`. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace` (or the legacy T3 model inputs) `attachmentIds` `startLocal` `startTz` `handoff` `startMode`.
+Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace` (or the legacy T3 model inputs) `attachmentIds` `startLocal` `startTz` `handoff` `startMode`. A legacy model input changes only its part of the stored `executionConfig`: `providerInstanceId` and `model` set (or, both null, clear) the model together, `modelOptions` the options (null: none), `runtimeMode` the permission, `interactionMode` the mode. Schedule updates do the same.
 In `backlog` all fields are editable; otherwise only `title` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it; a task with needs cannot have one (400). `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`). `startMode`: `auto|manual`, `null` inherits the tree's (backlog only). Needs change with `PUT /api/tasks/:id/needs`; tree membership with the tree endpoints.
 200 `Task`. 404.
@@ -823,6 +826,8 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, text, truncated, up
 ## API v7 changes
 
 Breaking, so `apiVersion` is 7 and v6 clients refuse this server. New-task defaults move from preferences to each connection ([Preferences](#preferences)). Removed: `PUT /api/preferences/pinned` (404) and `pinned` / `lastUsed` on `GET /api/preferences`; creating a task no longer records a last-used model. Added: `defaultConnectionId` on preferences and `PUT /api/preferences/default-connection`; `newTaskConfig` on connections and `PUT /api/connections/:connectionId/new-task-config`. A create without `connectionId` starts on the default connection when the project is available there. Migration 0024 moves the old global pin to the main machine's T3 connection and sets no default.
+
+Legacy storage dropped (#417; no version bump, no client reads these): sessions drop `providerInstanceId`, `creationSource` and `runCount`. Journal `sourceThreadId` is the external ID of a T3 `sourceSession` (else null); handoff and launch-base `sourceThreadId` is the source session's external ID. PR links of the old thread mirror leave `artifactLinks` (accepted evidence keeps its copy). The legacy T3 model inputs are translated into `executionConfig` on write instead of stored.
 
 ## API v6 changes
 

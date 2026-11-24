@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -318,7 +319,11 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 			out.FinalReply = obs.Reply
 			for _, link := range obs.Artifacts {
 				if link.URL != "" && !slices.ContainsFunc(out.ArtifactLinks, func(a artifactLink) bool { return a.URL == link.URL }) {
-					out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: link.Repository, URL: link.URL})
+					label := link.Repository
+					if link.Number > 0 {
+						label += "#" + strconv.Itoa(link.Number)
+					}
+					out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: label, URL: link.URL})
 				}
 			}
 		} else if !errors.Is(e, db.ErrNotFound) {

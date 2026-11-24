@@ -85,13 +85,6 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 		t.Fatalf("active connections %+v", got)
 	}
 
-	// Legacy thread ids keep mapping to the local machine's T3.
-	project := projectWithBinding(t, s, local, "/w/local")
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,origin_thread_id,connection_id) VALUES($1,'t','p','running','thread-l','origin-l',$2)`, project, local)
-	var origin int64
-	if err := pool.QueryRow(`SELECT (SELECT connection_id FROM session_identities WHERE id=t.origin_session_id) FROM tasks t WHERE t3_thread_id='thread-l'`).Scan(&origin); err != nil || origin != local {
-		t.Fatalf("legacy origin on %d, want %d (%v)", origin, local, err)
-	}
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "mirror-1", ProjectID: "p", Title: "Mirror", Status: t3.StatusRunning, CreatedAt: time.Now().UTC()}})); err != nil {
 		t.Fatal(err)
 	}
