@@ -159,8 +159,8 @@ func TestMigrationTrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !adopted.Adopted || adopted.Title != "Planner" || adopted.Prompt != "" || adopted.State != StateRunning ||
-		adopted.T3ThreadID == nil || *adopted.T3ThreadID != "sess-1" || adopted.RuntimeMode != "full-access" ||
-		adopted.ProviderInstanceID == nil || *adopted.ProviderInstanceID != "codex" || adopted.LaunchAttempt != 1 {
+		adopted.T3ThreadID == nil || *adopted.T3ThreadID != "sess-1" || adopted.ExecutionConfig == nil ||
+		adopted.ExecutionConfig.Permission != "full-access" || adopted.ExecutionConfig.Model != `["codex","gpt"]` || adopted.LaunchAttempt != 1 {
 		t.Fatalf("adopted %+v", adopted)
 	}
 	hasEvent := func(id int64, detail string) bool {

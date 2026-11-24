@@ -433,20 +433,6 @@ func printRef(w io.Writer, r agenttools.RefOut) {
 	}
 }
 
-// cliRunLimit caps the runs block; --json returns every stored run.
-const cliRunLimit = 10
-
-// runModel is the executed model, "requested -> executed" when they differ.
-func runModel(r db.ThreadRun) string {
-	switch {
-	case r.ExecutedModel == nil || *r.ExecutedModel == "":
-		return orDash(r.Model)
-	case r.Model != nil && *r.Model != "" && *r.Model != *r.ExecutedModel:
-		return *r.Model + " -> " + *r.ExecutedModel
-	}
-	return *r.ExecutedModel
-}
-
 // span is to - from rounded to seconds; "-" when either end is unknown.
 func span(from, to *time.Time) string {
 	if from == nil || to == nil || from.IsZero() || to.Before(*from) {

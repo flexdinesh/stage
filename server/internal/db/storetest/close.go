@@ -25,7 +25,7 @@ func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread str
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	if end != db.StateRunning {

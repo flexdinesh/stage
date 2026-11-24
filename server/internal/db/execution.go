@@ -50,18 +50,9 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if settled {
 			settledAt = &o.UpdatedAt
 		}
-		// The parent lives on the observed session's own connection.
-		var parentID *int64
-		if o.Parent != nil {
-			pid, err := ensureSession(ctx, tx, SessionRef{ConnectionID: o.Session.ConnectionID, ExternalSessionID: o.Parent.ExternalSessionID})
-			if err != nil {
-				return err
-			}
-			parentID = &pid
-		}
 		err = mirrorThread(ctx, tx, o, store.ThreadMirror{
-			SessionID: id, ParentSessionID: parentID, ParentThreadID: externalParent(o), Relationship: childMarker(o.Child),
-			Link: nullIfEmpty(o.Links.App), Branch: nullIfEmpty(o.Branch), WorktreePath: nullIfEmpty(o.Directory),
+			SessionID: id, ParentThreadID: externalParent(o), Relationship: childMarker(o.Child),
+			Branch: nullIfEmpty(o.Branch), WorktreePath: nullIfEmpty(o.Directory),
 			PendingRequests: pending, ActiveRunID: nullIfEmpty(active), LatestRunID: nullIfEmpty(o.ExecutionID),
 			Settled: settled, SettledAt: settledAt,
 			Model: nullIfEmpty(o.ModelLabel), RuntimeMode: nullIfEmpty(o.Config.Permission), InteractionMode: nullIfEmpty(o.Config.Mode),
@@ -74,7 +65,7 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 			preview := PreviewText(r.Text)
 			at := r.UpdatedAt
 			err = tx.Threads().SetSessionLastWord(ctx, id, o.UpdatedAt, store.LastWordRow{Text: r.Text, Preview: &preview, Truncated: r.Truncated,
-				RunID: nullIfEmpty(r.RunID), ItemID: nullIfEmpty(r.ItemID), At: &at})
+				RunID: nullIfEmpty(r.RunID), At: &at})
 		}
 		return err
 	})
@@ -197,11 +188,7 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observ
 		if !confirmed {
 			return Conflict("launch already changed; reload the preview")
 		}
-		var legacyID *string
-		if s.IsT3(connection) {
-			legacyID = &o.Session.ExternalSessionID
-		}
-		attached, err := tx.Tasks().Confirm(ctx, a, o.State, legacyID, sid, o.EndedAt)
+		attached, err := tx.Tasks().Confirm(ctx, a, o.State, sid, o.EndedAt)
 		if err != nil {
 			return err
 		}

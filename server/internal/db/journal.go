@@ -52,22 +52,7 @@ func validateJournalCategory(category string) error {
 func appendNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteInput) (JournalEntry, error) {
 	var sourceID *int64
 	if in.SourceSession != nil {
-		if in.SourceThreadID != nil {
-			return JournalEntry{}, Invalid("use sourceSession or the legacy T3 sourceThreadId, not both")
-		}
 		id, err := ensureSession(ctx, tx, *in.SourceSession)
-		if err != nil {
-			return JournalEntry{}, err
-		}
-		sourceID = &id
-	} else if in.SourceThreadID != nil {
-		t3, err := legacyT3Tx(ctx, tx)
-		if err != nil {
-			return JournalEntry{}, err
-		}
-		ref := SessionRef{ConnectionID: t3, ExternalSessionID: *in.SourceThreadID}
-		in.SourceSession = &ref
-		id, err := ensureSession(ctx, tx, ref)
 		if err != nil {
 			return JournalEntry{}, err
 		}

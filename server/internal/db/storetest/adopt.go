@@ -38,7 +38,7 @@ func caseAdoptThread(t *testing.T, open Factory) {
 	}
 	if !task.Adopted || task.Prompt != "" || task.Title != "Planner" || task.State != db.StateRunning || task.ProjectID != p.ID ||
 		task.T3ThreadID == nil || *task.T3ThreadID != "planner-1" || task.LaunchAttempt != 1 || task.LaunchedAt == nil ||
-		task.ExecutionConfig == nil || task.ExecutionConfig.Model != t3.ModelKey("codex", "gpt") || task.RuntimeMode != "auto" || task.InteractionMode != "plan" ||
+		task.ExecutionConfig == nil || task.ExecutionConfig.Model != t3.ModelKey("codex", "gpt") || task.ExecutionConfig.Permission != "auto" || task.ExecutionConfig.Mode != "plan" ||
 		task.TreeID != nil {
 		t.Fatalf("adopted task %+v", task)
 	}

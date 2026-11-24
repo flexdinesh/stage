@@ -34,8 +34,8 @@ func movedT3(t *testing.T) (*Store, *sqlite.DB, int64) {
 	return s, pool, sw.New
 }
 
-// A T3 thread with a parent on a worker's T3 is mirrored with the parent on
-// the same connection, after the local machine's T3 was retired.
+// A T3 thread with a parent on a worker's T3 is mirrored on its own
+// connection with its latest parent, after the local machine's T3 was retired.
 func TestMovedT3ObservationKeepsParentOnItsConnection(t *testing.T) {
 	s, pool, moved := movedT3(t)
 	project := projectWithBinding(t, s, moved, "/w/a")
@@ -53,7 +53,7 @@ func TestMovedT3ObservationKeepsParentOnItsConnection(t *testing.T) {
 	var conn int64
 	var parent string
 	var projectID *int64
-	err := pool.QueryRow(`SELECT si.connection_id,si.external_id,th.stage_project_id FROM threads th JOIN session_identities si ON si.id=th.parent_session_id WHERE th.t3_thread_id='child'`).Scan(&conn, &parent, &projectID)
+	err := pool.QueryRow(`SELECT si.connection_id,th.parent_thread_id,th.stage_project_id FROM threads th JOIN session_identities si ON si.id=th.session_id WHERE th.t3_thread_id='child'`).Scan(&conn, &parent, &projectID)
 	if err != nil || conn != moved || parent != "parent-2" {
 		t.Fatalf("parent on %d %q, want %d parent-2: %v", conn, parent, moved, err)
 	}
@@ -71,7 +71,8 @@ func TestMovedT3ObservationKeepsParentOnItsConnection(t *testing.T) {
 func TestMovedT3TaskEventJournalsItsSession(t *testing.T) {
 	s, pool, moved := movedT3(t)
 	project := projectWithBinding(t, s, moved, "/w/a")
-	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,t3_thread_id,connection_id) VALUES(7,$1,'ran','p','running','thread-a',$2)`, project, moved)
+	mustExec(t, pool, `INSERT INTO session_identities(connection_id,external_id) VALUES($1,'thread-a')`, moved)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id,session_id) VALUES(7,$1,'ran','p','running',$2,(SELECT id FROM session_identities WHERE connection_id=$2 AND external_id='thread-a'))`, project, moved)
 	if _, err := s.TransitionTask(t.Context(), Transition{TaskID: 7, To: StateDone, Detail: "finished"}); err != nil {
 		t.Fatal(err)
 	}

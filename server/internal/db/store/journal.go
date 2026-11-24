@@ -51,9 +51,6 @@ type AppendNoteInput struct {
 	Category      string      `json:"category"`
 	RequestID     string      `json:"requestId"`
 	SourceTaskID  *int64      `json:"sourceTaskId"`
-	// SourceThreadID is a legacy T3 thread id from a task create's
-	// originThreadId (initial note); not accepted on the journal API.
-	SourceThreadID *string `json:"-"`
 }
 
 // JournalEvent is an event row db derives from a change in the same Write

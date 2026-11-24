@@ -1,8 +1,6 @@
 package t3
 
 import (
-	"encoding/json"
-
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
@@ -43,21 +41,4 @@ var Descriptor = harness.Descriptor{
 		Env:  "T3CODE_THREAD_ID",
 		Hint: "T3 sets your session id in T3CODE_THREAD_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $T3CODE_THREAD_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$T3CODE_THREAD_ID.",
 	},
-	LegacyConfig: legacyConfiguration,
-}
-
-// legacyConfiguration maps a pre-executionConfig row's provider, model,
-// options, runtime and interaction mode to its execution config.
-func legacyConfiguration(raw json.RawMessage) (execution.Config, error) {
-	var in struct {
-		ProviderInstanceID string                  `json:"providerInstanceId"`
-		Model              string                  `json:"model"`
-		ModelOptions       []execution.ModelOption `json:"modelOptions"`
-		RuntimeMode        string                  `json:"runtimeMode"`
-		InteractionMode    string                  `json:"interactionMode"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return execution.Config{}, err
-	}
-	return LegacyConfig(in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode), nil
 }

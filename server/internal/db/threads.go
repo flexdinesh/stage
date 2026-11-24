@@ -31,46 +31,11 @@ func RunSpan(source execution.Source) (*time.Time, *time.Time) {
 	return o.StartedAt, o.EndedAt
 }
 
-type (
-	// ThreadFilter selects mirrored threads (ListThreads).
-	ThreadFilter = store.ThreadFilter
-	// ThreadObservation is the watcher's stored view of a thread.
-	ThreadObservation = store.ThreadObservation
-)
-
-// ThreadRuns returns a thread's mirrored recent runs (newest first, at most
-// 50); [] when unread. ErrNotFound for an unknown thread.
-func (s *Store) ThreadRuns(ctx context.Context, id string) ([]ThreadRun, error) {
-	runs, err := read(ctx, s, func(tx store.Tx) ([]ThreadRun, error) { return tx.Threads().Runs(ctx, id) })
-	if err != nil {
-		return nil, err
-	}
-	if runs == nil {
-		runs = []ThreadRun{}
-	}
-	return runs, nil
-}
+// ThreadObservation is the watcher's stored view of a thread.
+type ThreadObservation = store.ThreadObservation
 
 func (s *Store) GetThread(ctx context.Context, id string) (Thread, error) {
 	return read(ctx, s, func(tx store.Tx) (Thread, error) { return tx.Threads().Get(ctx, id) })
-}
-
-// ListThreads returns a page of mirrored threads (createdAt desc) and the
-// total match count.
-func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) (threads []Thread, total int, err error) {
-	err = s.e.Read(ctx, func(tx store.Tx) error {
-		var err error
-		threads, total, err = tx.Threads().List(ctx, f)
-		return err
-	})
-	return threads, total, err
-}
-
-// SetPendingQuestionCount stores how many of a thread's pending requests are
-// answerable questions (t3_pending_request list). Reads clamp it to
-// pending_request_count, and a detail upsert with no pending requests resets it.
-func (s *Store) SetPendingQuestionCount(ctx context.Context, threadID string, n int) error {
-	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetPendingQuestionCount(ctx, threadID, n) })
 }
 
 // NeedsInputCount: tasks in needs_input + external threads needing input.

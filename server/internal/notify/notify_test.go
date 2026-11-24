@@ -451,7 +451,7 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	ctx := context.Background()
 	task := seedTask(t, store, db.StateRunning)
 	id := "provider:session/with%id"
-	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, ThreadID: &id}); err != nil {
+	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}}); err != nil {
 		t.Fatal(err)
 	}
 	want := "/?inbox"
@@ -479,7 +479,7 @@ func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, ThreadID: &thread}); err != nil {
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, Session: &db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 			t.Fatal(err)
 		}
 		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}

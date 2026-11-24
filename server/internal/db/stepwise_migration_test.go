@@ -55,6 +55,11 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	24: connectionDefaultsSteps(),
 	25: {{"launch observed session", seedV0025ObservedSession, checkV0025ObservedSession}},
 	26: {{"journal events in go", seedV0026JournalEventsInGo, checkV0026JournalEventsInGo}},
+	27: {
+		{"legacy sessions and model backfilled", seedV0027LegacyBackfill, checkV0027LegacyBackfill},
+		{"unresolvable legacy ids stay null", seedV0027Unresolvable, checkV0027Unresolvable},
+	},
+	28: {{"legacy storage dropped", seedV0028DropLegacy, checkV0028DropLegacy}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -375,4 +380,184 @@ func checkV0026JournalEventsInGo(t *testing.T, pool *sqlite.DB) {
 	// A direct acceptance no longer takes the task's session from a trigger.
 	mustExec(t, pool, `INSERT INTO task_acceptances(id,task_id,provenance,evidence) VALUES(7,1,'user','{}')`)
 	wantRows(t, pool, `SELECT id,source_session_id FROM task_acceptances`, "7|NULL")
+}
+
+// v0027ClearNeutral makes seeded rows look like ones written before their
+// neutral columns: the legacy-id triggers filled them on insert, so clear
+// them and the identities only the triggers created (keep lists the rest).
+func v0027ClearNeutral(t *testing.T, pool *sqlite.DB, keep string) {
+	t.Helper()
+	mustExec(t, pool, `UPDATE tasks SET session_id=NULL WHERE t3_thread_id IS NOT NULL`)
+	mustExec(t, pool, `UPDATE tasks SET origin_session_id=NULL`)
+	mustExec(t, pool, `UPDATE schedules SET origin_session_id=NULL`)
+	mustExec(t, pool, `UPDATE notifications SET session_id=NULL`)
+	mustExec(t, pool, `UPDATE task_handoffs SET source_session_id=NULL`)
+	mustExec(t, pool, `UPDATE task_launch_bases SET source_session_id=NULL`)
+	mustExec(t, pool, `UPDATE journal_entries SET source_session_id=NULL`)
+	mustExec(t, pool, `DELETE FROM session_identities WHERE id NOT IN (`+keep+`)`)
+}
+
+// Migration 0027: legacy thread ids become session identities (the row's
+// own connection, else an existing T3 identity, else the local active T3),
+// and T3 tasks and schedules without executionConfig get the one their
+// legacy model columns mean.
+func seedV0027LegacyBackfill(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO harness_connections(id,harness,active,retired_at) VALUES(3,'t3',0,'2026-11-01T00:00:00.000000Z')`)
+	mustExec(t, pool, `INSERT INTO harness_connections(id,machine_id,harness) VALUES(4,1,'opencode')`)
+	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,3,'old-thread')`)
+	mustExec(t, pool, `INSERT INTO projects(id,title,t3_project_id,workspace_root,source) VALUES(1,'P','stage:p','','app')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id,t3_thread_id,provider_instance_id,model,model_options,runtime_mode,interaction_mode)
+ VALUES(1,1,'live','p','done',1,'live','codex','gpt<6>','[{"id":"effort","value":"high"}]','auto','plan')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id,t3_thread_id) VALUES(2,1,'retired','p','done',3,'old-thread')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,origin_thread_id,provider_instance_id) VALUES(3,1,'origin','p',1,'old-thread','codex')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,origin_thread_id,model,execution_config) VALUES(4,1,'kept','p',1,'new-origin','m','{"model":"x","options":[]}')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,provider_instance_id,model) VALUES(5,1,'opencode','p',4,'codex','gpt')`)
+	mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,cron,tz,origin_thread_id,provider_instance_id,model,runtime_mode)
+ VALUES(1,1,'s','p','* * * * *','UTC','old-thread','claude','haiku','approval-required')`)
+	mustExec(t, pool, `INSERT INTO notifications(id,event,task_id,t3_thread_id,title,url) VALUES(1,'done',2,'old-thread','n','u'),(2,'done',NULL,'live','n','u')`)
+	mustExec(t, pool, `INSERT INTO task_handoffs(task_id,attempt,source_task_id,source_thread_id,status) VALUES(3,1,1,'live','sent')`)
+	mustExec(t, pool, `INSERT INTO task_launch_bases(task_id,attempt,base_ref,start_from_origin,source,source_task_id,source_thread_id) VALUES(3,1,'main',0,'predecessor',2,'old-thread')`)
+	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,source_thread_id,text,request_id) VALUES(901,'note',3,'new-origin','n','k')`)
+	v0027ClearNeutral(t, pool, "5")
+}
+
+func checkV0027LegacyBackfill(t *testing.T, pool *sqlite.DB) {
+	const session = `(SELECT connection_id||':'||external_id FROM session_identities WHERE id=%s)`
+	q := func(col, table string) string {
+		return `SELECT id,COALESCE(` + fmt.Sprintf(session, col) + `,'NULL') FROM ` + table + ` ORDER BY id`
+	}
+	// Own connection, including a retired one.
+	wantRows(t, pool, q("session_id", "tasks"), "1|1:live", "2|3:old-thread", "3|NULL", "4|NULL", "5|NULL")
+	// No own connection: the existing (retired) T3 identity, else the local active T3.
+	wantRows(t, pool, q("origin_session_id", "tasks"), "1|NULL", "2|NULL", "3|3:old-thread", "4|1:new-origin", "5|NULL")
+	wantRows(t, pool, q("origin_session_id", "schedules"), "1|3:old-thread")
+	// A notification takes its task's connection.
+	wantRows(t, pool, q("session_id", "notifications"), "1|3:old-thread", "2|1:live")
+	wantRows(t, pool, q("source_session_id", "task_handoffs"), "1|1:live")
+	wantRows(t, pool, q("source_session_id", "task_launch_bases"), "1|3:old-thread")
+	wantRows(t, pool, q("source_session_id", "journal_entries"), "901|1:new-origin")
+	// T3 rows get the legacy executionConfig (Go's escaping of the model
+	// key); a set config and a non-T3 row are untouched.
+	wantRows(t, pool, `SELECT id,COALESCE(execution_config,'NULL') FROM tasks ORDER BY id`,
+		`1|{"model":"[\"codex\",\"gpt\\u003c6\\u003e\"]","options":[{"id":"effort","value":"high"}],"permission":"auto","mode":"plan"}`,
+		`2|{"model":"","options":[],"permission":"full-access","mode":"default"}`,
+		`3|{"model":"","options":[],"permission":"full-access","mode":"default"}`,
+		`4|{"model":"x","options":[]}`,
+		`5|NULL`)
+	wantRows(t, pool, `SELECT id,execution_config FROM schedules`,
+		`1|{"model":"[\"claude\",\"haiku\"]","options":[],"permission":"approval-required","mode":"default"}`)
+}
+
+// Unresolvable: no own connection, no T3 identity and no active local T3;
+// or a task session another task already holds. The neutral column stays
+// NULL.
+func seedV0027Unresolvable(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO projects(id,title,t3_project_id,workspace_root,source) VALUES(1,'P','stage:p','','app')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,t3_thread_id,origin_thread_id) VALUES(1,1,'dup','p',1,'dup','ghost')`)
+	mustExec(t, pool, `INSERT INTO notifications(id,event,task_id,t3_thread_id,title,url) VALUES(1,'done',NULL,'ghost','n','u')`)
+	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,source_thread_id,text,request_id) VALUES(901,'note',1,'ghost','n','k')`)
+	v0027ClearNeutral(t, pool, "SELECT id FROM session_identities WHERE external_id='dup'")
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,session_id) VALUES(2,1,'holder','p',1,(SELECT id FROM session_identities WHERE external_id='dup'))`)
+	mustExec(t, pool, `UPDATE harness_connections SET active=0,retired_at='2026-11-01T00:00:00.000000Z' WHERE id=1`)
+}
+
+func checkV0027Unresolvable(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT id,COALESCE(session_id,'NULL'),COALESCE(origin_session_id,'NULL') FROM tasks WHERE id=1`, "1|NULL|NULL")
+	wantRows(t, pool, `SELECT id,COALESCE(session_id,'NULL') FROM notifications`, "1|NULL")
+	wantRows(t, pool, `SELECT id,COALESCE(source_session_id,'NULL') FROM journal_entries`, "901|NULL")
+	wantRows(t, pool, `SELECT external_id FROM session_identities`, "dup")
+}
+
+// Migration 0028: the legacy columns, indexes, table and compatibility
+// triggers are gone; rows, ids and sequences survive; tasks and schedules
+// reference their connection by a real foreign key.
+var v0028DroppedColumns = map[string][]string{
+	"projects": {"t3_project_id", "workspace_root", "source", "t3_deleted_at"},
+	"tasks": {"provider_instance_id", "model", "model_options", "runtime_mode", "interaction_mode", "t3_thread_id",
+		"launch_reuse", "after_task_id", "after_thread_id", "origin_thread_id"},
+	"schedules": {"provider_instance_id", "model", "model_options", "runtime_mode", "interaction_mode", "origin_thread_id"},
+	"threads": {"provider_instance_id", "creation_source", "run_count", "latest_run_status", "recent_runs",
+		"pending_question_count", "parent_session_id", "link", "last_word_item_id", "pull_requests"},
+	"notifications":     {"t3_thread_id"},
+	"task_handoffs":     {"source_thread_id"},
+	"task_launch_bases": {"source_thread_id"},
+	"journal_entries":   {"source_thread_id"},
+}
+
+var v0028DroppedTriggers = []string{
+	"tasks_session_id_insert", "tasks_session_id_update", "tasks_connection_insert", "tasks_connection_update",
+	"schedules_connection_insert", "schedules_connection_update", "threads_session_id_insert", "threads_session_id_update",
+	"tasks_origin_session_id_insert", "tasks_origin_session_id_update", "schedules_origin_session_id_insert",
+	"schedules_origin_session_id_update", "notifications_session_id_insert", "notifications_session_id_update",
+	"task_launch_bases_source_session_id_insert", "task_launch_bases_source_session_id_update",
+	"journal_entries_source_session_id_insert", "journal_entries_source_session_id_update",
+}
+
+func seedV0028DropLegacy(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,1,'thread')`)
+	mustExec(t, pool, `INSERT INTO projects(id,title,t3_project_id,workspace_root,source,origin,imported_connection_id) VALUES(1,'P','stage:p','','app','discovered',1),(9,'gone','stage:g','','app',NULL,NULL)`)
+	mustExec(t, pool, `DELETE FROM projects WHERE id=9`)
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(1,'tree')`)
+	mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,cron,tz,execution_config) VALUES(1,1,'s','p','* * * * *','UTC','{"model":""}')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,tree_id,schedule_id,session_id,origin_session_id,execution_config,start_at,start_tz)
+ VALUES(1,1,'t','p','backlog',1,1,5,5,'{"model":""}','2026-12-01T00:00:00.000000Z','UTC'),(7,1,'gone','p','backlog',NULL,NULL,NULL,NULL,NULL,NULL,NULL)`)
+	mustExec(t, pool, `DELETE FROM tasks WHERE id=7`)
+	mustExec(t, pool, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,parent_thread_id,created_at,updated_at,session_id,stage_project_id,last_word_text)
+ VALUES('thread','p','th','running','parent','2026-11-01T00:00:00.000000Z','2026-11-01T00:00:00.000000Z',5,1,'hi')`)
+	mustExec(t, pool, `INSERT INTO notifications(id,event,task_id,title,url,session_id) VALUES(1,'done',1,'n','u',5)`)
+	mustExec(t, pool, `INSERT INTO task_handoffs(task_id,attempt,source_task_id,source_thread_id,status,source_session_id) VALUES(1,1,1,'thread','sent',5)`)
+	mustExec(t, pool, `INSERT INTO task_launch_bases(task_id,attempt,base_ref,start_from_origin,source,source_session_id) VALUES(1,1,'main',0,'fallback',5)`)
+	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id,source_session_id) VALUES(901,'note',1,'n','k',5)`)
+	mustExec(t, pool, `INSERT INTO question_responses(t3_thread_id,request_id,answers) VALUES('thread','r','{}')`)
+}
+
+func checkV0028DropLegacy(t *testing.T, pool *sqlite.DB) {
+	for table, cols := range v0028DroppedColumns {
+		for _, col := range cols {
+			if columnExists(t, pool, table, col) {
+				t.Errorf("%s.%s kept", table, col)
+			}
+		}
+	}
+	for _, name := range v0028DroppedTriggers {
+		if triggerExists(t, pool, name) {
+			t.Errorf("%s kept", name)
+		}
+	}
+	for _, name := range []string{"tasks_origin_thread_idx", "projects_workspace_root_idx", "threads_status_idx",
+		"threads_updated_at_idx", "threads_root_created_idx", "threads_t3_project_id_idx"} {
+		if indexExists(t, pool, name) {
+			t.Errorf("index %s kept", name)
+		}
+	}
+	for _, name := range []string{"tasks_state_idx", "tasks_project_id_idx", "tasks_created_at_idx", "tasks_due_start_idx",
+		"tasks_schedule_idx", "tasks_tree_idx", "tasks_archived_idx", "task_session_identity", "schedules_due_idx",
+		"schedules_project_idx", "threads_created_at_idx", "thread_session_identity"} {
+		if !indexExists(t, pool, name) {
+			t.Errorf("index %s missing", name)
+		}
+	}
+	if tableExists(t, pool, "question_responses") {
+		t.Error("question_responses kept")
+	}
+	wantRows(t, pool, `PRAGMA foreign_key_check`)
+	wantRows(t, pool, `SELECT id,title,origin,imported_connection_id FROM projects`, "1|P|discovered|1")
+	wantRows(t, pool, `SELECT id,tree_id,schedule_id,session_id,origin_session_id,execution_config,connection_id FROM tasks`, `1|1|1|5|5|{"model":""}|1`)
+	wantRows(t, pool, `SELECT id,connection_id,execution_config FROM schedules`, `1|1|{"model":""}`)
+	wantRows(t, pool, `SELECT t3_thread_id,parent_thread_id,session_id,stage_project_id,last_word_text FROM threads`, "thread|parent|5|1|hi")
+	wantRows(t, pool, `SELECT id,session_id FROM notifications`, "1|5")
+	wantRows(t, pool, `SELECT task_id,source_session_id FROM task_handoffs`, "1|5")
+	wantRows(t, pool, `SELECT task_id,source_session_id FROM task_launch_bases`, "1|5")
+	wantRows(t, pool, `SELECT id,source_session_id FROM journal_entries WHERE kind='note'`, "901|5")
+	// Sequences carry across the rebuilds: deleted ids are not reused.
+	mustExec(t, pool, `INSERT INTO projects(title) VALUES('new')`)
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt) VALUES(1,'new','p')`)
+	wantRows(t, pool, `SELECT max(id) FROM projects`, "10")
+	wantRows(t, pool, `SELECT max(id) FROM tasks`, "8")
+	// A real foreign key replaces the connection triggers; a bare thread id no
+	// longer derives a session.
+	mustFail(t, pool, "unknown task connection", `INSERT INTO tasks(project_id,title,prompt,connection_id) VALUES(1,'x','p',9)`)
+	mustFail(t, pool, "unknown schedule connection", `UPDATE schedules SET connection_id=9`)
+	mustFail(t, pool, "start without tz", `UPDATE tasks SET start_tz=NULL WHERE id=1`)
+	mustExec(t, pool, `UPDATE tasks SET start_at=NULL,start_tz=NULL WHERE id=1`)
 }

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -10,32 +9,26 @@ import (
 
 // Schedule is a recurring task template (docs/api.md "Schedules").
 type Schedule struct {
-	ExecutionConfig    *execution.Config       `json:"executionConfig"`
-	ConnectionID       int64                   `json:"connectionId"`
-	OriginSession      *SessionRef             `json:"originSession"`
-	ID                 int64                   `json:"id"`
-	ProjectID          int64                   `json:"projectId"`
-	ProjectTitle       string                  `json:"projectTitle"`
-	Title              string                  `json:"title"`
-	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"-"`
-	Model              *string                 `json:"-"`
-	ModelOptions       []execution.ModelOption `json:"-"`
-	RuntimeMode        string                  `json:"-"`
-	InteractionMode    string                  `json:"-"`
-	Workspace          Workspace               `json:"workspace"`
-	Notes              string                  `json:"notes"`
-	Attachments        []Attachment            `json:"attachments"`
-	Cron               string                  `json:"cron"`
-	Tz                 string                  `json:"tz"`
-	Paused             bool                    `json:"paused"`
-	NextRunAt          *time.Time              `json:"nextRunAt"`
-	LastRunAt          *time.Time              `json:"lastRunAt"`
-	LastTaskID         *int64                  `json:"lastTaskId"`
-	LastTaskState      *TaskState              `json:"lastTaskState"`
-	OriginThreadID     *string                 `json:"-"` // T3 session that created the schedule; spawned tasks inherit it
-	CreatedAt          time.Time               `json:"createdAt"`
-	CreatedBy          int64                   `json:"createdBy"` // user who created it; spawned tasks inherit it
+	ExecutionConfig *execution.Config `json:"executionConfig"`
+	ConnectionID    int64             `json:"connectionId"`
+	OriginSession   *SessionRef       `json:"originSession"`
+	ID              int64             `json:"id"`
+	ProjectID       int64             `json:"projectId"`
+	ProjectTitle    string            `json:"projectTitle"`
+	Title           string            `json:"title"`
+	Prompt          string            `json:"prompt"`
+	Workspace       Workspace         `json:"workspace"`
+	Notes           string            `json:"notes"`
+	Attachments     []Attachment      `json:"attachments"`
+	Cron            string            `json:"cron"`
+	Tz              string            `json:"tz"`
+	Paused          bool              `json:"paused"`
+	NextRunAt       *time.Time        `json:"nextRunAt"`
+	LastRunAt       *time.Time        `json:"lastRunAt"`
+	LastTaskID      *int64            `json:"lastTaskId"`
+	LastTaskState   *TaskState        `json:"lastTaskState"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	CreatedBy       int64             `json:"createdBy"` // user who created it; spawned tasks inherit it
 	// SourceMachineID: the machine whose agent gateway forwarded the create
 	// (nil: not through a gateway). Spawned tasks do not inherit it.
 	SourceMachineID *int64    `json:"sourceMachineId"`
@@ -66,84 +59,62 @@ type DueTask struct {
 	StartAt time.Time
 }
 
-// LegacyModel is the schedule's legacy model columns (Task.LegacyModel).
-func (s Schedule) LegacyModel() json.RawMessage {
-	return LegacyModel(s.ProviderInstanceID, s.Model, s.ModelOptions, s.RuntimeMode, s.InteractionMode)
-}
-
 // ScheduleInsert is a new schedule's columns.
 type ScheduleInsert struct {
-	ProjectID          int64
-	Title              string
-	Prompt             string
-	ProviderInstanceID *string
-	Model              *string
-	ModelOptions       []execution.ModelOption
-	RuntimeMode        string
-	InteractionMode    string
-	Workspace          Workspace
-	Notes              string
-	Cron               string
-	Tz                 string
-	Paused             bool
-	NextRunAt          *time.Time
-	OriginThreadID     *string
-	OriginSessionID    *int64
-	ExecutionConfig    *execution.Config
-	ConnectionID       int64
-	CreatedBy          int64
-	SourceMachineID    *int64
+	ProjectID       int64
+	Title           string
+	Prompt          string
+	Workspace       Workspace
+	Notes           string
+	Cron            string
+	Tz              string
+	Paused          bool
+	NextRunAt       *time.Time
+	OriginSessionID *int64
+	ExecutionConfig *execution.Config
+	ConnectionID    int64
+	CreatedBy       int64
+	SourceMachineID *int64
 }
 
 // ScheduleEditState is what an edit checks before updating a schedule.
 type ScheduleEditState struct {
-	Provider     *string
-	Model        *string
-	Cron         string
-	Tz           string
-	Paused       bool
-	ConnectionID int64
-	ProjectID    int64
+	ExecutionConfig *execution.Config
+	Cron            string
+	Tz              string
+	Paused          bool
+	ConnectionID    int64
+	ProjectID       int64
 }
 
 // ScheduleUpdate is the columns an edit sets (unset fields are kept;
-// ExecutionConfig, ProviderInstanceID, Model and NextRunAt Null clears).
+// ExecutionConfig and NextRunAt Null clears).
 type ScheduleUpdate struct {
-	ConnectionID       Optional[int64]
-	ExecutionConfig    Optional[execution.Config]
-	ProjectID          Optional[int64]
-	Title              Optional[string]
-	Prompt             Optional[string]
-	ProviderInstanceID Optional[string]
-	Model              Optional[string]
-	ModelOptions       Optional[[]execution.ModelOption]
-	RuntimeMode        Optional[string]
-	InteractionMode    Optional[string]
-	Workspace          Optional[Workspace]
-	Notes              Optional[string]
-	Cron               Optional[string]
-	Tz                 Optional[string]
-	Paused             Optional[bool]
-	NextRunAt          Optional[time.Time]
+	ConnectionID    Optional[int64]
+	ExecutionConfig Optional[execution.Config]
+	ProjectID       Optional[int64]
+	Title           Optional[string]
+	Prompt          Optional[string]
+	Workspace       Optional[Workspace]
+	Notes           Optional[string]
+	Cron            Optional[string]
+	Tz              Optional[string]
+	Paused          Optional[bool]
+	NextRunAt       Optional[time.Time]
 }
 
 // ScheduleTemplate is what a schedule spawns a task from.
 type ScheduleTemplate struct {
-	ProjectID          int64
-	Title              string
-	Prompt             string
-	ProviderInstanceID *string
-	Model              *string
-	ModelOptions       []execution.ModelOption
-	RuntimeMode        string
-	InteractionMode    string
-	Workspace          Workspace
-	Notes              string
-	Tz                 string
-	ConnectionID       int64
-	OriginSession      *SessionRef
-	ExecutionConfig    *execution.Config
-	CreatedBy          int64
+	ProjectID       int64
+	Title           string
+	Prompt          string
+	Workspace       Workspace
+	Notes           string
+	Tz              string
+	ConnectionID    int64
+	OriginSession   *SessionRef
+	ExecutionConfig *execution.Config
+	CreatedBy       int64
 }
 
 // ScheduleFireState is what a fire reads.

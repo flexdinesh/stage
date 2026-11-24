@@ -18,28 +18,24 @@ const notificationKeySQL = `CASE
   WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
   WHEN n.url GLOB '/tasks/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'task:' || substr(n.url, 8)
   WHEN n.session_id IS NOT NULL THEN 'thread:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
- WHEN n.t3_thread_id IS NOT NULL THEN 'thread:1:' || n.t3_thread_id
   ELSE 'notification:' || n.id END`
 
-const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),1), n.id, n.event, n.task_id, COALESCE((SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),tk.t3_thread_id,n.t3_thread_id), n.title, n.project_title,
+const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),1), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
        WHEN o.session_id IS NOT NULL THEN json_extract(o.observation,'$.state')
        WHEN th.settled THEN 'settled'
-       ELSE th.observed_state END AS current_state,
-  COALESCE(min(COALESCE(tth.pending_question_count, th.pending_question_count),
-    COALESCE(tth.pending_request_count, th.pending_request_count)), 0) AS pending_question_count`
+       ELSE th.observed_state END AS current_state`
 
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
-LEFT JOIN threads tth ON tth.session_id = tk.session_id
 LEFT JOIN threads th ON n.task_id IS NULL AND th.session_id = n.session_id
 LEFT JOIN execution_observations o ON o.session_id=n.session_id`
 
 func (r notifications) Insert(ctx context.Context, n store.NewNotification, sid *int64) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,t3_thread_id,title,project_title,url,session_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		string(n.Event), n.TaskID, n.T3ThreadID, n.Title, n.ProjectTitle, n.URL, sid).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid).Scan(&id)
 	return id, err
 }
 
@@ -62,7 +58,7 @@ func scanNotifications(rows *rowSet) ([]store.Notification, error) {
 	for rows.Next() {
 		var n store.Notification
 		if err := rows.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.T3ThreadID, &n.Title, &n.ProjectTitle,
-			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState, &n.PendingQuestionCount); err != nil {
+			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
@@ -125,7 +121,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID)
 	for rows.Next() {
 		var g store.NotificationGroup
 		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.T3ThreadID, &g.Title, &g.ProjectTitle,
-			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.PendingQuestionCount, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
+			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, g)

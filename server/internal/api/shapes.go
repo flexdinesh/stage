@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"strconv"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -104,25 +102,7 @@ func deepLink(envID string, threadID *string) *string {
 	return &u
 }
 
-// executionConfig is a row's canonical config: its own, else the one its
-// harness decodes from the legacy model columns (nil when neither).
-func (s *server) executionConfig(kind string, config *execution.Config, legacy func() json.RawMessage) *execution.Config {
-	if config != nil {
-		return config
-	}
-	d, ok := s.registry().Lookup(kind)
-	if !ok || d.LegacyConfig == nil {
-		return nil
-	}
-	c, err := d.LegacyConfig(legacy())
-	if err != nil {
-		return nil
-	}
-	return &c
-}
-
 func (s *server) task(env string, t db.Task) taskJSON {
-	t.ExecutionConfig = s.executionConfig(t.Harness, t.ExecutionConfig, t.LegacyModel)
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
 		if a.Session != nil {
 			links := s.sessionLinks(context.Background(), a.Session.ConnectionID, &a.Session.ExternalSessionID)
@@ -133,11 +113,6 @@ func (s *server) task(env string, t db.Task) taskJSON {
 	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
 	if t.Session != nil {
 		out.Links = s.sessionLinks(context.Background(), t.ConnectionID, &t.Session.ExternalSessionID)
-	}
-	for _, pr := range t.PullRequests {
-		if pr.URL != "" {
-			out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: pr.Repository + "#" + strconv.Itoa(pr.Number), URL: pr.URL})
-		}
 	}
 	return out
 }

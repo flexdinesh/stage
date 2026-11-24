@@ -16,7 +16,7 @@ type Notification struct {
 	ID           int64      `json:"id"`
 	Event        TaskState  `json:"event"` // needs_input | ready | done | failed | settled
 	TaskID       *int64     `json:"taskId"`
-	T3ThreadID   *string    `json:"externalSessionId"` // external thread, or the task's thread
+	T3ThreadID   *string    `json:"externalSessionId"` // the session's external id: the task's, else the notification's
 	Title        string     `json:"title"`
 	ProjectTitle *string    `json:"projectTitle"`
 	URL          string     `json:"url"`
@@ -25,9 +25,6 @@ type Notification struct {
 	// CurrentState: the task's state, or for an external thread `settled`
 	// when settled, else its observed state. nil = unknown (deleted/unobserved).
 	CurrentState *TaskState `json:"currentState"`
-	// PendingQuestionCount: answerable questions the task's or external
-	// thread's session is waiting on now.
-	PendingQuestionCount int `json:"-"`
 }
 
 // NewNotification is what the notifier records.
@@ -35,7 +32,7 @@ type NewNotification struct {
 	Session      *SessionRef
 	Event        TaskState
 	TaskID       *int64
-	T3ThreadID   *string
+	T3ThreadID   *string // legacy T3 thread id, resolved when Session is nil (not stored)
 	Title        string
 	ProjectTitle *string
 	URL          string

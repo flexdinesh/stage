@@ -30,7 +30,7 @@ func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread str
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	setState(t, s, ctx, id, end)
@@ -50,7 +50,7 @@ func journal(t *testing.T, s *db.Store, ctx context.Context, owner db.JournalOwn
 func journalRows(t *testing.T, ctx context.Context, since int64) []string {
 	t.Helper()
 	rows, err := testDB.Pool.QueryContext(ctx, `SELECT kind||' '||event_type||' task='||ifnull(task_id,'-')||' tree='||ifnull(tree_id,'-')||
- ' src='||ifnull(source_task_id,'-')||' thread='||ifnull(source_thread_id,'-')||' sess='||ifnull(source_session_id,'-')||
+ ' src='||ifnull(source_task_id,'-')||' sess='||ifnull(source_session_id,'-')||
  ' att='||ifnull(attempt,'-')||' from='||ifnull(from_tree_id,'-')||' to='||ifnull(to_tree_id,'-')||
  ' by='||created_by_user_id||' m='||ifnull(source_machine_id,'-')||' '||text
  FROM journal_entries WHERE id > $1 ORDER BY id`, since)
@@ -120,20 +120,20 @@ func TestJournalEventRowsExact(t *testing.T) {
 	b := mustTask(t, s, ctx, p.ID, "b", nil)
 	c := mustTask(t, s, ctx, p.ID, "c", nil)
 	wantRows(t, "create tasks", journalRows(t, ctx, since), []string{
-		"event task_created task=1 tree=- src=- thread=- sess=- att=0 from=- to=- by=1 m=- created",
-		"event task_created task=2 tree=- src=- thread=- sess=- att=0 from=- to=- by=1 m=- created",
-		"event task_created task=3 tree=- src=- thread=- sess=- att=0 from=- to=- by=1 m=- created",
+		"event task_created task=1 tree=- src=- sess=- att=0 from=- to=- by=1 m=- created",
+		"event task_created task=2 tree=- src=- sess=- att=0 from=- to=- by=1 m=- created",
+		"event task_created task=3 tree=- src=- sess=- att=0 from=- to=- by=1 m=- created",
 	})
 
 	since = lastJournalID(t, ctx)
 	tr := mustTree(t, s, ctx, "tree", "", db.TreeMember{TaskID: a.ID}, db.TreeMember{TaskID: b.ID, Needs: []int64{a.ID}}, db.TreeMember{TaskID: c.ID, Needs: []int64{b.ID}})
 	wantRows(t, "create tree", journalRows(t, ctx, since), []string{
-		"event tree_created task=- tree=1 src=- thread=- sess=- att=- from=- to=- by=1 m=- tree",
-		"event task_moved task=- tree=1 src=1 thread=- sess=- att=- from=- to=1 by=1 m=- a",
-		"event task_moved task=- tree=1 src=2 thread=- sess=- att=- from=- to=1 by=1 m=- b",
-		"event task_moved task=- tree=1 src=3 thread=- sess=- att=- from=- to=1 by=1 m=- c",
-		"event needs_changed task=- tree=1 src=2 thread=- sess=- att=- from=- to=- by=1 m=- Added need #1",
-		"event needs_changed task=- tree=1 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Added need #2",
+		"event tree_created task=- tree=1 src=- sess=- att=- from=- to=- by=1 m=- tree",
+		"event task_moved task=- tree=1 src=1 sess=- att=- from=- to=1 by=1 m=- a",
+		"event task_moved task=- tree=1 src=2 sess=- att=- from=- to=1 by=1 m=- b",
+		"event task_moved task=- tree=1 src=3 sess=- att=- from=- to=1 by=1 m=- c",
+		"event needs_changed task=- tree=1 src=2 sess=- att=- from=- to=- by=1 m=- Added need #1",
+		"event needs_changed task=- tree=1 src=3 sess=- att=- from=- to=- by=1 m=- Added need #2",
 	})
 	if got := treeRow(t, ctx, tr.ID); got != "open work=0 rev=3 closed=0" {
 		t.Fatalf("tree after create: %s", got)
@@ -147,7 +147,7 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "update tree", journalRows(t, ctx, since), []string{
-		"event tree_config_changed task=- tree=1 src=- thread=- sess=- att=- from=- to=- by=1 m=- Title: tree -> renamed; start mode: auto -> manual",
+		"event tree_config_changed task=- tree=1 src=- sess=- att=- from=- to=- by=1 m=- Title: tree -> renamed; start mode: auto -> manual",
 	})
 
 	// A note protects its task and tree and stamps the tree's updated_at.
@@ -170,9 +170,9 @@ func TestJournalEventRowsExact(t *testing.T) {
 		}
 	}
 	wantRows(t, "launch", journalRows(t, ctx, since), []string{
-		"event task_state_changed task=1 tree=1 src=- thread=- sess=- att=1 from=- to=- by=1 m=-  (backlog -> launching)",
-		"event task_state_changed task=1 tree=1 src=- thread=- sess=1 att=1 from=- to=- by=1 m=-  (launching -> running)",
-		"event task_state_changed task=1 tree=1 src=- thread=- sess=1 att=1 from=- to=- by=1 m=-  (running -> done)",
+		"event task_state_changed task=1 tree=1 src=- sess=- att=1 from=- to=- by=1 m=-  (backlog -> launching)",
+		"event task_state_changed task=1 tree=1 src=- sess=1 att=1 from=- to=- by=1 m=-  (launching -> running)",
+		"event task_state_changed task=1 tree=1 src=- sess=1 att=1 from=- to=- by=1 m=-  (running -> done)",
 	})
 	var unmatched int
 	if err := testDB.Pool.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries j WHERE j.event_type LIKE 'task_%' AND j.event_type <> 'task_moved'
@@ -190,8 +190,8 @@ func TestJournalEventRowsExact(t *testing.T) {
 		}
 	}
 	wantRows(t, "tree status", journalRows(t, ctx, since), []string{
-		"event tree_status_changed task=- tree=1 src=- thread=- sess=- att=- from=- to=- by=1 m=- open -> done",
-		"event tree_status_changed task=- tree=1 src=- thread=- sess=- att=- from=- to=- by=1 m=- done -> open",
+		"event tree_status_changed task=- tree=1 src=- sess=- att=- from=- to=- by=1 m=- open -> done",
+		"event tree_status_changed task=- tree=1 src=- sess=- att=- from=- to=- by=1 m=- done -> open",
 	})
 
 	// Deleting b splices it out: c inherits a, b's needs go, b leaves.
@@ -200,10 +200,10 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "delete member", journalRows(t, ctx, since), []string{
-		"event needs_changed task=- tree=1 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Added need #1",
-		"event needs_changed task=- tree=1 src=2 thread=- sess=- att=- from=- to=- by=1 m=- Removed need #1",
-		"event needs_changed task=- tree=1 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Removed need #2",
-		"event task_moved task=- tree=1 src=2 thread=- sess=- att=- from=1 to=- by=1 m=- b",
+		"event needs_changed task=- tree=1 src=3 sess=- att=- from=- to=- by=1 m=- Added need #1",
+		"event needs_changed task=- tree=1 src=2 sess=- att=- from=- to=- by=1 m=- Removed need #1",
+		"event needs_changed task=- tree=1 src=3 sess=- att=- from=- to=- by=1 m=- Removed need #2",
+		"event task_moved task=- tree=1 src=2 sess=- att=- from=1 to=- by=1 m=- b",
 	})
 
 	// Moving c to another tree records both sides.
@@ -214,10 +214,10 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "move", journalRows(t, ctx, since), []string{
-		"event needs_changed task=- tree=1 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Removed need #1",
-		"event task_moved task=- tree=1 src=3 thread=- sess=- att=- from=1 to=2 by=1 m=- c",
-		"event task_moved task=- tree=2 src=3 thread=- sess=- att=- from=1 to=2 by=1 m=- c",
-		"event needs_changed task=- tree=2 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Added need #4",
+		"event needs_changed task=- tree=1 src=3 sess=- att=- from=- to=- by=1 m=- Removed need #1",
+		"event task_moved task=- tree=1 src=3 sess=- att=- from=1 to=2 by=1 m=- c",
+		"event task_moved task=- tree=2 src=3 sess=- att=- from=1 to=2 by=1 m=- c",
+		"event needs_changed task=- tree=2 src=3 sess=- att=- from=- to=- by=1 m=- Added need #4",
 	})
 	if got := treeRow(t, ctx, tr2.ID); got != "open work=1 rev=2 closed=0" {
 		t.Fatalf("destination tree: %s", got)
@@ -229,8 +229,8 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "remove last", journalRows(t, ctx, since), []string{
-		"event task_moved task=- tree=1 src=1 thread=- sess=- att=- from=1 to=- by=1 m=- a",
-		"event tree_status_changed task=- tree=1 src=- thread=- sess=- att=- from=- to=- by=1 m=- open -> archived",
+		"event task_moved task=- tree=1 src=1 sess=- att=- from=1 to=- by=1 m=- a",
+		"event tree_status_changed task=- tree=1 src=- sess=- att=- from=- to=- by=1 m=- open -> archived",
 	})
 	if got := treeRow(t, ctx, tr.ID); got != "archived work=1 rev=6 closed=1" {
 		t.Fatalf("emptied tree: %s", got)
@@ -241,10 +241,10 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "dissolve", journalRows(t, ctx, since), []string{
-		"event needs_changed task=- tree=2 src=3 thread=- sess=- att=- from=- to=- by=1 m=- Removed need #4",
-		"event task_moved task=- tree=2 src=3 thread=- sess=- att=- from=2 to=- by=1 m=- c",
-		"event task_moved task=- tree=2 src=4 thread=- sess=- att=- from=2 to=- by=1 m=- d",
-		"event tree_status_changed task=- tree=2 src=- thread=- sess=- att=- from=- to=- by=1 m=- open -> archived",
+		"event needs_changed task=- tree=2 src=3 sess=- att=- from=- to=- by=1 m=- Removed need #4",
+		"event task_moved task=- tree=2 src=3 sess=- att=- from=2 to=- by=1 m=- c",
+		"event task_moved task=- tree=2 src=4 sess=- att=- from=2 to=- by=1 m=- d",
+		"event tree_status_changed task=- tree=2 src=- sess=- att=- from=- to=- by=1 m=- open -> archived",
 	})
 
 	// Deleting an unstarted tree writes nothing for it (the task_needs
@@ -264,11 +264,11 @@ func TestJournalEventRowsExact(t *testing.T) {
 	since = lastJournalID(t, ctx)
 	h := mustTask(t, s, ctx, p.ID, "h", []int64{g.ID})
 	wantRows(t, "create with needs", journalRows(t, ctx, since), []string{
-		"event tree_created task=- tree=4 src=- thread=- sess=- att=- from=- to=- by=1 m=- g",
-		"event task_moved task=- tree=4 src=7 thread=- sess=- att=- from=- to=4 by=1 m=- g",
-		"event task_moved task=- tree=4 src=8 thread=- sess=- att=- from=- to=4 by=1 m=- h",
-		"event needs_changed task=- tree=4 src=8 thread=- sess=- att=- from=- to=- by=1 m=- Added need #7",
-		"event task_created task=8 tree=4 src=- thread=- sess=- att=0 from=- to=- by=1 m=- created",
+		"event tree_created task=- tree=4 src=- sess=- att=- from=- to=- by=1 m=- g",
+		"event task_moved task=- tree=4 src=7 sess=- att=- from=- to=4 by=1 m=- g",
+		"event task_moved task=- tree=4 src=8 sess=- att=- from=- to=4 by=1 m=- h",
+		"event needs_changed task=- tree=4 src=8 sess=- att=- from=- to=- by=1 m=- Added need #7",
+		"event task_created task=8 tree=4 src=- sess=- att=0 from=- to=- by=1 m=- created",
 	})
 	if _, err := s.UpdateTree(ctx, *h.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}}); err != nil {
 		t.Fatal(err)
@@ -280,7 +280,7 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRows(t, "ready", journalRows(t, ctx, since), []string{
-		"event task_event task=8 tree=4 src=- thread=- sess=- att=0 from=- to=- by=1 m=- ready: needs completed",
+		"event task_event task=8 tree=4 src=- sess=- att=0 from=- to=- by=1 m=- ready: needs completed",
 	})
 	if recordedWork(t, ctx, h.ID) {
 		t.Fatal("a backlog event must not record work")

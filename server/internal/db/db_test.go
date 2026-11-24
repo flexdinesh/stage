@@ -8,7 +8,6 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
-	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 var testDB dbtest.DB
@@ -46,7 +45,7 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 	for i, name := range []string{"running", "fresh", "stale"} {
 		task := mustTask(t, s, ctx, p.ID, name, nil)
 		thread := fmt.Sprintf("thread-%d", i)
-		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread})
+		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}})
 		if name != "running" {
 			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 		}
@@ -87,47 +86,6 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 	age()
 	if got := fmt.Sprint(titles(true)); got != "[running fresh stale]" {
 		t.Fatalf("reopened stale poll %s", got)
-	}
-}
-
-func TestTaskCarriesThreadPullRequests(t *testing.T) {
-	pool := testDB.Reset(t)
-	s, ctx := db.NewStore(pool), t.Context()
-	p := mustProject(t, s, ctx, "proj-prs")
-	task := mustTask(t, s, ctx, p.ID, "t", nil)
-	got, err := s.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PullRequests == nil || len(got.PullRequests) != 0 {
-		t.Fatalf("threadless task prs = %#v", got.PullRequests)
-	}
-	now := time.Now().UTC()
-	open := t3.PullRequest{Host: "github.com", Repository: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Source: "agent", State: "open"}
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-task-pr", ProjectID: p.Bindings[0].ExternalProjectID, Title: "t", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{open}}})); err != nil {
-		t.Fatal(err)
-	}
-	// Historical records from an older Stage version remain readable.
-	if _, err := pool.ExecContext(ctx, `UPDATE threads SET pull_requests = ?, recent_runs = ? WHERE t3_thread_id = ?`, `[ {"host":"github.com","repository":"o/r","number":7,"url":"https://github.com/o/r/pull/7","source":"agent","state":"open"} ]`, `[{"runId":"old","ordinal":1}]`, "th-task-pr"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "th-task-pr", ProjectID: p.Bindings[0].ExternalProjectID, Title: "updated", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now, PullRequests: []t3.PullRequest{{URL: "https://example.com/new"}}}}); err != nil {
-		t.Fatal(err)
-	}
-	runs, err := s.ThreadRuns(ctx, "th-task-pr")
-	if err != nil || len(runs) != 1 || runs[0].RunID != "old" {
-		t.Fatalf("historical runs: %+v %v", runs, err)
-	}
-	thread := "th-task-pr"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, ThreadID: &thread}); err != nil {
-		t.Fatal(err)
-	}
-	got, err = s.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.PullRequests) != 1 || got.PullRequests[0] != open {
-		t.Fatalf("task prs = %#v", got.PullRequests)
 	}
 }
 

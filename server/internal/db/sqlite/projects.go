@@ -73,11 +73,9 @@ func (r projects) Get(ctx context.Context, id int64) (store.Project, error) {
 	return scanProject(r.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE id=$1`, id))
 }
 
-// The legacy columns preserve upgrade evidence only. They are not identities,
-// launch destinations or metadata sources after migration 8.
 func (r projects) Insert(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,created_by_user_id,source_machine_id) VALUES($1,$2,'','app',$3,$4) RETURNING id`, "stage:"+newUUID(), title, createdBy, sourceMachine).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO projects(title,created_by_user_id,source_machine_id) VALUES($1,$2,$3) RETURNING id`, title, createdBy, sourceMachine).Scan(&id)
 	return id, err
 }
 
@@ -92,8 +90,8 @@ func (r projects) SoleBinding(ctx context.Context, connectionID int64, external 
 
 func (r projects) InsertDiscovered(ctx context.Context, title string, connectionID, createdBy int64) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO projects(t3_project_id,title,workspace_root,source,origin,imported_connection_id,imported_at,created_by_user_id)
- VALUES($1,$2,'','app','discovered',$3,stage_now(),$4) RETURNING id`, "stage:"+newUUID(), title, connectionID, createdBy).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO projects(title,origin,imported_connection_id,imported_at,created_by_user_id)
+ VALUES($1,'discovered',$2,stage_now(),$3) RETURNING id`, title, connectionID, createdBy).Scan(&id)
 	return id, err
 }
 

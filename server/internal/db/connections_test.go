@@ -93,24 +93,6 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	}
 }
 
-func TestLegacyThreadIdsMapToTheActiveT3Connection(t *testing.T) {
-	s, ctx, pool := connectionStore(t)
-	first := s.LegacyT3ID()
-	project := projectWithBinding(t, s, first, "/w/a")
-	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
-		t.Fatal(err)
-	}
-	sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-b", "box b", 0)
-	if err != nil || !sw.Changed || sw.Old != first {
-		t.Fatalf("switch %+v %v", sw, err)
-	}
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,origin_thread_id,connection_id) VALUES($1,'t','p','running','thread-b','origin-b',$2)`, project, sw.New)
-	var session, origin int64
-	if err := pool.QueryRow(`SELECT (SELECT connection_id FROM session_identities WHERE id=t.session_id),(SELECT connection_id FROM session_identities WHERE id=t.origin_session_id) FROM tasks t WHERE t3_thread_id='thread-b'`).Scan(&session, &origin); err != nil || session != sw.New || origin != sw.New {
-		t.Fatalf("legacy ids on %d/%d, want %d (%v)", session, origin, sw.New, err)
-	}
-}
-
 func connectionStore(t *testing.T) (*Store, context.Context, *sqlite.DB) {
 	t.Helper()
 	pool := openUnmigrated(t)
@@ -139,7 +121,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','running','thread-a',$2)`, project, first)
+	ranTask(t, pool, project, first, "running", "thread-a")
 	schedule, err := s.CreateSchedule(ctx, NewSchedule{ProjectID: project, Title: "nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC", ConnectionID: first, RuntimeMode: "full-access", InteractionMode: "default", Workspace: Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +210,7 @@ func TestForgetConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','done','thread-a',$2)`, project, first)
+	ranTask(t, pool, project, first, "done", "thread-a")
 	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES($1,'/srv','/home')`, first)
 	var conflict *ConflictError
 	if err := s.ForgetConnection(ctx, first); !errors.As(err, &conflict) {
@@ -300,7 +282,7 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 		t.Fatalf("moves %+v %v", moves, err)
 	}
 	project := projectWithBinding(t, s, old, "/w/a")
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','done','thread-a',$2)`, project, old)
+	ranTask(t, pool, project, old, "done", "thread-a")
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id) VALUES(50,$1,'planned','p','backlog',$2)`, project, old)
 	if _, err := s.SetDefaultConnection(ctx, &old); err != nil {
 		t.Fatal(err)
@@ -344,7 +326,7 @@ func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := projectWithBinding(t, s, used, "/w/a")
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,t3_thread_id,connection_id) VALUES($1,'ran','p','done','thread-a',$2)`, project, used)
+	ranTask(t, pool, project, used, "done", "thread-a")
 	if _, err := s.SetDefaultConnection(ctx, &used); err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +357,12 @@ func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}
+}
+
+// ranTask inserts a task that launched as session external on connection.
+func ranTask(t *testing.T, pool *sqlite.DB, project, connection int64, state, external string) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO session_identities(connection_id,external_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, connection, external)
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id)
+ VALUES($1,'ran','p',$2,$3,(SELECT id FROM session_identities WHERE connection_id=$3 AND external_id=$4))`, project, state, connection, external)
 }

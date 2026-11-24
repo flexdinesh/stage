@@ -2,8 +2,6 @@ package db
 
 import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
-
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // TaskState values (docs/api.md TaskState).
@@ -51,14 +49,6 @@ type (
 )
 
 type (
-	Thread    = store.Thread
-	LastWord  = store.LastWord
-	ThreadRun = store.ThreadRun
+	Thread   = store.Thread
+	LastWord = store.LastWord
 )
-
-func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
-	if o == nil {
-		return []execution.ModelOption{}
-	}
-	return o
-}

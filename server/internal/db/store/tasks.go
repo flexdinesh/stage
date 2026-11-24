@@ -120,18 +120,12 @@ type Task struct {
 	ProjectTitle            string      `json:"projectTitle"`
 	Title                   string      `json:"title"`
 	Prompt                  string      `json:"prompt"`
-	// Legacy model columns of rows saved before executionConfig (T3); the
-	// API shows executionConfig only (harness.Descriptor.LegacyConfig).
-	ProviderInstanceID *string                 `json:"-"`
-	Model              *string                 `json:"-"`
-	ModelOptions       []execution.ModelOption `json:"-"`
-	RuntimeMode        string                  `json:"-"`
-	InteractionMode    string                  `json:"-"`
-	Workspace          Workspace               `json:"workspace"`
-	State              TaskState               `json:"state"`
-	T3ThreadID         *string                 `json:"externalSessionId"`
-	TreeID             *int64                  `json:"treeId"` // the task's tree (docs/api.md "Trees")
-	TreeTitle          *string                 `json:"treeTitle"`
+	Workspace               Workspace   `json:"workspace"`
+	State                   TaskState   `json:"state"`
+	// T3ThreadID is the session's external id (nil without a session).
+	T3ThreadID *string `json:"externalSessionId"`
+	TreeID     *int64  `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle  *string `json:"treeTitle"`
 	// StartMode is the task's own start mode (nil = inherit the tree's);
 	// EffectiveStartMode applies the tree's (nil outside a tree without one).
 	StartMode          *StartMode `json:"startMode"`
@@ -142,28 +136,24 @@ type Task struct {
 	Dependents []int64    `json:"dependents"` // tasks that need this one, by id
 	// Adopted: the task tracks an existing T3 session (prompt ""); it is never
 	// started, restarted or duplicated by stage.
-	Adopted           bool                 `json:"adopted"`
-	ReadyAt           *time.Time           `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
-	StartAt           *time.Time           `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
-	StartTz           *string              `json:"startTz"`    // IANA zone startAt was entered in
-	ScheduleID        *int64               `json:"scheduleId"` // recurring schedule that spawned the task
-	ScheduleTitle     *string              `json:"scheduleTitle"`
-	OriginThreadID    *string              `json:"-"`                  // legacy column: T3 session that created the task
-	OriginThreadTitle *string              `json:"originSessionTitle"` // the origin session's mirrored title (null when not mirrored)
-	Handoff           bool                 `json:"handoff"`            // append the needs' handoff at launch (docs/api.md "Handoff")
-	LaunchAttempt     int                  `json:"launchAttempt"`
-	LastError         *string              `json:"lastError"`
-	LaunchedAt        *time.Time           `json:"launchedAt"`
-	FinishedAt        *time.Time           `json:"finishedAt"`
-	SettledAt         *time.Time           `json:"settledAt"`
-	RunStartedAt      *time.Time           `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
-	RunEndedAt        *time.Time           `json:"runEndedAt"`
-	LastWordPreview   *string              `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
-	LastWordAt        *time.Time           `json:"lastWordAt"`
-	PullRequests      []execution.Artifact `json:"-"` // thread's PRs (mirror); [] without a thread
-	// PendingQuestionCount: the thread's answerable pending questions.
-	PendingQuestionCount int       `json:"-"`
-	CreatedAt            time.Time `json:"createdAt"`
+	Adopted           bool       `json:"adopted"`
+	ReadyAt           *time.Time `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
+	StartAt           *time.Time `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
+	StartTz           *string    `json:"startTz"`    // IANA zone startAt was entered in
+	ScheduleID        *int64     `json:"scheduleId"` // recurring schedule that spawned the task
+	ScheduleTitle     *string    `json:"scheduleTitle"`
+	OriginThreadTitle *string    `json:"originSessionTitle"` // the origin session's mirrored title (null when not mirrored)
+	Handoff           bool       `json:"handoff"`            // append the needs' handoff at launch (docs/api.md "Handoff")
+	LaunchAttempt     int        `json:"launchAttempt"`
+	LastError         *string    `json:"lastError"`
+	LaunchedAt        *time.Time `json:"launchedAt"`
+	FinishedAt        *time.Time `json:"finishedAt"`
+	SettledAt         *time.Time `json:"settledAt"`
+	RunStartedAt      *time.Time `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
+	RunEndedAt        *time.Time `json:"runEndedAt"`
+	LastWordPreview   *string    `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
+	LastWordAt        *time.Time `json:"lastWordAt"`
+	CreatedAt         time.Time  `json:"createdAt"`
 	// CreatedBy: the user who created the task (a schedule's creator for a
 	// task it spawned).
 	CreatedBy int64 `json:"createdBy"`
@@ -184,7 +174,6 @@ type Task struct {
 	Deletable       bool       `json:"deletable"`
 	ThreadUpdatedAt *time.Time `json:"-"` // mirrored thread's updatedAt (tree activity)
 	T3ProjectID     string     `json:"-"` // project's T3 id (for launch)
-	ThreadLink      *string    `json:"-"` // mirrored thread link
 	TreeStartMode   *StartMode `json:"-"` // the tree's start mode (batch grouping)
 }
 
@@ -197,21 +186,25 @@ type TaskEvent struct {
 	At        time.Time  `json:"at"`
 }
 
-// LegacyModel is the row's legacy model columns as JSON, the input of
-// harness.Descriptor.LegacyConfig.
-func (t Task) LegacyModel() json.RawMessage {
-	return LegacyModel(t.ProviderInstanceID, t.Model, t.ModelOptions, t.RuntimeMode, t.InteractionMode)
+// LegacyT3ModelKey is the T3 model id of a provider and model, "" unless
+// both are set (t3.ModelKey's encoding).
+func LegacyT3ModelKey(provider, model *string) string {
+	if provider == nil || model == nil || *provider == "" || *model == "" {
+		return ""
+	}
+	b, _ := json.Marshal([2]string{*provider, *model})
+	return string(b)
 }
 
-func LegacyModel(provider, model *string, options []execution.ModelOption, runtime, interaction string) json.RawMessage {
-	raw, _ := json.Marshal(struct {
-		ProviderInstanceID *string                 `json:"providerInstanceId"`
-		Model              *string                 `json:"model"`
-		ModelOptions       []execution.ModelOption `json:"modelOptions"`
-		RuntimeMode        string                  `json:"runtimeMode"`
-		InteractionMode    string                  `json:"interactionMode"`
-	}{provider, model, options, runtime, interaction})
-	return raw
+// LegacyT3Config is the execution config of the legacy T3 model inputs
+// (providerInstanceId, model, modelOptions, runtimeMode, interactionMode;
+// docs/api.md), as t3.LegacyConfig maps them. Writes and the legacy-column
+// backfill store it.
+func LegacyT3Config(provider, model *string, options []execution.ModelOption, runtime, interaction string) execution.Config {
+	if options == nil {
+		options = []execution.ModelOption{}
+	}
+	return execution.Config{Model: LegacyT3ModelKey(provider, model), Options: options, Permission: runtime, Mode: interaction}
 }
 
 type Attempt struct {
@@ -255,10 +248,11 @@ type LaunchBase struct {
 	StartFromOrigin bool        `json:"startFromOrigin"`
 	Source          string      `json:"source"`
 	SourceTaskID    *int64      `json:"sourceTaskId"`
-	SourceThreadID  *string     `json:"sourceThreadId"`
-	SourceTitle     string      `json:"sourceTitle"`
-	Reason          *string     `json:"reason"` // why it fell back
-	At              time.Time   `json:"at"`
+	// SourceThreadID is Session's external id on reads (nil without one).
+	SourceThreadID *string   `json:"sourceThreadId"`
+	SourceTitle    string    `json:"sourceTitle"`
+	Reason         *string   `json:"reason"` // why it fell back
+	At             time.Time `json:"at"`
 }
 
 // Detail is the launching task event: `base from #12's branch feat-x` or
@@ -284,15 +278,17 @@ const (
 // Handoff is what one launch attempt appended to its prompt for one need
 // (docs/api.md "Handoff").
 type Handoff struct {
-	Session        *SessionRef `json:"session,omitempty"`
-	Attempt        int         `json:"attempt"`
-	Status         string      `json:"status"`
-	SourceTaskID   *int64      `json:"sourceTaskId"`
-	SourceThreadID string      `json:"sourceThreadId"`
-	SourceTitle    string      `json:"sourceTitle"`
-	Text           string      `json:"text"`   // "" when skipped
-	Reason         *string     `json:"reason"` // why skipped
-	At             time.Time   `json:"at"`
+	Session      *SessionRef `json:"session,omitempty"`
+	Attempt      int         `json:"attempt"`
+	Status       string      `json:"status"`
+	SourceTaskID *int64      `json:"sourceTaskId"`
+	// SourceThreadID: on reads, Session's external id ("" without one); on
+	// writes, legacy evidence's T3 thread id when Session is nil.
+	SourceThreadID string    `json:"sourceThreadId"`
+	SourceTitle    string    `json:"sourceTitle"`
+	Text           string    `json:"text"`   // "" when skipped
+	Reason         *string   `json:"reason"` // why skipped
+	At             time.Time `json:"at"`
 }
 
 // HandoffSource is a need a launch reads: a task (TaskID set; its current
@@ -322,13 +318,12 @@ type LaunchDestination struct {
 }
 
 type TaskFilter struct {
-	OriginThreadID string
-	OriginSession  *SessionRef
-	ProjectID      *int64
-	States         []string
-	Q              string
-	From, To       *time.Time
-	SettledFrom    *time.Time // settled_at >= SettledFrom
+	OriginSession *SessionRef
+	ProjectID     *int64
+	States        []string
+	Q             string
+	From, To      *time.Time
+	SettledFrom   *time.Time // settled_at >= SettledFrom
 	// Closed: "" or "false" (open only: not archived, tree open or none),
 	// "true" (archived, or in a done or archived tree) or "all".
 	Closed string
@@ -342,14 +337,10 @@ type Transition struct {
 	To          TaskState
 	Detail      string
 
-	BeginAttempt  bool       // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
-	ThreadID      *string    // set t3_thread_id (+ launched_at)
-	ObservedStart *time.Time // first native execution of an adopted backlog session
-	LastError     *string    // set last_error
-	// ReuseAttempt marks the attempt's launch outcome unknown (transport
-	// failure or restart mid-launch, no thread): the next BeginAttempt keeps
-	// the attempt number and the clientRequestId.
-	ReuseAttempt bool
+	BeginAttempt  bool        // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/settled/start/ready_at
+	Session       *SessionRef // set the session (+ launched_at)
+	ObservedStart *time.Time  // first native execution of an adopted backlog session
+	LastError     *string     // set last_error
 }
 
 // TransitionResult reports what happened. Changed=false: current state not
@@ -365,26 +356,20 @@ type TransitionResult struct {
 
 // TaskInsert is a new backlog task's columns (Handoff nil = on).
 type TaskInsert struct {
-	ProjectID          int64
-	Title              string
-	Prompt             string
-	ProviderInstanceID *string
-	Model              *string
-	ModelOptions       []execution.ModelOption
-	RuntimeMode        string
-	InteractionMode    string
-	Workspace          Workspace
-	StartAt            *time.Time
-	StartTz            *string
-	ScheduleID         *int64
-	OriginThreadID     *string
-	Handoff            *bool
-	StartMode          *StartMode
-	ConnectionID       int64
-	OriginSessionID    *int64
-	ExecutionConfig    *execution.Config
-	CreatedBy          int64
-	SourceMachineID    *int64
+	ProjectID       int64
+	Title           string
+	Prompt          string
+	Workspace       Workspace
+	StartAt         *time.Time
+	StartTz         *string
+	ScheduleID      *int64
+	Handoff         *bool
+	StartMode       *StartMode
+	ConnectionID    int64
+	OriginSessionID *int64
+	ExecutionConfig *execution.Config
+	CreatedBy       int64
+	SourceMachineID *int64
 }
 
 // AdoptedInsert is an adopted session's task columns (launch attempt 1).
@@ -394,10 +379,7 @@ type AdoptedInsert struct {
 	State           TaskState
 	ConnectionID    int64
 	SessionID       int64
-	T3ThreadID      *string
 	ExecutionConfig execution.Config
-	RuntimeMode     string
-	InteractionMode string
 	LaunchedAt      *time.Time
 	FinishedAt      *time.Time
 	CreatedBy       int64
@@ -406,31 +388,25 @@ type AdoptedInsert struct {
 
 // TaskEditState is what an edit checks before updating a task.
 type TaskEditState struct {
-	State        TaskState
-	Provider     *string
-	Model        *string
-	Adopted      bool
-	ConnectionID int64
-	ProjectID    int64
-	Needs        int
+	State           TaskState
+	ExecutionConfig *execution.Config
+	Adopted         bool
+	ConnectionID    int64
+	ProjectID       int64
+	Needs           int
 }
 
 // TaskUpdate is the columns an edit sets (unset fields are kept;
-// ExecutionConfig, ProviderInstanceID, Model and StartMode Null clears).
+// ExecutionConfig and StartMode Null clears).
 type TaskUpdate struct {
-	ConnectionID       Optional[int64]
-	ExecutionConfig    Optional[execution.Config]
-	ProjectID          Optional[int64]
-	Title              Optional[string]
-	Prompt             Optional[string]
-	ProviderInstanceID Optional[string]
-	Model              Optional[string]
-	ModelOptions       Optional[[]execution.ModelOption]
-	RuntimeMode        Optional[string]
-	InteractionMode    Optional[string]
-	Workspace          Optional[Workspace]
-	Handoff            Optional[bool]
-	StartMode          Optional[StartMode]
+	ConnectionID    Optional[int64]
+	ExecutionConfig Optional[execution.Config]
+	ProjectID       Optional[int64]
+	Title           Optional[string]
+	Prompt          Optional[string]
+	Workspace       Optional[Workspace]
+	Handoff         Optional[bool]
+	StartMode       Optional[StartMode]
 }
 
 // TaskLaunchState is a task's state and launch identity.
@@ -488,15 +464,15 @@ type Tasks interface {
 	LaunchState(ctx context.Context, id int64) (TaskLaunchState, error)
 	// ApplyTransition writes t's state change and returns the launch
 	// attempt and request id after it.
-	ApplyTransition(ctx context.Context, t Transition) (attempt int, requestID string, err error)
+	// sessionID: t.Session's identity (nil: none).
+	ApplyTransition(ctx context.Context, t Transition, sessionID *int64) (attempt int, requestID string, err error)
 	// Confirm attaches session to the launching attempt (false: the task
 	// no longer has it).
-	Confirm(ctx context.Context, a Attempt, state string, t3ThreadID *string, sessionID int64, endedAt *time.Time) (bool, error)
+	Confirm(ctx context.Context, a Attempt, state string, sessionID int64, endedAt *time.Time) (bool, error)
 	// Reject returns the launching attempt's task to backlog, held.
 	Reject(ctx context.Context, a Attempt, reason string) error
 	// SetLaunchError records a launching attempt's error.
 	SetLaunchError(ctx context.Context, a Attempt, msg string) error
-	ReusesLaunch(ctx context.Context, id int64) (bool, error)
 	// NoteBlocked sets a backlog task's last error (false: not in backlog).
 	NoteBlocked(ctx context.Context, id int64, reason string) (bool, error)
 	// HoldScheduled holds a timed backlog task (false: not one).
@@ -509,8 +485,8 @@ type TaskJournalState struct {
 	TreeID, SessionID *int64
 	Title             string
 	LaunchAttempt     int
-	// HasThread: a legacy T3 thread id is set.
-	HasThread, Adopted, RecordedWork bool
+	// Adopted: an adopted session; RecordedWork: deletion is blocked.
+	Adopted, RecordedWork bool
 }
 
 // Attempts is the launch attempt repository: attempts, claims, pinned
@@ -565,10 +541,8 @@ type Observations interface {
 // ThreadMirror is the T3 mirror row derived from an observation.
 type ThreadMirror struct {
 	SessionID       int64
-	ParentSessionID *int64
 	ParentThreadID  *string
 	Relationship    *string
-	Link            *string
 	Branch          *string
 	WorktreePath    *string
 	PendingRequests int

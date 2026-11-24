@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 type acceptances struct{ *runner }
@@ -42,8 +41,8 @@ func (r acceptances) LaunchInputs(ctx context.Context, id int64, attempt int) ([
 }
 
 func (r acceptances) ThreadEvidence(ctx context.Context, sessionID *int64) (store.ThreadEvidence, bool, error) {
-	e := store.ThreadEvidence{Artifacts: []execution.Artifact{}}
-	err := r.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_item_id,last_word_text,last_word_truncated,last_word_at,updated_at,pull_requests,COALESCE(execution_state,'done'),pending_request_count,active_run_id FROM threads WHERE session_id=$1`, sessionID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.ReplyItemID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Artifacts, &e.Status, &e.Pending, &e.ActiveRunID)
+	var e store.ThreadEvidence
+	err := r.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_text,last_word_truncated,last_word_at,updated_at,COALESCE(execution_state,'done'),pending_request_count,active_run_id FROM threads WHERE session_id=$1`, sessionID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Status, &e.Pending, &e.ActiveRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ThreadEvidence{}, false, nil
 	}
@@ -57,7 +56,7 @@ func (r acceptances) JournalThrough(ctx context.Context, id int64, treeID *int64
 }
 
 func (r acceptances) Dependents(ctx context.Context, id int64) ([]store.AcceptanceImpact, error) {
-	rows, err := r.Query(ctx, `SELECT t.id,t.title,t.launch_attempt>0 OR t.t3_thread_id IS NOT NULL,`+effectiveModeSQL+` FROM task_needs n JOIN tasks t ON t.id=n.task_id LEFT JOIN task_trees tr ON tr.id=t.tree_id WHERE n.need_id=$1 ORDER BY t.id`, id)
+	rows, err := r.Query(ctx, `SELECT t.id,t.title,t.launch_attempt>0 OR t.session_id IS NOT NULL,`+effectiveModeSQL+` FROM task_needs n JOIN tasks t ON t.id=n.task_id LEFT JOIN task_trees tr ON tr.id=t.tree_id WHERE n.need_id=$1 ORDER BY t.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +131,9 @@ func (r acceptances) RecordInference(ctx context.Context, id int64, executionID,
 	return err
 }
 
-func (r acceptances) ClaimState(ctx context.Context, id int64, attempt int) (store.ClaimState, error) {
+func (r acceptances) ClaimState(ctx context.Context, id int64, _ int) (store.ClaimState, error) {
 	var c store.ClaimState
-	err := r.QueryRow(ctx, `SELECT t.launch_reuse,EXISTS(SELECT 1 FROM task_launch_claims c WHERE c.task_id=t.id AND c.attempt=$2),t.adopted,t.acceptance_id,t.tree_id,`+effectiveModeSQL+` FROM tasks t LEFT JOIN task_trees tr ON tr.id=t.tree_id WHERE t.id=$1`, id, attempt).Scan(&c.Reuse, &c.Claimed, &c.Adopted, &c.Accepted, &c.TreeID, &c.StartMode)
+	err := r.QueryRow(ctx, `SELECT t.adopted,t.acceptance_id,t.tree_id,`+effectiveModeSQL+` FROM tasks t LEFT JOIN task_trees tr ON tr.id=t.tree_id WHERE t.id=$1`, id).Scan(&c.Adopted, &c.Accepted, &c.TreeID, &c.StartMode)
 	return c, err
 }
 

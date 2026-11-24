@@ -23,7 +23,6 @@ type scheduleDetailJSON struct {
 }
 
 func (s *server) scheduleJSON(sc db.Schedule) db.Schedule {
-	sc.ExecutionConfig = s.executionConfig(s.Store.Harness(sc.ConnectionID), sc.ExecutionConfig, sc.LegacyModel)
 	return sc
 }
 

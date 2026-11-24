@@ -44,7 +44,6 @@ type Tx interface {
 	Machines() Machines
 	Projects() Projects
 	Threads() Threads
-	Stats() Stats
 	Tasks() Tasks
 	Attempts() Attempts
 	Observations() Observations

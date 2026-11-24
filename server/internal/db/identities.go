@@ -199,10 +199,6 @@ func (s *Store) LaunchDestination(ctx context.Context, taskID int64, attempt int
 	return read(ctx, s, func(tx store.Tx) (LaunchDestination, error) { return tx.Attempts().Destination(ctx, taskID, attempt) })
 }
 
-func (s *Store) ReusesLaunch(ctx context.Context, id int64) (bool, error) {
-	return read(ctx, s, func(tx store.Tx) (bool, error) { return tx.Tasks().ReusesLaunch(ctx, id) })
-}
-
 // NoteBlockedLaunch preserves a save-and-start task when preflight rejected
 // its launch, with the reason visible on the saved task. No attempt is consumed.
 func (s *Store) NoteBlockedLaunch(ctx context.Context, id int64, reason string) error {

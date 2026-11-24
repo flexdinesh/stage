@@ -5,7 +5,6 @@
 package harness
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -75,10 +74,6 @@ type Descriptor struct {
 	Attribution Attribution `json:"attribution"`
 	// Launch is how a launch learns its session identity ("" is reserved).
 	Launch LaunchIdentity `json:"launch"`
-	// LegacyConfig decodes the execution config of a row saved before
-	// executionConfig existed, from its legacy model columns
-	// (db.Task.LegacyModel); nil when the harness has no such rows.
-	LegacyConfig func(json.RawMessage) (execution.Config, error) `json:"-"`
 }
 
 // OwnsProcesses: the harness runs its sessions as processes Stage (or a

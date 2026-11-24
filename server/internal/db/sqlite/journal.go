@@ -12,7 +12,7 @@ type journal struct{ *runner }
 
 func (t *tx) Journal() store.Journal { return journal{t.r} }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, COALESCE(source_thread_id,(SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `)), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id`
+const journalColumns = `id, kind, task_id, tree_id, source_task_id, (SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id`
 
 func scanJournal(r rowScanner) (store.JournalEntry, error) {
 	var e store.JournalEntry
@@ -39,7 +39,7 @@ func (r journal) NoteByRequest(ctx context.Context, o store.JournalOwner, reques
 }
 
 func (r journal) InsertNote(ctx context.Context, o store.JournalOwner, in store.AppendNoteInput, sourceID *int64, createdBy int64, sourceMachine *int64) (store.JournalEntry, error) {
-	return scanJournal(r.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_thread_id, category, text, request_id,source_session_id,created_by_user_id,source_machine_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.SourceThreadID, in.Category, in.Text, in.RequestID, sourceID, createdBy, sourceMachine))
+	return scanJournal(r.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, category, text, request_id,source_session_id,created_by_user_id,source_machine_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.Category, in.Text, in.RequestID, sourceID, createdBy, sourceMachine))
 }
 
 func (r journal) InsertEvent(ctx context.Context, e store.JournalEvent) error {

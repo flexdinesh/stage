@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 
@@ -111,20 +110,9 @@ func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (in
 			finished = &o.UpdatedAt
 		}
 	}
-	var legacyID *string
-	permission, mode := "full-access", "default"
-	if isT3 {
-		legacyID = &ref.ExternalSessionID
-		if slices.Contains(RuntimeModes, o.Config.Permission) {
-			permission = o.Config.Permission
-		}
-		if slices.Contains(InteractionModes, o.Config.Mode) {
-			mode = o.Config.Mode
-		}
-	}
 	id, err = tx.Tasks().InsertAdopted(ctx, store.AdoptedInsert{ProjectID: projectID, Title: title, State: state,
-		ConnectionID: ref.ConnectionID, SessionID: sid, T3ThreadID: legacyID, ExecutionConfig: o.Config, RuntimeMode: permission,
-		InteractionMode: mode, LaunchedAt: launched, FinishedAt: finished, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx)})
+		ConnectionID: ref.ConnectionID, SessionID: sid, ExecutionConfig: o.Config,
+		LaunchedAt: launched, FinishedAt: finished, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx)})
 	if err != nil {
 		return 0, false, err
 	}

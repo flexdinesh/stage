@@ -27,7 +27,7 @@ func (s *Store) SetThreadLastWord(ctx context.Context, threadID string, checked 
 			at = &r.UpdatedAt
 		}
 		row = &store.LastWordRow{Text: r.Text, Preview: optionalText(PreviewText(r.Text)), Truncated: r.Truncated,
-			RunID: optionalText(r.RunID), ItemID: optionalText(r.ItemID), At: at}
+			RunID: optionalText(r.RunID), At: at}
 	}
 	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetLastWord(ctx, threadID, checked, row) })
 }

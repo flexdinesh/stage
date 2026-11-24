@@ -21,7 +21,7 @@ func launchedTask(t *testing.T, s *Store, ctx context.Context, project int64, th
 	if _, err := s.TransitionTask(ctx, Transition{TaskID: task.ID, To: StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, Transition{TaskID: task.ID, To: StateRunning, ThreadID: &thread}); err != nil {
+	if _, err := s.TransitionTask(ctx, Transition{TaskID: task.ID, To: StateRunning, Session: &SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	return task.ID
