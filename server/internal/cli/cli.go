@@ -116,7 +116,9 @@ Usage:
                                       comma-separate for several (env STAGE_LISTEN, default 127.0.0.1:7380)
   stage serve --managed               run as the per-user service (what "stage service" registers):
                                       config from service.env only, default data dir, unix required
-  stage status [--wait DUR]           the server this CLI reaches: version, readiness, harness states
+  stage db copy --from PATH --to URL  copy a stopped server's SQLite stage.db into an empty Postgres
+                                      database and verify it (Docker image only; stage db help)
+  stage status [--wait DUR]          the server this CLI reaches: version, readiness, harness states
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
   stage harness [list]                the harnesses this server knows, its machine profile, and which
                                       ones can run here

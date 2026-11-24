@@ -26,6 +26,13 @@ import (
 )
 
 func main() {
+	// `db`: offline database commands (stage db copy).
+	if len(os.Args) > 1 && os.Args[1] == "db" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code := runDB(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	// No args (or `serve`): the server. Anything else: the agent CLI.
 	if len(os.Args) > 1 && os.Args[1] != "serve" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
