@@ -144,14 +144,14 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		needs = append([]int64{owner}, needs...)
 	}
 	if in.TreeID != nil || len(needs) > 0 {
-		tree, err := resolveTree(ctx, rawTx(tx), in.TreeID, needs)
+		tree, err := resolveTree(ctx, tx, in.TreeID, needs)
 		if err != nil {
 			return 0, err
 		}
-		if err := joinTree(ctx, rawTx(tx), id, tree); err != nil {
+		if err := joinTree(ctx, tx, id, tree); err != nil {
 			return 0, err
 		}
-		if err := setNeeds(ctx, rawTx(tx), id, needs); err != nil {
+		if err := setNeeds(ctx, tx, id, needs); err != nil {
 			return 0, err
 		}
 	}
@@ -328,7 +328,7 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 		if !unstarted {
 			return Conflict("task %d has recorded work: archive it instead", id)
 		}
-		if err := spliceOut(ctx, rawTx(tx), id); err != nil {
+		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
 		}
 		return tx.Tasks().Delete(ctx, id)
@@ -350,7 +350,7 @@ func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task,
 		if tree != nil {
 			return Conflict("task %d is in tree %d: archive the tree, or remove it from the tree first", id, *tree)
 		}
-		if err := noActiveTask(ctx, rawTx(tx), `t.id = $1`, id); err != nil {
+		if err := noActiveTask(tx.Trees().ActiveTask(ctx, id)); err != nil {
 			return err
 		}
 		return tx.Tasks().SetArchived(ctx, id, true)
@@ -475,4 +475,12 @@ func reopenOnActivity(ctx context.Context, tx store.Tx, id int64, to TaskState) 
 		}
 	}
 	return nil
+}
+
+// nonNilIDs is ids, or [] for nil.
+func nonNilIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }

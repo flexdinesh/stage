@@ -295,7 +295,7 @@ func checkLaunchClaim(ctx context.Context, tx store.Tx, t Transition, attempt in
 		return nil
 	}
 	if c.TreeID != nil {
-		if err := treeOpen(ctx, rawTx(tx), *c.TreeID); err != nil {
+		if err := treeOpen(ctx, tx, *c.TreeID); err != nil {
 			return err
 		}
 	}

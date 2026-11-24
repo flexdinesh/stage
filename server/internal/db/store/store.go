@@ -51,6 +51,7 @@ type Tx interface {
 	Journal() Journal
 	Acceptances() Acceptances
 	Schedules() Schedules
+	Trees() Trees
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

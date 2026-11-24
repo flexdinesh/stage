@@ -26,12 +26,6 @@ func (s *Store) UpsertThreads(ctx context.Context, observations []execution.Obse
 	}
 	return nil
 }
-func nonNilPRs(prs []execution.Artifact) []execution.Artifact {
-	if prs == nil {
-		return []execution.Artifact{}
-	}
-	return prs
-}
 func RunSpan(source execution.Source) (*time.Time, *time.Time) {
 	o := source.Observation()
 	return o.StartedAt, o.EndedAt

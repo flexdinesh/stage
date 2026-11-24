@@ -31,8 +31,8 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 		var err error
 		id, created, err = s.adoptThread(ctx, tx, in)
 		if err == nil && in.TreeID != nil {
-			if err = treeExists(ctx, rawTx(tx), *in.TreeID); err == nil {
-				err = joinTree(ctx, rawTx(tx), id, *in.TreeID)
+			if err = treeExists(ctx, tx, *in.TreeID); err == nil {
+				err = joinTree(ctx, tx, id, *in.TreeID)
 			}
 		}
 		return err
