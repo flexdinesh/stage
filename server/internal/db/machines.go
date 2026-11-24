@@ -1,18 +1,14 @@
 package db
 
-import "context"
+import (
+	"context"
 
-// Machine runs harnesses: their connections, workspaces and processes.
-// One local machine exists until workers do (migration 0015).
-type Machine struct {
-	ID        int64  `json:"id"`
-	Label     string `json:"label"`
-	CreatedBy int64  `json:"createdBy"` // user who added it (the local machine: the default user)
-}
+	"github.com/flexdinesh/stage/server/internal/db/store"
+)
+
+type Machine = store.Machine
 
 // GetMachine reads a machine.
 func (s *Store) GetMachine(ctx context.Context, id int64) (Machine, error) {
-	var m Machine
-	err := s.pool.QueryRow(ctx, `SELECT id,label,created_by_user_id FROM machines WHERE id=$1`, id).Scan(&m.ID, &m.Label, &m.CreatedBy)
-	return m, notFound(err)
+	return read(ctx, s, func(tx store.Tx) (Machine, error) { return tx.Machines().Get(ctx, id) })
 }

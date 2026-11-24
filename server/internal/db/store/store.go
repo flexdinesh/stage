@@ -41,6 +41,7 @@ type Tx interface {
 	Notifications() Notifications
 	Sessions() Sessions
 	Connections() Connections
+	Machines() Machines
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers
