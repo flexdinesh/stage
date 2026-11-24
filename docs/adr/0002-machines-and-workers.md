@@ -8,6 +8,9 @@
 - **Replaces:** the earlier sketch in [execution.md](../execution.md)
   ("Worker-ready placement"), where a worker synced its harnesses upstream.
   This record makes the worker thin: the main server keeps the only database.
+- **Amended by:** [ADR 0003](0003-storage-adapters.md) (2026-11-24): the main
+  server's database is SQLite or Postgres, one owner per database on either
+  engine. "One replica" is unchanged.
 
 ## Context
 
@@ -57,7 +60,7 @@ remote machine is a second implementation of the same machine-runtime seam
 
 | Main server owns | Worker owns |
 | --- | --- |
-| SQLite, migrations, the data-dir lock | No database. A config file and its machine token (0600) in the worker data dir |
+| The database (SQLite or Postgres, [ADR 0003](0003-storage-adapters.md)), migrations, the ownership lock | No database. A config file and its machine token (0600) in the worker data dir |
 | Coordinator, polling schedule, release and schedule runners | Real harness adapters (T3, OpenCode) for that machine's connections |
 | Acceptance, journals, handoff, notifications | Connectors (setup: pair, auto-pair, connect-local, disconnect) |
 | MCP and REST API, the UI | Machine-local fs and process work: gitmeta inventory, shared-path translation, `git rev-parse` matching, OpenCode `service.json`, T3 auto-pair |
@@ -300,7 +303,7 @@ completion.
 
 | Alternative | Why rejected |
 | --- | --- |
-| Worker with its own database, synced to the main server | Two sources of truth for tasks, acceptance and journals, conflict resolution, and migrations on every laptop. It breaks the rule that one owner holds the database (data-dir lock). A thin worker keeps every business rule in one place. |
+| Worker with its own database, synced to the main server | Two sources of truth for tasks, acceptance and journals, conflict resolution, and migrations on every laptop. It breaks the rule that one owner holds the database (the data-dir lock on SQLite, an advisory lock on Postgres: [ADR 0003](0003-storage-adapters.md)). A thin worker keeps every business rule in one place. |
 | Name "connection" for the remote host | It already means one harness instance. Reusing it would blur Machine -> Connection. |
 | Name "node" | Generic, and it clashes with Kubernetes nodes in the deployment docs (#349). |
 | Name "runner" | It clashes with the release and schedule runners and with CI runner semantics. |
@@ -352,8 +355,9 @@ Stage tree 197 (auto start). Each task ships as its own PR.
   ([runtime.md](../runtime.md#remote-main-server-and-workers), #349).
 - A machine token is a credential with agent-level access through the
   gateway. Removing the machine revokes it.
-- The main server stays a single replica: data-dir lock, SQLite on a local
-  volume.
+- The main server stays a single replica: one owner per database (SQLite on
+  a local volume under the data-dir lock, or Postgres under an advisory lock;
+  [ADR 0003](0003-storage-adapters.md)).
 - Remote launches add one round trip per checkpoint. Lost replies fall back
   to the existing unconfirmed-launch recovery instead of new states.
 
