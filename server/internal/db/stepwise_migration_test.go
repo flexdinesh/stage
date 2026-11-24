@@ -60,6 +60,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"unresolvable legacy ids stay null", seedV0027Unresolvable, checkV0027Unresolvable},
 	},
 	28: {{"legacy storage dropped", seedV0028DropLegacy, checkV0028DropLegacy}},
+	29: {{"search index built and kept", seedV0029Search, checkV0029Search}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -560,4 +561,24 @@ func checkV0028DropLegacy(t *testing.T, pool *sqlite.DB) {
 	mustFail(t, pool, "unknown schedule connection", `UPDATE schedules SET connection_id=9`)
 	mustFail(t, pool, "start without tz", `UPDATE tasks SET start_tz=NULL WHERE id=1`)
 	mustExec(t, pool, `UPDATE tasks SET start_at=NULL,start_tz=NULL WHERE id=1`)
+}
+
+func seedV0029Search(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO projects(id,title) VALUES(1,'P')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt) VALUES(1,1,'Needle title','p'),(2,1,'t','Привет prompt')`)
+	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(901,'note',1,'Mätch note','k')`)
+}
+
+// checkV0029Search: existing rows are indexed (case-insensitive, non-ASCII
+// too) and later writes follow through the triggers.
+func checkV0029Search(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH '"NEEDLE"'`, "1")
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH '"привет"'`, "2")
+	wantRows(t, pool, `SELECT rowid FROM journal_fts WHERE journal_fts MATCH '"MÄTCH"'`, "901")
+	mustExec(t, pool, `UPDATE tasks SET title='renamed' WHERE id=1`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt) VALUES(3,1,'another needle','p')`)
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH '"needle"'`, "3")
+	for _, table := range []string{"tasks_fts", "journal_fts"} {
+		mustExec(t, pool, `INSERT INTO `+table+`(`+table+`, rank) VALUES ('integrity-check', 1)`)
+	}
 }

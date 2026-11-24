@@ -123,8 +123,7 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
 	}
 	if f.Q != "" {
-		p := w.arg(likePattern(f.Q))
-		w.add("(" + likeSQL("t.title", p) + " OR " + likeSQL("t.prompt", p) + ")")
+		w.add(searchTasks(&w, f.Q))
 	}
 	if f.From != nil {
 		w.add("t.created_at >= " + w.arg(*f.From))

@@ -48,7 +48,8 @@ func freshURL(t *testing.T) string {
 	}
 	name := "stage_test_" + hex.EncodeToString(suffix)
 	ctx := context.Background()
-	if _, err := adminPool.ExecContext(ctx, `CREATE DATABASE `+name); err != nil {
+	// Same locale as pgtest.Locale (this package cannot import pgtest).
+	if _, err := adminPool.ExecContext(ctx, `CREATE DATABASE `+name+` TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8'`); err != nil {
 		t.Fatal(err)
 	}
 	u, err := url.Parse(admin)

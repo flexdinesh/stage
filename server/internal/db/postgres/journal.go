@@ -70,7 +70,7 @@ func (r journal) Read(ctx context.Context, o store.JournalOwner, q store.Journal
 		w.add("category = " + w.arg(q.Category))
 	}
 	if q.Q != "" {
-		w.add(likeSQL("text", w.arg(likePattern(q.Q))))
+		w.add(searchJournal(&w, q.Q))
 	}
 	if q.TaskID != nil {
 		p := w.arg(*q.TaskID)

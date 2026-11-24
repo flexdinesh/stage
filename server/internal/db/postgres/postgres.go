@@ -217,19 +217,6 @@ func (w *where) sql() string {
 	return " WHERE " + strings.Join(w.conds, " AND ")
 }
 
-// likePattern escapes LIKE metacharacters (escape character \) for a
-// substring match; use the placeholder with likeSQL.
-func likePattern(q string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(q) + "%"
-}
-
-// likeSQL matches col against a likePattern placeholder case-insensitively
-// (ILIKE; pg_trgm indexes are #404).
-func likeSQL(col, pattern string) string {
-	return col + " ILIKE " + pattern + `::text ESCAPE '\'`
-}
-
 func nullIfEmpty(s string) *string {
 	if s == "" {
 		return nil

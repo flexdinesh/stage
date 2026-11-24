@@ -12,7 +12,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
-- Case-insensitive substring filters (`q`, title search) fold ASCII letters only.
+- Substring filters (`q`) match case-insensitively, non-ASCII letters included; every character is literal (`%`, `_` are not wildcards). Folding of rare Unicode characters may differ between the SQLite and Postgres engines.
 - Errors: non-2xx responses have body `{ "error": string }`. Some 409s and the worker routes' 401s add a machine-readable `"code"`.
 - Every response carries `Stage-Api-Version: <n>` (currently `6`; changes only on breaking API changes). The Go client (CLI, stdio MCP) refuses a response with a different value; a missing header is accepted.
 - Request origin policy (`/api` and `/mcp`; [runtime.md](runtime.md#request-origin-policy)): requests with a Host that is not allowed, cross-site requests and untrusted cross-origin writes get 403; a non-empty write body that is not `application/json` (or `multipart/form-data` for uploads) gets 415.

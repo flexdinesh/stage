@@ -158,19 +158,6 @@ func (w *where) sql() string {
 	return " WHERE " + strings.Join(w.conds, " AND ")
 }
 
-// likePattern escapes LIKE metacharacters (escape character \) for a
-// substring match; use the placeholder with likeSQL.
-func likePattern(q string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(q) + "%"
-}
-
-// likeSQL matches col against a likePattern placeholder, case-insensitively
-// (SQLite lower() folds ASCII only).
-func likeSQL(col, pattern string) string {
-	return "lower(" + col + ") LIKE lower(" + pattern + `) ESCAPE '\'`
-}
-
 func nullIfEmpty(s string) *string {
 	if s == "" {
 		return nil

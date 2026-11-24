@@ -24,6 +24,46 @@ type migrationStep struct {
 // SQLite one (docs/storage.md "Adding a migration").
 var stepwiseMigrations = map[int64][]migrationStep{
 	28: {{name: "baseline", check: checkBaseline}},
+	29: {{name: "search indexes", seed: seedV0029Search, check: checkV0029Search}},
+}
+
+func seedV0029Search(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`INSERT INTO projects (id, title) VALUES (1, 'P')`,
+		`INSERT INTO tasks (id, project_id, title, prompt) VALUES (1, 1, 'Needle title', 'p'), (2, 1, 't', 'Привет prompt')`,
+		`INSERT INTO journal_entries (id, kind, task_id, text, request_id) VALUES (901, 'note', 1, 'Mätch note', 'k')`,
+	} {
+		if _, err := pool.ExecContext(context.Background(), q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+// checkV0029Search: pg_trgm and the GIN indexes exist, and existing rows
+// match case-insensitively, non-ASCII too.
+func checkV0029Search(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	var ext, indexes int
+	if err := pool.QueryRowContext(ctx, `SELECT
+ (SELECT count(*) FROM pg_extension WHERE extname = 'pg_trgm'),
+ (SELECT count(*) FROM pg_indexes WHERE indexname IN ('tasks_title_trgm', 'tasks_prompt_trgm', 'journal_entries_text_trgm') AND indexdef LIKE '%USING gin%gin_trgm_ops%')`).Scan(&ext, &indexes); err != nil {
+		t.Fatal(err)
+	}
+	if ext != 1 || indexes != 3 {
+		t.Fatalf("pg_trgm %d, trigram indexes %d", ext, indexes)
+	}
+	for q, want := range map[string]int64{
+		`SELECT id FROM tasks WHERE title ILIKE '%NEEDLE%'`:         1,
+		`SELECT id FROM tasks WHERE prompt ILIKE '%ПРИВЕТ%'`:        2,
+		`SELECT id FROM journal_entries WHERE text ILIKE '%MÄTCH%'`: 901,
+	} {
+		var id int64
+		if err := pool.QueryRowContext(ctx, q).Scan(&id); err != nil || id != want {
+			t.Fatalf("%s: %d %v, want %d", q, id, err, want)
+		}
+	}
 }
 
 // checkBaseline: the baseline creates the schema with SQLite's seeded rows

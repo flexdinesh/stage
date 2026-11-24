@@ -321,9 +321,12 @@ type TaskFilter struct {
 	OriginSession *SessionRef
 	ProjectID     *int64
 	States        []string
-	Q             string
-	From, To      *time.Time
-	SettledFrom   *time.Time // settled_at >= SettledFrom
+	// Q is the Search capability (docs/storage.md "Search"): a
+	// case-insensitive substring of title or prompt, every character
+	// literal; it filters without changing the order.
+	Q           string
+	From, To    *time.Time
+	SettledFrom *time.Time // settled_at >= SettledFrom
 	// Closed: "" or "false" (open only: not archived, tree open or none),
 	// "true" (archived, or in a done or archived tree) or "all".
 	Closed string
