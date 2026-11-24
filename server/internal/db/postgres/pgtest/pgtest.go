@@ -24,6 +24,12 @@ import (
 // URLEnv names the admin URL of the check:postgres server.
 const URLEnv = "STAGE_TEST_DATABASE_URL"
 
+// Locale is the CREATE DATABASE clause for test databases: Postgres's
+// builtin C.UTF-8 provider (Unicode case mapping), so search folds
+// non-ASCII case the same on every server whatever its initdb locale
+// (docs/storage.md "Search"). Databases cloned from the template inherit it.
+const Locale = "TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8'"
+
 // maxConns caps each test engine's pool: enough for the contract suite's
 // racers, small enough for many packages on one server.
 const maxConns = 12
@@ -123,7 +129,7 @@ func migratedTemplate(ctx context.Context, admin string) (string, error) {
 		return "", err
 	}
 	name := "stage_template_" + hex.EncodeToString(b)
-	if err := adminExec(ctx, admin, `CREATE DATABASE `+name); err != nil {
+	if err := adminExec(ctx, admin, `CREATE DATABASE `+name+` `+Locale); err != nil {
 		return "", err
 	}
 	u, err := url.Parse(admin)

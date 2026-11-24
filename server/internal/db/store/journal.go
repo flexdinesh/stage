@@ -37,6 +37,9 @@ type JournalEntry struct {
 }
 
 type JournalQuery struct {
+	// Q is the Search capability (docs/storage.md "Search"): a
+	// case-insensitive substring of the entry text, every character
+	// literal; it filters without changing the order or paging.
 	Kind, Category, Q, Cursor string
 	TaskID                    *int64
 	Limit                     int

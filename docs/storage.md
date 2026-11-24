@@ -16,8 +16,8 @@ that disagrees with this file updates it in the same PR.
 | [Transactions and locking](#transactions-and-locking) | as described on both engines; the `storetest` concurrency cases pass on Postgres (#403) | |
 | [Single owner](#single-owner) | as described on both engines (#403); `serve` stops when a lease reports loss | Postgres in `serve`: #405 |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
-| [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 28; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 29; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 29 (#404); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) | |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
@@ -284,22 +284,54 @@ The adapter maps engine errors to `db` errors; rules map those to
 
 ## Search
 
-Three searches: tasks (title, prompt), journal (text), threads (title).
+Two searches, through `TaskFilter.Q` (tasks: title or prompt) and
+`JournalQuery.Q` (journal: text). There is no separate port object: the `Q`
+fields are the Search capability, and each adapter builds the predicate in
+its `search.go`, inside the same query as the other filters, the ordering
+and paging. (Thread search was removed with API v3.)
 
-- **Fixed on both engines:** the filters, the ordering, paging, substring
-  matching, LIKE metacharacters (`%`, `_`, `\`) matched literally, and
-  case-insensitive matching.
+- **Fixed on both engines:** the filters, the ordering (tasks
+  `updated_at DESC, id DESC`, journal `id DESC` with its cursor), paging,
+  substring matching, every character matched literally (`%`, `_`, `\`,
+  `"`), and case-insensitive matching, non-ASCII included. Nothing ranks.
 - **May differ:** relevance, if a search ever ranks (ties always break by
-  id, so ordering stays deterministic), and case folding of non-ASCII text at
-  the edges of Unicode.
-- **SQLite:** FTS5 with the trigram tokenizer (`case_sensitive 0`) over
-  external-content tables; queries shorter than 3 characters fall back to
-  `LIKE`. #404 decides whether triggers or repositories keep the FTS tables in
-  step and records it here.
-- **Postgres:** `pg_trgm` GIN indexes on the searched columns, `ILIKE`
-  substring matching.
-- Contract tests: substring hits, non-ASCII case-insensitivity, literal
-  metacharacters, short queries, paging.
+  id, so ordering stays deterministic), and case folding at the edges of
+  Unicode (FTS5's folding, Go's `strings.ToLower` and the Postgres ctype
+  disagree on rare characters).
+- **SQLite:** FTS5 external-content tables with the trigram tokenizer
+  (`case_sensitive 0`, no diacritic removal): `tasks_fts(title, prompt)` over
+  `tasks` and `journal_fts(text)` over `journal_entries` (migration 0029). A
+  query of 3 or more characters is one FTS5 phrase (`MATCH '"..."'`, `"`
+  doubled), which the trigram tokenizer matches as a substring. Shorter
+  queries cannot form a trigram: they fall back to
+  `stage_lower(col) LIKE stage_lower(?) ESCAPE '\'`, where `stage_lower` is a
+  registered Go function (Unicode `strings.ToLower`; SQLite's `lower()` folds
+  ASCII only), and scan.
+- **SQLite index upkeep: triggers.** `AFTER INSERT`, `AFTER DELETE` and
+  `AFTER UPDATE OF` the searched columns keep the FTS tables in step with
+  every write path (repositories, imports, cascades, SQL migrations). They
+  maintain a derived index, not a business rule, so they stay in SQL (unlike
+  [journal events](#journal-events)). A migration that rebuilds `tasks` or
+  `journal_entries` must recreate the six `*_fts_*` triggers and run
+  `INSERT INTO x(x) VALUES ('rebuild')`; `TestSearchIndexFollowsWrites`
+  checks the triggers and FTS5's `integrity-check` at the head.
+- **Postgres:** the `pg_trgm` extension and GIN `gin_trgm_ops` indexes on
+  `tasks.title`, `tasks.prompt` and `journal_entries.text` (migration 0029);
+  `ILIKE ... ESCAPE '\'` substring matching, which the indexes serve for
+  queries of 3 or more characters (shorter ones scan). `pg_trgm` is a
+  trusted extension: the migrating role needs to own the database or hold
+  `CREATE` on it.
+- **Postgres locale:** `ILIKE` and `pg_trgm` fold case with the database's
+  ctype. Non-ASCII case-insensitivity needs a UTF-8 ctype with Unicode case
+  mapping: the builtin `C.UTF-8` provider, ICU, or a libc UTF-8 locale. A
+  database with ctype `C` or `POSIX` folds ASCII only; nothing checks this
+  at startup. Test databases use the builtin `C.UTF-8` provider
+  (`pgtest.Locale`).
+- **Contract tests** (`storetest` `Search*`): substring hits in title and
+  prompt, ASCII and non-ASCII case-insensitivity, literal metacharacters and
+  quotes, 1 and 2 character queries, other filters still applying, the
+  ordering, journal paging by cursor, and edits and deletes changing what
+  matches.
 
 ## Migrations
 
@@ -391,7 +423,9 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
    at `N-1`, check the data and constraints after `N`. Reads of the result
    through `db.Store` go in a separate test that reuses the seed.
 6. Engine-only tables or columns (for example an FTS table on SQLite): add
-   them to `parityAllowlist` with why.
+   them to `parityAllowlist` with why. A SQLite rebuild of `tasks` or
+   `journal_entries` recreates the [search](#search) triggers and rebuilds
+   the FTS index.
 7. Never edit an applied migration; fix forward with a new one.
 8. Run `mise run check` (`check:postgres` runs because db code changed).
 9. Update this file when the change alters a rule here.
@@ -462,8 +496,10 @@ Adding a case:
    adds its row to the [Transactions and locking](#transactions-and-locking)
    table, naming the case.
 4. Assert engine-neutral facts: compare times with `Equal` at microsecond
-   precision, don't depend on collation beyond lowercase ASCII, and give
-   ordering a documented tiebreak.
+   precision, don't depend on collation beyond lowercase ASCII (the
+   `Search*` cases are the exception: Unicode case-insensitivity is part of
+   the [search](#search) contract), and give ordering a documented
+   tiebreak.
 5. Run `mise run check` (`check:storage`; `check:postgres` runs because db
    code changed).
 
@@ -478,7 +514,8 @@ from the Docker image.
   above the Postgres baseline. The target holds no Stage rows; an empty target
   is migrated to the source's version, a target at another version is
   refused.
-- **Copy:** every table in foreign-key order, IDs preserved, encodings
+- **Copy:** every table in foreign-key order (not SQLite's FTS tables: the
+  Postgres trigram indexes build from the copied rows), IDs preserved, encodings
   converted (TEXT time to `timestamptz`, TEXT JSON to `jsonb` or `text` per
   [Encodings](#encodings), `BLOB` to `bytea`), identity sequences reset past
   the highest ID. No legacy transforms: the source is at or above the

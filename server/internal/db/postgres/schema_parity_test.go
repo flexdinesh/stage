@@ -44,7 +44,17 @@ type logicalSchema map[string]*logicalTable
 // parityAllowlist names objects ("table" or "table.column") left out of the
 // comparison, with why. Every entry must exist on at least one engine.
 var parityAllowlist = map[string]string{
-	"goose_db_version": "goose bookkeeping in goose's own per-dialect shape, not Stage schema",
+	"goose_db_version":    "goose bookkeeping in goose's own per-dialect shape, not Stage schema",
+	"tasks_fts":           "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"tasks_fts_data":      "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"tasks_fts_idx":       "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"tasks_fts_docsize":   "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"tasks_fts_config":    "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"journal_fts":         "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"journal_fts_data":    "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"journal_fts_idx":     "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"journal_fts_docsize": "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
+	"journal_fts_config":  "SQLite FTS5 search index (docs/storage.md \"Search\"); Postgres uses pg_trgm GIN indexes on the columns",
 }
 
 func (s logicalSchema) table(name string) *logicalTable {

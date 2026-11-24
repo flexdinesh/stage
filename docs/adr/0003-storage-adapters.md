@@ -38,7 +38,7 @@ SQLite sits below it (#391 findings):
 | `json_each`, `json_extract`, `json_object`, `json_group_array` | 14 files |
 | `VACUUM INTO` backup before migrating | `schema.go` `Backup` |
 | SQLite error codes for unique and foreign-key violations | `db.go` |
-| `lower()` folds ASCII only; `GLOB`, `INSERT OR IGNORE` | `likeSQL`, search in tasks, journal, threads |
+| `lower()` folds ASCII only; `GLOB`, `INSERT OR IGNORE` | `likeSQL`, search in tasks and journal |
 
 ## Decision
 
