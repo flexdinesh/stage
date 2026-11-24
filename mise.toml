@@ -8,6 +8,11 @@ pnpm = "12.15.0" # Dockerfile
 shellcheck = "0.11.0" # scripts/release.sh (check:release)
 svu = "3.4.4" # next release version (scripts/release.sh next, docs/release.md)
 
+[env]
+# The one Postgres pin (latest major, exact tag): check:postgres and the
+# compose example use it.
+STAGE_PG_IMAGE = "postgres:19.0-alpine3.24"
+
 [tasks.dev]
 description = "Branch db + Go server (:7390, real T3) + browser host on Vite (proxies /api)"
 raw = true
@@ -56,12 +61,26 @@ run = [
 ]
 
 [tasks.check]
-description = "Everything CI-like: go vet + go test, workspace install + test/typecheck/lint, website checks, desktop fixture and desktop app Go tests, release tool"
-depends = ["check:go", "check:web", "website:check", "check:fixture", "check:desktop", "check:release"]
+description = "Everything CI-like: go vet/build + go test, storage gates, Postgres suites when db code changed, workspace install + test/typecheck/lint, website checks, desktop fixture and desktop app Go tests, release tool"
+depends = ["check:go", "check:storage", "check:postgres:changed", "check:web", "website:check", "check:fixture", "check:desktop", "check:release"]
 
 [tasks."check:go"]
-description = "go vet (with and without the smoke tag) + go test"
-run = "cd server && go vet ./... && go vet -tags smoke ./... && go test ./..."
+description = "go vet (plain, smoke and postgres tags) + go build -tags postgres of the server + go test"
+run = "cd server && go vet ./... && go vet -tags smoke ./... && go vet -tags postgres ./... && CGO_ENABLED=0 go build -tags postgres -o /dev/null ./cmd/stage && go test ./..."
+
+# Storage (docs/storage.md). Gates not written yet report "not present yet".
+[tasks."check:storage"]
+description = "Storage gates: TestMigrationVersionParity, TestStepwiseMigrations, TestDriverImportBoundary (under internal/db) + internal/db/{store,sqlite,postgres,storetest} once present"
+run = "scripts/check-storage.sh"
+
+[tasks."check:postgres"]
+description = "db + api suites with -tags postgres against a throwaway stage-pgtest-* container (STAGE_PG_IMAGE, random port, tmpfs, always removed); needs Docker"
+run = "scripts/check-postgres.sh"
+
+[tasks."check:postgres:changed"]
+description = "check:postgres only when db code changed vs the merge-base with origin/main (run by check)"
+hide = true
+run = "scripts/check-postgres.sh --if-changed"
 
 [tasks."opencode:live"]
 description = "Verify the adapter and mixed tree against an isolated OpenCode V2 server and local test model"
@@ -166,8 +185,8 @@ description = "Verify an asset directory (DIR=...): manifest, checksums, names, 
 run = 'scripts/release.sh verify "${DIR:?set DIR to an asset directory}"'
 
 [tasks."check:release"]
-description = "Release tool (tools/release) go vet + go test (incl. scripts/release.sh next against temp repos with svu, scripts/install.sh against fixture releases, scripts/install-dev.sh and uninstall-dev.sh against a fixture origin), shellcheck of scripts/*.sh"
-run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh && shellcheck -s sh scripts/install.sh scripts/install-dev.sh scripts/uninstall-dev.sh"
+description = "Release tool (tools/release) go vet + go test (incl. scripts/release.sh next against temp repos with svu, scripts/install.sh against fixture releases, scripts/install-dev.sh and uninstall-dev.sh against a fixture origin), shellcheck of scripts/*.sh (incl. check-storage.sh, check-postgres.sh)"
+run = "cd tools/release && go vet ./... && go test ./... && cd ../.. && shellcheck scripts/release.sh scripts/check-storage.sh scripts/check-postgres.sh && shellcheck -s sh scripts/install.sh scripts/install-dev.sh scripts/uninstall-dev.sh"
 
 [tasks."install:smoke"]
 description = "Installer smoke check: real binaries + systemd --user with the isolated stage-svctest identity (install, stage update, rollback, uninstall), then a real dist build installed into a temp home with no service manager"
