@@ -7,12 +7,14 @@ can render: the browser (PWA) and the MyGo desktop app
 Execution contracts and adapter responsibilities: [execution.md](execution.md).
 Machines, the worker process and the main/worker split:
 [ADR 0002](adr/0002-machines-and-workers.md).
+Storage engines, ports and adapters: [ADR 0003](adr/0003-storage-adapters.md),
+[storage.md](storage.md).
 
 ## Ownership
 
 | Path | Owns | Must not |
 | --- | --- | --- |
-| `server/` (Go module `github.com/flexdinesh/stage/server`) | REST API, `/mcp`, CLI, stdio MCP, SQLite, harness connections, scheduling, business rules; embeds the browser host build (`internal/webui`) | Be imported by another module's `internal` path (promote a small public package instead, per ADR 0001) |
+| `server/` (Go module `github.com/flexdinesh/stage/server`) | REST API, `/mcp`, CLI, stdio MCP, storage (SQLite by default, Postgres in Docker builds: [storage.md](storage.md)), harness connections, scheduling, business rules; embeds the browser host build (`internal/webui`) | Be imported by another module's `internal` path (promote a small public package instead, per ADR 0001) |
 | `packages/app/` (`@stage/app`) | The whole UI: routes, pages, components, query/state logic, API client and types (`src/api/types.ts` mirrors [api.md](api.md)), design tokens (`src/index.css`), and the platform contract (`src/platform/index.ts`) | Use browser globals at a platform boundary, import a host or MyGo, or branch on the platform |
 | `apps/web/` (`@stage/web`) | Browser host: `index.html`, `src/main.tsx` (mount, service worker registration), `src/sw.ts`, `public/` (manifest, icons, favicons), Vite config, browser adapters (`src/platform/`) | Hold product UI or business logic |
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`@stage/desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
@@ -92,6 +94,11 @@ Not part of the contract: plain DOM and layout (`document` visibility,
   ([runtime.md](runtime.md)). On a desktop machine an OS per-user service
   (systemd `--user`, launchd) supervises it (`stage service`,
   [service.md](service.md)).
+- Storage: every package reaches the database through `db.Store`; below it,
+  ports and one adapter per engine (SQLite by default, Postgres selected by
+  `STAGE_DATABASE_URL` in Docker builds). One server owns one database on
+  either engine ([storage.md](storage.md),
+  [ADR 0003](adr/0003-storage-adapters.md)).
 
 ## Builds and legacy paths
 
