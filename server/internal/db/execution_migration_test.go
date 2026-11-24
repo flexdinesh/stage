@@ -1,6 +1,10 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+)
 
 func TestExecutionMigrationHoldsLegacyUnknownLaunches(t *testing.T) {
 	pool := openUnmigrated(t)
@@ -11,7 +15,7 @@ func TestExecutionMigrationHoldsLegacyUnknownLaunches(t *testing.T) {
  (2,1,'restart','p','launching',2,0,'interrupted-request'),
  (3,1,'normal','p','backlog',0,0,NULL)`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(901,'note',1,'preserve history','note')`)
-	migrateTo(t, pool, MaxVersion()) // the store reads the latest schema
+	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	store := NewStore(pool)
 	for _, id := range []int64{1, 2} {
 		task, err := store.GetTask(t.Context(), id)

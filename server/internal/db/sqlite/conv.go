@@ -1,4 +1,4 @@
-package db
+package sqlite
 
 import (
 	"context"
@@ -65,66 +65,27 @@ func jsonArray[T any](v []T) string {
 	return string(b)
 }
 
-// conn and Tx run queries over database/sql with context-first signatures.
-// Arguments: time.Time is stored as timeLayout text; slices (except
-// []byte), maps and structs as JSON text. Scan targets: *time.Time and
-// **time.Time parse timeLayout; slices, maps and structs decode JSON
-// (NULL leaves them unset).
+// runner runs queries over database/sql with context-first signatures, on
+// the pool (Read) or a BEGIN IMMEDIATE transaction (Write). Arguments:
+// time.Time is stored as timeLayout text; slices (except []byte), maps and
+// structs as JSON text. Scan targets: *time.Time and **time.Time parse
+// timeLayout; slices, maps and structs decode JSON (NULL leaves them unset).
 type sqlRunner interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-type conn struct{ db *sql.DB }
+type runner struct{ r sqlRunner }
 
-// Tx is a transaction started as BEGIN IMMEDIATE (Open's _txlock): it holds
-// the database write lock from its first statement, so transactions run
-// one at a time; this replaces Postgres row locks and advisory locks.
-type Tx struct{ tx *sql.Tx }
-
-func (c conn) Exec(ctx context.Context, q string, args ...any) (execResult, error) {
-	return execOn(ctx, c.db, q, args)
+func (t *runner) Exec(ctx context.Context, q string, args ...any) (execResult, error) {
+	return execOn(ctx, t.r, q, args)
 }
-func (c conn) Query(ctx context.Context, q string, args ...any) (*rowSet, error) {
-	return queryOn(ctx, c.db, q, args)
+func (t *runner) Query(ctx context.Context, q string, args ...any) (*rowSet, error) {
+	return queryOn(ctx, t.r, q, args)
 }
-func (c conn) QueryRow(ctx context.Context, q string, args ...any) *oneRow {
-	return &oneRow{c.db.QueryRowContext(ctx, q, convertArgs(args)...)}
-}
-func (t *Tx) Exec(ctx context.Context, q string, args ...any) (execResult, error) {
-	return execOn(ctx, t.tx, q, args)
-}
-func (t *Tx) Query(ctx context.Context, q string, args ...any) (*rowSet, error) {
-	return queryOn(ctx, t.tx, q, args)
-}
-func (t *Tx) QueryRow(ctx context.Context, q string, args ...any) *oneRow {
-	return &oneRow{t.tx.QueryRowContext(ctx, q, convertArgs(args)...)}
-}
-
-// inTx runs fn in a BEGIN IMMEDIATE transaction, committing when fn returns
-// nil. It rolls back on error or panic, so the write lock is never left held.
-func (s *Store) inTx(ctx context.Context, fn func(tx *Tx) error) (err error) {
-	sqlTx, err := s.pool.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = sqlTx.Rollback()
-		}
-	}()
-	if err := fn(&Tx{sqlTx}); err != nil {
-		return err
-	}
-	committed = true
-	return sqlTx.Commit()
-}
-
-// queryRower is a conn or a *Tx, for single-statement reads.
-type queryRower interface {
-	QueryRow(ctx context.Context, query string, args ...any) *oneRow
+func (t *runner) QueryRow(ctx context.Context, q string, args ...any) *oneRow {
+	return &oneRow{t.r.QueryRowContext(ctx, q, convertArgs(args)...)}
 }
 
 type execResult struct{ n int64 }

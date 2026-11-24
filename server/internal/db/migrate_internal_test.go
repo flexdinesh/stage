@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,9 +13,9 @@ import (
 )
 
 // openUnmigrated opens a fresh temp database with no migrations applied.
-func openUnmigrated(t *testing.T) *sql.DB {
+func openUnmigrated(t *testing.T) *sqlite.DB {
 	t.Helper()
-	pool, err := Open(context.Background(), filepath.Join(t.TempDir(), DBFile))
+	pool, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), sqlite.DBFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,18 +24,14 @@ func openUnmigrated(t *testing.T) *sql.DB {
 }
 
 // migrateTo applies the embedded migrations up to and including version.
-func migrateTo(t *testing.T, pool *sql.DB, version int64) {
+func migrateTo(t *testing.T, pool *sqlite.DB, version int64) {
 	t.Helper()
-	provider, err := newProvider(pool)
-	if err != nil {
+	if err := sqlite.MigrateTo(context.Background(), pool, version); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := provider.UpTo(context.Background(), version); err != nil {
-		t.Fatalf("migrate to %d: %v", version, err)
 	}
 }
 
-func tableExists(t *testing.T, pool *sql.DB, name string) bool {
+func tableExists(t *testing.T, pool *sqlite.DB, name string) bool {
 	t.Helper()
 	var n int
 	if err := pool.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&n); err != nil {
@@ -74,14 +70,14 @@ func TestMigrationDropsContinuations(t *testing.T) {
 	}
 }
 
-func mustExec(t *testing.T, pool *sql.DB, q string, args ...any) {
+func mustExec(t *testing.T, pool *sqlite.DB, q string, args ...any) {
 	t.Helper()
 	if _, err := pool.Exec(q, args...); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 }
 
-func indexExists(t *testing.T, pool *sql.DB, name string) bool {
+func indexExists(t *testing.T, pool *sqlite.DB, name string) bool {
 	t.Helper()
 	var n int
 	if err := pool.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n); err != nil {
@@ -118,7 +114,7 @@ func TestMigrationTrees(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO notifications (event, task_id, title, url) VALUES ('done', 1, 'Build', '/tasks/1')`)
 
 	migrateTo(t, pool, 5) // the store reads the latest schema
-	if err := Migrate(context.Background(), pool); err != nil {
+	if err := sqlite.Migrate(context.Background(), pool); err != nil {
 		t.Fatal(err)
 	}
 	s := NewStore(pool)
@@ -275,7 +271,7 @@ func TestJournalMigrationPreservesHistoryAndDiscardsLegacyNotes(t *testing.T) {
 	if err := pool.QueryRow(`SELECT notes FROM schedules WHERE id = 1`).Scan(&text); err != nil || text != "template survives" {
 		t.Fatalf("schedule template: %q %v", text, err)
 	}
-	if err := Migrate(context.Background(), pool); err != nil {
+	if err := sqlite.Migrate(context.Background(), pool); err != nil {
 		t.Fatal(err)
 	}
 	s := NewStore(pool)
@@ -318,7 +314,7 @@ func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
 			mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
 			mustExec(t, pool, `INSERT INTO schedules(id,project_id,title,prompt,notes,cron,tz,next_run_at,origin_thread_id) VALUES(1,1,'schedule','prompt',?,'* * * * *','UTC','2026-11-01T00:00:00.000000Z','source-session')`, template)
 			migrateTo(t, pool, 5)
-			if err := Migrate(context.Background(), pool); err != nil {
+			if err := sqlite.Migrate(context.Background(), pool); err != nil {
 				t.Fatal(err)
 			}
 			s := NewStore(pool)

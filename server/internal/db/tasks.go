@@ -8,145 +8,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-const taskSelect = `
-SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt, t.provider_instance_id,
-  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace,
-  t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
-  COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
-  COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
-  t.adopted, t.ready_at, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, coalesce(th.last_word_preview, substr(json_extract(obs.observation,'$.reply.text'),1,200)), coalesce(th.last_word_at,json_extract(obs.observation,'$.reply.updatedAt')),
-  COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
-  t.start_at, t.start_tz, t.schedule_id, sc.title,
-  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `),t.origin_thread_id), oth.title, t.handoff,
-  COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
-  COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
-    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
-  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
-  t.archived_at, tr.status, ` + unstartedSQL + `,
-  t.connection_id,t.session_id,t.origin_session_id,
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
- hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id
-FROM tasks t
-JOIN projects p ON p.id = t.project_id
-JOIN harness_connections hc ON hc.id = t.connection_id
-LEFT JOIN task_trees tr ON tr.id = t.tree_id
-LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
-LEFT JOIN threads th ON th.session_id = t.session_id
-LEFT JOIN schedules sc ON sc.id = t.schedule_id
-LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
-
-func scanTask(row rowScanner) (Task, error) {
-	var t Task
-	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
-		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
-		&t.Workspace, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
-		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
-		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
-		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
-		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
-		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
-	if err != nil {
-		return Task{}, notFound(err)
-	}
-	if t.Session != nil {
-		t.T3ThreadID = &t.Session.ExternalSessionID
-	}
-	t.ModelOptions = nonNilOptions(t.ModelOptions)
-	t.PullRequests = nonNilPRs(t.PullRequests)
-	t.Needs = nonNilIDs(t.Needs)
-	t.Dependents = nonNilIDs(t.Dependents)
-	if t.Workspace.Type == "" {
-		t.Workspace.Type = "root"
-	}
-	return t, nil
-}
-
-func nonNilIDs(ids []int64) []int64 {
-	if ids == nil {
-		return []int64{}
-	}
-	return ids
-}
-
-func collectTasks(rows *rowSet, err error) ([]Task, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Task{}
-	for rows.Next() {
-		t, err := scanTask(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
-	return scanTask(s.pool.QueryRow(ctx, taskSelect+` WHERE t.id = $1`, id))
+	return read(ctx, s, func(tx store.Tx) (Task, error) { return tx.Tasks().Get(ctx, id) })
 }
 
-type TaskFilter struct {
-	OriginThreadID string
-	OriginSession  *SessionRef
-	ProjectID      *int64
-	States         []string
-	Q              string
-	From, To       *time.Time
-	SettledFrom    *time.Time // settled_at >= SettledFrom
-	// Closed: "" or "false" (open only: not archived, tree open or none),
-	// "true" (archived, or in a done or archived tree) or "all".
-	Closed string
-}
-
-// closedSQL: task t is archived or its tree tr is not open.
-const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
+type TaskFilter = store.TaskFilter
 
 func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
-	var w where
-	if f.OriginSession != nil {
-		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
-	}
-	if f.OriginThreadID != "" {
-		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + legacyT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
-	}
-	if f.ProjectID != nil {
-		w.add("t.project_id = " + w.arg(*f.ProjectID))
-	}
-	if len(f.States) > 0 {
-		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
-	}
-	if f.Q != "" {
-		p := w.arg(likePattern(f.Q))
-		w.add("(" + likeSQL("t.title", p) + " OR " + likeSQL("t.prompt", p) + ")")
-	}
-	if f.From != nil {
-		w.add("t.created_at >= " + w.arg(*f.From))
-	}
-	if f.To != nil {
-		w.add("t.created_at < " + w.arg(*f.To))
-	}
-	if f.SettledFrom != nil {
-		w.add("(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id) >= " + w.arg(*f.SettledFrom))
-	}
-	switch f.Closed {
-	case "all":
-	case "true":
-		w.add(closedSQL)
-	default:
-		w.add("NOT " + closedSQL)
-	}
-	rows, err := s.pool.Query(ctx, taskSelect+w.sql()+` ORDER BY t.updated_at DESC, t.id DESC`, w.args...)
-	return collectTasks(rows, err)
+	return read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().List(ctx, f) })
 }
 
 // PollableTasks: tasks whose thread may still change state. Active tasks
@@ -156,35 +29,11 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 // follow-up restarted the thread) or the mirror shows the thread active.
 // An adopted backlog session is watched for its first native execution.
 func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
-	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
-	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
-	// minutes after the last change, then whenever the thread mirror (full
-	// sync) shows it active again.
-	rows, err := s.pool.Query(ctx, taskSelect+`
-WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
-  t.state IN ('launching', 'running', 'needs_input')
-  OR (t.state='backlog' AND t.adopted=1)
-  OR (t.state IN ('done','settled') AND ((t.acceptance_id IS NULL AND $1) OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
-  OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
-    t.updated_at > `+nowPlusSQL("-10 minutes")+`
-    OR COALESCE((SELECT json_extract(observation,'$.active') FROM execution_observations WHERE session_id=t.session_id),0)=1)))
-ORDER BY t.id`, includeStale)
-	return collectTasks(rows, err)
+	return read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().Pollable(ctx, includeStale) })
 }
 
 func (s *Store) TaskEvents(ctx context.Context, taskID int64) ([]TaskEvent, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, from_state, to_state, detail, at FROM task_events WHERE task_id = $1 ORDER BY at, id`, taskID)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, scanTaskEvent)
-}
-
-func scanTaskEvent(r rowScanner) (TaskEvent, error) {
-	var e TaskEvent
-	err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At)
-	return e, err
+	return read(ctx, s, func(tx store.Tx) ([]TaskEvent, error) { return tx.Tasks().Events(ctx, taskID) })
 }
 
 // NewTask is a validated create input.
@@ -231,13 +80,8 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
 }
 
 // createTask is CreateTask with extra run inside the insert transaction.
-func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx *Tx, id int64) error) (Task, error) {
-	var id int64
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var err error
-		id, err = insertTask(ctx, tx, in, extra)
-		return err
-	})
+func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx store.Tx, id int64) error) (Task, error) {
+	id, err := write(ctx, s, func(tx store.Tx) (int64, error) { return s.insertTask(ctx, tx, in, extra) })
 	if err != nil {
 		return Task{}, err
 	}
@@ -246,44 +90,41 @@ func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx *Tx, i
 
 // insertTask is createTask's insert, inside tx: insert, adopt
 // NeedsThreadID, resolve and join the tree, set needs.
-func insertTask(ctx context.Context, tx *Tx, in NewTask, extra func(tx *Tx, id int64) error) (int64, error) {
+func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra func(tx store.Tx, id int64) error) (int64, error) {
 	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsThreadID != nil || in.NeedsSession != nil) {
 		return 0, errStartAndNeeds
 	}
-	if err := projectExists(ctx, tx, in.ProjectID); err != nil {
+	if err := requireProject(ctx, tx, in.ProjectID); err != nil {
 		return 0, err
 	}
 	var originID *int64
 	if in.ConnectionID == 0 {
-		t3, err := legacyT3(ctx, tx)
+		t3, err := legacyT3Tx(ctx, tx)
 		if err != nil {
 			return 0, err
 		}
 		in.ConnectionID = t3
 	}
-	if err := connectionInUse(ctx, tx, in.ConnectionID); err != nil {
+	if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
 		return 0, err
 	}
 	if in.OriginSession != nil {
 		if in.OriginThreadID != nil {
 			return 0, Invalid("use originSession or the legacy T3 originThreadId, not both")
 		}
-		value, err := sessionIdentity(ctx, tx, *in.OriginSession)
+		value, err := ensureSession(ctx, tx, *in.OriginSession)
 		if err != nil {
 			return 0, err
 		}
 		originID = &value
 	}
-	var id int64
-	err := tx.QueryRow(ctx, `
-INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
-  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config,created_by_user_id,source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18,$19,$20) RETURNING id`,
-		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
-		in.RuntimeMode, in.InteractionMode, in.Workspace,
-		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, originID, in.ExecutionConfig,
-		ActingUser(ctx), ActingMachine(ctx),
-	).Scan(&id)
+	id, err := tx.Tasks().Insert(ctx, store.TaskInsert{
+		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, ProviderInstanceID: in.ProviderInstanceID, Model: in.Model,
+		ModelOptions: in.ModelOptions, RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
+		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, OriginThreadID: in.OriginThreadID, Handoff: in.Handoff,
+		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: in.ExecutionConfig,
+		CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -296,7 +137,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$
 		} else {
 			input.ThreadID = *in.NeedsThreadID
 		}
-		owner, _, err := adoptThread(ctx, tx, input)
+		owner, _, err := s.adoptThread(ctx, tx, input)
 		if err != nil {
 			return 0, err
 		}
@@ -314,15 +155,14 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$
 			return 0, err
 		}
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, NULL, 'backlog', 'created')`, id); err != nil {
+	if err := tx.Tasks().AddEvent(ctx, id, nil, StateBacklog, "created"); err != nil {
 		return 0, err
 	}
 	if err := checkBaseTask(ctx, tx, id); err != nil {
 		return 0, err
 	}
 	if len(in.AttachmentIDs) > 0 {
-		if err := setAttachments(ctx, tx, id, in.AttachmentIDs); err != nil {
+		if err := setOwned(ctx, tx, store.OwnerTask, id, in.AttachmentIDs); err != nil {
 			return 0, err
 		}
 	}
@@ -337,15 +177,6 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$
 		}
 	}
 	return id, nil
-}
-
-func projectExists(ctx context.Context, tx *Tx, id int64) error {
-	var one int
-	err := tx.QueryRow(ctx, `SELECT 1 FROM projects WHERE id = $1`, id).Scan(&one)
-	if err != nil {
-		return fmt.Errorf("project: %w", notFound(err))
-	}
-	return nil
 }
 
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
@@ -384,25 +215,19 @@ func (p TaskPatch) restrictedSet() bool {
 // UpdateTask applies a validated patch. Outside backlog only the title
 // may change (Conflict otherwise).
 func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, error) {
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var state TaskState
-		var provider, model *string
-		var adopted bool
-		var nNeeds int
-		var connection, project int64
-		err := tx.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,connection_id, project_id,
-  (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
-			Scan(&state, &provider, &model, &adopted, &connection, &project, &nNeeds)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		e, err := tx.Tasks().EditState(ctx, id)
 		if err != nil {
-			return notFound(err)
+			return err
 		}
-		if p.ValidatedConnection != 0 && (connection != p.ValidatedConnection || project != p.ValidatedProject) {
+		provider, model := e.Provider, e.Model
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
-		if state != StateBacklog && p.restrictedSet() {
-			return Conflict("task is %s: only the title is editable outside backlog", state)
+		if e.State != StateBacklog && p.restrictedSet() {
+			return Conflict("task is %s: only the title is editable outside backlog", e.State)
 		}
-		if adopted && p.restrictedSet() {
+		if e.Adopted && p.restrictedSet() {
 			return Conflict("only the title is editable for an adopted session")
 		}
 		if p.ProviderInstanceID.Set {
@@ -414,88 +239,54 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if (provider == nil) != (model == nil) {
 			return Invalid("providerInstanceId and model must be set together")
 		}
-		if p.StartAt.Set && !p.StartAt.Null && nNeeds > 0 {
+		if p.StartAt.Set && !p.StartAt.Null && e.Needs > 0 {
 			return errStartAndNeeds
 		}
 		if p.StartAt.Set {
-			if _, err := tx.Exec(ctx, `UPDATE tasks SET start_at = $2, start_tz = $3 WHERE id = $1`, id, p.StartAt.Ptr(), p.StartTz.Ptr()); err != nil {
+			if err := tx.Tasks().SetStart(ctx, id, p.StartAt.Ptr(), p.StartTz.Ptr()); err != nil {
 				return err
 			}
 		}
 		if p.AttachmentIDs.Set {
-			if err := setAttachments(ctx, tx, id, p.AttachmentIDs.V); err != nil {
+			if err := setOwned(ctx, tx, store.OwnerTask, id, p.AttachmentIDs.V); err != nil {
 				return err
 			}
 		}
-		var w where
-		w.arg(id)
-		var sets []string
-		set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+		u := store.TaskUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
+			Title: p.Title, Prompt: p.Prompt, ProviderInstanceID: p.ProviderInstanceID, Model: p.Model, ModelOptions: p.ModelOptions,
+			RuntimeMode: p.RuntimeMode, InteractionMode: p.InteractionMode, Workspace: p.Workspace, Handoff: p.Handoff, StartMode: p.StartMode}
 		if p.ConnectionID.Set {
-			if err := checkDestinationChange(ctx, tx, connection, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			toT3, err := harnessIs(ctx, tx, p.ConnectionID.V, HarnessT3)
+			toT3, err := tx.Connections().HarnessIs(ctx, p.ConnectionID.V, HarnessT3)
 			if err != nil {
 				return err
 			}
-			if p.ConnectionID.V != connection && !toT3 {
-				var hasImages bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE task_id=$1)`, id).Scan(&hasImages); err != nil {
+			if p.ConnectionID.V != e.ConnectionID && !toT3 {
+				hasImages, err := tx.Tasks().HasAttachments(ctx, id)
+				if err != nil {
 					return err
 				}
 				if hasImages {
 					return Invalid("Remove image attachments before switching to OpenCode.")
 				}
 			}
-			set("connection_id", p.ConnectionID.V)
 		}
-		if p.ExecutionConfig.Set {
-			set("execution_config", p.ExecutionConfig.Ptr())
-		} else if p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set {
-			set("execution_config", nil)
+		if !p.ExecutionConfig.Set && (p.ProviderInstanceID.Set || p.Model.Set || p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set) {
+			u.ExecutionConfig = Optional[execution.Config]{Set: true, Null: true}
 		}
 		if p.ProjectID.Set {
-			if err := projectExists(ctx, tx, p.ProjectID.V); err != nil {
+			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
 				return err
 			}
-			set("project_id", p.ProjectID.V)
 		}
-		if p.Title.Set {
-			set("title", p.Title.V)
-		}
-		if p.Prompt.Set {
-			set("prompt", p.Prompt.V)
-		}
-		if p.ProviderInstanceID.Set {
-			set("provider_instance_id", p.ProviderInstanceID.Ptr())
-		}
-		if p.Model.Set {
-			set("model", p.Model.Ptr())
-		}
-		if p.ModelOptions.Set {
-			set("model_options", nonNilOptions(p.ModelOptions.V))
-		}
-		if p.RuntimeMode.Set {
-			set("runtime_mode", p.RuntimeMode.V)
-		}
-		if p.InteractionMode.Set {
-			set("interaction_mode", p.InteractionMode.V)
-		}
-		if p.Workspace.Set {
-			set("workspace", p.Workspace.V)
-		}
-		if p.Handoff.Set {
-			set("handoff", p.Handoff.V)
-		}
-		if p.StartMode.Set {
-			set("start_mode", p.StartMode.Ptr())
-		}
-		if len(sets) == 0 && !p.AttachmentIDs.Set && !p.StartAt.Set {
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
+			!p.ProviderInstanceID.Set && !p.Model.Set && !p.ModelOptions.Set && !p.RuntimeMode.Set && !p.InteractionMode.Set &&
+			!p.Workspace.Set && !p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
-		sets = append(sets, "updated_at = "+nowSQL)
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...); err != nil {
+		if err := tx.Tasks().Update(ctx, id, u); err != nil {
 			return err
 		}
 		if p.Workspace.Set {
@@ -511,15 +302,10 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 
 // checkBaseTask: workspace.baseTaskId, when set, names one of the task's
 // needs (Invalid otherwise).
-func checkBaseTask(ctx context.Context, tx *Tx, id int64) error {
-	var base *int64
-	var isNeed bool
-	err := tx.QueryRow(ctx, `
-SELECT json_extract(workspace, '$.baseTaskId'),
-  EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = tasks.id AND n.need_id = json_extract(tasks.workspace, '$.baseTaskId'))
-FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
+func checkBaseTask(ctx context.Context, tx store.Tx, id int64) error {
+	base, isNeed, err := tx.Tasks().BaseTask(ctx, id)
 	if err != nil {
-		return notFound(err)
+		return err
 	}
 	if base != nil && !isNeed {
 		return Invalid("workspace.baseTaskId: task %d is not a need of this task", *base)
@@ -531,11 +317,10 @@ FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
 // recorded work can only be archived (Conflict). It is spliced out of its
 // tree first (its dependents take over its needs).
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
-	return s.inTx(ctx, func(tx *Tx) error {
-		var state TaskState
-		var unstarted bool
-		if err := tx.QueryRow(ctx, `SELECT t.state, `+unstartedSQL+` FROM tasks t WHERE t.id = $1`, id).Scan(&state, &unstarted); err != nil {
-			return notFound(err)
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		state, unstarted, err := tx.Tasks().Deletability(ctx, id)
+		if err != nil {
+			return err
 		}
 		if state.Active() {
 			return Conflict("task is %s: stop it first", state)
@@ -546,8 +331,7 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
-		return err
+		return tx.Tasks().Delete(ctx, id)
 	})
 }
 
@@ -555,23 +339,21 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 // standalone task (a tree member is closed with its tree) that is not
 // launching, running or needing input (Conflict).
 func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task, error) {
-	err := s.inTx(ctx, func(tx *Tx) error {
-		var tree *int64
-		if err := tx.QueryRow(ctx, `SELECT tree_id FROM tasks WHERE id = $1`, id).Scan(&tree); err != nil {
-			return notFound(err)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		tree, err := tx.Tasks().TreeID(ctx, id)
+		if err != nil {
+			return err
 		}
 		if !archived {
-			_, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = NULL, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NOT NULL`, id)
-			return err
+			return tx.Tasks().SetArchived(ctx, id, false)
 		}
 		if tree != nil {
 			return Conflict("task %d is in tree %d: archive the tree, or remove it from the tree first", id, *tree)
 		}
-		if err := noActiveTask(ctx, tx, `t.id = $1`, id); err != nil {
+		if err := noActiveTask(tx.Trees().ActiveTask(ctx, id)); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = `+nowSQL+`, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NULL`, id)
-		return err
+		return tx.Tasks().SetArchived(ctx, id, true)
 	})
 	if err != nil {
 		return Task{}, err
@@ -591,12 +373,11 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	}
 	ws := src.Workspace
 	ws.BaseTaskID = nil
-	copyImages := func(tx *Tx, dst int64) error {
-		if err := copyAttachments(ctx, tx, src.ID, dst); err != nil {
+	copyImages := func(tx store.Tx, dst int64) error {
+		if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id, source_machine_id) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2, $3, $4)`, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
-		return err
+		return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
 	}
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
@@ -607,52 +388,30 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 
 // TouchTask bumps updated_at (re-arms polling of failed/interrupted tasks).
 func (s *Store) TouchTask(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET updated_at = `+nowSQL+` WHERE id = $1`, id)
-	if err == nil && tag.RowsAffected() == 0 {
+	found, err := write(ctx, s, func(tx store.Tx) (bool, error) { return tx.Tasks().Touch(ctx, id) })
+	if err == nil && !found {
 		return ErrNotFound
 	}
 	return err
 }
 
-// Transition is a guarded task state change.
-type Transition struct {
-	RequireAuto bool // release runner: recheck policy while claiming the launch
-	TaskID      int64
-	From        []TaskState // allowed current states; empty = any
-	To          TaskState
-	Detail      string
-
-	BeginAttempt  bool       // launch start: attempt+1 and a new launch_request_id (unless launch_reuse), clear thread/error/finished/settled/launch_reuse/start/ready_at
-	ThreadID      *string    // set t3_thread_id (+ launched_at)
-	ObservedStart *time.Time // first native execution of an adopted backlog session
-	LastError     *string    // set last_error
-	// ReuseAttempt marks the attempt's launch outcome unknown (transport
-	// failure or restart mid-launch, no thread): the next BeginAttempt keeps
-	// the attempt number and the clientRequestId.
-	ReuseAttempt bool
-}
-
-// TransitionResult reports what happened. Changed=false: current state not
-// in From (or already To); nothing written.
-type TransitionResult struct {
-	Changed bool
-	From    TaskState
-	Attempt int
-	// RequestID is the attempt's clientRequestId (launch_request_id); ""
-	// before the first launch.
-	RequestID string
-}
+type (
+	// Transition is a guarded task state change.
+	Transition = store.Transition
+	// TransitionResult reports what happened.
+	TransitionResult = store.TransitionResult
+)
 
 // TransitionTask applies t atomically: state, timestamps (finishedAt on first
 // entry into a finished state, settledAt on settled) and a task_events row.
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
-	err := s.inTx(ctx, func(tx *Tx) error {
-		err := tx.QueryRow(ctx, `SELECT state, launch_attempt, COALESCE(launch_request_id, '') FROM tasks WHERE id = $1`, t.TaskID).
-			Scan(&res.From, &res.Attempt, &res.RequestID)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		ls, err := tx.Tasks().LaunchState(ctx, t.TaskID)
 		if err != nil {
-			return notFound(err)
+			return err
 		}
+		res.From, res.Attempt, res.RequestID = ls.State, ls.Attempt, ls.RequestID
 		if (len(t.From) > 0 && !slices.Contains(t.From, res.From)) || (res.From == t.To && !t.BeginAttempt) {
 			return nil
 		}
@@ -661,55 +420,30 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 				return err
 			}
 		}
-		err = tx.QueryRow(ctx, `
-UPDATE tasks SET
-  state = $2,
-  launch_attempt = launch_attempt + CASE WHEN $3 AND NOT launch_reuse THEN 1 ELSE 0 END,
-  launch_request_id = CASE WHEN $3 AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
-                           THEN 'task-' || id || '-' || $8 ELSE launch_request_id END,
-  launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
-                      WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
-  t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
-  session_id = CASE WHEN $3 THEN NULL ELSE session_id END,
-  scheduled_hold = CASE WHEN $3 THEN 0 ELSE scheduled_hold END,
-  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$9) END,
-  last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
-  finished_at = CASE WHEN $3 THEN NULL
-                     WHEN $6 AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
-  settled_at = CASE WHEN $3 THEN NULL WHEN $2 = 'settled' THEN `+nowSQL+` ELSE settled_at END,
-  start_at = CASE WHEN $3 THEN NULL ELSE start_at END,
-  start_tz = CASE WHEN $3 THEN NULL ELSE start_tz END,
-  ready_at = CASE WHEN $3 THEN NULL ELSE ready_at END,
-  updated_at = `+nowSQL+`
-WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-			t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(), t.ObservedStart,
-		).Scan(&res.Attempt, &res.RequestID)
+		res.Attempt, res.RequestID, err = tx.Tasks().ApplyTransition(ctx, t)
 		if err != nil {
 			return err
 		}
 		if t.BeginAttempt {
-			if _, err := tx.Exec(ctx, `INSERT INTO execution_attempts(task_id,attempt,phase) VALUES($1,$2,'prepared') ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt); err != nil {
+			a := tx.Attempts()
+			if err := a.Begin(ctx, t.TaskID, res.Attempt); err != nil {
 				return err
 			}
 			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt); err != nil {
 				return err
 			}
-			claim, err := tx.Exec(ctx, `INSERT INTO task_launch_claims(task_id,attempt) VALUES($1,$2) ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt)
+			claimed, err := a.Claim(ctx, t.TaskID, res.Attempt)
 			if err != nil {
 				return err
 			}
-			if claim.RowsAffected() > 0 {
-				if _, err := tx.Exec(ctx, `INSERT INTO task_launch_inputs(task_id,attempt,source_task_id,acceptance_id)
-    SELECT $1,$2,d.id,d.acceptance_id FROM task_needs n JOIN tasks d ON d.id=n.need_id
-    WHERE n.task_id=$1 AND d.acceptance_id IS NOT NULL
-    ON CONFLICT DO NOTHING`, t.TaskID, res.Attempt); err != nil {
+			if claimed {
+				if err := a.PinInputs(ctx, t.TaskID, res.Attempt); err != nil {
 					return err
 				}
 			}
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $3, $4)`,
-			t.TaskID, string(res.From), string(t.To), t.Detail); err != nil {
+		from := res.From
+		if err := tx.Tasks().AddEvent(ctx, t.TaskID, &from, t.To, t.Detail); err != nil {
 			return err
 		}
 		if t.To.Active() {
@@ -729,17 +463,24 @@ WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
 // reopenOnActivity: task id became active (to), so an archived task is
 // unarchived and a done or archived tree reopened, each with a task event
 // (docs/api.md "Done, archive and delete").
-func reopenOnActivity(ctx context.Context, tx *Tx, id int64, to TaskState) error {
+func reopenOnActivity(ctx context.Context, tx store.Tx, id int64, to TaskState) error {
 	label := strings.ReplaceAll(string(to), "_", " ")
-	tag, err := tx.Exec(ctx, `UPDATE tasks SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL`, id)
+	unarchived, err := tx.Tasks().Unarchive(ctx, id)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $2, $3)`,
-			id, string(to), "unarchived: became "+label); err != nil {
+	if unarchived {
+		if err := tx.Tasks().AddEvent(ctx, id, &to, to, "unarchived: became "+label); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// nonNilIDs is ids, or [] for nil.
+func nonNilIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }

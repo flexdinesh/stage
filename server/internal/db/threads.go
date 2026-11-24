@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -25,53 +26,24 @@ func (s *Store) UpsertThreads(ctx context.Context, observations []execution.Obse
 	}
 	return nil
 }
-func nonNilPRs(prs []execution.Artifact) []execution.Artifact {
-	if prs == nil {
-		return []execution.Artifact{}
-	}
-	return prs
-}
 func RunSpan(source execution.Source) (*time.Time, *time.Time) {
 	o := source.Observation()
 	return o.StartedAt, o.EndedAt
 }
 
-const threadSelect = `
-SELECT th.t3_thread_id, th.t3_project_id, COALESCE(tk.project_id,p.id), COALESCE((SELECT title FROM projects WHERE id=tk.project_id),p.title), th.title, th.status, th.settled,
-  th.settled_at, th.pending_request_count, min(th.pending_question_count, th.pending_request_count), th.provider_instance_id, th.model, th.runtime_mode,
-  th.interaction_mode, th.branch, th.worktree_path, th.parent_thread_id, th.relationship,
-  th.creation_source, tk.id, th.link, th.created_at, th.updated_at, th.synced_at, th.archived, th.active_run_id, th.latest_run_id,
-  th.run_started_at, th.run_ended_at, th.last_word_preview, th.last_word_at, th.run_count, th.pull_requests, ` + threadStateSQL + `,
-  COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),0)
-FROM threads th
-LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),` + legacyT3SQL + `) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
-LEFT JOIN tasks tk ON tk.session_id = th.session_id`
-
-func scanThread(row rowScanner) (Thread, error) {
-	var t Thread
-	err := row.Scan(&t.T3ThreadID, &t.T3ProjectID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Status,
-		&t.Settled, &t.SettledAt, &t.PendingRequestCount, &t.PendingQuestionCount, &t.ProviderInstanceID, &t.Model, &t.RuntimeMode,
-		&t.InteractionMode, &t.Branch, &t.WorktreePath, &t.ParentThreadID, &t.Relationship,
-		&t.CreationSource, &t.TaskID, &t.Link, &t.CreatedAt, &t.UpdatedAt, &t.SyncedAt, &t.Archived, &t.ActiveRunID, &t.LatestRunID,
-		&t.RunStartedAt, &t.RunEndedAt, &t.LastWordPreview, &t.LastWordAt, &t.RunCount, &t.PullRequests, &t.State, &t.ConnectionID)
-	if err != nil {
-		return Thread{}, notFound(err)
-	}
-	t.PullRequests = nonNilPRs(t.PullRequests)
-	t.Session = SessionRef{ConnectionID: t.ConnectionID, ExternalSessionID: t.T3ThreadID}
-	t.Source = SourceT3
-	if t.TaskID != nil {
-		t.Source = SourceApp
-	}
-	return t, nil
-}
+type (
+	// ThreadFilter selects mirrored threads (ListThreads).
+	ThreadFilter = store.ThreadFilter
+	// ThreadObservation is the watcher's stored view of a thread.
+	ThreadObservation = store.ThreadObservation
+)
 
 // ThreadRuns returns a thread's mirrored recent runs (newest first, at most
 // 50); [] when unread. ErrNotFound for an unknown thread.
 func (s *Store) ThreadRuns(ctx context.Context, id string) ([]ThreadRun, error) {
-	var runs []ThreadRun
-	if err := s.pool.QueryRow(ctx, `SELECT recent_runs FROM threads WHERE t3_thread_id = $1`, id).Scan(&runs); err != nil {
-		return nil, notFound(err)
+	runs, err := read(ctx, s, func(tx store.Tx) ([]ThreadRun, error) { return tx.Threads().Runs(ctx, id) })
+	if err != nil {
+		return nil, err
 	}
 	if runs == nil {
 		runs = []ThreadRun{}
@@ -80,123 +52,48 @@ func (s *Store) ThreadRuns(ctx context.Context, id string) ([]ThreadRun, error) 
 }
 
 func (s *Store) GetThread(ctx context.Context, id string) (Thread, error) {
-	return scanThread(s.pool.QueryRow(ctx, threadSelect+` WHERE th.t3_thread_id = $1`, id))
-}
-
-type ThreadFilter struct {
-	ProjectID    *int64
-	States       []string
-	Active       bool
-	SortActivity bool
-	Parent       *string
-	Statuses     []string
-	Settled      *bool
-	Provider     string
-	Source       string // app | t3 | ""
-	Q            string
-	// IDs keeps these T3 thread ids only (nil = no id filter).
-	IDs      []string
-	From, To *time.Time
-	// ExcludeSubagents keeps root threads only (parent_thread_id IS NULL).
-	ExcludeSubagents bool
-	// NeedsInput keeps external threads needing input (see NeedsInputCount).
-	NeedsInput bool
-	// Running keeps external threads observed running (see externalRunning).
-	Running bool
-	// SettledFrom keeps external threads settled at or after it (see
-	// externalSettled), newest settle first.
-	SettledFrom *time.Time
-	Limit       int
-	Offset      int
+	return read(ctx, s, func(tx store.Tx) (Thread, error) { return tx.Threads().Get(ctx, id) })
 }
 
 // ListThreads returns a page of mirrored threads (createdAt desc) and the
 // total match count.
-func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) ([]Thread, int, error) {
-	var w where
-	if len(f.States) > 0 {
-		w.add("(" + threadStateSQL + ") IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
-	}
-	if f.Active {
-		w.add("NOT th.archived AND (" + threadStateSQL + ") IN ('running','needs_input')")
-	}
-	if f.Parent != nil {
-		w.add("th.parent_thread_id = " + w.arg(*f.Parent))
-	}
-	if f.ProjectID != nil {
-		w.add("p.id = " + w.arg(*f.ProjectID))
-	}
-	if len(f.Statuses) > 0 {
-		w.add("th.status IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.Statuses)) + "))")
-	}
-	if f.Settled != nil {
-		w.add("th.settled = " + w.arg(*f.Settled))
-	}
-	if f.Provider != "" {
-		w.add("th.provider_instance_id = " + w.arg(f.Provider))
-	}
-	switch f.Source {
-	case SourceApp:
-		w.add("tk.id IS NOT NULL")
-	case SourceT3:
-		w.add("tk.id IS NULL")
-	}
-	if f.Q != "" {
-		w.add(likeSQL("th.title", w.arg(likePattern(f.Q))))
-	}
-	if f.IDs != nil {
-		w.add("th.t3_thread_id IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.IDs)) + "))")
-	}
-	if f.From != nil {
-		w.add("th.created_at >= " + w.arg(*f.From))
-	}
-	if f.To != nil {
-		w.add("th.created_at < " + w.arg(*f.To))
-	}
-	if f.ExcludeSubagents {
-		w.add("th.parent_thread_id IS NULL")
-	}
-	if f.NeedsInput {
-		w.add(externalNeedsInput)
-	}
-	if f.Running {
-		w.add(externalRunning)
-	}
-	if f.SettledFrom != nil {
-		w.add(externalSettled + " AND th.settled_at >= " + w.arg(*f.SettledFrom))
-	}
-	var total int
-	countSQL := `SELECT count(*) FROM threads th
-LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),` + legacyT3SQL + `) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
-LEFT JOIN tasks tk ON tk.session_id = th.session_id` + w.sql()
-	if err := s.pool.QueryRow(ctx, countSQL, w.args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-	order := "th.created_at"
-	switch {
-	case f.SettledFrom != nil:
-		order = "th.settled_at"
-	case f.SortActivity:
-		order = "th.updated_at"
-	}
-	q := threadSelect + w.sql() + ` ORDER BY ` + order + ` DESC, th.t3_thread_id DESC LIMIT ` +
-		w.arg(f.Limit) + ` OFFSET ` + w.arg(f.Offset)
-	rows, err := s.pool.Query(ctx, q, w.args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-	out := []Thread{}
-	for rows.Next() {
-		t, err := scanThread(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		out = append(out, t)
-	}
-	return out, total, rows.Err()
+func (s *Store) ListThreads(ctx context.Context, f ThreadFilter) (threads []Thread, total int, err error) {
+	err = s.e.Read(ctx, func(tx store.Tx) error {
+		var err error
+		threads, total, err = tx.Threads().List(ctx, f)
+		return err
+	})
+	return threads, total, err
 }
 
-// The mirror's state follows T3 independently of frozen legacy task state.
-// Input, activity, and failure outrank a stale settled flag.
-const threadStateSQL = `COALESCE(th.execution_state,'done')`
+// SetPendingQuestionCount stores how many of a thread's pending requests are
+// answerable questions (t3_pending_request list). Reads clamp it to
+// pending_request_count, and a detail upsert with no pending requests resets it.
+func (s *Store) SetPendingQuestionCount(ctx context.Context, threadID string, n int) error {
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetPendingQuestionCount(ctx, threadID, n) })
+}
+
+// NeedsInputCount: tasks in needs_input + external threads needing input.
+func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
+	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Threads().NeedsInputCount(ctx) })
+}
+
+// WatchedThreadIDs: external non-subagent threads the watcher last saw running,
+// needing input or done (re-read until they leave those states; done until
+// observed again, including when work resumes). Scoped to the connection: a
+// replaced T3's threads are never watched against the T3 that replaced it.
+func (s *Store) WatchedThreadIDs(ctx context.Context, connection int64) ([]string, error) {
+	return read(ctx, s, func(tx store.Tx) ([]string, error) { return tx.Threads().WatchedIDs(ctx, connection) })
+}
+
+// ThreadObservations returns an entry for every id.
+func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
+	return read(ctx, s, func(tx store.Tx) (map[string]ThreadObservation, error) { return tx.Threads().Observations(ctx, ids) })
+}
+
+// SetObservedState records the watcher's mapped state for a mirrored thread
+// of ref's connection (scoped like WatchedThreadIDs: another T3 connection's
+// thread is never touched).
+func (s *Store) SetObservedState(ctx context.Context, ref SessionRef, st TaskState) error {
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetObservedState(ctx, ref, st) })
+}

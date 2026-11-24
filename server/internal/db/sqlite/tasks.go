@@ -1,0 +1,427 @@
+package sqlite
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/execution"
+)
+
+type tasks struct{ *runner }
+
+func (t *tx) Tasks() store.Tasks { return tasks{t.r} }
+
+// SQL over taskSelect's aliases (t = task, tr = its tree).
+const (
+	effectiveModeSQL  = `COALESCE(t.start_mode, tr.start_mode)`
+	hasNeedsSQL       = `EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = t.id)`
+	unacceptedNeedSQL = `EXISTS (SELECT 1 FROM task_needs n JOIN tasks d ON d.id = n.need_id WHERE n.task_id = t.id AND d.acceptance_id IS NULL)`
+	readinessSQL      = `CASE WHEN t.tree_id IS NULL OR t.state <> 'backlog' OR t.adopted=1 OR t.acceptance_id IS NOT NULL OR tr.status <> 'open' THEN NULL
+ WHEN ` + unacceptedNeedSQL + ` THEN 'blocked'
+ WHEN t.start_at IS NULL AND (` + effectiveModeSQL + ` = 'manual' OR NOT ` + hasNeedsSQL + `) THEN 'ready'
+ END`
+	// releasedSQL: a backlog task with needs, all accepted, and no start time
+	// (auto launches it; manual reads ready and notifies).
+	releasedSQL = `t.state = 'backlog' AND t.acceptance_id IS NULL AND t.start_at IS NULL AND t.adopted = 0 AND tr.status = 'open' AND ` + hasNeedsSQL + ` AND NOT ` + unacceptedNeedSQL
+	// unstartedSQL: task t has no notes or execution history (deletable).
+	unstartedSQL = `(t.launch_attempt = 0 AND t.t3_thread_id IS NULL AND t.adopted = 0 AND t.recorded_work = 0)`
+)
+
+// closedSQL: task t is archived or its tree tr is not open.
+const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
+
+const taskSelect = `
+SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt, t.provider_instance_id,
+  t.model, t.model_options, t.runtime_mode, t.interaction_mode, t.workspace,
+  t.state, t.t3_thread_id, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
+  COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
+  COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
+  t.adopted, t.ready_at, t.launch_attempt, t.last_error,
+  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, coalesce(th.last_word_preview, substr(json_extract(obs.observation,'$.reply.text'),1,200)), coalesce(th.last_word_at,json_extract(obs.observation,'$.reply.updatedAt')),
+  COALESCE(th.pull_requests, '[]'), t.created_at, t.updated_at, th.link,
+  t.start_at, t.start_tz, t.schedule_id, sc.title,
+  COALESCE((SELECT external_id FROM session_identities WHERE id=t.origin_session_id AND connection_id IN ` + t3ConnectionsSQL + `),t.origin_thread_id), oth.title, t.handoff,
+  COALESCE(min(th.pending_question_count, th.pending_request_count), 0),
+  COALESCE((SELECT json_group_array(json_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
+    'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'),
+  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
+  t.archived_at, tr.status, ` + unstartedSQL + `,
+  t.connection_id,t.session_id,t.origin_session_id,
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
+ hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id
+FROM tasks t
+JOIN projects p ON p.id = t.project_id
+JOIN harness_connections hc ON hc.id = t.connection_id
+LEFT JOIN task_trees tr ON tr.id = t.tree_id
+LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
+LEFT JOIN threads th ON th.session_id = t.session_id
+LEFT JOIN schedules sc ON sc.id = t.schedule_id
+LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
+
+func scanTask(row rowScanner) (store.Task, error) {
+	var t store.Task
+	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
+		&t.ProviderInstanceID, &t.Model, &t.ModelOptions, &t.RuntimeMode, &t.InteractionMode,
+		&t.Workspace, &t.State, &t.T3ThreadID, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
+		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
+		&t.LastWordPreview, &t.LastWordAt, &t.PullRequests, &t.CreatedAt,
+		&t.UpdatedAt, &t.ThreadLink, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
+		&t.OriginThreadID, &t.OriginThreadTitle, &t.Handoff, &t.PendingQuestionCount, &t.Attachments,
+		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
+	if err != nil {
+		return store.Task{}, notFound(err)
+	}
+	if t.Session != nil {
+		t.T3ThreadID = &t.Session.ExternalSessionID
+	}
+	t.ModelOptions = nonNilOptions(t.ModelOptions)
+	t.PullRequests = nonNilPRs(t.PullRequests)
+	t.Needs = nonNilIDs(t.Needs)
+	t.Dependents = nonNilIDs(t.Dependents)
+	if t.Workspace.Type == "" {
+		t.Workspace.Type = "root"
+	}
+	return t, nil
+}
+
+func nonNilIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
+}
+
+func nonNilOptions(o []execution.ModelOption) []execution.ModelOption {
+	if o == nil {
+		return []execution.ModelOption{}
+	}
+	return o
+}
+
+func collectTasks(rows *rowSet, err error) ([]store.Task, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []store.Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (r tasks) Get(ctx context.Context, id int64) (store.Task, error) {
+	return scanTask(r.QueryRow(ctx, taskSelect+` WHERE t.id = $1`, id))
+}
+
+func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, error) {
+	var w where
+	if f.OriginSession != nil {
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + w.arg(f.OriginSession.ConnectionID) + " AND external_id=" + w.arg(f.OriginSession.ExternalSessionID) + ")")
+	}
+	if f.OriginThreadID != "" {
+		w.add("t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=" + legacyT3SQL + " AND external_id=" + w.arg(f.OriginThreadID) + ")")
+	}
+	if f.ProjectID != nil {
+		w.add("t.project_id = " + w.arg(*f.ProjectID))
+	}
+	if len(f.States) > 0 {
+		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
+	}
+	if f.Q != "" {
+		p := w.arg(likePattern(f.Q))
+		w.add("(" + likeSQL("t.title", p) + " OR " + likeSQL("t.prompt", p) + ")")
+	}
+	if f.From != nil {
+		w.add("t.created_at >= " + w.arg(*f.From))
+	}
+	if f.To != nil {
+		w.add("t.created_at < " + w.arg(*f.To))
+	}
+	if f.SettledFrom != nil {
+		w.add("(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id) >= " + w.arg(*f.SettledFrom))
+	}
+	switch f.Closed {
+	case "all":
+	case "true":
+		w.add(closedSQL)
+	default:
+		w.add("NOT " + closedSQL)
+	}
+	rows, err := r.Query(ctx, taskSelect+w.sql()+` ORDER BY t.updated_at DESC, t.id DESC`, w.args...)
+	return collectTasks(rows, err)
+}
+
+func (r tasks) Pollable(ctx context.Context, includeStale bool) ([]store.Task, error) {
+	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
+	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
+	// minutes after the last change, then whenever the thread mirror (full
+	// sync) shows it active again.
+	rows, err := r.Query(ctx, taskSelect+`
+WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
+  t.state IN ('launching', 'running', 'needs_input')
+  OR (t.state='backlog' AND t.adopted=1)
+  OR (t.state IN ('done','settled') AND ((t.acceptance_id IS NULL AND $1) OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
+  OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
+    t.updated_at > `+nowPlusSQL("-10 minutes")+`
+    OR COALESCE((SELECT json_extract(observation,'$.active') FROM execution_observations WHERE session_id=t.session_id),0)=1)))
+ORDER BY t.id`, includeStale)
+	return collectTasks(rows, err)
+}
+
+func (r tasks) BySession(ctx context.Context, ref store.SessionRef) (store.Task, error) {
+	return scanTask(r.QueryRow(ctx, taskSelect+` WHERE t.session_id=(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID))
+}
+
+func (r tasks) CreatedBySession(ctx context.Context, ref store.SessionRef) ([]store.Task, error) {
+	rows, err := r.Query(ctx, taskSelect+` WHERE t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2) ORDER BY t.id`, ref.ConnectionID, ref.ExternalSessionID)
+	return collectTasks(rows, err)
+}
+
+func (r tasks) BySessionID(ctx context.Context, sessionID int64) (int64, error) {
+	var id int64
+	err := r.QueryRow(ctx, "SELECT id FROM tasks WHERE session_id=$1", sessionID).Scan(&id)
+	return id, notFound(err)
+}
+
+func (r tasks) SessionOccupied(ctx context.Context, sessionID, taskID int64) (bool, error) {
+	var occupied bool
+	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE session_id=$1 AND id<>$2)`, sessionID, taskID).Scan(&occupied)
+	return occupied, err
+}
+
+func (r tasks) Events(ctx context.Context, taskID int64) ([]store.TaskEvent, error) {
+	rows, err := r.Query(ctx,
+		`SELECT id, task_id, from_state, to_state, detail, at FROM task_events WHERE task_id = $1 ORDER BY at, id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, func(r rowScanner) (store.TaskEvent, error) {
+		var e store.TaskEvent
+		err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At)
+		return e, err
+	})
+}
+
+func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string) error {
+	var f *string
+	if from != nil {
+		v := string(*from)
+		f = &v
+	}
+	_, err := r.Exec(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail) VALUES ($1, $2, $3, $4)`, taskID, f, string(to), detail)
+	return err
+}
+
+func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {
+	var id int64
+	err := r.QueryRow(ctx, `
+INSERT INTO tasks (project_id, title, prompt, provider_instance_id, model, model_options,
+  runtime_mode, interaction_mode, workspace, start_at, start_tz, schedule_id, origin_thread_id, handoff, start_mode,connection_id,origin_session_id,execution_config,created_by_user_id,source_machine_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, true),$15,$16,$17,$18,$19,$20) RETURNING id`,
+		in.ProjectID, in.Title, in.Prompt, in.ProviderInstanceID, in.Model, nonNilOptions(in.ModelOptions),
+		in.RuntimeMode, in.InteractionMode, in.Workspace,
+		in.StartAt, in.StartTz, in.ScheduleID, in.OriginThreadID, in.Handoff, in.StartMode, in.ConnectionID, in.OriginSessionID, in.ExecutionConfig,
+		in.CreatedBy, in.SourceMachineID,
+	).Scan(&id)
+	return id, err
+}
+
+func (r tasks) InsertAdopted(ctx context.Context, in store.AdoptedInsert) (int64, error) {
+	var id int64
+	err := r.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,t3_thread_id,
+	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11,$12,$13) RETURNING id`, in.ProjectID, in.Title, in.State, in.ConnectionID, in.SessionID, in.T3ThreadID, in.ExecutionConfig, in.RuntimeMode, in.InteractionMode, in.LaunchedAt, in.FinishedAt, in.CreatedBy, in.SourceMachineID).Scan(&id)
+	return id, err
+}
+
+func (r tasks) EditState(ctx context.Context, id int64) (store.TaskEditState, error) {
+	var e store.TaskEditState
+	err := r.QueryRow(ctx, `SELECT state, provider_instance_id, model, adopted,connection_id, project_id,
+  (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
+		Scan(&e.State, &e.Provider, &e.Model, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.Needs)
+	return e, notFound(err)
+}
+
+func (r tasks) SetStart(ctx context.Context, id int64, at *time.Time, tz *string) error {
+	_, err := r.Exec(ctx, `UPDATE tasks SET start_at = $2, start_tz = $3 WHERE id = $1`, id, at, tz)
+	return err
+}
+
+func (r tasks) HasAttachments(ctx context.Context, id int64) (bool, error) {
+	var hasImages bool
+	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE task_id=$1)`, id).Scan(&hasImages)
+	return hasImages, err
+}
+
+func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
+	var w where
+	w.arg(id)
+	var sets []string
+	set := func(col string, v any) { sets = append(sets, col+" = "+w.arg(v)) }
+	if u.ConnectionID.Set {
+		set("connection_id", u.ConnectionID.V)
+	}
+	if u.ExecutionConfig.Set {
+		set("execution_config", u.ExecutionConfig.Ptr())
+	}
+	if u.ProjectID.Set {
+		set("project_id", u.ProjectID.V)
+	}
+	if u.Title.Set {
+		set("title", u.Title.V)
+	}
+	if u.Prompt.Set {
+		set("prompt", u.Prompt.V)
+	}
+	if u.ProviderInstanceID.Set {
+		set("provider_instance_id", u.ProviderInstanceID.Ptr())
+	}
+	if u.Model.Set {
+		set("model", u.Model.Ptr())
+	}
+	if u.ModelOptions.Set {
+		set("model_options", nonNilOptions(u.ModelOptions.V))
+	}
+	if u.RuntimeMode.Set {
+		set("runtime_mode", u.RuntimeMode.V)
+	}
+	if u.InteractionMode.Set {
+		set("interaction_mode", u.InteractionMode.V)
+	}
+	if u.Workspace.Set {
+		set("workspace", u.Workspace.V)
+	}
+	if u.Handoff.Set {
+		set("handoff", u.Handoff.V)
+	}
+	if u.StartMode.Set {
+		set("start_mode", u.StartMode.Ptr())
+	}
+	sets = append(sets, "updated_at = "+nowSQL)
+	_, err := r.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
+	return err
+}
+
+func (r tasks) BaseTask(ctx context.Context, id int64) (*int64, bool, error) {
+	var base *int64
+	var isNeed bool
+	err := r.QueryRow(ctx, `
+SELECT json_extract(workspace, '$.baseTaskId'),
+  EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = tasks.id AND n.need_id = json_extract(tasks.workspace, '$.baseTaskId'))
+FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
+	return base, isNeed, notFound(err)
+}
+
+func (r tasks) Deletability(ctx context.Context, id int64) (store.TaskState, bool, error) {
+	var state store.TaskState
+	var unstarted bool
+	err := r.QueryRow(ctx, `SELECT t.state, `+unstartedSQL+` FROM tasks t WHERE t.id = $1`, id).Scan(&state, &unstarted)
+	return state, unstarted, notFound(err)
+}
+
+func (r tasks) Delete(ctx context.Context, id int64) error {
+	_, err := r.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
+	return err
+}
+
+func (r tasks) TreeID(ctx context.Context, id int64) (*int64, error) {
+	var tree *int64
+	err := r.QueryRow(ctx, `SELECT tree_id FROM tasks WHERE id = $1`, id).Scan(&tree)
+	return tree, notFound(err)
+}
+
+func (r tasks) SetArchived(ctx context.Context, id int64, archived bool) error {
+	if !archived {
+		_, err := r.Exec(ctx, `UPDATE tasks SET archived_at = NULL, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NOT NULL`, id)
+		return err
+	}
+	_, err := r.Exec(ctx, `UPDATE tasks SET archived_at = `+nowSQL+`, updated_at = `+nowSQL+` WHERE id = $1 AND archived_at IS NULL`, id)
+	return err
+}
+
+func (r tasks) Unarchive(ctx context.Context, id int64) (bool, error) {
+	tag, err := r.Exec(ctx, `UPDATE tasks SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL`, id)
+	return err == nil && tag.RowsAffected() > 0, err
+}
+
+func (r tasks) Touch(ctx context.Context, id int64) (bool, error) {
+	tag, err := r.Exec(ctx, `UPDATE tasks SET updated_at = `+nowSQL+` WHERE id = $1`, id)
+	return err == nil && tag.RowsAffected() > 0, err
+}
+
+func (r tasks) LaunchState(ctx context.Context, id int64) (store.TaskLaunchState, error) {
+	var s store.TaskLaunchState
+	err := r.QueryRow(ctx, `SELECT state, launch_attempt, COALESCE(launch_request_id, '') FROM tasks WHERE id = $1`, id).
+		Scan(&s.State, &s.Attempt, &s.RequestID)
+	return s, notFound(err)
+}
+
+func (r tasks) ApplyTransition(ctx context.Context, t store.Transition) (int, string, error) {
+	var attempt int
+	var requestID string
+	err := r.QueryRow(ctx, `
+UPDATE tasks SET
+  state = $2,
+  launch_attempt = launch_attempt + CASE WHEN $3 AND NOT launch_reuse THEN 1 ELSE 0 END,
+  launch_request_id = CASE WHEN $3 AND NOT (launch_reuse AND launch_request_id IS NOT NULL)
+                           THEN 'task-' || id || '-' || $8 ELSE launch_request_id END,
+  launch_reuse = CASE WHEN $3 THEN false WHEN $7 THEN true
+                      WHEN $4 IS NOT NULL THEN false ELSE launch_reuse END,
+  t3_thread_id = CASE WHEN $3 THEN NULL WHEN $4 IS NOT NULL THEN $4 ELSE t3_thread_id END,
+  session_id = CASE WHEN $3 THEN NULL ELSE session_id END,
+  scheduled_hold = CASE WHEN $3 THEN 0 ELSE scheduled_hold END,
+  launched_at = CASE WHEN $4 IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$9) END,
+  last_error = CASE WHEN $3 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE last_error END,
+  finished_at = CASE WHEN $3 THEN NULL
+                     WHEN $6 AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
+  settled_at = CASE WHEN $3 THEN NULL WHEN $2 = 'settled' THEN `+nowSQL+` ELSE settled_at END,
+  start_at = CASE WHEN $3 THEN NULL ELSE start_at END,
+  start_tz = CASE WHEN $3 THEN NULL ELSE start_tz END,
+  ready_at = CASE WHEN $3 THEN NULL ELSE ready_at END,
+  updated_at = `+nowSQL+`
+WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
+		t.TaskID, string(t.To), t.BeginAttempt, t.ThreadID, t.LastError, t.To.Finished(), t.ReuseAttempt, newUUID(), t.ObservedStart,
+	).Scan(&attempt, &requestID)
+	return attempt, requestID, err
+}
+
+func (r tasks) Confirm(ctx context.Context, a store.Attempt, state string, t3ThreadID *string, sessionID int64, endedAt *time.Time) (bool, error) {
+	res, err := r.Exec(ctx, `UPDATE tasks SET state=$3,t3_thread_id=$4,session_id=$5,launch_reuse=0,last_error=NULL,launched_at=COALESCE(launched_at,stage_now()),finished_at=CASE WHEN $3 IN ('done','failed','interrupted','cancelled') THEN COALESCE($6,stage_now()) ELSE NULL END,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, state, t3ThreadID, sessionID, endedAt)
+	return err == nil && res.RowsAffected() == 1, err
+}
+
+func (r tasks) Reject(ctx context.Context, a store.Attempt, reason string) error {
+	_, err := r.Exec(ctx, `UPDATE tasks SET state='backlog',launch_reuse=0,last_error=$3,scheduled_hold=1,updated_at=stage_now() WHERE id=$1 AND launch_attempt=$2 AND state='launching'`, a.TaskID, a.Number, reason)
+	return err
+}
+
+func (r tasks) SetLaunchError(ctx context.Context, a store.Attempt, msg string) error {
+	_, err := r.Exec(ctx, "UPDATE tasks SET last_error=$3 WHERE id=$1 AND launch_attempt=$2 AND state='launching'", a.TaskID, a.Number, msg)
+	return err
+}
+
+func (r tasks) ReusesLaunch(ctx context.Context, id int64) (bool, error) {
+	var reuse bool
+	err := r.QueryRow(ctx, `SELECT launch_reuse FROM tasks WHERE id=$1`, id).Scan(&reuse)
+	return reuse, notFound(err)
+}
+
+func (r tasks) NoteBlocked(ctx context.Context, id int64, reason string) (bool, error) {
+	tag, err := r.Exec(ctx, `UPDATE tasks SET last_error=$2,updated_at=stage_now() WHERE id=$1 AND state='backlog'`, id, reason)
+	return err == nil && tag.RowsAffected() > 0, err
+}
+
+func (r tasks) HoldScheduled(ctx context.Context, id int64, reason string) (bool, error) {
+	tag, err := r.Exec(ctx, `UPDATE tasks SET scheduled_hold=1,start_at=NULL,start_tz=NULL,last_error=$2,updated_at=stage_now() WHERE id=$1 AND state='backlog' AND start_at IS NOT NULL`, id, reason)
+	return err == nil && tag.RowsAffected() > 0, err
+}

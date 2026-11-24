@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
 // MaxTaskAttachments is the per-task (and per-follow-up) image limit (T3's).
@@ -15,70 +17,45 @@ const MaxAttachmentBytes = 10 << 20
 // AttachmentMimeTypes are the accepted image types (T3's).
 var AttachmentMimeTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 
-// Attachment is an image's metadata (bytes via AttachmentData).
-type Attachment struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	MimeType  string `json:"mimeType"`
-	SizeBytes int    `json:"sizeBytes"`
-}
-
-// AttachmentData is an image with its bytes.
-type AttachmentData struct {
-	Attachment
-	TaskID *int64
-	Data   []byte
-}
+type (
+	Attachment     = store.Attachment
+	AttachmentData = store.AttachmentData
+)
 
 // CreateAttachment stores a staged (unattached) image.
 func (s *Store) CreateAttachment(ctx context.Context, name, mimeType string, data []byte) (Attachment, error) {
-	a := Attachment{Name: name, MimeType: mimeType, SizeBytes: len(data)}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO task_attachments (name, mime_type, size_bytes, data) VALUES ($1, $2, $3, $4) RETURNING id`,
-		name, mimeType, len(data), data).Scan(&a.ID)
-	return a, err
+	return write(ctx, s, func(tx store.Tx) (Attachment, error) { return tx.Attachments().Create(ctx, name, mimeType, data) })
 }
 
 // GetAttachment returns one image with its bytes.
 func (s *Store) GetAttachment(ctx context.Context, id int64) (AttachmentData, error) {
-	var a AttachmentData
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, task_id, name, mime_type, size_bytes, data FROM task_attachments WHERE id = $1`, id).
-		Scan(&a.ID, &a.TaskID, &a.Name, &a.MimeType, &a.SizeBytes, &a.Data)
-	if err != nil {
-		return AttachmentData{}, notFound(err)
-	}
-	return a, nil
+	return read(ctx, s, func(tx store.Tx) (AttachmentData, error) { return tx.Attachments().Get(ctx, id) })
 }
 
 // DeleteAttachment removes a staged image, or one of a backlog task's images
 // (Conflict once the task has left backlog).
 func (s *Store) DeleteAttachment(ctx context.Context, id int64) error {
-	return s.inTx(ctx, func(tx *Tx) error {
-		var state *TaskState
-		err := tx.QueryRow(ctx, `
-SELECT t.state FROM task_attachments a LEFT JOIN tasks t ON t.id = a.task_id
-WHERE a.id = $1`, id).Scan(&state)
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		state, err := tx.Attachments().TaskState(ctx, id)
 		if err != nil {
-			return notFound(err)
+			return err
 		}
 		if state != nil && *state != StateBacklog {
 			return Conflict("task is %s: images are read-only outside backlog", *state)
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM task_attachments WHERE id = $1`, id)
-		return err
+		return tx.Attachments().Delete(ctx, id)
 	})
 }
 
 // TaskAttachments returns a task's images with bytes, in upload order.
 func (s *Store) TaskAttachments(ctx context.Context, taskID int64) ([]AttachmentData, error) {
-	return s.attachmentData(ctx, `WHERE task_id = $1 ORDER BY id`, taskID)
+	return read(ctx, s, func(tx store.Tx) ([]AttachmentData, error) { return tx.Attachments().ForTask(ctx, taskID) })
 }
 
 // StagedAttachments returns the staged images ids (in ids order); Invalid
 // when any is unknown or already attached.
 func (s *Store) StagedAttachments(ctx context.Context, ids []int64) ([]AttachmentData, error) {
-	rows, err := s.attachmentData(ctx, `WHERE task_id IS NULL AND schedule_id IS NULL AND id IN (SELECT value FROM json_each($1))`, jsonArray(ids))
+	rows, err := read(ctx, s, func(tx store.Tx) ([]AttachmentData, error) { return tx.Attachments().Staged(ctx, ids) })
 	if err != nil {
 		return nil, err
 	}
@@ -93,82 +70,32 @@ func (s *Store) StagedAttachments(ctx context.Context, ids []int64) ([]Attachmen
 	return out, nil
 }
 
-func (s *Store) attachmentData(ctx context.Context, cond string, arg any) ([]AttachmentData, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, task_id, name, mime_type, size_bytes, data FROM task_attachments `+cond, arg)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []AttachmentData{}
-	for rows.Next() {
-		var a AttachmentData
-		if err := rows.Scan(&a.ID, &a.TaskID, &a.Name, &a.MimeType, &a.SizeBytes, &a.Data); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
-}
-
 // DeleteStagedAttachments removes staged images (after a follow-up sent them).
 func (s *Store) DeleteStagedAttachments(ctx context.Context, ids []int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND id IN (SELECT value FROM json_each($1))`, jsonArray(ids))
-	return err
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Attachments().DeleteStaged(ctx, ids) })
 }
 
 // SweepStagedAttachments removes staged images older than age.
 func (s *Store) SweepStagedAttachments(ctx context.Context, age time.Duration) (int64, error) {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM task_attachments WHERE task_id IS NULL AND schedule_id IS NULL AND created_at < $1`, time.Now().Add(-age))
-	return tag.RowsAffected(), err
+	return write(ctx, s, func(tx store.Tx) (int64, error) { return tx.Attachments().SweepStaged(ctx, time.Now().Add(-age)) })
 }
 
-// setAttachments makes ids the task's exact image set: staged ids are
-// attached, the task's images not in ids are deleted. Invalid when an id is
-// neither staged nor the task's own, or when more than MaxTaskAttachments.
-func setAttachments(ctx context.Context, tx *Tx, taskID int64, ids []int64) error {
-	return setOwnedAttachments(ctx, tx, "task_id", taskID, ids)
-}
-
-// setOwnedAttachments is setAttachments for an owner column (task_id or
-// schedule_id). Staged = no owner.
-func setOwnedAttachments(ctx context.Context, tx *Tx, col string, ownerID int64, ids []int64) error {
+// setOwned makes ids the owner's exact image set: staged ids are attached,
+// the owner's images not in ids are deleted. Invalid when an id is neither
+// staged nor the owner's, or when more than MaxTaskAttachments.
+func setOwned(ctx context.Context, tx store.Tx, owner store.AttachmentOwner, ownerID int64, ids []int64) error {
 	ids = uniqueIDs(ids)
 	if len(ids) > MaxTaskAttachments {
 		return Invalid("at most %d images per task", MaxTaskAttachments)
 	}
-	const staged = `(task_id IS NULL AND schedule_id IS NULL)`
-	var usable int
-	err := tx.QueryRow(ctx, `
-SELECT count(*) FROM task_attachments
-WHERE id IN (SELECT value FROM json_each($2)) AND (`+staged+` OR `+col+` = $1)`, ownerID, jsonArray(ids)).Scan(&usable)
+	usable, err := tx.Attachments().Usable(ctx, owner, ownerID, ids)
 	if err != nil {
 		return err
 	}
 	if usable != len(ids) {
 		return Invalid("unknown or already attached image in attachmentIds")
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM task_attachments WHERE `+col+` = $1 AND id NOT IN (SELECT value FROM json_each($2))`, ownerID, jsonArray(ids)); err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `UPDATE task_attachments SET `+col+` = $1 WHERE `+staged+` AND id IN (SELECT value FROM json_each($2))`, ownerID, jsonArray(ids))
-	return err
-}
-
-// copyScheduleAttachments copies a schedule's images onto task dst.
-func copyScheduleAttachments(ctx context.Context, tx *Tx, scheduleID, dst int64) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data)
-SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE schedule_id = $1 ORDER BY id`, scheduleID, dst)
-	return err
-}
-
-// copyAttachments copies src's images onto dst.
-func copyAttachments(ctx context.Context, tx *Tx, src, dst int64) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data)
-SELECT $2, name, mime_type, size_bytes, data FROM task_attachments WHERE task_id = $1 ORDER BY id`, src, dst)
-	return err
+	return tx.Attachments().SetOwned(ctx, owner, ownerID, ids)
 }
 
 func uniqueIDs(ids []int64) []int64 {

@@ -1,11 +1,11 @@
 package sync_test
 
 import (
-	"database/sql"
 	"log/slog"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
@@ -33,7 +33,7 @@ func forPlacements(t *testing.T, fn func(t *testing.T, p placement)) {
 
 // machine is the machine the placement's connections belong to (it adds
 // the remote machine's row).
-func (p placement) machine(t *testing.T, pool *sql.DB) int64 {
+func (p placement) machine(t *testing.T, pool *sqlite.DB) int64 {
 	t.Helper()
 	if !p.remote {
 		return db.LocalMachine

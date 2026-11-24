@@ -12,14 +12,14 @@ that disagrees with this file updates it in the same PR.
 | Part | Today | Task |
 | --- | --- | --- |
 | [Engines and selection](#engines-and-selection) | SQLite only, `<data dir>/stage.db` | #405 |
-| [Layout](#layout-and-ownership) and [ports](#ports) | one package, `internal/db`, SQL beside the rules | #398 |
+| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite` and `internal/db/dbtest` (#398); no `postgres` or `storetest` package yet | Postgres: #403, `storetest`: #400 |
 | [Transactions and locking](#transactions-and-locking) | SQLite: as described | Postgres: #403, proven by #400 |
 | [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
 | [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | one SQLite dir, `server/internal/db/migrations`, head 25; journal events by triggers | per-engine dirs #401, triggers to Go #399, Postgres baseline #403 |
+| [Migrations](#migrations) | one SQLite dir, `server/internal/db/sqlite/migrations`, head 25; journal events by triggers | Postgres dir and parity #401, triggers to Go #399, Postgres baseline #403 |
 | [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
-| [Checks](#checks) | the tasks exist (#185); every gate reports `not present yet` | gates: #398, #400, #401, #403 |
+| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` runs (#398); the other gates report `not present yet` | gates: #400, #401, #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); every Drop row is still in the SQLite schema | drops: #399 (trigger logic to Go), #417 (SQLite contract), #403 (baseline omits them) |
@@ -61,8 +61,14 @@ its API, and only `internal/serve` composes an engine.
 | `internal/db/storetest` | The adapter-agnostic contract suite: takes an engine factory, runs every port through `db.Store` and the ports | Depend on one engine's SQL |
 | `internal/db/dbtest` | Test helpers; opens stores through the engine (a temp SQLite file, or the `check:postgres` database) | Open a database any other way |
 
-Code outside the Postgres adapter compiles without the tag. Driver imports
-and SQL strings outside their adapter fail `TestDriverImportBoundary`.
+Code outside the Postgres adapter compiles without the tag.
+`TestDriverImportBoundary` (`internal/db/boundary_test.go`, run by
+`check:storage`) scans every Go file of the server module: a driver import
+(`modernc.org/sqlite`, pgx, `lib/pq`) outside its adapter fails, tests
+included; a `database/sql` import or a SQL statement in a string literal
+outside the adapters fails in non-test files. Tests may still query a
+database directly (through the `*sqlite.DB` that `dbtest` and the adapter
+return).
 
 ## Ports
 
@@ -71,23 +77,34 @@ slices, `json.RawMessage` for opaque JSON. Never an engine encoding (no
 timestamp strings, no JSON text for lists, no `sql.Null*` in a port).
 
 **Unit of work.** `Read(ctx, fn)` and `Write(ctx, fn)` run `fn` with a
-transaction handle that every repository call takes. A rule calls its
-repositories inside one `Write`; nothing writes outside a `Write`.
+transaction handle (`store.Tx`); every repository is reached through it
+(`tx.Tasks()`, `tx.Trees()`, ...), so every repository call runs in that unit
+of work. Each `db.Store` method that writes runs one `Write`, its rules and
+repository calls inside it; nothing writes outside a `Write`. On SQLite,
+`Read` runs on the pool, not in a transaction (a transaction would take the
+write lock under `_txlock=immediate`): each statement sees the latest
+commit. A method that needs one consistent view across reads (journal
+paging, completion preview) uses `Write`.
 
-**Repositories**, one per aggregate: tasks (and attempts, checkpoints,
-observations), trees (needs, membership), journal, projects (bindings,
-external projects, imports), connections (harness connections, T3 and
-OpenCode settings), machines (pairing codes, machine tokens), schedules,
-notifications, acceptance, attachments, users and identities, preferences,
-push subscriptions, snippets, threads and sessions (the T3 mirror, session
-identities). #398 may merge or split these where the code shows a better
-seam; it updates this list.
+**Repositories**, one per aggregate, in `internal/db/store`: `Tasks` (task
+rows and events), `Attempts` (launch attempts and checkpoints, claims, pinned
+destinations and inputs, launch bases, handoffs), `Observations` (normalized
+execution observations), `Trees` (trees, membership, needs), `Journal`,
+`Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
+projects, imports), `Connections` (harness connections, T3 and OpenCode
+settings, shared paths), `Machines` (pairing codes, machine tokens),
+`Notifications`, `Sessions` (session identities), `Threads` (the T3 mirror,
+watcher state, last words), `Stats` (read-only counts), `Attachments`,
+`Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
+Repository methods are named queries: they hold no rules, return engine
+errors unchanged and `store.ErrNotFound` for a missing row; `internal/db`
+classifies errors through the `ErrorClassifier`.
 
 **Capability ports**
 
 | Port | SQLite | Postgres |
 | --- | --- | --- |
-| Ownership | `flock` on `<data dir>/stage.lock` ([runtime.md](runtime.md#ownership-and-locks)) | session advisory lock on a dedicated connection ([Single owner](#single-owner)) |
+| Ownership | `flock` on `<data dir>/stage.lock`, taken by `internal/serve` with the data dir before the engine opens ([runtime.md](runtime.md#ownership-and-locks)); the port's `Acquire` holds nothing more | session advisory lock on a dedicated connection ([Single owner](#single-owner)) |
 | Backup | `VACUUM INTO` before migrating ([Backups](#backups)) | none: logs a warning before migrating |
 | Migrator | goose `sqlite3` dialect over the SQLite dir | goose `postgres` dialect with its session locker over the Postgres dir |
 | ErrorClassifier | SQLite extended codes ([Errors](#errors)) | SQLSTATE |

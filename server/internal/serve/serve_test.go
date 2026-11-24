@@ -23,7 +23,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
@@ -385,7 +385,7 @@ func TestSocketPathCollision(t *testing.T) {
 	if h := health(t, first.ready.Listeners[0]); h.InstanceID != first.ready.Meta.InstanceID {
 		t.Fatal("socket taken over")
 	}
-	gone(t, filepath.Join(data2, db.DBFile))
+	gone(t, filepath.Join(data2, sqlite.DBFile))
 	free(t, data2)
 }
 
@@ -404,7 +404,7 @@ func TestPartialBindFailure(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 	free(t, data, sock)
-	gone(t, filepath.Join(data, db.DBFile))
+	gone(t, filepath.Join(data, sqlite.DBFile))
 	// Nothing stale blocks the next start.
 	i := start(t, cfg(t, data, "unix:"+sock), newT3())
 	if err := i.stop(t); err != nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
@@ -363,7 +364,7 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != db.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()

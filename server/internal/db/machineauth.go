@@ -5,13 +5,14 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/base32"
 	"errors"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
 // Machine credentials (docs/api.md "Machines"). A pairing code adds a
@@ -122,12 +123,12 @@ func (s *Store) CreatePairing(ctx context.Context, label string) (Pairing, error
 	}
 	now := time.Now()
 	p := Pairing{Label: label, ExpiresAt: now.Add(PairingTTL).UTC().Truncate(time.Microsecond)}
-	err = s.inTx(ctx, func(tx *Tx) error {
-		if _, err := tx.Exec(ctx, `DELETE FROM pairing_codes WHERE COALESCE(redeemed_at,expires_at)<$1`, formatTime(now.Add(-pairingKeep))); err != nil {
+	err = s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Machines().PrunePairings(ctx, now.Add(-pairingKeep)); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO pairing_codes(secret_hash,label,created_by_user_id,expires_at) VALUES($1,$2,$3,$4) RETURNING id`,
-			hash, label, ActingUser(ctx), formatTime(p.ExpiresAt)).Scan(&p.ID)
+		p.ID, err = tx.Machines().InsertPairing(ctx, hash, label, ActingUser(ctx), p.ExpiresAt)
+		return err
 	})
 	if err != nil {
 		return Pairing{}, err
@@ -148,19 +149,15 @@ type PairingState struct {
 // PairingStatus reads a pairing code's state by its id (ErrNotFound when
 // unknown, revoked or pruned). It never reveals the code.
 func (s *Store) PairingStatus(ctx context.Context, id int64) (PairingState, error) {
-	p := PairingState{ID: id}
-	var live bool
-	err := s.pool.QueryRow(ctx, `SELECT expires_at,machine_id,expires_at>stage_now() FROM pairing_codes WHERE id=$1`, id).Scan(&p.ExpiresAt, &p.MachineID, &live)
-	if errors.Is(err, sql.ErrNoRows) {
-		return PairingState{}, ErrNotFound
-	}
+	row, err := read(ctx, s, func(tx store.Tx) (store.PairingRow, error) { return tx.Machines().Pairing(ctx, id) })
 	if err != nil {
 		return PairingState{}, err
 	}
+	p := PairingState{ID: id, ExpiresAt: row.ExpiresAt, MachineID: row.MachineID}
 	switch {
 	case p.MachineID != nil:
 		p.State = "joined"
-	case live:
+	case row.Live:
 		p.State = "waiting"
 	default:
 		p.State = "expired"
@@ -172,20 +169,15 @@ func (s *Store) PairingStatus(ctx context.Context, id int64) (PairingState, erro
 // longer add a machine (ErrNotFound when unknown; a redeemed code is a
 // conflict: remove its machine instead).
 func (s *Store) RevokePairing(ctx context.Context, id int64) error {
-	return s.inTx(ctx, func(tx *Tx) error {
-		var machine *int64
-		err := tx.QueryRow(ctx, `SELECT machine_id FROM pairing_codes WHERE id=$1`, id).Scan(&machine)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		row, err := tx.Machines().Pairing(ctx, id)
 		if err != nil {
 			return err
 		}
-		if machine != nil {
+		if row.MachineID != nil {
 			return &ConflictError{Msg: "This pairing code already added a machine. Remove the machine instead.", Code: "pairing_redeemed"}
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM pairing_codes WHERE id=$1 AND redeemed_at IS NULL`, id)
-		return err
+		return tx.Machines().DeleteUnredeemedPairing(ctx, id)
 	})
 }
 
@@ -217,41 +209,40 @@ func (s *Store) RedeemPairing(ctx context.Context, code, label, version string) 
 	}
 	var g MachineGrant
 	var tokenID int64
-	err = s.inTx(ctx, func(tx *Tx) error {
-		var stored []byte
-		var pairLabel string
-		var creator int64
-		err := tx.QueryRow(ctx, `SELECT secret_hash,label,created_by_user_id FROM pairing_codes WHERE id=$1 AND redeemed_at IS NULL AND expires_at>stage_now()`, id).Scan(&stored, &pairLabel, &creator)
-		if errors.Is(err, sql.ErrNoRows) {
+	err = s.e.Write(ctx, func(tx store.Tx) error {
+		m := tx.Machines()
+		pair, err := m.RedeemablePairing(ctx, id)
+		if errors.Is(err, ErrNotFound) {
 			return ErrInvalidPairing
 		}
 		if err != nil {
 			return err
 		}
-		if !secretMatches(stored, secret) {
+		if !secretMatches(pair.Hash, secret) {
 			return ErrInvalidPairing
 		}
-		g.Label = pairLabel
+		g.Label = pair.Label
 		if g.Label == "" {
 			g.Label = label
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO machines(label,created_by_user_id,last_seen_at,version) VALUES($1,$2,stage_now(),$3) RETURNING id`, g.Label, creator, strings.TrimSpace(version)).Scan(&g.MachineID); err != nil {
+		if g.MachineID, err = m.InsertMachine(ctx, g.Label, pair.CreatedBy, strings.TrimSpace(version)); err != nil {
 			return err
 		}
 		if g.Label == "" {
 			g.Label = "Machine " + strconv.FormatInt(g.MachineID, 10)
-			if _, err := tx.Exec(ctx, `UPDATE machines SET label=$2 WHERE id=$1`, g.MachineID, g.Label); err != nil {
+			if err := m.SetLabel(ctx, g.MachineID, g.Label); err != nil {
 				return err
 			}
 		}
-		res, err := tx.Exec(ctx, `UPDATE pairing_codes SET redeemed_at=stage_now(),machine_id=$2 WHERE id=$1 AND redeemed_at IS NULL`, id, g.MachineID)
+		redeemed, err := m.MarkRedeemed(ctx, id, g.MachineID)
 		if err != nil {
 			return err
 		}
-		if res.RowsAffected() != 1 {
+		if !redeemed {
 			return ErrInvalidPairing
 		}
-		return tx.QueryRow(ctx, `INSERT INTO machine_tokens(machine_id,secret_hash) VALUES($1,$2) RETURNING id`, g.MachineID, tokenHash).Scan(&tokenID)
+		tokenID, err = m.InsertToken(ctx, g.MachineID, tokenHash)
+		return err
 	})
 	if err != nil {
 		return MachineGrant{}, err
@@ -269,8 +260,12 @@ func (s *Store) AuthenticateMachine(ctx context.Context, token string) (int64, e
 	}
 	var machine int64
 	var stored []byte
-	err := s.pool.QueryRow(ctx, `SELECT t.machine_id,t.secret_hash FROM machine_tokens t JOIN machines m ON m.id=t.machine_id WHERE t.id=$1 AND m.removed_at IS NULL`, id).Scan(&machine, &stored)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := s.e.Read(ctx, func(tx store.Tx) error {
+		var err error
+		machine, stored, err = tx.Machines().Token(ctx, id)
+		return err
+	})
+	if errors.Is(err, ErrNotFound) {
 		return 0, ErrInvalidMachineToken
 	}
 	if err != nil {
@@ -286,35 +281,24 @@ func (s *Store) AuthenticateMachine(ctx context.Context, token string) (int64, e
 // at (never moving last_seen_at back) and, when version is not empty, the
 // build it runs. Removed machines and the local machine are left alone.
 func (s *Store) TouchMachine(ctx context.Context, id int64, at time.Time, version string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE machines SET last_seen_at=CASE WHEN last_seen_at IS NULL OR last_seen_at<$2 THEN $2 ELSE last_seen_at END, version=CASE WHEN $3<>'' THEN $3 ELSE version END WHERE id=$1 AND id<>1 AND removed_at IS NULL`, id, at, strings.TrimSpace(version))
-	return err
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		return tx.Machines().Touch(ctx, id, at, strings.TrimSpace(version))
+	})
 }
 
-// MachineInfo is a machine as listed: its row, what its worker last
-// reported, and its active connections.
-type MachineInfo struct {
-	Machine
-	CreatedAt   time.Time
-	LastSeenAt  *time.Time
-	Version     string
-	Connections []MachineConnection
-}
-
-// MachineConnection is an active harness connection of a machine.
-type MachineConnection struct {
-	ID      int64  `json:"id"`
-	Harness string `json:"harness"`
-	Label   string `json:"label"`
-}
+type (
+	MachineInfo       = store.MachineInfo
+	MachineConnection = store.MachineConnection
+)
 
 // ListMachines lists machines not removed, local first.
 func (s *Store) ListMachines(ctx context.Context) ([]MachineInfo, error) {
-	return s.machineInfos(ctx, 0)
+	return read(ctx, s, func(tx store.Tx) ([]MachineInfo, error) { return tx.Machines().List(ctx, 0) })
 }
 
 // GetMachineInfo reads a machine not removed (ErrNotFound otherwise).
 func (s *Store) GetMachineInfo(ctx context.Context, id int64) (MachineInfo, error) {
-	ms, err := s.machineInfos(ctx, id)
+	ms, err := read(ctx, s, func(tx store.Tx) ([]MachineInfo, error) { return tx.Machines().List(ctx, id) })
 	if err != nil {
 		return MachineInfo{}, err
 	}
@@ -322,47 +306,6 @@ func (s *Store) GetMachineInfo(ctx context.Context, id int64) (MachineInfo, erro
 		return MachineInfo{}, ErrNotFound
 	}
 	return ms[0], nil
-}
-
-// machineInfos lists machines not removed (only id when nonzero).
-func (s *Store) machineInfos(ctx context.Context, id int64) ([]MachineInfo, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id,label,created_by_user_id,created_at,last_seen_at,version FROM machines WHERE removed_at IS NULL AND ($1=0 OR id=$1) ORDER BY id`, id)
-	if err != nil {
-		return nil, err
-	}
-	ms, err := collectRows(rows, func(r rowScanner) (MachineInfo, error) {
-		var m MachineInfo
-		err := r.Scan(&m.ID, &m.Label, &m.CreatedBy, &m.CreatedAt, &m.LastSeenAt, &m.Version)
-		m.Connections = []MachineConnection{}
-		return m, err
-	})
-	if err != nil || len(ms) == 0 {
-		return ms, err
-	}
-	rows, err = s.pool.Query(ctx, `SELECT machine_id,id,harness,label FROM harness_connections WHERE active=1 AND ($1=0 OR machine_id=$1) ORDER BY id`, id)
-	if err != nil {
-		return nil, err
-	}
-	type conn struct {
-		machine int64
-		c       MachineConnection
-	}
-	cs, err := collectRows(rows, func(r rowScanner) (conn, error) {
-		var c conn
-		err := r.Scan(&c.machine, &c.c.ID, &c.c.Harness, &c.c.Label)
-		return c, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	for i := range ms {
-		for _, c := range cs {
-			if c.machine == ms[i].ID {
-				ms[i].Connections = append(ms[i].Connections, c.c)
-			}
-		}
-	}
-	return ms, nil
 }
 
 // SetDefaultLocalLabel names the local machine only while its label is
@@ -373,11 +316,7 @@ func (s *Store) SetDefaultLocalLabel(ctx context.Context, label string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	res, err := s.pool.Exec(ctx, `UPDATE machines SET label=$2 WHERE id=$1 AND label=''`, LocalMachine, label)
-	if err != nil {
-		return false, err
-	}
-	return res.RowsAffected() > 0, nil
+	return write(ctx, s, func(tx store.Tx) (bool, error) { return tx.Machines().SetLabelIfEmpty(ctx, LocalMachine, label) })
 }
 
 // RenameMachine sets a machine's label.
@@ -386,8 +325,8 @@ func (s *Store) RenameMachine(ctx context.Context, id int64, label string) error
 	if err != nil {
 		return err
 	}
-	res, err := s.pool.Exec(ctx, `UPDATE machines SET label=$2 WHERE id=$1 AND removed_at IS NULL`, id, label)
-	if err == nil && res.RowsAffected() == 0 {
+	renamed, err := write(ctx, s, func(tx store.Tx) (bool, error) { return tx.Machines().Rename(ctx, id, label) })
+	if err == nil && !renamed {
 		err = ErrNotFound
 	}
 	return err
@@ -403,40 +342,37 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 	if id == LocalMachine {
 		return &ConflictError{Msg: "This computer runs the Stage server and cannot be removed.", Code: "local_machine"}
 	}
-	err := s.inTx(ctx, func(tx *Tx) error {
-		res, err := tx.Exec(ctx, `UPDATE machines SET removed_at=stage_now() WHERE id=$1 AND removed_at IS NULL`, id)
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		removed, err := tx.Machines().MarkRemoved(ctx, id)
 		if err != nil {
 			return err
 		}
-		if res.RowsAffected() == 0 {
+		if !removed {
 			return ErrNotFound
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM machine_tokens WHERE machine_id=$1`, id); err != nil {
+		if err := tx.Machines().DeleteTokens(ctx, id); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id FROM harness_connections WHERE machine_id=$1 AND active=1`, id)
+		c := tx.Connections()
+		ids, err := c.ActiveOnMachine(ctx, id)
 		if err != nil {
 			return err
 		}
-		ids, err := collectRows(rows, rowTo[int64])
-		if err != nil {
-			return err
-		}
-		for _, c := range ids {
-			referenced, err := connectionReferenced(ctx, tx, c)
+		for _, conn := range ids {
+			referenced, err := connectionReferenced(ctx, tx, conn)
 			if err != nil {
 				return err
 			}
 			if !referenced {
-				if err := deleteConnection(ctx, tx, c); err != nil {
+				if err := c.Delete(ctx, conn); err != nil {
 					return err
 				}
 				continue
 			}
-			if _, err := tx.Exec(ctx, `UPDATE harness_connections SET active=0,retired_at=stage_now() WHERE id=$1`, c); err != nil {
+			if err := c.Retire(ctx, conn); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE preferences SET default_connection_id=NULL WHERE default_connection_id=$1`, c); err != nil {
+			if err := c.ClearDefault(ctx, conn); err != nil {
 				return err
 			}
 		}
@@ -446,14 +382,12 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 	return err
 }
 
-// connectionReferenced: relations (hasRelations) or unlaunched tasks and
+// connectionReferenced: relations (HasRelations) or unlaunched tasks and
 // schedules point at the connection, so it must stay as history.
-func connectionReferenced(ctx context.Context, tx *Tx, id int64) (bool, error) {
-	related, err := hasRelations(ctx, tx, id)
+func connectionReferenced(ctx context.Context, tx store.Tx, id int64) (bool, error) {
+	related, err := tx.Connections().HasRelations(ctx, id)
 	if err != nil || related {
 		return related, err
 	}
-	var pending bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1) OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)`, id).Scan(&pending)
-	return pending, err
+	return tx.Connections().HasWork(ctx, id)
 }

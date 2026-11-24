@@ -1,6 +1,10 @@
 package db
 
-import "context"
+import (
+	"context"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
+)
 
 // CreatedTasks is a session batch: the tasks one T3 session created
 // (origin_thread_id), grouped by tree.
@@ -30,8 +34,7 @@ func (s *Store) CreatedBy(ctx context.Context, threadID string) (CreatedTasks, e
 	return s.CreatedBySession(ctx, SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: threadID})
 }
 func (s *Store) CreatedBySession(ctx context.Context, ref SessionRef) (CreatedTasks, error) {
-	rows, err := s.pool.Query(ctx, taskSelect+` WHERE t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2) ORDER BY t.id`, ref.ConnectionID, ref.ExternalSessionID)
-	tasks, err := collectTasks(rows, err)
+	tasks, err := read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().CreatedBySession(ctx, ref) })
 	if err != nil {
 		return CreatedTasks{}, err
 	}

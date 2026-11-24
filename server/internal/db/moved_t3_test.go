@@ -1,8 +1,8 @@
 package db
 
 import (
-	"database/sql"
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +13,7 @@ import (
 
 // movedT3 retires the local machine's T3 onto the same environment on a
 // worker (machine 2) and returns the worker's connection.
-func movedT3(t *testing.T) (*Store, *sql.DB, int64) {
+func movedT3(t *testing.T) (*Store, *sqlite.DB, int64) {
 	t.Helper()
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'worker')`)

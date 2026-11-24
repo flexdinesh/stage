@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -16,7 +17,7 @@ func TestMachinesMigrationKeepsConnectionsAndOpensKinds(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
 	mustExec(t, pool, `INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace) VALUES(1,7,'oc','/w')`)
 	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,7,'ses_x')`)
-	migrateTo(t, pool, MaxVersion())
+	migrateTo(t, pool, sqlite.MaxVersion())
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}
@@ -107,7 +108,7 @@ func TestLocalMachineLabelMigrationUnsetsOnlyTheSeed(t *testing.T) {
 		pool := openUnmigrated(t)
 		migrateTo(t, pool, 21)
 		mustExec(t, pool, `UPDATE machines SET label=$1 WHERE id=1`, tc.before)
-		migrateTo(t, pool, MaxVersion())
+		migrateTo(t, pool, sqlite.MaxVersion())
 		m, err := NewStore(pool).GetMachine(t.Context(), LocalMachine)
 		if err != nil || m.Label != tc.after {
 			t.Fatalf("%q: machine %+v %v, want label %q", tc.before, m, err, tc.after)

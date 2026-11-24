@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"database/sql"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"slices"
 	"testing"
 
@@ -19,7 +19,7 @@ const (
 	thirdT3       int64 = 5
 )
 
-func twoMachineStore(t *testing.T) (*Store, context.Context, *sql.DB) {
+func twoMachineStore(t *testing.T) (*Store, context.Context, *sqlite.DB) {
 	t.Helper()
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'Laptop'),(3,'Desktop')`)
@@ -31,7 +31,7 @@ func remote(repo, path string) func(*execution.WorkspaceInfo) {
 	return func(w *execution.WorkspaceInfo) { w.Repo, w.RepoPath = repo, path }
 }
 
-func projectCount(t *testing.T, pool *sql.DB) int {
+func projectCount(t *testing.T, pool *sqlite.DB) int {
 	t.Helper()
 	var n int
 	if err := pool.QueryRow(`SELECT count(*) FROM projects`).Scan(&n); err != nil {

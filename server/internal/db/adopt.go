@@ -2,12 +2,12 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -27,9 +27,9 @@ type AdoptInput struct {
 func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, error) {
 	var id int64
 	var created bool
-	err := s.inTx(ctx, func(tx *Tx) error {
+	err := s.e.Write(ctx, func(tx store.Tx) error {
 		var err error
-		id, created, err = adoptThread(ctx, tx, in)
+		id, created, err = s.adoptThread(ctx, tx, in)
 		if err == nil && in.TreeID != nil {
 			if err = treeExists(ctx, tx, *in.TreeID); err == nil {
 				err = joinTree(ctx, tx, id, *in.TreeID)
@@ -44,37 +44,36 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 	return t, created, err
 }
 
-func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error) {
+func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
 	if in.ThreadID != "" {
-		t3, err := legacyT3(ctx, tx)
+		t3, err := legacyT3Tx(ctx, tx)
 		if err != nil {
 			return 0, false, err
 		}
 		ref = SessionRef{ConnectionID: t3, ExternalSessionID: in.ThreadID}
 	}
-	if err := connectionInUse(ctx, tx, ref.ConnectionID); err != nil {
+	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
 		return 0, false, err
 	}
-	isT3, err := harnessIs(ctx, tx, ref.ConnectionID, HarnessT3)
+	isT3, err := tx.Connections().HarnessIs(ctx, ref.ConnectionID, HarnessT3)
 	if err != nil {
 		return 0, false, err
 	}
-	sid, err := sessionIdentity(ctx, tx, ref)
+	sid, err := ensureSession(ctx, tx, ref)
 	if err != nil {
 		return 0, false, err
 	}
-	var id int64
-	err = tx.QueryRow(ctx, "SELECT id FROM tasks WHERE session_id=$1", sid).Scan(&id)
+	id, err := tx.Tasks().BySessionID(ctx, sid)
 	if err == nil {
 		return id, false, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, ErrNotFound) {
 		return 0, false, err
 	}
-	var o execution.Observation
-	if err = tx.QueryRow(ctx, "SELECT observation FROM execution_observations WHERE session_id=$1", sid).Scan(&o); err != nil {
-		return 0, false, notFound(err)
+	o, err := tx.Observations().Get(ctx, sid)
+	if err != nil {
+		return 0, false, err
 	}
 	if o.Child || o.Parent != nil {
 		return 0, false, Conflict("only a top-level session can be adopted")
@@ -82,7 +81,7 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	if o.Archived {
 		return 0, false, Conflict("session is archived")
 	}
-	projectID, err := adoptionProject(ctx, tx, in, o)
+	projectID, err := s.adoptionProject(ctx, tx, in, o)
 	if err != nil {
 		return 0, false, err
 	}
@@ -123,13 +122,13 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 			mode = o.Config.Mode
 		}
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,t3_thread_id,
-	 execution_config,runtime_mode,interaction_mode,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
-	 VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,1,1,$10,$11,$12,$13) RETURNING id`, projectID, title, state, ref.ConnectionID, sid, legacyID, o.Config, permission, mode, launched, finished, ActingUser(ctx), ActingMachine(ctx)).Scan(&id)
+	id, err = tx.Tasks().InsertAdopted(ctx, store.AdoptedInsert{ProjectID: projectID, Title: title, State: state,
+		ConnectionID: ref.ConnectionID, SessionID: sid, T3ThreadID: legacyID, ExecutionConfig: o.Config, RuntimeMode: permission,
+		InteractionMode: mode, LaunchedAt: launched, FinishedAt: finished, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx)})
 	if err != nil {
 		return 0, false, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO task_events(task_id,to_state,detail) VALUES($1,$2,'adopted session')`, id, state); err != nil {
+	if err = tx.Tasks().AddEvent(ctx, id, nil, state, "adopted session"); err != nil {
 		return 0, false, err
 	}
 	if in.InitialNote != nil && *in.InitialNote != "" {
@@ -138,26 +137,23 @@ func adoptThread(ctx context.Context, tx *Tx, in AdoptInput) (int64, bool, error
 	return id, true, err
 }
 
-func adoptionProject(ctx context.Context, tx *Tx, in AdoptInput, o execution.Observation) (int64, error) {
-	q := "SELECT project_id FROM project_bindings WHERE active=1 AND status='available' AND connection_id=$1 AND external_project_id=$2"
-	args := []any{o.Session.ConnectionID, o.Project}
+func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput, o execution.Observation) (int64, error) {
+	var workspace *string
 	if in.Binding != nil {
 		if in.Binding.ExternalProjectID != o.Project || in.Binding.ConnectionID != o.Session.ConnectionID {
 			return 0, Conflict("session workspace changed; retry adoption")
 		}
-		q += " AND workspace=$3"
-		args = append(args, in.Binding.Workspace)
+		workspace = &in.Binding.Workspace
 	}
-	var id int64
-	err := tx.QueryRow(ctx, "SELECT min(project_id) FROM ("+q+") HAVING count(*)=1", args...).Scan(&id)
-	if err == nil {
+	id, found, err := tx.Projects().AdoptionTarget(ctx, o.Session.ConnectionID, o.Project, workspace)
+	if err != nil {
+		return 0, err
+	}
+	if found {
 		if in.ProjectID != nil && *in.ProjectID != id || in.NewProjectTitle != "" {
 			return 0, Conflict("session already has a bound Stage project")
 		}
 		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
 	}
 	if in.Binding == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
 		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
@@ -165,20 +161,20 @@ func adoptionProject(ctx context.Context, tx *Tx, in AdoptInput, o execution.Obs
 	if in.ProjectID != nil {
 		id = *in.ProjectID
 	} else {
-		id, err = insertProject(ctx, tx, Project{Title: strings.TrimSpace(in.NewProjectTitle)})
+		id, err = tx.Projects().Insert(ctx, strings.TrimSpace(in.NewProjectTitle), ActingUser(ctx), ActingMachine(ctx))
 		if err != nil {
 			return 0, err
 		}
 	}
 	b := *in.Binding
 	b.ProjectID = id
-	var active bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM project_bindings WHERE active=1 AND project_id=$1 AND connection_id=$2)", id, b.ConnectionID).Scan(&active); err != nil {
+	active, err := tx.Projects().BoundOn(ctx, id, b.ConnectionID)
+	if err != nil {
 		return 0, err
 	}
 	if active {
 		return 0, Conflict("project already has a binding; confirm the workspace in project settings")
 	}
-	_, err = bindProject(ctx, tx, b)
+	_, err = s.bind(ctx, tx, b)
 	return id, err
 }

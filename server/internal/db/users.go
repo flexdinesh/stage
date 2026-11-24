@@ -2,20 +2,15 @@ package db
 
 import (
 	"context"
-	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
 // DefaultUser is the user migration 0017 seeds. Without sign-in every write
 // attributes to it; only ActingUser reads it (docs/architecture.md "Users").
 const DefaultUser int64 = 1
 
-// User is a person who creates work. Sign-in identities (identities table)
-// map to a user later; machine tokens are machine principals, never users.
-type User struct {
-	ID          int64     `json:"id"`
-	DisplayName string    `json:"displayName"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
+type User = store.User
 
 type actingUserKey struct{}
 
@@ -61,7 +56,5 @@ func withoutMachine(ctx context.Context) context.Context {
 
 // GetUser reads a user.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	var u User
-	err := s.pool.QueryRow(ctx, `SELECT id,display_name,created_at FROM users WHERE id=$1`, id).Scan(&u.ID, &u.DisplayName, &u.CreatedAt)
-	return u, notFound(err)
+	return read(ctx, s, func(tx store.Tx) (User, error) { return tx.Users().Get(ctx, id) })
 }

@@ -2,7 +2,6 @@ package serve_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,19 +10,20 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/pressly/goose/v3"
 )
 
 // seedDB creates data/stage.db migrated up to version (from the source
 // migrations) and returns its pool.
-func seedDB(t *testing.T, data string, version int64) *sql.DB {
+func seedDB(t *testing.T, data string, version int64) *sqlite.DB {
 	t.Helper()
-	pool, err := db.Open(context.Background(), filepath.Join(data, db.DBFile))
+	pool, err := sqlite.Open(context.Background(), filepath.Join(data, sqlite.DBFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pool.Close() })
-	p, err := goose.NewProvider(goose.DialectSQLite3, pool, os.DirFS(filepath.Join("..", "db", "migrations")))
+	p, err := goose.NewProvider(goose.DialectSQLite3, pool.DB, os.DirFS(filepath.Join("..", "db", "sqlite", "migrations")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,9 +33,9 @@ func seedDB(t *testing.T, data string, version int64) *sql.DB {
 	return pool
 }
 
-func version(t *testing.T, pool *sql.DB) int64 {
+func version(t *testing.T, pool *sqlite.DB) int64 {
 	t.Helper()
-	v, err := db.CurrentVersion(context.Background(), pool)
+	v, err := sqlite.CurrentVersion(context.Background(), pool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func version(t *testing.T, pool *sql.DB) int64 {
 
 func backups(t *testing.T, data string) []string {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join(data, db.BackupsDir, "stage-schema*.db"))
+	names, err := filepath.Glob(filepath.Join(data, sqlite.BackupsDir, "stage-schema*.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +56,8 @@ func backups(t *testing.T, data string) []string {
 func TestNewerSchemaRefused(t *testing.T) {
 	short := isolate(t)
 	data := t.TempDir()
-	pool := seedDB(t, data, db.MaxVersion())
-	newer := db.MaxVersion() + 1
+	pool := seedDB(t, data, sqlite.MaxVersion())
+	newer := sqlite.MaxVersion() + 1
 	if _, err := pool.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)`, newer); err != nil {
 		t.Fatal(err)
 	}
@@ -87,10 +87,10 @@ func TestOlderSchemaBackedUpBeforeMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := start(t, cfg(t, data, "unix:"+filepath.Join(short, "o.sock")), newT3())
-	if h := health(t, i.ready.Listeners[0]); h.Schema != db.MaxVersion() {
-		t.Fatalf("health schema %d, want %d", h.Schema, db.MaxVersion())
+	if h := health(t, i.ready.Listeners[0]); h.Schema != sqlite.MaxVersion() {
+		t.Fatalf("health schema %d, want %d", h.Schema, sqlite.MaxVersion())
 	}
-	if v := version(t, pool); v != db.MaxVersion() {
+	if v := version(t, pool); v != sqlite.MaxVersion() {
 		t.Fatalf("version %d", v)
 	}
 	got := backups(t, data)
@@ -100,7 +100,7 @@ func TestOlderSchemaBackedUpBeforeMigrate(t *testing.T) {
 	if fi, err := os.Stat(got[0]); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("backup mode %v %v", fi, err)
 	}
-	b, err := db.Open(context.Background(), got[0])
+	b, err := sqlite.Open(context.Background(), got[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestBackupsPrunedToThree(t *testing.T) {
 	short := isolate(t)
 	data := t.TempDir()
 	seedDB(t, data, 2)
-	dir := filepath.Join(data, db.BackupsDir)
+	dir := filepath.Join(data, sqlite.BackupsDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestBackupFailureRefusesMigrate(t *testing.T) {
 	short := isolate(t)
 	data := t.TempDir()
 	pool := seedDB(t, data, 2)
-	if err := os.WriteFile(filepath.Join(data, db.BackupsDir), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(data, sqlite.BackupsDir), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := runErr(t, cfg(t, data, "unix:"+filepath.Join(short, "f.sock")))
@@ -173,10 +173,10 @@ func TestFreshDBNoBackup(t *testing.T) {
 	short := isolate(t)
 	data := t.TempDir()
 	i := start(t, cfg(t, data, "unix:"+filepath.Join(short, "e.sock")), newT3())
-	if h := health(t, i.ready.Listeners[0]); h.Schema != db.MaxVersion() {
+	if h := health(t, i.ready.Listeners[0]); h.Schema != sqlite.MaxVersion() {
 		t.Fatalf("health schema %d", h.Schema)
 	}
-	if _, err := os.Stat(filepath.Join(data, db.BackupsDir)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(data, sqlite.BackupsDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("backups dir for a fresh database: %v", err)
 	}
 }
