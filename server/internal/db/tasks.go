@@ -167,7 +167,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		}
 	}
 	if in.InitialNote != "" {
-		if _, err := appendNote(ctx, rawTx(tx), JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID, SourceSession: in.OriginSession}); err != nil {
+		if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.InitialNote, RequestID: "initial-note", SourceThreadID: in.OriginThreadID, SourceSession: in.OriginSession}); err != nil {
 			return 0, err
 		}
 	}
@@ -377,8 +377,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 		if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
 			return err
 		}
-		_, err := rawTx(tx).Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id, source_machine_id) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2, $3, $4)`, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
-		return err
+		return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
 	}
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,

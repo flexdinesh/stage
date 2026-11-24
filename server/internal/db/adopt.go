@@ -132,7 +132,7 @@ func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (in
 		return 0, false, err
 	}
 	if in.InitialNote != nil && *in.InitialNote != "" {
-		_, err = appendNote(ctx, rawTx(tx), JournalOwner{TaskID: &id}, AppendNoteInput{Text: *in.InitialNote, RequestID: "initial-note", SourceSession: in.CallerSession})
+		_, err = appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: *in.InitialNote, RequestID: "initial-note", SourceSession: in.CallerSession})
 	}
 	return id, true, err
 }

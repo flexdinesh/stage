@@ -260,7 +260,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 			result.AcceptanceID = &acceptanceID
 			event, detail = "task_completed", "Completed by user; accepted evidence saved in Stage."
 			if strings.TrimSpace(in.Note) != "" {
-				if _, err = appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.Note, Category: "outcome", RequestID: "acceptance:" + in.RequestID}); err != nil {
+				if _, err = appendNote(ctx, tx.st, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.Note, Category: "outcome", RequestID: "acceptance:" + in.RequestID}); err != nil {
 					return err
 				}
 			}

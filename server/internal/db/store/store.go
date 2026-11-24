@@ -48,6 +48,7 @@ type Tx interface {
 	Tasks() Tasks
 	Attempts() Attempts
 	Observations() Observations
+	Journal() Journal
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

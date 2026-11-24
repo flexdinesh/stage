@@ -488,7 +488,7 @@ SELECT project_id, title, prompt, provider_instance_id, model, model_options, ru
 			if len(parts) > 1 {
 				key = fmt.Sprintf("initial-note-%d", i+1)
 			}
-			if _, err := appendNote(ctx, tx, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceSession: in.OriginSession}); err != nil {
+			if _, err := appendNote(ctx, st, JournalOwner{TaskID: &task}, AppendNoteInput{Text: text, RequestID: key, SourceSession: in.OriginSession}); err != nil {
 				return err
 			}
 		}
