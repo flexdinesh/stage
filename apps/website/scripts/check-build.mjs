@@ -1,4 +1,5 @@
-// Checks the static build: every route rendered to HTML, and no Ask AI anywhere.
+// Checks the static build: every route rendered to HTML, no Ask AI anywhere,
+// and collapsible docs sidebar sections.
 import { readFile } from 'node:fs/promises'
 
 const out = new URL('../dist/public/', import.meta.url)
@@ -26,10 +27,12 @@ for (const route of routes) {
     continue
   }
   if (html.includes('data-v-ask-ai-container')) failures.push(`${route}: Ask AI rendered`)
+  if (route.startsWith('docs/') && (html.match(/data-collapsable="true"/g) ?? []).length < 4)
+    failures.push(`${route}: sidebar sections not collapsible`)
 }
 
 if (failures.length > 0) {
   console.error(failures.join('\n'))
   process.exit(1)
 }
-console.log(`build ok: ${routes.length} routes static, no Ask AI`)
+console.log(`build ok: ${routes.length} routes static, no Ask AI, collapsible sidebar`)

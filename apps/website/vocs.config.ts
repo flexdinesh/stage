@@ -36,6 +36,7 @@ export default defineConfig({
       {
         text: 'Concepts',
         link: '/docs/concepts',
+        collapsed: false,
         items: [
           { text: 'Projects', link: '/docs/concepts/projects' },
           { text: 'Connections', link: '/docs/concepts/connections' },
@@ -49,6 +50,7 @@ export default defineConfig({
       },
       {
         text: 'Usage',
+        collapsed: false,
         items: [
           { text: 'Desktop app', link: '/docs/usage/desktop' },
           { text: 'Self-hosted server', link: '/docs/usage/server' },
@@ -57,6 +59,7 @@ export default defineConfig({
       },
       {
         text: 'Guides',
+        collapsed: false,
         items: [
           { text: 'Your first tree', link: '/docs/guides/first-tree' },
           { text: 'Agents that queue work', link: '/docs/guides/agents' },
@@ -65,6 +68,7 @@ export default defineConfig({
       },
       {
         text: 'Reference',
+        collapsed: false,
         items: [
           { text: 'Install and update', link: '/docs/reference/install' },
           { text: 'Connections', link: '/docs/reference/connections' },

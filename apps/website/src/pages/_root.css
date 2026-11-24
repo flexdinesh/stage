@@ -150,3 +150,38 @@ td {
 a {
   text-underline-offset: 3px;
 }
+
+/* Code blocks. Vocs (2.12.0) scrolls the <pre>, and its copy/wrap buttons are
+   absolute children of it, so they scroll away with long lines. Scroll the
+   inner <code> instead so the buttons stay pinned to the block's edge. */
+[data-v-code-container] > pre[data-v] {
+  overflow: hidden;
+  padding-block: 0;
+}
+[data-v-code-container] > pre[data-v] > code {
+  overflow-x: auto;
+  padding-block: 1.25rem;
+}
+[data-v-callout] [data-v-code-container] > pre[data-v] > code {
+  padding-block: 0.75rem;
+}
+[data-v-code-container] > pre[data-v][data-v-wrapped] > code {
+  overflow-x: hidden;
+}
+/* Room past the last character so it scrolls clear of the copy button. */
+[data-v-code-container] > pre[data-v] > code > .line {
+  padding-right: 3rem;
+}
+/* Code that scrolls under the pinned buttons hides behind the panel. */
+[data-v-code-container] > pre[data-v] > button:is([data-copied], [data-wrapped]) {
+  background: var(--st-panel);
+}
+[data-v-code-container] > pre[data-v] > button[data-copied]:focus-visible {
+  opacity: 1;
+}
+/* No hover on touch screens: keep copy reachable. */
+@media (hover: none) {
+  [data-v-code-container] > pre[data-v] > button[data-copied] {
+    opacity: 1;
+  }
+}
