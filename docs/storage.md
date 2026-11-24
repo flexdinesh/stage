@@ -23,7 +23,7 @@ that disagrees with this file updates it in the same PR.
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | none | #402 |
-| [Design only](#design-only-queue-events-leases) | none | #408, #409 |
+| [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
 
@@ -141,7 +141,7 @@ every write to that table, as today. It assumes one process
 | Use case | Store entry (today) | Invariant | Postgres |
 | --- | --- | --- | --- |
 | Launch claim | `TransitionTask` (begin attempt) | one attempt begins per task and attempt number; current acceptance checked and inputs pinned atomically | task row `FOR UPDATE`; unique `(task_id, attempt)` |
-| Release and schedule runner picks | `LaunchableForConnection`, `DueForConnection` | each item launches once | the launch claim's row lock decides; a later Queue uses `SKIP LOCKED` |
+| Release and schedule runner picks | `LaunchableForConnection`, `DueForConnection` | each item launches once | the launch claim's row lock decides; the runners stay reconcilers under Leases (#409), not Queue jobs ([ADR 0004](adr/0004-queue-port.md#loops)) |
 | Acceptance | `ChangeAcceptance` | one revision sequence per task; idempotent `requestId` | task row `FOR UPDATE`; unique request key with `ON CONFLICT` |
 | Tree mutations | `CreateTree`, `SetNeeds`, membership changes | no cycles; a task in at most one tree; needs within the tree | tree rows, then task rows, `FOR UPDATE` before any need check |
 | Schedule fire | `FireSchedule` | one spawn per fire time | schedule row `FOR UPDATE`; next fire advanced in the same transaction |
@@ -364,10 +364,15 @@ Not built. Each needs a port with a single-process SQLite fallback before a
 multi-replica Postgres deployment exists. Until then "one replica" holds on
 both engines.
 
-- **Queue** (#408 evaluates River): enqueue inside the caller's `Write`,
-  claim with `SKIP LOCKED`, retry with backoff, unique and scheduled jobs.
-  SQLite: a jobs table under `BEGIN IMMEDIATE`. Candidates to move: the
-  schedule runner, release runner, sync and sweeps.
+- **Queue** ([ADR 0004](adr/0004-queue-port.md), #408): River evaluated and
+  not adopted. A capability port over an engine-native `jobs` table per
+  adapter, created with its first consumer: enqueue inside the caller's
+  `Write`, claim with a lease (Postgres `SKIP LOCKED`, SQLite one
+  `BEGIN IMMEDIATE` write), attempt-fenced complete and fail, retry with
+  backoff, a unique key over live jobs, run-at. One-shot jobs only. First
+  consumer: Web Push delivery. The schedule runner, release runner, sync and
+  sweeps stay reconcilers or periodic passes under Leases
+  ([ADR 0004](adr/0004-queue-port.md#loops)).
 - **Events** (#409): publish and subscribe. Postgres `LISTEN/NOTIFY`
   carrying ids that subscribers re-read; SQLite in-process. Today's
   in-process users: the notification inbox stream and the connections cache

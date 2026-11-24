@@ -134,5 +134,5 @@ Stage tree 201 (auto start). Each task ships as its own PR.
 | #405 | Configuration and composition (`STAGE_DATABASE_URL`) | #403 |
 | #406 | `stage db copy` and cutover runbook | #403, #405 |
 | #407 | Docker build tag and Postgres compose example | #405 |
-| #408 | Evaluate River for the Queue port | #396 |
+| #408 | Evaluate River for the Queue port ([ADR 0004](0004-queue-port.md)) | #396 |
 | #409 | Events and Leases design (multi-replica prep) | #396 |
