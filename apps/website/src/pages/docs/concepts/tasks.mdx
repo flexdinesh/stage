@@ -1,0 +1,66 @@
+---
+title: Tasks
+description: A task is one prompt and where to run it, tracked through execution and then completed by you.
+showAskAi: false
+---
+
+# Tasks
+
+A task is one unit of agent work: a prompt, plus where and how to run it. Stage launches it as a [session](/docs/concepts/sessions) on a [connection](/docs/concepts/connections), follows its state, and waits for you to complete it.
+
+## What a task holds
+
+- **Prompt**, and optional images (PNG, JPEG, GIF or WebP, up to 8 of 10 MB each). Images go with the prompt on every launch.
+- **Project and connection**: which harness runs it, in the project's workspace there.
+- **Options** the harness supports: model and its options, and the workspace (the project root, or a worktree).
+- An optional **initial note** for its [journal](/docs/concepts/journals).
+
+Save it to the backlog to plan, or start it right away. A backlog task is fully editable; once it has launched, only its title changes.
+
+## Execution states
+
+Stage mirrors what the session is doing:
+
+| State | Meaning |
+|---|---|
+| Backlog | Not started |
+| Launch unconfirmed | Stage sent the launch but has not confirmed it. It reconciles automatically, reusing the same attempt. |
+| Running | The agent is working |
+| Needs input | The agent asked a question or needs an approval. Answer in the harness. |
+| Done | Execution finished. It awaits your review. |
+| Failed | Execution failed |
+| Interrupted | Execution stopped before finishing |
+| Cancelled | Execution was cancelled |
+
+Losing the connection keeps the last known state.
+
+## Completion is yours
+
+Execution finishing is not the same as the work being accepted. You complete a task in Stage:
+
+- Pick **Completed** in the task's State picker, or **Review** on a finished row. A review shows the cached final reply, links and which dependents it would release, with an optional acceptance note.
+- Active work must stop first. Any stopped task can be completed, including a failed one.
+- Moving a completed task back (State picker, **Change state**) keeps its accepted-result history and blocks dependents that have not started yet.
+- Later harness activity never revokes your acceptance.
+- Agents report outcomes in notes but have no tool to complete or reopen a task.
+
+A connection with auto-complete on can also complete a successful run for you ([Connections](/docs/concepts/connections)). In a [tree](/docs/concepts/trees), completion is what releases the next tasks.
+
+## Actions
+
+- **Start**: from backlog, or a fresh attempt after failed, interrupted or cancelled.
+- **Stop**: interrupt the session.
+- **Duplicate**: a new backlog task with the same config and images, without notes, tree or start time.
+- **Archive**: close a standalone task. A tree member closes with its tree.
+- **Delete**: only for a task that never started and has no recorded work. Archive recorded work instead.
+- **Open** in its harness, to answer questions or read the conversation.
+
+## Notifications
+
+Needs input, failed, ready and done send a notification: an inbox entry and toast in the app, Web Push on an installed web app, native notifications in the desktop app. One filter in Settings chooses which events notify, on every device. See [App reference](/docs/reference/app) and [Use Stage on your phone](/docs/guides/phone).
+
+## Next steps
+
+- [Trees](/docs/concepts/trees): make tasks wait on each other.
+- [Sessions and references](/docs/concepts/sessions): the conversation behind a task.
+- [Schedules](/docs/concepts/schedules): start tasks on a timer.

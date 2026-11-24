@@ -9,7 +9,7 @@ related_targets: ["src/pages/_root.css"]
 Docs at `/docs/*` (src/pages/docs, vocs layout themed by src/pages/_root.css). Mode: Read.
 
 ## Audience and task
-A T3 user installing stage (desktop or headless), pairing it with T3, installing the PWA, or wiring agents via CLI/MCP. Structure: Introduction, Install, Connect to T3, Desktop app, Headless server, Features, Agents. No REST API reference (repo-only). Wayfinding via vocs sidebar, outline and search; Ask AI disabled on every page.
+A T3 user installing stage (desktop or headless), pairing it with T3, installing the PWA, or wiring agents via CLI/MCP. Structure: Overview, Concepts (8 pages), Usage (Desktop app, Self-hosted server, Multiple machines), Guides (Your first tree, Agents that queue work, Answer from your phone), Reference (Install and update, Connections, Configuration, Security, The app, CLI, MCP tools). No REST API reference (repo-only). Wayfinding via vocs sidebar, outline and search; Ask AI disabled on every page.
 
 ## Direction contract
 THESIS: Vocs' reading layout kept intact, re-inked in stage's world so the docs feel like the app's manual, not a generic docs theme.

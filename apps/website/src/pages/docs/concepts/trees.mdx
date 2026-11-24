@@ -1,0 +1,62 @@
+---
+title: Trees
+description: A tree links tasks by needs, so each task starts only after you complete the tasks it depends on.
+showAskAi: false
+---
+
+# Trees
+
+A tree is a group of tasks where a task can **need** other members. It forms a DAG (no loops) and can span projects. Trees are the only way to express dependencies in Stage, and a task is in at most one tree.
+
+## Needs
+
+A task becomes eligible to start when you have completed every task it needs, in Stage. A need that merely finished executing does not count: complete it, or edit the dependencies. A blocked task cannot start early.
+
+- Tasks with no needs are **roots** and run in parallel. Chaining is always explicit: nothing adds needs for you.
+- Needs change only while a task is in the backlog.
+- Two tasks that need the same member run in parallel once it is completed.
+
+## Start mode
+
+Each tree has a start mode, and its tasks inherit it. A task can override it.
+
+| Mode | When a task's needs are completed |
+|---|---|
+| Auto (default for new trees) | Stage launches it |
+| Manual | It becomes **ready** and you get a `ready` notification with Start |
+
+Ready tasks, and backlog roots, list in the Ready groups of the Dashboard and Tasks. Stage never launches a root by itself: start it, or use **Start ready** on the tree. In an auto tree, a task added after its needs are already completed launches at once.
+
+## Handoff
+
+When a task with needs starts, Stage appends one handoff block per completed need to its prompt: the cached final reply (trimmed), available artifact links, branch or worktree, and task, journal and session references. Work carries its context forward.
+
+Handoff is on by default and set per task. It reads results saved in Stage at completion, so it works with the earlier harness offline. A missing reply stays marked as missing. Task detail shows what was appended.
+
+## Stacked work
+
+A task's workspace can be the branch of a task it needs ("#12's branch"), so it builds on unmerged changes. The need must be on the same harness and project. If that branch is unavailable, merged or deleted, the launch is blocked until you choose the configured base instead.
+
+## Editing a tree
+
+- **Remove a task**: it is spliced out and its dependents take over its needs (A → X → B becomes A → B). This can make dependents ready at once.
+- **Mark done**: you will not work on the rest. Members keep their states and nothing more starts.
+- **Archive**: close the tree. **Reopen** or **Unarchive** undoes either. A closed tree stays closed until you reopen it, and its tasks leave the Dashboard.
+- **Dissolve**: detach every task and archive the tree. Emptying a tree also archives it.
+- **Delete**: only for a tree where nothing started and nothing was recorded. It deletes its tasks.
+
+Done and archive need every member stopped first.
+
+## Building trees
+
+- From task detail: the Tree panel, or **Add to tree** (a new tree or an active one).
+- From a session batch (the tasks one agent session created, in task detail's Batch drawer): check independent backlog tasks and pick **New tree from n**, as **Parallel** or as a **Chain** in check order.
+- From an existing harness session: track it as a task so it can be a node ([Sessions](/docs/concepts/sessions)).
+
+The Trees page lists trees by their next step. The tree view shows members in level order as a list or a top-down graph, with a side panel for activity or the selected task's needs, start mode, base and handoff.
+
+## Next steps
+
+- [Build your first tree](/docs/guides/first-tree): a guided example.
+- [Journals](/docs/concepts/journals): notes shared across a tree.
+- [Tasks](/docs/concepts/tasks): how completion works.

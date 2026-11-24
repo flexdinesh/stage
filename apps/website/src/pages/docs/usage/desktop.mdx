@@ -1,0 +1,98 @@
+---
+title: Desktop app
+description: Run Stage on one machine with the desktop app, which starts this machine's server for you.
+showAskAi: false
+---
+
+# Desktop app
+
+Pick the desktop app when Stage, your harnesses and you are all on one Linux machine. The app shows the Stage UI in a native window and starts this machine's Stage server as a per-user service, so there is nothing to run by hand. For a machine you reach over the network (a home server, a VM), use the [self-hosted server](/docs/usage/server) instead.
+
+```txt
++-------------+  private   +--------------+     +---------------+
+| Desktop app | ---------> | Stage server | --> | T3 / OpenCode |
+|  (window)   |  socket    | (per-user    |     | (this machine |
++-------------+            |  service)    |     |  or another)  |
+                           +--------------+     +---------------+
+```
+
+## Requirements
+
+- **Linux**: glibc, GTK 3 and WebKitGTK 4.1, amd64 or arm64. When they are missing, the installer stops and prints the install command for your distribution.
+- **macOS**: the Mac desktop app ships only once it can be signed and notarized. Until then, use the [self-hosted server](/docs/usage/server) setup on a Mac.
+- For running tasks, an existing T3 Code or OpenCode V2 service. Planning works without one.
+
+## Set up
+
+:::steps
+
+### Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh
+```
+
+It installs per user, without root, and puts the `stage` CLI on your `PATH`. Never run it as root. Flags and paths: [Install reference](/docs/reference/install).
+
+### Start
+
+Open Stage from your app launcher. On launch the app starts this machine's per-user service and waits for the server to answer.
+
+### Connect a harness
+
+A new install has no connections, so the Dashboard shows **Connect a harness**. Open Settings > Connections and pair T3 or connect OpenCode. Details: [Connections reference](/docs/reference/connections).
+
+### Turn on notifications
+
+Open Settings > Notifications. Under **This device**, click **Enable notifications**, then **Send test**.
+
+:::
+
+## The window and the server
+
+The server runs separately from the window:
+
+- **Closing the window** hides it. The app stays resident (Dock, tray, app launcher) and notifications continue. On Linux the first close says so, with **Keep running** and **Quit Stage**.
+- **Quit** (`Cmd/Ctrl+Q`, the menu or the tray) stops the app and its notifications only. The Stage server keeps running, so schedules, trees and syncing continue.
+- **Server trouble**: when the server stops answering, a banner shows and the app reconnects. When it stopped or failed, a screen shows the cause, the log tail and **Start Stage server**. A server on another API version is blocked with **Restart Stage server**.
+- **Terminal server**: if a `stage serve` started from a terminal already holds the data dir and listens on the socket, the app uses it and says it stops when that terminal does.
+- T3 never blocks startup.
+
+## Notifications
+
+Native notifications come from the app itself, so they keep working while the window is closed.
+
+- Which events notify (needs input, failed, ready, done, completed) is one filter in Settings > Notifications, shared with every device. The on/off under **This device** is per installation, on by default.
+- With the window in front, in-app toasts show instead.
+- Clicking a notification opens its task, or the inbox for a session started outside Stage.
+- On reconnect, missed notifications from the last 15 minutes show (at most 3, then "N more in Stage"). Older ones stay in the inbox.
+- The Dock or launcher badge counts what needs input.
+- macOS asks for permission on the first notification. On Linux, clicks work only while the app runs.
+
+## Links and login startup
+
+- `stage://tasks/<n>` and `stage://trees/<n>` open the app at that page. Other web links open in your browser. T3 links open the T3 app, else T3 in the browser.
+- Settings > General > Info > **Open Stage at login** starts the app at login (without a window) and turns on the service's login startup. Off turns both off.
+
+## Other machines
+
+The desktop app connects to this machine's server only. To use a Stage server on another machine, open it in a browser ([Self-hosted server](/docs/usage/server)). To let this machine's harnesses run tasks for a main server elsewhere, make it a worker ([Multiple machines](/docs/usage/workers)).
+
+## Troubleshooting
+
+Help > Copy Diagnostics copies the app, CLI and server versions, the service status (without secrets) and the last 50 server log lines. The same button is in Settings > General > Info and on the connection screen.
+
+## Update and uninstall
+
+```sh
+stage update      # latest stable release; quits and reopens a running app
+stage uninstall   # keeps your data, config, logs and backups
+```
+
+Details: [Install reference](/docs/reference/install).
+
+## Next steps
+
+- [Your first tree](/docs/guides/first-tree): plan, run and hand off dependent tasks.
+- [Agents that queue work](/docs/guides/agents): let agents add tasks and notes.
+- [Concepts](/docs/concepts): projects, tasks, trees and journals.

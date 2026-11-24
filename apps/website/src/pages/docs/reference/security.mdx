@@ -1,0 +1,72 @@
+---
+title: Security
+description: Stage's trust model, default bindings, request origin policy, worker authentication and how to expose it safely.
+showAskAi: false
+---
+
+# Security
+
+:::warning
+Stage has no authentication. Anyone who can reach a listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host (`full-access` is the task default).
+:::
+
+## Default binding
+
+| How it runs | Listens on |
+|---|---|
+| Foreground `stage serve` | `127.0.0.1:7380` |
+| Per-user service (and the desktop app) | a private Unix socket only, mode `0600` |
+
+Binding to `127.0.0.1` keeps other machines out, not browsers on this machine. Listener settings: [Configuration](/docs/reference/configuration).
+
+## Request origin policy
+
+`/api` and `/mcp` reject requests that browsers send on behalf of other sites. Static UI routes are not checked. Checks, in order:
+
+| Check | Rejects |
+|---|---|
+| Host (DNS rebinding) | a Host other than an IP address, `localhost`, or a trusted origin's host. The port is ignored. |
+| Fetch metadata | `Sec-Fetch-Site: cross-site` or `same-site`, unless the `Origin` is trusted. This applies to GET too. |
+| Unsafe methods | cross-origin POST, PUT, PATCH and DELETE |
+| Body type | a non-empty body on an unsafe method that is not `application/json` or `multipart/form-data` (415). This closes the `text/plain` and form-encoded vectors. |
+
+**Trusted origins** are `STAGE_PUBLIC_URL`'s origin and those in `STAGE_ALLOWED_ORIGINS`. Any other hostname gets:
+
+```txt
+403 host "…" not allowed: add its origin to STAGE_ALLOWED_ORIGINS …
+```
+
+`X-Forwarded-*` headers are never trusted.
+
+### Not authentication
+
+That policy is request-origin hygiene, not authentication. Any process or person that can reach a listener directly has full access. A private socket (`unix`, mode `0600`) limits that to your user.
+
+## Exposing Stage to a network
+
+Before exposing Stage to a network, put an authenticating HTTPS reverse proxy in front and keep Stage itself unreachable except through it. The proxy setup for a main server with workers: [Workers](/docs/usage/workers). HTTPS options: [Server](/docs/usage/server#https-and-push-notifications).
+
+:::note
+A tailnet limits who can connect, not what they can do.
+:::
+
+## Worker routes
+
+`/api/worker/*` is the one place Stage authenticates requests itself:
+
+- A worker joins with a one-time pairing code (valid 10 minutes), then authenticates every other worker route with a revocable machine token.
+- Every other route refuses machine tokens.
+- Your proxy passes `/api/worker/*` through without user authentication, forwarding the `Authorization` header unchanged. Creating a pairing link stays behind user authentication.
+- Removing a machine revokes its token at once.
+
+## HTTP MCP and loopback
+
+`POST /mcp` also keeps the MCP SDK's own loopback check: a request that arrives on a loopback address with a Host other than a loopback one gets `403 Forbidden: invalid Host header`, even when the origin policy trusts that host. A reverse proxy forwarding to `127.0.0.1:7380` therefore cannot serve HTTP MCP; through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL ([MCP tools](/docs/reference/mcp)).
+
+## Agent gateway
+
+A worker's agent gateway forwards `/api` and `/mcp` to the main server with its machine token, so anything that reaches the gateway has agent access to the main server. It listens on a private socket by default. When you add TCP for HTTP MCP clients, use a loopback address (`STAGE_WORKER_LISTEN=unix,127.0.0.1:7381`) and avoid a wildcard host. The gateway cannot manage machines or change any machine's harness setup (403).
+
+## Releases
+
+Releases are not signed. The installer's checks catch corrupt, truncated or substituted downloads and wrong-platform releases; trust in the release itself rests on the GitHub account and HTTPS ([Install and update](/docs/reference/install)).

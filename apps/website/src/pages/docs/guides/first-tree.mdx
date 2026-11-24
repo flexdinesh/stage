@@ -1,0 +1,72 @@
+---
+title: Your first tree
+description: Plan two or three dependent tasks, run them in order, and watch each one hand its result to the next.
+showAskAi: false
+---
+
+# Your first tree
+
+A [tree](/docs/concepts/trees) groups tasks so that one starts only after the tasks it needs are completed by you. This guide builds a small tree, runs it, and shows the handoff. You need Stage running with one harness connected ([Desktop app](/docs/usage/desktop) or [Self-hosted server](/docs/usage/server)).
+
+:::steps
+
+### Create a project and bind a workspace
+
+Open Projects. If sync already lists your repository, open it. Otherwise click **New project**, enter a title and click **Create project**. On the project page, choose **Bind workspace** and pick the harness workspace for that repository. More: [Projects](/docs/concepts/projects).
+
+### Add backlog tasks
+
+Press `N` (or click **New task**). Pick the project, a title and a prompt, set Start to **Backlog**, and click **Save to backlog**. Add two or three tasks, for example "Add the API endpoint" and "Write the client for it". More: [Tasks](/docs/concepts/tasks).
+
+### Group them into a tree
+
+Open the first task and click **Add to tree**. Pick **New tree**, give it a title, choose a start mode (next step) and click **Create tree**. That task is the tree's root.
+
+Open the second task, click **Add to tree**, pick the new tree, and under **After** pick the first task. Repeat for a third task: pick the first task to run it in parallel with the second, or the second to chain it.
+
+From a terminal, the same tree in one command (task 43 needs 41):
+
+```sh
+stage tree new --title "API and client" 41 43:41
+```
+
+Tasks that an agent session created can also be grouped from that session's Batch drawer: check them and pick **New tree from n**, as **Parallel** or **Chain**.
+
+### Pick the start mode
+
+- **Auto**: a task starts on its own once every task it needs is completed.
+- **Manual**: it reads ready when its needs are completed, and you start it.
+
+In both modes a root waits for you to start it. A task can override the tree's mode in its Tree panel.
+
+### Start the root
+
+The root reads ready: it lists in the Dashboard's Ready group. Click **Start**. The others stay blocked and cannot start early.
+
+### Answer questions
+
+When the agent asks something, the task reads needs input at the top of the Dashboard. Click **Open in T3** (or **Open in OpenCode**) and answer in the harness session.
+
+### Review and complete
+
+When the run finishes, the task waits for you in the Dashboard. Click **Review** to read its final reply and what completing it will start, add an optional note, and complete it. **Complete** on the row does the same in one click, with Undo for a few seconds. A connection can also complete a task for you when its T3 thread is settled or its OpenCode session archived (on by default, per connection).
+
+### Watch the dependent
+
+In auto mode the dependent starts on its own. In manual mode it reads ready and a ready notification offers **Start**.
+
+### See the handoff
+
+Open the dependent's task detail. Stage appended one block per completed need to its prompt: the reply excerpt, links, branch or worktree, and task and journal references. That is how work carries context forward.
+
+### Mark the tree done
+
+When the tree is finished, or you will not work on the rest, open the tree's menu and choose **Mark done**. Nothing more starts, and the tree leaves the Dashboard. **Reopen** undoes it.
+
+:::
+
+## Next steps
+
+- [Trees](/docs/concepts/trees): start modes, editing and handoff in depth.
+- [Agents that queue work](/docs/guides/agents): let an agent build trees for you.
+- [App reference](/docs/reference/app): the Dashboard, task detail and the tree view.

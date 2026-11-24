@@ -1,0 +1,76 @@
+---
+title: Concepts
+description: The eight ideas Stage is built on, how they relate, and how work moves through them.
+showAskAi: false
+---
+
+# Concepts
+
+Stage is built around eight concepts. Read in order for a top-down picture, or jump to one.
+
+- **[Projects](/docs/concepts/projects)**: a Stage-owned title that groups work and points at a workspace on each connection.
+- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code or OpenCode) on one machine, where tasks run.
+- **[Tasks](/docs/concepts/tasks)**: a prompt plus where and how to run it, tracked from backlog to your completion.
+- **[Trees](/docs/concepts/trees)**: tasks linked by needs, so one starts only after you complete what it depends on.
+- **[Journals](/docs/concepts/journals)**: append-only notes and events on every task and tree, shared by you and your agents.
+- **[Schedules](/docs/concepts/schedules)**: a task template that spawns and starts a new task on a cron.
+- **[Sessions and references](/docs/concepts/sessions)**: the harness conversation behind a task, and the links that point at tasks, trees and sessions.
+- **[Machines](/docs/concepts/machines)**: the computers that run harnesses: this server, or workers joined to it.
+
+## The data model
+
+```txt
+Stage server
+├── Project        a title, bound to a workspace on each connection
+│   └── Task       a prompt, run as a harness session
+├── Tree           tasks linked by needs (a DAG, can span projects)
+├── Schedule       spawns a new task on each cron fire
+├── Journal        append-only notes and events on every task and tree
+└── Machine        this server, or a worker
+    └── Connection a T3 or OpenCode service on that machine
+```
+
+The server holds all of it in one SQLite database. Workers hold no database: they run harnesses for the server.
+
+| Term | What it is | Identified by |
+|---|---|---|
+| Project | A title with workspace bindings | project id |
+| Task | One unit of agent work | task number, `#12` |
+| Tree | A dependency graph of tasks | tree number, `#4` |
+| Schedule | A recurring task template | schedule id |
+| Journal entry | One note or event | immutable entry id |
+| Session | The harness conversation behind a task | connection id plus the harness's session id |
+| Connection | One harness service on one machine | connection id |
+| Machine | This server, or a worker | machine id and its name |
+
+## How the pieces fit together
+
+:::steps
+
+### Plan
+
+Create a task in a project, with a prompt and a connection. Save it to the backlog, or add it to a tree so it waits on other tasks.
+
+### Start
+
+Start it yourself, let its tree start it, or give it a start time. A schedule spawns and starts new tasks on its own. Stage launches a session on the connection, in the project's workspace there.
+
+### Run
+
+The harness runs the session. Stage follows its state. When the agent asks a question or needs approval, the task reads **needs input** and you answer in the harness.
+
+### Review and complete
+
+When execution finishes, the task reads **done**. You review the cached final reply and complete the task in Stage.
+
+### Continue
+
+Completing a task releases its dependents in the tree: an auto task starts, a manual one becomes ready for you to start. Each dependent's prompt gets a handoff block with the accepted results it builds on. Throughout, agents and you write notes to the task and tree journals.
+
+:::
+
+## Next steps
+
+- [Projects](/docs/concepts/projects): start with where work lives.
+- [Build your first tree](/docs/guides/first-tree): plan and run a small dependency chain.
+- [Desktop app](/docs/usage/desktop): run Stage on one machine.

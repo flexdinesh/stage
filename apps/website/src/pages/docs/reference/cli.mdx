@@ -1,0 +1,233 @@
+---
+title: CLI
+description: The stage command groups, their key flags, how the CLI finds a server and its caller, output modes and exit codes.
+showAskAi: false
+---
+
+# CLI
+
+`stage` is one binary: `stage serve` (or `stage` with no arguments) runs the server, and every other subcommand is the CLI. The desktop app and the headless install both put it in `~/.local/bin`. This page groups the commands; `stage help` lists every flag.
+
+Coding agents with a shell use the CLI by default: it costs no context until used, while a registered MCP server loads every tool schema into every session ([Agents](/docs/guides/agents)).
+
+## Tasks
+
+| Command | Does |
+|---|---|
+| `stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true\|all] [--limit N]` | list tasks; open tasks by default |
+| `stage task show ID` | a task with its final reply, artifact links, handoff and base |
+| `stage task add --title T --prompt TEXT\|- [config]` | create a task, saved to backlog unless `--start` |
+| `stage task edit ID [config]` | edit a task; outside backlog only the title changes |
+| `stage task needs ID [NEED...]` | replace a backlog task's needs (none clears them) |
+| `stage task start\|stop\|dup ID` | start (requires completed prerequisites), stop, duplicate |
+| `stage task rm ID` | delete a task that never started and has no recorded work |
+| `stage task archive ID [--undo]` | archive a standalone task (`--undo` unarchives) |
+| `stage task wait ID [--until S,..] [--timeout 10m]` | wait for a state; exit 3 on timeout |
+| `stage task notes ID ...` | the task's journal ([Journals](#journals)) |
+
+### Task flags
+
+| Flag | Meaning |
+|---|---|
+| `--project P` | project id or title |
+| `--connection ID` | the execution harness connection |
+| `--execution-config JSON` | harness options advertised by `stage models ls` |
+| `--provider ID`, `--model ID`, `--effort E`, `--option K=V...`, `--runtime MODE`, `--mode default\|plan` | T3 provider and model settings |
+| `--workspace worktree` | the harness-managed worktree instead of the root |
+| `--base-ref REF`, `--branch NAME` | worktree base ref and branch |
+| `--base predecessor [--base-task ID]` | start the worktree from a need's branch ([MCP tools](/docs/reference/mcp)) |
+| `--prompt-file PATH`, `--prompt -` | read the prompt from a file or stdin |
+| `--image PATH...` | attach local images (PNG, JPEG, GIF, WebP, up to 8) |
+| `--needs ID,..` | wait for user completion of those tasks (joins their tree, or starts one) |
+| `--after-me` | adopt the calling session as a task and make it the first need |
+| `--tree ID` | join a tree (a parallel root unless `--needs`) |
+| `--start-mode auto\|manual\|inherit` | per-task exception to the tree's start mode; `inherit` clears it |
+| `--handoff=false` | turn off handoff (`task edit --handoff=true\|false`) |
+| `--start` | launch now |
+| `--start-at YYYY-MM-DDTHH:mm --tz ZONE` | one-shot start at a wall time (`task edit --start-at ""` clears it) |
+| `--initial-note TEXT` | first journal note |
+| `--origin-connection ID --origin-session ID` | on `task ls`: tasks a session created |
+
+## Trees
+
+| Command | Does |
+|---|---|
+| `stage tree ls [--status active\|done\|archived\|all] [--all] [--project P]` | list trees; active by default |
+| `stage tree show ID` | levels, states, needs, readiness |
+| `stage tree new --title T [--start-mode auto\|manual] ID[:NEED,..]...` | build a tree from existing tasks |
+| `stage tree add TREE_ID TASK_ID [--needs ID,..]` | add a task (a task in another tree moves) |
+| `stage tree rm TASK_ID` | take a task out of its tree (dependents take its needs) |
+| `stage tree edit ID [--title T] [--start-mode auto\|manual]` | rename or set the shared start mode |
+| `stage tree start ID` | start every ready member |
+| `stage tree done\|archive ID [--undo]` | mark done or archive (`--undo` reopens) |
+| `stage tree rm-tree ID` | delete a tree and its tasks (none started) |
+| `stage tree notes ID ...` | the tree's journal ([Journals](#journals)) |
+
+## Journals
+
+| Command | Does |
+|---|---|
+| `stage task\|tree notes ID [list] [--kind notes\|events\|all] [--category C] [--q TEXT] [--cursor C] [--limit N]` | read entries; a tree read takes `--task ID` to filter |
+| `stage task\|tree notes ID add --text TEXT [--category C] [--request-id KEY]` | append a note; `--text -` reads stdin; a tree note takes `--source-task ID` |
+| `stage task\|tree notes ID get ENTRY_ID` | one entry in full |
+
+Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI generates a request id when you omit one.
+
+## Schedules
+
+| Command | Does |
+|---|---|
+| `stage schedule ls [--project P]` | list schedules |
+| `stage schedule show ID` | a schedule with its recent runs |
+| `stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused] [--notes TEXT]` | create a schedule; `--notes` is a template for each spawned task's note |
+| `stage schedule edit ID [config] [--cron CRON] [--tz ZONE]` | edit it |
+| `stage schedule rm\|run\|pause\|resume ID` | delete (spawned tasks stay), run now, pause, resume |
+| `stage schedule preview --cron CRON --tz ZONE` | the next three fire times |
+
+## Sessions, context and lookup
+
+| Command | Does |
+|---|---|
+| `stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT] [--tree ID] [--project ID \| --new-project TITLE]` | track a session as a task (default: your own session) |
+| `stage show REF` | what a Stage link, T3 thread link, `#ID` or thread id names; `--target-connection ID --target-session ID` names a scoped session |
+| `stage context` | your session, cwd, resolved project, owning task and tree |
+| `stage projects ls` | projects with their bindings and connections |
+| `stage models ls [--connection ID] [--project ID]` | a connection's models, agents and options |
+| `stage guide` | the agent workflow guide |
+
+## Tools
+
+| Command | Does |
+|---|---|
+| `stage tools [NAME]` | list every MCP tool, or one tool's description and input schema |
+| `stage call TOOL [JSON\|-]` | run one tool with JSON arguments (`-` reads stdin) and print its JSON result exactly as over MCP; exit 1 on a tool error |
+| `stage mcp` | the tools over stdio MCP ([MCP tools](/docs/reference/mcp)) |
+
+## Setup
+
+| Command | Does |
+|---|---|
+| `stage setup [--claude] [--codex] [--opencode] [--mcp]` | the Stage skill and an instruction pointer for every agent found (or those named), then a check; `--mcp` also registers stdio MCP with Claude Code and Codex |
+| `stage setup --check` | report only: CLI on `PATH`, server, caller detection, per-agent skill and MCP; exit 1 on problems |
+| `stage setup skill [--claude] [--codex] [--opencode]` | the skill only |
+| `stage setup mcp [--claude] [--codex] [--http]` | register MCP only (`--http` registers `/mcp` instead of stdio) |
+| `stage setup instructions [--claude] [--codex] [--file PATH]` | the instruction pointer only |
+
+Agents are found by their command on `PATH` or their config directory. The skill is `SKILL.md` in `~/.claude/skills/stage/` (Claude Code) and `~/.agents/skills/stage/` (Codex and OpenCode). The instruction pointer is a two-line block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
+
+## Harness
+
+| Command | Does |
+|---|---|
+| `stage harness [list]` | harnesses this server knows, its machine profile, which can run here |
+| `stage harness KIND [status]` | KIND's connection: state, settings, actions |
+| `stage harness KIND set FIELD=VALUE... [--reset FIELD]...` | save settings |
+| `stage harness KIND run ACTION [FIELD=VALUE...]` | `t3`: `auto-pair`, `pair code=CODE`; `opencode`: `connect-local`, `pair link=LINK` |
+| `stage harness KIND disconnect` | forget the credentials (tasks stay) |
+
+Fields and actions: [Connections](/docs/reference/connections).
+
+## Server
+
+| Command | Does |
+|---|---|
+| `stage serve [--listen ADDR]...` | run the server in the foreground (also `stage` with no arguments) |
+| `stage serve --managed` | run as the per-user service (what `stage service` registers) |
+| `stage status [--wait DUR]` | the server this CLI reaches: version, readiness, harness states; exit 1 unreachable or another API version, 3 when `--wait` expires |
+
+## Service
+
+| Command | Does |
+|---|---|
+| `stage service start [--wait 30s]` | register or update the definition, create `service.env`, start if not running, wait for readiness; never restarts a running server |
+| `stage service restart` | start, and restart a running server (apply `service.env` edits) |
+| `stage service stop` | stop through the service manager; the server drains for up to 100s |
+| `stage service status` | state, Stage health and T3 reported separately, log location, problems with fixes |
+| `stage service logs [-f] [-n 100]` | recent log lines |
+| `stage service enable` / `disable` | login startup on or off (neither starts nor stops it) |
+| `stage service uninstall` | stop, disable and remove the definition; keeps data, `service.env` and logs |
+
+Every command but `logs` takes `--json`. Service commands always act on this installation's own service; `--url` and `STAGE_URL` do not apply. Without a user manager (no logind session, containers, WSL without systemd) they exit 6.
+
+| Exit | Meaning |
+|---|---|
+| 0 | ok (status: running and ready) |
+| 1 | failed |
+| 2 | usage |
+| 3 | `--wait` expired |
+| 4 | status only: not running or not installed |
+| 5 | another (foreground) server holds the data dir |
+| 6 | no usable service manager |
+| 7 | invalid configuration (for example an invalid `service.env`) |
+
+## Worker and machines
+
+| Command | Does |
+|---|---|
+| `stage machine [ls]` | machines that run harnesses: kind, status, connections |
+| `stage machine pair [--label L]` | a one-time link (10 minutes) and the `stage worker join` command; needs `STAGE_PUBLIC_URL` on the server |
+| `stage machine rename ID LABEL` | rename a machine |
+| `stage machine rm ID` | remove a remote machine: revokes its token, keeps its connections as history |
+| `stage machine ping ID` | a round trip through the machine's worker channel |
+| `stage worker join <link> [--label L]` | redeem a pairing link; refuses when already joined |
+| `stage worker run [--listen ADDR]` | the worker in the foreground (instead of the service) |
+| `stage worker status` | config, the main server's view of this machine, the running process and its gateway addresses; exit 0 online, 1 not online, 4 not joined, 7 revoked |
+| `stage worker leave [--local]` | remove this machine on the main server, then delete the local config; `--local` deletes only locally |
+| `stage worker service start\|stop\|restart\|status\|logs\|enable\|disable\|uninstall` | the worker service, with the same flags and exit codes as `stage service` |
+
+Worker commands take `--config PATH` and `--json`, and never use `--url` or `STAGE_URL`: the main server's URL comes from the worker config. Setup: [Workers](/docs/usage/workers).
+
+## Install
+
+| Command | Does |
+|---|---|
+| `stage update [--check] [--version X] [--from DIR]` | install the latest stable release (or X) in the same mode |
+| `stage uninstall` | remove this installation; keeps data, config, logs and backups |
+| `stage install --from DIR` | install a downloaded, verified release (run by the install script and `stage update`) |
+| `stage version [--json]` | this binary and its installation |
+
+Exit codes: [Install and update](/docs/reference/install).
+
+## Server selection
+
+The CLI and `stage mcp` reach the server at:
+
+1. `--url URL`
+2. `STAGE_URL`: an `http(s)` URL, or `unix:///abs/path.sock` for a socket
+3. the private default socket, when a server owns it
+4. `http://127.0.0.1:7380`
+
+`stage status` shows which server the CLI reaches. Agent commands never start a server; when nothing answers, their error suggests `stage service start`. On a worker's machine the CLI finds the worker's agent gateway socket the same way.
+
+## Caller context
+
+Commands that create tasks, write notes, adopt sessions or show context know the calling session:
+
+1. `--caller-connection ID --caller-session ID`
+2. `STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>`
+3. the harness's session variable (`T3CODE_THREAD_ID` for T3, `OPENCODE_SESSION_ID` for OpenCode), on that harness's connection on this machine. The CLI and `stage mcp` run as the agent's child processes, so they read it themselves.
+
+`stage context` shows the session and where it came from. Without a session, supply a project or journal owner explicitly.
+
+## Output
+
+- Human output by default; `--json` for agents and scripts.
+- Usage errors exit 2; other failures exit 1.
+- Documented exit codes: `stage task wait` exits 3 on timeout; `stage status` 1 or 3 (above); `stage call` 1 on a tool error; `stage setup --check` 1 on problems; `stage service` 0 to 7; `stage worker status` 0, 1, 4, 7.
+
+## Examples
+
+```sh
+stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog
+stage task add --title "Deploy" --prompt-file deploy.md --after-me             # eligible after user completion of this session's task
+echo "..." | stage task add --title "Refactor" --prompt - --base-ref origin/main --start
+stage task ls --state backlog --json
+stage task wait 42 --until done,settled --timeout 30m                          # exit 3 on timeout
+stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
+stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
+stage tree start 7                                                             # start every ready member
+stage task notes 42 add --text "Chose cookie sessions" --category decision
+stage task ls --origin-connection 1 --origin-session "$T3CODE_THREAD_ID"        # tasks a T3 session created (connection 1)
+stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
+stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
+```

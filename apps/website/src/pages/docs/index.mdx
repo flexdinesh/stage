@@ -1,53 +1,67 @@
 ---
-title: Introduction
-description: What stage is, how it works with T3 Code and OpenCode, what it needs to run, how to keep it private, and how it is built.
+title: Overview
+description: What Stage is, the concepts it is built on, how to pick a setup, and how it is built.
 showAskAi: false
 ---
 
-# Introduction
+# Overview
 
-Stage manages tasks, schedules, dependency trees and journals across T3 Code and OpenCode V2. Choose a harness per task. Open its session for questions and approvals. When execution finishes, review the bounded final reply and complete the task in Stage. A dependent in a manual tree becomes ready for you to start.
-
-## Connect a harness
-
-A new install has no connections; the Dashboard shows **Connect a harness** until one is set up. Open Settings > Connections to pair T3 or connect an existing OpenCode V2 service (tested with 2.3.0); any version whose API has the operations Stage uses. For OpenCode on the Stage server's machine, click **Connect** (or run `stage harness opencode run connect-local`); Stage signs in with the service's own password. For another machine, run `opencode pair` there and paste one link (or `stage harness opencode run pair link=LINK`); Stage renews that session automatically. **Advanced** takes a plain service address. If your phone uses another address, set the browser service URL. If you use a separate web client, enter its URL and register the service in that browser once. Task detail also offers **Open on service** and **Copy session ID**.
-
-Create a Stage project and bind its workspace on each harness you use. Select the destination on each new task when a project has both bindings. Planning and accepted-result handoff work with a disconnected predecessor.
-
-## Requirements
-
-- For execution, an existing T3 Code or OpenCode V2 service. Planning works offline.
-- Linux or macOS (amd64 or arm64), installed per user without root ([Install](/docs/install)).
-  - **Desktop app**: Linux with glibc, GTK 3 and WebKitGTK 4.1. Mac desktop releases ship only once they can be signed and notarized; until then use the headless install on a Mac.
-  - **Headless server**: needs nothing else.
-- Push notifications and installing the web app (PWA) need a secure context: `http://localhost` on the same machine, or HTTPS with a certificate your devices trust ([HTTPS and push notifications](/docs/deploy#https-and-push-notifications)).
-
-## Security
+Stage is a task manager for coding agents. It plans, queues, schedules and links tasks across T3 Code and OpenCode V2: you pick a harness per task, answer its questions in the harness, and complete the result in Stage, which releases the work that depends on it.
 
 :::warning
-stage has no authentication. Anyone who can reach its listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host (`full-access` is the task default).
+Stage has no authentication. Anyone who can reach its listener can read tasks and journals and launch agents on the host. Keep it private ([Security](/docs/reference/security)).
 :::
 
-- It listens on `127.0.0.1:7380` by default, or only on a private Unix socket (mode `0600`) when it runs as the per-user service.
-- `/api` and `/mcp` reject requests browsers send on behalf of other sites (DNS rebinding, cross-site requests, form-encodable bodies). That policy is not authentication.
-- Before exposing it to a network, put an authenticating HTTPS reverse proxy in front. A tailnet limits who can connect, not what they can do.
+## Concepts
 
-Details: [Security](/docs/deploy#security).
+Stage is built around eight concepts. Read them in order for a top-down picture, or go to one when you need it.
+
+- **[Projects](/docs/concepts/projects)**: a Stage-owned title that groups work and points at a workspace on each connection.
+- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code or OpenCode) on one machine, where tasks run.
+- **[Tasks](/docs/concepts/tasks)**: a prompt plus where and how to run it, tracked from backlog to your completion.
+- **[Trees](/docs/concepts/trees)**: tasks linked by needs, so one starts only after you complete what it depends on.
+- **[Journals](/docs/concepts/journals)**: append-only notes and events on every task and tree, shared by you and your agents.
+- **[Schedules](/docs/concepts/schedules)**: a task template that spawns and starts a new task on a cron.
+- **[Sessions and references](/docs/concepts/sessions)**: the harness conversation behind a task, and the links that point at tasks, trees and sessions.
+- **[Machines](/docs/concepts/machines)**: the computers that run harnesses: this server, or workers joined to it.
+
+## The data model
+
+```txt
+Stage server
+├── Project        a title, bound to a workspace on each connection
+│   └── Task       a prompt, run as a harness session
+├── Tree           tasks linked by needs (a DAG, can span projects)
+├── Schedule       spawns a new task on each cron fire
+├── Journal        append-only notes and events on every task and tree
+└── Machine        this server, or a worker
+    └── Connection a T3 or OpenCode service on that machine
+```
+
+How work moves through them: [Concepts](/docs/concepts).
+
+## Pick a setup
+
+| Setup | For | Guide |
+|---|---|---|
+| Desktop app | Stage, its server and your harnesses on one machine | [Desktop app](/docs/usage/desktop) |
+| Self-hosted server | Stage on a machine you reach over HTTP from a browser or phone | [Self-hosted server](/docs/usage/server) |
+| Multiple machines | One main server, with laptops and desktops running harnesses as workers | [Multiple machines](/docs/usage/workers) |
+
+Every setup needs Linux or macOS (amd64 or arm64) and an existing T3 Code or OpenCode V2 service for execution. Planning works without one. Details: [Install and update](/docs/reference/install).
 
 ## How it is built
 
-- **Server and CLI**: Go, one binary (`stage`). `stage` with no arguments or `stage serve` runs the server; other subcommands are the [agent CLI](/docs/agents) and management commands (`stage service`, `stage update`, `stage harness`).
-- **Storage**: SQLite (`stage.db`) in the data dir: `$XDG_DATA_HOME/stage`, else `~/.local/share/stage` (macOS `~/Library/Application Support/stage`).
+- **Server and CLI**: one Go binary, `stage`. `stage serve` (or `stage` with no arguments) runs the server; every other subcommand is the CLI.
+- **Storage**: one SQLite database (`stage.db`) in the server's data dir ([Configuration](/docs/reference/configuration)).
 - **Web app**: React, served by the server, installable as a PWA with Web Push.
-- **Desktop app**: the same UI in a native window. It bundles the CLI/server, starts the per-user service and connects over its Unix socket ([Desktop app](/docs/desktop)).
-- **T3 integration**: T3's MCP endpoint (`<T3 URL>/mcp`), plus T3's OAuth and upload endpoints. stage polls active tasks every 5s, refreshes projects and tracked tasks every 5 min, and discovers active external sessions for notifications.
-- **OpenCode integration**: V2 HTTP API for execution, workspace discovery and supported model and agent choices.
-- **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API.
+- **Desktop app**: the same UI in a native window, talking to this machine's server over its private socket.
+- **Harnesses**: T3 through its MCP endpoint, OAuth and upload endpoints; OpenCode through its V2 HTTP API ([Connections](/docs/reference/connections)).
+- **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API ([CLI](/docs/reference/cli), [MCP tools](/docs/reference/mcp)).
 
 ## Next steps
 
-- [Install](/docs/install): the desktop app, or the headless server for a remote machine.
-- [Connect to T3](/docs/t3): pair stage with your T3 server.
-- [Desktop app](/docs/desktop) or [Headless server](/docs/deploy): run and manage stage.
-- [Features](/docs/features): everything stage does, grouped by area.
-- [Agents](/docs/agents): let agents running in either harness queue and manage tasks through the CLI or MCP.
+- [Concepts](/docs/concepts): how the pieces fit together.
+- [Desktop app](/docs/usage/desktop): the quickest way to run Stage on one machine.
+- [Your first tree](/docs/guides/first-tree): plan and run a small chain of tasks.
+- [Agents that queue work](/docs/guides/agents): let agents create and link their own tasks.

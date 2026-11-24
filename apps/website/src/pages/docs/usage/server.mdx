@@ -1,0 +1,168 @@
+---
+title: Self-hosted server
+description: Run Stage headless on a machine you reach over HTTP, such as a home server, a VM or a LAN box, and use it from a browser.
+showAskAi: false
+---
+
+# Self-hosted server
+
+Pick the self-hosted server when Stage should run on a machine without the desktop app: a home server, a VM, a box on your LAN, or a Mac (until the Mac desktop app ships). You install the CLI/server, run it as a per-user service, and open the UI in a browser. To run harnesses on several machines against one server, see [Multiple machines](/docs/usage/workers).
+
+```txt
+Browser / PWA (phone, laptop)
+        |
+        v
+HTTPS proxy with auth
+        |
+        v
+Stage server (127.0.0.1:7380) ---> T3 / OpenCode
+
+On the Stage machine itself, a browser opens
+http://127.0.0.1:7380 directly.
+```
+
+## Set up
+
+:::steps
+
+### Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/install.sh | sh -s -- --headless
+```
+
+The headless install is a static binary and needs nothing else. It installs per user, without root. Details: [Install reference](/docs/reference/install).
+
+### Start the service
+
+```sh
+stage service start      # register and start; waits until the server answers
+stage service enable     # optional: start at login
+```
+
+The service runs as you (a systemd user unit on Linux, a launchd agent on macOS) and restarts on failure. By default it listens only on a private Unix socket.
+
+### Add a TCP listener
+
+Browsers need TCP. Edit `service.env` (`~/.config/stage/service.env` on Linux, `~/Library/Application Support/stage/service.env` on macOS):
+
+```sh
+STAGE_LISTEN=unix,127.0.0.1:7380
+```
+
+Keep `unix` in the list; the CLI uses it. Use `0.0.0.0:7380` instead of `127.0.0.1:7380` only to listen on every interface, and read [Reach it from other devices](#reach-it-from-other-devices) first. Then apply it:
+
+```sh
+stage service restart
+```
+
+All settings: [Configuration reference](/docs/reference/configuration).
+
+### Connect a harness
+
+Open Settings > Connections and pair T3 or connect OpenCode, or from a terminal:
+
+```sh
+stage harness t3 run auto-pair            # T3 on this machine
+stage harness opencode run connect-local  # OpenCode on this machine
+```
+
+Other machines, codes and tokens: [Connections reference](/docs/reference/connections).
+
+### Open it in a browser
+
+On the same machine, open `http://127.0.0.1:7380`. From other devices, set up HTTPS first ([HTTPS and push notifications](#https-and-push-notifications)).
+
+:::
+
+## Run in the foreground
+
+To try Stage or run it under your own supervisor, skip the service:
+
+```sh
+stage serve                                 # or just `stage`; listens on 127.0.0.1:7380
+stage serve --listen unix,127.0.0.1:7380    # the private socket and TCP in one process
+```
+
+A foreground server reads its config from the environment, not `service.env`, and stops with its terminal. Only one server can own a data dir, so stop the service first (`stage service stop`). `stage status` shows which server the CLI reaches.
+
+## Reach it from other devices
+
+:::warning
+Stage has no authentication. Anyone who can reach its listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host.
+:::
+
+- Before exposing Stage to a network, put an authenticating HTTPS reverse proxy in front and keep Stage itself unreachable except through it.
+- A tailnet limits who can connect, not what they can do.
+- Stage refuses requests that browsers send on behalf of other sites, and any hostname it does not trust (`403 host … not allowed`). Add your proxy's origin to `STAGE_ALLOWED_ORIGINS`, or set it as `STAGE_PUBLIC_URL`. This is not authentication.
+
+Details: [Security reference](/docs/reference/security).
+
+## HTTPS and push notifications
+
+Push notifications and installing the web app need a secure context. `http://localhost` is one, so both work in a browser on the same machine with no setup. Other devices need HTTPS with a certificate they trust. Settings > Notifications says "needs https" when a page is opened over plain HTTP from another address.
+
+The server only makes outbound requests to the browser push services (Apple, Google, Mozilla), so its URL can stay private (LAN or tailnet). Devices need internet to receive pushes.
+
+Options, easiest first. Each needs the TCP listener on `127.0.0.1:7380`.
+
+- **Tailscale serve**: a real certificate for your tailnet name, nothing to install on devices. Easiest for iOS. Enable HTTPS certificates for the tailnet, then on the Stage host:
+
+  ```sh
+  tailscale serve --bg http://127.0.0.1:7380
+  ```
+
+  Stage is then at `https://<machine>.<tailnet>.ts.net`, reachable only from your tailnet. Add that origin to `STAGE_ALLOWED_ORIGINS` (or set it as `STAGE_PUBLIC_URL`) and restart. Walkthrough: [Answer from your phone](/docs/guides/phone).
+
+- **Caddy**: with a real domain, Caddy gets a certificate automatically:
+
+  ```txt
+  stage.example.com {
+      reverse_proxy 127.0.0.1:7380
+  }
+  ```
+
+- **mkcert**: for a LAN-only name, issue a certificate with [mkcert](https://github.com/FiloSottile/mkcert) (`mkcert stage.lan`) and use `tls stage.lan.pem stage.lan-key.pem` in Caddy. Every device must trust the mkcert root CA. On iOS, install it as a profile, then enable it under Settings > General > About > Certificate Trust Settings.
+
+- **Any reverse proxy** that terminates TLS and forwards to Stage, with the streaming settings below.
+
+Whichever you pick, add its origin to `STAGE_ALLOWED_ORIGINS` or `STAGE_PUBLIC_URL`, then `stage service restart`.
+
+### Reverse proxy and SSE
+
+The notifications inbox uses a Server-Sent Events stream (`/api/notifications/stream`).
+
+- Caddy's `reverse_proxy` flushes it immediately. If your config uses `encode`, exclude that path so events are not buffered.
+- Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
+
+HTTP MCP (`/mcp`) does not work through a proxy that forwards to `127.0.0.1`: it answers 403. Agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL ([MCP reference](/docs/reference/mcp)).
+
+## Install as an app (PWA)
+
+Over HTTPS (or `localhost`), install Stage as an app to get push notifications:
+
+- **iOS and iPadOS 16.4+**: open the HTTPS URL in Safari, tap Share > Add to Home Screen, open Stage from the Home Screen, then Settings > Notifications > **Enable notifications**.
+- **macOS**: Safari > File > Add to Dock (or use the site in Safari or Chrome), then Settings > Notifications > **Enable notifications**.
+- **Send test** in Settings > Notifications checks the device.
+
+Which events notify (needs input, failed, ready, done, completed) is one filter in Settings that applies to every device.
+
+## Logs, status and updates
+
+```sh
+stage service status     # state, Stage health and harnesses, log location, problems with fixes
+stage service logs -f    # follow the log
+stage update             # latest release; restarts the service if it was running
+```
+
+- Logs go to journald on Linux and `~/Library/Logs/stage/stage.log` on macOS.
+- On Linux the user manager stops at your last logout unless lingering is on (`loginctl enable-linger`). With lingering, an enabled service also starts at boot. Stage never changes lingering. On macOS the service runs in your GUI session.
+- An update drains in-flight requests for up to 100s, relaunches no task and never touches T3 or its agents. A foreground `stage serve` is left alone, with a note to restart it.
+
+Every `stage service` command: [CLI reference](/docs/reference/cli).
+
+## Next steps
+
+- [Answer from your phone](/docs/guides/phone): Tailscale, the PWA and push notifications.
+- [Multiple machines](/docs/usage/workers): one main server, harnesses on your laptops.
+- [Your first tree](/docs/guides/first-tree): plan and run dependent tasks.

@@ -5,12 +5,15 @@ const out = new URL('../dist/public/', import.meta.url)
 const routes = [
   'index.html',
   'docs/index.html',
-  'docs/install/index.html',
-  'docs/t3/index.html',
-  'docs/desktop/index.html',
-  'docs/deploy/index.html',
-  'docs/features/index.html',
-  'docs/agents/index.html',
+  'docs/concepts/index.html',
+  ...['projects', 'connections', 'tasks', 'trees', 'journals', 'schedules', 'sessions', 'machines'].map(
+    (p) => `docs/concepts/${p}/index.html`,
+  ),
+  ...['desktop', 'server', 'workers'].map((p) => `docs/usage/${p}/index.html`),
+  ...['first-tree', 'agents', 'phone'].map((p) => `docs/guides/${p}/index.html`),
+  ...['install', 'connections', 'configuration', 'security', 'app', 'cli', 'mcp'].map(
+    (p) => `docs/reference/${p}/index.html`,
+  ),
 ]
 
 const failures = []
