@@ -152,7 +152,7 @@ Usage:
                                       the per-user worker service (stage worker run --managed), same
                                       flags and exit codes as stage service; a machine runs the server
                                       service or the worker service under one identity, not both
-  stage version [--json]              this binary: version, identity, commit, API version, schema,
+  stage version [--json]              this binary: version, identity, commit, API version, schema, engines,
                                       and its installation (mode, location) when installed
   stage update [--check] [--version X] [--from DIR]
                                       install the latest stable release (or X) in this installation's

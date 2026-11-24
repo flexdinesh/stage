@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/service"
 )
@@ -72,7 +74,11 @@ func TestServiceNoManager(t *testing.T) {
 func TestVersionJSON(t *testing.T) {
 	code, out, _ := runService(t, &noManager{}, "version", "--json")
 	var bi service.BuildInfo
-	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 7 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" || bi.Schema != sqlite.MaxVersion() {
+	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 7 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" || bi.Schema != sqlite.MaxVersion() || !slices.Equal(bi.Engines, config.Engines()) || bi.Engines[0] != "sqlite" {
 		t.Fatalf("version: %d %s", code, out)
+	}
+	code, out, _ = runService(t, &noManager{}, "version")
+	if code != 0 || !strings.Contains(out, "engines "+strings.Join(config.Engines(), ",")+")") {
+		t.Fatalf("version text: %d %s", code, out)
 	}
 }

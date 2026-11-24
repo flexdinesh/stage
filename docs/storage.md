@@ -11,15 +11,15 @@ that disagrees with this file updates it in the same PR.
 
 | Part | Today | Task |
 | --- | --- | --- |
-| [Engines and selection](#engines-and-selection) | SQLite only, `<data dir>/stage.db` | #405 |
-| [Layout](#layout-and-ownership) and [ports](#ports) | as described, including the Postgres adapter `internal/db/postgres` (#403); `internal/serve` still composes only SQLite | composition: #405 |
+| [Engines and selection](#engines-and-selection) | as described (#405); no shipped build has the `postgres` tag until the Dockerfile does (#407) | |
+| [Layout](#layout-and-ownership) and [ports](#ports) | as described, including the Postgres adapter `internal/db/postgres` (#403) and its composition in `internal/serve` (#405) | |
 | [Transactions and locking](#transactions-and-locking) | as described on both engines; the `storetest` concurrency cases pass on Postgres (#403) | |
-| [Single owner](#single-owner) | as described on both engines (#403); `serve` stops when a lease reports loss | Postgres in `serve`: #405 |
+| [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
 | [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 29; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 29 (#404); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
-| [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) | |
+| [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403) | |
@@ -36,14 +36,26 @@ One engine per process, chosen at startup.
 | Database | `<data dir>/stage.db` | the database the URL names |
 | Used by | desktop, CLI, installs, the per-user service, dev, the default compose stack, tests | a main server run from the Docker image |
 
-- Any other `STAGE_DATABASE_URL` value is invalid configuration (exit 78).
+- `config.ParseDatabase` reads it: the prefixes match exactly (lowercase;
+  pgx reads anything else as a keyword/value string). Any other
+  `STAGE_DATABASE_URL` value is invalid configuration (exit 78).
 - A Postgres URL in a binary built without the tag exits 78 with an error
-  that says the binary has no Postgres support and to use the Docker image.
+  that says the binary has no Postgres support and to use the Docker image,
+  before the data dir is locked (`config.PostgresBuilt`, set by the tag).
+- `internal/serve` (`engine.go`) composes the engine, its Ownership and
+  Backup ports and the migration guard. On Postgres, opening and taking
+  ownership are bounded at 30 s; an unreachable database exits 1
+  ([runtime.md](runtime.md#ownership-and-locks)).
 - The data dir stays required on both engines: it holds `stage.lock`,
   sockets and logs. On SQLite it also holds `stage.db` and `backups/`.
-- Health, version and startup logs report the engine (`sqlite` or
-  `postgres`), never the URL or its credentials. No log line prints the URL.
-- The desktop app, the installer and `stage service` are SQLite only.
+- Health (`engine`), `stage status` and startup logs report the running
+  engine (`sqlite` or `postgres`); `stage version` reports the engines built
+  in (`engines`). Never the URL or its password: `config.DatabaseURL` prints
+  `[redacted]` (fmt, slog, JSON), and no log line or error prints the URL.
+  pgx connection errors may name the user, database and host.
+- The desktop app, the installer and `stage service` are SQLite only:
+  `serve --managed` ignores an inherited `STAGE_DATABASE_URL` and
+  `service.env` refuses it ([service.md](service.md#serviceenv)).
 - Tests read `STAGE_TEST_DATABASE_URL` only under `-tags postgres`, set only
   by `check:postgres` (see [Checks](#checks)).
 
@@ -449,7 +461,7 @@ All gates run in `mise run check`; there is no CI.
 | --- | --- | --- |
 | `check:go` | always | `go vet` (plain, `smoke`, `postgres` tags), `CGO_ENABLED=0 go build -tags postgres` of the server, `go test ./...` (SQLite) |
 | `check:storage` (`scripts/check-storage.sh`) | always | the gate tests by name under `server/internal/db` (`TestMigrationVersionParity`, `TestStepwiseMigrations`, `TestDriverImportBoundary`) and the `internal/db/{store,sqlite,postgres,storetest}` packages; a gate or package not written yet prints `not present yet` and passes |
-| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites. Without Docker it fails, never skips |
+| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites, and `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database). Without Docker it fails, never skips |
 
 - New gate tests use the names above; `check:storage` finds them by name.
 - `STAGE_PG_IMAGE` in `mise.toml` is the one Postgres pin (latest major, one

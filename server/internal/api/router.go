@@ -287,6 +287,8 @@ type Health struct {
 	StartedAt  *time.Time `json:"startedAt"`
 	// Schema is the database's migration version (0 when unreachable).
 	Schema int64 `json:"schema"`
+	// Engine is the storage engine: sqlite | postgres (never its URL).
+	Engine string `json:"engine"`
 	// PublicURL is STAGE_PUBLIC_URL, null when unset: the address copied
 	// Stage links use on hosts whose own origin is not shareable (desktop).
 	PublicURL *string `json:"publicUrl"`
@@ -307,7 +309,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	h := Health{
 		Status: "ok", DB: "ok", Service: buildinfo.Service, Identity: buildinfo.Identity,
 		Version: buildinfo.Version, Commit: buildinfo.Revision(), APIVersion: buildinfo.APIVersion,
-		InstanceID: s.Instance.InstanceID,
+		InstanceID: s.Instance.InstanceID, Engine: s.Config.Database.Engine(),
 	}
 	if !s.Instance.StartedAt.IsZero() {
 		t := s.Instance.StartedAt

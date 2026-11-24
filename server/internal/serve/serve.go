@@ -86,9 +86,11 @@ type Ready struct {
 //  1. lock the data dir (a second server on it, on any address, exits here)
 //  2. open every listener (a failed bind closes the others; the database
 //     is not touched yet)
-//  3. open the database, refuse a schema newer than this binary (78), back
-//     it up when migrations are pending, migrate, start T3, recover
-//     launching tasks and start the background loops
+//  3. open the engine STAGE_DATABASE_URL selects (SQLite in the data dir,
+//     or Postgres: opening and its ownership lock bounded at 30s, held
+//     elsewhere 75), refuse a schema newer than this binary (78), back it
+//     up when migrations are pending, migrate, start T3, recover launching
+//     tasks and start the background loops
 //  4. serve all listeners, then notify READY=1 (systemd)
 //
 // Shutdown: STOPPING=1, background loops and notification streams end, the
@@ -150,13 +152,12 @@ func Run(ctx context.Context, o Options) error {
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
-	dbPath := filepath.Join(cfg.DataDir, sqlite.DBFile)
-	pool, err := sqlite.Open(ctx, dbPath)
+	pool, err := openEngine(ctx, cfg, meta.InstanceID, logger)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	lease, err := pool.Ownership().Acquire(ctx)
+	lease, err := acquireOwnership(ctx, cfg, pool)
 	if err != nil {
 		return err
 	}
@@ -165,7 +166,6 @@ func Run(ctx context.Context, o Options) error {
 	if err := migrate(ctx, pool, logger); err != nil {
 		return err
 	}
-	logger.Info("database", "path", dbPath)
 	if w := cfg.WarnRemovedEnv(); w != "" {
 		logger.Warn(w)
 	}

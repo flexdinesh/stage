@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# check:postgres: the db and api suites with -tags postgres against a
+# check:postgres: the db, api, serve and config suites with -tags postgres against a
 # throwaway Postgres container (name stage-pgtest-<random>, label
 # stage-pgtest=1, random 127.0.0.1 port, tmpfs data), always removed.
 # Postgres is Docker-only: no Docker is a failure, never a skip.
 #
 # --if-changed (used by `mise run check`): run only when the branch changes
-# db code vs the merge-base with origin/main, committed or uncommitted
+# db code (or the engine composition in serve and config) vs the
+# merge-base with origin/main, committed or uncommitted
 # (including untracked files). The image is STAGE_PG_IMAGE (mise.toml [env]).
 #
 # Run from the repository root (mise does).
@@ -13,7 +14,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-watched=(server/internal/db docs/storage.md server/go.mod Dockerfile)
+# Pathspecs (git globs, quoted so the shell leaves them alone).
+watched=(server/internal/db 'server/internal/serve/engine*.go' 'server/internal/config/database*.go' docs/storage.md server/go.mod Dockerfile)
 
 if [ "${1:-}" = "--if-changed" ]; then
   if base=$(git merge-base HEAD origin/main 2>/dev/null); then
@@ -79,6 +81,6 @@ port=${port##*:}
 echo "check:postgres: ready on 127.0.0.1:$port: $(docker exec "$name" psql -U postgres -tAc 'select version()')"
 
 export STAGE_TEST_DATABASE_URL="postgres://postgres:stage@127.0.0.1:$port/postgres?sslmode=disable"
-echo "check:postgres: STAGE_TEST_DATABASE_URL=$STAGE_TEST_DATABASE_URL go test -tags postgres -count=1 ./internal/db/... ./internal/api/..."
-(cd server && go test -tags postgres -count=1 ./internal/db/... ./internal/api/...)
+echo "check:postgres: STAGE_TEST_DATABASE_URL=$STAGE_TEST_DATABASE_URL go test -tags postgres -count=1 ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/..."
+(cd server && go test -tags postgres -count=1 ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/...)
 echo "check:postgres: done; removing $name"
