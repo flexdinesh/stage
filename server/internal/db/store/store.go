@@ -37,6 +37,7 @@ type Tx interface {
 	Push() Push
 	Preferences() Preferences
 	Users() Users
+	Attachments() Attachments
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers
