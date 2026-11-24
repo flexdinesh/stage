@@ -21,8 +21,11 @@ COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
 COPY --from=web /src/apps/web/dist/ ./internal/webui/dist/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
-# Data dir for the SQLite database, owned by distroless nonroot (65532), so a
+# The only build with the postgres tag (docs/storage.md): the image runs on
+# SQLite by default or on Postgres when STAGE_DATABASE_URL is set.
+# Release, desktop and CLI builds never contain the Postgres driver.
+RUN CGO_ENABLED=0 go build -tags postgres -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
+# Data dir (SQLite database, or on Postgres only the lock and sockets), owned by distroless nonroot (65532), so a
 # named volume mounted at /data starts out writable.
 RUN mkdir -p /out/data && chown 65532:65532 /out/data && chmod 0700 /out/data
 

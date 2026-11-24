@@ -1,0 +1,68 @@
+# Example: Stage main server on Postgres (README.md). Not the production
+# stack (compose.yaml at the repository root, SQLite); run one or the other,
+# both publish 127.0.0.1:7380.
+#
+#   cd examples/postgres
+#   echo 'STAGE_PG_PASSWORD=<url-safe password>' > .env
+#   docker compose up -d --build
+name: stage-postgres
+
+services:
+  postgres:
+    # The one Postgres pin: the same exact tag as STAGE_PG_IMAGE in mise.toml
+    # (check:storage fails if they differ).
+    image: postgres:19.0-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stage
+      POSTGRES_DB: stage
+      POSTGRES_PASSWORD: ${STAGE_PG_PASSWORD:?set STAGE_PG_PASSWORD in examples/postgres/.env (see README.md)}
+      # Unicode case folding for search (docs/storage.md "Search"). Applies
+      # only when the volume is first initialized.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "stage", "-d", "stage"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Postgres 18+ keeps its data under /var/lib/postgresql/<major>/docker.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    # Not published: only Stage, on this compose network, reaches it.
+
+  app:
+    build: ../..
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Above the app's 100s shutdown wait for in-flight launches.
+    stop_grace_period: 2m
+    restart: unless-stopped
+    # Published on the host's loopback only (no auth). Put an authenticating
+    # HTTPS reverse proxy in front before exposing it.
+    ports:
+      - "127.0.0.1:7380:7380"
+    # T3 on the Docker host, reachable from the container at
+    # http://host.docker.internal:3773: enter it in Settings > Connections > T3.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      STAGE_LISTEN: 0.0.0.0:7380
+      # Required on Postgres too, but holds only stage.lock and sockets: no
+      # volume. Everything else is in the database.
+      STAGE_DATA_DIR: /data
+      # Selects Postgres. The password must be URL-safe (README.md).
+      STAGE_DATABASE_URL: postgres://stage:${STAGE_PG_PASSWORD:?set STAGE_PG_PASSWORD}@postgres:5432/stage?sslmode=disable
+    # Distroless image: the stage binary is the probe (exit 0 when ready).
+    healthcheck:
+      test: ["CMD", "/stage", "status"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  pgdata:

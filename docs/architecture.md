@@ -21,6 +21,7 @@ Storage engines, ports and adapters: [ADR 0003](adr/0003-storage-adapters.md),
 | `apps/website/` (`@stage/website`) | Static marketing site and public user guides on vocs (`renderStrategy: 'full-static'`), illustrative demos (vendored stageshow in `src/vendor/`), its own `PRODUCT.md`, `DESIGN.md` and `.impeccable/`, and the Cloudflare Workers static-assets config (`wrangler.jsonc`, worker `stage-website`, deployed by Workers Builds from `main`: [website.md](website.md)). Tasks: `mise run website:dev` (:5175), `website:build`, `website:check` (also in `mise run check`), `website:preview` (wrangler dev, :8787) | Import `@stage/*` or product UI/runtime internals; be needed by a product build or release (they install with `--filter` and never build it); deploy with product releases |
 | `desktop/fixture/` | MyGo proof (ADR 0001). Separate Go module and its own pnpm lockfile, outside the workspace | Be imported by anything |
 | `examples/kubernetes/` | A minimal Kubernetes example for a remote main server (Deployment, Service, PVC, README), per [runtime.md](runtime.md#remote-main-server-and-workers). Documentation only: no build, check or release uses it | Become a supported chart; run more than one replica |
+| `examples/postgres/` | A compose example for a main server on Postgres (Stage image + Postgres on `STAGE_PG_IMAGE`, README), per [storage.md](storage.md#docker-image-and-compose-example). Only `check:storage` reads it (the image pin) | Replace the production `compose.yaml`; pin a Postgres tag other than `STAGE_PG_IMAGE` |
 | `tools/release/`, `scripts/release.sh` | Release builds ([release.md](release.md)): one version and commit for the desktop, its bundled CLI and the headless CLI; the manifest, checksums and verification. `tools/release` is its own Go module (standard library only) | Upload, tag, install or hold product logic |
 
 One pnpm workspace (`pnpm-workspace.yaml`: `apps/web`, `apps/website`, `packages/app`, `desktop/app/ui`) with one lockfile at
@@ -42,11 +43,11 @@ Two homes, no shared or generated content between them:
 | [features.md](features.md), [api.md](api.md) (tree, journal, handoff, base rules), [runtime.md](runtime.md) (machines) | `/docs`, `/docs/concepts/*` |
 | [desktop.md](desktop.md) | `/docs/usage/desktop` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy) | `/docs/usage/server`, `/docs/guides/phone` |
-| [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), `examples/kubernetes/` | `/docs/usage/workers` |
+| [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), [storage.md](storage.md) (engines), `examples/kubernetes/`, `examples/postgres/` | `/docs/usage/workers` |
 | [features.md](features.md), [api.md](api.md) (MCP, tree rules) | `/docs/guides/first-tree`, `/docs/guides/agents` |
 | [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/reference/install` |
 | [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 and OpenCode pairing) | `/docs/reference/connections` |
-| [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), `.env.example` | `/docs/reference/configuration` |
+| [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), [storage.md](storage.md) (engines), `.env.example` | `/docs/reference/configuration` |
 | [runtime.md](runtime.md) (origin policy, worker auth) | `/docs/reference/security` |
 | [features.md](features.md) (UI, Settings) | `/docs/reference/app` |
 | CLI (`server/internal/cli`), [api.md](api.md) (CLI) | `/docs/reference/cli` |

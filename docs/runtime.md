@@ -80,7 +80,8 @@ The data dir is required on both storage engines: it holds `stage.lock`,
 the `<data dir>/run` sockets and logs, and on SQLite `stage.db` and
 `backups/`. `STAGE_DATABASE_URL` selects the engine: unset is SQLite at
 `<data dir>/stage.db`; `postgres://` or `postgresql://` is Postgres, only in
-a binary built with the `postgres` tag (the Docker image); any other value,
+a binary built with the `postgres` tag (the Docker image; example:
+`examples/postgres/`); any other value,
 or a Postgres URL in a binary without the tag, exits 78 before the data dir
 is touched. The per-user service, and so the desktop app, is SQLite only
 ([service.md](service.md#serviceenv), [storage.md](storage.md#engines-and-selection)).
@@ -475,19 +476,26 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
 
 The distributed deployment: one main server on a host or cluster behind an
 authenticating HTTPS proxy, and workers on the machines that run harnesses
-([ADR 0002](adr/0002-machines-and-workers.md)). Example:
-`examples/kubernetes/`. User guide: website `/docs/usage/workers` (Multiple
-machines).
+([ADR 0002](adr/0002-machines-and-workers.md)). Examples:
+`examples/kubernetes/` (SQLite), `examples/postgres/` (compose, Postgres).
+User guide: website `/docs/usage/workers` (Multiple machines).
 
 **Main server.**
 
+- **Engine.** SQLite in the data dir by default; Postgres when the Docker
+  image gets `STAGE_DATABASE_URL` ([Identity and paths](#identity-and-paths),
+  [storage.md](storage.md#engines-and-selection)).
 - **One replica.** One server owns one data dir ([Ownership and
   locks](#ownership-and-locks)); a second server on the same volume exits 75.
+  On Postgres one server also owns the database: a second server on it exits
+  75 whatever its data dir ([storage.md](storage.md#single-owner)).
   Under an orchestrator: one replica, stop the old instance before starting
   the new one (Kubernetes `strategy: Recreate`), no autoscaling.
-- **Local volume.** `stage.db`, its backups and `stage.lock` live on a local
-  (block-backed) filesystem. `flock` and SQLite locking are unreliable on NFS
-  and other network filesystems, so they are not supported.
+- **Local volume (SQLite).** `stage.db`, its backups and `stage.lock` live on
+  a local (block-backed) filesystem. `flock` and SQLite locking are unreliable
+  on NFS and other network filesystems, so they are not supported. On
+  Postgres the data dir holds only `stage.lock` and sockets and needs no
+  volume; backups are the operator's ([storage.md](storage.md#backups)).
 - **Shutdown.** Allow more than the 100s drain ([Shutdown](#shutdown)) before
   a forced kill (Kubernetes `terminationGracePeriodSeconds: 120`, compose
   `stop_grace_period: 2m`).

@@ -33,6 +33,7 @@ A worker always dials out to the main server, so laptops need no open ports and 
 - Run it as a [self-hosted server](/docs/usage/server), with Docker ([`compose.yaml`](https://github.com/flexdinesh/stage/blob/main/compose.yaml) builds the image, keeps the database in a volume and publishes port 7380 on the host's loopback), or on [Kubernetes](#kubernetes). Put it behind HTTPS.
 - Set `STAGE_PUBLIC_URL` to the HTTPS URL users and workers reach. Pairing needs it: pairing links are built from it and workers dial it.
 - One server per data dir, on a local disk.
+- The database is SQLite in the data dir by default. A main server run from the Docker image can use [Postgres](#postgres) instead.
 - The Docker image never runs harnesses as local processes. T3 and OpenCode on your workers do the work.
 - Workers and the main server need the same API version. Update them together.
 
@@ -117,11 +118,32 @@ Setting up agents: [Agents that queue work](/docs/guides/agents).
 
 A minimal example lives in [`examples/kubernetes`](https://github.com/flexdinesh/stage/tree/main/examples/kubernetes): a Deployment, a ClusterIP Service and a PersistentVolumeClaim for `stage.db`. There is no published image: build one from the repository `Dockerfile` at the release your workers run and push it to your registry. Then set the image and `STAGE_PUBLIC_URL`, apply the files, and put your [auth proxy](#auth-proxy) or ingress in front of the Service.
 
+The example uses SQLite. On [Postgres](#postgres), set `STAGE_DATABASE_URL` in the Deployment; the volume and its backup notes below then no longer apply.
+
 - **Exactly one replica**, with `strategy: Recreate`. One server owns one data dir, and SQLite has one writer; a second pod on the volume exits at startup. Do not autoscale it.
 - **A local volume**, never NFS: use a block-backed storage class (a cloud disk, local-path, Longhorn, Ceph RBD), `ReadWriteOnce`. File locks and SQLite locking are unreliable on network filesystems.
 - **Graceful stop**: `terminationGracePeriodSeconds: 120` covers the server's 100s drain.
 - **Probes** on `/api/health`, which answers 200 while the server and its database work, whatever harnesses or workers do.
 - **Back up** the volume. Before a migration the server also copies `stage.db` into `backups/` on it.
+
+## Postgres
+
+A main server run from the Docker image can keep its data in Postgres instead of SQLite: set `STAGE_DATABASE_URL=postgres://…`. Only the image supports it; the desktop app and the installed CLI and service always use SQLite. Configuration details: [Postgres](/docs/reference/configuration#postgres).
+
+[`examples/postgres`](https://github.com/flexdinesh/stage/tree/main/examples/postgres) runs Stage and Postgres in one compose project. It builds the image, starts Stage once Postgres is healthy, keeps the database in a named volume, and publishes port 7380 on the host's loopback:
+
+```sh
+cd examples/postgres
+echo 'STAGE_PG_PASSWORD=<url-safe password>' > .env
+docker compose up -d --build
+```
+
+`/api/health` and `stage status` then report the engine as `postgres`. Put your [auth proxy](#auth-proxy) in front, as for any main server.
+
+- **Still one server**: it holds a lock on the database for its lifetime, and a second server on the same database exits at startup. Run one replica.
+- **Back up the database yourself** with `pg_dump` or your provider's snapshots, ideally before every update. The server takes no backup; it logs a warning before it migrates.
+- **No volume for Stage**: on Postgres the data dir holds only the lock and sockets.
+- **Starting fresh**: the example starts with an empty database. There is no copy from an existing `stage.db` yet.
 
 ## Remove and update
 

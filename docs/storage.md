@@ -11,7 +11,7 @@ that disagrees with this file updates it in the same PR.
 
 | Part | Today | Task |
 | --- | --- | --- |
-| [Engines and selection](#engines-and-selection) | as described (#405); no shipped build has the `postgres` tag until the Dockerfile does (#407) | |
+| [Engines and selection](#engines-and-selection) | as described (#405); the Docker image is built with the `postgres` tag (#407) | |
 | [Layout](#layout-and-ownership) and [ports](#ports) | as described, including the Postgres adapter `internal/db/postgres` (#403) and its composition in `internal/serve` (#405) | |
 | [Transactions and locking](#transactions-and-locking) | as described on both engines; the `storetest` concurrency cases pass on Postgres (#403) | |
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
@@ -21,7 +21,7 @@ that disagrees with this file updates it in the same PR.
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
-| Docker build and compose example | Docker image builds without the tag | #407 |
+| [Docker image and compose example](#docker-image-and-compose-example) | as described (#407) | |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
@@ -31,10 +31,10 @@ One engine per process, chosen at startup.
 
 | | SQLite | Postgres |
 | --- | --- | --- |
-| Built into | every build | only builds with `-tags postgres`: the `Dockerfile`. Desktop, CLI, installer and release binaries never contain it (no pgx) |
+| Built into | every build | only builds with `-tags postgres`: the `Dockerfile` ([below](#docker-image-and-compose-example)). Desktop, CLI, installer and release binaries never contain it (no pgx) |
 | Selected by | `STAGE_DATABASE_URL` unset | `STAGE_DATABASE_URL=postgres://...` or `postgresql://...` |
 | Database | `<data dir>/stage.db` | the database the URL names |
-| Used by | desktop, CLI, installs, the per-user service, dev, the default compose stack, tests | a main server run from the Docker image |
+| Used by | desktop, CLI, installs, the per-user service, dev, the default compose stack, tests | a main server run from the Docker image, such as `examples/postgres` |
 
 - `config.ParseDatabase` reads it: the prefixes match exactly (lowercase;
   pgx reads anything else as a keyword/value string). Any other
@@ -58,6 +58,25 @@ One engine per process, chosen at startup.
   `service.env` refuses it ([service.md](service.md#serviceenv)).
 - Tests read `STAGE_TEST_DATABASE_URL` only under `-tags postgres`, set only
   by `check:postgres` (see [Checks](#checks)).
+
+### Docker image and compose example
+
+- The `Dockerfile` is the only build with `-tags postgres`. The image runs on
+  SQLite in `/data` by default and on Postgres when `STAGE_DATABASE_URL` is
+  set. `scripts/release.sh` (CLI, installer and desktop binaries) never passes
+  the tag.
+- The root `compose.yaml` (the production stack) stays on SQLite.
+- `examples/postgres/compose.yaml` (project `stage-postgres`, with a README)
+  runs the image against Postgres:
+  - a `postgres` service on `STAGE_PG_IMAGE` (`check:storage` fails if the
+    tag differs), initialized with the builtin `C.UTF-8` locale
+    ([Search](#search)), a `pg_isready` healthcheck, the named volume
+    `pgdata`, no published port;
+  - an `app` service started once Postgres is healthy, with
+    `STAGE_DATABASE_URL` from the required `STAGE_PG_PASSWORD`, a
+    `/stage status` healthcheck, and no volume (on Postgres the data dir holds
+    only the lock and sockets).
+- Backups in the example are the operator's ([Backups](#backups)).
 
 ## Layout and ownership
 
@@ -451,7 +470,8 @@ and paging. (Thread search was removed with API v3.)
 - **Postgres (operator-owned):** the server takes no backup. Before applying
   pending migrations the Backup port logs a warning naming the current and
   target versions and that no backup was taken, then the server migrates. Backups, snapshots and
-  point-in-time recovery are the operator's (managed service, `pg_dump`).
+  point-in-time recovery are the operator's (managed service, `pg_dump`;
+  `examples/postgres/README.md` shows one).
 
 ## Checks
 
@@ -460,12 +480,13 @@ All gates run in `mise run check`; there is no CI.
 | Task | Runs | Covers |
 | --- | --- | --- |
 | `check:go` | always | `go vet` (plain, `smoke`, `postgres` tags), `CGO_ENABLED=0 go build -tags postgres` of the server, `go test ./...` (SQLite) |
-| `check:storage` (`scripts/check-storage.sh`) | always | the gate tests by name under `server/internal/db` (`TestMigrationVersionParity`, `TestStepwiseMigrations`, `TestDriverImportBoundary`) and the `internal/db/{store,sqlite,postgres,storetest}` packages; a gate or package not written yet prints `not present yet` and passes |
+| `check:storage` (`scripts/check-storage.sh`) | always | the gate tests by name under `server/internal/db` (`TestMigrationVersionParity`, `TestStepwiseMigrations`, `TestDriverImportBoundary`) and the `internal/db/{store,sqlite,postgres,storetest}` packages; a gate or package not written yet prints `not present yet` and passes; the Postgres pin (the image in `examples/postgres/compose.yaml` is `STAGE_PG_IMAGE`) |
 | `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites, and `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database). Without Docker it fails, never skips |
 
 - New gate tests use the names above; `check:storage` finds them by name.
 - `STAGE_PG_IMAGE` in `mise.toml` is the one Postgres pin (latest major, one
-  exact tag), shared with the compose example.
+  exact tag), shared with the compose example (`examples/postgres`);
+  `check:storage` fails when they differ.
 - Postgres tests use only the `stage-pgtest-*` containers; never another
   database, the prod stack or the default data dir.
 - `storetest` runs on SQLite in `check:storage` and on Postgres in

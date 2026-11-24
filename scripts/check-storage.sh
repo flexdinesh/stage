@@ -7,11 +7,22 @@
 #   TestDriverImportBoundary (driver imports only in their adapters).
 #   A gate not written yet is reported as "not present yet", never silently.
 # - The storage adapter packages under server/internal/db, once they exist.
+# - The Postgres pin: the image in examples/postgres/compose.yaml is
+#   STAGE_PG_IMAGE (mise.toml [env]), the tag check:postgres runs.
 #
 # Run from the repository root (mise does). Postgres suites: check:postgres.
 set -euo pipefail
 
 cd "$(dirname "$0")/../server"
+
+: "${STAGE_PG_IMAGE:?STAGE_PG_IMAGE is unset (defined in mise.toml [env]; run via mise)}"
+compose=../examples/postgres/compose.yaml
+images=$(sed -n -E 's/^[[:space:]]+image:[[:space:]]*["'\'']?([^"'\''[:space:]#]+).*/\1/p' "$compose")
+if [ "$images" != "$STAGE_PG_IMAGE" ]; then
+  echo "check:storage: $compose must use exactly one image, STAGE_PG_IMAGE ($STAGE_PG_IMAGE); found: ${images:-none}" >&2
+  exit 1
+fi
+echo "check:storage: Postgres pin: ${compose#../} uses $STAGE_PG_IMAGE"
 
 gates=(TestMigrationVersionParity TestStepwiseMigrations TestDriverImportBoundary)
 pkgs=(store sqlite postgres storetest)
