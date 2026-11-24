@@ -37,7 +37,7 @@ func runVersion(env Env, args []string) error {
 	if *asJSON {
 		return writeJSON(env.Stdout, v)
 	}
-	fmt.Fprintf(env.Stdout, "stage %s (identity %s, commit %s, api v%d, schema %d)\n", bi.Version, bi.Identity, orNone(bi.Commit), bi.APIVersion, bi.Schema)
+	fmt.Fprintf(env.Stdout, "stage %s (identity %s, commit %s, api v%d, schema %d, engines %s)\n", bi.Version, bi.Identity, orNone(bi.Commit), bi.APIVersion, bi.Schema, strings.Join(bi.Engines, ","))
 	if v.Install != nil {
 		fmt.Fprintf(env.Stdout, "installed %s mode at %s (%s)\n", v.Install.Mode, v.Install.App, v.Install.Link)
 	}

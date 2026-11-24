@@ -23,7 +23,7 @@ func TestParseServiceEnv(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", k, got[k], v)
 		}
 	}
-	for _, bad := range []string{"STAGE_DATA_DIR=/x\n", "STAGE_ENV=dev\n", "HOME=/x\n", "noequals\n", "T3_BIN=a\nT3_BIN=b\n", "T3_URL=http://t3:3773\n", "T3_ADMIN_TOKEN=x\n", "OPENCODE_URL=http://oc\n"} {
+	for _, bad := range []string{"STAGE_DATA_DIR=/x\n", "STAGE_ENV=dev\n", "HOME=/x\n", "noequals\n", "T3_BIN=a\nT3_BIN=b\n", "T3_URL=http://t3:3773\n", "T3_ADMIN_TOKEN=x\n", "OPENCODE_URL=http://oc\n", "STAGE_DATABASE_URL=postgres://u:p@h/db\n"} {
 		if _, err := ParseServiceEnv(strings.NewReader(bad)); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -60,6 +60,7 @@ func TestLoadManaged(t *testing.T) {
 	inherited := map[string]string{
 		"HOME": home, "STAGE_DATA_DIR": "/elsewhere", "STAGE_ENV": "dev", "STAGE_LISTEN": "127.0.0.1:1",
 		"T3_BIN": "/inherited", "T3_FAKE": "1", "STAGE_ALLOWED_ORIGINS": "bogus",
+		"STAGE_DATABASE_URL": "postgres://u:p@h/db",
 	}
 	getenv := func(k string) string { return inherited[k] }
 	cfg, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix", "T3_BIN": "/file"})
@@ -72,6 +73,9 @@ func TestLoadManaged(t *testing.T) {
 	}
 	if cfg.T3Bin != "/file" || cfg.T3Fake || len(cfg.AllowedOrigins) != 0 || cfg.T3ClientName != "stage" {
 		t.Fatalf("inherited values leaked: %+v", cfg)
+	}
+	if cfg.Database.Engine() != EngineSQLite {
+		t.Fatalf("inherited STAGE_DATABASE_URL leaked: engine %s", cfg.Database.Engine())
 	}
 	if len(cfg.Listen) != 1 || cfg.Listen[0].Network != "unix" || !cfg.Listen[0].Private {
 		t.Fatalf("listen %+v", cfg.Listen)
@@ -102,5 +106,13 @@ func TestServiceConfigDir(t *testing.T) {
 	}
 	if got := ServiceLogDir(get, "linux"); got != "" {
 		t.Fatalf("linux log dir %s", got)
+	}
+}
+
+// TestServiceEnvRefusesDatabaseURL: the service is SQLite only, and says so.
+func TestServiceEnvRefusesDatabaseURL(t *testing.T) {
+	_, err := ParseServiceEnv(strings.NewReader("STAGE_DATABASE_URL=postgres://u:pw@h/db\n"))
+	if err == nil || !strings.Contains(err.Error(), "always uses SQLite") || strings.Contains(err.Error(), "pw@") {
+		t.Fatalf("err %v", err)
 	}
 }

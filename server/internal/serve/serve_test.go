@@ -96,11 +96,17 @@ type inst struct {
 // start runs an instance and waits until it serves.
 func start(t *testing.T, c config.Config, tc t3.Client) *inst {
 	t.Helper()
+	return startLogged(t, c, tc, quiet())
+}
+
+// startLogged is start with logger.
+func startLogged(t *testing.T, c config.Config, tc t3.Client, logger *slog.Logger) *inst {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	readyCh := make(chan serve.Ready, 1)
 	i := &inst{cancel: cancel, done: make(chan error, 1)}
 	go func() {
-		i.done <- serve.Run(ctx, serve.Options{Config: c, T3: tc, Logger: quiet(), Ready: func(r serve.Ready) { readyCh <- r }, ShutdownTimeout: 10 * time.Second})
+		i.done <- serve.Run(ctx, serve.Options{Config: c, T3: tc, Logger: logger, Ready: func(r serve.Ready) { readyCh <- r }, ShutdownTimeout: 10 * time.Second})
 	}()
 	select {
 	case i.ready = <-readyCh:

@@ -416,6 +416,7 @@ type Health struct {
 	InstanceID string     `json:"instanceId"`
 	StartedAt  *time.Time `json:"startedAt"`
 	Schema     int64      `json:"schema"`
+	Engine     string     `json:"engine"` // sqlite | postgres
 	// Harnesses is each connected harness's last known state.
 	Harnesses []struct {
 		Kind         string  `json:"kind"`

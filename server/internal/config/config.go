@@ -24,8 +24,11 @@ type Config struct {
 	// Listen: STAGE_LISTEN (comma list) or `stage serve --listen` (repeatable),
 	// default listen.Default. A listen.DefaultSocket item stays unresolved
 	// (Address "") until ResolveSockets.
-	Listen    []listen.Addr
-	DataDir   string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.db. With STAGE_ENV=dev never the default.
+	Listen  []listen.Addr
+	DataDir string // STAGE_DATA_DIR, default DefaultDataDir(); holds stage.lock, sockets, logs and (SQLite) stage.db. With STAGE_ENV=dev never the default.
+	// Database is the engine STAGE_DATABASE_URL selects (zero: SQLite in
+	// DataDir).
+	Database  Database
 	PublicURL string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
 	// T3Bin (T3_BIN) is the t3 CLI auto-pair runs; "" = look it up.
 	T3Bin string
@@ -56,6 +59,9 @@ func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) 
 	dev := getenv("STAGE_ENV") == "dev"
 	var err error
 	if cfg.Listen, err = loadListen(getenv, listenFlags); err != nil {
+		return Config{}, err
+	}
+	if cfg.Database, err = ParseDatabase(getenv(DatabaseEnv)); err != nil {
 		return Config{}, err
 	}
 	if cfg.AllowedOrigins, err = loadOrigins(getenv("STAGE_ALLOWED_ORIGINS"), cfg.PublicURL); err != nil {

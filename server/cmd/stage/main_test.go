@@ -128,6 +128,15 @@ func TestServeExitCodes(t *testing.T) {
 	}
 }
 
+// An invalid STAGE_DATABASE_URL: exit 78, never printing the value.
+func TestServeInvalidDatabaseURL(t *testing.T) {
+	short, environ := env(t)
+	code, stderr := runMain(t, append(environ, "STAGE_DATA_DIR="+filepath.Join(short, "data"), "STAGE_DATABASE_URL=mysql://u:s3cret-pw@db/stage"), "serve", "--listen", "unix:"+filepath.Join(short, "s.sock"))
+	if code != 78 || !strings.Contains(stderr, "STAGE_DATABASE_URL") || strings.Contains(stderr, "s3cret-pw") {
+		t.Fatalf("invalid database URL: %d %s", code, stderr)
+	}
+}
+
 // A database migrated by a newer Stage: exit 78 with the recovery hint.
 func TestServeNewerSchema(t *testing.T) {
 	short, environ := env(t)

@@ -91,7 +91,11 @@ func printStatus(w io.Writer, s statusOut) {
 	if h.InstanceID != "" && h.StartedAt != nil {
 		kv(w, "instance", "%s %s", h.InstanceID, dim("since "+h.StartedAt.Local().Format(time.RFC3339)))
 	}
-	kv(w, "database", "%s", h.DB)
+	if h.Engine != "" {
+		kv(w, "database", "%s %s", h.DB, dim("("+h.Engine+")"))
+	} else {
+		kv(w, "database", "%s", h.DB)
+	}
 	for _, hh := range h.Harnesses {
 		printHarnessState(w, hh.Kind, hh.Connected, hh.Configured, hh.LastError)
 	}

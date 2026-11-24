@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 )
 
@@ -24,6 +25,9 @@ type BuildInfo struct {
 	ServiceUnit  string `json:"serviceUnit"`
 	// Schema is the highest database schema this binary knows.
 	Schema int64 `json:"schema"`
+	// Engines are the storage engines built in: sqlite, plus postgres
+	// with the postgres build tag (the Docker image).
+	Engines []string `json:"engines"`
 	// Build is the release build stamp (buildinfo.Stamp), absent when
 	// unstamped.
 	Build string `json:"build,omitempty"`
@@ -34,7 +38,7 @@ func ThisBuild() BuildInfo {
 	return BuildInfo{
 		Identity: buildinfo.Identity, Version: buildinfo.Version, Commit: buildinfo.Revision(),
 		APIVersion: buildinfo.APIVersion, ServiceLabel: buildinfo.Label(), ServiceUnit: UnitName(),
-		Schema: sqlite.MaxVersion(), Build: buildinfo.Stamp,
+		Schema: sqlite.MaxVersion(), Engines: config.Engines(), Build: buildinfo.Stamp,
 	}
 }
 

@@ -20,13 +20,18 @@ import (
 const ServiceEnvFile = "service.env"
 
 // ServiceEnvKeys are the keys service.env may set. In managed mode
-// (`stage serve --managed`) these, plus STAGE_DATA_DIR and STAGE_ENV, are never taken
+// (`stage serve --managed`) these, plus managedFixedKeys, are never taken
 // from the inherited environment: only from service.env.
 var ServiceEnvKeys = append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS"}, HarnessEnvKeys...)
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in
-// service.env: the service's data dir is always the identity default.
-var managedFixedKeys = []string{"STAGE_DATA_DIR", "STAGE_ENV"}
+// service.env, each with its reason: the service's data dir is always the
+// identity default, and its database is always SQLite in it.
+var managedFixedKeys = map[string]string{
+	"STAGE_DATA_DIR": "its data dir is always this installation's default",
+	"STAGE_ENV":      "its data dir is always this installation's default",
+	DatabaseEnv:      "the service always uses SQLite in its data dir",
+}
 
 // InvalidError is a configuration error (exit 78 from `stage serve`): a
 // restart cannot fix it.
@@ -104,7 +109,7 @@ STAGE_LISTEN=unix
 
 // ParseServiceEnv reads service.env: KEY=VALUE lines, '#' comments, blank
 // lines; a value may be wrapped in matching single or double quotes (no
-// escapes). Keys outside ServiceEnvKeys, STAGE_DATA_DIR, STAGE_ENV and
+// escapes). Keys outside ServiceEnvKeys, managedFixedKeys and
 // duplicates are errors.
 func ParseServiceEnv(r io.Reader) (map[string]string, error) {
 	return parseEnvFile(r, ServiceEnvFile, ServiceEnvKeys, true)
@@ -130,10 +135,8 @@ func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[s
 			return nil, fmt.Errorf("%s line %d: want KEY=VALUE", name, n)
 		}
 		if fixed {
-			for _, f := range managedFixedKeys {
-				if k == f {
-					return nil, fmt.Errorf("%s line %d: %s cannot be set for the service (its data dir is always this installation's default)", name, n, k)
-				}
+			if why, ok := managedFixedKeys[k]; ok {
+				return nil, fmt.Errorf("%s line %d: %s cannot be set for the service (%s)", name, n, k, why)
 			}
 		}
 		if slices.Contains(RemovedHarnessEnvKeys, k) {
@@ -198,8 +201,9 @@ func ReadServiceEnv(path string) (map[string]string, error) {
 }
 
 // LoadManaged is the config of `stage serve --managed`: the keys of
-// ServiceEnvKeys come only from file (service.env), STAGE_DATA_DIR and
-// STAGE_ENV are ignored (the data dir is the identity default), everything
+// ServiceEnvKeys come only from file (service.env), STAGE_DATA_DIR,
+// STAGE_ENV and STAGE_DATABASE_URL are ignored (the data dir is the
+// identity default; the database is SQLite in it), everything
 // else (HOME, XDG_*) from getenv. The listeners must include the private
 // default socket (`unix`).
 func LoadManaged(getenv func(string) string, file map[string]string) (Config, error) {
@@ -207,10 +211,8 @@ func LoadManaged(getenv func(string) string, file map[string]string) (Config, er
 		if allowedServiceKey(k) {
 			return file[k]
 		}
-		for _, f := range managedFixedKeys {
-			if k == f {
-				return ""
-			}
+		if _, ok := managedFixedKeys[k]; ok {
+			return ""
 		}
 		return getenv(k)
 	}

@@ -364,7 +364,7 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() || h.Engine != "sqlite" {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()

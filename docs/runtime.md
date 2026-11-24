@@ -76,6 +76,16 @@ Release builds use `stage`, developer builds (`mise run dist`) `stage-dev`
 The data dir is canonical: symlinks are resolved after the directory is
 created, so one directory has one identity however it is spelled.
 
+The data dir is required on both storage engines: it holds `stage.lock`,
+the `<data dir>/run` sockets and logs, and on SQLite `stage.db` and
+`backups/`. `STAGE_DATABASE_URL` selects the engine: unset is SQLite at
+`<data dir>/stage.db`; `postgres://` or `postgresql://` is Postgres, only in
+a binary built with the `postgres` tag (the Docker image); any other value,
+or a Postgres URL in a binary without the tag, exits 78 before the data dir
+is touched. The per-user service, and so the desktop app, is SQLite only
+([service.md](service.md#serviceenv), [storage.md](storage.md#engines-and-selection)).
+No log line or error prints the URL.
+
 Socket paths over the OS limit (107 bytes on Linux, 103 on macOS) are
 rejected with an error at parse time instead of failing at bind. The fix is a
 shorter explicit `unix:/path`.
@@ -106,7 +116,7 @@ Startup order:
 1. **Lock the data dir.** If it is held, exit at once (status 75) with `data dir … is in use by another stage server (pid N, version V, listening on …)`, plus a hint to run `stage service stop` when the holder is the managed service. The server does not wait. It also starts nothing and binds nothing.
 2. **Open every listener in order.** For a socket, take its lock. Under the lock, an existing socket file that refuses connections is stale (its owner died) and is replaced. A regular file is refused. So is a socket that answers (a server predating the lock) or one that cannot be probed. If any bind fails, the listeners already opened are closed, their sockets removed and their locks released. The database has not been touched yet.
 3. Record the holder in `stage.lock`.
-4. Open the database and guard its schema ([below](#schema-and-backups)): a schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Log one warning naming any removed harness environment variable still set (`T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`, `OPENCODE_WEB_URL`, `OPENCODE_USERNAME`, `OPENCODE_PASSWORD`: no longer read; set the connection up in Settings > Connections). Migrate, start T3 (its URL: the one saved with the T3 `url` setting (`PUT /api/harnesses/t3/settings` or `stage harness t3 set url=URL`), else `http://127.0.0.1:3773`; an unpaired T3 is never contacted in the background), recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
+4. Open the database and guard its schema ([below](#schema-and-backups)). The startup log names the engine (`database engine=sqlite path=…` or `database engine=postgres`), never the URL. On Postgres, connecting and taking the database's ownership lock ([storage.md](storage.md#single-owner)) are bounded at 30 s (unreachable: exit 1, for the restart policy to retry; held by another server: exit 75). A schema newer than this binary exits 78; pending migrations on a non-empty database are preceded by a backup (a failed backup exits 1, unmigrated). Log one warning naming any removed harness environment variable still set (`T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`, `OPENCODE_WEB_URL`, `OPENCODE_USERNAME`, `OPENCODE_PASSWORD`: no longer read; set the connection up in Settings > Connections). Migrate, start T3 (its URL: the one saved with the T3 `url` setting (`PUT /api/harnesses/t3/settings` or `stage harness t3 set url=URL`), else `http://127.0.0.1:3773`; an unpaired T3 is never contacted in the background), recover launching tasks (`RecoverLaunching`, so a restart relaunches nothing), and start the background loops.
 5. Serve all listeners, then send `READY=1` to systemd.
 
 `filelock.Acquire` retries for up to 500 ms. A client briefly probing a
@@ -146,7 +156,7 @@ An explicit desktop Quit does not stop the server.
 | 1 | any other failure (bind error, database, shutdown timeout, database ownership lost while running) |
 | 2 | bad command line (for example `--managed` with `--listen`) |
 | 75 | the data dir is held by another server, or (Postgres) the database's ownership lock is ([storage.md](storage.md#single-owner)) |
-| 78 | invalid configuration (`STAGE_*`/`T3_*` values, `service.env`, socket path), or a database schema newer than this binary |
+| 78 | invalid configuration (`STAGE_*`/`T3_*` values, `service.env`, socket path; a `STAGE_DATABASE_URL` that is not `postgres://`/`postgresql://`, or a Postgres URL in a binary built without the `postgres` tag), or a database schema newer than this binary |
 
 systemd does not restart on 75 or 78 (`RestartPreventExitStatus`). launchd
 cannot exclude exit codes, so a `--managed` server on macOS logs the reason
@@ -154,9 +164,13 @@ and exits 0 for those two.
 
 ## Schema and backups
 
-Migrations are goose versions (`server/internal/db/sqlite/migrations`, tracked in
+Migrations are goose versions per engine (`server/internal/db/sqlite/migrations`,
+`server/internal/db/postgres/migrations`, same version numbers, tracked in
 `goose_db_version`). `stage version --json` `schema` is the highest this
-binary knows; `/api/health` `schema` is the database's.
+binary knows and `engines` the engines built in (`["sqlite"]`, or
+`["sqlite","postgres"]` with the `postgres` tag); `/api/health` `schema` is
+the database's and `engine` the running engine. The backups below are
+SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups)).
 
 - Database newer than the binary (a downgrade): refused, exit 78,
   `database schema N is newer than this Stage (knows M): install a newer
@@ -200,7 +214,9 @@ binary knows; `/api/health` `schema` is the database's.
   `GET /api/harnesses/t3/status` ([api.md](api.md#t3-details)), which refreshes a
   stale probe for at most 3s.
 - 503 means the database query failed.
-- It does not expose paths or the pid.
+- `engine` is `sqlite` or `postgres`; `stage status` shows it next to the
+  database state.
+- It does not expose paths, the pid or the database URL.
 
 Every `/api` response carries `Stage-Api-Version: <n>` (`buildinfo.APIVersion`,
 currently 2). The number changes only on breaking API changes.

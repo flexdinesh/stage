@@ -76,6 +76,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
   "instanceId": "9f2c4e1a7b3d5c60",
   "startedAt": "2026-11-16T09:00:00Z",
   "schema": 4,
+  "engine": "sqlite",
   "publicUrl": "https://stage.example.ts.net",
   "harnesses": [
     { "kind": "t3", "connectionId": 1, "configured": true, "connected": false, "lastError": "dial tcp 127.0.0.1:3773: connection refused" },
@@ -85,7 +86,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 ```
 - A live Stage server answers 200 whenever its database works; a harness being offline is still 200. `harnesses` lists each connectable harness in registry order with its connector's last known state from memory: `configured` (setup done: T3 paired, with a stored token or a saved admin token; OpenCode saved settings), `connected` (T3: a valid token T3 has not rejected; OpenCode: an adapter installed without a known problem). Health never calls a harness (reachability and the setup state are in `GET /api/harnesses/{kind}/status`).
 - 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
-- `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `harnesses[].lastError` is nullable.
+- `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `engine` is the storage engine, `"sqlite"` or `"postgres"` ([storage.md](storage.md#engines-and-selection)); never the database URL. `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `harnesses[].lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
 
 ## Users
