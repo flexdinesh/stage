@@ -12,14 +12,14 @@ that disagrees with this file updates it in the same PR.
 | Part | Today | Task |
 | --- | --- | --- |
 | [Engines and selection](#engines-and-selection) | SQLite only, `<data dir>/stage.db` | #405 |
-| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite`, `internal/db/dbtest` (#398) and `internal/db/storetest` (#400); no `postgres` package yet | Postgres: #403 |
+| [Layout](#layout-and-ownership) and [ports](#ports) | as described for `internal/db`, `internal/db/store`, `internal/db/sqlite`, `internal/db/dbtest` (#398), `internal/db/storetest` (#400) and `internal/db/backfill` (#401); `internal/db/postgres` holds only the migrator (#401) | Postgres adapter: #403 |
 | [Transactions and locking](#transactions-and-locking) | SQLite: as described; the `storetest` concurrency cases exist (#400) | Postgres: #403 |
 | [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
 | [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | one SQLite dir, `server/internal/db/sqlite/migrations`, head 26; [journal events](#journal-events) written by Go (#399) | Postgres dir and parity #401, Postgres baseline #403 |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 26; Postgres `server/internal/db/postgres/migrations` empty until the baseline; no backfills yet; [journal events](#journal-events) written by Go (#399) | Postgres baseline #403 |
 | [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
-| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` runs (#398); `storetest` runs on SQLite in `check:storage` and, until #403, on SQLite again in `check:postgres` (#400); the migration gates report `not present yet` | gates: #401, #403 |
+| [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` (#398), `TestMigrationVersionParity` and the SQLite `TestStepwiseMigrations` (#401) run; `storetest` runs on SQLite in `check:storage` and, until #403, on SQLite again in `check:postgres` (#400); the Postgres step-wise and schema parity tests exist and skip until the baseline (#401) | Postgres gates live: #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
 | [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); the other Drop rows are still in the SQLite schema | drops: #417 (SQLite contract), #403 (baseline omits them) |
@@ -54,7 +54,8 @@ its API, and only `internal/serve` composes an engine.
 
 | Path | Owns | Must not |
 | --- | --- | --- |
-| `internal/db` | `db.Store`, domain types, app errors (`ErrNotFound`, `ConflictError`, `InvalidError`), business rules (`SwitchInstance`, `ForgetConnection`, tree rules, acceptance, launch claims, journal events), shared Go backfills | Import a driver or hold SQL |
+| `internal/db` | `db.Store`, domain types, app errors (`ErrNotFound`, `ConflictError`, `InvalidError`), business rules (`SwitchInstance`, `ForgetConnection`, tree rules, acceptance, launch claims, journal events) | Import a driver or hold SQL |
+| `internal/db/backfill` | Shared Go backfills: the step list (`backfill.Steps`, version and name), each backfill's logic and the query port it declares | Hold SQL; import a driver or an adapter |
 | `internal/db/store` | Ports: the unit of work, repositories, capability ports, and the Go types they exchange | Import a driver, `internal/db/sqlite` or `internal/db/postgres` |
 | `internal/db/sqlite` | Every SQLite statement, `modernc.org/sqlite`, pragmas, `stage_now`, `VACUUM INTO`, FTS5, SQLite error codes, the SQLite migrations dir | Hold business rules; import pgx |
 | `internal/db/postgres` (build tag `postgres`) | Every Postgres statement, pgx v5 (`database/sql` only where goose needs it), the advisory lock, SQLSTATE mapping, the Postgres migrations dir | Hold business rules; import modernc; be needed by code built without the tag |
@@ -286,7 +287,8 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   tracked in `goose_db_version`.
 - **Shared versions:** a schema change adds `NNNN_name.sql` (or a Go
   migration) with the same version and name in both dirs.
-  `TestMigrationVersionParity` fails otherwise.
+  `TestMigrationVersionParity` fails otherwise. Until the Postgres baseline
+  lands, a migration goes in the SQLite dir only.
 - **Postgres baseline:** one migration at the SQLite head when the Postgres
   adapter lands (#403; 26 today). It creates the current schema natively
   (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression indexes,
@@ -302,35 +304,74 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   backfill; move reads and writes; drop the old shape in a later migration.
   One migration never both drops and replaces a shape that running code reads.
 - **Backfills in Go.** Data backfills are goose Go migrations registered with
-  the same version on both engines. The logic lives once in `internal/db`;
-  each adapter supplies only its SQL.
+  the same version on both engines, with no `.sql` file at that version. The
+  logic lives once in `internal/db/backfill` (adapters cannot import
+  `internal/db`, whose tests import the SQLite adapter): a `backfill.Step`
+  (version, name) plus a function over a small query port declared next to
+  it. Each adapter implements the port with its SQL and registers a runner
+  for exactly `backfill.Steps` in its `goMigrations` (a test per adapter
+  checks it); goose runs it in the migration transaction. No backfill before
+  the Postgres baseline: `TestMigrationVersionParity` refuses one, and every
+  backfill is above the baseline.
 - **Roll forward only.** No down migrations. A bad migration is fixed by a
   new one. A downgrade restores a backup.
 - **Version guard,** per engine with the same numbers: a database newer than
   the binary exits 78 and writes nothing
   ([runtime.md](runtime.md#schema-and-backups)).
-- **Locking:** Postgres migrations run under goose's session locker, after
-  the ownership lock. SQLite migrations run under the data-dir lock.
+- **Locking:** Postgres migrations run under goose's session locker
+  (`lock.NewPostgresSessionLocker`: an advisory lock on goose's default key,
+  held on a dedicated connection while migrating; the ownership lock uses a
+  different key), after the ownership lock. SQLite migrations run under the
+  data-dir lock.
 
 ### Tests
 
+- `TestMigrationVersionParity` (`internal/db`, `check:storage`): reads both
+  engine dirs and `backfill.Steps`; versions and names match from the
+  Postgres baseline (its lowest version) up. An empty Postgres dir passes.
 - `TestStepwiseMigrations`: for every version `v`, `UpTo(v-1)`, seed
-  representative rows, `Up(v)`, assert the data. SQLite from version 1;
-  Postgres from the baseline (in `check:postgres`). No releases exist yet, so
-  this is the upgrade coverage.
-- Logical schema parity (`check:postgres`): tables, columns, nullability,
-  primary, foreign and unique keys, and normalized types match across
-  engines, with an explicit allowlist for engine-only objects.
+  representative rows, `Up(v)`, assert the data. SQLite from version 1
+  (`internal/db/stepwise_migration_test.go`, `check:storage`); Postgres from
+  the baseline (`internal/db/postgres/stepwise_test.go`, `check:postgres`;
+  skips until the baseline). Each engine's `stepwiseMigrations` registry
+  holds one or more scenarios per version, a seed and a check; a version
+  without an entry fails. Checks query that version's schema directly; where
+  a migration's result is also read through `db.Store`, a separate test
+  reuses the seed and reads it at the head. No releases exist yet, so this
+  is the upgrade coverage.
+- `TestSchemaParity` (`internal/db/postgres`, `check:postgres`): both engines
+  migrated to their heads hold the same tables, columns, nullability,
+  primary, foreign and unique keys, with types compared by class (`int`:
+  SQLite INTEGER, Postgres integers and boolean; `text`: SQLite TEXT,
+  Postgres text, timestamptz, jsonb; `bytes`; `real`). Partial and
+  expression indexes are engine-native and not compared. Engine-only objects
+  go in its `parityAllowlist`, each with why; an entry present on neither
+  engine fails. Until the baseline only the SQLite introspection runs;
+  `TestSchemaParityCompare` proves the comparator on hand-written schemas.
+- Postgres tests each create and drop their own database on the
+  `check:postgres` container; without `STAGE_TEST_DATABASE_URL` they fail.
 
 ### Adding a migration
 
-1. Pick the next version `N` (the highest in either dir plus one).
-2. Write `N_name.sql` in both engine dirs, each in its engine's native types;
-   for a backfill, a Go migration registered as `N` on both.
-3. Keep it expand-only unless it is the contract step of an earlier expand.
-4. Extend the step-wise seed for the tables it touches.
-5. Run `mise run check` (`check:postgres` runs because db code changed).
-6. Update this file when the change alters a rule here.
+1. Pick the next version `N`: the highest in either dir or `backfill.Steps`,
+   plus one.
+2. Schema change: write `N_name.sql` (`-- +goose Up` only) in
+   `internal/db/sqlite/migrations` and, once the Postgres baseline exists,
+   the same name in `internal/db/postgres/migrations`, each in its engine's
+   native types.
+3. Backfill (after the baseline only): add `backfill.Step{N, "name"}`, its
+   function and query port in `internal/db/backfill`, and a runner for `N`
+   in each adapter's `goMigrations` implementing that port. No `.sql` file
+   at `N`.
+4. Keep it expand-only unless it is the contract step of an earlier expand.
+5. Add `N` to each engine's `stepwiseMigrations`: seed the tables it touches
+   at `N-1`, check the data and constraints after `N`. Reads of the result
+   through `db.Store` go in a separate test that reuses the seed.
+6. Engine-only tables or columns (for example an FTS table on SQLite): add
+   them to `parityAllowlist` with why.
+7. Never edit an applied migration; fix forward with a new one.
+8. Run `mise run check` (`check:postgres` runs because db code changed).
+9. Update this file when the change alters a rule here.
 
 ## Backups
 

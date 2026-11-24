@@ -12,13 +12,32 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
-	pool := openUnmigrated(t)
-	migrateTo(t, pool, 17)
+// Migration 0018: T3 and OpenCode settings move to per-machine rows on the
+// local machine, unchanged; connection identities stay.
+func seedV0018MachineSettings(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `UPDATE harness_connections SET identity='env-a',label='box a' WHERE id=1`)
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness,identity,label) VALUES(7,'opencode','http://oc:4096','oc')`)
 	mustExec(t, pool, `UPDATE t3_connection SET client_id='c',token='keep',t3_url='http://t3:3773',last_full_sync_at='2026-11-01T00:00:00Z',last_error='boom' WHERE id=1`)
 	mustExec(t, pool, `UPDATE opencode_settings SET endpoint='http://oc:4096',username='u',password='p',auth='basic' WHERE id=1`)
+}
+
+func checkV0018MachineSettings(t *testing.T, pool *sqlite.DB) {
+	if n := foreignKeyViolations(t, pool); n != 0 {
+		t.Fatalf("%d foreign key violations", n)
+	}
+	wantRows(t, pool, `SELECT machine_id,client_id,token,t3_url,last_full_sync_at,last_error FROM t3_connection`,
+		"1|c|keep|http://t3:3773|2026-11-01T00:00:00Z|boom")
+	wantRows(t, pool, `SELECT machine_id,endpoint,username,password,auth FROM opencode_settings`, "1|http://oc:4096|u|p|basic")
+	wantRows(t, pool, `SELECT id,machine_id,harness,identity,active FROM harness_connections ORDER BY id`,
+		"1|1|t3|env-a|1", "7|1|opencode|http://oc:4096|1")
+	mustFail(t, pool, "settings for an unknown machine", `INSERT INTO t3_connection(machine_id) VALUES(9)`)
+}
+
+// After 0018, the store reads per-machine settings at the latest schema.
+func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 17)
+	seedV0018MachineSettings(t, pool)
 	migrateTo(t, pool, sqlite.MaxVersion())
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)

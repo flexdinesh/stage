@@ -1,13 +1,15 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+)
 
 // Migration 0019: external_projects gains repo_path (unknown for existing
 // rows) and project_bindings is rebuilt to allow origin 'remote', keeping
 // every row, id and the sequence.
-func TestRemoteMatchMigration(t *testing.T) {
-	pool := openUnmigrated(t)
-	migrateTo(t, pool, 18)
+func seedV0019RemoteMatch(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)
 	mustExec(t, pool, `INSERT INTO projects(id,title,t3_project_id,workspace_root,source) VALUES(1,'P','stage:p','','app'),(2,'Q','stage:q','','app')`)
 	mustExec(t, pool, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,repo) VALUES(1,'e1','E','/w/p',1,'github.com/o/p')`)
@@ -16,8 +18,9 @@ func TestRemoteMatchMigration(t *testing.T) {
 	// A launch destination pins binding 7; it must still resolve after the rebuild.
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state) VALUES(1,1,'t','p','backlog')`)
 	mustExec(t, pool, `INSERT INTO task_launch_destinations(task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision) VALUES(1,1,1,'e1','/w/p',7,3)`)
-	migrateTo(t, pool, 19)
+}
 
+func checkV0019RemoteMatch(t *testing.T, pool *sqlite.DB) {
 	type row struct {
 		id, project, connection, revision, active int64
 		external, workspace, status, origin       string

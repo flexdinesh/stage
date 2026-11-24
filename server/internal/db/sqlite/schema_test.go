@@ -2,6 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/backfill"
 )
 
 // openUnmigrated opens a fresh temp database with no migrations applied.
@@ -46,6 +50,63 @@ func TestMaxVersionIsLastMigration(t *testing.T) {
 	sources := provider.ListSources()
 	if want := sources[len(sources)-1].Version; MaxVersion() != want {
 		t.Fatalf("MaxVersion %d, want %d", MaxVersion(), want)
+	}
+}
+
+// Every backfill step has a SQLite runner and every runner is a step.
+func TestGoMigrationsMatchBackfillSteps(t *testing.T) {
+	var steps, runners []int64
+	for _, s := range backfill.Steps {
+		steps = append(steps, s.Version)
+	}
+	for v := range goMigrations {
+		runners = append(runners, v)
+	}
+	slices.Sort(steps)
+	slices.Sort(runners)
+	if !slices.Equal(steps, runners) {
+		t.Fatalf("backfill steps %v, SQLite runners %v", steps, runners)
+	}
+}
+
+// A Go migration runs in goose's migration transaction: it is recorded when
+// it succeeds and rolled back, unrecorded, when it fails.
+func TestGoMigrationRunsInTheMigrationTransaction(t *testing.T) {
+	fsys, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := MaxVersion() + 1
+	ctx := context.Background()
+	for _, fail := range []bool{false, true} {
+		pool := openUnmigrated(t)
+		provider, err := providerFor(pool.DB, fsys, map[int64]goRunner{next: func(ctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO snippets(name, body) VALUES ('backfilled', 'x')`); err != nil {
+				return err
+			}
+			if fail {
+				return errors.New("backfill failed")
+			}
+			return nil
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, upErr := provider.Up(ctx)
+		var n int
+		if err := pool.QueryRow(`SELECT count(*) FROM snippets WHERE name = 'backfilled'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		v, err := CurrentVersion(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fail && (upErr == nil || n != 0 || v != next-1) {
+			t.Fatalf("failed backfill: err %v, rows %d, version %d", upErr, n, v)
+		}
+		if !fail && (upErr != nil || n != 1 || v != next) {
+			t.Fatalf("backfill: err %v, rows %d, version %d", upErr, n, v)
+		}
 	}
 }
 

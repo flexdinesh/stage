@@ -7,14 +7,37 @@ import (
 	"testing"
 )
 
-func TestIdentityUpgradePreservesHistory(t *testing.T) {
-	pool := openUnmigrated(t)
-	migrateTo(t, pool, 7)
+// Migration 0008: identities; projects bind to the T3 connection, sessions
+// get identities, launched tasks a launch destination; text, evidence and
+// credentials unchanged.
+func seedV0008Identities(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(71,'external-p','Stage title','/old','t3')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,t3_thread_id,origin_thread_id,launch_attempt) VALUES(81,71,'Task','Prompt','same','uncached-source',1)`)
 	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,source_thread_id,text,request_id) VALUES(901,'note',81,'uncached-source','Keep exact text','keep')`)
 	mustExec(t, pool, `INSERT INTO task_acceptances(id,task_id,provenance,evidence,note) VALUES(61,81,'user','{"threadId":"same","reply":"exact reply"}','Accepted')`)
 	mustExec(t, pool, `UPDATE t3_connection SET token='preserve-token',environment_id='environment',t3_url='http://existing'`)
+}
+
+func checkV0008Identities(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT id,project_id,connection_id,external_project_id,workspace,active FROM project_bindings`, "1|71|1|external-p|/old|1")
+	wantRows(t, pool, `SELECT t.id,s.connection_id,s.external_id,o.external_id FROM tasks t
+		JOIN session_identities s ON s.id=t.session_id JOIN session_identities o ON o.id=t.origin_session_id`,
+		"81|1|same|uncached-source")
+	wantRows(t, pool, `SELECT task_id,attempt,workspace FROM task_launch_destinations`, "81|1|/old")
+	wantRows(t, pool, `SELECT text FROM journal_entries WHERE id=901`, "Keep exact text")
+	wantRows(t, pool, `SELECT evidence FROM task_acceptances WHERE id=61`, `{"threadId":"same","reply":"exact reply"}`)
+	wantRows(t, pool, `SELECT token,environment_id,t3_url FROM t3_connection`, "preserve-token|environment|http://existing")
+	if n := foreignKeyViolations(t, pool); n != 0 {
+		t.Fatalf("%d foreign key violations", n)
+	}
+}
+
+// After 0008, the store reads bindings, sessions and launch destinations at
+// the latest schema, and re-running migrations repeats nothing.
+func TestIdentityUpgradePreservesHistory(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 7)
+	seedV0008Identities(t, pool)
 	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	s := NewStore(pool)
 	ctx := context.Background()
@@ -26,16 +49,6 @@ func TestIdentityUpgradePreservesHistory(t *testing.T) {
 	if err != nil || task.Session == nil || task.Session.ConnectionID != 1 || task.Session.ExternalSessionID != "same" || task.OriginSession == nil || task.OriginSession.ExternalSessionID != "uncached-source" {
 		t.Fatalf("task %+v %v", task, err)
 	}
-	var text, evidence, token string
-	if err = pool.QueryRow(`SELECT text FROM journal_entries WHERE id=901`).Scan(&text); err != nil || text != "Keep exact text" {
-		t.Fatal(text, err)
-	}
-	if err = pool.QueryRow(`SELECT evidence FROM task_acceptances WHERE id=61`).Scan(&evidence); err != nil || evidence != `{"threadId":"same","reply":"exact reply"}` {
-		t.Fatal(evidence, err)
-	}
-	if err = pool.QueryRow(`SELECT token FROM t3_connection`).Scan(&token); err != nil || token != "preserve-token" {
-		t.Fatal("credentials changed", err)
-	}
 	dest, err := s.LaunchDestination(ctx, 81, 1)
 	if err != nil || dest.Workspace != "/old" {
 		t.Fatal(dest, err)
@@ -46,14 +59,6 @@ func TestIdentityUpgradePreservesHistory(t *testing.T) {
 	var count int
 	if err = pool.QueryRow(`SELECT count(*) FROM project_bindings`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("migration repeated", count, err)
-	}
-	rows, err := pool.Query(`PRAGMA foreign_key_check`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	if rows.Next() {
-		t.Fatal("invalid migration references")
 	}
 }
 

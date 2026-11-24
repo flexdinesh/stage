@@ -25,9 +25,10 @@ func foreignKeyViolations(t *testing.T, pool *sqlite.DB) int {
 	return n
 }
 
-func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) {
-	pool := openUnmigrated(t)
-	migrateTo(t, pool, 11)
+// Migration 0012: connections gain identity, label, active and retirement:
+// each takes its instance's identity (T3 environment, verified OpenCode
+// address); one active connection per harness; data stays on it.
+func seedV0012ConnectionIdentity(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness,auto_complete) VALUES(2,'opencode',0)`)
 	mustExec(t, pool, `UPDATE t3_connection SET environment_id='env-a',token='keep'`)
 	mustExec(t, pool, `UPDATE opencode_settings SET endpoint='http://oc:4096',verified_endpoint='http://oc:4096'`)
@@ -36,6 +37,33 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(5,1,'thread'),(6,2,'ses_x')`)
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,session_id,connection_id,launch_attempt) VALUES(1,1,'t3','p','running',5,1,1),(2,1,'oc','p','running',6,2,1)`)
 	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES(2,'/srv','/home')`)
+}
+
+func checkV0012ConnectionIdentity(t *testing.T, pool *sqlite.DB) {
+	if n := foreignKeyViolations(t, pool); n != 0 {
+		t.Fatalf("%d foreign key violations", n)
+	}
+	wantRows(t, pool, `SELECT id,harness,identity,label,active,retired_at,auto_complete FROM harness_connections ORDER BY id`,
+		"1|t3|env-a|env-a|1|NULL|1", "2|opencode|http://oc:4096|http://oc:4096|1|NULL|0")
+	wantRows(t, pool, `SELECT id,connection_id,session_id FROM tasks ORDER BY id`, "1|1|5", "2|2|6")
+	wantRows(t, pool, `SELECT connection_id,external_project_id FROM project_bindings ORDER BY connection_id`, "1|p", "2|oc")
+	wantRows(t, pool, `SELECT connection_id,harness_root,stage_root FROM shared_paths`, "2|/srv|/home")
+	wantRows(t, pool, `SELECT token FROM t3_connection`, "keep")
+	// Only one active connection per harness.
+	mustFail(t, pool, "second active T3 connection", `INSERT INTO harness_connections(harness) VALUES('t3')`)
+	// New AUTOINCREMENT ids never reuse an old one.
+	var next int64
+	if err := pool.QueryRow(`INSERT INTO harness_connections(harness,active,retired_at) VALUES('t3',0,stage_now()) RETURNING id`).Scan(&next); err != nil || next <= 2 {
+		t.Fatalf("next id %d %v", next, err)
+	}
+}
+
+// After 0012, the store reads connections, settings and tasks on their
+// instance at the latest schema.
+func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 11)
+	seedV0012ConnectionIdentity(t, pool)
 	migrateTo(t, pool, sqlite.MaxVersion()) // the store reads the latest schema
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
@@ -62,15 +90,6 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	task, err := s.GetTask(ctx, 2)
 	if err != nil || task.ConnectionID != 2 || task.Harness != HarnessOpenCode || !task.ConnectionActive || task.Session == nil || task.Session.ExternalSessionID != "ses_x" {
 		t.Fatalf("task %+v %v", task, err)
-	}
-	// Only one active connection per harness.
-	if _, err := pool.Exec(`INSERT INTO harness_connections(harness) VALUES('t3')`); err == nil {
-		t.Fatal("second active T3 connection")
-	}
-	// New AUTOINCREMENT ids never reuse an old one.
-	var next int64
-	if err := pool.QueryRow(`INSERT INTO harness_connections(harness,active,retired_at) VALUES('t3',0,stage_now()) RETURNING id`).Scan(&next); err != nil || next <= 2 {
-		t.Fatalf("next id %d %v", next, err)
 	}
 }
 
