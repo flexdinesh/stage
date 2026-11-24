@@ -398,9 +398,17 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
   const title = `${useHarnesses().kindName(task.harness)} session`;
   const session = task.session;
   if (session === null) {
+    const seen = task.state === "launching" ? (task.launch?.session ?? null) : null;
     return (
       <Panel title={title}>
-        <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No session yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
+        {seen === null ? (
+          <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No session yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Muted>Started; Stage has not recorded it yet.</Muted>
+            <p className="break-all font-mono text-meta">{seen.externalSessionId}</p>
+          </div>
+        )}
       </Panel>
     );
   }

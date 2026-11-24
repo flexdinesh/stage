@@ -759,18 +759,22 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 				return t, err
 			}
 		} else {
-			if err := s.store.Unconfirmed(record, attempt, e); err != nil {
+			if err := s.store.Unconfirmed(record, attempt, e, nil); err != nil {
 				return t, err
 			}
 		}
 		t, _ = s.store.GetTask(record, t.ID)
 		return t, harnessErr(e)
 	}
-	if e = s.store.PutObservation(record, o); e != nil {
-		_ = s.store.Unconfirmed(record, attempt, e)
-		return t, e
+	// The harness returned a session; a failure to record it keeps the
+	// attempt unconfirmed with the cause, a backoff and the session seen.
+	if e = s.store.PutObservation(record, o); e == nil {
+		e = s.store.FinishAttempt(record, attempt, o, false)
 	}
-	if e = s.store.FinishAttempt(record, attempt, o, false); e != nil {
+	if e != nil {
+		if err := s.store.Unconfirmed(record, attempt, e, db.Observed(o)); err != nil {
+			return t, errors.Join(e, err)
+		}
 		return t, e
 	}
 	if s.OnTransition != nil {

@@ -292,6 +292,17 @@ remain unconfirmed and require linking.
 
 After dispatch, recovery retries automatically with backoff (5 seconds to one
 minute), including after restart. UI labels the state **Launch unconfirmed**.
+When the harness returned a session but Stage failed to record it (its
+observation or the confirmation write), the attempt keeps the cause, the backoff
+and that session; task detail leads with "Launched in <harness>; Stage can't
+record it" and opens the session, and the next retry records it once the cause is
+gone. A revision check that no longer matches reports a conflict, never a silent
+no-op.
+
+Session identities are always scoped by the observed session's own connection:
+a mirrored thread's parent and a task event's journal row take the session of
+that thread or task, never the local machine's T3 (which may be retired once T3
+moved to a worker).
 A per-task lock serializes reconciliation and manual attachment; database
 revision checks reject stale checkpoints and attachments. The server data-dir
 lock prevents concurrent owners of the same database.

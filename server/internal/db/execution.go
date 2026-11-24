@@ -58,18 +58,27 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if settled {
 			settledAt = &o.UpdatedAt
 		}
+		// The parent lives on the observed session's own connection.
+		var parentID *int64
+		if o.Parent != nil {
+			pid, err := sessionIdentity(ctx, tx, SessionRef{ConnectionID: o.Session.ConnectionID, ExternalSessionID: o.Parent.ExternalSessionID})
+			if err != nil {
+				return err
+			}
+			parentID = &pid
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,execution_state,archived,link,created_at,updated_at,synced_at,
-   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at)
-   VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+   branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at,parent_session_id)
+   VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
    ON CONFLICT(t3_thread_id) DO UPDATE SET title=excluded.title,status=excluded.status,execution_state=excluded.execution_state,
-   parent_thread_id=excluded.parent_thread_id,relationship=excluded.relationship,
+   parent_thread_id=excluded.parent_thread_id,parent_session_id=excluded.parent_session_id,relationship=excluded.relationship,
    archived=excluded.archived,link=COALESCE(excluded.link,threads.link),updated_at=excluded.updated_at,synced_at=stage_now(),
    branch=excluded.branch,worktree_path=excluded.worktree_path,pending_request_count=excluded.pending_request_count,
    active_run_id=excluded.active_run_id,latest_run_id=excluded.latest_run_id,run_started_at=excluded.run_started_at,run_ended_at=excluded.run_ended_at,
    settled=excluded.settled,settled_at=CASE WHEN excluded.settled THEN COALESCE(threads.settled_at,excluded.settled_at) END
    WHERE excluded.updated_at>=threads.updated_at`, o.Session.ExternalSessionID, o.Project, o.Title, o.State, o.Archived, nullIfEmpty(o.Links.App),
 			o.CreatedAt, o.UpdatedAt, nullIfEmpty(o.Branch), nullIfEmpty(o.Directory), pending, nullIfEmpty(active), nullIfEmpty(o.ExecutionID), o.StartedAt, o.EndedAt,
-			externalParent(o), childMarker(o.Child), id, settled, settledAt)
+			externalParent(o), childMarker(o.Child), id, settled, settledAt, parentID)
 		if err != nil {
 			return err
 		}
@@ -111,12 +120,29 @@ type Attempt struct {
 	Revision   int64                `json:"revision"`
 	Error      string               `json:"reason"`
 	RetryAt    *time.Time           `json:"retryAt"`
-	RetryCount int                  `json:"-"`
+	RetryCount int                  `json:"retryCount"`
+	// Session is what the harness returned for this unconfirmed attempt when
+	// Stage could not record it yet; nil when none was seen.
+	Session *ObservedSession `json:"session"`
+}
+
+// ObservedSession is a session a harness reported for a launch attempt before
+// Stage recorded it. Links are filled at the API edge, never stored.
+type ObservedSession struct {
+	SessionRef
+	Title string           `json:"title"`
+	State string           `json:"state"`
+	Links *execution.Links `json:"links,omitempty"`
+}
+
+// Observed is the attempt record of the session o names.
+func Observed(o execution.Observation) *ObservedSession {
+	return &ObservedSession{SessionRef: o.Session, Title: o.Title, State: o.State}
 }
 
 func (s *Store) Attempt(ctx context.Context, id int64, n int) (Attempt, error) {
 	a := Attempt{TaskID: id, Number: n}
-	err := s.pool.QueryRow(ctx, `SELECT intent,checkpoint,phase,revision,error,retry_at,retry_count FROM execution_attempts WHERE task_id=$1 AND attempt=$2`, id, n).Scan(&a.Intent, &a.Checkpoint, &a.Phase, &a.Revision, &a.Error, &a.RetryAt, &a.RetryCount)
+	err := s.pool.QueryRow(ctx, `SELECT intent,checkpoint,phase,revision,error,retry_at,retry_count,observed_session FROM execution_attempts WHERE task_id=$1 AND attempt=$2`, id, n).Scan(&a.Intent, &a.Checkpoint, &a.Phase, &a.Revision, &a.Error, &a.RetryAt, &a.RetryCount, &a.Session)
 	return a, notFound(err)
 }
 func (s *Store) PrepareAttempt(ctx context.Context, id int64, n int, in execution.Intent) error {
@@ -144,15 +170,34 @@ func (s *Store) SaveCheckpoint(ctx context.Context, a *Attempt, c execution.Chec
 	a.Phase = "unconfirmed"
 	return nil
 }
-func (s *Store) Unconfirmed(ctx context.Context, a Attempt, cause error) error {
+
+// Unconfirmed keeps the attempt open with cause and the next retry (backing
+// off to a minute). seen, when the harness returned a session Stage could not
+// record, replaces the attempt's observed session; nil keeps it.
+func (s *Store) Unconfirmed(ctx context.Context, a Attempt, cause error, seen *ObservedSession) error {
 	delay := 5 * time.Second
 	for i := 0; i < a.RetryCount && delay < time.Minute; i++ {
 		delay = min(delay*2, time.Minute)
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE execution_attempts SET phase='unconfirmed',error=$4,retry_count=retry_count+1,retry_at=$5 WHERE task_id=$1 AND attempt=$2 AND revision=$3 AND phase IN ('prepared','unconfirmed')`, a.TaskID, a.Number, a.Revision, cause.Error(), time.Now().UTC().Add(delay))
-	if err == nil {
-		_, err = s.pool.Exec(ctx, "UPDATE tasks SET last_error=$3 WHERE id=$1 AND launch_attempt=$2 AND state='launching'", a.TaskID, a.Number, cause.Error())
+	var observed *string
+	if seen != nil {
+		stored := *seen
+		stored.Links = nil
+		raw, err := json.Marshal(stored)
+		if err != nil {
+			return err
+		}
+		v := string(raw)
+		observed = &v
 	}
+	res, err := s.pool.Exec(ctx, `UPDATE execution_attempts SET phase='unconfirmed',error=$4,retry_count=retry_count+1,retry_at=$5,observed_session=COALESCE($6,observed_session) WHERE task_id=$1 AND attempt=$2 AND revision=$3 AND phase IN ('prepared','unconfirmed')`, a.TaskID, a.Number, a.Revision, cause.Error(), time.Now().UTC().Add(delay), observed)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() != 1 {
+		return Conflict("launch changed; reload the task")
+	}
+	_, err = s.pool.Exec(ctx, "UPDATE tasks SET last_error=$3 WHERE id=$1 AND launch_attempt=$2 AND state='launching'", a.TaskID, a.Number, cause.Error())
 	return err
 }
 func (s *Store) RecoverAttempts(ctx context.Context) error {

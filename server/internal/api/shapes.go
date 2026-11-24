@@ -124,6 +124,10 @@ func (s *server) executionConfig(kind string, config *execution.Config, legacy f
 func (s *server) task(env string, t db.Task) taskJSON {
 	t.ExecutionConfig = s.executionConfig(t.Harness, t.ExecutionConfig, t.LegacyModel)
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
+		if a.Session != nil {
+			links := s.sessionLinks(context.Background(), a.Session.ConnectionID, &a.Session.ExternalSessionID)
+			a.Session.Links = &links
+		}
 		t.Launch = &a
 	}
 	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
