@@ -243,7 +243,7 @@ func (s *Store) CreateTree(ctx context.Context, in NewTree) (TreeDetail, error) 
 	var id int64
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		var err error
-		if id, err = tx.Trees().Insert(ctx, in.Title, mode, ActingUser(ctx), ActingMachine(ctx)); err != nil {
+		if id, err = insertTree(ctx, tx, in.Title, mode); err != nil {
 			return err
 		}
 		for _, m := range in.Tasks {
@@ -396,7 +396,7 @@ func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, er
 				return err
 			}
 		}
-		return tx.Trees().Update(ctx, id, p.Title, p.StartMode)
+		return updateTree(ctx, tx, id, p.Title, p.StartMode)
 	})
 	if err != nil {
 		return Tree{}, err
@@ -421,7 +421,7 @@ func (s *Store) SetTreeStatus(ctx context.Context, id int64, status TreeStatus) 
 				return err
 			}
 		}
-		return tx.Trees().SetStatus(ctx, id, status)
+		return setTreeStatus(ctx, tx, id, status)
 	})
 	if err != nil {
 		return TreeDetail{}, err
@@ -499,13 +499,13 @@ func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 		if err := treeExists(ctx, tx, id); err != nil {
 			return err
 		}
-		if err := tr.DetachMembers(ctx, id); err != nil {
+		if err := detachMembers(ctx, tx, id); err != nil {
 			return err
 		}
 		if err := tr.ClearStaleBases(ctx); err != nil {
 			return err
 		}
-		return tr.ArchiveDissolved(ctx, id)
+		return archiveDissolved(ctx, tx, id)
 	})
 }
 
@@ -600,7 +600,7 @@ func (s *Store) MarkReady(ctx context.Context) ([]int64, error) {
 		slices.Sort(ids)
 		from := StateBacklog
 		for _, id := range ids {
-			if err := tx.Tasks().AddEvent(ctx, id, &from, StateBacklog, "ready: needs completed"); err != nil {
+			if err := addTaskEvent(ctx, tx, id, &from, StateBacklog, "ready: needs completed"); err != nil {
 				return err
 			}
 		}
@@ -687,7 +687,7 @@ func resolveTree(ctx context.Context, tx store.Tx, tree *int64, needs []int64) (
 	case len(trees) == 1:
 		target = trees[0]
 	default:
-		if target, err = tx.Trees().Insert(ctx, found[needs[0]].title, StartAuto, ActingUser(ctx), ActingMachine(ctx)); err != nil {
+		if target, err = insertTree(ctx, tx, found[needs[0]].title, StartAuto); err != nil {
 			return 0, err
 		}
 	}
@@ -727,7 +727,7 @@ func joinTree(ctx context.Context, tx store.Tx, id, tree int64) error {
 	if cur != nil {
 		return spliceOutTo(ctx, tx, id, &tree)
 	}
-	return tx.Trees().SetMembership(ctx, id, &tree)
+	return setMembership(ctx, tx, id, &tree)
 }
 
 // spliceOut takes task id out of its tree: each dependent drops id and takes
@@ -750,13 +750,13 @@ func spliceOutTo(ctx context.Context, tx store.Tx, id int64, destination *int64)
 			return err
 		}
 	}
-	if err := tr.InheritNeeds(ctx, id); err != nil {
+	if err := inheritNeeds(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := tr.TouchDependents(ctx, id); err != nil {
 		return err
 	}
-	if err := tr.DropNeeds(ctx, id); err != nil {
+	if err := dropNeeds(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := tr.ClearStaleBases(ctx); err != nil {
@@ -765,7 +765,7 @@ func spliceOutTo(ctx context.Context, tx store.Tx, id int64, destination *int64)
 	if tree == nil {
 		return nil
 	}
-	return tr.SetMembership(ctx, id, destination)
+	return setMembership(ctx, tx, id, destination)
 }
 
 // setNeeds replaces id's needs (docs/api.md "Tree rules"; 409 unless noted):
@@ -820,14 +820,14 @@ func setNeeds(ctx context.Context, tx store.Tx, id int64, needs []int64) error {
 			return Conflict("task %d already needs this task (needs cannot loop)", need)
 		}
 	}
-	if err := tr.KeepNeeds(ctx, id, want); err != nil {
+	if err := keepNeeds(ctx, tx, id, want); err != nil {
 		return err
 	}
 	for _, need := range want {
 		if slices.Contains(cur, need) {
 			continue
 		}
-		if err := tr.AddNeed(ctx, id, need); err != nil {
+		if err := addNeed(ctx, tx, id, need); err != nil {
 			return err
 		}
 	}

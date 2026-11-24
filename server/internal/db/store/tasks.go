@@ -456,8 +456,16 @@ type Tasks interface {
 	// SessionOccupied: another task than taskID owns the session.
 	SessionOccupied(ctx context.Context, sessionID, taskID int64) (bool, error)
 	Events(ctx context.Context, taskID int64) ([]TaskEvent, error)
-	// AddEvent appends a task event (from nil: none).
-	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string) error
+	// AddEvent appends a task event (from nil: none) and returns its time.
+	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string) (time.Time, error)
+	// JournalState is what the task's derived journal events read
+	// (ErrNotFound).
+	JournalState(ctx context.Context, id int64) (TaskJournalState, error)
+	// MarkRecordedWork protects the task from deletion.
+	MarkRecordedWork(ctx context.Context, id int64) error
+	// ProjectBySession is the project of the task owning the session (nil:
+	// no such task).
+	ProjectBySession(ctx context.Context, sessionID int64) (*int64, error)
 	Insert(ctx context.Context, in TaskInsert) (int64, error)
 	InsertAdopted(ctx context.Context, in AdoptedInsert) (int64, error)
 	EditState(ctx context.Context, id int64) (TaskEditState, error)
@@ -493,6 +501,16 @@ type Tasks interface {
 	NoteBlocked(ctx context.Context, id int64, reason string) (bool, error)
 	// HoldScheduled holds a timed backlog task (false: not one).
 	HoldScheduled(ctx context.Context, id int64, reason string) (bool, error)
+}
+
+// TaskJournalState is a task's tree, session, launch attempt, title and
+// recorded-work markers.
+type TaskJournalState struct {
+	TreeID, SessionID *int64
+	Title             string
+	LaunchAttempt     int
+	// HasThread: a legacy T3 thread id is set.
+	HasThread, Adopted, RecordedWork bool
 }
 
 // Attempts is the launch attempt repository: attempts, claims, pinned

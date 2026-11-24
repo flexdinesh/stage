@@ -109,7 +109,7 @@ func appendNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteI
 			return JournalEntry{}, Conflict("source task is no longer a member of this tree")
 		}
 	}
-	return tx.Journal().InsertNote(ctx, o, in, sourceID, ActingUser(ctx), ActingMachine(ctx))
+	return insertNote(ctx, tx, o, in, sourceID)
 }
 
 func equalPtr[T comparable](a, b *T) bool {

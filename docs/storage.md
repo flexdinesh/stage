@@ -17,12 +17,12 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | SQLite: `stage.lock`, as described | Postgres: #403 |
 | [Encodings](#encodings) and [errors](#errors) | SQLite: as described | Postgres: #403 |
 | [Search](#search) | `lower(...) LIKE` (ASCII folding) | #404 |
-| [Migrations](#migrations) | one SQLite dir, `server/internal/db/sqlite/migrations`, head 25; journal events by triggers | Postgres dir and parity #401, triggers to Go #399, Postgres baseline #403 |
+| [Migrations](#migrations) | one SQLite dir, `server/internal/db/sqlite/migrations`, head 26; [journal events](#journal-events) written by Go (#399) | Postgres dir and parity #401, Postgres baseline #403 |
 | [Backups](#backups) | SQLite: as described | Postgres warning: #403 |
 | [Checks](#checks) | the tasks exist (#185); `TestDriverImportBoundary` runs (#398); `storetest` runs on SQLite in `check:storage` and, until #403, on SQLite again in `check:postgres` (#400); the migration gates report `not present yet` | gates: #401, #403 |
 | [Data copy and cutover](#data-copy-and-cutover) | none | #406 |
 | Docker build and compose example | Docker image builds without the tag | #407 |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); every Drop row is still in the SQLite schema | drops: #399 (trigger logic to Go), #417 (SQLite contract), #403 (baseline omits them) |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); the other Drop rows are still in the SQLite schema | drops: #417 (SQLite contract), #403 (baseline omits them) |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -124,6 +124,39 @@ they differ in more than syntax:
 The `harness_connections` snapshot cache stays in `db.Store` and is dropped by
 every write to that table, as today. It assumes one process
 ([Design only](#design-only-queue-events-leases)).
+
+## Journal events
+
+Rows derived from a change are written by Go in `internal/db`
+(`journal_events.go`), in the same `Write` as the change, so they commit and
+roll back with it on either engine. SQLite triggers wrote them until
+migration 0026 (#399).
+
+| Cause (helper) | Derived rows |
+| --- | --- |
+| Task event (`addTaskEvent`) | event `task_created` (no from state), `task_state_changed` (detail plus ` (from -> to)`) or `task_event` (same state), on the task and its tree, at the task event's time, with the task's session and launch attempt; the task records work when launched, adopted or entering launching, running, needs input, done, settled, failed or interrupted, and a task with recorded work protects its tree |
+| Note (`insertNote`) | protects its task and tree; the tree's `updated_at` becomes the note's time |
+| Tree created, config, status (`insertTree`, `updateTree`, `setTreeStatus`, `archiveDissolved`) | `tree_created` (title), `tree_config_changed` (`Title: a -> b; start mode: x -> y`, only when either changed), `tree_status_changed` (`old -> new`, only on a change) |
+| Membership (`setMembership`, `detachMembers`) | `task_moved` (task title, from and to tree) in the old and the new tree; both trees' membership revision + 1, `updated_at` now, recorded work carried over; an emptied old tree is archived (closed now), with its status event |
+| Needs (`addNeed`, `keepNeeds`, `inheritNeeds`, `dropNeeds`, `detachMembers`) | `needs_changed` (`Added` or `Removed need #N`) in the dependent's tree, by task then need; none for a standalone task |
+| Acceptance (`insertAcceptance`) | `task_acceptances.source_session_id` = the task's session |
+| Handoff (`recordHandoff`) | source session: the evidence's session, else the legacy thread id under the local machine's active T3, else none (the trigger aborted the write) |
+| New T3 mirror row (`mirrorThread`) | `threads.stage_project_id`: the session's task's project, else the project of the only active binding of its harness project on its connection |
+
+- **Attribution:** derived events keep the triggers' attribution, the
+  column defaults: the default user and no source machine
+  ([architecture.md](architecture.md#users)).
+- **Changes from the triggers:** task events no longer copy the legacy
+  `tasks.t3_thread_id` into `source_thread_id` (the API's `sourceThreadId`
+  reads the T3 session's id); deleting an unstarted tree writes no
+  `needs_changed` rows into the tree it deletes; no direct `INSERT` of a task
+  into a tree exists, so `journal_member_created` has no replacement. Events
+  from one bulk change are written in the orders above.
+- **Tests:** `TestJournalEventRowsExact` pins every row;
+  `TestDerivedWritesOnceAndRollBack` proves each helper writes once and rolls
+  back with its `Write`; `TestDerivedWritesBoundary` fails when `internal/db`
+  calls a raw repository write outside its helper. They read SQL or call the
+  helpers, so they stay in `internal/db`, not `storetest`.
 
 ## Transactions and locking
 
@@ -255,7 +288,7 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   migration) with the same version and name in both dirs.
   `TestMigrationVersionParity` fails otherwise.
 - **Postgres baseline:** one migration at the SQLite head when the Postgres
-  adapter lands (#403; 25 today). It creates the current schema natively
+  adapter lands (#403; 26 today). It creates the current schema natively
   (`timestamptz`, `jsonb`, `bytea`, identity, partial and expression indexes,
   `CHECK`s) without the legacy columns and compatibility triggers
   [#402](#legacy-columns-and-compatibility-triggers) drops; #417 drops them
@@ -263,7 +296,7 @@ Three searches: tasks (title, prompt), journal (text), threads (title).
   are SQLite-only history; the parity test compares versions from the
   baseline up.
 - **No business rules in triggers.** Journal events are written by Go in the
-  same `Write` as their cause (#399). A trigger may only maintain
+  same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
 - **Expand, then contract.** Add tables and nullable or defaulted columns;
   backfill; move reads and writes; drop the old shape in a later migration.
@@ -408,7 +441,8 @@ copied back.
 
 The #402 audit of the SQLite schema at head 25. It covers every legacy or
 retired column and every compatibility trigger. Business-rule triggers
-(`task_event_journal`, `journal_*`) are #399's and are not listed.
+(`task_event_journal`, `journal_*`) are not listed: #399 moved them to Go
+([Journal events](#journal-events)).
 
 **Policy (user decision on #402; no users yet).** Anything whose only role is
 legacy compatibility is dropped from **both** engines:
@@ -429,7 +463,8 @@ resolve becomes NULL.
 - SQLite drops them in #417 (expand, backfill, contract), which lands before
   #403, so the baseline equals the SQLite head and
   [Data copy](#data-copy-and-cutover) needs no legacy transforms.
-- Load-bearing trigger logic moves to Go in #399, before #417.
+- Load-bearing trigger logic moved to Go in #399, and migration 0026 dropped
+  those triggers (marked Dropped below). #417 drops the rest.
 
 **Settled before this audit:** 0025 dropped `threads_parent_session_id_*`.
 
@@ -445,7 +480,7 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `projects.source` (`'app'`/`'t3'`) | Write-only `'app'`; no reader | Drop | Remove the writes |
 | `projects.t3_deleted_at` | None (read once by 0008) | Drop | None |
 | `projects.origin`, `imported_connection_id`, `imported_at`, `archive_owner` | Project import and archive-follow (`import.go`); API `origin`, `importedAt` | Keep | None |
-| `tasks.t3_thread_id` | Written with `session_id` on T3 launch and adopt (`execution.go` `FinishAttempt`, `adopt.go`); read as a fallback for `externalSessionId`, as the "has started" marker (`trees.go` `unstartedSQL`, `acceptance.go`, `recorded_work` triggers), copied by `task_event_journal`, and as evidence `threadId` | Fallback-only: Drop | Verify every row has `session_id`; markers and evidence `threadId` read `session_id`; #399's Go journal events stop copying it |
+| `tasks.t3_thread_id` | Written with `session_id` on T3 launch and adopt (`execution.go` `FinishAttempt`, `adopt.go`); read as a fallback for `externalSessionId`, as the "has started" marker (`trees.go` `unstartedSQL`, `acceptance.go`, the recorded-work rule in `journal_events.go`), and as evidence `threadId`; journal events no longer copy it (#399) | Fallback-only: Drop | Verify every row has `session_id`; markers and evidence `threadId` read `session_id` |
 | `tasks.origin_thread_id`, index `tasks_origin_thread_idx` | Insert column, but no caller sets `NewTask.OriginThreadID` (API v6 rejects it); read into a `json:"-"` field nothing uses | Drop | `origin_session_id` already backfilled (0008) |
 | `tasks.after_thread_id`, `after_task_id`, constraint `tasks_one_wait` | None; 0003 nulled both and dropped their indexes | Drop | None (`tasks_start_pair` stays) |
 | `tasks.launch_reuse` | Always 0 outside tests (`ReuseAttempt` is test-only, `ReusesLaunch` has no caller); 0009 moved reuse into `execution_attempts` | Drop | Remove the reads and `ReuseAttempt` |
@@ -464,8 +499,8 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `threads` indexes `threads_status_idx`, `threads_updated_at_idx`, `threads_root_created_idx`, `threads_t3_project_id_idx` | Used only by `ListThreads` and `Stats`, which have no caller since `/api/threads` and `/api/stats` were removed | Drop | Remove those store functions |
 | `notifications.t3_thread_id` | Written beside `session_id` (`notify.go`); read as a fallback for the key and `externalSessionId` | Fallback-only: Drop | Backfill `session_id`; the key reads `session_id` only |
 | `task_handoffs.source_thread_id` (NOT NULL), `task_launch_bases.source_thread_id` | Written beside `source_session_id` (`sync/handoff.go`, `sync/service.go`); read for API `sourceThreadId` | Fallback-only: Drop | Backfill `source_session_id`; `sourceThreadId` derives from it (T3 sessions) or leaves the API |
-| `journal_entries.source_thread_id` | Written by `task_event_journal` beside `source_session_id`; the note input is unreachable; `COALESCE` puts it first for API `sourceThreadId` | Fallback-only: Drop | Backfill `source_session_id`; derive `sourceThreadId`; note and event `text` unchanged |
-| `task_acceptances.source_session_id` | Filled only by `acceptance_session_insert`; read as a fallback when evidence has no `session` | Keep | #399: Go sets it on insert |
+| `journal_entries.source_thread_id` | Old task events only (`task_event_journal` copied it until 0026; Go events write `source_session_id` only); the note input is unreachable; `COALESCE` puts it first for API `sourceThreadId` | Fallback-only: Drop | Backfill `source_session_id`; derive `sourceThreadId`; note and event `text` unchanged |
+| `task_acceptances.source_session_id` | Set by Go on insert from the task's session (#399; `acceptance_session_insert` until 0026); read as a fallback when evidence has no `session` | Keep | None |
 | `question_responses` (table) | None (read once by 0008) | Drop | None |
 | `t3_connection`, `opencode_settings` (all columns) | Live harness setup | Keep | None |
 
@@ -483,10 +518,10 @@ the write (the 0025 failure).
 | `tasks_origin_session_id_*`, `schedules_origin_session_id_*` (no guard) | Fire only for `origin_thread_id`, which no live caller sets | Drop | Drop with the columns |
 | `notifications_session_id_*` | Redundant: Go resolves the session first | Drop | None |
 | `task_launch_bases_source_session_id_*` | Redundant for live writes | Drop | None |
-| `task_handoffs_source_session_id_*` | Load-bearing for legacy evidence with `threadId` and no `session` (aborts the launch without a local T3) | Drop | #399: Go resolves the source session (evidence, else `source_session_id`, else the legacy T3 rule) |
-| `journal_entries_source_session_id_*` | Redundant: notes resolve in Go; `task_event_journal` sets `source_session_id` | Drop | None |
-| `thread_project_insert` | Load-bearing: the only writer of `threads.stage_project_id` (project activity reads it) | Drop | #399: `PutObservation` sets `stage_project_id` (task's project, else the single active binding) |
-| `acceptance_session_insert` | Load-bearing for `task_acceptances.source_session_id` | Drop | #399: Go sets it |
+| `task_handoffs_source_session_id_*` | Was load-bearing for legacy evidence with `threadId` and no `session` (aborted the launch without a local T3) | Dropped (0026) | Done in #399: `recordHandoff` resolves the source session (evidence, else the legacy T3 rule, else none) |
+| `journal_entries_source_session_id_*` | Redundant: notes resolve in Go; Go task events set `source_session_id` and no longer set `source_thread_id` | Drop | None |
+| `thread_project_insert` | Was load-bearing: the only writer of `threads.stage_project_id` (project activity reads it) | Dropped (0026) | Done in #399: `mirrorThread` sets `stage_project_id` (task's project, else the single active binding) |
+| `acceptance_session_insert` | Was load-bearing for `task_acceptances.source_session_id` | Dropped (0026) | Done in #399: `insertAcceptance` sets it |
 | `tasks_connection_insert/update`, `schedules_connection_insert/update` | Foreign-key substitute: 0008 added `connection_id` with `ALTER TABLE` and a default, which cannot carry `REFERENCES`. `schedules_connection_insert` is the only guard against an unknown schedule connection | Drop | Postgres: a real foreign key. SQLite (#417): rebuild `tasks` and `schedules` with the foreign key |
 
 ### JSON columns

@@ -212,7 +212,7 @@ func (s *Store) NoteBlockedLaunch(ctx context.Context, id int64, reason string) 
 			return err
 		}
 		from := StateBacklog
-		return tx.Tasks().AddEvent(ctx, id, &from, StateBacklog, "Launch blocked: "+reason)
+		return addTaskEvent(ctx, tx, id, &from, StateBacklog, "Launch blocked: "+reason)
 	})
 }
 
@@ -225,7 +225,7 @@ func (s *Store) HoldScheduled(ctx context.Context, id int64, reason string) erro
 			return err
 		}
 		from := StateBacklog
-		return tx.Tasks().AddEvent(ctx, id, &from, StateBacklog, reason+" Start manually after repairing the binding or connection.")
+		return addTaskEvent(ctx, tx, id, &from, StateBacklog, reason+" Start manually after repairing the binding or connection.")
 	})
 }
 

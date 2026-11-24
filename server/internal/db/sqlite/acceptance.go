@@ -94,9 +94,9 @@ func (r acceptances) MarkReopened(ctx context.Context, id int64) error {
 	return err
 }
 
-func (r acceptances) Insert(ctx context.Context, id int64, provenance string, evidence store.AcceptedEvidence, note string) (int64, error) {
+func (r acceptances) Insert(ctx context.Context, id int64, provenance string, evidence store.AcceptedEvidence, note string, sourceSessionID *int64) (int64, error) {
 	var acceptanceID int64
-	err := r.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES($1,$2,$3,$4) RETURNING id`, id, provenance, evidence, note).Scan(&acceptanceID)
+	err := r.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note,source_session_id) VALUES($1,$2,$3,$4,$5) RETURNING id`, id, provenance, evidence, note, sourceSessionID).Scan(&acceptanceID)
 	return acceptanceID, err
 }
 

@@ -59,7 +59,7 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 			}
 			parentID = &pid
 		}
-		err = tx.Threads().Mirror(ctx, o, store.ThreadMirror{
+		err = mirrorThread(ctx, tx, o, store.ThreadMirror{
 			SessionID: id, ParentSessionID: parentID, ParentThreadID: externalParent(o), Relationship: childMarker(o.Child),
 			Link: nullIfEmpty(o.Links.App), Branch: nullIfEmpty(o.Branch), WorktreePath: nullIfEmpty(o.Directory),
 			PendingRequests: pending, ActiveRunID: nullIfEmpty(active), LatestRunID: nullIfEmpty(o.ExecutionID),
@@ -213,7 +213,7 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observ
 			detail = "existing session linked by user; no launch sent"
 		}
 		from := StateLaunching
-		return tx.Tasks().AddEvent(ctx, a.TaskID, &from, TaskState(o.State), detail)
+		return addTaskEvent(ctx, tx, a.TaskID, &from, TaskState(o.State), detail)
 	})
 }
 func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) error {
@@ -229,7 +229,7 @@ func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) err
 			return err
 		}
 		from := StateLaunching
-		return tx.Tasks().AddEvent(ctx, a.TaskID, &from, StateBacklog, fmt.Sprintf("launch rejected before execution: %s", reason))
+		return addTaskEvent(ctx, tx, a.TaskID, &from, StateBacklog, fmt.Sprintf("launch rejected before execution: %s", reason))
 	})
 }
 

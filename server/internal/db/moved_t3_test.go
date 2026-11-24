@@ -72,7 +72,9 @@ func TestMovedT3TaskEventJournalsItsSession(t *testing.T) {
 	s, pool, moved := movedT3(t)
 	project := projectWithBinding(t, s, moved, "/w/a")
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,t3_thread_id,connection_id) VALUES(7,$1,'ran','p','running','thread-a',$2)`, project, moved)
-	mustExec(t, pool, `INSERT INTO task_events(task_id,from_state,to_state,detail) VALUES(7,'running','done','finished')`)
+	if _, err := s.TransitionTask(t.Context(), Transition{TaskID: 7, To: StateDone, Detail: "finished"}); err != nil {
+		t.Fatal(err)
+	}
 	var session, journaled int64
 	err := pool.QueryRow(`SELECT t.session_id,j.source_session_id FROM tasks t JOIN journal_entries j ON j.task_id=t.id AND j.kind='event' WHERE t.id=7`).Scan(&session, &journaled)
 	if err != nil || journaled != session {

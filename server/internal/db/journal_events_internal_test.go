@@ -123,3 +123,59 @@ func TestHandoffSourceSession(t *testing.T) {
 		}
 	}
 }
+
+func triggerNames(t *testing.T, pool *sqlite.DB) map[string]bool {
+	t.Helper()
+	rows, err := pool.Query(`SELECT name FROM sqlite_master WHERE type = 'trigger'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	names := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		names[n] = true
+	}
+	return names
+}
+
+// Migration 0026 drops the business-rule triggers and keeps every row; the
+// other compatibility triggers stay (#417).
+func TestJournalTriggersMigration(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 25)
+	mustExec(t, pool, `INSERT INTO projects(id,t3_project_id,title,workspace_root,source) VALUES(1,'p','P','/w','app')`)
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(1,'T')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,tree_id) VALUES(1,1,'a','p','backlog',1),(2,1,'b','p','backlog',1)`)
+	mustExec(t, pool, `INSERT INTO task_needs(task_id,need_id) VALUES(2,1)`)
+	mustExec(t, pool, `INSERT INTO task_events(task_id,from_state,to_state,detail) VALUES(1,NULL,'backlog','created')`)
+	var before int
+	if err := pool.QueryRow(`SELECT count(*) FROM journal_entries`).Scan(&before); err != nil || before == 0 {
+		t.Fatalf("seeded journal %d %v", before, err)
+	}
+	migrateTo(t, pool, 26)
+	names := triggerNames(t, pool)
+	for _, gone := range []string{"task_event_journal", "journal_note_protection", "journal_tree_created", "journal_tree_config", "journal_tree_status",
+		"journal_membership", "journal_need_added", "journal_need_removed", "journal_member_created", "thread_project_insert", "acceptance_session_insert",
+		"task_handoffs_source_session_id_insert", "task_handoffs_source_session_id_update"} {
+		if names[gone] {
+			t.Errorf("trigger %s survived 0026", gone)
+		}
+	}
+	for _, kept := range []string{"tasks_session_id_insert", "journal_entries_source_session_id_insert", "tasks_connection_insert"} {
+		if !names[kept] {
+			t.Errorf("compatibility trigger %s dropped before #417", kept)
+		}
+	}
+	var after, rev int
+	if err := pool.QueryRow(`SELECT (SELECT count(*) FROM journal_entries), (SELECT membership_revision FROM task_trees WHERE id = 1)`).Scan(&after, &rev); err != nil || after != before || rev != 2 {
+		t.Fatalf("journal %d -> %d, revision %d: %v", before, after, rev, err)
+	}
+	mustExec(t, pool, `INSERT INTO task_events(task_id,from_state,to_state,detail) VALUES(1,'backlog','backlog','raw')`)
+	if err := pool.QueryRow(`SELECT count(*) FROM journal_entries`).Scan(&after); err != nil || after != before {
+		t.Fatalf("a raw insert journaled after 0026: %d -> %d %v", before, after, err)
+	}
+}

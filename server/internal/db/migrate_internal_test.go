@@ -290,15 +290,6 @@ func TestJournalMigrationPreservesHistoryAndDiscardsLegacyNotes(t *testing.T) {
 	if err != nil || len(page.Entries) != 2 || page.Entries[0].TaskID == nil || *page.Entries[0].TaskID != 1 || page.Entries[0].Attempt == nil || *page.Entries[0].Attempt != 1 {
 		t.Fatalf("post-rollout event: %+v %v", page, err)
 	}
-	// Direct inserts also invalidate existing tree cursors.
-	first, err := s.ReadJournal(ctx, JournalOwner{TreeID: &id}, JournalQuery{Kind: "events", Limit: 1})
-	if err != nil || first.NextCursor == nil {
-		t.Fatalf("first cursor %+v %v", first, err)
-	}
-	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,tree_id) VALUES(1,'direct insert','p',1)`)
-	if _, err := s.ReadJournal(ctx, JournalOwner{TreeID: &id}, JournalQuery{Kind: "events", Limit: 1, Cursor: *first.NextCursor}); err == nil {
-		t.Fatal("direct insert retained stale cursor")
-	}
 }
 
 func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {

@@ -8,6 +8,43 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
+func mustTree(t *testing.T, s *db.Store, ctx context.Context, title string, mode db.StartMode, members ...db.TreeMember) db.TreeDetail {
+	t.Helper()
+	tree, err := s.CreateTree(ctx, db.NewTree{Title: title, StartMode: mode, Tasks: members})
+	if err != nil {
+		t.Fatalf("create tree %q: %v", title, err)
+	}
+	return tree
+}
+
+func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.TaskState) {
+	t.Helper()
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: to}); err != nil {
+		t.Fatalf("task %d to %s: %v", id, to, err)
+	}
+}
+
+// launch launches task id under a legacy thread id and moves it to end.
+func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread string, end db.TaskState) {
+	t.Helper()
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, ThreadID: &thread}); err != nil {
+		t.Fatal(err)
+	}
+	setState(t, s, ctx, id, end)
+}
+
+func journal(t *testing.T, s *db.Store, ctx context.Context, owner db.JournalOwner, q db.JournalQuery) db.JournalPage {
+	t.Helper()
+	page, err := s.ReadJournal(ctx, owner, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
 // journalRows dumps every journal entry after id since, oldest first, without
 // id and created_at.
 func journalRows(t *testing.T, ctx context.Context, since int64) []string {
@@ -123,12 +160,19 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatalf("note protection: touched=%v tree=%s", touched, treeRow(t, ctx, tr.ID))
 	}
 
+	// Task events carry the task's session, not its legacy thread id; the
+	// API's sourceThreadId still reads the T3 session's id.
 	since = lastJournalID(t, ctx)
 	launch(t, s, ctx, a.ID, "thread-a", db.StateDone)
+	for _, e := range journal(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, db.JournalQuery{Kind: "events", Limit: 2}).Entries {
+		if e.SourceThreadID == nil || *e.SourceThreadID != "thread-a" {
+			t.Fatalf("event sourceThreadId %v", e.SourceThreadID)
+		}
+	}
 	wantRows(t, "launch", journalRows(t, ctx, since), []string{
 		"event task_state_changed task=1 tree=1 src=- thread=- sess=- att=1 from=- to=- by=1 m=-  (backlog -> launching)",
-		"event task_state_changed task=1 tree=1 src=- thread=thread-a sess=1 att=1 from=- to=- by=1 m=-  (launching -> running)",
-		"event task_state_changed task=1 tree=1 src=- thread=thread-a sess=1 att=1 from=- to=- by=1 m=-  (running -> done)",
+		"event task_state_changed task=1 tree=1 src=- thread=- sess=1 att=1 from=- to=- by=1 m=-  (launching -> running)",
+		"event task_state_changed task=1 tree=1 src=- thread=- sess=1 att=1 from=- to=- by=1 m=-  (running -> done)",
 	})
 	var unmatched int
 	if err := testDB.Pool.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries j WHERE j.event_type LIKE 'task_%' AND j.event_type <> 'task_moved'
@@ -203,8 +247,8 @@ func TestJournalEventRowsExact(t *testing.T) {
 		"event tree_status_changed task=- tree=2 src=- thread=- sess=- att=- from=- to=- by=1 m=- open -> archived",
 	})
 
-	// Deleting an unstarted tree: the task_needs cascade fires
-	// journal_need_removed for the tree being deleted.
+	// Deleting an unstarted tree writes nothing for it (the task_needs
+	// cascade journaled into the deleted tree before 0026).
 	e := mustTask(t, s, ctx, p.ID, "e", nil)
 	f := mustTask(t, s, ctx, p.ID, "f", nil)
 	tr3 := mustTree(t, s, ctx, "gone", "", db.TreeMember{TaskID: e.ID}, db.TreeMember{TaskID: f.ID, Needs: []int64{e.ID}})
@@ -212,9 +256,7 @@ func TestJournalEventRowsExact(t *testing.T) {
 	if err := s.DeleteTree(ctx, tr3.ID); err != nil {
 		t.Fatal(err)
 	}
-	wantRows(t, "delete tree", journalRows(t, ctx, since), []string{
-		"event needs_changed task=- tree=3 src=6 thread=- sess=- att=- from=- to=- by=1 m=- Removed need #5",
-	})
+	wantRows(t, "delete tree", journalRows(t, ctx, since), nil)
 
 	// An event without a state change is a task_event with the bare detail.
 	// A task created with needs gets a tree named after its first need.

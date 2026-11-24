@@ -84,6 +84,9 @@ type Projects interface {
 	// (connection, external project, workspace).
 	Bound(ctx context.Context, b ProjectBinding) (Project, error)
 	Insert(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error)
+	// SoleBinding is the project of the only active binding of external
+	// project on the connection (nil: none or several).
+	SoleBinding(ctx context.Context, connectionID int64, external string) (*int64, error)
 	// InsertDiscovered inserts a project discovery created on connection.
 	InsertDiscovered(ctx context.Context, title string, connectionID, createdBy int64) (int64, error)
 	// Update sets title and archive state; a change of archive state makes

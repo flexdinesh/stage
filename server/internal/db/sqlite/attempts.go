@@ -211,7 +211,16 @@ func (r observations) Watched(ctx context.Context, connection int64) ([]store.Se
 	return refs, rows.Err()
 }
 
-func (r threads) Mirror(ctx context.Context, o execution.Observation, m store.ThreadMirror) error {
+func (r threads) SetProject(ctx context.Context, threadID string, project *int64) error {
+	_, err := r.Exec(ctx, `UPDATE threads SET stage_project_id = $2 WHERE t3_thread_id = $1`, threadID, project)
+	return err
+}
+
+func (r threads) Mirror(ctx context.Context, o execution.Observation, m store.ThreadMirror) (bool, error) {
+	var existed bool
+	if err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM threads WHERE t3_thread_id = $1)`, o.Session.ExternalSessionID).Scan(&existed); err != nil {
+		return false, err
+	}
 	_, err := r.Exec(ctx, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,execution_state,archived,link,created_at,updated_at,synced_at,
    branch,worktree_path,pending_request_count,active_run_id,latest_run_id,run_started_at,run_ended_at,parent_thread_id,relationship,session_id,settled,settled_at,parent_session_id)
    VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,stage_now(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
@@ -225,10 +234,10 @@ func (r threads) Mirror(ctx context.Context, o execution.Observation, m store.Th
 		o.CreatedAt, o.UpdatedAt, m.Branch, m.WorktreePath, m.PendingRequests, m.ActiveRunID, m.LatestRunID, o.StartedAt, o.EndedAt,
 		m.ParentThreadID, m.Relationship, m.SessionID, m.Settled, m.SettledAt, m.ParentSessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, err = r.Exec(ctx, "UPDATE threads SET model=$2,runtime_mode=$3,interaction_mode=$4 WHERE session_id=$1", m.SessionID, m.Model, m.RuntimeMode, m.InteractionMode)
-	return err
+	return !existed, err
 }
 
 func (r threads) SetSessionLastWord(ctx context.Context, sessionID int64, checked time.Time, lw store.LastWordRow) error {

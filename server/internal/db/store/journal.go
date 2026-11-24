@@ -27,7 +27,8 @@ type JournalEntry struct {
 	ToTreeID       *int64      `json:"toTreeId"`
 	CreatedAt      time.Time   `json:"createdAt"`
 	// CreatedBy: the user who wrote the note or caused the Go-written event;
-	// trigger-written events carry the default user.
+	// derived events (docs/storage.md "Journal events") carry the default
+	// user.
 	CreatedBy int64 `json:"createdBy"`
 	// SourceMachineID: the machine whose agent gateway forwarded the write
 	// (nil: not through a gateway).
@@ -55,6 +56,18 @@ type AppendNoteInput struct {
 	SourceThreadID *string `json:"-"`
 }
 
+// JournalEvent is an event row db derives from a change in the same Write
+// (docs/storage.md "Journal events").
+type JournalEvent struct {
+	TaskID, TreeID, SourceTaskID *int64
+	SourceSessionID              *int64
+	Attempt                      *int
+	EventType, Text              string
+	FromTreeID, ToTreeID         *int64
+	// At is the event time (nil: now).
+	At *time.Time
+}
+
 // Journal is the task and tree journal repository.
 type Journal interface {
 	// OwnerRevision is a tree's membership revision (0 for a task;
@@ -64,6 +77,9 @@ type Journal interface {
 	// NoteByRequest is o's note written with requestID (ErrNotFound).
 	NoteByRequest(ctx context.Context, o JournalOwner, requestID string) (JournalEntry, error)
 	InsertNote(ctx context.Context, o JournalOwner, in AppendNoteInput, sourceSessionID *int64, createdBy int64, sourceMachine *int64) (JournalEntry, error)
+	// InsertEvent appends a derived event. It takes the column defaults for
+	// its creator (the default user) and source machine (none).
+	InsertEvent(ctx context.Context, e JournalEvent) error
 	// Read pages o's entries matching q, newest first: at most limit
 	// entries with id < before (0: from the newest).
 	Read(ctx context.Context, o JournalOwner, q JournalQuery, before int64, limit int) ([]JournalEntry, error)

@@ -200,7 +200,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 			if p.EvidenceVersion != in.EvidenceVersion {
 				return Conflict("Evidence changed. Refresh and review it again.")
 			}
-			acceptanceID, err := ac.Insert(ctx, id, "user", p.Evidence, in.Note)
+			acceptanceID, err := insertAcceptance(ctx, tx, id, "user", p.Evidence, in.Note)
 			if err != nil {
 				return err
 			}
@@ -258,7 +258,7 @@ func (s *Store) InferCompletion(ctx context.Context, id int64, o execution.Obser
 		if err != nil || p.BlockedReason != "" {
 			return err
 		}
-		acceptanceID, err := ac.Insert(ctx, id, provenance, p.Evidence, "")
+		acceptanceID, err := insertAcceptance(ctx, tx, id, provenance, p.Evidence, "")
 		if err != nil {
 			return err
 		}
