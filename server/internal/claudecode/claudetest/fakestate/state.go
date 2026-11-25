@@ -147,12 +147,17 @@ func uuidFor(id, kind string) string {
 	return fmt.Sprintf("%s-%s-%d", id[:8], kind, seq)
 }
 
-// AppendUser writes a typed user prompt.
-func AppendUser(projects, cwd, id, entrypoint, prompt string, at time.Time) error {
-	return appendRecord(projects, cwd, id, map[string]any{
+// AppendUser writes a typed user prompt. sessionKind is "bg" in a
+// background session, "" otherwise (Claude omits it).
+func AppendUser(projects, cwd, id, entrypoint, sessionKind, prompt string, at time.Time) error {
+	rec := map[string]any{
 		"type": "user", "entrypoint": entrypoint, "uuid": uuidFor(id, "u"), "timestamp": at.Format(time.RFC3339Nano),
 		"message": map[string]any{"role": "user", "content": prompt},
-	})
+	}
+	if sessionKind != "" {
+		rec["sessionKind"] = sessionKind
+	}
+	return appendRecord(projects, cwd, id, rec)
 }
 
 // AppendReply writes an assistant text message, then (turnOver) the

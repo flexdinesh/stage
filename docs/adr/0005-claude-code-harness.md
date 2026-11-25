@@ -4,6 +4,8 @@
   #369. Docs and parser fixtures only: no code, no schema. Tree 200's task
   prompts call this "ADR 0003"; that number went to
   [storage adapters](0003-storage-adapters.md) first, so this is 0005.
+- **Amended** 2026-11-25 by #378: decision 11 (`rm` is the archived
+  closure) and the "entry gone" row of decision 4.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -65,7 +67,7 @@ them. 2, 3, 13 and 14 come from the evidence.
    | `done` | done | the process may stay alive and take more turns: a later `working` is new activity |
    | `failed` | failed | e.g. a session that never started |
    | `stopped` | interrupted | after `claude stop` |
-   | entry gone (`rm`) | idle, with the reply when the transcript exists, else not found | never failure or completion |
+   | entry gone (`rm`) | idle, with the reply when the transcript exists, else not found | never failure; closed (`archived`) after a finished background turn (decision 11) |
 
    The hourly reap ([E7](#e7-reap)) ends the process but keeps the entry and
    its `state`, so a reaped session maps as above (no `pid`).
@@ -95,8 +97,20 @@ them. 2, 3, 13 and 14 come from the evidence.
     `-w` silently reuses an existing worktree of that name, dirty or not
     ([E5](#e5-worktrees)). Stage never removes worktrees; `claude rm`
     does.
-11. **No closures in v1.** `rm` hides the session but is not a closure
-    (#378 may add one).
+11. **`rm` is the archived closure** (#378; v1 had none). The idle reap
+    keeps the entry and its `state` (E7); `rm` drops the entry and keeps the
+    transcript (E3), so the two are distinguishable. Stage reports
+    `closed: archived` (provenance `harness_archived`, no migration) only
+    when the session list was read, the session is not on it, its
+    transcript exists, and the transcript's last turn ran in a background
+    session (`sessionKind: "bg"`) and is over (`turn_duration`). Not
+    closures: an adopted terminal or SDK session leaving the list when its
+    process exits, `rm` mid-turn (it kills the turn), a refused `rm` (dirty
+    worktree: the entry stays), `purge` (no transcript). The state stays
+    idle (the entry took it), so inferred completion reads the task's
+    stored `done`: a session removed while blocked completes nothing.
+    A removed session is not `archived` for adoption or linking: its
+    transcript stays resumable.
 12. **Inventory** is `~/.claude.json` `projects` (under `CLAUDE_CONFIG_DIR`
     when set). Git checkouts are importable. `-w` worktrees are not listed
     there, only their repository.

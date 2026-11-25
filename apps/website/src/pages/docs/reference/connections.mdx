@@ -146,6 +146,8 @@ Each task starts one background session in the project folder or in a new Claude
 
 When a session waits for you, answer in Claude: task detail offers **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). Projects come from the folders Claude knows; Git checkouts import as Stage projects. A session T3 started is tracked through T3, not adopted here.
 
+Removing a finished session with `claude rm` completes its done task (**Complete tasks when removed in Claude Code**, on by default). Claude ending an idle session after about an hour does not, and neither does removing one mid-turn or one waiting for you.
+
 ### Disconnect
 
 `stage harness claude disconnect`, or Disconnect in Settings. Stage stops using Claude Code; sessions keep running in Claude, tasks and history stay, and connecting again resumes the same connection.

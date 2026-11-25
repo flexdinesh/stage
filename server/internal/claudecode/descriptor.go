@@ -5,6 +5,7 @@
 package claudecode
 
 import (
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
@@ -21,12 +22,19 @@ const SessionEnv = "CLAUDE_CODE_SESSION_ID"
 
 // Descriptor: Claude Code runs as local processes owned by Claude's daemon.
 // Its config directory is a lasting identity. Claude assigns session ids, so
-// a launch is correlated by its marker. No closures in v1.
+// a launch is correlated by its marker. A session removed in Claude (`claude
+// rm`) after its turn ended may complete its task (the archived closure).
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "Claude Code", Hosting: harness.Hosted,
 	StableIdentity: true,
 	Launch:         harness.LaunchCorrelated,
-	Closures:       []harness.Closure{},
+	Closures: []harness.Closure{{
+		Signal: execution.ClosedArchived, Provenance: "harness_archived",
+		Setting:   "Complete tasks when removed in Claude Code",
+		Completed: "Completed automatically: removed in Claude Code. This result stays unchanged when execution continues.",
+		Via:       "via Claude Code removal",
+		Event:     "Completed from Claude Code removal; accepted evidence saved in Stage.",
+	}},
 	Setup: harness.Setup{
 		Fields: []harness.Field{
 			{ID: "binary", Label: "Claude command", Kind: harness.FieldText, Help: "Name or path of the claude executable. Blank: Stage looks on its PATH, then ~/.local/bin."},

@@ -425,19 +425,24 @@ func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observati
 	if e != nil {
 		return e
 	}
-	if (task.State == db.StateBacklog && !task.Adopted) || o.State == "idle" {
+	if task.State == db.StateBacklog && !task.Adopted {
 		return nil
 	}
-	detail := "execution observed " + o.State
-	if o.StateReason != "" {
-		detail += " (" + o.StateReason + ")"
-	}
-	change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail}
-	if task.Adopted && task.LaunchedAt == nil {
-		change.ObservedStart = o.StartedAt
-	}
-	if _, e = s.transition(ctx, change); e != nil {
-		return e
+	// Idle never overwrites a known state, but it may carry a closure (a
+	// Claude session removed with its state): inference reads the stored
+	// task state, so only a task Stage recorded done can complete.
+	if o.State != "idle" {
+		detail := "execution observed " + o.State
+		if o.StateReason != "" {
+			detail += " (" + o.StateReason + ")"
+		}
+		change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail}
+		if task.Adopted && task.LaunchedAt == nil {
+			change.ObservedStart = o.StartedAt
+		}
+		if _, e = s.transition(ctx, change); e != nil {
+			return e
+		}
 	}
 	closure, ok := s.closure(task.Harness, o)
 	if !ok {

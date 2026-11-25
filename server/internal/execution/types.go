@@ -224,7 +224,7 @@ const ReasonOwnerExited = "owner_exited"
 // Closure signals. A closure never implies the execution succeeded.
 const (
 	ClosedSettled  = "settled"  // T3 thread settled
-	ClosedArchived = "archived" // OpenCode session archived
+	ClosedArchived = "archived" // OpenCode session archived; Claude Code session removed (`claude rm`)
 )
 
 // Closure reports that the session was closed in its harness. Stage may infer

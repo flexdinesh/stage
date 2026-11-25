@@ -93,19 +93,21 @@ func TestRosterFixturesMapStates(t *testing.T) {
 }
 
 // The ADR's reply table (E4): the last assistant text of the current turn,
-// whether the turn is over, and the first prompt's entrypoint.
+// whether the turn is over, the first prompt's entrypoint, and whether the
+// last turn ran in a background session (a `-p` seed then `--bg --resume`
+// is background from its second turn).
 func TestTranscriptFixtures(t *testing.T) {
 	cases := []struct {
 		file, entrypoint, reply, branch string
-		over                            bool
+		over, background                bool
 	}{
-		{"done-text", "cli", "**The Keeper of Hollow Point**", "", true},
-		{"blocked-question", "cli", "Blocked: the harness rejected", "", true},
-		{"blocked-permission", "cli", "", "", false},
-		{"working", "cli", "", "", false},
-		{"worktree", "cli", "wt ok", "worktree-spikewt", true},
-		{"print-then-bg", "sdk-cli", "r2 bg", "", true},
-		{"t3-code", "t3-code", "Reply text.", "", false},
+		{"done-text", "cli", "**The Keeper of Hollow Point**", "", true, true},
+		{"blocked-question", "cli", "Blocked: the harness rejected", "", true, true},
+		{"blocked-permission", "cli", "", "", false, true},
+		{"working", "cli", "", "", false, true},
+		{"worktree", "cli", "wt ok", "worktree-spikewt", true, true},
+		{"print-then-bg", "sdk-cli", "r2 bg", "", true, true},
+		{"t3-code", "t3-code", "Reply text.", "", false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -116,6 +118,9 @@ func TestTranscriptFixtures(t *testing.T) {
 			}
 			if tr.Entrypoint != c.entrypoint || tr.TurnOver != c.over || !strings.HasPrefix(tr.Reply, c.reply) || (c.reply == "") != (tr.Reply == "") {
 				t.Fatalf("entrypoint %q over %v reply %.60q", tr.Entrypoint, tr.TurnOver, tr.Reply)
+			}
+			if tr.Background != c.background {
+				t.Fatalf("background %v", tr.Background)
 			}
 			if c.branch != "" && tr.Branch != c.branch {
 				t.Fatalf("branch %q", tr.Branch)

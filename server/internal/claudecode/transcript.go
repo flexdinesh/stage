@@ -30,6 +30,9 @@ type Transcript struct {
 	ReplyAt        time.Time
 	// TurnOver: a turn_duration record follows the last prompt or reply.
 	TurnOver bool
+	// Background: the last typed prompt ran in a background session
+	// (sessionKind "bg"), not a terminal or SDK one.
+	Background bool
 }
 
 // record is the subset of a transcript line Stage reads. Unknown types are
@@ -40,6 +43,7 @@ type record struct {
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
 	Entrypoint  string `json:"entrypoint"`
+	SessionKind string `json:"sessionKind"`
 	Cwd         string `json:"cwd"`
 	GitBranch   string `json:"gitBranch"`
 	SessionID   string `json:"sessionId"`
@@ -200,6 +204,7 @@ func parseTranscript(r io.Reader) (Transcript, error) {
 				t.FirstPrompt, t.Entrypoint, t.Cwd = text, rec.Entrypoint, rec.Cwd
 			}
 			t.LastPromptID, t.Reply, t.ReplyID, t.ReplyAt, t.TurnOver = rec.UUID, "", "", time.Time{}, false
+			t.Background = rec.SessionKind == sessionKindBackground
 		case "assistant":
 			if rec.Message == nil {
 				return true
@@ -286,6 +291,10 @@ func transcriptPath(root, cwd, id string) (string, bool) {
 
 // Origin reports the entrypoint of a T3-started session.
 const entrypointT3 = "t3-code"
+
+// sessionKindBackground is a transcript record's sessionKind in a `--bg`
+// session.
+const sessionKindBackground = "bg"
 
 // refusedT3 is the refusal for a session T3 started: T3 tracks it.
 var refusedT3 = "This Claude session was started by T3. Track it through T3."
