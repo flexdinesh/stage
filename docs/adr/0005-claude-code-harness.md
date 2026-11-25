@@ -50,7 +50,8 @@ them. 2, 3, 13 and 14 come from the evidence.
    model turn, writes a fake first exchange and runs it in the foreground:
    rejected.
 3. **Rejection.** Only a refusal the CLI prints before it dispatches
-   (`Workspace not trusted`, usage errors) is `Rejected`; the task returns to
+   (`Workspace not trusted`; usage errors likely too, not probed) is
+   `Rejected`; the task returns to
    backlog with the CLI's message. Any other failure stays unconfirmed and
    goes to the correlator. Exit 0 does not prove the session started (a bad
    `--resume` exits 0 and then the session fails): the roster decides.
@@ -294,7 +295,7 @@ answering prompts in Claude for now. The SDK route stays open as #385.
 
 ## Consequences
 
-- #371 (hosted plumbing): unchanged.
+- #371 (hosted plumbing, merged as ca5cfeb): unaffected.
 - #372 (adapter): descriptor `launch: correlated` with an
   `execution.Correlator`, not reserved. Map states per decision 4, not the
   working/blocked/done/failed/stopped strings with `status` the brief
