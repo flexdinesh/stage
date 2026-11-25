@@ -10,6 +10,7 @@
   researched and not built.
 - **Amended** 2026-11-25 by #377: decision 16 (push via HTTP hooks),
   evidence E9, the hooks approval route.
+- **Amended** 2026-11-25 by #380: decision 17 (usage).
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -163,6 +164,30 @@ them. 2, 3, 13 and 14 come from the evidence.
     main API is not the target: the managed service listens on a Unix socket
     only, and HTTP hooks need TCP. A command hook running the `stage` binary
     was rejected: its path changes with updates and identities.
+17. **Usage** (#380) comes from the transcript, best effort: turns are the
+    typed user prompts on the main chain (the current one included). A user
+    record's `origin.kind` is `human` for a typed prompt (absent in `-p` and
+    SDK sessions); a background subagent finishing appends a
+    `task-notification` user record that starts another model turn with its
+    own `turn_duration` (live probe, 2.1.332), and `peer` marks another
+    session's message: neither is a turn. Tokens
+    count every assistant `message.usage` once (deduped by `message.id`
+    plus `requestId`, the largest value of each channel: a message's records
+    repeat it), sidechains and subagent transcripts included, `<synthetic>`
+    skipped; working time sums the main chain's `turn_duration.durationMs`
+    (finished turns). No cost. Evidence: transcripts carry per-message
+    `usage` (`input_tokens`, `cache_read_input_tokens`,
+    `cache_creation_input_tokens`, `output_tokens`) and `turn_duration`
+    records, and no cost field. `~/.claude.json` `projects[<path>].lastCost`
+    is per folder, for its last interactive session only (folders whose last
+    session ran in the background showed 0 or none), so it is not per
+    session. The jobs `state.json` `tokens` is undocumented (output tokens
+    only); Stage does not use it. Subagents write
+    `<projectsDirectory>/<encoded cwd>/<sessionId>/subagents/agent-*.jsonl`
+    (records `isSidechain: true`, plus a `.meta.json`), with no message
+    overlap with the main file. Nested subagents (depth 2 and more) were not
+    probed and may be undercounted. Stage never prices tokens: the
+    observation's `costUsd` stays null.
 
 ## Evidence
 
@@ -471,6 +496,8 @@ Agents harness is wanted on its own merits.
   where it runs.
 - #382 (cloud sessions): no harness; findings and the routes left open
   are [above](#cloud-sessions-claude---cloud-not-built).
+- #380 (usage): the observation carries `usage` from the transcript
+  (decision 17); task detail, `stage task show` and `get_task` show it.
 
 ## Reproduce
 

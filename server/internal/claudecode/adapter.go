@@ -298,6 +298,8 @@ type session struct {
 	listed     bool
 	transcript Transcript
 	hasLog     bool
+	// logPath is the transcript's path when hasLog.
+	logPath string
 }
 
 func (s session) cwd() string {
@@ -327,7 +329,7 @@ func (a *Adapter) readListed(ctx context.Context, id string, es []Entry) (sessio
 	s.entry, s.listed = findSession(es, id)
 	if p, ok := transcriptPath(a.projects(ctx), s.entry.Cwd, id); ok {
 		if t, err := a.logs.read(p); err == nil {
-			s.transcript, s.hasLog = t, true
+			s.transcript, s.hasLog, s.logPath = t, true, p
 		}
 	}
 	if !s.listed && !s.hasLog {
@@ -412,10 +414,31 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		text, cut := truncate(t.Reply, maxReply)
 		o.Reply = &execution.Reply{ItemID: t.ReplyID, RunID: t.LastPromptID, MessageID: t.ReplyID, Text: text, Truncated: cut, UpdatedAt: t.ReplyAt.UTC()}
 	}
+	o.Usage = a.usage(s)
 	if o.Project == "" {
 		return execution.Observation{}, errors.New("claude session has no working directory")
 	}
 	return o, nil
+}
+
+// usage is the session's usage from its transcript and its subagents'
+// (<transcript without .jsonl>/subagents/*.jsonl, tokens only); nil before
+// its first turn. Claude records no cost for a background session, so
+// CostUSD stays nil (ADR 0005 decision 17).
+func (a *Adapter) usage(s session) *execution.Usage {
+	t := s.transcript
+	if !s.hasLog || t.Turns == 0 {
+		return nil
+	}
+	tok := t.Tokens
+	subagents, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(s.logPath, ".jsonl"), "subagents", "*.jsonl"))
+	for _, p := range subagents {
+		if sub, err := a.logs.read(p); err == nil {
+			tok = tok.add(sub.Tokens)
+		}
+	}
+	return &execution.Usage{Turns: t.Turns, InputTokens: tok.Input, CacheReadTokens: tok.CacheRead,
+		CacheWriteTokens: tok.CacheWrite, OutputTokens: tok.Output, WorkingMs: t.WorkingMs}
 }
 
 // Observe reads the session list (shared, cached) and the transcript.

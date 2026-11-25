@@ -162,18 +162,24 @@ func AppendUser(projects, cwd, id, entrypoint, sessionKind, prompt string, at ti
 	return appendRecord(projects, cwd, id, rec)
 }
 
+// ReplyUsage is the usage of every reply AppendReply writes, and
+// ReplyDurationMs its turn's duration.
+var ReplyUsage = map[string]any{"input_tokens": 10, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 20, "output_tokens": 5}
+
+const ReplyDurationMs = 1000
+
 // AppendReply writes an assistant text message, then (turnOver) the
 // turn_duration record that ends the turn.
 func AppendReply(projects, cwd, id, text string, turnOver bool) error {
 	msg := "msg_" + uuidFor(id, "m")
 	if err := appendRecord(projects, cwd, id, map[string]any{
 		"type": "assistant", "entrypoint": "cli", "uuid": uuidFor(id, "a"),
-		"message": map[string]any{"id": msg, "role": "assistant", "model": "claude-haiku-5-5", "content": []map[string]any{{"type": "text", "text": text}}},
+		"message": map[string]any{"id": msg, "role": "assistant", "model": "claude-haiku-5-5", "content": []map[string]any{{"type": "text", "text": text}}, "usage": ReplyUsage},
 	}); err != nil {
 		return err
 	}
 	if !turnOver {
 		return nil
 	}
-	return appendRecord(projects, cwd, id, map[string]any{"type": "system", "subtype": "turn_duration", "uuid": uuidFor(id, "s")})
+	return appendRecord(projects, cwd, id, map[string]any{"type": "system", "subtype": "turn_duration", "durationMs": ReplyDurationMs, "uuid": uuidFor(id, "s")})
 }

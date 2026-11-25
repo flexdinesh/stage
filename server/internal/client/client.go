@@ -187,6 +187,7 @@ type Task struct {
 // TaskDetail is GET /api/tasks/:id.
 type TaskDetail struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
+	Usage       *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`

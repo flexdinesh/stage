@@ -33,7 +33,41 @@ type Transcript struct {
 	// Background: the last typed prompt ran in a background session
 	// (sessionKind "bg"), not a terminal or SDK one.
 	Background bool
+	// Turns: typed user prompts on the main chain (the current one
+	// included); a background subagent's notification or a peer session's
+	// message starts model work but is not a turn.
+	Turns int
+	// WorkingMs: the main chain's turn_duration records, summed (finished
+	// turns only).
+	WorkingMs int64
+	// Tokens: every assistant message of this file, sidechains included.
+	Tokens Tokens
 }
+
+// Tokens is the token usage of assistant messages, each message counted
+// once.
+type Tokens struct {
+	Input, CacheRead, CacheWrite, Output int64
+}
+
+func (a Tokens) add(b Tokens) Tokens {
+	return Tokens{Input: a.Input + b.Input, CacheRead: a.CacheRead + b.CacheRead,
+		CacheWrite: a.CacheWrite + b.CacheWrite, Output: a.Output + b.Output}
+}
+
+// max is the larger value of each channel: a message's records repeat its
+// usage, and a streamed one can grow from its first record to its last.
+func (a Tokens) max(b Tokens) Tokens {
+	return Tokens{Input: max(a.Input, b.Input), CacheRead: max(a.CacheRead, b.CacheRead),
+		CacheWrite: max(a.CacheWrite, b.CacheWrite), Output: max(a.Output, b.Output)}
+}
+
+// originHuman is a typed user prompt's origin kind.
+const originHuman = "human"
+
+// syntheticModel marks a local placeholder message that never reached the
+// API.
+const syntheticModel = "<synthetic>"
 
 // record is the subset of a transcript line Stage reads. Unknown types are
 // skipped.
@@ -51,11 +85,43 @@ type record struct {
 	Timestamp   string `json:"timestamp"`
 	CustomTitle string `json:"customTitle"`
 	AITitle     string `json:"aiTitle"`
-	Message     *struct {
+	RequestID   string `json:"requestId"`
+	DurationMs  int64  `json:"durationMs"`
+	// Origin is who sent a user record: "human" for a typed prompt,
+	// "task-notification" (a background subagent finished) or "peer"
+	// (another session) otherwise; absent in -p, SDK and older sessions.
+	Origin *struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message *struct {
 		ID      string          `json:"id"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
+		Usage   *usage          `json:"usage"`
 	} `json:"message"`
+}
+
+// usage is an assistant message's Messages API usage.
+type usage struct {
+	InputTokens         int64 `json:"input_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+}
+
+// tokens is rec's usage and the key that dedupes its message's records
+// ("" when it has neither a message nor a request id); ok false for a
+// record without usage or a synthetic one.
+func (rec record) tokens() (key string, t Tokens, ok bool) {
+	m := rec.Message
+	if rec.Type != "assistant" || m == nil || m.Usage == nil || m.Model == syntheticModel {
+		return "", Tokens{}, false
+	}
+	if m.ID != "" || rec.RequestID != "" {
+		key = m.ID + ":" + rec.RequestID
+	}
+	u := m.Usage
+	return key, Tokens{Input: u.InputTokens, CacheRead: u.CacheReadTokens, CacheWrite: u.CacheCreationTokens, Output: u.OutputTokens}, true
 }
 
 type block struct {
@@ -162,9 +228,17 @@ func ReadTranscript(path string) (Transcript, error) {
 func parseTranscript(r io.Reader) (Transcript, error) {
 	var t Transcript
 	var customTitle, aiTitle string
+	messages := map[string]Tokens{}
 	err := eachRecord(r, func(rec record) bool {
 		if rec.SessionID != "" && t.SessionID == "" {
 			t.SessionID = rec.SessionID
+		}
+		if key, tok, ok := rec.tokens(); ok {
+			if key == "" {
+				t.Tokens = t.Tokens.add(tok)
+			} else {
+				messages[key] = messages[key].max(tok)
+			}
 		}
 		switch rec.Type {
 		case "custom-title":
@@ -204,6 +278,9 @@ func parseTranscript(r io.Reader) (Transcript, error) {
 				t.FirstPrompt, t.Entrypoint, t.Cwd = text, rec.Entrypoint, rec.Cwd
 			}
 			t.LastPromptID, t.Reply, t.ReplyID, t.ReplyAt, t.TurnOver = rec.UUID, "", "", time.Time{}, false
+			if rec.Origin == nil || rec.Origin.Kind == originHuman {
+				t.Turns++
+			}
 			t.Background = rec.SessionKind == sessionKindBackground
 		case "assistant":
 			if rec.Message == nil {
@@ -227,10 +304,14 @@ func parseTranscript(r io.Reader) (Transcript, error) {
 		case "system":
 			if rec.Subtype == "turn_duration" {
 				t.TurnOver = true
+				t.WorkingMs += max(rec.DurationMs, 0)
 			}
 		}
 		return true
 	})
+	for _, tok := range messages {
+		t.Tokens = t.Tokens.add(tok)
+	}
 	t.Title = customTitle
 	if t.Title == "" {
 		t.Title = aiTitle

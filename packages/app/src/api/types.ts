@@ -598,8 +598,25 @@ export interface TaskEvent {
   at: string;
 }
 
+/** What a session consumed over its life, as its harness records it (cumulative, best effort). */
+export interface Usage {
+  /** Prompts the session answered or is answering. */
+  turns: number;
+  /** Uncached input; cache reads and writes are separate. */
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  /** Time spent on finished turns; 0 when unknown. */
+  workingMs: number;
+  /** A cost the harness itself reports; null when it reports none (Claude Code never does). */
+  costUsd: number | null;
+}
+
 export interface TaskDetail extends Task {
   finalReply?: { text: string; truncated: boolean; updatedAt: string; runId: string };
+  /** The current session's usage, when its harness reports one. */
+  usage?: Usage;
   acceptances: Acceptance[];
   events: TaskEvent[];
   thread: Thread | null;

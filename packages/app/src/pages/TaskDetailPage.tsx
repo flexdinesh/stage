@@ -15,6 +15,7 @@ import { AcceptedResult } from "../components/Completion.tsx";
 import { BlockedReason, LaunchBlockAlert, useLaunchGate } from "../components/LaunchGate.tsx";
 import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
+import { UsagePanel } from "../components/Usage.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageStrip } from "../components/Images.tsx";
@@ -365,6 +366,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
             <BatchPanel task={task} />
             <ThreadPanel task={task} thread={task.thread} />
+            <UsagePanel task={task} />
             <ConfigPanel task={task} />
           </div>
         </div>

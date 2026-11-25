@@ -145,6 +145,71 @@ func TestTranscriptFixtures(t *testing.T) {
 	}
 }
 
+// Usage from the captured transcripts: each assistant message counted once
+// although its records repeat it (blocked-question has three messages over
+// five records), synthetic and usage-less records skipped, turns are typed
+// prompts and working time sums turn_duration (finished turns only).
+func TestTranscriptUsageFixtures(t *testing.T) {
+	cases := []struct {
+		file    string
+		turns   int
+		working int64
+		tokens  claudecode.Tokens
+	}{
+		{"done-text", 1, 23015, claudecode.Tokens{Input: 2, CacheRead: 27618, CacheWrite: 16652, Output: 4875}},
+		{"blocked-question", 1, 7827, claudecode.Tokens{Input: 6, CacheRead: 119137, CacheWrite: 19926, Output: 665}},
+		{"blocked-permission", 1, 0, claudecode.Tokens{Input: 2, CacheRead: 25662, CacheWrite: 16554, Output: 88}},
+		{"working", 1, 0, claudecode.Tokens{}},
+		{"print-then-bg", 2, 3163, claudecode.Tokens{Input: 4, CacheRead: 13430, CacheWrite: 53336, Output: 14}},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			tr, err := claudecode.ReadTranscript(filepath.Join("testdata", "transcripts", c.file+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tr.Turns != c.turns || tr.WorkingMs != c.working || tr.Tokens != c.tokens {
+				t.Fatalf("turns %d working %d tokens %+v, want %d %d %+v", tr.Turns, tr.WorkingMs, tr.Tokens, c.turns, c.working, c.tokens)
+			}
+		})
+	}
+}
+
+// A message streamed over several records counts its largest usage once;
+// sidechain messages count, synthetic ones do not, and a record with
+// neither a message nor a request id counts on its own. A prompt with no
+// origin (-p, SDK) or a human one is a turn; a subagent's notification and
+// a peer's message are not.
+func TestTranscriptUsageDedupe(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","uuid":"u1","timestamp":"2026-11-25T03:00:00Z","entrypoint":"cli","cwd":"/w","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","requestId":"r1","timestamp":"2026-11-25T03:00:01Z","message":{"id":"m1","model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":3,"cache_read_input_tokens":100,"cache_creation_input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"assistant","requestId":"r1","timestamp":"2026-11-25T03:00:02Z","message":{"id":"m1","model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":3,"cache_read_input_tokens":100,"cache_creation_input_tokens":10,"output_tokens":40}}}`,
+		`{"type":"assistant","isSidechain":true,"requestId":"r2","timestamp":"2026-11-25T03:00:03Z","message":{"id":"m2","model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1,"output_tokens":5}}}`,
+		`{"type":"assistant","timestamp":"2026-11-25T03:00:04Z","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"type":"assistant","timestamp":"2026-11-25T03:00:05Z","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"type":"assistant","timestamp":"2026-11-25T03:00:06Z","message":{"id":"m3","model":"<synthetic>","content":[],"usage":{"input_tokens":0,"output_tokens":999}}}`,
+		`{"type":"system","subtype":"turn_duration","isSidechain":true,"durationMs":500,"timestamp":"2026-11-25T03:00:07Z"}`,
+		`{"type":"system","subtype":"turn_duration","durationMs":7000,"timestamp":"2026-11-25T03:00:08Z"}`,
+		`{"type":"user","sessionId":"s","uuid":"u2","timestamp":"2026-11-25T03:01:00Z","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}`,
+		`{"type":"user","sessionId":"s","uuid":"u3","timestamp":"2026-11-25T03:02:00Z","origin":{"kind":"human"},"message":{"role":"user","content":[{"type":"text","text":"again"}]}}`,
+		`{"type":"user","sessionId":"s","uuid":"u4","timestamp":"2026-11-25T03:03:00Z","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>done</task-notification>"}}`,
+		`{"type":"user","sessionId":"s","uuid":"u5","timestamp":"2026-11-25T03:04:00Z","origin":{"kind":"peer"},"message":{"role":"user","content":"from another session"}}`,
+	}
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := claudecode.ReadTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := claudecode.Tokens{Input: 3 + 1 + 1 + 1, CacheRead: 100, CacheWrite: 10, Output: 40 + 5 + 2 + 2}
+	if tr.Tokens != want || tr.Turns != 2 || tr.WorkingMs != 7000 {
+		t.Fatalf("tokens %+v turns %d working %d, want %+v 2 7000", tr.Tokens, tr.Turns, tr.WorkingMs, want)
+	}
+}
+
 func TestEncodeProject(t *testing.T) {
 	for in, want := range map[string]string{
 		"/tmp/x/.claude/worktrees/w": "-tmp-x--claude-worktrees-w",
