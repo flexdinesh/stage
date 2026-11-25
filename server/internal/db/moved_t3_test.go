@@ -99,8 +99,13 @@ func TestUnconfirmedRecordsObservedSession(t *testing.T) {
 	if err != nil || a.Session != nil {
 		t.Fatalf("fresh attempt %+v %v", a, err)
 	}
-	links := execution.Links{Web: "https://t3/thread"}
-	seen := &ObservedSession{SessionRef: SessionRef{ConnectionID: moved, ExternalSessionID: "thr"}, Title: "Work", State: "running", Links: &links}
+	// Destinations are resolved when read; only the resume command is kept.
+	seen := Observed(execution.Observation{Session: SessionRef{ConnectionID: moved, ExternalSessionID: "thr"}, Title: "Work", State: "running",
+		Links: execution.Links{Web: "https://t3/thread", Command: "claude attach thr"}})
+	if seen.Links == nil || *seen.Links != (execution.Links{Command: "claude attach thr"}) {
+		t.Fatalf("observed links %+v", seen.Links)
+	}
+	seen.Links.Web = "https://t3/thread"
 	if err := s.Unconfirmed(ctx, a, errors.New("record failed"), seen); err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +113,12 @@ func TestUnconfirmedRecordsObservedSession(t *testing.T) {
 	if err != nil || got.Error != "record failed" || got.RetryAt == nil || got.RetryCount != 1 || got.Session == nil {
 		t.Fatalf("after unconfirmed %+v %v", got, err)
 	}
-	if got.Session.SessionRef != seen.SessionRef || got.Session.Title != "Work" || got.Session.State != "running" || got.Session.Links != nil {
+	if got.Session.SessionRef != seen.SessionRef || got.Session.Title != "Work" || got.Session.State != "running" ||
+		got.Session.Links == nil || *got.Session.Links != (execution.Links{Command: "claude attach thr"}) {
 		t.Fatalf("observed %+v", *got.Session)
+	}
+	if none := Observed(execution.Observation{Session: seen.SessionRef, Links: execution.Links{Web: "https://t3/thread"}}); none.Links != nil {
+		t.Fatalf("a session without a resume command kept links %+v", none.Links)
 	}
 	if task, err := s.GetTask(ctx, 9); err != nil || task.LastError == nil || *task.LastError != "record failed" {
 		t.Fatalf("task last error %+v %v", task.LastError, err)

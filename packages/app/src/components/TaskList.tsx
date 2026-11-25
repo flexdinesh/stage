@@ -352,7 +352,7 @@ export function TaskRow({
           </BlockedReason>
         ) : null}
         {session === null ? null : (
-          <SessionActionButton action={session} name={kindName(task.harness)} small variant={session.primary ? "primary" : "secondary"} />
+          <SessionActionButton action={session} name={kindName(task.harness)} small variant={session.primary ? "primary" : "secondary"} connectionId={task.connectionId} />
         )}
         {extra}
         <RowCopyLink subject={{ kind: "task", id: task.id, title: task.title }} />

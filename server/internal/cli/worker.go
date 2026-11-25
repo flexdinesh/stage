@@ -45,7 +45,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 	cfgFlag := fs.String("config", "", "worker config file (env "+config.WorkerConfigEnv+"; default worker/worker.json in the data dir)")
 	asJSON := fs.Bool("json", false, "JSON output")
 	var label string
-	var managed, local bool
+	var managed, local, localHarnesses bool
 	var listenFlags listFlag
 	switch verb {
 	case "join":
@@ -53,6 +53,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 	case "run":
 		fs.BoolVar(&managed, "managed", false, "run as the worker service (`stage worker service`): config path and gateway listeners from worker.env only")
 		fs.Var(&listenFlags, "listen", "agent gateway listen address (repeatable or a comma list; env "+config.WorkerListenEnv+"; default and required: unix)")
+		fs.BoolVar(&localHarnesses, "local-harnesses", false, "let harnesses that run as local processes (Claude Code) run on this machine (the worker service always may; a container never); also "+harness.LocalHarnessesEnv+"=1")
 	case "leave":
 		fs.BoolVar(&local, "local", false, "only delete the local worker config (the server is unreachable or already removed the machine)")
 	}
@@ -78,7 +79,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 		if managed && len(listenFlags) > 0 {
 			return usagef("worker run: --managed takes the gateway listeners from worker.env (%s); drop --listen", config.WorkerListenEnv)
 		}
-		return runWorkerRun(ctx, env, *cfgFlag, managed, strings.Join(listenFlags, ","))
+		return runWorkerRun(ctx, env, *cfgFlag, managed, localHarnesses, strings.Join(listenFlags, ","))
 	}
 	path, err := worker.ResolveConfigPath(*cfgFlag, env.Getenv)
 	if err != nil {
@@ -152,14 +153,15 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 }
 
 // workerHost is what `stage worker run` serves: this machine's connection
-// setup (T3 and OpenCode, composed once the main server is reachable), the
-// adapters it installs, and its fs and process work (machine.LocalOps),
-// over the worker channel. harnessEnv is the machine's harness settings
+// setup (T3, OpenCode, and Claude Code when profile allows local
+// harnesses; composed once the main server is reachable), the adapters it
+// installs, and its fs and process work (machine.LocalOps), over the
+// worker channel. harnessEnv is the machine's harness settings
 // (config.HarnessEnvKeys); credentials stay in the worker dir of
 // configPath.
-func workerHost(managed bool, getenv, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, workerchan.Upcall) worker.Host {
+func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, workerchan.Upcall) worker.Host {
 	return func(machineID int64, call workerchan.Upcall) worker.Host {
-		h := remote.NewHost(machine.NewLocal(machineID, harness.ResolveProfile(managed, false, getenv), machine.LocalOps{}))
+		h := remote.NewHost(machine.NewLocal(machineID, profile, machine.LocalOps{}))
 		workersetup.Attach(workersetup.Options{
 			Host:   h,
 			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath)},
@@ -170,13 +172,14 @@ func workerHost(managed bool, getenv, harnessEnv func(string) string, configPath
 	}
 }
 
-// runWorkerRun is `stage worker run [--managed] [--listen ADDR]`. Exit: 0
+// runWorkerRun is `stage worker run [--managed] [--listen ADDR]
+// [--local-harnesses]`. Exit: 0
 // on SIGINT or SIGTERM, 75 when another worker holds the worker dir or
 // another process holds a gateway socket, 78 when not joined, the config
 // is invalid or the machine was removed, 1 otherwise. A managed
 // worker on macOS exits 0 instead of 75 and 78 (launchd cannot exclude exit
 // codes from KeepAlive).
-func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, listenFlag string) error {
+func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed, localHarnesses bool, listenFlag string) error {
 	goos := runtime.GOOS
 	logger := slog.New(slog.NewTextHandler(env.Stderr, nil))
 	opts := worker.RunOptions{Logger: logger, Managed: managed, Getenv: env.Getenv}
@@ -222,7 +225,15 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed bool, li
 		}
 	}
 	if err == nil {
-		opts.Host = workerHost(managed, env.Getenv, harnessEnv, opts.ConfigPath, opts.Logger)
+		// The worker service always hosts local harnesses; a foreground
+		// worker only when asked (flag or env); a container never.
+		profile := harness.ResolveProfile(managed, localHarnesses, env.Getenv)
+		onOff := "off"
+		if profile.LocalProcesses {
+			onOff = "on"
+		}
+		opts.Logger.Info("machine profile", "profile", profile.Kind, "localHarnesses", onOff)
+		opts.Host = workerHost(profile, harnessEnv, opts.ConfigPath, opts.Logger)
 		err = worker.Run(ctx, opts)
 	}
 	if err == nil {

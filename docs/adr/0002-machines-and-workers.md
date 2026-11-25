@@ -10,7 +10,13 @@
   This record makes the worker thin: the main server keeps the only database.
 - **Amended by:** [ADR 0003](0003-storage-adapters.md) (2026-11-24): the main
   server's database is SQLite or Postgres, one owner per database on either
-  engine. "One replica" is unchanged.
+  engine. "One replica" is unchanged. Stage task #374 (2026-11-25): a
+  worker also hosts hosted harnesses (Claude Code,
+  [ADR 0005](0005-claude-code-harness.md)) when its machine profile allows
+  local processes (the worker service, or `stage worker run
+  --local-harnesses`); the main server decides from the profile the worker
+  describes. Claude Code's setup holds no secrets, so the main server keeps
+  all of it ([execution.md](../execution.md#remote-machines)).
 
 ## Context
 

@@ -106,6 +106,11 @@ func (s *server) task(env string, t db.Task) taskJSON {
 	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
 		if a.Session != nil {
 			links := s.sessionLinks(context.Background(), a.Session.ConnectionID, &a.Session.ExternalSessionID)
+			// No destination and no stored observation: the resume command
+			// the attempt kept.
+			if links == (execution.Links{}) && a.Session.Links != nil {
+				links = *a.Session.Links
+			}
 			a.Session.Links = &links
 		}
 		t.Launch = &a
@@ -117,6 +122,9 @@ func (s *server) task(env string, t db.Task) taskJSON {
 	return out
 }
 
+// sessionLinks are the session's links: its adapter's destinations (an
+// in-process adapter's resume command too), else its stored observation's
+// (a remote machine's adapter resolves none without a call).
 func (s *server) sessionLinks(ctx context.Context, id int64, external *string) execution.Links {
 	if external == nil {
 		return execution.Links{}
@@ -124,7 +132,7 @@ func (s *server) sessionLinks(ctx context.Context, id int64, external *string) e
 	ref := db.SessionRef{ConnectionID: id, ExternalSessionID: *external}
 	if a, err := s.Sync.Adapter(id); err == nil {
 		links := a.Destinations(ctx, ref)
-		if links.Web != "" || links.Native != "" {
+		if links.Web != "" || links.Native != "" || links.Command != "" {
 			return links
 		}
 	}

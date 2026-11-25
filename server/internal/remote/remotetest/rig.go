@@ -43,6 +43,8 @@ type Rig struct {
 	cfgPath   string
 	listen    []listen.Addr // the worker's agent gateway: a temp socket
 	adapters  map[int64]execution.Adapter
+	// profile is what the worker reports (SetProfile).
+	profile harness.Profile
 
 	mu    sync.Mutex
 	kinds map[string]string // request id -> kind, from the down stream
@@ -53,11 +55,13 @@ type Rig struct {
 
 // New hosts adapters (by connection) on remote machine machineID, beside
 // an empty local machine 1, and starts its worker. The main server's
-// record of the machine's active connections is adapters' keys.
+// record of the machine's active connections is adapters' keys. The
+// worker allows local harnesses (`stage worker run --local-harnesses`).
 func New(t *testing.T, machineID int64, adapters map[int64]execution.Adapter) *Rig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &Rig{t: t, machineID: machineID, adapters: adapters, kinds: map[string]string{}, drop: map[string]int{}}
+	r := &Rig{t: t, machineID: machineID, adapters: adapters, kinds: map[string]string{}, drop: map[string]int{},
+		profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}}
 	r.hub = workerchan.NewHub(ctx, workerchan.Options{Version: "test"})
 	r.set = machine.MustSet(machine.NewLocal(1, harness.Profile{}, nil))
 	conns := func(id int64) []int64 {
@@ -128,6 +132,10 @@ func (r *Rig) Adapter(connection int64) execution.Adapter {
 	return a
 }
 
+// SetProfile sets the profile the next worker StartWorker starts reports
+// (stop the running one first).
+func (r *Rig) SetProfile(p harness.Profile) { r.profile = p }
+
 // StartWorker starts a worker process (a fresh host over the same
 // adapters) and waits until the main server has described it.
 func (r *Rig) StartWorker() {
@@ -140,8 +148,9 @@ func (r *Rig) StartWorker() {
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.done = cancel, make(chan error, 1)
 	r.mu.Unlock()
+	profile := r.profile
 	host := func(id int64, _ workerchan.Upcall) worker.Host {
-		h := remote.NewHost(machine.NewLocal(id, harness.Profile{Kind: harness.ProfileServer}, machine.LocalOps{}))
+		h := remote.NewHost(machine.NewLocal(id, profile, machine.LocalOps{}))
 		for conn, a := range r.adapters {
 			h.Local().Install(conn, conn, a)
 		}

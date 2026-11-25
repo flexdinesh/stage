@@ -74,13 +74,29 @@ func (m *Machine) Profile() harness.Profile {
 	return m.desc.Profile
 }
 
-// Allows: a remote machine hosts connected harnesses only, whatever its
-// worker's profile says, until workers set up hosted harnesses (#374).
+// Allows: connected harnesses always; a hosted one as the worker's
+// profile allows it (harness.Profile.Allows), with the fix in the worker's
+// terms, and once its setup is ready only if the worker set it up (it
+// hosts no Codex setup, or an older worker no Claude one). Until the worker
+// described the machine its profile is unknown: allowed, so the calls
+// themselves answer offline or still starting.
 func (m *Machine) Allows(d harness.Descriptor) execution.Availability {
-	if d.Hosting == harness.Hosted {
-		return execution.Availability{Reason: d.Name + " can't run on a worker machine yet; connect it on the main machine."}
+	m.mu.Lock()
+	desc := m.desc
+	m.mu.Unlock()
+	if desc == nil {
+		return execution.Availability{Available: true}
 	}
-	return execution.Availability{Available: true}
+	if desc.Profile.Allows(d).Available {
+		if d.Hosting == harness.Hosted && desc.SetupReady && !slices.ContainsFunc(desc.Connectors, func(c ConnectorState) bool { return c.Kind == d.Kind }) {
+			return execution.Availability{Reason: d.Name + " can't run on this machine: its Stage worker doesn't set it up (not supported on workers yet, or the worker needs an update)."}
+		}
+		return execution.Availability{Available: true}
+	}
+	if desc.Profile.Kind == harness.ProfileContainer {
+		return execution.Availability{Reason: d.Name + " can't run in a container: run this machine's Stage worker outside Docker."}
+	}
+	return execution.Availability{Reason: d.Name + " runs on this machine only when its Stage worker allows local harnesses: use the worker service, or run stage worker run --local-harnesses."}
 }
 
 func (m *Machine) active(connection int64) bool {
@@ -113,7 +129,8 @@ func (m *Machine) Adapters() map[int64]execution.Adapter {
 	return out
 }
 
-// kinds are the connected harness kinds the machine's worker sets up.
+// kinds are the harness kinds the machine's worker sets up (Allows
+// decides which of them it may host).
 func (m *Machine) kinds() []string {
 	if m.hosts == nil {
 		return nil

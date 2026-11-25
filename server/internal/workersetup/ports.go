@@ -3,8 +3,10 @@ package workersetup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -28,18 +30,27 @@ type Ports struct {
 }
 
 var (
-	_ t3setup.Settings       = Ports{}
-	_ t3setup.AdminTokens    = Ports{}
-	_ t3setup.Identity       = Ports{}
-	_ t3.TokenStore          = Ports{}
-	_ opencodesetup.Settings = Ports{}
-	_ opencodesetup.Identity = Ports{}
-	_ machine.Identity       = Ports{}
+	_ t3setup.Settings         = Ports{}
+	_ t3setup.AdminTokens      = Ports{}
+	_ t3setup.Identity         = Ports{}
+	_ t3.TokenStore            = Ports{}
+	_ opencodesetup.Settings   = Ports{}
+	_ opencodesetup.Identity   = Ports{}
+	_ claudecodesetup.Settings = Ports{}
+	_ machine.Identity         = Ports{}
 )
+
+// errNotServed: the main server runs an older Stage that does not serve
+// this setup call (same API version, fewer harnesses).
+var errNotServed = errors.New("the Stage server does not serve this setup call; update it")
 
 // call sends kind with body and decodes the reply into out (nil: none).
 func (p Ports) call(ctx context.Context, kind string, body, out any) error {
 	raw, err := p.Call(ctx, kind, body)
+	var re *workerchan.RemoteError
+	if errors.As(err, &re) && re.Code == workerchan.CodeUnknownKind {
+		return fmt.Errorf("%w (%s)", errNotServed, kind)
+	}
 	if err != nil {
 		return remote.DecodeSetupError(err)
 	}
@@ -118,6 +129,20 @@ func (p Ports) SaveOpenCodeSettings(ctx context.Context, setup config.OpenCodeSe
 		return err
 	}
 	return p.Creds.Set(opencode.Kind, cred)
+}
+
+// ClaudeSettings is the machine's Claude Code setup as the main server
+// records it (no secrets: Claude's own login is used).
+func (p Ports) ClaudeSettings(ctx context.Context) (config.ClaudeSettings, error) {
+	var c config.ClaudeSettings
+	err := p.call(ctx, remote.KindClaudeGet, nil, &c)
+	return c, err
+}
+
+// SaveClaudeSettings saves the machine's Claude Code setup on the main
+// server.
+func (p Ports) SaveClaudeSettings(ctx context.Context, c config.ClaudeSettings) error {
+	return p.call(ctx, remote.KindClaudeSave, c, nil)
 }
 
 // Active is the machine's active connection of kind (0: none).

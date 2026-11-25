@@ -48,14 +48,23 @@ not allow.
 - **Hosting decision.** `Machine.Allows` is the one place a machine decides
   whether it may host a harness kind, with the reason when not. The local
   machine answers with its profile's policy (`harness.Profile.Allows`); a
-  remote machine allows connected kinds only, whatever its worker's
-  profile, until workers set up hosted harnesses (#374). The API refuses a
+  remote machine with the profile its worker last described (the same
+  policy, with the fix in the worker's terms: `stage worker run
+  --local-harnesses` or the worker service, or the worker outside Docker).
+  Once the worker's setup is ready, a hosted kind it did not set up is not
+  allowed either: workers set up Claude Code but not Codex (an older worker
+  not Claude Code), so Codex on a worker reads unavailable, never as a
+  connect that fails. Until its worker described it since this server started, a remote
+  machine's profile is unknown and every kind is allowed, so the calls
+  themselves answer offline or still starting. The API refuses a
   disallowed kind's setup routes with that reason (409
   `harness_unavailable`) without reaching its connector, the connectors
-  index leaves it out, and a launch on a connection of that kind answers
-  `connection_unavailable` with the reason. `serve` composes a hosted
-  harness's setup and adapters only when the machine allows it, so a
-  profile without local processes never starts the harness's processes.
+  index leaves it out, and the coordinator answers
+  `connection_unavailable` with the reason for a connection of that kind,
+  before any installed adapter (a worker restarted without local harnesses
+  names the fix). `serve` and `workersetup` compose a hosted harness's
+  setup and adapters only when their machine allows it, so a profile
+  without local processes never starts the harness's processes.
 
 - **LocalMachine.** `machine.Local` is the in-process machine (machine 1). `serve/localmachine.go` composes it: the T3 client
   (fake or MCP) and adapter, the T3 and OpenCode setups and their
@@ -152,13 +161,22 @@ suite cannot tell a remote machine from the local one.
   launch is refused as `connection_unavailable`, and an attempt already
   dispatched stays unconfirmed and retries until the worker is back.
 - **Setup.** A remote machine's connection setup runs on its worker
-  (`server/internal/workersetup`): the same `t3setup` and `opencodesetup`
-  constructors as the local machine, composed once the channel is first
-  online, over ports that call the main server (`setup.*` worker-to-main
-  kinds, `remote.ServeSetup`, always scoped to the token's machine; a
-  connection of another machine is `not_found`). The main server keeps the
-  connection rows, identity, status, non-secret settings (T3 URL and Browser
-  URL, OpenCode addresses and auth mode) and sync bookkeeping; harness credentials (the
+  (`server/internal/workersetup`): the same `t3setup`, `opencodesetup`
+  and `claudecodesetup` constructors as the local machine (Claude Code
+  only when the worker's profile allows local harnesses), composed once
+  the channel is first online, over ports that call the main server
+  (`setup.*` worker-to-main kinds, `remote.ServeSetup`, always scoped to
+  the token's machine; a connection of another machine is `not_found`).
+  The main server keeps the connection rows, identity, status, non-secret
+  settings (T3 URL and Browser URL, OpenCode addresses and auth mode,
+  Claude Code's command, connected config directory and disconnect:
+  `setup.claude.get` and `setup.claude.save`) and sync bookkeeping;
+  Claude Code has no credentials (Claude's own login on that machine). A
+  worker whose main server is older (it answers `setup.claude.*` with
+  `unknown_kind`) composes T3 and OpenCode without Claude Code and logs
+  why; a worker older than its main server answers Claude Code's
+  connector calls `not_hosted`, which the main server reports as 503
+  `machine_needs_update`. Harness credentials (the
   T3 token and admin token, OpenCode Basic credentials or paired token) stay in the
   worker's `credentials.json` (`0600`, deleted on join and leave) and never
   cross the channel. The main server's `remote.Connector` per machine and
@@ -168,11 +186,11 @@ suite cannot tell a remote machine from the local one.
   carries connector summaries once `setupReady`). Offline, needs update and
   a worker still composing its setup are `remote.UnavailableError`
   (503 `machine_offline`, `machine_needs_update`,
-  `machine_setup_starting`). Remote machines are connected-only for now:
-  workers set up connected kinds only (`remoteSetupHooks`), and
-  `remote.Machine.Allows` reports a hosted kind unavailable ("can't run on
-  a worker machine yet"); #374 lifts both. A remote machine's connection row is created
-  on first connect (T3 pairing, OpenCode connect or pair), and a switch on
+  `machine_setup_starting`). Every registered kind has a connector proxy
+  on every remote machine (`remoteSetupHooks`); `remote.Machine.Allows`
+  decides which ones the machine offers. A remote machine's connection row is created
+  on first connect (T3 pairing, OpenCode connect or pair, Claude Code
+  connect), and a switch on
   the worker follows the connections on the main server (runners, sync).
   No environment variable sets a connection.
 - **Verification.** Every `TestContract*` in `server/internal/sync` runs
@@ -183,7 +201,18 @@ suite cannot tell a remote machine from the local one.
   images, traits and ops. Setup runs end to end over a real channel and
   store in `workersetup` (T3 pair creating the machine's connection,
   OpenCode credentials kept on the worker, calls scoped
-  to the caller's machine).
+  to the caller's machine, Claude Code against the fake `claude` CLI:
+  connect, a task through the coordinator whose stored observation carries
+  the resume command, disconnect; refused without local harnesses; left
+  out against an older main server).
+- **Resume command.** `Destinations` makes no call, so a remote session's
+  `links.command` comes from its stored observation (every observation
+  carries its links). A launch whose session Stage saw but could not
+  record keeps that session's resume command on the attempt
+  (`execution_attempts.observed_session`, command only; destinations are
+  still resolved when read), and the API falls back to it. With more than
+  one machine, the UI names the machine the command must run on ("Copy
+  resume command for laptop").
 
 ## Harness registry
 
@@ -465,7 +494,12 @@ Claude Code has no HTTP API. Kind `claude`, hosting `hosted`, stable identity
 setting, a connect action and disconnect ([api.md](api.md#harness-connections-api-v6)),
 stored per machine in `claude_settings` with the config directory the
 connection was made with; `serve` composes it only where the machine allows
-hosted harnesses.
+hosted harnesses. On a worker (`workersetup`) it runs on that machine, with
+that machine's `claude`, login and daemon, when the worker allows local
+harnesses (the worker service, or `stage worker run --local-harnesses`);
+its settings live on the main server's `claude_settings` row for that
+machine ([Remote machines](#remote-machines)). The resume command then has
+to run on that machine.
 
 - **Running claude.** Stage clears the variables a Claude or T3 process sets
   for its own session (`CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_AGENT_SDK_VERSION`,

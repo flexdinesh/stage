@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -298,14 +297,17 @@ func TestHostedHarnessRefusedWhereTheProfileDisallowsIt(t *testing.T) {
 	}
 }
 
-// Remote machines host connected harnesses only for now: a hosted kind is
-// unavailable there with the worker reason, and its setup refuses with it.
-func TestHostedHarnessUnavailableOnRemoteMachines(t *testing.T) {
+// A remote machine whose worker never described it (offline since this
+// server started) has an unknown profile: the hosted kind is listed as
+// available and connectable, and its setup answers that the machine is
+// offline, never a guessed hosting reason. Described profiles are covered
+// in remote (allows_test.go) and workersetup.
+func TestHostedHarnessOnAnUndescribedRemoteMachineAnswersOffline(t *testing.T) {
 	e := newEnv(t, withPublicURL, func(d *api.Deps) {
 		hub := workerchan.NewHub(t.Context(), workerchan.Options{Version: buildinfo.Version})
 		set := machine.MustSet(machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil))
 		hosts := remote.NewHosts(set, hub, func(int64) []int64 { return nil }, nil, nil)
-		hosts.SetSetup(remote.SetupHooks{Kinds: []string{t3.Kind, opencode.Kind}, Active: d.Store.ActiveID})
+		hosts.SetSetup(remote.SetupHooks{Kinds: []string{t3.Kind, opencode.Kind, hostedKit.Kind}, Active: d.Store.ActiveID})
 		svc := t3sync.NewForMachines(d.Store, set, nil)
 		svc.Harnesses = hostedHarnesses
 		d.Harnesses, d.Sync, d.Channels, d.Machines = hostedHarnesses, svc, hub, hosts
@@ -321,11 +323,11 @@ func TestHostedHarnessUnavailableOnRemoteMachines(t *testing.T) {
 	var list hostedListing
 	e.must("GET", fmt.Sprintf("/api/machines/%d/harnesses", j.MachineID), nil, 200, &list)
 	available, reason, connectable := list.kit(t)
-	if available || connectable || !strings.HasPrefix(reason, "Hosted kit can't run on a worker machine yet") {
+	if !available || !connectable || reason != "" {
 		t.Fatalf("remote listing %v %q %v", available, reason, connectable)
 	}
 	var out errOut
-	if rec := raw(t, e.h, "POST", fmt.Sprintf("/api/machines/%d/harnesses/hosted-kit/actions/connect", j.MachineID), nil, map[string]any{}, &out); rec.Code != 409 || out.Code != "harness_unavailable" || out.Error != reason {
+	if rec := raw(t, e.h, "POST", fmt.Sprintf("/api/machines/%d/harnesses/hosted-kit/actions/connect", j.MachineID), nil, map[string]any{}, &out); rec.Code != 503 || out.Code != "machine_offline" {
 		t.Fatalf("remote connect: %d %+v", rec.Code, out)
 	}
 	// The local machine still allows it.
