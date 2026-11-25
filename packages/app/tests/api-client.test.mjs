@@ -158,6 +158,7 @@ test("harness setup calls: local routes stay, forMachine drives a remote machine
   const desk = api.forMachine(2);
   await desk.harnesses();
   await desk.harnessStatus("x");
+  await desk.harnessStatus("x", { refresh: true });
   await desk.configureHarness("x", { a: 1 });
   await desk.runHarnessAction("x", "connect local");
   await desk.disconnectHarness("x");
@@ -167,6 +168,7 @@ test("harness setup calls: local routes stay, forMachine drives a remote machine
     "GET /harnesses/t3/status",
     "GET /machines/2/harnesses",
     "GET /machines/2/harnesses/x/status",
+    "GET /machines/2/harnesses/x/status?refresh=1",
     "PUT /machines/2/harnesses/x/settings",
     "POST /machines/2/harnesses/x/actions/connect%20local",
     "DELETE /machines/2/harnesses/x/connection",

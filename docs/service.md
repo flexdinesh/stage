@@ -104,7 +104,10 @@ reachable are reported apart (`stage`, `harnesses` from health, one
 `harness_offline` problem per harness that is set up but not connected;
 `harnesses` is null while Stage is not reachable). A missing or offline
 harness never fails `start`; it adds a note. Stage does not start or manage
-connected harnesses (T3, OpenCode).
+connected harnesses (T3, OpenCode). Codex (hosted) needs the desktop profile
+this service runs with: Stage starts the Codex app-server daemon on demand
+and never stops it, so the daemon outlives the service
+([runtime.md](runtime.md#codex-connection)).
 
 ## Paths per identity
 
@@ -165,6 +168,9 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   `stage.db`. A local connection (`stage harness opencode run connect-local`)
   reads the OpenCode registration file
   under the service's `XDG_STATE_HOME` (else `~/.local/state`) each time.
+- Codex: no credentials in `stage.db`. The daemon uses the Codex login under
+  the service's `CODEX_HOME` (else `~/.codex`); `codex` must be on the
+  service's `PATH`, or set its path (`stage harness codex set binary=PATH`).
 - `stage service start` validates the file before starting, so a bad file is
   an error there (exit 7) instead of a restart loop.
 

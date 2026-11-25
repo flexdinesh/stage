@@ -117,10 +117,10 @@ Three tabs.
 ### Connections
 
 - **Machines**: every machine, the main machine first, with online or offline, last seen, its build (flagged when it differs from the main machine's) and its connections as rows. Rename a worker inline; remove one behind a confirm that says what happens to its worker, connections and tasks. **Add machine** creates a one-time pairing link (10 minutes) and the copyable `stage worker join <link>` command, counts down, and shows when the worker joins; closing it while waiting revokes the code ([Machines](/docs/concepts/machines)).
-- **Connections**: per machine, **Add connection** lists the harnesses it can still connect. **Manage** opens a connection's drawer: T3 pairing (Pair with T3 or a pairing code), the T3 URL, Browser URL and optional admin token; the OpenCode connection (one click for the service on this machine, an `opencode pair` link for another, Advanced); and the New tasks panel (Set as default, model pin). A disconnected connection stays as a Disconnected row with Reconnect and Forget. Details: [Connections](/docs/reference/connections).
-- **Diagnostics**: independent T3 and OpenCode connection diagnostics.
+- **Connections**: per machine, **Add connection** lists the harnesses it can still connect. **Manage** opens a connection's drawer: T3 pairing (Pair with T3 or a pairing code), the T3 URL, Browser URL and optional admin token; the OpenCode connection (one click for the service on this machine, an `opencode pair` link for another, Advanced); the Codex connection (Connect, the command that fixes a problem, the Codex CLI path); and the New tasks panel (Set as default, model pin). A disconnected connection stays as a Disconnected row with Reconnect and Forget. Details: [Connections](/docs/reference/connections).
+- **Diagnostics**: independent T3, OpenCode and Codex connection diagnostics.
 - **Sync now**: a full sync also runs every 5 minutes.
-- **Auto-complete**: a connection can complete a task for you. A successful run whose T3 thread is settled, whose OpenCode session is archived, or whose Claude Code session is removed (`claude rm`), is accepted automatically (provenance shown, once per run; changing the state back undoes it; failed or interrupted runs never). On by default; toggle it per connection.
+- **Auto-complete**: a connection can complete a task for you. A successful run whose T3 thread is settled, whose OpenCode session or Codex thread is archived, or whose Claude Code session is removed (`claude rm`), is accepted automatically (provenance shown, once per run; changing the state back undoes it; failed or interrupted runs never). On by default; toggle it per connection.
 
 No harness setting comes from the environment.
 

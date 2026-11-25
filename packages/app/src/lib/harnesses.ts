@@ -85,6 +85,25 @@ export function sessionLinks(links: { links?: { native?: string; web?: string; c
 /** The copyable resume command, offered when the host has no destination to open; none on a replaced connection. */
 export const resumeCommand = (links: Parameters<typeof sessionLinks>[0]): string | null => sessionLinks(links)?.command ?? null;
 
+/** A task row's session action: Open in the harness, or Copy resume command when the host has nowhere to open it. */
+export type RowSessionAction = { kind: "open"; href: string; primary: boolean } | { kind: "resume"; command: string; primary: boolean };
+
+/**
+ * The task row's session action: the host's destination (`destination`) when it has one, else the session's resume
+ * command; primary while the task needs input. Null when there is neither, or while `hidden` (the row is confirming a
+ * completion or was just completed).
+ */
+export function rowSessionAction(
+  destination: string | null,
+  task: Parameters<typeof sessionLinks>[0],
+  { needsInput, hidden }: { needsInput: boolean; hidden: boolean },
+): RowSessionAction | null {
+  if (hidden) return null;
+  if (destination !== null) return { kind: "open", href: destination, primary: needsInput };
+  const command = resumeCommand(task);
+  return command === null ? null : { kind: "resume", command, primary: needsInput };
+}
+
 /** Task detail Alert for a task on a retired (replaced or forgotten) connection; `name` is its harness's name. */
 export function retiredNotice(t: Pick<Task, "connectionLabel">, name: string): string {
   return `Ran on ${name}${quoted(t.connectionLabel)}, which Stage no longer uses. Its history and result stay here.`;

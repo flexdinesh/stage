@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": -32600,
+    "message": "session 01a2117d-eb29-7543-b695-e11bb3ce70fa is archived. Run `codex unarchive 01a2117d-eb29-7543-b695-e11bb3ce70fa` to unarchive it first."
+  },
+  "id": 8
+}

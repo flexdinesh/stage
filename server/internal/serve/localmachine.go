@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
+	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -30,6 +33,8 @@ type localMachine struct {
 	// adminToken is the saved T3 admin token the client was built with.
 	adminToken string
 	setup      *t3setup.Service
+	// codex is the Codex setup, composed only when the machine allows it.
+	codex *codexsetup.Service
 	// close releases the T3 client (nil for an injected or fake client).
 	close func()
 }
@@ -106,6 +111,18 @@ func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.
 			return err
 		}
 		m.SetConnector(claudecode.Kind, claudecodesetup.NewConnector(claude))
+	}
+	// Codex is hosted: its daemon runs on this machine, so it is composed
+	// only where the profile allows local processes.
+	if m.Allows(codex.Descriptor).Available {
+		m.codex, err = codexsetup.New(ctx, codexsetup.Options{
+			Ports:   codexsetup.Ports{Settings: ports, Identity: ports, Install: m.Install},
+			Version: buildinfo.Version, Logger: logger,
+		})
+		if err != nil {
+			return err
+		}
+		m.SetConnector(codex.Kind, codexsetup.NewConnector(m.codex))
 	}
 	return nil
 }

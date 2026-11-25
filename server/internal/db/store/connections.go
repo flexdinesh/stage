@@ -163,6 +163,9 @@ type Connections interface {
 	ClaudeSettings(ctx context.Context, machine int64) (c config.ClaudeSettings, found bool, err error)
 	// SaveClaudeSettings upserts machine's row and sets its updated_at.
 	SaveClaudeSettings(ctx context.Context, machine int64, c config.ClaudeSettings) error
+	// CodexSettings reads machine's codex_settings row (none: the zero value).
+	CodexSettings(ctx context.Context, machine int64) (config.CodexSettings, error)
+	SaveCodexSettings(ctx context.Context, machine int64, c config.CodexSettings) error
 }
 
 // T3Connection is the non-secret part of a machine's t3_connection row.

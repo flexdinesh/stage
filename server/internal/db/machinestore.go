@@ -109,3 +109,13 @@ func (m MachineStore) ClaudeSettings(ctx context.Context) (config.ClaudeSettings
 func (m MachineStore) SaveClaudeSettings(ctx context.Context, c config.ClaudeSettings) error {
 	return m.Store.SaveClaudeSettings(ctx, m.machine, c)
 }
+
+// CodexSettings reads the machine's Codex setup.
+func (m MachineStore) CodexSettings(ctx context.Context) (config.CodexSettings, error) {
+	return m.Store.CodexSettings(ctx, m.machine)
+}
+
+// SaveCodexSettings saves the machine's Codex setup.
+func (m MachineStore) SaveCodexSettings(ctx context.Context, c config.CodexSettings) error {
+	return m.Store.SaveCodexSettings(ctx, m.machine, c)
+}

@@ -6,14 +6,14 @@ showAskAi: false
 
 # Overview
 
-Stage is a task manager for coding agents. It plans, queues, schedules and links tasks across T3 Code and OpenCode V2: you pick a harness per task, answer its questions in the harness, and complete the result in Stage, which releases the work that depends on it.
+Stage is a task manager for coding agents. It plans, queues, schedules and links tasks across T3 Code, OpenCode V2 and Codex: you pick a harness per task, answer its questions in the harness, and complete the result in Stage, which releases the work that depends on it.
 
 ## Concepts
 
 Stage is built around eight concepts. Read them in order for a top-down picture, or go to one when you need it.
 
 - **[Projects](/docs/concepts/projects)**: a Stage-owned title that groups work and points at a workspace on each connection.
-- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code or OpenCode) on one machine, where tasks run.
+- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code, OpenCode or Codex) on one machine, where tasks run.
 - **[Tasks](/docs/concepts/tasks)**: a prompt plus where and how to run it, tracked from backlog to your completion.
 - **[Trees](/docs/concepts/trees)**: tasks linked by needs, so one starts only after you complete what it depends on.
 - **[Journals](/docs/concepts/journals)**: append-only notes and events on every task and tree, shared by you and your agents.
@@ -31,7 +31,7 @@ Stage server
 ├── Schedule       spawns a new task on each cron fire
 ├── Journal        append-only notes and events on every task and tree
 └── Machine        this server, or a worker
-    └── Connection a T3 or OpenCode service on that machine
+    └── Connection a T3, OpenCode or Codex service on that machine
 ```
 
 How work moves through them: [Concepts](/docs/concepts).
@@ -44,7 +44,7 @@ How work moves through them: [Concepts](/docs/concepts).
 | Self-hosted server | Stage on a machine you reach over HTTP from a browser or phone | [Self-hosted server](/docs/usage/server) |
 | Multiple machines | One main server, with laptops and desktops running harnesses as workers | [Multiple machines](/docs/usage/workers) |
 
-Every setup needs Linux or macOS (amd64 or arm64) and an existing T3 Code or OpenCode V2 service for execution. Planning works without one. Details: [Install and update](/docs/reference/install).
+Every setup needs Linux or macOS (amd64 or arm64) and an existing T3 Code or OpenCode V2 service, or Codex on your computer, for execution. Planning works without one. Details: [Install and update](/docs/reference/install).
 
 ## How it is built
 
@@ -52,7 +52,7 @@ Every setup needs Linux or macOS (amd64 or arm64) and an existing T3 Code or Ope
 - **Storage**: one SQLite database (`stage.db`) in the server's data dir ([Configuration](/docs/reference/configuration)).
 - **Web app**: React, served by the server, installable as a PWA with Web Push.
 - **Desktop app**: the same UI in a native window, talking to this machine's server over its private socket.
-- **Harnesses**: T3 through its MCP endpoint, OAuth and upload endpoints; OpenCode through its V2 HTTP API ([Connections](/docs/reference/connections)).
+- **Harnesses**: T3 through its MCP endpoint, OAuth and upload endpoints; OpenCode through its V2 HTTP API; Codex through its app-server daemon on the machine where Stage runs ([Connections](/docs/reference/connections)).
 - **Agent interface**: the `stage` CLI, a stdio MCP server (`stage mcp`) and an HTTP MCP endpoint (`/mcp`), all over the server's REST API ([CLI](/docs/reference/cli), [MCP tools](/docs/reference/mcp)).
 
 ## Next steps

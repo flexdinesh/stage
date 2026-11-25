@@ -9,7 +9,7 @@ showAskAi: false
 Stage is built around eight concepts. Read in order for a top-down picture, or jump to one.
 
 - **[Projects](/docs/concepts/projects)**: a Stage-owned title that groups work and points at a workspace on each connection.
-- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code or OpenCode) on one machine, where tasks run.
+- **[Connections](/docs/concepts/connections)**: one harness service (T3 Code, OpenCode or Codex) on one machine, where tasks run.
 - **[Tasks](/docs/concepts/tasks)**: a prompt plus where and how to run it, tracked from backlog to your completion.
 - **[Trees](/docs/concepts/trees)**: tasks linked by needs, so one starts only after you complete what it depends on.
 - **[Journals](/docs/concepts/journals)**: append-only notes and events on every task and tree, shared by you and your agents.
@@ -27,7 +27,7 @@ Stage server
 ├── Schedule       spawns a new task on each cron fire
 ├── Journal        append-only notes and events on every task and tree
 └── Machine        this server, or a worker
-    └── Connection a T3 or OpenCode service on that machine
+    └── Connection a T3, OpenCode or Codex service on that machine
 ```
 
 The server holds all of it in one SQLite database. Workers hold no database: they run harnesses for the server.

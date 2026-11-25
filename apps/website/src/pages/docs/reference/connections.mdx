@@ -1,12 +1,12 @@
 ---
 title: Connections
-description: Pair T3 Code, connect OpenCode V2 or Claude Code, set their addresses and tokens, and check connection status from Settings or the CLI.
+description: Pair T3 Code, connect OpenCode V2, Claude Code or Codex, set their addresses and tokens, and check connection status from Settings or the CLI.
 showAskAi: false
 ---
 
 # Connections
 
-Stage runs tasks on existing harness services, T3 Code and OpenCode V2, and on Claude Code on the computer Stage runs on. Each connection is set up in Settings > Connections or with `stage harness`. Credentials and addresses are stored in the server's database (on a worker, in that machine's credentials file), so a service or desktop app needs nothing else.
+Stage runs tasks on existing harness services, T3 Code and OpenCode V2, and on Claude Code and Codex on the computer Stage runs on. Each connection is set up in Settings > Connections or with `stage harness`. Credentials and addresses are stored in the server's database (on a worker, in that machine's credentials file), so a service or desktop app needs nothing else.
 
 :::note
 Harness settings are never environment variables. `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN` and the `OPENCODE_*` variables are no longer read; a server logs a warning naming any still set ([Configuration](/docs/reference/configuration)).
@@ -28,7 +28,7 @@ stage harness KIND run ACTION [FIELD=VALUE...]
 stage harness KIND disconnect        # forget KIND's credentials (tasks stay)
 ```
 
-`KIND` is `t3`, `opencode` or `claude`.
+`KIND` is `t3`, `opencode`, `claude` or `codex`.
 
 ## T3 Code
 
@@ -151,6 +151,38 @@ Removing a finished session with `claude rm` completes its done task (**Complete
 ### Disconnect
 
 `stage harness claude disconnect`, or Disconnect in Settings. Stage stops using Claude Code; sessions keep running in Claude, tasks and history stay, and connecting again resumes the same connection.
+
+## Codex
+
+Stage talks to the Codex app-server daemon on its own machine, so Codex runs only where Stage runs on your computer: the desktop app (or Stage's per-user service), or `stage serve --local-harnesses`. It is unavailable in the Docker image and on workers. Stage stores no Codex credentials; log in with `codex login`.
+
+### Connect
+
+Click **Connect**, or `stage harness codex run connect`. Stage starts the daemon when it is down (at most once every 30 seconds), reads the Codex login and connects the Codex home. It never stops, restarts or updates the daemon, which keeps running turns across Stage restarts and serves `codex resume` and Codex Desktop.
+
+| Setting | Field | Purpose |
+|---|---|---|
+| Codex CLI | `binary` | Path to the codex binary. Empty uses `codex` on PATH (`stage harness codex set binary=PATH`). |
+
+| State | Meaning |
+|---|---|
+| connected | Stage reaches the daemon and Codex is signed in |
+| not connected | Codex is not connected on this machine |
+| signed out | the daemon answers but Codex has no login: run `codex login` |
+| unreachable | the daemon is down or not answering |
+| not installed | the Codex CLI is missing |
+
+When not connected, Settings shows the reason and the command that fixes it.
+
+### Tasks
+
+Tasks run in the project root: no Codex worktrees, no Plan mode. Images are sent with the prompt. Permission: **Read only**, **Auto** (default) or **Full access**. Workspaces are the projects Codex trusts; trust a project in Codex, Stage never edits Codex's config.
+
+Answer questions and approvals in Codex: **Copy resume command** on a task row or task detail copies `cd <dir> && codex resume <id>`. Track session takes a thread id or a `codex resume <id>` command; threads T3 Code started are refused (track them through T3).
+
+### Disconnect
+
+`stage harness codex disconnect`, or Disconnect in Settings, stops tracking. Tasks and history stay; the daemon and its threads stay in Codex.
 
 ## Connections on workers
 

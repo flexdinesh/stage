@@ -42,6 +42,7 @@ var seedSQL = []string{
 	`UPDATE opencode_settings SET endpoint = 'http://oc', auth = 'basic', username = 'u', password = 'p', token_issued_at = '2026-11-05T00:00:00.000000Z' WHERE machine_id = 1`,
 	`INSERT INTO opencode_settings (machine_id) VALUES (2)`,
 	`INSERT INTO claude_settings (machine_id, binary_path, config_dir, disconnected, updated_at) VALUES (1, '/opt/claude ✓', '/home/u/.claude', 1, '2026-11-05T00:00:00.123456Z'), (2, '', '', 0, '2026-11-05T00:00:00.000000Z')`,
+	`INSERT INTO codex_settings (machine_id, binary_path, connected) VALUES (1, '/opt/cödex bin', 1), (2, '', 0)`,
 	`UPDATE preferences SET default_connection_id = 2, notify_events = '["done", "failed"]' WHERE id = 1`,
 	`INSERT INTO projects (id, title, origin, imported_connection_id, imported_at, archive_owner, created_by_user_id, source_machine_id) VALUES (1, 'Proj ✓', 'discovered', 2, '2026-11-06T00:00:00.000000Z', 'user', 2, 2)`,
 	`INSERT INTO project_bindings (id, project_id, connection_id, external_project_id, workspace, origin) VALUES (1, 1, 1, 'ext-1', '/w', 'manual')`,

@@ -10,6 +10,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
@@ -20,7 +21,7 @@ import (
 // kind's connection to a distinct id.
 func precedenceAPI(t *testing.T) *client.Client {
 	t.Helper()
-	conns := map[string]int64{"t3-like": 1, "oc-like": 2, "cc-like": 3}
+	conns := map[string]int64{"t3-like": 1, "oc-like": 2, "cc-like": 3, codex.Kind: 4}
 	descs := []map[string]any{
 		{"kind": "t3-like", "attribution": map[string]any{"metaKeys": []string{}, "env": "T3CODE_THREAD_ID"}},
 		{"kind": "oc-like", "attribution": map[string]any{"metaKeys": []string{}, "env": "OPENCODE_SESSION_ID"}},
@@ -30,6 +31,8 @@ func precedenceAPI(t *testing.T) *client.Client {
 				Yields: []harness.EnvMatch{{Env: "T3CODE_THREAD_ID"}, {Env: "CLAUDE_CODE_ENTRYPOINT", Value: "t3-code"}},
 			}}},
 		{"kind": "no-env", "attribution": map[string]any{"metaKeys": []string{}}},
+		// The real Codex descriptor: yields to T3.
+		{"kind": codex.Kind, "attribution": codex.Descriptor.Attribution},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -74,6 +77,9 @@ func TestHarnessEnvPrecedence(t *testing.T) {
 		{"T3 and OpenCode", map[string]string{"T3CODE_THREAD_ID": "t3", "OPENCODE_SESSION_ID": "oc"}, 0, "", "", "several harness session variables are set (T3CODE_THREAD_ID, OPENCODE_SESSION_ID)"},
 		{"OpenCode and yielding nested", map[string]string{"OPENCODE_SESSION_ID": "oc", "CLAUDE_CODE_SESSION_ID": "cc", "CLAUDE_CODE_ENTRYPOINT": "t3-code"}, 2, "oc", "OPENCODE_SESSION_ID", ""},
 		{"T3, OpenCode and yielding nested", map[string]string{"T3CODE_THREAD_ID": "t3", "OPENCODE_SESSION_ID": "oc", "CLAUDE_CODE_SESSION_ID": "cc"}, 0, "", "", "several harness session variables are set (T3CODE_THREAD_ID, OPENCODE_SESSION_ID)"},
+		{"Codex inside T3", map[string]string{"T3CODE_THREAD_ID": "t3", "CODEX_THREAD_ID": "cx"}, 1, "t3", "T3CODE_THREAD_ID", ""},
+		{"Codex alone", map[string]string{"CODEX_THREAD_ID": "cx"}, 4, "cx", "CODEX_THREAD_ID", ""},
+		{"Codex and OpenCode", map[string]string{"OPENCODE_SESSION_ID": "oc", "CODEX_THREAD_ID": "cx"}, 0, "", "", "several harness session variables are set (OPENCODE_SESSION_ID, CODEX_THREAD_ID)"},
 		{"blank values ignored", map[string]string{"T3CODE_THREAD_ID": " ", "CLAUDE_CODE_SESSION_ID": "cc"}, 3, "cc", "CLAUDE_CODE_SESSION_ID", ""},
 	}
 	for _, tc := range cases {

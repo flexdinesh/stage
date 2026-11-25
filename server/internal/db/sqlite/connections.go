@@ -444,5 +444,20 @@ func (r connections) SaveClaudeSettings(ctx context.Context, machine int64, c co
 	return err
 }
 
+func (r connections) CodexSettings(ctx context.Context, machine int64) (config.CodexSettings, error) {
+	var c config.CodexSettings
+	err := r.QueryRow(ctx, `SELECT binary_path,connected FROM codex_settings WHERE machine_id=$1`, machine).Scan(&c.Binary, &c.Connected)
+	if errors.Is(err, sql.ErrNoRows) {
+		return config.CodexSettings{}, nil
+	}
+	return c, err
+}
+
+func (r connections) SaveCodexSettings(ctx context.Context, machine int64, c config.CodexSettings) error {
+	_, err := r.Exec(ctx, `INSERT INTO codex_settings(machine_id,binary_path,connected) VALUES($1,$2,$3)
+ ON CONFLICT(machine_id) DO UPDATE SET binary_path=excluded.binary_path,connected=excluded.connected,updated_at=`+nowSQL, machine, c.Binary, c.Connected)
+	return err
+}
+
 // Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
 func (connections) Lock(context.Context, int64) error { return nil }

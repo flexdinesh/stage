@@ -59,7 +59,7 @@ not allow.
 
 - **LocalMachine.** `machine.Local` is the in-process machine (machine 1). `serve/localmachine.go` composes it: the T3 client
   (fake or MCP) and adapter, the T3 and OpenCode setups and their
-  connectors. Setup code installs adapters through `Local.Install(old, next,
+  connectors, and the Codex setup (`codexsetup`) when the profile allows it. Setup code installs adapters through `Local.Install(old, next,
   adapter)` (the install port; nil disconnects); its change hook moves the
   coordinator (`sync.Service.ConnectionsChanged`) and resyncs the runners.
 - **Ops.** `machine.Ops` is the harness-neutral fs and process work that
@@ -89,7 +89,10 @@ not allow.
   connection.
   Event sink: the install port, `OnSwitched`/`OnPaired`. Harness-specific
   machine-local work is its own port: `opencodesetup.Local` (service.json and
-  its probe) and `t3setup.Local` (find and run the t3 CLI for auto-pair).
+  its probe), `t3setup.Local` (find and run the t3 CLI for auto-pair) and
+  `codexsetup.Options.Daemon` (run `codex app-server daemon version|start`).
+  `codexsetup.Settings` loads and saves `config.CodexSettings` (CLI path,
+  connected).
   `machine.StorePorts` backs settings, credentials and identity with the
   store for the local machine. Checkpoint save stays the `Launch` callback.
 - **RemoteMachine.** A joined machine is hosted as `remote.Machine`
@@ -186,13 +189,13 @@ suite cannot tell a remote machine from the local one.
 
 Each harness package declares a `harness.Descriptor`: kind, name, hosting,
 whether its instance identity is stable, and the closure signals it reports
-with their copy. `serve` composes a fixed `harness.Registry` (T3, OpenCode, Claude Code)
+with their copy. `serve` composes a fixed `harness.Registry` (T3, OpenCode, Claude Code, Codex)
 and runs one release and one schedule runner per active connection, on
 every machine (`serve/runners.go` follows instance switches). The database
 stores kinds as text; the registry, not a schema CHECK, decides which exist.
 
 - **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any
-  machine profile. `hosted`: the harness runs as processes on Stage's machine
+  machine profile. `hosted` (Codex): the harness runs as processes on Stage's machine
   and is available only where the machine profile allows local processes
   ([runtime.md](runtime.md#machine-profile-and-hosted-harnesses)); elsewhere
   `GET /api/harnesses` reports it unavailable with the reason.
@@ -546,3 +549,47 @@ permission prompt it stops and a worktree session, then removes the
 sessions (`claude rm`) and purges the folders (`claude purge`). Claude
 processes rewrite the state file, so a trust entry removed by hand can come
 back; the purge is what removes them.
+
+## Codex adapter
+
+`internal/codex` drives the Codex app-server daemon over WebSocket on its
+unix control socket; `internal/codexsetup` is its connection setup. Design
+and live gate evidence: [ADR 0006](adr/0006-codex-app-server-harness.md).
+Codex owns threads, models, login and project trust. Stage stores no Codex
+credentials and never writes Codex's config.
+
+- **Client.** One connection per adapter, opened lazily. When the daemon is
+  down the client runs `daemon start` (at most once per 30 s), else reports
+  the daemon down. Every failure is `execution.ErrUnavailable` with the
+  problem; an unknown method names the method and asks for a Codex update.
+- **Inventory.** Workspaces are the projects Codex trusts
+  (`config/read`); a Git checkout is importable. `RegisterWorkspace` refuses:
+  trust the project in Codex. One workspace mode, the project checkout.
+- **Launch (`reserved`).** Validation rejects before any effect (non-root
+  workspace, missing directory, non-image attachment, invalid option or
+  permission). `thread/start`, checkpoint the thread id, best-effort
+  `thread/name/set`, then `turn/start` with `clientUserMessageId` set to the
+  request id. Replay reads the checkpointed thread: a first turn carrying
+  the client id (or the prompt) is the admission, no turn starts it, any
+  other turn fails. Stage then unsubscribes; the turn keeps running.
+- **Observation.** `thread/read`: `active` is running or needs_input (the
+  waiting flags); the last turn's outcome is done, failed or interrupted;
+  an in-progress turn on a thread the daemon unloaded, or a system error,
+  has no terminal evidence and is an error. Archive closes the session
+  (`archived` closure). The reply is the final answer, 4,000 characters.
+- **Push.** `execution.EventSource`: the daemon broadcasts thread status,
+  archive and turn completion for every thread; Stage observes each and
+  ingests it like a poll. `Attention` lists loaded threads waiting on input.
+- **Interaction.** Respond and send are unavailable: the user answers in
+  Codex. Links carry `command` (`cd <dir> && codex resume <id>`), which the
+  task list offers as Copy resume command.
+- **Adoption.** `ResolveLink` takes a thread id or a `codex resume` command
+  and refuses T3 Code's threads (T3 tracks them), ephemeral and subagent
+  threads.
+- **Attribution.** Agents read `CODEX_THREAD_ID`. Its precedence yields to
+  T3 inside a Codex process T3 runs (`T3CODE_THREAD_ID`).
+
+The fake daemon (`codex/codextest`) speaks the same subset over a temp
+socket; `internal/sync` `contract_codex_test.go` runs the coordinator
+contract on it in both placements, and `codex/testdata` holds sanitized
+fixtures from the live gates.

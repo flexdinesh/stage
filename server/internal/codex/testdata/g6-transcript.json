@@ -1,0 +1,669 @@
+[
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "stage",
+          "title": null,
+          "version": "0.0.1"
+        },
+        "capabilities": {
+          "experimentalApi": true
+        }
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 1,
+      "result": {
+        "userAgent": "Codex Desktop/0.171.0 (Arch Linux Unknown; x86_64) unknown (stage; 0.0.1)",
+        "codexHome": "/home/u/.codex",
+        "platformFamily": "unix",
+        "platformOs": "linux"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "method": "initialized"
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "observer",
+          "title": null,
+          "version": "0.0.1"
+        },
+        "capabilities": {
+          "experimentalApi": true
+        }
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 1,
+      "result": {
+        "userAgent": "Codex Desktop/0.171.0 (Arch Linux Unknown; x86_64) unknown (observer; 0.0.1)",
+        "codexHome": "/home/u/.codex",
+        "platformFamily": "unix",
+        "platformOs": "linux"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "method": "initialized"
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 2,
+      "method": "thread/start",
+      "params": {
+        "cwd": "/home/u/work/g6",
+        "model": "gpt-5.6-luna",
+        "approvalPolicy": "never",
+        "sandbox": "read-only"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/started",
+      "params": {
+        "thread": {
+          "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/home/u/work/g6",
+              "runtimeWorkspaceRoots": [
+                "/home/u/work/g6"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "high",
+          "createdAt": 1795589837,
+          "updatedAt": 1795589837,
+          "recencyAt": 1795589837,
+          "status": {
+            "type": "idle"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+          "cwd": "/home/u/work/g6",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        }
+      },
+      "emittedAtMs": 1795589837486
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 2,
+      "result": {
+        "thread": {
+          "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/home/u/work/g6",
+              "runtimeWorkspaceRoots": [
+                "/home/u/work/g6"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "high",
+          "createdAt": 1795589837,
+          "updatedAt": 1795589837,
+          "recencyAt": 1795589837,
+          "status": {
+            "type": "idle"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+          "cwd": "/home/u/work/g6",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "model": "gpt-5.6-luna",
+        "modelProvider": "openai",
+        "serviceTier": null,
+        "disabledPluginIds": [],
+        "cwd": "/home/u/work/g6",
+        "runtimeWorkspaceRoots": [
+          "/home/u/work/g6"
+        ],
+        "instructionSources": [
+          "/home/u/.codex/AGENTS.md"
+        ],
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "readOnly",
+          "networkAccess": false
+        },
+        "activePermissionProfile": null,
+        "reasoningEffort": "high",
+        "multiAgentMode": "explicitRequestOnly"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "warning",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "message": "`[features].multi_agent` is deprecated. It still controls the V1 fallback. `[agents].enabled = false` disables subagent tools even when the model selects a subagent version, unless `[features].multi_agent_v2` is enabled."
+      },
+      "emittedAtMs": 1795589837486
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/started",
+      "params": {
+        "thread": {
+          "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/home/u/work/g6",
+              "runtimeWorkspaceRoots": [
+                "/home/u/work/g6"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "high",
+          "createdAt": 1795589837,
+          "updatedAt": 1795589837,
+          "recencyAt": 1795589837,
+          "status": {
+            "type": "idle"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+          "cwd": "/home/u/work/g6",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        }
+      },
+      "emittedAtMs": 1795589837486
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 2,
+      "method": "thread/read",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 2,
+      "result": {
+        "thread": {
+          "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/home/u/work/g6",
+              "runtimeWorkspaceRoots": [
+                "/home/u/work/g6"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "high",
+          "createdAt": 1795589839,
+          "updatedAt": 1795589839,
+          "recencyAt": 1795589839,
+          "status": {
+            "type": "idle"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+          "cwd": "/home/u/work/g6",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "readState": null
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 3,
+      "method": "thread/read",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 3,
+      "result": {
+        "thread": {
+          "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/home/u/work/g6",
+              "runtimeWorkspaceRoots": [
+                "/home/u/work/g6"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "high",
+          "createdAt": 1795589839,
+          "updatedAt": 1795589839,
+          "recencyAt": 1795589839,
+          "status": {
+            "type": "idle"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+          "cwd": "/home/u/work/g6",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "readState": null
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 3,
+      "method": "thread/resume",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "excludeTurns": true
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "no rollout found for thread id 01a2117e-9284-7221-aace-98a24bdaa94f"
+      },
+      "id": 3
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 4,
+      "method": "thread/list",
+      "params": {
+        "cwd": "/home/u/work/g6"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 4,
+      "result": {
+        "data": [],
+        "readStates": {},
+        "nextCursor": null,
+        "backwardsCursor": null
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 5,
+      "method": "thread/read",
+      "params": {
+        "threadId": "fcbf8fc2-233d-4557-b47f-912dde94a427"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "thread not loaded: fcbf8fc2-233d-4557-b47f-912dde94a427"
+      },
+      "id": 5
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 6,
+      "method": "thread/read",
+      "params": {
+        "threadId": "not-a-uuid"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "invalid thread id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `n` at 1"
+      },
+      "id": 6
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 7,
+      "method": "foo/bar",
+      "params": {}
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "Invalid request: unknown variant `foo/bar`, expected one of `initialize`, `server/diagnostics`, `userVerification/status`, `userVerification/enroll`, `userVerification/delete`, `userVerification/verify`, `userVerification/cancel`, `thread/start`, `thread/resume`, `thread/fork`, `thread/sample`, `thread/sample/cancel`, `thread/archive`, `thread/delete`, `thread/unsubscribe`, `thread/increment_elicitation`, `thread/decrement_elicitation`, `thread/name/set`, `thread/prediction/request`, `thread/goal/set`, `thread/goal/get`, `thread/goal/clear`, `thread/queue/add`, `thread/queue/list`, `thread/queue/update`, `thread/queue/delete`, `thread/queue/reorder`, `thread/queue/start`, `thread/metadata/update`, `thread/attachment/add`, `thread/attachment/list`, `thread/attachmentOwner/list`, `thread/attachment/remove`, `thread/section/move`, `thread/settings/update`, `thread/memoryMode/set`, `thread/memory/read`, `memory/status`, `memory/reset`, `rollout/compress`, `thread/unarchive`, `thread/compact/start`, `thread/shellCommand`, `thread/approveGuardianDeniedAction`, `thread/backgroundTerminals/clean`, `thread/backgroundTerminals/list`, `thread/backgroundTerminals/terminate`, `thread/revert`, `thread/list`, `project/list`, `project/read`, `project/create`, `project/import`, `project/update`, `project/move`, `project/delete`, `threadSection/list`, `threadSection/create`, `threadSection/update`, `threadSection/delete`, `thread/search`, `thread/search/stream`, `thread/search/cancel`, `thread/search/stream/cancel`, `thread/searchOccurrences`, `thread/loaded/list`, `thread/read`, `thread/readState/update`, `thread/turns/list`, `thread/items/list`, `thread/items/read`, `thread/guardianReview`, `thread/inject_items`, `thread/prepareApprovedPlan`, `skills/list`, `skills/extraRoots/set`, `hooks/list`, `marketplace/add`, `marketplace/remove`, `marketplace/upgrade`, `plugin/list`, `plugin/search`, `plugin/installed`, `plugin/reconcile`, `plugin/read`, `plugin/skill/read`, `plugin/share/save`, `plugin/share/updateTargets`, `plugin/share/list`, `plugin/share/checkout`, `plugin/share/delete`, `app/read`, `app/list`, `app/installed`, `fs/readFile`, `fs/writeFile`, `fs/createDirectory`, `fs/getMetadata`, `fs/readDirectory`, `fs/remove`, `fs/copy`, `fs/watch`, `fs/unwatch`, `skills/config/write`, `plugin/install`, `plugin/uninstall`, `turn/start`, `turn/settings/update`, `turn/steer`, `turn/interrupt`, `thread/realtime/start`, `thread/realtime/appendAudio`, `thread/realtime/appendText`, `thread/realtime/appendSpeech`, `thread/realtime/stop`, `thread/timeline/list`, `thread/realtime/list`, `thread/realtime/listVoices`, `review/start`, `model/list`, `account/gatewayOAuth/read`, `account/gatewayOAuth/login`, `account/gatewayOAuth/cancel`, `modelProvider/list`, `modelProvider/config/write`, `modelProvider/default/set`, `modelProvider/capabilities/read`, `experimentalFeature/list`, `permissionProfile/list`, `experimentalFeature/enablement/set`, `remoteControl/enable`, `remoteControl/disable`, `remoteControl/status/read`, `remoteControl/pairing/start`, `remoteControl/pairing/status`, `remoteControl/client/list`, `remoteControl/client/revoke`, `collaborationMode/list`, `mock/experimentalMethod`, `environment/add`, `environment/info`, `environment/status`, `mcpServer/oauth/login`, `config/mcpServer/reload`, `mcpServerStatus/list`, `mcpServer/resource/read`, `mcpServer/event/stream/start`, `mcpServer/event/stream/stop`, `mcpServer/tool/call`, `windowsSandbox/setupStart`, `windowsSandbox/readiness`, `account/login/start`, `account/bedrock/discover`, `account/bedrock/setup`, `account/gcp/setup`, `account/bedrock/checkGovCloudRequirements`, `account/login/cancel`, `accountSession/list`, `accountSession/switch`, `account/logout`, `account/securitySetup/read`, `account/rateLimits/read`, `account/rateLimitResetCredit/consume`, `account/usage/read`, `account/workspaceMessages/read`, `account/sendAddCreditsNudgeEmail`, `feedback/upload`, `feedback/save`, `command/exec`, `command/exec/write`, `command/exec/terminate`, `command/exec/resize`, `process/spawn`, `process/writeStdin`, `process/kill`, `process/resizePty`, `config/read`, `externalAgentConfig/detect`, `externalAgentConfig/import`, `externalAgentConfig/import/recordHistory`, `externalAgentConfig/import/readHistories`, `config/value/write`, `config/batchWrite`, `configRequirements/read`, `account/read`, `getConversationSummary`, `gitDiffToRemote`, `getAuthStatus`, `fuzzyFileSearch`, `fuzzyFileSearch/sessionStart`, `fuzzyFileSearch/sessionUpdate`, `fuzzyFileSearch/sessionStop`"
+      },
+      "id": 7
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 8,
+      "method": "thread/read",
+      "params": {}
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "Invalid request: missing field `threadId`"
+      },
+      "id": 8
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 4,
+      "method": "thread/unsubscribe",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 4,
+      "result": {
+        "status": "unsubscribed"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 5,
+      "method": "thread/delete",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589843512
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589843512
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589843517
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589843517
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 5,
+      "result": {}
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/deleted",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      },
+      "emittedAtMs": 1795589844370
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/deleted",
+      "params": {
+        "threadId": "01a2117e-9284-7221-aace-98a24bdaa94f"
+      },
+      "emittedAtMs": 1795589844370
+    }
+  }
+]

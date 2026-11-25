@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "codex",
+    "app-server",
+    "daemon",
+    "start"
+  ],
+  "exitCode": 0,
+  "stderr": "",
+  "stdout": {
+    "status": "alreadyRunning",
+    "managedCodexPath": "/home/u/.codex/packages/app-server-daemon/current/bin/codex",
+    "managedCodexVersion": "0.161.0",
+    "socketPath": "/home/u/.codex/app-server-control/app-server-control.sock",
+    "cliVersion": "0.171.0",
+    "appServerVersion": "0.171.0"
+  }
+}

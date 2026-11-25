@@ -1,0 +1,51 @@
+{
+  "id": 2,
+  "result": {
+    "thread": {
+      "id": "01a2117e-9284-7221-aace-98a24bdaa94f",
+      "environments": [
+        {
+          "environmentId": "local",
+          "cwd": "/home/u/work/g6",
+          "runtimeWorkspaceRoots": [
+            "/home/u/work/g6"
+          ]
+        }
+      ],
+      "extra": null,
+      "sessionId": "01a2117e-9284-7221-aace-98a24bdaa94f",
+      "forkedFromId": null,
+      "attachedToThreadId": null,
+      "parentThreadId": null,
+      "preview": "",
+      "ephemeral": false,
+      "section": null,
+      "sectionEnteredAt": null,
+      "projectId": null,
+      "historyMode": "paginated",
+      "modelProvider": "openai",
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "high",
+      "createdAt": 1795589839,
+      "updatedAt": 1795589839,
+      "recencyAt": 1795589839,
+      "status": {
+        "type": "idle"
+      },
+      "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-57-17-01a2117e-9284-7221-aace-98a24bdaa94f.jsonl",
+      "cwd": "/home/u/work/g6",
+      "cliVersion": "0.171.0",
+      "originator": "Codex Desktop",
+      "source": "vscode",
+      "canAcceptDirectInput": true,
+      "threadSource": null,
+      "agentNickname": null,
+      "agentRole": null,
+      "gitInfo": null,
+      "name": null,
+      "daybreakEnabled": null,
+      "turns": []
+    },
+    "readState": null
+  }
+}
