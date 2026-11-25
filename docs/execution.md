@@ -210,7 +210,7 @@ suite cannot tell a remote machine from the local one.
   carries its links). A launch whose session Stage saw but could not
   record keeps that session's resume command on the attempt
   (`execution_attempts.observed_session`, command only; destinations are
-  still resolved when read), and the API falls back to it. With more than
+  still resolved when read), and the API falls back to it. On task rows and task detail, with more than
   one machine, the UI names the machine the command must run on ("Copy
   resume command for laptop").
 
