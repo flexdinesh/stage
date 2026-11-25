@@ -10,6 +10,7 @@ import {
   useNotificationInbox,
   useNotifications,
   useHarnesses,
+  useSessionRequests,
 } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
 import { folderName, type SessionAction } from "../lib/harnesses.ts";
@@ -42,6 +43,7 @@ import {
 } from "./ui.tsx";
 import { useSessionAction } from "../lib/hostState.ts";
 import { SessionActionButton } from "./SessionAction.tsx";
+import { RowRequestControls, RowRequestLine, useRowRequest } from "./Requests.tsx";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -248,10 +250,13 @@ function useNotificationAction() {
   return (n: Pick<Notification, "connectionId" | "links">): SessionAction | null => (harnesses.retired(n.connectionId) ? null : action(n));
 }
 
-/** Open in <harness> or Copy resume command, primary while waiting. A waiting session with neither is answered where it runs: say so instead of offering nothing. */
-function RowSessionButton({ action, harness, waiting, connectionId }: { action: SessionAction | null; harness: string; waiting: boolean; connectionId: number }) {
-  if (action === null) return waiting ? <span className="text-small text-muted">Answer in {harness}</span> : null;
-  return <SessionActionButton action={action} name={harness} small variant={waiting ? "primary" : "secondary"} connectionId={connectionId} />;
+/**
+ * Open in <harness> or Copy resume command, primary while waiting unless Stage answers it on the row (`answered`). A
+ * waiting session with neither is answered where it runs: say so instead of offering nothing.
+ */
+function RowSessionButton({ action, harness, waiting, answered = false, connectionId }: { action: SessionAction | null; harness: string; waiting: boolean; answered?: boolean; connectionId: number }) {
+  if (action === null) return waiting && !answered ? <span className="text-small text-muted">Answer in {harness}</span> : null;
+  return <SessionActionButton action={action} name={harness} small variant={waiting && !answered ? "primary" : "secondary"} connectionId={connectionId} />;
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
@@ -503,6 +508,9 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   const action = useNotificationAction()(n);
   const { name } = useHarnesses();
   const waiting = n.currentState === "needs_input";
+  // The task's requests Stage can answer: one approval on the row, else Answer on the task.
+  const { requests } = useSessionRequests({ taskId: n.taskId, connectionId: n.connectionId, needsInput: waiting });
+  const answer = useRowRequest(n.taskId, requests);
   const project = projectOf(n);
   // A ready task still in backlog reads "ready": that is its current state, not a change.
   const ready = startable(n);
@@ -531,6 +539,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           )}
         </div>
       </div>
+      <RowRequestLine action={answer.action} className="mt-1" />
       <div className="mt-1 flex items-center justify-between gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-meta text-muted">
           <span className="flex min-w-0 items-center gap-2">
@@ -566,9 +575,15 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
-          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={waiting} connectionId={n.connectionId} />
+          {n.taskId === null ? null : <RowRequestControls action={answer.action} taskId={n.taskId} busy={answer.busy} onRespond={answer.onRespond} onNavigate={onNavigate} />}
+          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={waiting} answered={answer.action !== null} connectionId={n.connectionId} />
         </div>
       </div>
+      {answer.error === null ? null : (
+        <div className="mt-1">
+          <ErrorText error={answer.error} />
+        </div>
+      )}
       <div id={historyId} hidden={!expanded}>
         {expanded ? <NotificationHistory groupKey={n.key} /> : null}
       </div>

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 )
 
 func openHooks(t *testing.T, dir string) *claudecode.Hooks {
@@ -51,7 +52,11 @@ func settingsOf(t *testing.T, path string) map[string][2]string {
 			t.Fatalf("%s: want one hook and no matcher: %s", ev, b)
 		}
 		hk := ms[0].Hooks[0]
-		if hk.Type != "http" || hk.Timeout != 5 {
+		timeout := 5
+		if ev == "PermissionRequest" {
+			timeout = 3600 // held for an answer in Stage
+		}
+		if hk.Type != "http" || hk.Timeout != timeout {
 			t.Fatalf("%s: %+v", ev, hk)
 		}
 		out[ev] = [2]string{hk.URL, hk.Headers["Authorization"]}
@@ -121,7 +126,11 @@ func TestHooksSettingsAndRealInputs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if code := post(t, h.URL(), auth, string(b)); code != http.StatusNoContent {
+		var held *claudetest.HookCall
+		if fx.event == "PermissionRequest" {
+			// It names a tool: it stays open for an answer (it nudges first).
+			held = claudetest.Post(h.URL(), map[string]string{"Authorization": auth}, b)
+		} else if code := post(t, h.URL(), auth, string(b)); code != http.StatusNoContent {
 			t.Fatalf("%s: %d", fx.file, code)
 		}
 		select {
@@ -131,6 +140,9 @@ func TestHooksSettingsAndRealInputs(t *testing.T) {
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("%s: no nudge", fx.file)
+		}
+		if held != nil && held.Answered() {
+			t.Fatalf("%s: answered without Stage", fx.file)
 		}
 	}
 	if st := h.Status(); st.LastEventAt == nil {
@@ -155,7 +167,7 @@ func TestHooksRefuseBadRequests(t *testing.T) {
 		{"malformed", h.URL(), auth, `{"hook_event_name":`, http.StatusBadRequest},
 		{"no session", h.URL(), auth, `{"hook_event_name":"Stop"}`, http.StatusBadRequest},
 		{"not a uuid", h.URL(), auth, `{"hook_event_name":"Stop","session_id":"../../etc"}`, http.StatusBadRequest},
-		{"too large", h.URL(), auth, `{"hook_event_name":"Stop","pad":"` + strings.Repeat("x", 70<<10) + `"}`, http.StatusRequestEntityTooLarge},
+		{"too large", h.URL(), auth, `{"hook_event_name":"Stop","pad":"` + strings.Repeat("x", 1<<20) + `"}`, http.StatusRequestEntityTooLarge},
 	}
 	for _, c := range cases {
 		if got := post(t, c.url, c.auth, c.body); got != c.want {
@@ -278,5 +290,32 @@ func TestHooksSubscriptions(t *testing.T) {
 	}
 	if _, err := net.DialTimeout("tcp", strings.TrimSuffix(strings.TrimPrefix(h.URL(), "http://"), "/hooks"), time.Second); err == nil {
 		t.Fatal("listener open after Close")
+	}
+}
+
+// A PermissionRequest naming a tool stays open past the server's read and
+// write bounds; one naming none is answered at once. Close releases the
+// open one with no decision (Claude keeps its prompt).
+func TestHooksHoldPermissionRequests(t *testing.T) {
+	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: t.TempDir(), IOTimeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	auth := map[string]string{"Authorization": settingsOf(t, h.SettingsPath())["PermissionRequest"][1]}
+	session := `"session_id":"e9455d86-e696-4452-8002-0a373629eec8","hook_event_name":"PermissionRequest"`
+	held := claudetest.Post(h.URL(), auth, []byte(`{`+session+`,"tool_name":"Bash","tool_input":{"command":"ls"}}`))
+	if c := claudetest.Post(h.URL(), auth, []byte(`{`+session+`}`)).Wait(t, 2*time.Second); c.Err != nil || c.Status != http.StatusNoContent {
+		t.Fatalf("no tool: %d %v", c.Status, c.Err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if held.Answered() {
+		t.Fatalf("held hook ended: %d %v", held.Status, held.Err)
+	}
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if c := held.Wait(t, 2*time.Second); c.Err != nil || c.Status != http.StatusNoContent || c.Body != "" {
+		t.Fatalf("released hook %d %q %v", c.Status, c.Body, c.Err)
 	}
 }

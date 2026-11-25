@@ -3,9 +3,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork, useMachines, useTask } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork, useMachines, useSessionRequests, useTask } from "../api/queries.ts";
 import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "../components/SessionAction.tsx";
+import { RequestsPanel } from "../components/Requests.tsx";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
@@ -212,6 +213,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   // Open in the harness, or (a harness without a destination to open) copy the command that resumes it in its own client.
   const action = useSessionAction()(task);
   const phoneBar = action !== null || stoppable;
+  // Requests the harness lets Stage answer: the panel below leads, the harness's own client stays as the alternative.
+  const { requests } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
+  const answerable = requests.length > 0;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) => (
     <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} connectionId={task.connectionId} {...(className === undefined ? {} : { className })} />
@@ -266,10 +270,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
-          <Alert tone="need" actions={action === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            {kindName(task.harness)} needs input{action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : null}
+          <Alert tone="need" actions={action === null ? undefined : openInApp(answerable ? "secondary" : "primary", "max-md:hidden")}>
+            {answerable
+              ? `${kindName(task.harness)} is waiting for your answer.`
+              : `${kindName(task.harness)} needs input${action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
           </Alert>
         ) : null}
+        <RequestsPanel taskId={task.id} requests={requests} harness={kindName(task.harness)} needsInput={task.state === "needs_input"} />
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
         {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
 
@@ -374,7 +381,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {phoneBar ? (
         <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {openInApp(waiting ? "primary" : "secondary", "flex-1")}
+          {openInApp(waiting && !answerable ? "primary" : "secondary", "flex-1")}
           {stoppable ? stopButton("flex-1") : null}
         </div>
       ) : null}

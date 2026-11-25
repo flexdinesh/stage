@@ -831,6 +831,46 @@ export interface StartTreeResponse {
   errors: { taskId: number; error: string }[];
 }
 
+/** A pending approval, question or input request a task's session waits on (docs/api.md "Session interaction"). */
+export interface SessionRequest {
+  id: string;
+  kind: "approval" | "question" | "input";
+  title: string;
+  detail?: string;
+  /** Preformatted: the command, path, URL or input the request acts on. */
+  preview?: string;
+  options?: HarnessChoice[];
+  /** The option whose answer may carry `text` (a reason sent with a denial). */
+  textOption?: string;
+  /** A question request's questions, answered together. */
+  questions?: RequestQuestion[];
+  createdAt: string;
+}
+
+export interface RequestQuestion {
+  id: string;
+  header?: string;
+  prompt: string;
+  /** Answered by label. */
+  options?: RequestQuestionOption[];
+  /** Several options may be picked. */
+  multi?: boolean;
+  /** Free text is accepted in place of an option. */
+  custom?: boolean;
+}
+
+export interface RequestQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** Answers a SessionRequest: an option id, text, or both; a question request answers each question id (labels, or one free text). */
+export interface RequestResponse {
+  option?: string;
+  text?: string;
+  answers?: Record<string, string[]>;
+}
+
 export interface AdoptSessionRequest {
   projectId?: number;
   newProjectTitle?: string;

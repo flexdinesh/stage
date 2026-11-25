@@ -36,22 +36,57 @@ const (
 	OpSend    = "send"    // send a message to the session
 )
 
+// Request kinds.
+const (
+	RequestApproval = "approval" // pick an option
+	RequestQuestion = "question" // answer every Questions entry together
+	RequestInput    = "input"    // free text
+)
+
 // Request is a pending question or approval the session waits on.
 type Request struct {
 	ID string `json:"id"`
-	// Kind: approval (pick an option), question (pick or answer) or input
-	// (free text).
-	Kind      string    `json:"kind"`
-	Title     string    `json:"title"`
-	Detail    string    `json:"detail,omitempty"`
-	Options   []Choice  `json:"options,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	// Kind: RequestApproval, RequestQuestion or RequestInput.
+	Kind   string `json:"kind"`
+	Title  string `json:"title"`
+	Detail string `json:"detail,omitempty"`
+	// Preview is preformatted: the command, path, URL or input the request
+	// acts on (shown monospaced).
+	Preview string   `json:"preview,omitempty"`
+	Options []Choice `json:"options,omitempty"`
+	// TextOption is the option whose answer may carry Text (a reason sent
+	// with a denial); "": no option takes text.
+	TextOption string `json:"textOption,omitempty"`
+	// Questions of a question request, answered together (Response.Answers).
+	Questions []Question `json:"questions,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
 }
 
-// Response answers a Request: an option id, text, or both.
+// Question is one question of a question request.
+type Question struct {
+	ID     string `json:"id"`
+	Header string `json:"header,omitempty"`
+	Prompt string `json:"prompt"`
+	// Options are answered by label.
+	Options []QuestionOption `json:"options,omitempty"`
+	// Multi: several options may be picked.
+	Multi bool `json:"multi,omitempty"`
+	// Custom: free text is accepted in place of an option.
+	Custom bool `json:"custom,omitempty"`
+}
+
+// QuestionOption is one answer a Question offers.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// Response answers a Request: an option id, text, or both; a question
+// request answers each question by id (option labels, or one custom text).
 type Response struct {
-	Option string `json:"option,omitempty"`
-	Text   string `json:"text,omitempty"`
+	Option  string              `json:"option,omitempty"`
+	Text    string              `json:"text,omitempty"`
+	Answers map[string][]string `json:"answers,omitempty"`
 }
 
 // Message is a user message sent into a session.
@@ -60,7 +95,8 @@ type Message struct {
 }
 
 // Interactive answers a session's pending requests and sends it messages.
-// ErrNotFound: the request is no longer pending.
+// ErrNotFound: the request is no longer pending. *Invalid: the answer does
+// not fit the request (nothing was sent).
 type Interactive interface {
 	Requests(context.Context, SessionRef) ([]Request, error)
 	Respond(ctx context.Context, ref SessionRef, requestID string, r Response) error

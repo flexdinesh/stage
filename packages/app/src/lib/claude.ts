@@ -67,6 +67,11 @@ export function updatesText(events: ClaudeEvents, now: number = Date.now()): { t
   return { text: `instant · ${events.lastEventAt === null ? "no hook yet" : `last hook ${relativeTime(events.lastEventAt, now)}`}`, reason: null };
 }
 
+/** The card's Approvals fact: while hooks push, a session's approvals and questions are answered on its task too. */
+export function approvalsText(events: ClaudeEvents): string {
+  return events.mode === "push" ? "on the task in Stage, or in Claude Code" : "in Claude Code";
+}
+
 /** connected | disconnected | not_found | logged_out | error. */
 type ClaudeState = "connected" | "disconnected" | "not_found" | "logged_out" | "error";
 

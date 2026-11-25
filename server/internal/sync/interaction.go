@@ -66,15 +66,18 @@ func (s *Service) Respond(ctx context.Context, id int64, requestID string, r exe
 	if strings.TrimSpace(requestID) == "" {
 		return db.Task{}, db.Invalid("request id is required")
 	}
-	if r.Option == "" && strings.TrimSpace(r.Text) == "" {
-		return db.Task{}, db.Invalid("respond with an option or text")
+	if r.Option == "" && strings.TrimSpace(r.Text) == "" && len(r.Answers) == 0 {
+		return db.Task{}, db.Invalid("respond with an option, text or answers")
 	}
 	t, in, err := s.interactive(ctx, id, execution.OpRespond)
 	if err != nil {
 		return t, err
 	}
+	var invalid *execution.Invalid
 	if err = in.Respond(ctx, *t.Session, requestID, r); errors.Is(err, execution.ErrNotFound) {
 		return t, fmt.Errorf("%w: request %q is no longer pending", db.ErrNotFound, requestID)
+	} else if errors.As(err, &invalid) {
+		return t, db.Invalid("%s", invalid.Reason)
 	} else if err != nil {
 		return t, harnessErr(err)
 	}

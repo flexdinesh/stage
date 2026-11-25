@@ -164,6 +164,9 @@ func (f *hostedHarness) Requests(context.Context, execution.SessionRef) ([]execu
 func (f *hostedHarness) Respond(_ context.Context, _ execution.SessionRef, id string, r execution.Response) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Option == "bad" {
+		return &execution.Invalid{Reason: "pick allow or deny"}
+	}
 	for i, q := range f.requests {
 		if q.ID == id {
 			f.requests = append(f.requests[:i], f.requests[i+1:]...)
@@ -352,7 +355,10 @@ func (l lostOwner) Observe(ctx context.Context, ref execution.SessionRef) (execu
 
 func TestContractInteraction(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, requests: []execution.Request{{ID: "q1", Kind: "approval", Title: "Run tests?", Options: []execution.Choice{{ID: "yes"}, {ID: "no"}}}}}
+		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, requests: []execution.Request{
+			{ID: "q1", Kind: "approval", Title: "Run tests?", Preview: "go test ./...", TextOption: "no", Options: []execution.Choice{{ID: "yes"}, {ID: "no"}}},
+			{ID: "q2", Kind: "question", Title: "Pick", Questions: []execution.Question{{ID: "0", Header: "Color", Prompt: "Which color?", Options: []execution.QuestionOption{{Label: "Red", Description: "warm"}}, Multi: true, Custom: true}}},
+		}}
 		_, svc, task := v2Setup(t, p, "hosted", f)
 		ctx := t.Context()
 		if _, err := svc.Requests(ctx, task.ID); err == nil {
@@ -362,8 +368,11 @@ func TestContractInteraction(t *testing.T) {
 			t.Fatal(err)
 		}
 		rs, err := svc.Requests(ctx, task.ID)
-		if err != nil || len(rs) != 1 || rs[0].ID != "q1" {
+		if err != nil || len(rs) != 2 || rs[0].ID != "q1" || rs[0].Preview != "go test ./..." || rs[0].TextOption != "no" {
 			t.Fatal(rs, err)
+		}
+		if q := rs[1].Questions; len(q) != 1 || q[0].Prompt != "Which color?" || !q[0].Multi || !q[0].Custom || q[0].Options[0].Description != "warm" {
+			t.Fatal("question round trip", rs[1])
 		}
 		var invalid *db.InvalidError
 		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
@@ -372,8 +381,14 @@ func TestContractInteraction(t *testing.T) {
 		if _, err := svc.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
 			t.Fatal("unknown request", err)
 		}
+		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "bad"}); !errors.As(err, &invalid) || invalid.Msg != "pick allow or deny" {
+			t.Fatal("invalid answer", err)
+		}
 		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
 			t.Fatal(err, f.responses)
+		}
+		if _, err := svc.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
+			t.Fatal("answers", err, f.responses)
 		}
 		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
 			t.Fatal(err, f.messages)

@@ -10,7 +10,7 @@ import { claudeStatusView } from "../lib/claude.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { CodexStatus, ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { CodexStatus, ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -39,6 +39,8 @@ export const keys = {
   tree: ["tree"],
   journal: ["journal"],
   journalEntry: ["journalEntry"],
+  /** A task's pending session requests (approvals, questions). */
+  requests: ["requests"],
   /** This device's state (not the server's): its push subscription. */
   device: { push: ["device", "push"] },
   /** The native host's state (desktop): login startup and diagnostics. */
@@ -585,4 +587,50 @@ export function invalidateConnectionChange(
 export function useInvalidateWork(): () => Promise<void> {
   const qc = useQueryClient();
   return () => invalidateWork(qc);
+}
+
+const NO_REQUESTS: SessionRequest[] = [];
+
+/** How often pending requests are re-read while a task needs input: a request can appear or be answered elsewhere at any time. */
+const REQUESTS_POLL = 3000;
+
+/**
+ * What a task's session waits on, when its connection offers operation `respond` (connection capabilities, cached as
+ * NewTaskDefaults reads them). Read only while the task needs input on an active connection; polled meanwhile.
+ */
+export function useSessionRequests({ taskId, connectionId, needsInput }: { taskId: number | null; connectionId: number; needsInput: boolean }) {
+  const api = useApi();
+  const harnesses = useHarnesses();
+  const live = needsInput && taskId !== null && !harnesses.retired(connectionId);
+  const caps = useQuery({
+    queryKey: ["capabilities", connectionId, "", false],
+    queryFn: () => api.capabilities(connectionId),
+    enabled: live,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const respondable = caps.data?.operations.respond?.available === true;
+  const q = useQuery({
+    queryKey: [...keys.requests, taskId],
+    queryFn: () => api.taskRequests(taskId ?? 0),
+    enabled: live && respondable,
+    refetchInterval: REQUESTS_POLL,
+    retry: false,
+  });
+  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error };
+}
+
+/** Answers one of a task's requests; the task, its requests and the inbox refresh either way (a 404 means it was answered elsewhere). */
+export function useRespondRequest(taskId: number) {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ requestId, response }: { requestId: string; response: RequestResponse }) => api.respondRequest(taskId, requestId, response),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: [...keys.requests, taskId] }),
+        qc.invalidateQueries({ queryKey: keys.notifications }),
+        invalidateWork(qc),
+      ]),
+  });
 }

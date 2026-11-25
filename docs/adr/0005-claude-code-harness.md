@@ -6,6 +6,10 @@
   [storage adapters](0003-storage-adapters.md) first, so this is 0005.
 - **Amended** 2026-11-25 by #378: decision 11 (`rm` is the archived
   closure) and the "entry gone" row of decision 4.
+- **Amended** 2026-11-25 by #375: decision 8 (approvals and questions are
+  also answered in Stage, through a PermissionRequest HTTP hook) and
+  [E11](#e11-permissionrequest-answers); the approval routes table records the
+  choice.
 - **Extended** 2026-11-25 by #382: [cloud sessions](#cloud-sessions-claude---cloud-not-built)
   researched and not built.
 - **Amended** 2026-11-25 by #377: decision 16 (push via HTTP hooks),
@@ -90,8 +94,26 @@ them. 2, 3, 13 and 14 come from the evidence.
    roster lists the session, else `cd <cwd> && claude --resume <uuid>`.
    `--resume` on a live background session is refused without a write,
    so the command is always safe to run ([E3](#e3-stop-attach-resume-rm)).
-8. **Needs-input is answered in Claude** in v1 (attach or resume). Approval
-   routes are recorded [below](#approval-routes-record-only), not built.
+8. **Needs-input is answered in Claude, and in Stage where Stage can**
+   (amended by #375; v1 answered in Claude only). The hook settings file
+   every launch passes (decision 16) gives `PermissionRequest` a
+   `timeout: 3600` (the daemon's idle retire), and the receiver holds a
+   request naming a tool open, after its wake-up, until the user answers in
+   Stage, the session stops waiting, a newer request of the session
+   supersedes it, Claude gives up or the receiver closes. Claude shows its
+   own prompt meanwhile, so `claude attach` still answers it and the resume
+   command stays ([E11](#e11-permissionrequest-answers)); every way the hook ends
+   without a Stage answer leaves Claude's prompt in place. Stage offers
+   Allow, one Always allow per Claude suggestion (passed back verbatim as
+   `updatedPermissions`), and Deny with an optional reason (`message` "Denied in Stage: <reason>":
+   Claude reads the bare message as the tool's error, not as a denial);
+   `AskUserQuestion` is a question request answered as `updatedInput`
+   `answers`. A turn that ended asking the user (roster `blocked`, `idle`)
+   is a follow-up, not a request (#376). Adopted sessions and sessions
+   launched without the hook list no requests. A live session never
+   re-reads the settings file, so the receiver binds its port again after a
+   restart (decision 16). Requests are memory only. Only the user answers: the respond
+   route refuses agent callers (`docs/api.md`).
 9. **Scope.** Stage sees the sessions it launched plus ones the user adopts
    by UUID (or short id, resolved through the roster). Adoption is refused
    with "Track it through T3" when the transcript's first `user` record has
@@ -161,7 +183,8 @@ them. 2, 3, 13 and 14 come from the evidence.
     `127.0.0.1` with a bearer token from the file. A hook only wakes Stage:
     it names the session, and the adapter reads the roster and transcript
     again (retrying briefly until the roster shows the event's change),
-    then pushes that observation through `execution.EventSource`. The body
+    then pushes that observation through `execution.EventSource` (a
+    `PermissionRequest` is also held for an answer, decision 8). The body
     is never trusted for state (Stop cannot tell done from blocked; the
     roster can), so a forged hook costs a read. Polling stays the
     reconciliation: adopted sessions, copies (`--resume` of a live session
@@ -407,17 +430,35 @@ of the checkout Claude is launched from. Probed (#379, and on every
   the worktree would lose them.`, with a `claude rm <short>
   --discard-unpushed <token>` hint.
 
-## Approval routes (record only)
+### E11 PermissionRequest answers
 
-v1 answers in Claude (decision 8). Candidates for #375:
+#375, claude 2.1.332, `--bg --permission-mode manual --settings <file>`,
+haiku, in a scratch folder; fixtures in `testdata/hooks/`.
+
+| Probe | Result |
+| --- | --- |
+| Hook input | `session_id`, `transcript_path`, `cwd`, `permission_mode`, `hook_event_name: PermissionRequest`, `tool_name`, `tool_input`, `permission_suggestions` (e.g. `addDirectories`/`setMode` with `destination: session`, `addRules` with `destination: localSettings`). No `tool_use_id`. Arrives about 0.3 s after the roster shows `blocked`, `waitingFor: "permission prompt"` |
+| Hook held, `claude attach` | the TUI shows the prompt (Yes / always / auto / No): the hook races Claude's own prompt, it does not block it. Answering in the TUI runs the tool; Claude leaves the hook connection open. A late hook answer on it is ignored |
+| `{"behavior":"allow"}` | the tool runs, the turn finishes |
+| `{"behavior":"deny","message":M}` | the tool result is `M` (`is_error`); the model reads it |
+| `allow` + `updatedPermissions: [<an addRules suggestion>]` | the rule is written to `<cwd>/.claude/settings.local.json` |
+| `AskUserQuestion` | arrives as a PermissionRequest (roster `waitingFor: "input needed"`); `allow` + `updatedInput: {questions, answers: {<question>: <label>}}` answers it ("Your questions have been answered: …") |
+| Hook `timeout` reached | Claude closes the request; its prompt stays |
+| Receiver down, or killed mid-request | the prompt stays; no retry |
+| Settings file changed while the session lives | the next hook still goes to the old URL (read at start; a woken session reads it again, #377) |
+| Empty 200 | no decision; the prompt stays (#377) |
+
+## Approval routes
+
+v1 answered in Claude (decision 8). #375 chose the PermissionRequest hook:
 
 | Route | How | Fit |
 | --- | --- | --- |
-| Hooks (probed, [E9](#e9-hooks); push built in decision 16) | the `PermissionRequest` HTTP hook Stage already passes (`--settings`) | An answer channel only if the hook holds the request open until Stage answers (its `timeout`); today it answers 204 at once |
+| Hooks (**chosen**, #375) | a `PermissionRequest` HTTP hook in the settings file Stage passes (`--settings`), held open until answered ([E11](#e11-permissionrequest-answers)) | Answers in `--bg` sessions while Claude keeps its own prompt; settings contract owned by the adapter |
 | `--permission-prompt-tool` / `--permission-prompts host` | an MCP tool Stage serves decides each prompt | `-p` (print/SDK) mode only, not `--bg` |
 | Agent SDK sidecar (T3's route) | a Node process hosting `query()` with `canUseTool` | Full control, but Stage then owns the process (#385); not a `--bg` session |
 | Messaging socket | `CLAUDE_CODE_MESSAGING_SOCKET`, `peerProtocol` in `~/.claude/sessions/<pid>.json`, daemon `control.sock` | Undocumented internal protocol; do not build on it |
-| Attach | the user answers in `claude attach` or the `claude agents` view | v1 |
+| Attach | the user answers in `claude attach` or the `claude agents` view | v1; still always available |
 
 ## Why not HTTP
 
@@ -516,9 +557,8 @@ Agents harness is wanted on its own merits.
   `CLAUDE_CODE_SESSION_ID` first, then T3. Parser tests use the fixtures.
 - #373 (surfacing): the setup and launch copy explains trust ("Open
   Claude in this folder once and trust it").
-- #375: choose among the approval routes above. The hooks route reuses
-  `claudecode.Hooks` and its settings file: the `PermissionRequest` hook
-  would wait for Stage's decision instead of answering 204.
+- #375: the PermissionRequest hook, held open on decision 16's receiver
+  (decision 8, amended; E11).
 - #377 (push): decision 16.
 - #383 (discovery): `Attention` reads the roster (decision 9, amended); a
   live interactive session has no resume command, since it is answered

@@ -32,8 +32,9 @@ type Options struct {
 	// LaunchWait bounds the wait for a launched session to appear in the
 	// session list (default 5s).
 	LaunchWait time.Duration
-	// Hooks is the machine's hook receiver (nil: no push; launches pass no
-	// --settings and polling alone follows sessions).
+	// Hooks is the machine's hook receiver (nil: no push and no approvals
+	// in Stage; launches pass no --settings, polling alone follows
+	// sessions, and their prompts are answered in Claude Code).
 	Hooks *Hooks
 	// SettleDelays are the waits before each read after a hook (default
 	// 0, 250ms, 500ms, 1s, 2s); tests shorten them.
@@ -196,8 +197,8 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			"predecessorBase":   available,
 			"worktreeBase":      {Reason: reasonBase},
 			"registerWorkspace": {Reason: reasonFolder},
-			execution.OpRespond: {Reason: reasonAnswer},
-			execution.OpSend:    {Reason: reasonAnswer},
+			execution.OpRespond: a.hooksRunning(),
+			execution.OpSend:    {Reason: reasonSend},
 		},
 		Models:      slices.Clone(models),
 		Options:     []execution.Option{effort},

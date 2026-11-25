@@ -2,6 +2,9 @@
 // phone width. Unlinked and lazy-loaded; not a product page.
 import { useState, type ReactNode } from "react";
 import { IconClose, IconPlus, IconSearch } from "../components/icons.tsx";
+import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
+import type { SessionRequest } from "../api/types.ts";
+import { rowRequestAction } from "../lib/requests.ts";
 import {
   Alert,
   Button,
@@ -63,6 +66,42 @@ import {
 const TONES: readonly ChipTone[] = ["need", "run", "done", "ok", "bad", "idle", "plain"];
 const COLORS = ["bg", "surface", "panel", "line", "line-strong", "fg", "muted", "accent", "need", "need-fg", "run", "done", "ok", "bad", "idle"] as const;
 const TYPE_ROLES = ["label", "meta-sm", "meta", "detail", "small", "ui", "body", "title", "headline"] as const;
+
+const choice = (id: string, label: string) => ({ id, label, available: true });
+const SAMPLE_APPROVAL: SessionRequest = {
+  id: "r1",
+  kind: "approval",
+  title: "Run a command",
+  detail: "Create p2.txt and echo made",
+  preview: "touch p2.txt && echo made",
+  options: [choice("allow", "Allow"), choice("deny", "Deny")],
+  textOption: "deny",
+  createdAt: "2026-11-25T07:00:00Z",
+};
+const SAMPLE_ALWAYS: SessionRequest = {
+  ...SAMPLE_APPROVAL,
+  id: "r2",
+  title: "Run a command",
+  detail: "Run the migration check",
+  preview: Array.from({ length: 12 }, (_, i) => `step ${i + 1}: go test ./internal/db/... -run TestMigration${i + 1}`).join("\n"),
+  options: [
+    choice("allow", "Allow"),
+    choice("always:0", "Always allow `Bash(go test:*)` in this project (.claude/settings.local.json)"),
+    choice("always:1", "Allow and accept edits for this session"),
+    choice("deny", "Deny"),
+  ],
+};
+const SAMPLE_QUESTION: SessionRequest = {
+  id: "r3",
+  kind: "question",
+  title: "Claude Code asks",
+  questions: [
+    { id: "0", header: "Color", prompt: "Which color do you prefer?", options: [{ label: "Red", description: "Warm" }, { label: "Blue", description: "Cool" }], custom: true },
+    { id: "1", header: "Sizes", prompt: "Which sizes ship first?", options: [{ label: "Small" }, { label: "Medium" }, { label: "Large" }], multi: true },
+  ],
+  createdAt: "2026-11-25T07:00:00Z",
+};
+const noop = () => undefined;
 
 function Section({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
   return (
@@ -348,6 +387,43 @@ export function DevUiPage() {
             <li>
               <RowButton disabled>Disabled row</RowButton>
             </li>
+          </RowList>
+        </Panel>
+      </Section>
+
+      <Section title="Requests" meta="components/Requests.tsx · a session's approvals and questions">
+        <Panel title="Requests" meta="3 pending" flush>
+          <RequestCard request={SAMPLE_APPROVAL} harness="Claude Code" onRespond={noop} />
+          <RequestCard request={SAMPLE_ALWAYS} harness="Claude Code" onRespond={noop} />
+          <RequestCard request={SAMPLE_QUESTION} harness="Claude Code" onRespond={noop} />
+        </Panel>
+        <Panel title="Settled" flush>
+          <RequestCard request={SAMPLE_APPROVAL} harness="Claude Code" outcome="answered" onRespond={noop} />
+          <RequestCard request={{ ...SAMPLE_APPROVAL, id: "r4" }} harness="Claude Code" outcome="expired" onRespond={noop} />
+          <RequestCard request={{ ...SAMPLE_APPROVAL, id: "r5" }} harness="Claude Code" busy onRespond={noop} />
+        </Panel>
+        <Panel title="Row answers" flush>
+          <RowList>
+            <Row need className="flex flex-col gap-1">
+              <span className="flex items-baseline gap-1.5 text-ui">
+                <IdTag id={375} />
+                <TextLink to="/tasks/375">Answer approvals and questions in Stage</TextLink>
+              </span>
+              <RowRequestLine action={rowRequestAction([SAMPLE_APPROVAL])} />
+              <span className="flex flex-wrap gap-1.5">
+                <RowRequestControls action={rowRequestAction([SAMPLE_APPROVAL])} taskId={375} onRespond={noop} />
+              </span>
+            </Row>
+            <Row need className="flex flex-col gap-1">
+              <span className="flex items-baseline gap-1.5 text-ui">
+                <IdTag id={376} />
+                <TextLink to="/tasks/376">A question or several requests link to the task</TextLink>
+              </span>
+              <span className="flex flex-wrap gap-1.5">
+                <RowRequestControls action={rowRequestAction([SAMPLE_QUESTION])} taskId={376} onRespond={noop} />
+                <RowRequestControls action={rowRequestAction([SAMPLE_APPROVAL, SAMPLE_ALWAYS])} taskId={376} onRespond={noop} />
+              </span>
+            </Row>
           </RowList>
         </Panel>
       </Section>

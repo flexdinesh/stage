@@ -569,11 +569,18 @@ adapter and keeps it until shutdown ([execution.md](execution.md#claude-code-ada
 It is not one of the [listeners](#one-process-many-listeners): it serves
 only `POST /hooks` on `127.0.0.1` (never another interface), requires
 `Authorization: Bearer <token>` (constant-time compare; 401 otherwise),
-reads at most 64 KiB, answers 204 with no body before any work, and never
-logs or stores a hook's body. `<state dir>/hooks-settings.json` (dir `0700`,
-file `0600`, written atomically when its content changes) is the Claude
+reads at most 1 MiB, answers 204 with no body before any work, and never
+logs or stores a hook's body. The one exception is a `PermissionRequest`
+naming a tool: it stays open (Claude waits up to 3600 s; Stage lifts the
+listener's 10 s read and write bounds for it) as a request the user can
+answer in Stage, with its tool input in memory only, until answered (200
+with Claude's decision) or released (204: answered in Claude, superseded,
+the session stopped waiting, or shutdown); Claude shows its own prompt
+meanwhile ([execution.md](execution.md#claude-code-adapter)).
+`<state dir>/hooks-settings.json` (dir `0700`, file `0600`, written atomically when its content changes) is the Claude
 settings file every launch passes with `--settings`: one HTTP hook per
-event, all with that URL and token. `hooks-settings-head.json` beside it
+event, all with that URL and token (timeout 5 s, `PermissionRequest`
+3600 s). `hooks-settings-head.json` beside it
 (same modes, written with it) adds `worktree.baseRef` `head`; a launch
 with a predecessor base passes it instead, since Claude takes one
 `--settings`. Claude saves the file's path with each
@@ -584,7 +591,8 @@ rewrites the file, and sessions launched before reach the new port when
 they next wake. While no listener answers (Stage stopped), Claude records a
 non-blocking hook error in the session and the turn goes on; polling
 catches up. When the receiver cannot open (no state dir, the folder or
-port), launches carry no hooks and the setup status says why.
+port), launches carry no hooks, approvals are answered in Claude Code only,
+and the setup status says why.
 
 ## Codex connection
 

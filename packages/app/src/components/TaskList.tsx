@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork, useSessionRequests } from "../api/queries.ts";
 import { rowSessionAction } from "../lib/harnesses.ts";
 import type { Task } from "../api/types.ts";
 import { configModelText, dateTime, duration, relativeTime } from "../lib/format.ts";
@@ -21,6 +21,7 @@ import { NodeChip } from "./trees/TreeNode.tsx";
 import { Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "./SessionAction.tsx";
+import { RowRequestControls, RowRequestLine, useRowRequest } from "./Requests.tsx";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
@@ -249,8 +250,11 @@ export function TaskRow({
   const undo = useUndoComplete(task);
   const confirming = review ? quick.confirm : null;
   const rowError = review ? quick.error : justCompleted ? undo.error : null;
-  const session = rowSessionAction(appLink, task, { needsInput, hidden: justCompleted || confirming !== null });
-  const hasActions = justCompleted || review || showStart || session !== null || extra !== undefined;
+  // A request Stage can answer leads the row; the harness's own Open / resume command steps back to secondary.
+  const { requests } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput });
+  const answer = useRowRequest(task.id, requests);
+  const session = rowSessionAction(appLink, task, { needsInput: needsInput && answer.action === null, hidden: justCompleted || confirming !== null });
+  const hasActions = justCompleted || review || showStart || session !== null || answer.action !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -302,6 +306,7 @@ export function TaskRow({
             </TextLink>
           )}
         </div>
+        <RowRequestLine action={answer.action} className="mt-1" />
         <LastWordLine state={task.state} preview={task.lastWordPreview} className="mt-1 hidden md:block" />
       </div>
 
@@ -351,6 +356,7 @@ export function TaskRow({
             </Button>
           </BlockedReason>
         ) : null}
+        <RowRequestControls action={answer.action} taskId={task.id} busy={answer.busy} onRespond={answer.onRespond} />
         {session === null ? null : (
           <SessionActionButton action={session} name={kindName(task.harness)} small variant={session.primary ? "primary" : "secondary"} connectionId={task.connectionId} />
         )}
@@ -366,6 +372,11 @@ export function TaskRow({
       {start.error === null ? null : (
         <div className={cx("order-6 col-span-2", underTitle)}>
           <ErrorText error={start.error} />
+        </div>
+      )}
+      {answer.error === null ? null : (
+        <div className={cx("order-6 col-span-2", underTitle)}>
+          <ErrorText error={answer.error} />
         </div>
       )}
       {rowError === null ? null : (

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, updatesText, versionText } from "../src/lib/claude.ts";
+import { approvalsText, claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, updatesText, versionText } from "../src/lib/claude.ts";
 
 const details = { binary: "/home/dee/.local/bin/claude", version: "2.1.332 (Claude Code)", configDirectory: "/home/dee/.claude", loggedIn: true, scope: true };
 const status = (extra = {}) => ({
@@ -93,4 +93,9 @@ test("status panel: summary, identity line, reason as the error", () => {
   assert.deepEqual(down.detail, { lines: [], error: "claude --version didn't answer." });
   assert.equal(down.summary.tone, "bad");
   assert.deepEqual(claudeStatusView(read(undefined, { error: "fetch failed" }), "Claude Code").detail, { lines: [], error: "fetch failed" });
+});
+
+test("approvals: on the task while hooks push, else in Claude Code", () => {
+  assert.equal(approvalsText({ mode: "push", reason: "", lastEventAt: null }), "on the task in Stage, or in Claude Code");
+  assert.equal(approvalsText({ mode: "polling", reason: "No port.", lastEventAt: null }), "in Claude Code");
 });
