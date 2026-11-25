@@ -30,7 +30,7 @@ import {
   type RepeatSpec,
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
-import { effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
+import { branchLabel, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
 import { blockedStartModes, formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { projectsForConnection } from "../lib/projects.ts";
@@ -358,7 +358,7 @@ function TaskFormDrawer({
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
     full && unverifiedConfig && "verify or clear saved settings",
     full && !acceptsImages && images.items.length > 0 && "remove images",
-    full && harnessWorktree && wsChoice !== "root" && (wsChoice === "predecessor" || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
+    full && harnessWorktree && wsChoice !== "root" && ((wsChoice === "predecessor" && !supportsPredecessor) || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
     !harnessWorktree && wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
@@ -495,7 +495,11 @@ function TaskFormDrawer({
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
         </> : null}
         <fieldset disabled={!full || !connection} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
-          <FieldGroup label="Workspace" start>
+          <FieldGroup
+            label="Workspace"
+            start
+            hint={harnessWorktree && supportsPredecessor && wsChoice === "predecessor" ? `${harnesses.name(connection)} makes the worktree from ${branchLabel(predName)} and names its branch.` : undefined}
+          >
             <Segmented
               label="Workspace"
               options={workspaces}
@@ -503,7 +507,7 @@ function TaskFormDrawer({
               onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
             />
           </FieldGroup>
-          {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || wsChoice === "predecessor") ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType:"worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
+          {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || (wsChoice === "predecessor" && !supportsPredecessor)) ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType: wsChoice === "predecessor" && supportsPredecessor ? "predecessor" : "worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
           {!harnessWorktree && wsChoice !== "root" ? (
             <>
               <Field

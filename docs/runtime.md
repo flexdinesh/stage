@@ -152,7 +152,7 @@ two owners lock different inodes.
 | `*.lock` files | the server | never (they are empty or informational) |
 | Default socket dir, data dir | the server | never |
 | `<data dir>/backups/stage-schema*.db` | the server, before a migration | the server, keeping the newest 3 |
-| `<data dir>/claude/hooks-settings.json` (worker: `<worker dir>/claude/`) | the server (or worker) with its first Claude Code adapter | never: Claude sessions read it again whenever they wake ([Claude Code hooks](#claude-code-hooks)) |
+| `<data dir>/claude/hooks-settings.json` and `hooks-settings-head.json` (worker: `<worker dir>/claude/`) | the server (or worker) with its first Claude Code adapter | never: Claude sessions read it again whenever they wake ([Claude Code hooks](#claude-code-hooks)) |
 
 ## Shutdown
 
@@ -573,7 +573,10 @@ reads at most 64 KiB, answers 204 with no body before any work, and never
 logs or stores a hook's body. `<state dir>/hooks-settings.json` (dir `0700`,
 file `0600`, written atomically when its content changes) is the Claude
 settings file every launch passes with `--settings`: one HTTP hook per
-event, all with that URL and token. Claude saves the file's path with each
+event, all with that URL and token. `hooks-settings-head.json` beside it
+(same modes, written with it) adds `worktree.baseRef` `head`; a launch
+with a predecessor base passes it instead, since Claude takes one
+`--settings`. Claude saves the file's path with each
 session and reads it again when it wakes the session, so the file always
 names the current listener. A restart keeps the token and binds the port
 the file names when it is free; otherwise it takes a free port and

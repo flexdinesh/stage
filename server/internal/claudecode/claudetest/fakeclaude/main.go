@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,6 +128,11 @@ func launch(s *fakestate.State, args []string) (int, error) {
 			if i+1 >= len(args) {
 				return 2, fmt.Errorf("--settings needs a file")
 			}
+			// Claude keeps one --settings value: a second would drop
+			// the first (the hooks or the worktree base).
+			if settings != "" {
+				return 2, fmt.Errorf("--settings given twice")
+			}
 			settings = args[i+1]
 			i++
 		case "--":
@@ -145,9 +151,10 @@ func launch(s *fakestate.State, args []string) (int, error) {
 		fmt.Fprintln(os.Stderr, "connection reset")
 		return 1, nil
 	}
+	branch := ""
 	if worktree != "" {
-		dir = filepath.Join(dir, ".claude", "worktrees", worktree)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		var err error
+		if dir, branch, err = makeWorktree(dir, worktree, settings); err != nil {
 			return 2, err
 		}
 	}
@@ -160,7 +167,7 @@ func launch(s *fakestate.State, args []string) (int, error) {
 		PID: 4242, ID: id[:8], Cwd: dir, Kind: "background", StartedAt: now.UnixMilli(),
 		SessionID: id, Name: name, Status: "busy", State: "working",
 	}, Settings: settings})
-	if err := fakestate.AppendUser(s.ProjectsDir, dir, id, "cli", "bg", prompt, now); err != nil {
+	if err := fakestate.AppendUserOn(s.ProjectsDir, dir, id, "cli", "bg", prompt, branch, now); err != nil {
 		return 2, err
 	}
 	if s.Launch == fakestate.CrashAfterCreate {
@@ -169,6 +176,57 @@ func launch(s *fakestate.State, args []string) (int, error) {
 	}
 	fmt.Printf("backgrounded · %s · %s\n\n  claude agents          list sessions\n", id[:8], name)
 	return 0, nil
+}
+
+// makeWorktree is `-w name` as Claude does it (docs/adr/0005 E5, E10): in a
+// Git checkout, a worktree of the main checkout at
+// <main>/.claude/worktrees/<name> on a new branch worktree-<name>, from the
+// launch checkout's HEAD when settings set worktree.baseRef "head", else
+// from the main checkout's HEAD (standing in for origin's default branch).
+// Outside Git it is a plain folder.
+func makeWorktree(cwd, name, settings string) (string, string, error) {
+	git := func(dir string, args ...string) (string, error) {
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+		out, err := c.Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	common, err := git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		dir := filepath.Join(cwd, ".claude", "worktrees", name)
+		return dir, "", os.MkdirAll(dir, 0o755)
+	}
+	main := filepath.Dir(common)
+	from := main
+	var s struct {
+		Worktree struct {
+			BaseRef string `json:"baseRef"`
+		} `json:"worktree"`
+	}
+	if settings != "" {
+		raw := []byte(settings)
+		if !strings.HasPrefix(strings.TrimSpace(settings), "{") {
+			// A settings file, as Claude takes either.
+			if raw, err = os.ReadFile(settings); err != nil {
+				return "", "", fmt.Errorf("--settings: %w", err)
+			}
+		}
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", "", fmt.Errorf("--settings: %w", err)
+		}
+	}
+	if s.Worktree.BaseRef == "head" {
+		from = cwd
+	}
+	base, err := git(from, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve HEAD in %s: %w", from, err)
+	}
+	dir, branch := filepath.Join(main, ".claude", "worktrees", name), "worktree-"+name
+	if _, err := git(main, "worktree", "add", "-q", "-b", branch, dir, base); err != nil {
+		return "", "", fmt.Errorf("git worktree add: %w", err)
+	}
+	return dir, branch, nil
 }
 
 func claudeEnv() map[string]string {

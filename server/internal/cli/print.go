@@ -151,7 +151,7 @@ func printTask(w io.Writer, t client.Task) {
 	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, permission, mode)
 	switch {
 	case t.Workspace.FromPredecessor():
-		fmt.Fprintf(w, "  worktree from %s's branch (configured ref %s, branch %s)\n", predecessorLabel(t), t.Workspace.BaseRef, orDash(t.Workspace.Branch))
+		fmt.Fprintf(w, "  worktree from %s's branch (configured ref %s, branch %s)\n", predecessorLabel(t), orDash(&t.Workspace.BaseRef), orDash(t.Workspace.Branch))
 	case t.Workspace.Type == "worktree":
 		fmt.Fprintf(w, "  worktree %s (branch %s)\n", t.Workspace.BaseRef, orDash(t.Workspace.Branch))
 	}

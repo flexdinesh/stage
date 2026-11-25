@@ -220,8 +220,38 @@ func TestLiveClaude(t *testing.T) {
 	// A worktree per attempt, in the repository.
 	_, o = launch("live-wt", repo, "worktree", "", "Without using any tools, reply with exactly: stage wt ok")
 	done = await(o.Session, "done")
-	if done.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-wt")) || done.Project != repo || done.Branch != "worktree-"+claudecode.WorktreeName("live-wt") {
+	if done.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-wt")) || done.Project != repo || done.Branch != "worktree-"+claudecode.WorktreeName("live-wt") || !done.Base.Available {
 		t.Fatalf("worktree %+v", done)
+	}
+
+	// A predecessor base: Claude's next worktree starts at the predecessor
+	// worktree's commit (docs/adr/0005 E10).
+	gitIn := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=stage", "-c", "user.email=stage@example.invalid"}, args...)...).Output()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v", args, dir, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	gitIn(done.Directory, "commit", "-q", "--allow-empty", "-m", "predecessor")
+	tip := gitIn(done.Directory, "rev-parse", "HEAD")
+	marker := execution.LaunchMarker("live-dep")
+	dep := execution.Intent{RequestID: "live-dep", ConnectionID: 1, Project: repo, Directory: repo, Title: "Stage live live-dep", Prompt: "Without using any tools, reply with exactly: stage dep ok\n\n" + marker, Marker: marker,
+		Workspace: execution.Workspace{Kind: "worktree", Base: done.Branch}, Config: execution.Config{Model: "haiku"}}
+	o, err = a.Launch(ctx, dep, execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatalf("launch live-dep: %v", err)
+	}
+	if s, ok := strings.CutPrefix(o.Links.Command, "claude attach "); ok {
+		shorts = append(shorts, s)
+	}
+	depDone := await(o.Session, "done")
+	if depDone.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-dep")) || depDone.Project != repo {
+		t.Fatalf("dependent %+v", depDone)
+	}
+	if head := gitIn(depDone.Directory, "rev-parse", "HEAD"); head != tip {
+		t.Fatalf("dependent starts at %s, want the predecessor's %s", head, tip)
 	}
 }
 
@@ -275,13 +305,37 @@ func liveCleanup(t *testing.T, cli *claudecode.CLI, state, scratch string, dirs,
 	// t.Context() has ended by the time cleanup runs.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	for _, s := range shorts {
-		for try := 0; try < 10; try++ {
+	// Newest first: a dependent launched from a predecessor's worktree
+	// keeps Claude from removing that worktree until it is gone.
+	rm := func(s string, tries int) (bool, string) {
+		last := ""
+		for try := 0; try < tries; try++ {
 			res, err := cli.Run(ctx, "", "rm", s)
 			if err == nil && (res.Code == 0 || strings.Contains(res.Stderr+res.Stdout, "No session matching")) {
-				break
+				return true, ""
+			}
+			last = res.Stderr + res.Stdout
+			if err != nil {
+				last = err.Error()
 			}
 			time.Sleep(time.Second)
+		}
+		return false, last
+	}
+	for i := len(shorts) - 1; i >= 0; i-- {
+		s := shorts[i]
+		ok, out := rm(s, 10)
+		if !ok {
+			// Claude keeps a worktree that has commits (the predecessor's);
+			// with the scratch worktrees gone it removes the session.
+			t.Logf("claude rm %s: %s; removing the scratch worktrees", s, out)
+			for _, d := range dirs {
+				_ = os.RemoveAll(filepath.Join(d, ".claude", "worktrees"))
+			}
+			ok, out = rm(s, 3)
+		}
+		if !ok {
+			t.Errorf("claude rm %s kept the session (%s); remove it by hand", s, out)
 		}
 	}
 	for _, d := range dirs {

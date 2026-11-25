@@ -913,6 +913,14 @@ func TestBaseTools(t *testing.T) {
 	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
 		t.Fatal("create_task base without baseRef must fail")
 	}
+	// A worktree with base=predecessor and no baseRef reaches the server,
+	// whose harness policy decides: T3 needs the fallback ref.
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "needs": []int64{a.ID}, "workspaceType": "worktree", "base": "predecessor"}, nil); !strings.Contains(msg, "baseRef is required") {
+		t.Fatalf("create_task worktree base=predecessor without baseRef on T3: %s", msg)
+	}
+	if msg := call(t, cs, "update_task", map[string]any{"id": r.ID, "workspaceType": "worktree", "base": "predecessor"}, nil); !strings.Contains(msg, "baseRef is required") {
+		t.Fatalf("update_task worktree base=predecessor without baseRef on T3: %s", msg)
+	}
 }
 
 // The server's HTTP /mcp endpoint serves tools from the /api router

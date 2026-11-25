@@ -31,6 +31,9 @@ var Descriptor = harness.Descriptor{
 	StableIdentity: true,
 	Launch:         harness.LaunchCorrelated,
 	Attention:      harness.AttentionSilent,
+	// Claude names its worktree branches and starts them from origin's
+	// default branch, or from a predecessor's branch (docs/adr/0005 E10).
+	Worktree: harness.Worktree{Predecessor: true},
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when removed in Claude Code",

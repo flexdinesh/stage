@@ -180,7 +180,7 @@ var available = execution.Availability{Available: true}
 // Unavailable operation reasons.
 const (
 	reasonAnswer = "Answer in Claude Code: copy the resume command and run it in a terminal."
-	reasonBase   = "Claude Code creates worktrees from the checkout's current HEAD and names the branch itself."
+	reasonBase   = "Claude Code starts worktrees from origin's default branch, or from a predecessor's branch, and names the branch itself."
 	reasonFolder = "Open Claude Code in the folder once; Stage lists the folders Claude Code knows."
 )
 
@@ -193,7 +193,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
 		Operations: map[string]execution.Availability{
 			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "images": available,
-			"predecessorBase":   {Reason: reasonBase},
+			"predecessorBase":   available,
 			"worktreeBase":      {Reason: reasonBase},
 			"registerWorkspace": {Reason: reasonFolder},
 			execution.OpRespond: {Reason: reasonAnswer},
@@ -384,7 +384,7 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		ExecutionID: t.LastPromptID,
 		Links:       a.links(s),
 		Artifacts:   []execution.Artifact{},
-		Base:        execution.Availability{Reason: reasonBase},
+		Base:        baseAvailability(cwd, t.Branch),
 		Config:      execution.Config{Options: []execution.ModelOption{}},
 	}
 	if o.Title == "" {

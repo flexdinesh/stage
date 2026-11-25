@@ -36,6 +36,10 @@ var HookEvents = []string{"Stop", "StopFailure", "Notification", "PermissionRequ
 // session, so the file always names the current listener.
 const HooksFile = "hooks-settings.json"
 
+// HooksHeadFile is HooksFile plus worktree.baseRef "head", for a launch
+// with a predecessor base (Claude takes one --settings; base.go).
+const HooksHeadFile = "hooks-settings-head.json"
+
 const (
 	hookPath    = "/hooks"
 	maxHookBody = 64 << 10
@@ -173,6 +177,10 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 // SettingsPath is the file a launch passes with --settings.
 func (h *Hooks) SettingsPath() string { return h.path }
 
+// HeadSettingsPath is the file a launch with a predecessor base passes
+// with --settings (HooksHeadFile).
+func (h *Hooks) HeadSettingsPath() string { return filepath.Join(filepath.Dir(h.path), HooksHeadFile) }
+
 // URL is where Claude posts hooks.
 func (h *Hooks) URL() string { return h.url }
 
@@ -298,7 +306,12 @@ func (h *Hooks) deliver(n Nudge) {
 
 // Claude's settings file shape, as far as Stage writes it.
 type hookSettingsFile struct {
-	Hooks map[string][]hookMatcher `json:"hooks"`
+	Hooks    map[string][]hookMatcher `json:"hooks"`
+	Worktree *worktreeSettings        `json:"worktree,omitempty"`
+}
+
+type worktreeSettings struct {
+	BaseRef string `json:"baseRef"`
 }
 
 type hookMatcher struct {
@@ -315,7 +328,12 @@ type httpHook struct {
 // HookSettings is the settings file's content: one HTTP hook per event,
 // no matcher.
 func HookSettings(hookURL, token string) ([]byte, error) {
-	f := hookSettingsFile{Hooks: map[string][]hookMatcher{}}
+	return hookSettings(hookURL, token, nil)
+}
+
+// hookSettings is HookSettings with an optional worktree section.
+func hookSettings(hookURL, token string, wt *worktreeSettings) ([]byte, error) {
+	f := hookSettingsFile{Hooks: map[string][]hookMatcher{}, Worktree: wt}
 	for _, e := range HookEvents {
 		f.Hooks[e] = []hookMatcher{{Hooks: []httpHook{{Type: "http", URL: hookURL, Headers: map[string]string{"Authorization": "Bearer " + token}, Timeout: hookTimeout}}}}
 	}
@@ -351,20 +369,34 @@ func readHookSettings(path string) (int, string) {
 	return 0, ""
 }
 
-// writeSettings writes the settings file (0600, in a 0700 dir) when its
-// content changed, atomically.
+// writeSettings writes the settings files (0600, in a 0700 dir) when their
+// content changed, atomically: HooksFile and its head variant, so both name
+// the current listener.
 func (h *Hooks) writeSettings(dir string) error {
-	b, err := HookSettings(h.url, h.token)
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if old, err := os.ReadFile(h.path); err == nil && bytes.Equal(old, b) {
-		return os.Chmod(h.path, 0o600)
+	b, err := hookSettings(h.url, h.token, nil)
+	if err != nil {
+		return err
 	}
-	tmp, err := os.CreateTemp(dir, HooksFile+".*")
+	if err := writeFile0600(dir, h.path, b); err != nil {
+		return err
+	}
+	head, err := hookSettings(h.url, h.token, &worktreeSettings{BaseRef: "head"})
+	if err != nil {
+		return err
+	}
+	return writeFile0600(dir, h.HeadSettingsPath(), head)
+}
+
+// writeFile0600 replaces path (in dir) with b, atomically, unless it
+// already holds b.
+func writeFile0600(dir, path string, b []byte) error {
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, b) {
+		return os.Chmod(path, 0o600)
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*")
 	if err != nil {
 		return err
 	}
@@ -376,5 +408,5 @@ func (h *Hooks) writeSettings(dir string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), h.path)
+	return os.Rename(tmp.Name(), path)
 }
