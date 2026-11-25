@@ -89,7 +89,15 @@ them. 2, 3, 13 and 14 come from the evidence.
    by UUID (or short id, resolved through the roster). Adoption is refused
    with "Track it through T3" when the transcript's first `user` record has
    `entrypoint: "t3-code"`. Opening an adopted session returns its first
-   user prompt.
+   user prompt. Amended by #383: discovery surfaces, adoption tracks. The
+   adapter's attention feed lists every session waiting for its user
+   (background `blocked`, retired ones included, and interactive `waiting`,
+   T3's left out), read from the same roster. Under the descriptor's
+   `silent` attention policy they appear only as inbox waiting rows and in
+   the needs-input count, never as events or pushes, until the user adopts
+   one (the row's Track). Global hooks (`stage setup --claude`) were
+   rejected: they would write the user's global Claude settings, and the
+   roster already reports waiting sessions.
 10. **Workspaces**: the project root, or Claude's `-w <name>`. Claude picks
     the base (HEAD of the checkout) and the branch (`worktree-<name>`), so
     `worktreeBase` and `predecessorBase` are unavailable. Stage names
@@ -319,6 +327,9 @@ answering prompts in Claude for now. The SDK route stays open as #385.
 - #373 (surfacing): the setup and launch copy explains trust ("Open
   Claude in this folder once and trust it").
 - #375: choose among the approval routes above.
+- #383 (discovery): `Attention` reads the roster (decision 9, amended); a
+  live interactive session has no resume command, since it is answered
+  where it runs.
 
 ## Reproduce
 

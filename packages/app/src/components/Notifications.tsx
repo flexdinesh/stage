@@ -11,7 +11,8 @@ import {
   useNotifications,
   useHarnesses,
 } from "../api/queries.ts";
-import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, WaitingSession } from "../api/types.ts";
+import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
+import { folderName, resumeCommand, sessionAction, type SessionAction } from "../lib/harnesses.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconClose } from "./icons.tsx";
@@ -41,6 +42,7 @@ import {
   toneClass,
 } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
+import { CopyButton } from "./ui/copy.tsx";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -240,15 +242,34 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
   );
 }
 
-/** The harness destination of a notification or waiting session; none once its connection was replaced. */
-function useNotificationDestination() {
+/** A row's way to its session (null on a replaced connection: Stage no longer follows it). */
+function useNotificationAction() {
   const destination = useSessionDestination();
   const harnesses = useHarnesses();
-  return (n: Pick<Notification, "connectionId" | "links">) => (harnesses.retired(n.connectionId) ? null : destination(n));
+  return (n: Pick<Notification, "connectionId" | "links">): SessionAction | null =>
+    harnesses.retired(n.connectionId) ? null : sessionAction(destination(n), resumeCommand(n));
+}
+
+/**
+ * Open in <harness>, or Copy resume command when the harness has only a resume command (Claude Code). A waiting session
+ * with neither is answered where it runs: say so instead of offering nothing.
+ */
+function SessionActionButton({ action, harness, waiting }: { action: SessionAction | null; harness: string; waiting: boolean }) {
+  const variant = waiting ? "primary" : "secondary";
+  switch (action?.kind) {
+    case "open":
+      return <AppButton small variant={variant} href={action.href}>Open in {harness}</AppButton>;
+    case "copy":
+      return <CopyButton text={action.command} label="Copy resume command" title={action.command} variant={variant} />;
+    case "none":
+      return waiting ? <span className="text-small text-muted">Answer in {harness}</span> : null;
+    default:
+      return null;
+  }
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
-  const destination = useNotificationDestination();
+  const action = useNotificationAction()(n);
   const { name } = useHarnesses();
   const sticky = n.event === "needs_input";
   const [paused, setPaused] = useState(false);
@@ -297,11 +318,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           <ToastView n={n} onDismiss={onDismiss} />
-          {destination(n) === null ? null : (
-            <AppButton small variant={stillWaiting(n) ? "primary" : "secondary"} href={destination(n) ?? ""}>
-              Open in {name(n.connectionId)}
-            </AppButton>
-          )}
+          <SessionActionButton action={action} harness={name(n.connectionId)} waiting={stillWaiting(n)} />
         </div>
       </div>
     </div>
@@ -349,14 +366,19 @@ function groupByDay(items: NotificationGroup[], now: Date = new Date()): Group[]
 
 /**
  * Opening reads the inbox: unread markers stay (from a snapshot) until
- * the drawer closes; anything that arrives while open is read on close.
+ * the drawer closes; anything that arrives while open is read on close. `onTrack` hands a waiting session to the
+ * Track session drawer (the inbox closes first: one modal at a time).
  */
-export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
+export function NotificationsDrawer({ onClose, onTrack }: { onClose: () => void; onTrack?: (session: SessionRef) => void }) {
   const api = useApi();
   const { notifications } = usePlatform();
   const qc = useQueryClient();
   const inbox = useNotificationInbox();
   const silent = inbox.data?.pages[0]?.waitingSessions ?? [];
+  const harnesses = useHarnesses();
+  const silentHarnesses = new Set(silent.map((session) => harnesses.name(session.connectionId)));
+  const [onlyHarness] = silentHarnesses;
+  const silentTitle = silentHarnesses.size === 1 && onlyHarness !== undefined ? `Waiting in ${onlyHarness}` : "Waiting outside Stage";
   const push = useQuery({
     queryKey: keys.device.push,
     queryFn: () => notifications?.state() ?? Promise.resolve(undefined),
@@ -442,8 +464,8 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="flex flex-col gap-2">
             {silent.length === 0 ? null : <section className="border border-line">
-              <PanelHeader as="h3" title="Waiting in T3" meta={<span className="tabular">{silent.length}</span>} />
-              <RowList>{silent.map((session) => <Row bare key={`${session.connectionId}:${session.externalSessionId}`}><SilentWaitingRow session={session} /></Row>)}</RowList>
+              <PanelHeader as="h3" title={silentTitle} meta={<span className="tabular">{silent.length}</span>} />
+              <RowList>{silent.map((session) => <Row bare key={`${session.connectionId}:${session.externalSessionId}`}><SilentWaitingRow session={session} onTrack={onTrack} /></Row>)}</RowList>
             </section>}
             {groupByDay(items).map((g) => (
               <section key={g.label} className="border border-line">
@@ -492,7 +514,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   onNavigate: () => void;
 }) {
   const historyId = useId();
-  const destination = useNotificationDestination();
+  const action = useNotificationAction()(n);
   const { name } = useHarnesses();
   const waiting = n.currentState === "needs_input";
   const project = projectOf(n);
@@ -558,11 +580,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
-          {destination(n) === null ? null : (
-            <AppButton small variant={waiting ? "primary" : "secondary"} href={destination(n) ?? ""}>
-              Open in {name(n.connectionId)}
-            </AppButton>
-          )}
+          <SessionActionButton action={action} harness={name(n.connectionId)} waiting={waiting} />
         </div>
       </div>
       <div id={historyId} hidden={!expanded}>
@@ -623,20 +641,31 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
   );
 }
 
-/** Current attention only. No event timestamp, history, unread marker or read mutation. */
-function SilentWaitingRow({ session }: { session: WaitingSession }) {
-  const destination = useNotificationDestination();
+/**
+ * Current attention only. No event timestamp, history, unread marker or read mutation. A session Stage discovered
+ * is not tracked: Track hands it to the Track session drawer, where the user confirms.
+ */
+function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTrack: ((session: SessionRef) => void) | undefined }) {
+  const action = useNotificationAction()(session);
   const { name } = useHarnesses();
-  const href = destination(session);
-  const fallback = `Open in ${name(session.connectionId)}: ${session.externalSessionId}`;
+  const harness = name(session.connectionId);
+  const place = session.projectTitle ?? folderName(session.directory) ?? harness;
   return <div className={cx(needEdgeClass(true), "px-3 py-row")}>
     <div className="flex items-center justify-between gap-2.5">
       <p title={session.title} className="min-w-0 truncate text-body font-medium">{session.title}</p>
       <div className="shrink-0"><TaskStateBadge state="needs_input" /></div>
     </div>
     <div className="mt-1 flex items-center justify-between gap-2.5">
-      <Meta className="min-w-0 truncate">{session.projectTitle ?? name(session.connectionId)}</Meta>
-      {href === null ? <span title={fallback} className="min-w-0 truncate text-small text-muted">{fallback}</span> : <AppButton small href={href} variant="primary">Open in {name(session.connectionId)}</AppButton>}
+      <Meta className="min-w-0 truncate" title={session.directory ?? place}>{place}</Meta>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {onTrack === undefined || action === null ? null : (
+          <Button small title="Track this session as a Stage task" onClick={() => onTrack({ connectionId: session.connectionId, externalSessionId: session.externalSessionId })}>
+            Track
+          </Button>
+        )}
+        <SessionActionButton action={action} harness={harness} waiting />
+      </div>
     </div>
+    {action?.kind === "copy" ? <code title={action.command} className="mt-1 block truncate font-mono text-meta text-muted">{action.command}</code> : null}
   </div>;
 }

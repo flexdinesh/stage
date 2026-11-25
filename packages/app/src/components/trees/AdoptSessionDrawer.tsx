@@ -1,22 +1,27 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnections, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../../api/queries.ts";
 import { connectionOptions } from "../../lib/machines.ts";
-import type { AdoptSessionRequest, Task, SessionPreview, TreeDetail } from "../../api/types.ts";
+import type { AdoptSessionRequest, SessionPreview, SessionRef, Task, TreeDetail } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 
 import { ProjectCombobox } from "../ProjectSelect.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
 import { Button, Drawer, ErrorText, Field, InlineError, Input, Meta, Muted, Panel, Combobox } from "../ui.tsx";
 
-/** Explicit lookup only. Preview never adopts a session. */
+/**
+ * Explicit lookup only. Preview never adopts a session. `initial` (a waiting session from the inbox) fills the
+ * harness and session and previews it at once; tracking still waits for the user's confirmation.
+ */
 export function AdoptSessionDrawer({
   tree,
+  initial,
   onClose,
   onAdopted,
 }: {
   tree?: TreeDetail;
+  initial?: SessionRef;
   onClose: () => void;
   onAdopted?: (task: Task) => void;
 }) {
@@ -25,14 +30,14 @@ export function AdoptSessionDrawer({
   const connections = useConnections();
   const harnessNames = useHarnesses();
   const { machines } = useMachines();
-  const [chosen, setConnection] = useState("");
+  const [chosen, setConnection] = useState(initial === undefined ? "" : String(initial.connectionId));
   const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
   const [projectId, setProjectId] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const invalidate = useInvalidateWork();
   const navigate = useNavigate();
-  const [ref, setRef] = useState("");
+  const [ref, setRef] = useState(initial?.externalSessionId ?? "");
   const [picked, setPicked] = useState<SessionPreview | null>(null);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
@@ -68,6 +73,12 @@ export function AdoptSessionDrawer({
       else await navigate(`/tasks/${task.id}`);
     },
   });
+  // Preview the handed-over session once, on open.
+  const previewMutate = preview.mutate;
+  const prefilled = initial !== undefined;
+  useEffect(() => {
+    if (prefilled) previewMutate();
+  }, [prefilled, previewMutate]);
   const eligible = picked !== null && !picked.unavailableReason;
   return (
     <Drawer

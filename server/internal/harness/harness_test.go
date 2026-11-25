@@ -15,6 +15,7 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 		"no name":            {{Kind: "a", Hosting: harness.Connected}},
 		"twice":              {ok, ok},
 		"unknown hosting":    {{Kind: "a", Name: "A", Hosting: "cloud"}},
+		"unknown attention":  {{Kind: "a", Name: "A", Hosting: harness.Connected, Attention: "loud"}},
 		"unknown signal":     {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: "merged", Provenance: "harness_merged"}}}},
 		"mismatched closure": {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: execution.ClosedSettled, Provenance: "harness_archived"}}}},
 		"duplicate field":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: harness.FieldURL}, {ID: "u", Label: "U2", Kind: harness.FieldText}}}}},
@@ -36,6 +37,10 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 	}
 	if r.Name("b") != "B" || r.Name("zzz") != "zzz" {
 		t.Fatal("names")
+	}
+	// Unset attention notifies (T3 and OpenCode); a harness opts into silent.
+	if d, _ := r.Lookup("a"); d.Attention != harness.AttentionNotify {
+		t.Fatalf("default attention %q", d.Attention)
 	}
 	if c, found := b.Closure(execution.ClosedArchived); !found || c.Via != "via B" {
 		t.Fatalf("closure %+v", c)

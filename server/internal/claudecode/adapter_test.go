@@ -274,6 +274,89 @@ func TestStop(t *testing.T) {
 	}
 }
 
+// Attention lists every session waiting for its user that Stage may track:
+// blocked background sessions (also retired ones, with no process) and
+// waiting terminal sessions, never T3's or ones that are not waiting.
+func TestAttentionListsWaitingSessions(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	launch := func(req string) string {
+		t.Helper()
+		o, err := a.Launch(t.Context(), intent(f, req), execution.Checkpoint{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o.Session.ExternalSessionID
+	}
+	attention := func(want ...string) {
+		t.Helper()
+		refs, err := a.Attention(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := []string{}
+		for _, r := range refs {
+			if r.ConnectionID != conn {
+				t.Fatalf("connection %+v", r)
+			}
+			got = append(got, r.ExternalSessionID)
+		}
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("attention %v, want %v", got, want)
+		}
+	}
+	_, blocked, done := launch("req-a1"), launch("req-a2"), launch("req-a3")
+	attention()
+	f.SetState(blocked, "blocked", "waiting", "permission prompt")
+	f.SetState(done, "done", "idle", "")
+	attention(blocked)
+	// Retired after an hour idle: no process, still blocked.
+	f.Update(func(s *fakestate.State) {
+		for i := range s.Sessions {
+			if s.Sessions[i].SessionID == blocked {
+				s.Sessions[i].PID, s.Sessions[i].Status, s.Sessions[i].WaitingFor = 0, "", ""
+			}
+		}
+	})
+	attention(blocked)
+	term, t3, idle := "44444444-4444-4444-8444-444444444444", "33333333-3333-4333-8333-333333333333", "55555555-5555-4555-8555-555555555555"
+	f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
+	f.AddInteractive(t3, f.Workspace, "t3-code", "from T3")
+	f.AddInteractive(idle, f.Workspace, "cli", "idle terminal")
+	f.SetState(term, "", "waiting", "permission prompt")
+	f.SetState(t3, "", "waiting", "input needed")
+	f.SetState(idle, "", "idle", "")
+	attention(blocked, term)
+	f.Update(func(s *fakestate.State) { s.FailAgents = true })
+	if _, err := a.Attention(t.Context()); err == nil {
+		t.Fatal("an unreadable list must be an error")
+	}
+}
+
+// A terminal session is answered where it runs: no command while its
+// process lives, the resume command once Claude no longer lists it.
+func TestInteractiveLinks(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	term := "44444444-4444-4444-8444-444444444444"
+	f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
+	f.SetState(term, "", "waiting", "permission prompt")
+	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: term}
+	o, err := a.Observe(t.Context(), ref)
+	if err != nil || o.State != "needs_input" || o.Links != (execution.Links{}) {
+		t.Fatalf("live %+v %v", o, err)
+	}
+	if l := a.Destinations(t.Context(), ref); l != (execution.Links{}) {
+		t.Fatalf("destinations %+v", l)
+	}
+	f.Remove(term)
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.Links.Command != "cd "+f.Workspace+" && claude --resume "+term {
+		t.Fatalf("exited %+v %v", o, err)
+	}
+}
+
 // A session T3 started is refused everywhere Stage could pick it up; a
 // terminal session can be adopted by UUID or short id.
 func TestT3SessionsAreRefusedAndLinksResolve(t *testing.T) {

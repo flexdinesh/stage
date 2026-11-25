@@ -163,14 +163,14 @@ func (r notifications) Prune(ctx context.Context, before time.Time) (int64, erro
 }
 
 func (r notifications) Waiting(ctx context.Context, upToID int64) ([]store.WaitingSession, error) {
-	rows, err := r.Query(ctx, `SELECT connection_id, external_id, title, project_title FROM (
- SELECT 1 AS connection_id, th.t3_thread_id AS external_id, th.title, p.title AS project_title, th.updated_at AS updated_at
+	rows, err := r.Query(ctx, `SELECT connection_id, external_id, title, project_title, directory FROM (
+ SELECT 1 AS connection_id, th.t3_thread_id AS external_id, th.title, p.title AS project_title, NULL::text AS directory, th.updated_at AS updated_at
  FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),`+legacyT3SQL+`) AND b.external_project_id=th.t3_project_id AND b.active HAVING count(*)=1))
  LEFT JOIN tasks tk ON tk.session_id = th.session_id
  WHERE `+externalNeedsInput+` AND NOT EXISTS (
  SELECT 1 FROM notifications n WHERE n.session_id = th.session_id AND n.id <= $1)
  UNION ALL
- SELECT si.connection_id, si.external_id, o.observation->>'title', p.title, o.observed_at
+ SELECT si.connection_id, si.external_id, o.observation->>'title', p.title, NULLIF(o.observation->>'directory',''), o.observed_at
  FROM execution_observations o JOIN session_identities si ON si.id=o.session_id
  LEFT JOIN projects p ON p.id=(SELECT min(b.project_id) FROM project_bindings b WHERE b.active AND b.connection_id=si.connection_id AND b.external_project_id=o.observation->>'project' HAVING count(*)=1)
  WHERE NOT EXISTS (SELECT 1 FROM threads th WHERE th.session_id=o.session_id)
@@ -185,7 +185,7 @@ func (r notifications) Waiting(ctx context.Context, upToID int64) ([]store.Waiti
 	out := []store.WaitingSession{}
 	for rows.Next() {
 		var row store.WaitingSession
-		if err := rows.Scan(&row.ConnectionID, &row.ThreadID, &row.Title, &row.ProjectTitle); err != nil {
+		if err := rows.Scan(&row.ConnectionID, &row.ThreadID, &row.Title, &row.ProjectTitle, &row.Directory); err != nil {
 			return nil, err
 		}
 		out = append(out, row)

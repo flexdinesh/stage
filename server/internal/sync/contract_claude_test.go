@@ -1,7 +1,9 @@
 package sync_test
 
 import (
+	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -239,6 +241,63 @@ func TestContractClaudeT3SessionRefused(t *testing.T) {
 		var conflict *db.ConflictError
 		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || !strings.Contains(conflict.Msg, "Track it through T3") {
 			t.Fatalf("%v", err)
+		}
+	})
+}
+
+// Discovery surfaces, adoption tracks: a waiting Claude session Stage did
+// not launch shows as a silent waiting row and in the needs-input count,
+// never as an inbox event, and leaves once answered. T3's sessions stay
+// T3's.
+func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		store, svc, _, _ := claudeSetup(t, p, f)
+		ctx := t.Context()
+		var events []coordinator.ThreadChange
+		svc.OnThreadChange = func(_ context.Context, c coordinator.ThreadChange) { events = append(events, c) }
+		watch := func() {
+			t.Helper()
+			if err := svc.WatchThreads(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		waiting := func(want ...string) {
+			t.Helper()
+			rows, err := store.WaitingWithoutNotifications(ctx, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, r := range rows {
+				got = append(got, r.ThreadID)
+				if r.Directory == nil || *r.Directory != f.Workspace || r.ProjectTitle == nil || *r.ProjectTitle != "Repo" {
+					t.Fatalf("row %+v", r)
+				}
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("waiting %v, want %v", got, want)
+			}
+		}
+		watch() // seeds: the first pass is silent for every harness
+		term, t3 := "44444444-4444-4444-8444-444444444444", "33333333-3333-4333-8333-333333333333"
+		f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
+		f.AddInteractive(t3, f.Workspace, "t3-code", "from T3")
+		f.SetState(term, "", "waiting", "permission prompt")
+		f.SetState(t3, "", "waiting", "input needed")
+		watch()
+		waiting(term)
+		if n, err := store.NeedsInputCount(ctx); err != nil || n != 1 {
+			t.Fatalf("needs input %d %v", n, err)
+		}
+		f.SetState(term, "", "busy", "")
+		watch()
+		waiting()
+		f.SetState(term, "", "waiting", "permission prompt")
+		watch()
+		waiting(term)
+		if len(events) != 0 {
+			t.Fatalf("discovered sessions recorded events: %+v", events)
 		}
 	})
 }

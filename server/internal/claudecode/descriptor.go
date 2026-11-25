@@ -24,10 +24,13 @@ const SessionEnv = "CLAUDE_CODE_SESSION_ID"
 // Its config directory is a lasting identity. Claude assigns session ids, so
 // a launch is correlated by its marker. A session removed in Claude (`claude
 // rm`) after its turn ended may complete its task (the archived closure).
+// Sessions Stage discovers waiting (not launched or adopted) are silent: a
+// waiting row, never an inbox event or push (docs/adr/0005 decision 9).
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "Claude Code", Hosting: harness.Hosted,
 	StableIdentity: true,
 	Launch:         harness.LaunchCorrelated,
+	Attention:      harness.AttentionSilent,
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when removed in Claude Code",

@@ -42,6 +42,21 @@ const (
 	LaunchCorrelated LaunchIdentity = "correlated"
 )
 
+// AttentionPolicy is what Stage does with a session the harness's attention
+// feed (execution.Adapter.Attention) surfaces that no task owns.
+type AttentionPolicy string
+
+const (
+	// AttentionNotify: transitions into needs_input, done or failed after
+	// startup record an inbox event and push, besides the silent waiting row.
+	// The default.
+	AttentionNotify AttentionPolicy = "notify"
+	// AttentionSilent: the session shows only as a silent waiting row and in
+	// the needs-input count; Stage records no event and sends no push until
+	// the user adopts it.
+	AttentionSilent AttentionPolicy = "silent"
+)
+
 // Closure is a closure signal the harness reports (execution.Closure) and
 // the copy that names it. Stage infers completion from a known signal only.
 type Closure struct {
@@ -75,6 +90,9 @@ type Descriptor struct {
 	Attribution Attribution `json:"attribution"`
 	// Launch is how a launch learns its session identity ("" is reserved).
 	Launch LaunchIdentity `json:"launch"`
+	// Attention is what an unowned session from the attention feed may
+	// produce ("" is notify).
+	Attention AttentionPolicy `json:"-"`
 }
 
 // OwnsProcesses: the harness runs its sessions as processes Stage (or a
@@ -166,6 +184,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		if ds[i].Launch == "" {
 			ds[i].Launch = LaunchReserved
 		}
+		if ds[i].Attention == "" {
+			ds[i].Attention = AttentionNotify
+		}
 	}
 	for _, d := range ds {
 		if d.Kind == "" || d.Name == "" {
@@ -180,6 +201,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		}
 		if d.Launch != LaunchReserved && d.Launch != LaunchCorrelated {
 			return nil, fmt.Errorf("harness %s: unknown launch identity %q", d.Kind, d.Launch)
+		}
+		if d.Attention != AttentionNotify && d.Attention != AttentionSilent {
+			return nil, fmt.Errorf("harness %s: unknown attention policy %q", d.Kind, d.Attention)
 		}
 		for _, c := range d.Closures {
 			if p, ok := provenances[c.Signal]; !ok || p != c.Provenance {

@@ -19,6 +19,8 @@ import {
   retiredNotice,
   sessionLinks,
   resumeCommand,
+  sessionAction,
+  folderName,
   usageText,
 } from "../src/lib/harnesses.ts";
 import { canStart, canStop } from "../src/lib/tasks.ts";
@@ -278,4 +280,21 @@ test("session and workspace endpoints take the connection id", async () => {
   await api.thread(5, "a/b");
   await api.externalProjects(5);
   assert.deepEqual(paths, ["/connections/5/sessions/a%2Fb", "/connections/5/projects"]);
+});
+
+test("a session row opens the host destination, else copies the resume command, else offers nothing", () => {
+  assert.deepEqual(sessionAction("t3code://threads/env/t", "ignored"), { kind: "open", href: "t3code://threads/env/t" });
+  assert.deepEqual(sessionAction(null, "claude attach 1a2b3c4d"), { kind: "copy", command: "claude attach 1a2b3c4d" });
+  assert.deepEqual(sessionAction("", "claude attach 1a2b3c4d"), { kind: "copy", command: "claude attach 1a2b3c4d" });
+  assert.deepEqual(sessionAction(null, null), { kind: "none" });
+  assert.deepEqual(sessionAction(null, ""), { kind: "none" });
+});
+
+test("folderName is a folder path's last segment", () => {
+  assert.equal(folderName("/home/u/src/app"), "app");
+  assert.equal(folderName("/home/u/src/app/"), "app");
+  assert.equal(folderName("/"), null);
+  assert.equal(folderName(""), null);
+  assert.equal(folderName(null), null);
+  assert.equal(folderName(undefined), null);
 });

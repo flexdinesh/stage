@@ -1208,6 +1208,8 @@ export interface WaitingSession {
   externalSessionId: string;
   title: string;
   projectTitle: string | null;
+  /** The session's working folder when its harness reports one (null for T3). */
+  directory: string | null;
 }
 
 export interface NotificationGroupPage {

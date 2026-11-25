@@ -40,6 +40,7 @@ type Adapter struct {
 	cli        *CLI
 	identity   string
 	roster     *roster
+	logs       *transcripts
 	launchWait time.Duration
 	now        func() time.Time
 
@@ -72,6 +73,7 @@ func New(o Options) *Adapter {
 	return &Adapter{
 		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
+		logs:   &transcripts{now: o.Now},
 	}
 }
 
@@ -300,7 +302,7 @@ func (a *Adapter) read(ctx context.Context, id string, fresh bool) (session, err
 	s := session{id: id}
 	s.entry, s.listed = findSession(es, id)
 	if p, ok := transcriptPath(a.projects(ctx), s.entry.Cwd, id); ok {
-		if t, err := ReadTranscript(p); err == nil {
+		if t, err := a.logs.read(p); err == nil {
 			s.transcript, s.hasLog = t, true
 		}
 	}
@@ -435,11 +437,35 @@ func (a *Adapter) Stop(ctx context.Context, ref execution.SessionRef) error {
 	return nil
 }
 
-// Attention is empty: Stage watches the sessions it launched or adopted
-// from its own records, and Claude sessions it does not own are not its to
-// discover (ADR 0005 decision 9).
-func (a *Adapter) Attention(context.Context) ([]execution.SessionRef, error) {
-	return []execution.SessionRef{}, nil
+// Attention is every listed session waiting for its user (ADR 0005
+// decision 9): a blocked background session, also one Claude's daemon
+// retired (attach wakes it), and a waiting terminal, IDE or SDK session.
+// Sessions T3 started are T3's to surface. Discovery surfaces, adoption
+// tracks: the descriptor's silent attention policy keeps these to a waiting
+// row. An unreadable list, or no transcript root to tell T3's sessions
+// apart, is an error.
+func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error) {
+	es, err := a.roster.list(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	root := a.projects(ctx)
+	if root == "" {
+		return nil, errors.New("claude auth status reports no projects directory")
+	}
+	out := []execution.SessionRef{}
+	for _, e := range es {
+		if st, err := MapState(e); err != nil || st != "needs_input" || !validUUID(e.SessionID) {
+			continue
+		}
+		if p, ok := transcriptPath(root, e.Cwd, e.SessionID); ok {
+			if t, err := ReadHead(p); err == nil && t.Entrypoint == entrypointT3 {
+				continue
+			}
+		}
+		out = append(out, execution.SessionRef{ConnectionID: a.conn, ExternalSessionID: e.SessionID})
+	}
+	return out, nil
 }
 
 // Opening is the session's first typed prompt.
@@ -463,10 +489,15 @@ func (a *Adapter) Opening(ctx context.Context, ref execution.SessionRef, full bo
 }
 
 // links: attach while Claude lists the background session, else resume in
-// its folder.
+// its folder. A terminal, IDE or SDK session whose process runs has none:
+// it is answered where it runs (a resume there would open a second client
+// on the same session).
 func (a *Adapter) links(s session) execution.Links {
 	if s.listed && s.entry.Background() && s.entry.ID != "" {
 		return execution.Links{Command: "claude attach " + s.entry.ID}
+	}
+	if s.listed && !s.entry.Background() && s.entry.PID > 0 {
+		return execution.Links{}
 	}
 	if cwd := s.cwd(); cwd != "" {
 		return execution.Links{Command: "cd " + shellQuote(cwd) + " && claude --resume " + s.id}

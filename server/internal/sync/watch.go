@@ -5,6 +5,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
@@ -28,6 +29,10 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 	if !a.Health(ctx).Available {
 		return nil
 	}
+	// A silent harness's unowned sessions are current state only (the
+	// waiting row and needs-input count): no inbox event, no push.
+	d, _ := s.descriptor(s.store.Harness(connection))
+	silent := d.Attention == harness.AttentionSilent
 	refs, e := a.Attention(ctx)
 	if e != nil {
 		return nil
@@ -68,7 +73,7 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 			continue
 		}
 		_ = s.store.SetObservedState(ctx, ref, db.TaskState(o.State))
-		if !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {
+		if silent || !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {
 			continue
 		}
 		if previous.State == "" && !o.CreatedAt.After(s.started) {
