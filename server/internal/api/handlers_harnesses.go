@@ -52,13 +52,18 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	// The machine's hosting profile (its host in the machine set).
+	// The machine's hosting profile and policy (its host in the machine set).
 	var profile harness.Profile
-	if hm, ok := s.Sync.Machines().Get(m.ID); ok {
+	hm, hosted := s.Sync.Machines().Get(m.ID)
+	if hosted {
 		profile = hm.Profile()
 	}
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
+	}
+	allows := profile.Allows
+	if hosted {
+		allows = hm.Allows
 	}
 	out := []harnessJSON{}
 	for _, d := range s.registry().All() {
@@ -74,8 +79,9 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 		if d.Setup.Actions == nil {
 			d.Setup.Actions = []harness.Action{}
 		}
+		// The connectors index leaves out kinds the machine does not allow.
 		_, connectable := s.connectors().Get(m.ID, d.Kind)
-		out = append(out, harnessJSON{Descriptor: d, Availability: profile.Allows(d), Connectable: connectable})
+		out = append(out, harnessJSON{Descriptor: d, Availability: allows(d), Connectable: connectable})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"machine": machineJSON{machineInfoJSON: s.toMachineJSON(m), Profile: profile}, "harnesses": out})
 	return nil
@@ -92,7 +98,9 @@ type connectionStatusJSON struct {
 
 // connector is the {kind} path value's descriptor and connector on the
 // {id} machine (none: the local machine): 404 for an unknown kind or
-// machine, 409 for a kind with no connection setup there.
+// machine, 409 harness_unavailable with the machine's reason for a kind it
+// does not allow (the connector is never reached), 409 for a kind with no
+// connection setup there.
 func (s *server) connector(r *http.Request) (harness.Descriptor, harness.Connector, error) {
 	m, err := s.harnessMachine(r)
 	if err != nil {
@@ -101,6 +109,11 @@ func (s *server) connector(r *http.Request) (harness.Descriptor, harness.Connect
 	d, ok := s.registry().Lookup(r.PathValue("kind"))
 	if !ok {
 		return d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
+	}
+	if hm, ok := s.Sync.Machines().Get(m.ID); ok {
+		if a := hm.Allows(d); !a.Available {
+			return d, nil, &db.ConflictError{Code: "harness_unavailable", Msg: a.Reason}
+		}
 	}
 	c, ok := s.connectors().Get(m.ID, d.Kind)
 	if !ok {

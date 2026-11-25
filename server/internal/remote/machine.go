@@ -74,6 +74,15 @@ func (m *Machine) Profile() harness.Profile {
 	return m.desc.Profile
 }
 
+// Allows: a remote machine hosts connected harnesses only, whatever its
+// worker's profile says, until workers set up hosted harnesses (#374).
+func (m *Machine) Allows(d harness.Descriptor) execution.Availability {
+	if d.Hosting == harness.Hosted {
+		return execution.Availability{Reason: d.Name + " can't run on a worker machine yet; connect it on the main machine."}
+	}
+	return execution.Availability{Available: true}
+}
+
 func (m *Machine) active(connection int64) bool {
 	return slices.Contains(m.conns(m.id), connection)
 }

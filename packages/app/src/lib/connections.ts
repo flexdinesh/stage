@@ -91,6 +91,50 @@ export function harnessSummary(read: StatusRead<HarnessStatus>, kind: Harness, n
   return { harness: kind, state: s.state, tone, label: `${name} ${s.state}` };
 }
 
+/** A connection's detail lines and error line in the status panel. */
+export interface StatusDetail {
+  lines: string[];
+  error: string | null;
+}
+
+/** A connection's live status as the status row and launch gate read it: its summary and its panel detail. */
+export interface StatusView {
+  summary: HarnessSummary;
+  detail: StatusDetail;
+}
+
+/** T3's status view: which T3 and its URL, then the last full sync and when the token expires. */
+export function t3StatusView(read: StatusRead<T3Status>, now: number = Date.now()): StatusView {
+  const d = read.data;
+  const expires = d?.tokenExpiresAt ?? null;
+  const lines = [
+    [d === undefined ? null : t3Identity(d), d?.t3Url ?? null].filter((p) => p !== null && p !== "").join(" · "),
+    [
+      d?.lastFullSyncAt == null ? null : `synced ${relativeTime(d.lastFullSyncAt, now)}`,
+      expires === null ? null : `token ${d?.state === "expired" ? "expired" : "expires"} ${relativeTime(expires, now)}`,
+    ]
+      .filter((p) => p !== null)
+      .join(" · "),
+  ].filter((l) => l !== "");
+  return { summary: t3Summary(read), detail: { lines, error: t3ErrorText(read) } };
+}
+
+/** OpenCode's status view: the service's host and sign-in, then when it was checked. */
+export function openCodeStatusView(read: StatusRead<OpenCodeStatus>, now: number = Date.now()): StatusView {
+  const d = read.data;
+  const lines =
+    d === undefined
+      ? []
+      : [[d.endpoint === "" ? null : serviceHostText(d), signInText(d, now)].filter((p) => p !== null).join(" · "), `checked ${relativeTime(d.checkedAt ?? null, now)}`];
+  return { summary: openCodeSummary(read, now), detail: { lines, error: openCodeErrorText(read) } };
+}
+
+/** A generic harness's status view: its summary, and why it is not connected (reason, else last error) as the detail. */
+export function harnessStatusView(read: StatusRead<HarnessStatus>, kind: Harness, name: string): StatusView {
+  const reason = read.data?.reason ?? read.data?.lastError ?? "";
+  return { summary: harnessSummary(read, kind, name), detail: { lines: reason === "" ? [] : [reason], error: read.error } };
+}
+
 /** A Config panel Harness row's chip; `fixable`: Settings can fix it, so the row links there. */
 export interface ConnectionChip {
   tone: HarnessTone;

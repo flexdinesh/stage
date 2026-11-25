@@ -130,9 +130,11 @@ func UnknownAction(d Descriptor, action string) error {
 }
 
 // Connectors is the server's connector per machine and kind, checked
-// against the registry: every connector names a registered connected kind.
-// A machine has at most one connector per kind, serving that kind's active
-// connection on the machine.
+// against the registry: every connector names a registered kind, connected
+// or hosted. A machine has at most one connector per kind, serving that
+// kind's active connection on the machine. Whether a machine may host a
+// kind is the machine's decision (machine.Machine.Allows), applied before
+// connectors are indexed here.
 type Connectors struct {
 	reg *Registry
 	m   map[int64]map[string]Connector
@@ -145,12 +147,8 @@ func NewConnectors(reg *Registry, m map[int64]map[string]Connector) (Connectors,
 			return Connectors{}, fmt.Errorf("connectors for invalid machine %d", machine)
 		}
 		for kind := range kinds {
-			d, ok := reg.Lookup(kind)
-			if !ok {
+			if _, ok := reg.Lookup(kind); !ok {
 				return Connectors{}, fmt.Errorf("connector for unregistered harness %q", kind)
-			}
-			if d.Hosting != Connected {
-				return Connectors{}, fmt.Errorf("connector for %s, which is not a connected harness", d.Name)
 			}
 		}
 	}

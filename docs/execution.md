@@ -33,13 +33,29 @@ plugin registration or service installation framework.
 ## Machine-runtime seam
 
 `internal/machine` is the per-machine host of harness code; it names no
-harness. A `machine.Machine` has an id, `Online`, a hosting `Profile`, the
-adapters of its active connections, a connector per kind and `Ops`.
-`machine.Set` holds the server's machines: `sync.Service` resolves every
-connection's adapter through it (`Adapter(id)`; a retired or unhosted
-connection answers `connection_retired` or `connection_unavailable` as
-before), `GET /api/harnesses` reads the local machine's profile, and
-`harness.Connectors` is built from the machines' connectors.
+harness. A `machine.Machine` has an id, `Online`, a hosting `Profile`,
+`Allows(descriptor)`, the adapters of its active connections, a connector
+per kind and `Ops`. `machine.Set` holds the server's machines:
+`sync.Service` resolves every connection's adapter through it
+(`Adapter(id)`; a retired or unhosted connection answers
+`connection_retired` or `connection_unavailable` as before, and a
+connection whose kind its machine does not allow answers
+`connection_unavailable` with that reason), `GET /api/harnesses` reads the
+machine's profile and `Allows`, and `harness.Connectors` is built from the
+machines' connectors, leaving out a connector for a kind its machine does
+not allow.
+
+- **Hosting decision.** `Machine.Allows` is the one place a machine decides
+  whether it may host a harness kind, with the reason when not. The local
+  machine answers with its profile's policy (`harness.Profile.Allows`); a
+  remote machine allows connected kinds only, whatever its worker's
+  profile, until workers set up hosted harnesses (#374). The API refuses a
+  disallowed kind's setup routes with that reason (409
+  `harness_unavailable`) without reaching its connector, the connectors
+  index leaves it out, and a launch on a connection of that kind answers
+  `connection_unavailable` with the reason. `serve` composes a hosted
+  harness's setup and adapters only when the machine allows it, so a
+  profile without local processes never starts the harness's processes.
 
 - **LocalMachine.** `machine.Local` is the in-process machine (machine 1). `serve/localmachine.go` composes it: the T3 client
   (fake or MCP) and adapter, the T3 and OpenCode setups and their
@@ -62,6 +78,15 @@ before), `GET /api/harnesses` reads the local machine's profile, and
   OpenCode credential, and the T3 token through `t3.TokenStore`. Identity:
   ensure, identity stamps, instance switches by kind (the main server
   applies its own registry's policy), retired connections, stored evidence.
+  `machine.Identity` is the harness-neutral identity port (active
+  connection of a kind, instance switch, connection read) that
+  `machine.StorePorts` and the worker's ports both serve; a hosted
+  harness's setup takes it with the install port (`machine.Install`).
+  `machine.Connect` is a connect action's core: `SwitchInstance` (the first
+  connect creates the machine's connection row, the same identity keeps
+  it, another replaces it under the replaced-instance rules), then install
+  the adapter on the new connection; its result names the replaced
+  connection.
   Event sink: the install port, `OnSwitched`/`OnPaired`. Harness-specific
   machine-local work is its own port: `opencodesetup.Local` (service.json and
   its probe) and `t3setup.Local` (find and run the t3 CLI for auto-pair).
@@ -140,7 +165,10 @@ suite cannot tell a remote machine from the local one.
   carries connector summaries once `setupReady`). Offline, needs update and
   a worker still composing its setup are `remote.UnavailableError`
   (503 `machine_offline`, `machine_needs_update`,
-  `machine_setup_starting`). A remote machine's connection row is created
+  `machine_setup_starting`). Remote machines are connected-only for now:
+  workers set up connected kinds only (`remoteSetupHooks`), and
+  `remote.Machine.Allows` reports a hosted kind unavailable ("can't run on
+  a worker machine yet"); #374 lifts both. A remote machine's connection row is created
   on first connect (T3 pairing, OpenCode connect or pair), and a switch on
   the worker follows the connections on the main server (runners, sync).
   No environment variable sets a connection.
@@ -172,14 +200,16 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   environment id), pairing a retired connection's identity revives it, and
   identities are unique per machine and kind. Otherwise (an OpenCode address)
   the connector proves continuity itself and passes the connection to revive.
-- **Connection setup.** A connected harness's descriptor carries a setup
-  schema (settings fields with their locking environment variable, typed
-  actions, disconnect). Its setup package implements `harness.Connector`
+- **Connection setup.** A harness's descriptor, connected or hosted,
+  carries a setup schema (settings fields with their locking environment
+  variable, typed actions, disconnect). Its setup package implements `harness.Connector`
   (memory-only summary, status with harness details, configure, run,
   disconnect) over narrow ports ([machine-runtime seam](#machine-runtime-seam));
   each machine hosts one per kind (`harness.Connectors`, built from the
-  machines and checked against the registry). The API exposes them
-  generically under `/api/harnesses/{kind}/...`; health, sync skipping and
+  machines and checked against the registry, leaving out kinds a machine
+  does not allow). A hosted harness has no connection row until its
+  connect action creates one through the identity port (`machine.Connect`).
+  The API exposes them generically under `/api/harnesses/{kind}/...`; health, sync skipping and
   connection lists read connector summaries. Hosts render the schema, or a
   panel registered for the kind (UI `CONNECTION_PANELS`, CLI `slots_*.go`).
 - **Closures.** Completion is inferred only from a closure the harness's

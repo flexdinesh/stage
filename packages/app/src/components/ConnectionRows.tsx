@@ -59,6 +59,7 @@ export function AddConnection({ machine, connections, onPick }: { machine: Machi
           <MenuItem
             key={o.kind}
             reason={o.reason}
+            detail={o.detail}
             onSelect={() => {
               const descriptor = connections.descriptor(o.kind);
               if (descriptor !== undefined) onPick({ descriptor });

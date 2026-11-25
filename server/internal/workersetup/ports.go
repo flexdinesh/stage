@@ -8,6 +8,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/remote"
@@ -33,6 +34,7 @@ var (
 	_ t3.TokenStore          = Ports{}
 	_ opencodesetup.Settings = Ports{}
 	_ opencodesetup.Identity = Ports{}
+	_ machine.Identity       = Ports{}
 )
 
 // call sends kind with body and decodes the reply into out (nil: none).

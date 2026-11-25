@@ -1,57 +1,13 @@
 import { Link } from "react-router";
 import { useConnectionStatuses, useHarnesses, useMachines } from "../api/queries.ts";
-import type { OpenCodeStatus, T3Status } from "../api/types.ts";
-import { relativeTime } from "../lib/format.ts";
 import { machineSetupState } from "../lib/machines.ts";
-import { t3Identity } from "../lib/onboarding.ts";
-import {
-  connectionStatusItem,
-  harnessSummary,
-  openCodeErrorText,
-  openCodeSummary,
-  statusRead,
-  statusTargets,
-  t3ErrorText,
-  t3Summary,
-  unreachableDetail,
-  type HarnessSummary,
-  type StatusRead,
-} from "../lib/connections.ts";
-import { serviceHostText, signInText } from "../lib/opencode.ts";
+import { connectionStatusItem, statusTargets, unreachableDetail, type StatusDetail, type StatusView } from "../lib/connections.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
 import { IconCheck, IconPlug, IconRefresh, IconSettings, IconTriangleAlert } from "./icons.tsx";
 import { Button, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, toneClass, usePopover, type IconComponent } from "./ui.tsx";
 
-/** An item's detail lines and error, for the panel. */
-type Detail = { lines: string[]; error: string | null };
-
 /** Detail per item key, for the panel. */
-type Details = Record<string, Detail>;
-
-function t3Detail(read: StatusRead<T3Status>): Detail {
-  const d = read.data;
-  const expires = d?.tokenExpiresAt ?? null;
-  return {
-    lines: [
-      [d === undefined ? null : t3Identity(d), d?.t3Url ?? null].filter((p) => p !== null && p !== "").join(" · "),
-      [
-        d?.lastFullSyncAt == null ? null : `synced ${relativeTime(d.lastFullSyncAt)}`,
-        expires === null ? null : `token ${d?.state === "expired" ? "expired" : "expires"} ${relativeTime(expires)}`,
-      ]
-        .filter((p) => p !== null)
-        .join(" · "),
-    ].filter((l) => l !== ""),
-    error: t3ErrorText(read),
-  };
-}
-
-function openCodeDetail(read: StatusRead<OpenCodeStatus>): Detail {
-  const d = read.data;
-  return {
-    lines: d === undefined ? [] : [[d.endpoint === "" ? null : serviceHostText(d), signInText(d)].filter((p) => p !== null).join(" · "), `checked ${relativeTime(d.checkedAt ?? null)}`],
-    error: openCodeErrorText(read),
-  };
-}
+type Details = Record<string, StatusDetail>;
 
 /**
  * The status sentence, kind and tone, and each item's detail lines: every set-up connection on every machine, read on
@@ -64,24 +20,11 @@ export function useStatus(): { row: Row; details: Details } {
   // Until connections and machines load, keep checking.
   const loaded = harnesses.loaded && data !== undefined;
   const targets = loaded ? statusTargets(machines, harnesses.connection) : [];
-  const reads = useConnectionStatuses(targets.filter((t) => machineSetupState(t.machine) === "ready"));
-  const live = new Map<number, { summary: HarnessSummary; detail: Detail }>();
-  for (const { connection, query } of reads.t3) {
-    const read = statusRead(query);
-    live.set(connection.connectionId, { summary: t3Summary(read), detail: t3Detail(read) });
-  }
-  for (const { connection, query } of reads.openCode) {
-    const read = statusRead(query);
-    live.set(connection.connectionId, { summary: openCodeSummary(read), detail: openCodeDetail(read) });
-  }
-  for (const { connection, query } of reads.other) {
-    const read = statusRead(query);
-    const reason = read.data?.reason ?? read.data?.lastError ?? "";
-    live.set(connection.connectionId, {
-      summary: harnessSummary(read, connection.harness, harnesses.kindName(connection.harness)),
-      detail: { lines: reason === "" ? [] : [reason], error: read.error },
-    });
-  }
+  const reads = useConnectionStatuses(
+    targets.filter((t) => machineSetupState(t.machine) === "ready"),
+    harnesses.kindName,
+  );
+  const live = new Map<number, StatusView>(reads.map(({ connection, view }) => [connection.connectionId, view]));
   const grouped = machines.length > 1;
   const items: StatusItem[] = [];
   const details: Details = {};

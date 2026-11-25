@@ -62,7 +62,7 @@ function InFlight({ cells }: { cells: InFlightCell[] }) {
 /** Planning remains available before pairing and during connection failures. */
 export function DashboardPage() {
   const harnesses = useHarnesses();
-  // The server's view (paired T3, set-up OpenCode), as the status control uses: a disconnected harness stays quiet.
+  // The server's view (a set-up connection of any harness), as the status control uses: a disconnected harness stays quiet.
   const notice = harnessNotice(harnesses.loaded ? harnesses.list : null, LOCAL_MACHINE_ID);
   const t3 = useT3Status({ enabled: notice === "t3" });
   const openCode = useOpenCodeStatus();
@@ -72,7 +72,7 @@ export function DashboardPage() {
         <T3Alert status={t3.data} />
       ) : notice === "connect" ? (
         <Alert tone="need" className="mb-3.5">
-          <TextLink variant="rest" to={SETTINGS_PATH.connections}>Connect a harness</TextLink> to start tasks in T3 or OpenCode.
+          <TextLink variant="rest" to={SETTINGS_PATH.connections}>Connect a harness</TextLink> to start tasks.
         </Alert>
       ) : null}
       {openCode.data?.state === "unavailable" ? (

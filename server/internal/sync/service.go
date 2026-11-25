@@ -112,8 +112,18 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 	a, ok := s.machines.Adapter(id)
 	if !ok {
 		// A replaced instance keeps its history but is never reached again.
-		if s.store.Harness(id) != "" && !s.store.ConnectionActive(id) {
+		kind := s.store.Harness(id)
+		if kind != "" && !s.store.ConnectionActive(id) {
 			return nil, db.ConnectionRetired()
+		}
+		// Its machine does not allow the kind (a hosted harness on a
+		// profile without local processes, or on a worker): say why.
+		if d, ok := s.descriptor(kind); ok {
+			if m, ok := s.machines.Get(s.store.ConnectionMachine(id)); ok {
+				if a := m.Allows(d); !a.Available {
+					return nil, &db.ConflictError{Code: "connection_unavailable", Msg: a.Reason}
+				}
+			}
 		}
 		return nil, &db.ConflictError{Code: "connection_unavailable", Msg: "This harness is unavailable. Select a supported connection."}
 	}

@@ -3,15 +3,18 @@ import { test } from "node:test";
 import {
   connectionGate,
   connectionStatusItem,
+  harnessStatusView,
   harnessSummary,
   liveChip,
   openCodeErrorText,
   openCodeRowDetail,
+  openCodeStatusView,
   openCodeSummary,
   statusRead,
   statusTargets,
   t3ErrorText,
   t3RowDetail,
+  t3StatusView,
   t3Summary,
   unreachableDetail,
 } from "../src/lib/connections.ts";
@@ -207,6 +210,26 @@ test("harnessSummary: a generic harness reads as its Settings row does", () => {
   assert.equal(harnessSummary(status({ connected: false, configured: false, state: "not connected" }), "x", "X").tone, "idle");
   assert.equal(harnessSummary({ data: undefined, checking: false, error: "boom" }, "x", "X").tone, "bad");
   assert.equal(harnessSummary({ data: undefined, checking: true, error: null }, "x", "X").state, "checking");
+});
+
+test("status views: T3 and OpenCode slots carry their summary and panel detail", () => {
+  const t = t3StatusView(t3({}), NOW);
+  assert.deepEqual(t.summary, t3Summary(t3({})));
+  assert.deepEqual(t.detail, { lines: ["controlbox · v0.1.10 · http://127.0.0.1:3773", "synced 1m ago · token expires in 23d"], error: null });
+  assert.deepEqual(t3StatusView(failed, NOW).detail, { lines: [], error: "Failed to fetch" });
+  const o = openCodeStatusView(oc({ state: "unavailable", reason: "service.json missing" }), NOW);
+  assert.equal(o.summary.state, "unavailable");
+  assert.equal(o.detail.error, "service.json missing");
+  assert.equal(o.detail.lines.length, 2);
+});
+
+test("status views: any other kind reads the generic status (reason, else last error, as its detail)", () => {
+  const v = harnessStatusView(status({ connected: false, state: "unavailable", reason: "claude not found" }), "claude", "Claude Code");
+  assert.deepEqual(v.summary, { harness: "claude", state: "unavailable", tone: "bad", label: "Claude Code unavailable" });
+  assert.deepEqual(v.detail, { lines: ["claude not found"], error: null });
+  assert.deepEqual(harnessStatusView(status({ lastError: "exit 1" }), "claude", "Claude Code").detail.lines, ["exit 1"]);
+  assert.deepEqual(harnessStatusView(status({}), "claude", "Claude Code").detail, { lines: [], error: null });
+  assert.deepEqual(harnessStatusView(failed, "claude", "Claude Code").detail, { lines: [], error: "Failed to fetch" });
 });
 
 // The status button reads every machine's set-up connections, not just the main machine's.

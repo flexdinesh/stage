@@ -238,7 +238,7 @@ export interface Project {
 /** Projects one connection's discovery created in the last 7 days. */
 export interface ImportSummary {
   connectionId: number;
-  harness: "t3" | "opencode";
+  harness: Harness;
   count: number;
   at: string;
 }
@@ -253,7 +253,7 @@ export interface ProjectBinding {
  id: number;
  projectId: number;
  connectionId: number;
- harness: "t3" | "opencode";
+ harness: Harness;
  externalProjectId: string;
  workspace: string;
  revision: number;

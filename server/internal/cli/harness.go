@@ -56,6 +56,9 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 	switch {
 	case !ok:
 		return usagef("harness %s: unknown harness (want one of %s)", kind, strings.Join(kinds(hs), ", "))
+	case !d.Available:
+		// This machine does not allow the kind: the server's reason.
+		return fmt.Errorf("harness %s: %s", kind, d.Reason)
 	case !d.Connectable:
 		return usagef("harness %s: %s has no connection setup on this server", kind, d.Name)
 	}
