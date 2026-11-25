@@ -98,8 +98,12 @@ func TestConnectorsAreCheckedAgainstTheRegistry(t *testing.T) {
 	if _, err := harness.NewConnectors(reg, one("nope")); err == nil {
 		t.Fatal("connector for an unregistered kind accepted")
 	}
-	if _, err := harness.NewConnectors(reg, one("proc")); err == nil {
-		t.Fatal("connector for a hosted kind accepted")
+	// Hosted kinds have connection setup too; the machine decides whether
+	// it may host them (machine.Machine.Allows).
+	if cs, err := harness.NewConnectors(reg, one("proc")); err != nil {
+		t.Fatalf("connector for a hosted kind refused: %v", err)
+	} else if _, ok := cs.Get(1, "proc"); !ok {
+		t.Fatal("hosted connector missing")
 	}
 	if _, err := harness.NewConnectors(reg, map[int64]map[string]harness.Connector{0: {"svc": nopConnector{}}}); err == nil {
 		t.Fatal("connector for machine 0 accepted")

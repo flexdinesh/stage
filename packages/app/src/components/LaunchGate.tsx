@@ -4,7 +4,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { useConnectionStatuses, useHarnesses, useMachines, useProjects } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
-import { harnessSummary, openCodeSummary, statusRead, statusTargets, t3Summary, type HarnessSummary } from "../lib/connections.ts";
+import { statusTargets, type HarnessSummary } from "../lib/connections.ts";
 import { launchBlock, type LaunchBlock } from "../lib/launch.ts";
 import { machineSetupState, machineTag, withMachine } from "../lib/machines.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
@@ -27,17 +27,10 @@ export function LaunchGateProvider({ children }: { children: ReactNode }) {
   const targets = loaded ? statusTargets(machines, harnesses.connection) : [];
   const reads = useConnectionStatuses(
     targets.filter((t) => machineSetupState(t.machine) === "ready"),
+    harnesses.kindName,
     { poll: false },
   );
-  const live: (HarnessSummary & { id: number })[] = [
-    ...reads.t3.map(({ connection, query }) => ({ id: connection.connectionId, ...t3Summary(statusRead(query)) })),
-    ...reads.openCode.map(({ connection, query }) => ({ id: connection.connectionId, ...openCodeSummary(statusRead(query)) })),
-    ...reads.other.map(({ connection, query }) => ({
-      id: connection.connectionId,
-      ...harnessSummary(statusRead(query), connection.harness, harnesses.kindName(connection.harness)),
-    })),
-  ];
-  const byId = new Map(live.map((l) => [l.id, l]));
+  const byId = new Map<number, HarnessSummary>(reads.map(({ connection, view }) => [connection.connectionId, view.summary]));
   const gate: LaunchGate = (t) => {
     const c = harnesses.connection(t.connectionId);
     const machineId = c?.machineId ?? 0;

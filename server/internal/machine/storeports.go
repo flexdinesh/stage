@@ -24,6 +24,11 @@ func NewStorePorts(store db.MachineStore, reg *harness.Registry) StorePorts {
 	return StorePorts{MachineStore: store, Harnesses: reg}
 }
 
+// Active is the machine's active connection of kind (0: none).
+func (p StorePorts) Active(_ context.Context, kind string) (int64, error) {
+	return p.ActiveID(kind), nil
+}
+
 // SwitchInstance switches the machine's active connection of kind to the
 // instance identity (db.Store.SwitchInstance).
 func (p StorePorts) SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error) {

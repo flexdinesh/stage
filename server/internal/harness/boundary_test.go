@@ -13,15 +13,15 @@ import (
 // harnessBranch matches code that names a specific harness: kind literals,
 // kind constants and T3-only connection lookups. Product code reads the
 // descriptor, capabilities and operations instead (docs/execution.md).
-var harnessBranch = regexp.MustCompile(`HarnessT3|HarnessOpenCode|IsT3\(|T3ID\(|"t3"|"opencode"|\bt3\.Kind\b|\bopencode\.Kind\b`)
+var harnessBranch = regexp.MustCompile(`HarnessT3|HarnessOpenCode|IsT3\(|T3ID\(|"t3"|"opencode"|"claude"|\bt3\.Kind\b|\bopencode\.Kind\b|\bclaudecode\.Kind\b`)
 
 // owners may name their harness: the adapters, their connection setup, this
 // package, the server and worker compositions, the CLI's per-harness
-// status panels, `stage setup`'s coding-agent targets (OpenCode as an
-// agent to install a skill for, not a harness branch) and the storage
-// contract suite (test-only code, like a _test.go file, that exercises the
-// Store's harness APIs).
-var owners = []string{"internal/t3/", "internal/opencode/", "internal/t3setup/", "internal/opencodesetup/", "internal/harness/", "internal/serve/", "internal/workersetup/", "internal/cli/slots_", "internal/cli/setup_agents.go", "internal/db/storetest/"}
+// status panels, `stage setup`'s coding-agent targets (OpenCode and Claude
+// Code as agents to register MCP or install a skill for, not a harness
+// branch) and the storage contract suite (test-only code, like a _test.go
+// file, that exercises the Store's harness APIs).
+var owners = []string{"internal/t3/", "internal/opencode/", "internal/claudecode/", "internal/t3setup/", "internal/opencodesetup/", "internal/claudecodesetup/", "internal/harness/", "internal/serve/", "internal/workersetup/", "internal/cli/slots_", "internal/cli/setup.go", "internal/cli/setup_agents.go", "internal/db/storetest/"}
 
 // pending still branches on a harness and is being moved behind the
 // boundary. Shrink it; never grow it.

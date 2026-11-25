@@ -5,10 +5,12 @@ import { addConnectionOptions, addConnectionReason, connectShortcuts, connectedR
 const main = { id: 1, label: "deebox", kind: "local", status: "online", connections: [] };
 const studio = { id: 2, label: "studio", kind: "remote", status: "online", connections: [] };
 const KINDS = [
-  { kind: "t3", name: "T3 Code", connectable: true },
-  { kind: "opencode", name: "OpenCode", connectable: true },
-  { kind: "codex", name: "Codex", connectable: false },
+  { kind: "t3", name: "T3 Code", hosting: "connected", available: true, connectable: true },
+  { kind: "opencode", name: "OpenCode", hosting: "connected", available: true, connectable: true },
+  { kind: "codex", name: "Codex", hosting: "connected", available: true, connectable: false },
 ];
+const WHY = "Proc runs only where Stage runs on your computer: use the desktop app, or start stage serve with --local-harnesses.";
+const hosted = (over = {}) => ({ kind: "proc", name: "Proc", hosting: "hosted", available: true, connectable: true, ...over });
 
 test("the main machine is main, every other machine a worker", () => {
   assert.equal(machineRole(main), "main");
@@ -49,10 +51,10 @@ test("rows: set-up connections, and disconnected ones that were set up or hold h
 
 test("add options: connectable harnesses only; connected ones are listed disabled", () => {
   assert.deepEqual(addConnectionOptions(KINDS, [{ harness: "t3" }]), [
-    { kind: "t3", name: "T3 Code", reason: "already connected" },
-    { kind: "opencode", name: "OpenCode", reason: null },
+    { kind: "t3", name: "T3 Code", reason: "already connected", detail: null },
+    { kind: "opencode", name: "OpenCode", reason: null, detail: null },
   ]);
-  assert.deepEqual(addConnectionOptions(KINDS, [{ harness: "t3", disconnected: true }])[0], { kind: "t3", name: "T3 Code", reason: "disconnected; reconnect it" });
+  assert.deepEqual(addConnectionOptions(KINDS, [{ harness: "t3", disconnected: true }])[0], { kind: "t3", name: "T3 Code", reason: "disconnected; reconnect it", detail: null });
   assert.deepEqual(connectShortcuts(addConnectionOptions(KINDS, [{ harness: "t3", disconnected: true }])), [{ kind: "opencode", label: "Connect OpenCode" }]);
 });
 
@@ -65,6 +67,31 @@ test("Add connection is disabled offline, on another API version, while checking
   assert.equal(addConnectionReason(main, []), "no harness to connect");
   assert.equal(addConnectionReason({ ...studio, status: "offline" }, some), "studio is offline");
   assert.equal(addConnectionReason({ ...studio, status: "needs_update" }, some), "studio needs an update");
+});
+
+test("add options: hosted harnesses are listed; one the machine cannot run is disabled with its full reason", () => {
+  assert.deepEqual(addConnectionOptions([hosted()], []), [{ kind: "proc", name: "Proc", reason: null, detail: null }], "allowed and set up: connect it");
+  assert.deepEqual(addConnectionOptions([hosted({ available: false, connectable: false, reason: WHY })], []), [{ kind: "proc", name: "Proc", reason: "unavailable here", detail: WHY }]);
+  assert.deepEqual(
+    addConnectionOptions([hosted({ available: false, connectable: false })], [])[0].detail,
+    "Proc can't run on this machine.",
+    "a missing server reason still explains it",
+  );
+  assert.deepEqual(addConnectionOptions([hosted({ connectable: false })], []), [{ kind: "proc", name: "Proc", reason: "no connection setup here", detail: null }]);
+  // Unavailable wins over a row left from a machine profile that allowed it.
+  assert.equal(addConnectionOptions([hosted({ available: false, connectable: false, reason: WHY })], [{ harness: "proc" }])[0].reason, "unavailable here");
+  assert.deepEqual(connectShortcuts(addConnectionOptions([...KINDS, hosted({ available: false, connectable: false, reason: WHY })], [])), [
+    { kind: "t3", label: "Connect T3 Code" },
+    { kind: "opencode", label: "Connect OpenCode" },
+  ], "an unavailable harness gets no shortcut");
+});
+
+test("Add connection stays openable while an unavailable harness explains itself", () => {
+  const unavailable = hosted({ available: false, connectable: false, reason: WHY });
+  const connected = [{ harness: "t3" }, { harness: "opencode" }];
+  assert.equal(addConnectionReason(main, addConnectionOptions([...KINDS, unavailable], connected)), null);
+  assert.equal(addConnectionReason(main, addConnectionOptions([...KINDS, hosted({ connectable: false })], connected)), "no harness to connect");
+  assert.equal(addConnectionReason(main, addConnectionOptions(KINDS, connected)), "every harness is connected");
 });
 
 test("empty machine: a Connect button per harness it can add, none while options load", () => {

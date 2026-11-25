@@ -1,13 +1,14 @@
-import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
+import { harnessStatusView, openCodeStatusView, statusRead, t3StatusView, type StatusRead, type StatusView } from "../lib/connections.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, Machine, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -223,49 +224,76 @@ export interface MachineConnection {
   machine: Pick<Machine, "id" | "kind">;
 }
 
+/** A connection's live status view (lib/connections.ts), paired with the connection. */
+export interface ConnectionStatus<C> {
+  connection: C;
+  view: StatusView;
+}
+
+/** A machine's harness calls and its scoped query key. */
+type MachineCalls = { api: HarnessApi; key: (k: readonly unknown[]) => readonly unknown[] };
+
 /**
- * Each connection's status on its own machine (the queries Settings' rows run there, so the cache is shared): T3,
- * OpenCode and generic harnesses, each paired with its connection.
+ * How one harness's status is read: its query on a machine (the one Settings' rows run there, so the cache is shared)
+ * and its view. A kind without its own slot reads the generic status.
  */
-export function useConnectionStatuses<C extends MachineConnection>(connections: readonly C[], { poll = true }: { poll?: boolean } = {}) {
+interface StatusSlot<S> {
+  query: (m: MachineCalls, kind: Harness, qc: QueryClient) => UseQueryOptions<S, Error, S, readonly unknown[]>;
+  view: (read: StatusRead<S>, kind: Harness, name: string) => StatusView;
+}
+
+const GENERIC_STATUS: StatusSlot<HarnessStatus> = {
+  query: (m, kind) => harnessStatusQuery(m.api, m.key([...keys.harnessStatus, kind]), kind),
+  view: harnessStatusView,
+};
+
+/** Harness-specific status reads by kind: the only place status reading names a harness. */
+const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus> } = {
+  t3: { query: (m, _kind, qc) => t3StatusQuery(m.api, m.key(keys.t3Status), qc), view: (read) => t3StatusView(read) },
+  opencode: { query: (m) => openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), view: (read) => openCodeStatusView(read) },
+};
+
+const hasStatusSlot = (kind: Harness): boolean => Object.hasOwn(STATUS_SLOTS, kind);
+
+/**
+ * Each connection's live status view on its own machine, in input order: its kind's slot, else the generic status.
+ * `name` is a kind's display name (generic summaries name it).
+ */
+export function useConnectionStatuses<C extends MachineConnection>(
+  connections: readonly C[],
+  name: (kind: Harness) => string,
+  { poll = true }: { poll?: boolean } = {},
+): ConnectionStatus<C>[] {
   // poll false: read what another observer (the status row) keeps fresh, without a second poll of the same status.
   const every: { refetchInterval?: false } = poll ? {} : { refetchInterval: false };
+  const of = (kind: Harness) => connections.filter((c) => c.harness === kind);
+  const read = [
+    ...useSlotStatuses(STATUS_SLOTS.t3, of("t3"), every, name),
+    ...useSlotStatuses(STATUS_SLOTS.opencode, of("opencode"), every, name),
+    ...useSlotStatuses(
+      GENERIC_STATUS,
+      connections.filter((c) => !hasStatusSlot(c.harness)),
+      every,
+      name,
+    ),
+  ];
+  return connections.flatMap((c) => read.filter((r) => r.connection === c));
+}
+
+/** One slot's status queries, each connection on its machine, paired with its view. */
+function useSlotStatuses<S, C extends MachineConnection>(slot: StatusSlot<S>, connections: readonly C[], every: { refetchInterval?: false }, name: (kind: Harness) => string): ConnectionStatus<C>[] {
   const api = useApi();
   const qc = useQueryClient();
-  const on = (m: MachineConnection["machine"]) => {
+  const on = (m: MachineConnection["machine"]): MachineCalls => {
     const id = machineScopeId(m);
     return { api: id === null ? api : api.forMachine(id), key: (k: readonly unknown[]) => machineKey(id, k) };
   };
-  const t3 = connections.filter((c) => c.harness === "t3");
-  const openCode = connections.filter((c) => c.harness === "opencode");
-  const other = connections.filter((c) => c.harness !== "t3" && c.harness !== "opencode");
-  const t3Queries = useQueries({
-    queries: t3.map((c) => {
-      const m = on(c.machine);
-      return { ...t3StatusQuery(m.api, m.key(keys.t3Status), qc), ...every };
-    }),
-  });
-  const openCodeQueries = useQueries({
-    queries: openCode.map((c) => {
-      const m = on(c.machine);
-      return { ...openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), ...every };
-    }),
-  });
-  const otherQueries = useQueries({
-    queries: other.map((c) => {
-      const m = on(c.machine);
-      return { ...harnessStatusQuery(m.api, m.key([...keys.harnessStatus, c.harness]), c.harness), ...every };
-    }),
-  });
-  return { t3: paired(t3, t3Queries), openCode: paired(openCode, openCodeQueries), other: paired(other, otherQueries) };
-}
-
-/** Each connection with its query (useQueries returns one per option, in order). */
-const paired = <C, Q>(connections: readonly C[], queries: readonly Q[]): { connection: C; query: Q }[] =>
-  connections.flatMap((connection, i) => {
+  const queries = useQueries({ queries: connections.map((c) => ({ ...slot.query(on(c.machine), c.harness, qc), ...every })) });
+  return connections.flatMap((connection, i) => {
     const query = queries[i];
-    return query === undefined ? [] : [{ connection, query }];
+    return query === undefined ? [] : [{ connection, view: slot.view(statusRead(query), connection.harness, name(connection.harness)) }];
   });
+}
 
 /** The first full sync filled projects, threads and the catalog: refetch everything that read them empty. */
 function refreshAfterFirstSync(qc: QueryClient): Promise<void> {

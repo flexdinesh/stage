@@ -42,12 +42,12 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
 }
 
 /**
- * The harness notice above the Dashboard: `connect` when no T3 or OpenCode connection is set up anywhere, `t3` (its
+ * The harness notice above the Dashboard: `connect` when no connection of any harness is set up anywhere, `t3` (its
  * own alert) when T3 is set up on `machineId`, else none. None while connections load (null).
  */
 export function harnessNotice(connections: readonly Pick<HarnessConnection, "harness" | "machineId" | "active" | "configured">[] | null, machineId: number): "connect" | "t3" | null {
   if (connections === null) return null;
-  const set = connections.filter((c) => c.active && c.configured && (c.harness === "t3" || c.harness === "opencode"));
+  const set = connections.filter((c) => c.active && c.configured);
   if (set.length === 0) return "connect";
   return set.some((c) => c.harness === "t3" && c.machineId === machineId) ? "t3" : null;
 }

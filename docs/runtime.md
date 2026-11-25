@@ -42,7 +42,14 @@ local processes.
 | `container` | `STAGE_MACHINE_PROFILE=container`, set by the Docker image | never, whatever else is set |
 
 `GET /api/harnesses` reports the profile and, per harness, whether it is
-available here with the reason when not. The profile is not stored: it is
+available here with the reason when not. A harness that is not available
+is refused with that reason everywhere: its setup routes answer 409
+`harness_unavailable` without starting anything, the server composes no
+setup or adapter for it, and a task on a connection of that kind (one a
+desktop run left in the same data dir) cannot start (409
+`connection_unavailable`). A remote machine runs connected harnesses only
+for now, whatever its worker's profile
+([execution.md](execution.md#remote-machines)). The profile is not stored: it is
 computed at each start. Every connection belongs to a machine
 (`harness_connections.machine_id`); one local machine (`machines` id 1)
 exists until workers do. While its label is unset (migration 0022 unsets the

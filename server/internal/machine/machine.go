@@ -24,8 +24,12 @@ type Machine interface {
 	ID() int64
 	// Online: the machine is reachable now (the local machine always is).
 	Online() bool
-	// Profile is the machine's hosting policy (harness.ResolveProfile).
+	// Profile is the machine's hosting profile (harness.ResolveProfile).
 	Profile() harness.Profile
+	// Allows reports whether the machine may host d, with the reason when
+	// not: the one hosting decision the API, the connectors index and the
+	// coordinator read (the local machine: its profile's policy).
+	Allows(d harness.Descriptor) execution.Availability
 	// Adapter is the installed adapter of one of the machine's active
 	// connections.
 	Adapter(connection int64) (execution.Adapter, bool)
@@ -67,6 +71,9 @@ func (l *Local) ID() int64                { return l.id }
 func (l *Local) Online() bool             { return true }
 func (l *Local) Profile() harness.Profile { return l.profile }
 func (l *Local) Ops() Ops                 { return l.ops }
+
+// Allows is the machine's profile policy (harness.Profile.Allows).
+func (l *Local) Allows(d harness.Descriptor) execution.Availability { return l.profile.Allows(d) }
 
 func (l *Local) Adapter(connection int64) (execution.Adapter, bool) {
 	l.mu.RLock()
@@ -247,11 +254,18 @@ func (s *Set) Adapters() map[int64]execution.Adapter {
 }
 
 // Connectors indexes every machine's connectors, checked against reg:
-// each names a registered connected kind.
+// each names a registered kind. A connector for a kind its machine does
+// not allow (Machine.Allows) is left out, so nothing probes it.
 func (s *Set) Connectors(reg *harness.Registry) (harness.Connectors, error) {
 	m := map[int64]map[string]harness.Connector{}
 	for _, mc := range s.All() {
-		if cs := mc.Connectors(); len(cs) > 0 {
+		cs := mc.Connectors()
+		for kind := range cs {
+			if d, ok := reg.Lookup(kind); ok && !mc.Allows(d).Available {
+				delete(cs, kind)
+			}
+		}
+		if len(cs) > 0 {
 			m[mc.ID()] = cs
 		}
 	}

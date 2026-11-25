@@ -78,7 +78,10 @@ func newLocalMachine(ctx context.Context, wg *sync.WaitGroup, store *db.Store, c
 
 // compose builds the machine's setups over its store-backed ports and
 // registers their connectors. Set the machine's change hook first: the
-// OpenCode setup installs its adapter here.
+// OpenCode setup installs its adapter here. A hosted harness is composed
+// only when the machine allows it (m.Allows), so a profile without local
+// processes never runs its processes; its connect action creates its
+// connection through the identity port (machine.Connect).
 func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.Config, reg *harness.Registry, onPaired func(), progress func(connection int64) t3setup.SyncProgress, logger *slog.Logger) error {
 	ports := machine.NewStorePorts(store.OnMachine(m.ID()), reg)
 	openCode, err := opencodesetup.New(ctx, opencodesetup.Ports{Settings: ports, Identity: ports, Install: m.Install}, logger)
@@ -98,7 +101,8 @@ func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.
 }
 
 // remoteSetupHooks connect remote machines' connectors to this server: the
-// connected kinds every worker sets up, the active connection from the
+// connected kinds every worker sets up (hosted kinds stay on the main
+// machine until workers set them up, #374), the active connection from the
 // store, the full sync on a T3 status, and a sync after a setup change
 // (as onPaired does for the local machine).
 func remoteSetupHooks(store *db.Store, reg *harness.Registry, progress func(connection int64) t3setup.SyncProgress, kick func()) remote.SetupHooks {

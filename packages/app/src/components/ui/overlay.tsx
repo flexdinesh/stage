@@ -353,23 +353,30 @@ export function Menu({
   );
 }
 
-/** One menu action. `reason` disables it and says why; `danger` sets it in Fault Red. */
+/**
+ * One menu action. `reason` disables it and says why; `danger` sets it in Fault Red. `detail` is the full reason
+ * behind a short one: the hover title and screen-reader text, and shown in place of the short reason on a phone (no
+ * hover there).
+ */
 export function MenuItem({
   onSelect,
   danger = false,
   reason,
+  detail,
   leading,
   children,
 }: {
   onSelect: () => void;
   danger?: boolean;
   reason?: string | null;
+  detail?: string | null;
   /** Mono Slate text before the label (a history entry's kind). */
   leading?: ReactNode;
   children: ReactNode;
 }) {
   const disabled = reason !== undefined && reason !== null;
-  return (
+  const full = disabled && detail !== undefined && detail !== null ? detail : null;
+  const item = (
     <button
       type="button"
       role="menuitem"
@@ -387,9 +394,16 @@ export function MenuItem({
         {leading === undefined ? null : <span className="shrink-0 font-mono text-meta-sm text-muted">{leading}</span>}
         <span className="min-w-0 truncate">{children}</span>
       </span>
-      {disabled ? <span className="font-mono text-meta-sm text-muted">{reason}</span> : null}
+      {disabled ? (
+        <span aria-hidden={full !== null ? true : undefined} className={cx("font-mono text-meta-sm text-muted", full !== null && "max-md:hidden")}>
+          {reason}
+        </span>
+      ) : null}
+      {full === null ? null : <span className="font-mono text-meta-sm text-muted md:sr-only">{full}</span>}
     </button>
   );
+  // Not every browser shows a disabled button's title, so the hover title sits on a wrapper.
+  return full === null ? item : <div title={full}>{item}</div>;
 }
 
 export function MenuSeparator() {

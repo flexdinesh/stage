@@ -67,7 +67,7 @@ type Descriptor struct {
 	// revived. Otherwise the harness proves continuity itself.
 	StableIdentity bool      `json:"-"`
 	Closures       []Closure `json:"closures"`
-	// Setup is the connection setup schema (connected harnesses).
+	// Setup is the connection setup schema (connected and hosted harnesses).
 	Setup Setup `json:"setup"`
 	// Attribution is how an agent running on this harness tells Stage its
 	// session.

@@ -40,21 +40,28 @@ export const connectedRows = (rows: readonly ConnectionRowModel[]) => rows.filte
 export interface AddConnectionOption {
   kind: Harness;
   name: string;
-  /** Why it can't be added (already connected); null when it can. */
+  /** Why it can't be added (already connected, unavailable here), short; null when it can. */
   reason: string | null;
+  /** The machine's full reason it cannot run the harness (the server's); null when it can. */
+  detail: string | null;
 }
 
-/** Every connectable harness on the machine; one it already has a row for is listed disabled. */
+/**
+ * Every connectable harness on the machine, plus every hosted one: a hosted harness the machine cannot run is listed
+ * disabled with the server's reason, so users learn why it is missing. One it already has a row for is listed disabled.
+ */
 export function addConnectionOptions(
-  descriptors: readonly Pick<HarnessDescriptor, "kind" | "name" | "connectable">[],
+  descriptors: readonly Pick<HarnessDescriptor, "kind" | "name" | "connectable" | "hosting" | "available" | "reason">[],
   rows: readonly (Pick<ConnectionRowModel, "harness"> & Partial<Pick<ConnectionRowModel, "disconnected">>)[],
 ): AddConnectionOption[] {
-  const reason = (kind: Harness): string | null => {
-    const row = rows.find((r) => r.harness === kind);
-    if (row === undefined) return null;
-    return row.disconnected === true ? "disconnected; reconnect it" : "already connected";
+  const option = (d: (typeof descriptors)[number]): AddConnectionOption => {
+    if (!d.available) return { kind: d.kind, name: d.name, reason: "unavailable here", detail: d.reason === undefined || d.reason === "" ? `${d.name} can't run on this machine.` : d.reason };
+    if (!d.connectable) return { kind: d.kind, name: d.name, reason: "no connection setup here", detail: null };
+    const row = rows.find((r) => r.harness === d.kind);
+    const reason = row === undefined ? null : row.disconnected === true ? "disconnected; reconnect it" : "already connected";
+    return { kind: d.kind, name: d.name, reason, detail: null };
   };
-  return descriptors.filter((d) => d.connectable).map((d) => ({ kind: d.kind, name: d.name, reason: reason(d.kind) }));
+  return descriptors.filter((d) => d.connectable || d.hosting === "hosted").map(option);
 }
 
 /** The empty machine's shortcuts: a Connect button per harness it can add now. */
@@ -62,7 +69,13 @@ export function connectShortcuts(options: readonly AddConnectionOption[] | null)
   return (options ?? []).filter((o) => o.reason === null).map((o) => ({ kind: o.kind, label: `Connect ${o.name}` }));
 }
 
-/** Why Add connection is disabled on the machine (offline, needs an update, nothing left to add); null when enabled. */
+/** Row reasons: the harness already has a connection row on the machine. */
+const ROW_REASONS: readonly (string | null)[] = ["already connected", "disconnected; reconnect it"];
+
+/**
+ * Why Add connection is disabled on the machine (offline, needs an update, nothing left to add); null when enabled.
+ * It stays enabled while a harness is listed as unavailable (`detail`), so its reason can be read in the menu.
+ */
 export function addConnectionReason(m: Pick<Machine, "kind" | "status" | "label">, options: readonly AddConnectionOption[] | null): string | null {
   switch (machineSetupState(m)) {
     case "offline":
@@ -74,5 +87,6 @@ export function addConnectionReason(m: Pick<Machine, "kind" | "status" | "label"
   }
   if (options === null) return "checking harnesses";
   if (options.length === 0) return "no harness to connect";
-  return options.every((o) => o.reason !== null) ? "every harness is connected" : null;
+  if (options.some((o) => o.reason === null || o.detail !== null)) return null;
+  return options.every((o) => ROW_REASONS.includes(o.reason)) ? "every harness is connected" : "no harness to connect";
 }
