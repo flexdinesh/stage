@@ -137,6 +137,13 @@ them. 2, 3, 13 and 14 come from the evidence.
 14. **Identity keys.** Stage keys sessions on `sessionId` (and `id` for CLI
     calls), never on `pid` or `startedAt`: both change when the daemon
     restarts or wakes a session.
+15. **Images** (#381) are files. Stage writes a launch's images to
+    `<workspace>/.claude/stage-images/stage-<requestId>/` (a `*`
+    `.gitignore` in `stage-images`), passes that folder with `--add-dir`
+    and lists each file after the prompt for the Read tool. The folder is
+    below the workspace because Claude refuses an untrusted added folder
+    ([E8](#e8-images)). A worktree session's cwd is its worktree, so the
+    folder is added either way.
 
 ## Evidence
 
@@ -288,6 +295,20 @@ Ten sessions idled past an hour, checked at 04:05Z and 04:20Z:
 - `claude attach <short>` on a retired session wakes it (the daemon claims
   a spare, new `pid`), and it stays alive after the attaching client exits.
 - Fixture: `roster/all-reaped.json`.
+
+### E8 Images
+
+claude 2.1.332, 2026-11-25, `mise run claude:live`:
+
+- `claude --bg --add-dir <dir> -- <prompt>` with `<dir>` outside every
+  trusted folder exits 1 before dispatch: `Added folder not trusted: <dir>.
+  Leave out its --add-dir or, if you trust it and everything in its
+  repository or below it, start claude there once and accept the trust
+  prompt.`
+- With `<dir>` below the trusted workspace, a `manual` (default
+  permissions) haiku session read a PNG listed in the prompt with the Read
+  tool, never blocked on a permission prompt, and named its color.
+- The added folder does not join `~/.claude.json` `projects`.
 
 ## Approval routes (record only)
 

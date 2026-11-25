@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,11 +76,11 @@ func TestLiveClaude(t *testing.T) {
 		t.Fatalf("health %+v", h)
 	}
 	daemonBefore := daemonPIDs()
-	launch := func(req, dir, kind, permission, prompt string) (execution.Intent, execution.Observation) {
+	launch := func(req, dir, kind, permission, prompt string, images ...execution.Image) (execution.Intent, execution.Observation) {
 		t.Helper()
 		marker := execution.LaunchMarker(req)
 		in := execution.Intent{RequestID: req, ConnectionID: 1, Project: dir, Directory: dir, Title: "Stage live " + req, Prompt: prompt + "\n\n" + marker, Marker: marker,
-			Workspace: execution.Workspace{Kind: kind}, Config: execution.Config{Model: "haiku", Permission: permission}}
+			Workspace: execution.Workspace{Kind: kind}, Config: execution.Config{Model: "haiku", Permission: permission}, Images: images}
 		o, err := a.Launch(ctx, in, execution.Checkpoint{}, nil)
 		if err != nil {
 			t.Fatalf("launch %s: %v", req, err)
@@ -132,6 +136,31 @@ func TestLiveClaude(t *testing.T) {
 	removed := await(o.Session, "idle")
 	if removed.Closed == nil || removed.Closed.Signal != execution.ClosedArchived || removed.Reply == nil || !strings.Contains(removed.Reply.Text, "stage live ok") {
 		t.Fatalf("removed %+v", removed)
+	}
+
+	// An image reaches Claude as a file it reads without a permission
+	// prompt (manual mode): its folder, below the trusted workspace, is
+	// added with --add-dir.
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 220, A: 255}}, image.Point{}, draw.Src)
+	var red bytes.Buffer
+	if err := png.Encode(&red, img); err != nil {
+		t.Fatal(err)
+	}
+	_, o = launch("live-img", plain, "root", "manual", "Look at the attached image. Reply with exactly one lowercase word: its color.",
+		execution.Image{Name: "swatch.png", MimeType: "image/png", Data: red.Bytes()})
+	done = await(o.Session, "done")
+	if done.Reply == nil || !strings.Contains(strings.ToLower(done.Reply.Text), "red") {
+		t.Fatalf("image reply %+v", done.Reply)
+	}
+	ws, err := a.Workspaces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		if strings.Contains(w.WorkspaceRoot, "stage-images") {
+			t.Fatalf("the images folder became a workspace: %+v", w)
+		}
 	}
 
 	// A permission prompt is needs input; stop interrupts it.
