@@ -3,6 +3,7 @@
 // with claudeDetails (docs/api.md). Components: components/ClaudeSetup.tsx.
 import type { HarnessStatus } from "../api/types.ts";
 import type { HarnessSummary, HarnessTone, StatusRead, StatusView } from "./connections.ts";
+import { relativeTime } from "./format.ts";
 
 export const CLAUDE = "claude";
 
@@ -21,16 +22,49 @@ export interface ClaudeDetails {
   loggedIn: boolean;
   /** Background launches run in their own systemd user scope, so sessions outlive a Stage restart. */
   scope: boolean;
+  /** How Stage hears about the sessions it launches; null before the connection is set up. */
+  events: ClaudeEvents | null;
+}
+
+/** `details.events`: Claude hooks wake Stage (push, polling still reconciles), or Stage only polls and says why. */
+export interface ClaudeEvents {
+  mode: "push" | "polling";
+  /** Why Stage only polls ("" when pushing). */
+  reason: string;
+  /** The last hook Stage accepted (ISO); null for none since Stage started. */
+  lastEventAt: string | null;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+function eventsOf(v: unknown): ClaudeEvents | null {
+  if (!isRecord(v) || (v.mode !== "push" && v.mode !== "polling")) return null;
+  const at = str(v.lastEventAt);
+  return { mode: v.mode, reason: str(v.reason), lastEventAt: at === "" ? null : at };
+}
+
 /** The status's Claude details; null when the server sent none. */
 export function claudeDetails(s: Pick<HarnessStatus, "details">): ClaudeDetails | null {
   const d = s.details;
   if (!isRecord(d)) return null;
-  return { binary: str(d.binary), version: str(d.version), configDirectory: str(d.configDirectory), loggedIn: d.loggedIn === true, scope: d.scope === true };
+  return {
+    binary: str(d.binary),
+    version: str(d.version),
+    configDirectory: str(d.configDirectory),
+    loggedIn: d.loggedIn === true,
+    scope: d.scope === true,
+    events: eventsOf(d.events),
+  };
+}
+
+/**
+ * How updates arrive, for the card's Updates line: "instant · last hook 2m ago" (or "no hook yet") while hooks push,
+ * "every few seconds" with the reason while Stage only polls. Polling is not a problem: neutral, never a tone.
+ */
+export function updatesText(events: ClaudeEvents, now: number = Date.now()): { text: string; reason: string | null } {
+  if (events.mode === "polling") return { text: "every few seconds", reason: events.reason === "" ? null : events.reason };
+  return { text: `instant · ${events.lastEventAt === null ? "no hook yet" : `last hook ${relativeTime(events.lastEventAt, now)}`}`, reason: null };
 }
 
 /** connected | disconnected | not_found | logged_out | error. */
@@ -105,10 +139,11 @@ export function claudeSummary(read: StatusRead<HarnessStatus>, name: string): Ha
   return { harness: CLAUDE, state: chip.label, tone: chip.tone, label: `${name} ${chip.label}` };
 }
 
-/** The status panel: which Claude, or the reason as the error line. */
-export function claudeStatusView(read: StatusRead<HarnessStatus>, name: string): StatusView {
+/** The status panel: which Claude and how updates arrive, or the reason as the error line. */
+export function claudeStatusView(read: StatusRead<HarnessStatus>, name: string, now: number = Date.now()): StatusView {
   const s = read.data;
   const problem = s === undefined ? null : reasonOf(s);
-  const line = s === undefined || problem !== null ? "" : claudeIdentity(s);
-  return { summary: claudeSummary(read, name), detail: { lines: line === "" ? [] : [line], error: problem ?? read.error } };
+  const events = s === undefined || problem !== null ? null : (claudeDetails(s)?.events ?? null);
+  const lines = [s === undefined || problem !== null ? "" : claudeIdentity(s), events === null ? "" : `updates ${updatesText(events, now).text}`].filter((l) => l !== "");
+  return { summary: claudeSummary(read, name), detail: { lines, error: problem ?? read.error } };
 }

@@ -514,7 +514,7 @@ to run on that machine.
   cgroup and outlives a Stage restart.
 - **Launch.** In the workspace folder: `claude --bg -n <title> [--model M]
   [--effort E] [--permission-mode P] [-w stage-<requestId>] [--add-dir
-  <images>] -- <prompt>` (the prompt carries the launch marker; `--` keeps a
+  <images>] [--settings <hooks file>] -- <prompt>` (the prompt carries the launch marker; `--` keeps a
   prompt starting with `-` from reading as a flag). A base or branch, a
   workspace other than the project folder or a Claude worktree, a config
   the features do not offer, an image type other than PNG, JPEG, GIF or
@@ -582,6 +582,29 @@ to run on that machine.
   it runs: a resume would open a second client on it); else `cd <cwd> &&
   claude --resume <uuid>`. **Links** to resolve: a UUID or the 8-character id, also inside a
   pasted `claude attach` or `--resume` command.
+- **Push** ([ADR 0005](adr/0005-claude-code-harness.md) decision 16): the
+  adapter is an `execution.EventSource`. The machine's hook receiver
+  (`claudecode.Hooks`, opened with the first adapter, kept until shutdown)
+  listens on `127.0.0.1` and writes `<state dir>/hooks-settings.json`
+  (`<data dir>/claude` on the main server, `<worker dir>/claude` on a
+  worker; [runtime.md](runtime.md#claude-code-hooks)): one Claude HTTP hook
+  per event (`Stop`, `StopFailure`, `Notification`, `PermissionRequest`,
+  `SessionEnd`, `UserPromptSubmit`) with a bearer token. Every launch passes
+  the file with `--settings`. A hook is a wake-up: Stage answers 204 at
+  once and reads only `session_id`, `hook_event_name` and
+  `notification_type`; Events then reads the session list (one read taken
+  after the hook, shared) and transcript, again after 250 ms, 500 ms, 1 s
+  and 2 s until the list shows what the event announces (Stop, StopFailure,
+  SessionEnd: not running; PermissionRequest, a `permission_prompt`
+  Notification: needs input; UserPromptSubmit: running), and pushes the
+  last observation (one session at a time, four at once, the newest hook
+  wins). The coordinator ingests it as a poll. Polling continues: adopted
+  sessions, copies, a woken session after the listener moved, and hooks a
+  policy blocks (`allowedHttpHookUrls`, `disableAllHooks`,
+  `allowManagedHooksOnly`) are polled only. Replacing or removing the
+  adapter (connect, the command setting, disconnect) ends its
+  subscription; hooks meanwhile are answered and dropped. The setup status
+  reports `details.events` ([api.md](api.md#harness-connections-api-v6)).
 - **Inventory** is the `projects` of Claude's state file (`~/.claude.json`,
   or `.claude.json` in a `CLAUDE_CONFIG_DIR`); a Git checkout's top is
   importable, worktrees under `.claude/worktrees` are left out. No file is

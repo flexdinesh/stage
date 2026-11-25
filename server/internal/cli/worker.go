@@ -166,7 +166,9 @@ func workerHost(profile harness.Profile, harnessEnv func(string) string, configP
 			Host:   h,
 			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath)},
 			Config: config.HarnessFrom(harnessEnv),
-			Logger: logger,
+			// The worker dir of configPath (beside its credentials).
+			StateDir: worker.Dir(configPath),
+			Logger:   logger,
 		})
 		return h
 	}

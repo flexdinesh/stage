@@ -69,7 +69,9 @@ A Claude session that T3 started belongs to T3. Stage refuses it: "This Claude s
 
 ## Check the connection
 
-The status button at the bottom of the sidebar includes Claude Code. In Settings > Connections its row shows the config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens the card: the command Stage runs, the version, the config folder, the login, and whether sessions keep running when Stage restarts. **Check connection** runs the checks again.
+The status button at the bottom of the sidebar includes Claude Code. In Settings > Connections its row shows the config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens the card: the command Stage runs, the version, the config folder, the login, whether sessions keep running when Stage restarts, and how updates arrive. **Check connection** runs the checks again.
+
+Sessions Stage starts tell it right away when a turn ends, a permission prompt opens or the session stops: each launch passes Claude a hook settings file (`--settings`), and the card's **Updates** line reads "instant". Stage still checks every few seconds, so sessions you track, or hooks your Claude settings block (`allowedHttpHookUrls`, `disableAllHooks`), still update, a little later.
 
 ```sh
 stage harness claude

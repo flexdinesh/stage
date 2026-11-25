@@ -1,8 +1,10 @@
 package claudecodesetup_test
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 )
@@ -206,3 +209,84 @@ func TestConnector(t *testing.T) {
 }
 
 func claudeSettings(bin string) config.ClaudeSettings { return config.ClaudeSettings{Binary: bin} }
+
+func eventsOf(t *testing.T, st harness.Status) *claudecode.EventsStatus {
+	t.Helper()
+	d, ok := st.Details.(claudecodesetup.Details)
+	if !ok {
+		t.Fatalf("details %T", st.Details)
+	}
+	return d.Events
+}
+
+// Push starts with the first adapter: the connected status reports push
+// (no hook yet, then the last one), the adapter launches with the hook
+// settings and receives hooks; disconnect ends its subscription and the
+// status drops events.
+func TestHookEventsStatus(t *testing.T) {
+	e := newEnv(t)
+	e.opts.StateDir = filepath.Join(t.TempDir(), "claude")
+	ctx := t.Context()
+	s := e.service(t)
+	if ev := eventsOf(t, s.Status(ctx, true)); ev != nil {
+		t.Fatalf("events before connect %+v", ev)
+	}
+	if _, err := s.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ev := eventsOf(t, s.Status(ctx, false))
+	if ev == nil || ev.Mode != claudecode.ModePush || ev.Reason != "" || ev.LastEventAt != nil {
+		t.Fatalf("connected events %+v", ev)
+	}
+	id, _ := e.ports.Active(ctx, claudecode.Kind)
+	installed, _ := e.local.Adapter(id)
+	a, ok := installed.(*claudecode.Adapter)
+	if !ok {
+		t.Fatalf("adapter %T", installed)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Events(ctx, func(context.Context, execution.Observation) error { return nil })
+	}()
+	o, err := a.Launch(ctx, execution.Intent{RequestID: "r", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x", Workspace: execution.Workspace{Kind: "root"}}, execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := e.f.Launches()[0].Args; !slices.Contains(args, filepath.Join(e.opts.StateDir, claudecode.HooksFile)) {
+		t.Fatalf("launch args %q", args)
+	}
+	if code := e.f.Hook(o.Session.ExternalSessionID, "Stop", nil); code != 204 {
+		t.Fatal(code)
+	}
+	if ev := eventsOf(t, s.Status(ctx, false)); ev == nil || ev.LastEventAt == nil {
+		t.Fatalf("after a hook %+v", ev)
+	}
+	if err := s.Disconnect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the removed adapter still receives hooks")
+	}
+	if ev := eventsOf(t, s.Status(ctx, false)); ev != nil {
+		t.Fatalf("events after disconnect %+v", ev)
+	}
+}
+
+// Without a folder for the hook settings Stage follows sessions by polling
+// and says why.
+func TestHookEventsPollingWithoutStateDir(t *testing.T) {
+	e := newEnv(t)
+	s := e.service(t)
+	if _, err := s.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ev := eventsOf(t, s.Status(t.Context(), false))
+	if ev == nil || ev.Mode != claudecode.ModePolling || ev.Reason != "Stage has no folder for its Claude Code hook settings. It checks Claude Code every few seconds instead." {
+		t.Fatalf("events %+v", ev)
+	}
+}

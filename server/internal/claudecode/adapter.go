@@ -32,8 +32,14 @@ type Options struct {
 	// LaunchWait bounds the wait for a launched session to appear in the
 	// session list (default 5s).
 	LaunchWait time.Duration
-	Now        func() time.Time
-	Logger     *slog.Logger
+	// Hooks is the machine's hook receiver (nil: no push; launches pass no
+	// --settings and polling alone follows sessions).
+	Hooks *Hooks
+	// SettleDelays are the waits before each read after a hook (default
+	// 0, 250ms, 500ms, 1s, 2s); tests shorten them.
+	SettleDelays []time.Duration
+	Now          func() time.Time
+	Logger       *slog.Logger
 }
 
 // Adapter is the Claude Code execution.Adapter for one connection.
@@ -44,8 +50,11 @@ type Adapter struct {
 	roster     *roster
 	logs       *transcripts
 	launchWait time.Duration
+	hooks      *Hooks
 	now        func() time.Time
 	log        *slog.Logger
+	// settleDelays are the waits before each read after a hook (Events).
+	settleDelays []time.Duration
 
 	authMu sync.Mutex
 	auth   authCache
@@ -60,6 +69,7 @@ var (
 	_ execution.Adapter      = (*Adapter)(nil)
 	_ execution.Correlator   = (*Adapter)(nil)
 	_ execution.LinkResolver = (*Adapter)(nil)
+	_ execution.EventSource  = (*Adapter)(nil)
 )
 
 // New builds the adapter; it runs nothing until called.
@@ -76,8 +86,12 @@ func New(o Options) *Adapter {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
+	if len(o.SettleDelays) == 0 {
+		o.SettleDelays = settleDelays
+	}
 	return &Adapter{
 		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now, log: o.Logger,
+		hooks: o.Hooks, settleDelays: o.SettleDelays,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
 		logs:   &transcripts{now: o.Now},
 	}
@@ -303,6 +317,12 @@ func (a *Adapter) read(ctx context.Context, id string, fresh bool) (session, err
 	if err != nil {
 		return session{}, err
 	}
+	return a.readListed(ctx, id, es)
+}
+
+// readListed gathers a session from the session list es and its
+// transcript (read).
+func (a *Adapter) readListed(ctx context.Context, id string, es []Entry) (session, error) {
 	s := session{id: id}
 	s.entry, s.listed = findSession(es, id)
 	if p, ok := transcriptPath(a.projects(ctx), s.entry.Cwd, id); ok {

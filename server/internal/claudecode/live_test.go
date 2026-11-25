@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -67,10 +68,47 @@ func TestLiveClaude(t *testing.T) {
 	git("init", "-q", "-b", "main")
 	git("commit", "-q", "--allow-empty", "-m", "init")
 
-	a := claudecode.New(claudecode.Options{Connection: 1, CLI: cli, Identity: au.ConfigDirectory})
+	// Hooks: every launch passes the settings file; Events records what
+	// they push.
+	hooks, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(scratch, "stage-claude")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := claudecode.New(claudecode.Options{Connection: 1, CLI: cli, Identity: au.ConfigDirectory, Hooks: hooks})
 	var shorts []string
 	t.Cleanup(func() { liveCleanup(t, cli, state, scratch, []string{plain, repo}, shorts) })
+	t.Cleanup(func() { _ = hooks.Close() })
 	trust(t, state, plain, repo)
+	var pushMu sync.Mutex
+	pushes := map[execution.SessionRef][]string{}
+	eventsCtx, stopEvents := context.WithCancel(ctx)
+	t.Cleanup(stopEvents)
+	go func() {
+		_ = a.Events(eventsCtx, func(_ context.Context, o execution.Observation) error {
+			pushMu.Lock()
+			pushes[o.Session] = append(pushes[o.Session], o.State)
+			pushMu.Unlock()
+			return nil
+		})
+	}()
+	// pushed checks that a hook pushed ref in state want (Events, not a
+	// poll).
+	pushed := func(ref execution.SessionRef, want string) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			pushMu.Lock()
+			got := slices.Clone(pushes[ref])
+			pushMu.Unlock()
+			if slices.Contains(got, want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no %s pushed for %s (pushed %v; last hook %+v)", want, ref.ExternalSessionID, got, hooks.Status())
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 
 	if h := a.Health(ctx); !h.Available {
 		t.Fatalf("health %+v", h)
@@ -111,6 +149,7 @@ func TestLiveClaude(t *testing.T) {
 	if done.Reply == nil || !strings.Contains(done.Reply.Text, "stage live ok") || done.Project != plain {
 		t.Fatalf("done %+v", done)
 	}
+	pushed(o.Session, "done")
 	if c, err := a.Correlate(ctx, in); err != nil || c.Session != o.Session {
 		t.Fatalf("correlate %+v %v", c, err)
 	}
@@ -166,6 +205,7 @@ func TestLiveClaude(t *testing.T) {
 	// A permission prompt is needs input; stop interrupts it.
 	_, o = launch("live-block", plain, "root", "manual", "Use the Bash tool to run exactly: touch stage-live-blocked.txt. Then reply done.")
 	await(o.Session, "needs_input")
+	pushed(o.Session, "needs_input")
 	// The attention feed lists it (discovery reads the same session list).
 	refs, err := a.Attention(ctx)
 	if err != nil || !slices.Contains(refs, o.Session) {
@@ -175,6 +215,7 @@ func TestLiveClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	await(o.Session, "interrupted")
+	pushed(o.Session, "interrupted") // SessionEnd
 
 	// A worktree per attempt, in the repository.
 	_, o = launch("live-wt", repo, "worktree", "", "Without using any tools, reply with exactly: stage wt ok")

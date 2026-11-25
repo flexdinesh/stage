@@ -97,7 +97,7 @@ func run(s *fakestate.State, args []string) (int, error) {
 }
 
 func launch(s *fakestate.State, args []string) (int, error) {
-	var name, worktree, prompt string
+	var name, worktree, settings, prompt string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-n", "--model", "--effort", "--permission-mode":
@@ -122,6 +122,12 @@ func launch(s *fakestate.State, args []string) (int, error) {
 				fmt.Fprintf(os.Stderr, "Added folder not trusted: %s. Leave out its --add-dir or, if you trust it and everything in its repository or below it, start `claude` there once and accept the trust prompt.\n", args[i+1])
 				return 1, nil
 			}
+			i++
+		case "--settings":
+			if i+1 >= len(args) {
+				return 2, fmt.Errorf("--settings needs a file")
+			}
+			settings = args[i+1]
 			i++
 		case "--":
 			prompt = strings.Join(args[i+1:], " ")
@@ -153,7 +159,7 @@ func launch(s *fakestate.State, args []string) (int, error) {
 	s.Sessions = append(s.Sessions, fakestate.Session{Entry: fakestate.Entry{
 		PID: 4242, ID: id[:8], Cwd: dir, Kind: "background", StartedAt: now.UnixMilli(),
 		SessionID: id, Name: name, Status: "busy", State: "working",
-	}})
+	}, Settings: settings})
 	if err := fakestate.AppendUser(s.ProjectsDir, dir, id, "cli", "bg", prompt, now); err != nil {
 		return 2, err
 	}

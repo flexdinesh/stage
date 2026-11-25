@@ -7,7 +7,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useHarnessApi, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus, useHarnesses } from "../api/queries.ts";
 import type { HarnessStatus } from "../api/types.ts";
-import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeChip, claudeDetails, claudeFix, commandText, configText, versionText } from "../lib/claude.ts";
+import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "../lib/claude.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { Alert, Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "./ui.tsx";
@@ -124,6 +124,7 @@ function Connected({ status, checking, check }: { status: HarnessStatus; checkin
         <Fact label="Config">{d === null || d.configDirectory === "" ? "-" : configText(d.configDirectory)}</Fact>
         <Fact label="Login">{d === null || d.version === "" ? "-" : d.loggedIn ? "logged in" : "logged out"}</Fact>
         <Fact label="Restarts">{d === null ? "-" : d.scope ? "sessions keep running when Stage restarts" : "a Stage restart may stop Claude's sessions"}</Fact>
+        <Fact label="Updates">{d === null || d.events === null ? "-" : <Updates events={d.events} />}</Fact>
       </dl>
       <ul className="flex list-none flex-col gap-1 text-small text-muted">
         <li>Questions and approvals are answered in Claude Code: copy a task's resume command and run it in a terminal.</li>
@@ -135,6 +136,17 @@ function Connected({ status, checking, check }: { status: HarnessStatus; checkin
       <CommandForm status={status} />
       <AutoCompleteToggle harness={CLAUDE} className="border-t border-line pt-2" />
     </div>
+  );
+}
+
+/** How Stage hears about the sessions it launches: hooks (instant) or polling, with why it only polls. */
+function Updates({ events }: { events: ClaudeEvents }) {
+  const { text, reason } = updatesText(events);
+  return (
+    <>
+      {text}
+      {reason === null ? null : <span className="block font-sans text-small text-muted">{reason}</span>}
+    </>
   );
 }
 

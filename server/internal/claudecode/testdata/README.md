@@ -27,5 +27,6 @@ prompt and account data). Thinking signatures read `redacted`.
 | `transcripts/t3-code.jsonl` | first records of a T3-launched session (`entrypoint: t3-code`); message text replaced |
 | `jobs/*-state.json`, `jobs/*-timeline.jsonl` | `~/.claude/jobs/<short>/` for the blocked, question, working and done cases (undocumented; Stage does not depend on them) |
 | `sessions/bg.json`, `sessions/t3-code.json` | `~/.claude/sessions/<pid>.json` for a background and a T3 session |
+| `hooks/*.json` | HTTP hook inputs a `--bg --settings` session posted (#377, ADR 0005 E8): `stop`, `user-prompt-submit`, `permission-request`, `notification-permission-prompt`, `session-end`; paths redacted, the scratchpad dir reads `SESSION` |
 
 The prompts carry `stage-launch:req-*` or `[stage-marker:*]` markers.

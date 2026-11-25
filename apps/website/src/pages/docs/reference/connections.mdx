@@ -140,7 +140,7 @@ Click **Connect**, or `stage harness claude run connect`. Stage checks the `clau
 | `logged_out` | Run `claude auth login` in a terminal, then connect again |
 | `error` | The command did not answer within 20 seconds, or Claude now uses another config folder: check the command and connect again |
 
-In Settings, the Claude Code row shows its config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens its card: **Connect** while not connected; the reason and **Connect again** on a problem (plus `claude auth login` to copy when logged out); once connected, the command Stage runs, the version, the config folder, the login and whether sessions keep running when Stage restarts, with **Check connection** and **Disconnect**. **Claude command** and its **Save** are at the bottom.
+In Settings, the Claude Code row shows its config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens its card: **Connect** while not connected; the reason and **Connect again** on a problem (plus `claude auth login` to copy when logged out); once connected, the command Stage runs, the version, the config folder, the login, whether sessions keep running when Stage restarts and **Updates** (instant through Claude hooks for sessions Stage starts, else every few seconds with the reason), with **Check connection** and **Disconnect**. **Claude command** and its **Save** are at the bottom.
 
 `stage harness claude` prints the same:
 

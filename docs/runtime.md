@@ -36,7 +36,9 @@ harnesses run as processes on this machine and need a profile that allows
 local processes. Claude Code is one ([execution.md](execution.md#claude-code-adapter)): its
 background sessions belong to Claude's per-user daemon, which a launch from
 the managed service starts in its own systemd user scope (Linux), so
-restarting Stage leaves them running. Codex is another
+restarting Stage leaves them running. Sessions Stage launches post
+[Claude Code hooks](#claude-code-hooks) to a private loopback listener.
+Codex is another
 ([runtime](#codex-connection)): its app-server daemon outlives Stage too.
 
 | Profile | When | Local processes |
@@ -150,6 +152,7 @@ two owners lock different inodes.
 | `*.lock` files | the server | never (they are empty or informational) |
 | Default socket dir, data dir | the server | never |
 | `<data dir>/backups/stage-schema*.db` | the server, before a migration | the server, keeping the newest 3 |
+| `<data dir>/claude/hooks-settings.json` (worker: `<worker dir>/claude/`) | the server (or worker) with its first Claude Code adapter | never: Claude sessions read it again whenever they wake ([Claude Code hooks](#claude-code-hooks)) |
 
 ## Shutdown
 
@@ -557,6 +560,28 @@ Settings connect OpenCode three ways: the service on the Stage server's machine 
 - Paired: the link's code is redeemed once for a 30-day session token, stored like a password. Stage renews it after 7 days through the service (`POST /api/pair`); a failed renewal keeps the old token, logs a warning and retries after an hour. A server password change on the OpenCode host revokes the token (state `rejected`): pair again.
 
 No environment variable sets the connection: it lives in Settings only. Browser links omit credentials. Stage readiness and project planning are independent of either harness.
+
+## Claude Code hooks
+
+Where Claude Code runs (the main server, or a worker that allows local
+harnesses), its setup opens a hook receiver with the first Claude Code
+adapter and keeps it until shutdown ([execution.md](execution.md#claude-code-adapter)).
+It is not one of the [listeners](#one-process-many-listeners): it serves
+only `POST /hooks` on `127.0.0.1` (never another interface), requires
+`Authorization: Bearer <token>` (constant-time compare; 401 otherwise),
+reads at most 64 KiB, answers 204 with no body before any work, and never
+logs or stores a hook's body. `<state dir>/hooks-settings.json` (dir `0700`,
+file `0600`, written atomically when its content changes) is the Claude
+settings file every launch passes with `--settings`: one HTTP hook per
+event, all with that URL and token. Claude saves the file's path with each
+session and reads it again when it wakes the session, so the file always
+names the current listener. A restart keeps the token and binds the port
+the file names when it is free; otherwise it takes a free port and
+rewrites the file, and sessions launched before reach the new port when
+they next wake. While no listener answers (Stage stopped), Claude records a
+non-blocking hook error in the session and the turn goes on; polling
+catches up. When the receiver cannot open (no state dir, the folder or
+port), launches carry no hooks and the setup status says why.
 
 ## Codex connection
 
