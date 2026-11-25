@@ -64,7 +64,10 @@ them. 2, 3, 13 and 14 come from the evidence.
    | `done` | done | the process may stay alive and take more turns: a later `working` is new activity |
    | `failed` | failed | e.g. a session that never started |
    | `stopped` | interrupted | after `claude stop` |
-   | entry gone (`rm`, reap) | idle, with the reply when the transcript exists, else not found | never failure or completion |
+   | entry gone (`rm`) | idle, with the reply when the transcript exists, else not found | never failure or completion |
+
+   The hourly reap ([E7](#e7-reap)) ends the process but keeps the entry and
+   its `state`, so a reaped session maps as above (no `pid`).
 
    Entries with `kind: interactive` have no `state`. They are terminal or SDK
    sessions (T3's among them). Stage ignores them unless adopted
@@ -146,7 +149,7 @@ have `pid`, `cwd`, `kind: "interactive"`, `startedAt`, `sessionId`, `name`,
 | After `rm` | entry gone from both lists |
 | T3 sessions | `kind: interactive`, `status: busy` while T3's SDK process runs. The entrypoint is not in the roster: `~/.claude/sessions/<pid>.json` has `entrypoint: "t3-code"`, `kind: "interactive"`; a background one has `entrypoint: "cli"`, `kind: "bg"`, `jobId`. |
 | Daemon upgrade | the 2.1.332 daemon re-adopted the idle 2.1.331 session: new `pid` and `startedAt`, same `id`, `sessionId`, `state` |
-| ~1 h reap | see [E7](#e7-reap) |
+| ~1 h reap | process ended, entry kept with the same `state`, no `pid` or `status` ([E7](#e7-reap)) |
 
 Claude also keeps `~/.claude/jobs/<short>/state.json` (`state`, `tempo`,
 `needs`, e.g. `approve Bash: touch blocked.txt && echo made`, `intent` =
@@ -246,7 +249,20 @@ a message, even when it is dirty. The roster `cwd` is the worktree.
 
 ### E7 Reap
 
-Pending: filled in once a `done` session has idled past an hour.
+Ten sessions idled past an hour, checked at 04:05Z and 04:20Z:
+
+- The daemon ends a session's process after 60 idle minutes, on a
+  one-minute sweep: `bg retire 385d212a: settled, idle 60m` then
+  `bg settled 385d212a (done)` (launched 03:02Z, retired 04:02Z). A session
+  still waiting for its user retires the same way (`bg retire abab23c5:
+  idle-prompt, idle 60m`).
+- The roster keeps every retired entry under `--all` with its `state`
+  unchanged (`done`, and `blocked` for the waiting one) and no `pid` or
+  `status`; `--json` alone drops them. `~/.claude/jobs/<short>/` stays.
+  Nothing was removed within 78 minutes; only `rm` removes an entry.
+- `claude attach <short>` on a retired session wakes it (the daemon claims
+  a spare, new `pid`), and it stays alive after the attaching client exits.
+- Fixture: `roster/all-reaped.json`.
 
 ## Approval routes (record only)
 
@@ -294,4 +310,6 @@ answering prompts in Claude for now. The SDK route stays open as #385.
 Clear the inherited Claude and T3 variables (`env -u CLAUDECODE -u
 CLAUDE_CODE_SESSION_ID …`), trust a scratch directory once with an
 interactive `claude`, and run the probes above with `--model haiku`.
-Clean up with `claude rm <short>` and `claude purge <dir>`.
+Clean up with `claude rm <short>`, then `claude purge -y <dir>` for each
+directory: purging a parent deletes its children's transcripts but leaves
+their `~/.claude.json` entries.

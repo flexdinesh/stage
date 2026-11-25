@@ -17,6 +17,7 @@ prompt and account data). Thinking signatures read `redacted`.
 | `roster/all-after-stop.json` | `stopped` (no pid); a `done` entry with no pid whose `cwd` reverted to the launch repository |
 | `roster/active-after-stop.json` | `agents --json` (no `--all`) at the same moment: stopped and pid-less entries absent |
 | `roster/all-failed.json` | `failed` (`--bg --resume` of an unknown UUID) |
+| `roster/all-reaped.json` | after the hourly reap: `done`, `blocked` and `stopped` entries with no pid |
 | `transcripts/done-text.jsonl` | finished turn, text reply |
 | `transcripts/blocked-question.jsonl` | tool errors, then a final text asking the user; turn over |
 | `transcripts/blocked-permission.jsonl` | tail is a `tool_use` waiting for approval; no reply |
