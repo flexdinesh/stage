@@ -33,7 +33,10 @@ The way the server runs decides which harnesses it may run
 ([execution.md](execution.md#harness-registry)). Connected harnesses (a
 service Stage connects to: T3, OpenCode) run on every profile. Hosted
 harnesses run as processes on this machine and need a profile that allows
-local processes.
+local processes. Claude Code is one ([execution.md](execution.md#claude-code-adapter)): its
+background sessions belong to Claude's per-user daemon, which a launch from
+the managed service starts in its own systemd user scope (Linux), so
+restarting Stage leaves them running.
 
 | Profile | When | Local processes |
 | --- | --- | --- |

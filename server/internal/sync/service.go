@@ -253,6 +253,10 @@ func harnessErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	var refused *execution.Refused
+	if errors.As(err, &refused) {
+		return &db.ConflictError{Code: "session_refused", Msg: refused.Reason}
+	}
 	return &db.HarnessError{Err: err}
 }
 func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {

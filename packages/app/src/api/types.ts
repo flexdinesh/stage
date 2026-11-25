@@ -320,7 +320,14 @@ export interface HarnessDescriptor {
   closures: HarnessClosure[];
   setup: HarnessSetup;
   /** How the harness names an agent's session: MCP _meta keys it sends per call, and the variable its agents read their session id from. */
-  attribution: { metaKeys: string[]; env?: string };
+  attribution: {
+    metaKeys: string[];
+    env?: string;
+    precedence?: {
+      owns?: { env: string; value?: string }[];
+      yields?: { env: string; value?: string }[];
+    };
+  };
   available: boolean;
   /** Why it cannot run here (e.g. Stage runs in a container); "" when available. */
   reason?: string;

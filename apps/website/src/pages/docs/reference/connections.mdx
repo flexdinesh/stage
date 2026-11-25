@@ -1,12 +1,12 @@
 ---
 title: Connections
-description: Pair T3 Code, connect OpenCode V2, set their addresses and tokens, and check connection status from Settings or the CLI.
+description: Pair T3 Code, connect OpenCode V2 or Claude Code, set their addresses and tokens, and check connection status from Settings or the CLI.
 showAskAi: false
 ---
 
 # Connections
 
-Stage runs tasks on existing harness services: T3 Code and OpenCode V2. Each connection is set up in Settings > Connections or with `stage harness`. Credentials and addresses are stored in the server's database (on a worker, in that machine's credentials file), so a service or desktop app needs nothing else.
+Stage runs tasks on existing harness services, T3 Code and OpenCode V2, and on Claude Code on the computer Stage runs on. Each connection is set up in Settings > Connections or with `stage harness`. Credentials and addresses are stored in the server's database (on a worker, in that machine's credentials file), so a service or desktop app needs nothing else.
 
 :::note
 Harness settings are never environment variables. `T3_URL`, `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN` and the `OPENCODE_*` variables are no longer read; a server logs a warning naming any still set ([Configuration](/docs/reference/configuration)).
@@ -28,7 +28,7 @@ stage harness KIND run ACTION [FIELD=VALUE...]
 stage harness KIND disconnect        # forget KIND's credentials (tasks stay)
 ```
 
-`KIND` is `t3` or `opencode`.
+`KIND` is `t3`, `opencode` or `claude`.
 
 ## T3 Code
 
@@ -125,6 +125,30 @@ With a separate web client configured, task detail also offers **Open on service
 `stage harness opencode disconnect`, or Disconnect in Settings, forgets the address and credentials. Tasks and history stay. The row stays as Disconnected, like T3.
 
 A disconnected OpenCode leaves planning and the other harness available.
+
+## Claude Code
+
+Stage runs tasks as Claude Code background sessions (`claude --bg`) on the computer Stage runs on: the desktop app, or `stage serve --local-harnesses`. Not in Docker, and not on worker machines yet. Stage uses Claude's own login and stores no Claude credentials.
+
+### Connect
+
+Click **Connect**, or `stage harness claude run connect`. Stage checks the `claude` command (`claude --version`) and that Claude is logged in (`claude auth status`); the connection is named by Claude's config folder (`Claude Code (~/.claude)`). Stage finds `claude` on its `PATH`, then in `~/.local/bin` and the other usual install folders; set **Claude command** (`stage harness claude set binary=/path/to/claude`) for anything else.
+
+| Status | What to do |
+| --- | --- |
+| `not_found` | Install Claude Code, or set the Claude command |
+| `logged_out` | Run `claude auth login` in a terminal, then connect again |
+| `error` | The command did not answer within 20 seconds, or Claude now uses another config folder: check the command and connect again |
+
+### Running tasks
+
+Each task starts one background session in the project folder or in a new Claude worktree (Claude branches it from the checkout's current commit). Pick Claude's default model or opus, sonnet, haiku or fable, an effort and a permission mode. Claude must trust a folder before it runs there: run `claude` in it once and accept the prompt. Otherwise the task returns to backlog saying so.
+
+When a session waits for you, answer in Claude: task detail offers **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). Projects come from the folders Claude knows; Git checkouts import as Stage projects. A session T3 started is tracked through T3, not adopted here.
+
+### Disconnect
+
+`stage harness claude disconnect`, or Disconnect in Settings. Stage stops using Claude Code; sessions keep running in Claude, tasks and history stay, and connecting again resumes the same connection.
 
 ## Connections on workers
 

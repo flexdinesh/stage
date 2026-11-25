@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // Ops runs agent operations against the REST API.
@@ -86,11 +87,14 @@ type harnessCaller struct {
 	warning string
 }
 
-// fromHarnessEnv derives the caller from the one harness session variable
-// set in this process's environment (harness.Attribution.Env), on that
-// harness's active connection on this machine (resolved by the server). A
-// derived session is cached for the process; none set, several set, or no
-// connection leave the caller unknown with a warning.
+// fromHarnessEnv derives the caller from the harness session variable set
+// in this process's environment (harness.Attribution.Env), on that
+// harness's active connection on this machine (resolved by the server).
+// Several set: a candidate whose Attribution.Precedence.Owns matches wins
+// (several owning: ambiguous); otherwise candidates whose Yields match drop
+// out and the one left wins. A derived session is cached for the process;
+// several left or no connection leave the caller unknown with a warning;
+// none set or all yielded leave it unknown without one.
 func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 	if o.HarnessEnv == nil {
 		return harnessCaller{}, nil
@@ -104,33 +108,67 @@ func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 	if err != nil {
 		return harnessCaller{}, err
 	}
-	var kinds, names, ids []string
+	var cands []envCandidate
 	for _, d := range hs.Harnesses {
 		if d.Attribution.Env == "" {
 			continue
 		}
 		if id := strings.TrimSpace(o.HarnessEnv(d.Attribution.Env)); id != "" {
-			kinds, names, ids = append(kinds, d.Kind), append(names, d.Attribution.Env), append(ids, id)
+			cands = append(cands, envCandidate{kind: d.Kind, env: d.Attribution.Env, id: id, precedence: d.Attribution.Precedence})
 		}
 	}
-	switch len(kinds) {
+	cands = rankCandidates(cands, o.HarnessEnv)
+	switch len(cands) {
 	case 0:
 		return harnessCaller{}, nil
 	case 1:
 	default:
+		names := make([]string, len(cands))
+		for i, c := range cands {
+			names[i] = c.env
+		}
 		return harnessCaller{warning: fmt.Sprintf("several harness session variables are set (%s); pass the caller explicitly", strings.Join(names, ", "))}, nil
 	}
-	c, err := o.Client.ResolveConnection(ctx, kinds[0])
+	w := cands[0]
+	c, err := o.Client.ResolveConnection(ctx, w.kind)
 	var apiErr *client.Error
 	if errors.As(err, &apiErr) && apiErr.Status == 404 {
-		return harnessCaller{warning: fmt.Sprintf("%s is set but there is %s", names[0], apiErr.Msg)}, nil
+		return harnessCaller{warning: fmt.Sprintf("%s is set but there is %s", w.env, apiErr.Msg)}, nil
 	}
 	if err != nil {
 		return harnessCaller{}, err
 	}
-	h := harnessCaller{session: &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: ids[0]}, source: names[0]}
+	h := harnessCaller{session: &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: w.id}, source: w.env}
 	o.harnessCaller = &h
 	return h, nil
+}
+
+// envCandidate is a harness whose session variable is set.
+type envCandidate struct {
+	kind, env, id string
+	precedence    *harness.Precedence
+}
+
+// rankCandidates applies harness.Precedence to several set variables: the
+// owning candidates if any, else those that do not yield.
+func rankCandidates(cands []envCandidate, getenv func(string) string) []envCandidate {
+	if len(cands) < 2 {
+		return cands
+	}
+	var owns, kept []envCandidate
+	for _, c := range cands {
+		switch {
+		case c.precedence != nil && harness.AnyMatches(c.precedence.Owns, getenv):
+			owns = append(owns, c)
+		case c.precedence != nil && harness.AnyMatches(c.precedence.Yields, getenv):
+		default:
+			kept = append(kept, c)
+		}
+	}
+	if len(owns) > 0 {
+		return owns
+	}
+	return kept
 }
 
 // IDArgs names one task or schedule.

@@ -1,0 +1,320 @@
+package claudecode_test
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
+	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest/fakestate"
+	"github.com/flexdinesh/stage/server/internal/execution"
+)
+
+const conn = 7
+
+func intent(f *claudetest.Fake, req string) execution.Intent {
+	marker := execution.LaunchMarker(req)
+	return execution.Intent{
+		RequestID: req, ConnectionID: conn, Project: f.Workspace, Directory: f.Workspace, Title: "Fix the thing",
+		Prompt: "- do it\n\n" + marker, Marker: marker, Workspace: execution.Workspace{Kind: "root"},
+		Config: execution.Config{Model: "haiku", Permission: "acceptEdits", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("low")}}},
+	}
+}
+
+// A launch runs `claude --bg` once in the workspace with the config's
+// flags and the prompt after "--", in a cleaned environment, and maps the
+// printed short id to the session.
+func TestLaunchStartsOneBackgroundSession(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-1"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls := f.Launches()
+	if len(ls) != 1 {
+		t.Fatalf("launches %d", len(ls))
+	}
+	want := []string{"--bg", "-n", "Fix the thing", "--model", "haiku", "--effort", "low", "--permission-mode", "acceptEdits", "--", "- do it\n\nstage-launch:req-1"}
+	if !slices.Equal(ls[0].Args, want) || ls[0].Dir != f.Workspace {
+		t.Fatalf("args %q dir %s", ls[0].Args, ls[0].Dir)
+	}
+	for k := range ls[0].Env {
+		if claudecode.Cleared(k) {
+			t.Fatalf("inherited %s reached claude", k)
+		}
+	}
+	if !strings.Contains(ls[0].Env["PATH"], filepath.Join(f.Home, ".local", "bin")) {
+		t.Fatalf("PATH not widened: %s", ls[0].Env["PATH"])
+	}
+	if err := o.Valid(); err != nil || o.State != "running" || o.Project != f.Workspace || o.Directory != f.Workspace || o.Session.ConnectionID != conn {
+		t.Fatalf("%+v %v", o, err)
+	}
+	s := f.Session(o.Session.ExternalSessionID)
+	if o.Links.Command != "claude attach "+s.ID {
+		t.Fatalf("links %+v", o.Links)
+	}
+}
+
+// Claude's refusal of an untrusted folder, a missing executable and an
+// unsupported intent certify nothing started.
+func TestLaunchRejections(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	untrusted := filepath.Join(f.Home, "other")
+	if err := os.MkdirAll(untrusted, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := intent(f, "req-u")
+	in.Directory, in.Project = untrusted, untrusted
+	var rejected *execution.Rejected
+	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "doesn't trust "+untrusted) {
+		t.Fatalf("untrusted: %v", err)
+	}
+	img := intent(f, "req-i")
+	img.Images = []execution.Image{{Name: "a.png"}}
+	base := intent(f, "req-b")
+	base.Workspace.Base = "main"
+	model := intent(f, "req-m")
+	model.Config.Model = "gpt"
+	for _, in := range []execution.Intent{img, base, model} {
+		if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) {
+			t.Fatalf("%s: %v", in.RequestID, err)
+		}
+	}
+	missing := claudecode.New(claudecode.Options{Connection: conn, CLI: &claudecode.CLI{Bin: filepath.Join(f.Home, "nope"), Environ: f.Environ()}, Identity: f.ConfigDir()})
+	if _, err := missing.Launch(t.Context(), intent(f, "req-x"), execution.Checkpoint{}, nil); !errors.As(err, &rejected) {
+		t.Fatalf("missing binary: %v", err)
+	}
+	if n := len(f.Launches()); n != 1 {
+		t.Fatalf("only the untrusted launch reached claude: %d", n)
+	}
+}
+
+// A lost reply is uncertain; Correlate finds the session by its marker and
+// never launches again. Before anything was created it finds nothing.
+func TestLostReplyCorrelatesByMarker(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	f.Update(func(s *fakestate.State) { s.Launch = fakestate.CrashAfterCreate })
+	in := intent(f, "req-lost")
+	var rejected *execution.Rejected
+	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); err == nil || errors.As(err, &rejected) {
+		t.Fatalf("lost reply must be uncertain: %v", err)
+	}
+	other := intent(f, "req-other")
+	f.Update(func(s *fakestate.State) { s.Launch = "" })
+	if _, err := a.Launch(t.Context(), other, execution.Checkpoint{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	o, err := a.Correlate(t.Context(), in)
+	if err != nil || o.State != "running" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	tr, _ := claudecode.ReadHead(filepath.Join(f.ProjectsDir(), claudecode.EncodeProject(f.Workspace), o.Session.ExternalSessionID+".jsonl"))
+	if !strings.Contains(tr.FirstPrompt, in.Marker) {
+		t.Fatalf("correlated the wrong session: %q", tr.FirstPrompt)
+	}
+	if _, err := a.Correlate(t.Context(), intent(f, "req-never")); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("never created: %v", err)
+	}
+	if n := len(f.Launches()); n != 2 {
+		t.Fatalf("correlation launched: %d", n)
+	}
+}
+
+// A worktree launch names its worktree per attempt and correlates in it.
+func TestWorktreeLaunch(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	in := intent(f, "req-w")
+	in.Workspace.Kind = "worktree"
+	f.Update(func(s *fakestate.State) { s.Launch = fakestate.CrashAfterCreate })
+	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); err == nil {
+		t.Fatal("lost reply reported success")
+	}
+	if args := f.Launches()[0].Args; !slices.Contains(args, "-w") || !slices.Contains(args, claudecode.WorktreeName("req-w")) {
+		t.Fatalf("args %q", args)
+	}
+	o, err := a.Correlate(t.Context(), in)
+	wt := claudecode.WorktreeDir(f.Workspace, claudecode.WorktreeName("req-w"))
+	if err != nil || o.Directory != wt || o.Project != f.Workspace {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
+// Observe maps the session list; a removed session with a transcript is
+// idle with its reply, one without either is not found; replies are
+// bounded and shown once the session is not running.
+func TestObserveStatesAndReply(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-o"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, id := o.Session, o.Session.ExternalSessionID
+	f.Reply(id, "Which file?", true)
+	f.SetState(id, "blocked", "idle", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "needs_input" || !o.Active || o.Reply == nil || o.Reply.Text != "Which file?" {
+		t.Fatalf("blocked %+v %v", o, err)
+	}
+	f.Reply(id, strings.Repeat("é", 5000), true)
+	f.SetState(id, "done", "idle", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "done" || o.Active || o.EndedAt == nil || !o.Reply.Truncated || len([]rune(o.Reply.Text)) != 4000 {
+		t.Fatalf("done %+v %v", o, err)
+	}
+	f.SetState(id, "working", "busy", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "running" || o.Reply != nil {
+		t.Fatalf("working again %+v %v", o, err)
+	}
+	f.SetState(id, "failed", "", "")
+	if o, _ = a.Observe(t.Context(), ref); o.State != "failed" {
+		t.Fatalf("failed %+v", o)
+	}
+	f.Remove(id)
+	o, err = a.Observe(t.Context(), ref)
+	if err != nil || o.State != "idle" || o.Reply == nil || !strings.HasPrefix(o.Links.Command, "cd "+f.Workspace+" && claude --resume "+id) {
+		t.Fatalf("removed %+v %v", o, err)
+	}
+	if _, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: "11111111-1111-4111-8111-111111111111"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if _, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: "not-a-uuid"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("malformed: %v", err)
+	}
+	if op, err := a.Opening(t.Context(), ref, false); err != nil || !strings.HasPrefix(op.Text, "- do it") {
+		t.Fatalf("opening %+v %v", op, err)
+	}
+	f.Update(func(s *fakestate.State) { s.FailAgents = true })
+	if _, err := a.Observe(t.Context(), ref); err == nil || errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("an unreadable list must stay uncertain: %v", err)
+	}
+}
+
+// Stop stops a background session; it maps to interrupted.
+func TestStop(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-s"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Stop(t.Context(), o.Session); err != nil {
+		t.Fatal(err)
+	}
+	if o, err = a.Observe(t.Context(), o.Session); err != nil || o.State != "interrupted" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if err := a.Stop(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: "11111111-1111-4111-8111-111111111111"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	f.AddInteractive("22222222-2222-4222-8222-222222222222", f.Workspace, "cli", "hi")
+	if err := a.Stop(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: "22222222-2222-4222-8222-222222222222"}); err == nil {
+		t.Fatal("stopped an interactive session")
+	}
+}
+
+// A session T3 started is refused everywhere Stage could pick it up; a
+// terminal session can be adopted by UUID or short id.
+func TestT3SessionsAreRefusedAndLinksResolve(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	t3 := "33333333-3333-4333-8333-333333333333"
+	f.AddInteractive(t3, f.Workspace, "t3-code", "from T3")
+	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: t3}
+	var refused *execution.Refused
+	if _, err := a.Observe(t.Context(), ref); !errors.As(err, &refused) || !strings.Contains(refused.Reason, "Track it through T3") {
+		t.Fatalf("observe: %v", err)
+	}
+	if _, err := a.ResolveLink(t.Context(), t3); !errors.As(err, &refused) {
+		t.Fatalf("resolve: %v", err)
+	}
+	term := "44444444-4444-4444-8444-444444444444"
+	f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
+	if r, err := a.ResolveLink(t.Context(), "claude --resume "+term); err != nil || r.ExternalSessionID != term {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if o, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: term}); err != nil || o.State != "running" {
+		t.Fatalf("interactive %+v %v", o, err)
+	}
+	o, err := a.Launch(t.Context(), intent(f, "req-r"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := f.Session(o.Session.ExternalSessionID).ID
+	if r, err := a.ResolveLink(t.Context(), "claude attach "+short); err != nil || r != o.Session {
+		t.Fatalf("short %+v %v", r, err)
+	}
+	if _, err := a.ResolveLink(t.Context(), "https://example.com"); err == nil {
+		t.Fatal("resolved garbage")
+	}
+}
+
+// Health follows the login and the config directory; the inventory lists
+// Claude's folders, importable when they are Git checkouts.
+func TestHealthAndWorkspaces(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	if h := a.Health(t.Context()); !h.Available || h.Identity != f.ConfigDir() {
+		t.Fatalf("%+v", h)
+	}
+	f.Update(func(s *fakestate.State) { s.LoggedIn = false })
+	if h := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: f.ConfigDir()}).Health(t.Context()); h.Available || !strings.Contains(h.Reason, "claude auth login") {
+		t.Fatalf("logged out %+v", h)
+	}
+	if h := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: "/elsewhere"}).Health(t.Context()); h.Available {
+		t.Fatalf("other identity %+v", h)
+	}
+	plain := filepath.Join(f.Home, "notes")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.WriteClaudeJSON(f.Workspace, plain, f.Workspace+"/.claude/worktrees/x", "relative")
+	ws, err := a.Workspaces(t.Context())
+	if err != nil || len(ws) != 2 {
+		t.Fatalf("%+v %v", ws, err)
+	}
+	for _, w := range ws {
+		if w.ID != w.WorkspaceRoot || w.Importable != (w.ID == f.Workspace) {
+			t.Fatalf("%+v", w)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(f.Home, ".claude.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Workspaces(t.Context()); err == nil {
+		t.Fatal("a malformed state file must fail, not empty the inventory")
+	}
+	if err := os.Remove(filepath.Join(f.Home, ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+	if ws, err := a.Workspaces(t.Context()); err != nil || len(ws) != 0 {
+		t.Fatalf("no file: %+v %v", ws, err)
+	}
+}
+
+// Features: Claude's aliases, effort, permission modes and workspaces; the
+// operations it lacks say why.
+func TestFeatures(t *testing.T) {
+	f := claudetest.New(t)
+	c, err := f.Adapter(conn).Features(t.Context())
+	if err != nil || c.Valid() != nil {
+		t.Fatal(err, c.Valid())
+	}
+	for _, op := range []string{"images", "predecessorBase", "worktreeBase", "respond", "send", "registerWorkspace"} {
+		if a := c.Operations[op]; a.Available || a.Reason == "" {
+			t.Fatalf("%s %+v", op, a)
+		}
+	}
+	if err := c.ValidateConfig(execution.Config{}); err != nil {
+		t.Fatal("Claude's defaults", err)
+	}
+	if err := c.ValidateConfig(execution.Config{Model: "opus", Permission: "plan", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("max")}}}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -99,3 +99,13 @@ func (m MachineStore) OpenCodeSettings(ctx context.Context) (config.OpenCodeSetu
 func (m MachineStore) SaveOpenCodeSettings(ctx context.Context, setup config.OpenCodeSetup, cred config.OpenCodeCredential) error {
 	return m.Store.SaveOpenCodeSettings(ctx, m.machine, setup, cred)
 }
+
+// ClaudeSettings reads the machine's Claude Code harness setup.
+func (m MachineStore) ClaudeSettings(ctx context.Context) (config.ClaudeSettings, error) {
+	return m.Store.ClaudeSettings(ctx, m.machine)
+}
+
+// SaveClaudeSettings saves the machine's Claude Code harness setup.
+func (m MachineStore) SaveClaudeSettings(ctx context.Context, c config.ClaudeSettings) error {
+	return m.Store.SaveClaudeSettings(ctx, m.machine, c)
+}

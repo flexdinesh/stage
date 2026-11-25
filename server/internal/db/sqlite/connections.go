@@ -429,5 +429,20 @@ func (r connections) SaveOpenCodeSettings(ctx context.Context, machine int64, c 
 	return err
 }
 
+func (r connections) ClaudeSettings(ctx context.Context, machine int64) (config.ClaudeSettings, bool, error) {
+	var c config.ClaudeSettings
+	err := r.QueryRow(ctx, `SELECT binary_path,config_dir,disconnected FROM claude_settings WHERE machine_id=$1`, machine).Scan(&c.Binary, &c.ConfigDir, &c.Disconnected)
+	if errors.Is(err, sql.ErrNoRows) {
+		return config.ClaudeSettings{}, false, nil
+	}
+	return c, err == nil, err
+}
+
+func (r connections) SaveClaudeSettings(ctx context.Context, machine int64, c config.ClaudeSettings) error {
+	_, err := r.Exec(ctx, `INSERT INTO claude_settings(machine_id,binary_path,config_dir,disconnected,updated_at) VALUES($1,$2,$3,$4,`+nowSQL+`)
+ ON CONFLICT(machine_id) DO UPDATE SET binary_path=excluded.binary_path,config_dir=excluded.config_dir,disconnected=excluded.disconnected,updated_at=excluded.updated_at`, machine, c.Binary, c.ConfigDir, c.Disconnected)
+	return err
+}
+
 // Lock is a no-op: BEGIN IMMEDIATE already serializes writes.
 func (connections) Lock(context.Context, int64) error { return nil }

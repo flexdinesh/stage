@@ -57,7 +57,7 @@ type SharedPath struct {
 }
 
 // Connections is the harness connections repository, with each machine's
-// T3 and OpenCode settings and shared paths.
+// T3, OpenCode and Claude Code settings and shared paths.
 type Connections interface {
 	// Lock locks the connection rows id until the unit of work ends, on engines
 	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
@@ -158,6 +158,11 @@ type Connections interface {
 	// OpenCodeIdentity is the identity of machine's active OpenCode connection ("" when none).
 	OpenCodeIdentity(ctx context.Context, machine int64) (string, error)
 	SaveOpenCodeSettings(ctx context.Context, machine int64, c config.OpenCodeSettings) error
+
+	// ClaudeSettings reads machine's claude_settings row (found false: none).
+	ClaudeSettings(ctx context.Context, machine int64) (c config.ClaudeSettings, found bool, err error)
+	// SaveClaudeSettings upserts machine's row and sets its updated_at.
+	SaveClaudeSettings(ctx context.Context, machine int64, c config.ClaudeSettings) error
 }
 
 // T3Connection is the non-secret part of a machine's t3_connection row.

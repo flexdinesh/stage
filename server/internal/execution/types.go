@@ -272,6 +272,13 @@ type Rejected struct{ Reason string }
 
 func (e *Rejected) Error() string { return e.Reason }
 
+// Refused: the harness will not let Stage track this session (another
+// client owns it, e.g. a Claude session T3 started). Reason says where to
+// track it instead. It is a decision, not a failure: the API answers 409.
+type Refused struct{ Reason string }
+
+func (e *Refused) Error() string { return e.Reason }
+
 type LinkResolver interface {
 	ResolveLink(context.Context, string) (SessionRef, error)
 }

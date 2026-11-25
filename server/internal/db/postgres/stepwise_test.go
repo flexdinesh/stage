@@ -25,6 +25,7 @@ type migrationStep struct {
 var stepwiseMigrations = map[int64][]migrationStep{
 	28: {{name: "baseline", check: checkBaseline}},
 	29: {{name: "search indexes", seed: seedV0029Search, check: checkV0029Search}},
+	30: {{name: "claude settings table", seed: seedV0030ClaudeSettings, check: checkV0030ClaudeSettings}},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -147,6 +148,48 @@ func TestStepwiseMigrations(t *testing.T) {
 				}
 				st.check(t, pool)
 			})
+		}
+	}
+}
+
+func seedV0030ClaudeSettings(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	if _, err := pool.ExecContext(context.Background(), `INSERT INTO machines (id, label) VALUES (2, 'worker')`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkV0030ClaudeSettings: the table starts empty (no row reads the
+// defaults), defaults fill an inserted row, and the machine key holds.
+func checkV0030ClaudeSettings(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	var n int
+	if err := pool.QueryRowContext(ctx, `SELECT count(*) FROM claude_settings`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("rows %d %v, want 0", n, err)
+	}
+	for _, q := range []string{
+		`INSERT INTO claude_settings (machine_id) VALUES (1)`,
+		`INSERT INTO claude_settings (machine_id, binary_path, disconnected) VALUES (2, '/bin/claude', true)`,
+	} {
+		if _, err := pool.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	var bin string
+	var disconnected, stamped bool
+	if err := pool.QueryRowContext(ctx, `SELECT binary_path, disconnected, updated_at IS NOT NULL FROM claude_settings WHERE machine_id = 1`).Scan(&bin, &disconnected, &stamped); err != nil {
+		t.Fatal(err)
+	}
+	if bin != "" || disconnected || !stamped {
+		t.Fatalf("defaults %q %v %v", bin, disconnected, stamped)
+	}
+	for why, q := range map[string]string{
+		"unknown machine":   `INSERT INTO claude_settings (machine_id) VALUES (9)`,
+		"duplicate machine": `INSERT INTO claude_settings (machine_id) VALUES (1)`,
+	} {
+		if _, err := pool.ExecContext(ctx, q); err == nil {
+			t.Fatalf("%s: %s accepted", why, q)
 		}
 	}
 }
