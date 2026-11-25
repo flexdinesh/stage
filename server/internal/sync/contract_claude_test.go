@@ -1,8 +1,13 @@
 package sync_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -335,4 +340,42 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// A task's images reach Claude as files: the launch writes them to its own
+// folder (fetched by index over a worker channel), offers the folder with
+// --add-dir and lists each file after the prompt.
+func TestContractClaudeImages(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		store, svc, task, _ := claudeSetup(t, p, f)
+		ctx := t.Context()
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, 1, 1))); err != nil {
+			t.Fatal(err)
+		}
+		att, err := store.CreateAttachment(ctx, "shot.png", "image/png", buf.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.UpdateTask(ctx, task.ID, db.TaskPatch{AttachmentIDs: db.Optional[[]int64]{Set: true, V: []int64{att.ID}}}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.StartTask(ctx, task.ID)
+		if err != nil || got.State != db.StateRunning {
+			t.Fatalf("start %+v %v", got, err)
+		}
+		args := f.Launches()[0].Args
+		i := slices.Index(args, "--add-dir")
+		if i < 0 || args[i+2] != "--" {
+			t.Fatalf("args %q", args)
+		}
+		file := filepath.Join(args[i+1], "1-shot.png")
+		if b, err := os.ReadFile(file); err != nil || !bytes.Equal(b, buf.Bytes()) {
+			t.Fatalf("image file: %v", err)
+		}
+		if prompt := args[len(args)-1]; !strings.HasSuffix(prompt, "\n1. shot.png: "+file) {
+			t.Fatalf("prompt %q", prompt)
+		}
+	})
 }

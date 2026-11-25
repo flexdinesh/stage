@@ -108,6 +108,21 @@ func launch(s *fakestate.State, args []string) (int, error) {
 		case "-w":
 			worktree = args[i+1]
 			i++
+		case "--add-dir":
+			if i+1 >= len(args) {
+				return 2, fmt.Errorf("--add-dir needs a folder")
+			}
+			if fi, err := os.Stat(args[i+1]); err != nil || !fi.IsDir() {
+				fmt.Fprintf(os.Stderr, "Path %s was not found.\n", args[i+1])
+				return 1, nil
+			}
+			// Claude refuses an added folder outside every trusted one
+			// (claude 2.1.332).
+			if !s.Trusts(args[i+1]) {
+				fmt.Fprintf(os.Stderr, "Added folder not trusted: %s. Leave out its --add-dir or, if you trust it and everything in its repository or below it, start `claude` there once and accept the trust prompt.\n", args[i+1])
+				return 1, nil
+			}
+			i++
 		case "--":
 			prompt = strings.Join(args[i+1:], " ")
 			i = len(args)

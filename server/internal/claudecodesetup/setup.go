@@ -146,7 +146,7 @@ func (s *Service) cli(bin string) *claudecode.CLI {
 
 // install puts the adapter for bin on the connection (s.mu held or setup).
 func (s *Service) install(bin, identity string) {
-	s.ports.Install(s.id, s.id, s.opts.NewAdapter(claudecode.Options{Connection: s.id, CLI: s.cli(bin), Identity: identity}))
+	s.ports.Install(s.id, s.id, s.opts.NewAdapter(claudecode.Options{Connection: s.id, CLI: s.cli(bin), Identity: identity, Logger: s.log}))
 	s.active = true
 }
 

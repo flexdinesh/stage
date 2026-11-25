@@ -28,7 +28,7 @@ export const features: Feature[] = [
     id: 'backlog',
     title: 'Write the prompt now. Start it later.',
     body: 'Save a task with its prompt, provider, model, effort, runtime and workspace. It waits in the backlog until you start it, or until something you queued starts it for you.',
-    facts: ['provider, model, effort, worktree', 'T3 supports prompt images', 'save to backlog or start right away'],
+    facts: ['provider, model, effort, worktree', 'prompt images for T3, Claude Code, Codex', 'save to backlog or start right away'],
     link: { text: 'How tasks work', href: '/docs/concepts/tasks' },
     demoLabel: "Animated demo: in stage's New task drawer a prompt is typed, a model and effort are picked, and Save to backlog adds the task to the top of the project's backlog.",
   },

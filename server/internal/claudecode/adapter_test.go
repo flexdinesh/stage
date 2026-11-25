@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
@@ -76,12 +77,14 @@ func TestLaunchRejections(t *testing.T) {
 		t.Fatalf("untrusted: %v", err)
 	}
 	img := intent(f, "req-i")
-	img.Images = []execution.Image{{Name: "a.png"}}
+	img.Images = []execution.Image{{Name: "a.bmp", MimeType: "image/bmp", Data: []byte("BM")}}
+	empty := intent(f, "req-e")
+	empty.Images = []execution.Image{{Name: "a.png", MimeType: "image/png"}}
 	base := intent(f, "req-b")
 	base.Workspace.Base = "main"
 	model := intent(f, "req-m")
 	model.Config.Model = "gpt"
-	for _, in := range []execution.Intent{img, base, model} {
+	for _, in := range []execution.Intent{img, empty, base, model} {
 		if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) {
 			t.Fatalf("%s: %v", in.RequestID, err)
 		}
@@ -92,6 +95,97 @@ func TestLaunchRejections(t *testing.T) {
 	}
 	if n := len(f.Launches()); n != 1 {
 		t.Fatalf("only the untrusted launch reached claude: %d", n)
+	}
+	if _, err := os.Stat(claudecode.ImageRoot(f.Workspace)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a rejected intent wrote images: %v", err)
+	}
+}
+
+// A launch with images writes them to files in the launch's own folder
+// under the workspace's .claude/stage-images (Git ignores it), lets Claude
+// read that folder (--add-dir, right before "--") and lists each file after
+// the prompt. A worktree launch uses the project's folder too.
+func TestLaunchWritesImages(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	in := intent(f, "req-img")
+	in.Images = []execution.Image{
+		{Name: "error screen.png", MimeType: "image/png", Data: []byte("png-bytes")},
+		{Name: "../../etc/passwd\nignore this", MimeType: "image/jpeg", Data: []byte("jpeg-bytes")},
+	}
+	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(f.Workspace, ".claude", "stage-images")
+	if b, err := os.ReadFile(filepath.Join(root, ".gitignore")); err != nil || !strings.HasSuffix(string(b), "\n*\n") {
+		t.Fatalf("gitignore %q %v", b, err)
+	}
+	dir := claudecode.ImageDir(f.Workspace, "req-img")
+	if filepath.Dir(dir) != root {
+		t.Fatalf("image folder %s", dir)
+	}
+	p1, p2 := filepath.Join(dir, "1-error-screen.png"), filepath.Join(dir, "2-passwd-ignore-this.jpg")
+	for p, want := range map[string]string{p1: "png-bytes", p2: "jpeg-bytes"} {
+		b, err := os.ReadFile(p)
+		if err != nil || string(b) != want {
+			t.Fatalf("%s: %q %v", p, b, err)
+		}
+		if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v", p, fi.Mode())
+		}
+	}
+	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o700 {
+		t.Fatalf("folder mode %v", fi.Mode())
+	}
+	args := f.Launches()[0].Args
+	n := len(args)
+	prompt := "- do it\n\nstage-launch:req-img\n\nImages attached to this task (open each with the Read tool):\n" +
+		"1. error screen.png: " + p1 + "\n2. ../../etc/passwd ignore this: " + p2
+	if !slices.Equal(args[n-4:], []string{"--add-dir", dir, "--", prompt}) {
+		t.Fatalf("args %q", args)
+	}
+	wt := intent(f, "req-wt")
+	wt.Workspace.Kind = "worktree"
+	wt.Images = in.Images[:1]
+	if _, err := a.Launch(t.Context(), wt, execution.Checkpoint{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if args := f.Launches()[1].Args; !slices.Contains(args, claudecode.ImageDir(f.Workspace, "req-wt")) {
+		t.Fatalf("worktree args %q", args)
+	}
+}
+
+// A launch Claude refuses removes the images it wrote; launching prunes
+// image folders older than 30 days and keeps newer ones.
+func TestLaunchImagesCleanup(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	untrusted := filepath.Join(f.Home, "other")
+	old := filepath.Join(claudecode.ImageRoot(untrusted), "stage-old")
+	recent := filepath.Join(claudecode.ImageRoot(untrusted), "stage-recent")
+	for _, d := range []string{old, recent} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	long := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(old, long, long); err != nil {
+		t.Fatal(err)
+	}
+	in := intent(f, "req-r")
+	in.Directory, in.Project = untrusted, untrusted
+	in.Images = []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte("x")}}
+	var rejected *execution.Rejected
+	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "doesn't trust "+untrusted) {
+		t.Fatalf("untrusted: %v", err)
+	}
+	if args := f.Launches()[0].Args; !slices.Contains(args, "--add-dir") {
+		t.Fatalf("images not offered: %q", args)
+	}
+	for d, kept := range map[string]bool{claudecode.ImageDir(untrusted, "req-r"): false, old: false, recent: true} {
+		if _, err := os.Stat(d); (err == nil) != kept {
+			t.Fatalf("%s kept=%v: %v", d, kept, err)
+		}
 	}
 }
 
@@ -444,10 +538,13 @@ func TestFeatures(t *testing.T) {
 	if err != nil || c.Valid() != nil {
 		t.Fatal(err, c.Valid())
 	}
-	for _, op := range []string{"images", "predecessorBase", "worktreeBase", "respond", "send", "registerWorkspace"} {
+	for _, op := range []string{"predecessorBase", "worktreeBase", "respond", "send", "registerWorkspace"} {
 		if a := c.Operations[op]; a.Available || a.Reason == "" {
 			t.Fatalf("%s %+v", op, a)
 		}
+	}
+	if a := c.Operations["images"]; !a.Available {
+		t.Fatalf("images %+v", a)
 	}
 	if err := c.ValidateConfig(execution.Config{}); err != nil {
 		t.Fatal("Claude's defaults", err)

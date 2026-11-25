@@ -513,15 +513,31 @@ to run on that machine.
   transient scope, so the daemon it may start is not in Stage's service
   cgroup and outlives a Stage restart.
 - **Launch.** In the workspace folder: `claude --bg -n <title> [--model M]
-  [--effort E] [--permission-mode P] [-w stage-<requestId>] -- <prompt>`
-  (the prompt carries the launch marker; `--` keeps a prompt starting with
-  `-` from reading as a flag). Images, a base or branch, a workspace other
-  than the project folder or a Claude worktree, a config the features do not
-  offer, a missing folder or executable, and Claude's `Workspace not
-  trusted` refusal are `Rejected` (the task returns to backlog with the
-  reason; trusting a folder is done in Claude). Exit 0 prints
+  [--effort E] [--permission-mode P] [-w stage-<requestId>] [--add-dir
+  <images>] -- <prompt>` (the prompt carries the launch marker; `--` keeps a
+  prompt starting with `-` from reading as a flag). A base or branch, a
+  workspace other than the project folder or a Claude worktree, a config
+  the features do not offer, an image type other than PNG, JPEG, GIF or
+  WebP, a missing folder or executable, and Claude's `Workspace not
+  trusted` or `Added folder not trusted` refusal are `Rejected` (the task
+  returns to backlog with the reason; trusting a folder is done in
+  Claude). Exit 0 prints
   `backgrounded · <short>`; the session list maps the short id to the
   session within 5 seconds. Anything else is uncertain.
+- **Images** are files Claude reads with its Read tool. Before running
+  claude, Stage writes them to `<project>/.claude/stage-images/stage-<requestId>/`
+  (folder `0700`, files `0600`, named `<n>-<name>.<ext>` with the name kept
+  to `[A-Za-z0-9._-]` and the extension from the type), with a `*`
+  `.gitignore` in `stage-images` so Git never sees them. It passes the
+  folder with `--add-dir`, so Claude reads it without a permission prompt
+  (a worktree session's cwd is its worktree, outside the folder), and
+  appends `Images attached to this task (open each with the Read tool):`
+  with one `<n>. <name>: <path>` line each, after the marker. The folder is
+  inside the project because Claude refuses an added folder it does not
+  trust, and trust covers the folders below a trusted one (ADR 0005 E8).
+  A rejected launch removes its folder; an uncertain one keeps it. Each
+  launch with images removes that project's image folders older than 30
+  days (best effort); Claude keeps what it read in the transcript.
 - **Correlate.** Background sessions listed in the launch folder (or its
   per-attempt worktree, `<folder>/.claude/worktrees/stage-<requestId>`) and
   the transcripts of those folders, matched by the marker in the first
@@ -576,7 +592,7 @@ to run on that machine.
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`). Permissions: `manual`, `acceptEdits`, `auto`, `plan`, `dontAsk`,
   `bypassPermissions`. Workspaces: the project folder or a Claude worktree.
-  Unavailable with reasons: images, predecessor and worktree bases (Claude
+  Images are available. Unavailable with reasons: predecessor and worktree bases (Claude
   branches from the checkout's HEAD), registering a folder, and respond and
   send (answer in Claude: attach or resume).
 - **Health** is `claude auth status --json`, reused for 30 seconds:
@@ -594,8 +610,8 @@ real executable with a state file), and `TestContractClaude*` in
 channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
 two scratch folders trusted in Claude's state file, launches a reply (then
-removes it with `claude rm` and checks the closure), a
-permission prompt it stops and a worktree session, then removes the
+removes it with `claude rm` and checks the closure), an image it must name
+the color of (manual permissions, no prompt), a permission prompt it stops and a worktree session, then removes the
 sessions (`claude rm`) and purges the folders (`claude purge`). Claude
 processes rewrite the state file, so a trust entry removed by hand can come
 back; the purge is what removes them.

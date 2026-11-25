@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,7 @@ type Options struct {
 	// session list (default 5s).
 	LaunchWait time.Duration
 	Now        func() time.Time
+	Logger     *slog.Logger
 }
 
 // Adapter is the Claude Code execution.Adapter for one connection.
@@ -43,6 +45,7 @@ type Adapter struct {
 	logs       *transcripts
 	launchWait time.Duration
 	now        func() time.Time
+	log        *slog.Logger
 
 	authMu sync.Mutex
 	auth   authCache
@@ -70,8 +73,11 @@ func New(o Options) *Adapter {
 	if o.LaunchWait == 0 {
 		o.LaunchWait = 5 * time.Second
 	}
+	if o.Logger == nil {
+		o.Logger = slog.Default()
+	}
 	return &Adapter{
-		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now,
+		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now, log: o.Logger,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
 		logs:   &transcripts{now: o.Now},
 	}
@@ -161,7 +167,6 @@ var available = execution.Availability{Available: true}
 const (
 	reasonAnswer = "Answer in Claude Code: copy the resume command and run it in a terminal."
 	reasonBase   = "Claude Code creates worktrees from the checkout's current HEAD and names the branch itself."
-	reasonImages = "Claude Code background sessions can't take image attachments from Stage yet."
 	reasonFolder = "Open Claude Code in the folder once; Stage lists the folders Claude Code knows."
 )
 
@@ -173,8 +178,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 	}
 	return execution.Capabilities{
 		Operations: map[string]execution.Availability{
-			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available,
-			"images":            {Reason: reasonImages},
+			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "images": available,
 			"predecessorBase":   {Reason: reasonBase},
 			"worktreeBase":      {Reason: reasonBase},
 			"registerWorkspace": {Reason: reasonFolder},

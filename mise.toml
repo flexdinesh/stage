@@ -83,7 +83,7 @@ hide = true
 run = "scripts/check-postgres.sh --if-changed"
 
 [tasks."claude:live"]
-description = "Verify the Claude Code adapter against the real claude CLI (your login, haiku; marks two scratch folders trusted, then purges them)"
+description = "Verify the Claude Code adapter against the real claude CLI (your login, haiku, one image; marks two scratch folders trusted, then purges them)"
 run = '''
 : "${STAGE_TEST_CLAUDE:?Set STAGE_TEST_CLAUDE to the absolute path of the claude executable}"
 cd server && go test -count=1 -v -timeout 15m -run TestLiveClaude ./internal/claudecode
