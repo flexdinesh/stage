@@ -17,6 +17,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -185,7 +186,7 @@ func Run(ctx context.Context, o Options) error {
 	home, _ := os.UserHomeDir()
 	cliName := install.CLIName(home, buildinfo.Identity)
 	// The fixed harness composition: every kind this server knows, in order.
-	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor)
 	profile := o.Profile
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer

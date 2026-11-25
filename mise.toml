@@ -82,6 +82,13 @@ description = "check:postgres only when db code, the serve/config engine files o
 hide = true
 run = "scripts/check-postgres.sh --if-changed"
 
+[tasks."claude:live"]
+description = "Verify the Claude Code adapter against the real claude CLI (your login, haiku; marks two scratch folders trusted, then purges them)"
+run = '''
+: "${STAGE_TEST_CLAUDE:?Set STAGE_TEST_CLAUDE to the absolute path of the claude executable}"
+cd server && go test -count=1 -v -timeout 15m -run TestLiveClaude ./internal/claudecode
+'''
+
 [tasks."opencode:live"]
 description = "Verify the adapter and mixed tree against an isolated OpenCode V2 server and local test model"
 run = '''

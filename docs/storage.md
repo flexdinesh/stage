@@ -17,7 +17,7 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 29; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 29 (#404); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 30; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 30 (0030 `claude_settings`, #372); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
@@ -123,8 +123,8 @@ rows and events), `Attempts` (launch attempts and checkpoints, claims, pinned
 destinations and inputs, launch bases, handoffs), `Observations` (normalized
 execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
-projects, imports), `Connections` (harness connections, T3 and OpenCode
-settings, shared paths), `Machines` (pairing codes, machine tokens),
+projects, imports), `Connections` (harness connections, T3, OpenCode and
+Claude Code settings, shared paths), `Machines` (pairing codes, machine tokens),
 `Notifications`, `Sessions` (session identities), `Threads` (the T3 mirror,
 watcher state, last words), `Stats` (read-only counts), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
@@ -381,6 +381,13 @@ and paging. (Thread search was removed with API v3.)
   from SQLite first, so the two heads match. Versions below it are
   SQLite-only history; the parity test compares versions from the baseline
   up.
+- **Shared migrations since the baseline:** 0029 search indexes (#404);
+  0030 `claude_settings` (#372): each machine's Claude Code setup
+  (`binary_path`, the claude command name or path, `''` for the default
+  lookup, not `binary`, a reserved word on Postgres; `config_dir`, the
+  config directory Claude reported at the last connect, the connection's
+  identity that health checks; `disconnected`; `updated_at`). No row reads the defaults and the first save inserts one,
+  so neither engine seeds it.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // SetupField is a harness setup setting or action input (docs/api.md
@@ -32,8 +34,9 @@ type HarnessDescriptor struct {
 	Reason      string `json:"reason,omitempty"`
 	Connectable bool   `json:"connectable"`
 	Attribution struct {
-		MetaKeys []string `json:"metaKeys"`
-		Env      string   `json:"env,omitempty"`
+		MetaKeys   []string            `json:"metaKeys"`
+		Env        string              `json:"env,omitempty"`
+		Precedence *harness.Precedence `json:"precedence,omitempty"`
 	} `json:"attribution"`
 	Setup struct {
 		Fields     []SetupField  `json:"fields"`

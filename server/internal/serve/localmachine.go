@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -97,6 +99,14 @@ func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.
 	})
 	m.SetConnector(t3.Kind, t3setup.NewConnector(m.setup, progress))
 	m.SetConnector(opencode.Kind, opencodesetup.NewConnector(openCode))
+	// Claude Code runs as local processes: only where this machine allows.
+	if m.Allows(claudecode.Descriptor).Available {
+		claude, err := claudecodesetup.New(ctx, claudecodesetup.Ports{Settings: ports, Identity: ports, Install: m.Install}, claudecodesetup.Options{Scope: claudecode.ScopeAvailable(), Logger: logger})
+		if err != nil {
+			return err
+		}
+		m.SetConnector(claudecode.Kind, claudecodesetup.NewConnector(claude))
+	}
 	return nil
 }
 

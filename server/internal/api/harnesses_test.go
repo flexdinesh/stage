@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -153,5 +154,38 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 	e.must("GET", "/api/health", nil, 200, &h)
 	if len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || h.Harnesses[0].ConnectionID != e.store.LegacyT3ID() {
 		t.Fatalf("health harnesses %+v", h.Harnesses)
+	}
+}
+
+// Claude Code's descriptor reaches clients with its attribution precedence
+// (the CLI ranks harness session variables by it) and a connect action.
+func TestHarnessListServesClaudeCode(t *testing.T) {
+	e := newEnv(t, func(d *api.Deps) {
+		d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor)
+	})
+	var list struct {
+		Harnesses []struct {
+			Kind        string        `json:"kind"`
+			Hosting     string        `json:"hosting"`
+			Launch      string        `json:"launch"`
+			Setup       harness.Setup `json:"setup"`
+			Attribution struct {
+				Env        string              `json:"env"`
+				Precedence *harness.Precedence `json:"precedence"`
+			} `json:"attribution"`
+		} `json:"harnesses"`
+	}
+	e.must("GET", "/api/harnesses", nil, 200, &list)
+	cc := list.Harnesses[2]
+	p := cc.Attribution.Precedence
+	if cc.Kind != claudecode.Descriptor.Kind || cc.Hosting != "hosted" || cc.Launch != "correlated" || cc.Attribution.Env != "CLAUDE_CODE_SESSION_ID" || p == nil ||
+		len(p.Owns) != 1 || p.Owns[0] != (harness.EnvMatch{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}) || len(p.Yields) != 2 {
+		t.Fatalf("%+v %+v", cc, p)
+	}
+	if _, ok := cc.Setup.Action(claudecode.ActionConnect); !ok || !cc.Setup.Disconnect || len(cc.Setup.Fields) != 1 {
+		t.Fatalf("setup %+v", cc.Setup)
+	}
+	if list.Harnesses[0].Attribution.Precedence != nil {
+		t.Fatal("T3 declares no precedence")
 	}
 }

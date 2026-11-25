@@ -242,7 +242,7 @@ Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: t
         socket when a server owns it, else http://127.0.0.1:7380) --json
 Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID,
         else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, else the harness's session
-        variable (T3CODE_THREAD_ID, OPENCODE_SESSION_ID; stage mcp too) on its connection on this
+        variable (T3CODE_THREAD_ID, OPENCODE_SESSION_ID, CLAUDE_CODE_SESSION_ID; stage mcp too) on its connection on this
         machine. Harness MCP metadata (OpenCode) and the Stage-Caller-Session header on HTTP MCP name
         the caller per call.
 Creation: --connection ID selects the destination. --execution-config JSON sets harness options.

@@ -61,6 +61,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	},
 	28: {{"legacy storage dropped", seedV0028DropLegacy, checkV0028DropLegacy}},
 	29: {{"search index built and kept", seedV0029Search, checkV0029Search}},
+	30: {{"claude settings table", seedV0030ClaudeSettings, checkV0030ClaudeSettings}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -581,4 +582,21 @@ func checkV0029Search(t *testing.T, pool *sqlite.DB) {
 	for _, table := range []string{"tasks_fts", "journal_fts"} {
 		mustExec(t, pool, `INSERT INTO `+table+`(`+table+`, rank) VALUES ('integrity-check', 1)`)
 	}
+}
+
+func seedV0030ClaudeSettings(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'worker')`)
+}
+
+// checkV0030ClaudeSettings: the table starts empty (no row reads the
+// defaults), defaults fill an inserted row, and machine and boolean
+// constraints hold.
+func checkV0030ClaudeSettings(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT count(*) FROM claude_settings`, "0")
+	mustExec(t, pool, `INSERT INTO claude_settings(machine_id) VALUES(1)`)
+	mustExec(t, pool, `INSERT INTO claude_settings(machine_id,binary_path,config_dir,disconnected) VALUES(2,'/bin/claude','/home/u/.claude',1)`)
+	wantRows(t, pool, `SELECT machine_id,binary_path,config_dir,disconnected,updated_at<>'' FROM claude_settings ORDER BY machine_id`, "1|||0|1", "2|/bin/claude|/home/u/.claude|1|1")
+	mustFail(t, pool, "unknown machine", `INSERT INTO claude_settings(machine_id) VALUES(9)`)
+	mustFail(t, pool, "duplicate machine", `INSERT INTO claude_settings(machine_id) VALUES(1)`)
+	mustFail(t, pool, "non-boolean disconnected", `UPDATE claude_settings SET disconnected=2 WHERE machine_id=1`)
 }

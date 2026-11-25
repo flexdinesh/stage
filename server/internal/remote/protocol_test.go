@@ -86,6 +86,10 @@ func TestErrorsCrossTheChannel(t *testing.T) {
 	if err := roundTrip(&execution.Rejected{Reason: "model unavailable"}); !errors.As(err, &rejected) || rejected.Reason != "model unavailable" {
 		t.Fatal("rejection lost", err)
 	}
+	var refused *execution.Refused
+	if err := roundTrip(&execution.Refused{Reason: "Track it through T3."}); !errors.As(err, &refused) || refused.Reason != "Track it through T3." {
+		t.Fatal("refusal lost", err)
+	}
 	for _, sentinel := range []error{execution.ErrUnavailable, execution.ErrNotFound, execution.ErrNoReply} {
 		if err := roundTrip(fmt.Errorf("observe: %w", sentinel)); !errors.Is(err, sentinel) {
 			t.Fatal(sentinel, err)

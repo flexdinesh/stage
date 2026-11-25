@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -96,9 +97,47 @@ type Attribution struct {
 	// it as the weakest caller source, on the kind's active connection on
 	// their machine (GET /api/connections/resolve).
 	Env string `json:"env,omitempty"`
+	// Precedence decides between several harness session variables set in
+	// one process (a harness running inside another, or inheriting its
+	// environment). Nil: none.
+	Precedence *Precedence `json:"precedence,omitempty"`
 	// Hint is the caller line of launch journal instructions; {connectionId}
 	// and {cli} are filled in. Empty: the generic hint.
 	Hint string `json:"-"`
+}
+
+// Precedence ranks a harness's session variable against the others set in
+// the same process. Resolution (agenttools): a candidate whose Owns matches
+// wins outright; otherwise candidates whose Yields match drop out; one left
+// wins, several name no caller.
+type Precedence struct {
+	// Owns: when any matches, this harness's variable names the caller
+	// whatever else is set.
+	Owns []EnvMatch `json:"owns,omitempty"`
+	// Yields: when any matches (and none of Owns), this harness's variable
+	// is ignored.
+	Yields []EnvMatch `json:"yields,omitempty"`
+}
+
+// EnvMatch matches an environment variable: Value "" matches any
+// non-empty value, otherwise the exact (trimmed) value.
+type EnvMatch struct {
+	Env   string `json:"env"`
+	Value string `json:"value,omitempty"`
+}
+
+// Matches reports whether m holds in getenv.
+func (m EnvMatch) Matches(getenv func(string) string) bool {
+	v := strings.TrimSpace(getenv(m.Env))
+	if m.Value == "" {
+		return v != ""
+	}
+	return v == m.Value
+}
+
+// AnyMatches reports whether any of ms holds in getenv.
+func AnyMatches(ms []EnvMatch, getenv func(string) string) bool {
+	return slices.ContainsFunc(ms, func(m EnvMatch) bool { return m.Matches(getenv) })
 }
 
 // Closure is the descriptor's closure for signal.
