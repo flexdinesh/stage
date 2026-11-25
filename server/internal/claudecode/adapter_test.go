@@ -290,6 +290,52 @@ func TestObserveStatesAndReply(t *testing.T) {
 	}
 }
 
+// Usage comes from the transcript plus its subagents' transcripts (tokens
+// only), never with a cost; a session with no transcript has none.
+func TestObserveUsage(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-usage"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, id := o.Session, o.Session.ExternalSessionID
+	f.Reply(id, "one", true)
+	f.Prompt(id, "again")
+	f.Reply(id, "two", false)
+	if o, err = a.Observe(t.Context(), ref); err != nil {
+		t.Fatal(err)
+	}
+	want := execution.Usage{Turns: 2, InputTokens: 20, CacheReadTokens: 200, CacheWriteTokens: 40, OutputTokens: 10, WorkingMs: fakestate.ReplyDurationMs}
+	if o.Usage == nil || *o.Usage != want {
+		t.Fatalf("usage %+v, want %+v", o.Usage, want)
+	}
+
+	transcript := fakestate.TranscriptPath(f.ProjectsDir(), f.Session(id).Cwd, id)
+	subagents := filepath.Join(strings.TrimSuffix(transcript, ".jsonl"), "subagents")
+	if err := os.MkdirAll(subagents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := `{"type":"assistant","isSidechain":true,"sessionId":"` + id + `","timestamp":"2026-11-25T03:00:00Z","message":{"id":"msg_sub","model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":2,"cache_creation_input_tokens":3,"output_tokens":4}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(subagents, "agent-a1.jsonl"), []byte(sub), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if o, err = a.Observe(t.Context(), ref); err != nil {
+		t.Fatal(err)
+	}
+	want.InputTokens, want.CacheReadTokens, want.CacheWriteTokens, want.OutputTokens = 21, 202, 43, 14
+	if o.Usage == nil || *o.Usage != want {
+		t.Fatalf("with a subagent %+v, want %+v", o.Usage, want)
+	}
+
+	if err := os.Remove(transcript); err != nil {
+		t.Fatal(err)
+	}
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.Usage != nil {
+		t.Fatalf("no transcript: usage %+v %v", o.Usage, err)
+	}
+}
+
 // `claude rm` of a background session whose turn ended is the archived
 // closure; the idle reap (entry kept, no process), a removal mid-turn and an
 // interactive session leaving the list are not.

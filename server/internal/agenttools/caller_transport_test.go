@@ -54,7 +54,7 @@ func (h *callerHarness) Observe(_ context.Context, ref db.SessionRef) (execution
 		return execution.Observation{}, execution.ErrUnavailable
 	}
 	now := time.Now().UTC()
-	return execution.Observation{Project: "external", Session: ref, Title: "OpenCode plan", State: "done", CreatedAt: now, UpdatedAt: now, Directory: "volume://remote/worktree", Reply: &execution.Reply{Text: "retained reply", UpdatedAt: now}, Links: execution.Links{Web: "https://example.invalid/session"}}, nil
+	return execution.Observation{Project: "external", Session: ref, Title: "OpenCode plan", State: "done", CreatedAt: now, UpdatedAt: now, Directory: "volume://remote/worktree", Reply: &execution.Reply{Text: "retained reply", UpdatedAt: now}, Usage: &execution.Usage{Turns: 2, OutputTokens: 40}, Links: execution.Links{Web: "https://example.invalid/session"}}, nil
 }
 
 func TestMCPSubprocess(t *testing.T) {
@@ -221,7 +221,7 @@ func TestScopedCallerTransports(t *testing.T) {
 			}
 			var d agenttools.RefOut
 			mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("#%d", owners[1])}, &d)
-			if d.Task == nil || d.Task.FinalReply == nil || d.Task.FinalReply.Text != "retained reply" || d.Links.Web == "" || d.Session != nil {
+			if d.Task == nil || d.Task.FinalReply == nil || d.Task.FinalReply.Text != "retained reply" || d.Task.Usage == nil || *d.Task.Usage != (execution.Usage{Turns: 2, OutputTokens: 40}) || d.Links.Web == "" || d.Session != nil {
 				t.Fatal(d)
 			}
 			mustCall(t, cs, "adopt_session", map[string]any{"session": ref}, nil)

@@ -32,6 +32,11 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if o.Reply == nil && (s.IsT3(o.Session.ConnectionID) || o.ExecutionID == previous.ExecutionID) {
 			o.Reply = previous.Reply
 		}
+		// Usage is cumulative per session: a read without it (an unreadable
+		// transcript) keeps the last one.
+		if o.Usage == nil {
+			o.Usage = previous.Usage
+		}
 		if err := tx.Observations().Put(ctx, id, o); err != nil {
 			return err
 		}

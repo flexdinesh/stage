@@ -201,6 +201,7 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 		fmt.Fprintf(w, "artifact  %s %s\n", link.Label, link.URL)
 	}
 	printTask(w, d.Task)
+	printUsage(w, d.Usage)
 	printHandoff(w, d)
 	printLaunchBase(w, d.CurrentLaunchBase)
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
@@ -439,6 +440,43 @@ func span(from, to *time.Time) string {
 		return "-"
 	}
 	return to.Sub(*from).Round(time.Second).String()
+}
+
+// printUsage prints the session's usage on one line: turns, input (all of
+// it, with the cache reads), output, working time and a reported cost.
+func printUsage(w io.Writer, u *execution.Usage) {
+	if u == nil {
+		return
+	}
+	turns := "turns"
+	if u.Turns == 1 {
+		turns = "turn"
+	}
+	in := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens
+	parts := []string{fmt.Sprintf("%d %s", u.Turns, turns), compactCount(in) + " in"}
+	if u.CacheReadTokens > 0 {
+		parts[1] += " (" + compactCount(u.CacheReadTokens) + " cached)"
+	}
+	parts = append(parts, compactCount(u.OutputTokens)+" out")
+	if u.WorkingMs > 0 {
+		parts = append(parts, (time.Duration(u.WorkingMs)*time.Millisecond).Round(time.Second).String()+" working")
+	}
+	if u.CostUSD != nil {
+		parts = append(parts, fmt.Sprintf("$%.2f", *u.CostUSD))
+	}
+	fmt.Fprintf(w, "  usage    %s\n", strings.Join(parts, " · "))
+}
+
+// compactCount is n with a k or M suffix and one decimal (4875 is 4.9k).
+func compactCount(n int64) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprint(n)
+	case n < 999_950:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e3), ".0") + "k"
+	default:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e6), ".0") + "M"
+	}
 }
 
 // printLastWord prints the thread's latest assistant reply excerpt.

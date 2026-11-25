@@ -25,6 +25,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	at := time.Date(2026, 11, 22, 10, 0, 5, 0, time.UTC)
 	later := at.Add(time.Hour)
 	str := "s"
+	cost := 1.5
 	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "thread-1"}
 	avail := execution.Availability{Available: true, Reason: "why"}
 	choice := execution.Choice{ID: "c", Label: "C", Availability: avail}
@@ -38,6 +39,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Links:     execution.Links{Service: "svc", Web: "https://web", App: "https://app", Native: "t3code://x", Command: "t3 resume x"},
 		CreatedAt: at, UpdatedAt: later, StartedAt: &at, EndedAt: &later, ExecutionID: "run-1",
 		Reply:     &execution.Reply{ItemID: "i", RunID: "r", MessageID: "m", Text: "done", Truncated: true, Position: 2, UpdatedAt: at},
+		Usage:     &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
 		Artifacts: []execution.Artifact{{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "reply", State: "open"}},
 		Base:      avail, Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited,
 	}

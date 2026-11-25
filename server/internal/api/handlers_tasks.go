@@ -316,7 +316,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	if task.Session != nil {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
-			out.FinalReply = obs.Reply
+			out.FinalReply, out.Usage = obs.Reply, obs.Usage
 			for _, link := range obs.Artifacts {
 				if link.URL != "" && !slices.ContainsFunc(out.ArtifactLinks, func(a artifactLink) bool { return a.URL == link.URL }) {
 					label := link.Repository

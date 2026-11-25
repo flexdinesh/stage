@@ -27,6 +27,7 @@ type threadJSON struct {
 
 type taskDetailJSON struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
+	Usage       *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	taskJSON
 	Events []db.TaskEvent `json:"events"`

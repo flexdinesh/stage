@@ -285,6 +285,14 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   about success. An idle observation may carry a closure (the harness closed
   the session and dropped its state with it): the task keeps its state and
   inference reads the stored `done`.
+- `usage` (`execution.Usage`, omitted when the harness reports none) is what
+  the session consumed over its whole life: `turns`, `inputTokens`
+  (uncached), `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`,
+  `workingMs` (finished turns; 0 unknown) and `costUsd`. Cumulative, best
+  effort, harness-neutral. `costUsd` is only a cost the harness itself
+  reports (null otherwise); Stage never prices tokens. The store keeps the
+  last usage when an observation carries none (an unreadable transcript).
+  Task detail shows the current session's usage.
 - `Launch` receives an immutable intent plus versioned adapter JSON checkpoints.
   It must call the durable save callback before each external effect, stop if
   saving fails, and reconcile the same operation on replay. Checkpoints contain
@@ -605,6 +613,16 @@ to run on that machine.
   adapter (connect, the command setting, disconnect) ends its
   subscription; hooks meanwhile are answered and dropped. The setup status
   reports `details.events` ([api.md](api.md#harness-connections-api-v6)).
+- **Usage** from the transcript ([ADR 0005](adr/0005-claude-code-harness.md)
+  decision 17): turns are the typed user prompts on the main chain (the
+  current one included; `origin.kind` `human`, or no origin in `-p` and SDK
+  sessions), not a background subagent's `task-notification` or a `peer`
+  message, though each starts model work; tokens count every assistant
+  message once (deduped by message id plus request id, the largest value of
+  each channel), sidechains and `<transcript without .jsonl>/subagents/*.jsonl`
+  included, `<synthetic>` messages skipped; working time sums the main chain's
+  `turn_duration` records (finished turns). No cost: Claude records none for
+  a background session. None before the first turn or without a transcript.
 - **Inventory** is the `projects` of Claude's state file (`~/.claude.json`,
   or `.claude.json` in a `CLAUDE_CONFIG_DIR`); a Git checkout's top is
   importable, worktrees under `.claude/worktrees` are left out. No file is

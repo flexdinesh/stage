@@ -777,6 +777,11 @@ by Go decode) and is `jsonb`.
 `journal_entries.text` and `journal_launch_context.instructions` are plain
 text, not JSON, and stay `text`.
 
+`execution_observations.observation` carries the session's `usage` when the
+harness reports one (#380, no migration: a new key in the JSON). Usage is
+cumulative per session, so `PutObservation` keeps the stored usage when a
+new observation has none.
+
 ### Doc claims this audit corrects
 
 - [execution.md](execution.md): `LegacyConfig` is not the only reader of the

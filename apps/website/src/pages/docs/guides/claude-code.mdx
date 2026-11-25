@@ -55,6 +55,10 @@ Once Claude no longer lists the background session, the command resumes it in it
 
 When the session finishes, task detail shows its final reply, read from the end of Claude's transcript (best effort, up to 4000 characters). Complete the task in Stage to start what depends on it, or remove the session with `claude rm`: with **Complete tasks when removed in Claude Code** on (the default), Stage completes a successful task when its finished session is removed.
 
+### See what a session used
+
+Task detail has a **Usage** panel, read from the transcript: turns, input tokens (with cache read and cache write), output tokens and working time, counting the session's subagents too. It reads "so far" while the session is still working. There is no cost: Claude records none for a background session, and Stage does not estimate one. `stage task show` prints the same on one line.
+
 ## Track a session you started
 
 A Claude session you started yourself can become a Stage task. Use **Track session**, pick Claude Code and paste one of:

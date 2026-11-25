@@ -179,6 +179,23 @@ type Reply struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// Usage is what a session has consumed over its whole life, as its harness
+// records it: cumulative, best effort, never estimated by Stage.
+type Usage struct {
+	// Turns: prompts the session answered or is answering.
+	Turns int `json:"turns"`
+	// InputTokens is uncached input; cache reads and writes are separate.
+	InputTokens      int64 `json:"inputTokens"`
+	CacheReadTokens  int64 `json:"cacheReadTokens"`
+	CacheWriteTokens int64 `json:"cacheWriteTokens"`
+	OutputTokens     int64 `json:"outputTokens"`
+	// WorkingMs: time spent on finished turns (0 when unknown).
+	WorkingMs int64 `json:"workingMs"`
+	// CostUSD: a cost the harness itself reports; nil when it reports none.
+	// Stage never prices tokens.
+	CostUSD *float64 `json:"costUsd"`
+}
+
 // Artifact retains historical PR JSON without exposing PR tracking operations.
 type Artifact struct {
 	Host       string `json:"host"`
@@ -208,6 +225,7 @@ type Observation struct {
 	EndedAt     *time.Time   `json:"endedAt"`
 	ExecutionID string       `json:"executionId"`
 	Reply       *Reply       `json:"reply,omitempty"`
+	Usage       *Usage       `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
 	Artifacts   []Artifact   `json:"artifacts"`
 	Base        Availability `json:"base"`
 	Closed      *Closure     `json:"closed,omitempty"`
