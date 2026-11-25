@@ -3,6 +3,7 @@
 package claudetest
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,6 +162,24 @@ func (f *Fake) Remove(id string) {
 	})
 }
 
+// Rm runs `claude rm <short>` on a background session, as a user would.
+func (f *Fake) Rm(id string) {
+	f.t.Helper()
+	res, err := f.CLI().Run(context.Background(), "", "rm", f.Session(id).ID)
+	if err != nil || res.Code != 0 {
+		f.t.Fatalf("claude rm: %v %+v", err, res)
+	}
+}
+
+// Prompt appends a typed prompt to a background session's transcript (a
+// new turn, e.g. from `claude attach`).
+func (f *Fake) Prompt(id, prompt string) {
+	f.t.Helper()
+	if err := fakestate.AppendUser(f.ProjectsDir(), f.Session(id).Cwd, id, "cli", "bg", prompt, time.Now().UTC()); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 // Reply appends an assistant reply to a session's transcript.
 func (f *Fake) Reply(id, text string, turnOver bool) {
 	f.t.Helper()
@@ -176,7 +195,7 @@ func (f *Fake) AddInteractive(id, cwd, entrypoint, prompt string) {
 	f.Update(func(s *fakestate.State) {
 		s.Sessions = append(s.Sessions, fakestate.Session{Entry: fakestate.Entry{PID: 7, Cwd: cwd, Kind: "interactive", StartedAt: time.Now().UnixMilli(), SessionID: id, Name: "interactive", Status: "busy"}})
 	})
-	if err := fakestate.AppendUser(f.ProjectsDir(), cwd, id, entrypoint, prompt, time.Now().UTC()); err != nil {
+	if err := fakestate.AppendUser(f.ProjectsDir(), cwd, id, entrypoint, "", prompt, time.Now().UTC()); err != nil {
 		f.t.Fatal(err)
 	}
 }

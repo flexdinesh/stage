@@ -77,6 +77,18 @@ func run(s *fakestate.State, args []string) (int, error) {
 		}
 		fmt.Fprintf(os.Stderr, "No session matching '%s'. Run 'claude agents' to list running sessions.\n", args[1])
 		return 1, nil
+	case len(args) == 2 && args[0] == "rm":
+		// Drops the entry from the list; the transcript stays.
+		for i := range s.Sessions {
+			e := &s.Sessions[i]
+			if !e.Removed && e.Kind == "background" && e.ID == args[1] {
+				e.Removed, e.PID, e.Status = true, 0, ""
+				fmt.Printf("removed %s\n", e.ID)
+				return 0, nil
+			}
+		}
+		fmt.Fprintf(os.Stderr, "No session matching '%s'.\n", args[1])
+		return 1, nil
 	case len(args) >= 1 && args[0] == "--bg":
 		return launch(s, args[1:])
 	}
@@ -127,7 +139,7 @@ func launch(s *fakestate.State, args []string) (int, error) {
 		PID: 4242, ID: id[:8], Cwd: dir, Kind: "background", StartedAt: now.UnixMilli(),
 		SessionID: id, Name: name, Status: "busy", State: "working",
 	}})
-	if err := fakestate.AppendUser(s.ProjectsDir, dir, id, "cli", prompt, now); err != nil {
+	if err := fakestate.AppendUser(s.ProjectsDir, dir, id, "cli", "bg", prompt, now); err != nil {
 		return 2, err
 	}
 	if s.Launch == fakestate.CrashAfterCreate {

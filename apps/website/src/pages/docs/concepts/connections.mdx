@@ -51,7 +51,7 @@ Pairing a different T3, or confirming a different OpenCode service, retires the 
 
 ## Auto-complete
 
-A connection can complete a task for you. When a run succeeds and its T3 thread is settled, or its OpenCode session archived, Stage accepts the task automatically, once per run, with that provenance shown. Failed or interrupted runs never auto-complete, and changing the task's state back undoes it. Auto-complete is on by default; turn it off per connection in its setup in Settings > Connections. See [Tasks](/docs/concepts/tasks) for completion.
+A connection can complete a task for you. When a run succeeds and its T3 thread is settled, its OpenCode session archived, or its Claude Code session removed (`claude rm`), Stage accepts the task automatically, once per run, with that provenance shown. Failed or interrupted runs never auto-complete, and changing the task's state back undoes it. Auto-complete is on by default; turn it off per connection in its setup in Settings > Connections. See [Tasks](/docs/concepts/tasks) for completion.
 
 ## Next steps
 

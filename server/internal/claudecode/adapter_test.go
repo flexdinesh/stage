@@ -196,6 +196,61 @@ func TestObserveStatesAndReply(t *testing.T) {
 	}
 }
 
+// `claude rm` of a background session whose turn ended is the archived
+// closure; the idle reap (entry kept, no process), a removal mid-turn and an
+// interactive session leaving the list are not.
+func TestRemovalIsTheArchivedClosure(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-rm"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, id := o.Session, o.Session.ExternalSessionID
+	f.Reply(id, "Done.", true)
+	f.SetState(id, "done", "idle", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "done" || o.Closed != nil {
+		t.Fatalf("done %+v %v", o, err)
+	}
+	f.Update(func(s *fakestate.State) { // reaped: no process, entry and state kept
+		for i := range s.Sessions {
+			if s.Sessions[i].SessionID == id {
+				s.Sessions[i].PID, s.Sessions[i].Status = 0, ""
+			}
+		}
+	})
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "done" || o.Closed != nil {
+		t.Fatalf("reaped %+v %v", o, err)
+	}
+	f.Rm(id)
+	o, err = a.Observe(t.Context(), ref)
+	if err != nil || o.State != "idle" || o.Active || o.Archived || o.Closed == nil || o.Closed.Signal != execution.ClosedArchived || o.ExecutionID == "" || o.Reply == nil || o.Reply.Text != "Done." {
+		t.Fatalf("removed %+v %v", o, err)
+	}
+
+	mid, err := a.Launch(t.Context(), intent(f, "req-rm-mid"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	midID := mid.Session.ExternalSessionID
+	f.Reply(midID, "First.", true)
+	f.Prompt(midID, "And another thing")
+	f.Rm(midID)
+	if o, err = a.Observe(t.Context(), mid.Session); err != nil || o.State != "idle" || o.Closed != nil {
+		t.Fatalf("removed mid-turn %+v %v", o, err)
+	}
+
+	term := "66666666-6666-4666-8666-666666666666"
+	f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
+	if err := fakestate.AppendReply(f.ProjectsDir(), f.Workspace, term, "Hi.", true); err != nil {
+		t.Fatal(err)
+	}
+	f.Remove(term) // its process exited
+	if o, err = a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: term}); err != nil || o.State != "idle" || o.Closed != nil {
+		t.Fatalf("interactive exit %+v %v", o, err)
+	}
+}
+
 // Stop stops a background session; it maps to interrupted.
 func TestStop(t *testing.T) {
 	f := claudetest.New(t)

@@ -122,6 +122,17 @@ func TestLiveClaude(t *testing.T) {
 		}
 	}
 
+	// `claude rm` of the done session is the archived closure: no longer
+	// listed, reply kept (the session list is reused for 2 seconds).
+	short, _ := strings.CutPrefix(done.Links.Command, "claude attach ")
+	if res, err := cli.Run(ctx, "", "rm", short); err != nil || res.Code != 0 {
+		t.Fatalf("rm %s: %v %+v", short, err, res)
+	}
+	removed := await(o.Session, "idle")
+	if removed.Closed == nil || removed.Closed.Signal != execution.ClosedArchived || removed.Reply == nil || !strings.Contains(removed.Reply.Text, "stage live ok") {
+		t.Fatalf("removed %+v", removed)
+	}
+
 	// A permission prompt is needs input; stop interrupts it.
 	_, o = launch("live-block", plain, "root", "manual", "Use the Bash tool to run exactly: touch stage-live-blocked.txt. Then reply done.")
 	await(o.Session, "needs_input")

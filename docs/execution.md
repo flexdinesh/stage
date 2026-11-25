@@ -242,7 +242,10 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   Unknown/malformed snapshots and missing/offline sessions never imply execution
   failure or completion. Connection health is independent. `closed`
   (`{signal}`, omitted when open) reports a closure in the harness: `settled`
-  (T3) or `archived` (OpenCode). It says nothing about success.
+  (T3) or `archived` (OpenCode archive, Claude Code `rm`). It says nothing
+  about success. An idle observation may carry a closure (the harness closed
+  the session and dropped its state with it): the task keeps its state and
+  inference reads the stored `done`.
 - `Launch` receives an immutable intent plus versioned adapter JSON checkpoints.
   It must call the durable save callback before each external effect, stop if
   saving fails, and reconcile the same operation on replay. Checkpoints contain
@@ -448,7 +451,7 @@ acceptance. No provider account or production service is required.
 the sessions, worktrees, models and login ([ADR 0005](adr/0005-claude-code-harness.md)).
 Claude Code has no HTTP API. Kind `claude`, hosting `hosted`, stable identity
 (the `configDirectory` from `claude auth status --json`), launch
-`correlated`, no closures. Setup (`internal/claudecodesetup`): the command
+`correlated`, closure `archived` (`claude rm`). Setup (`internal/claudecodesetup`): the command
 setting, a connect action and disconnect ([api.md](api.md#harness-connections-api-v6)),
 stored per machine in `claude_settings` with the config directory the
 connection was made with; `serve` composes it only where the machine allows
@@ -486,7 +489,16 @@ hosted harnesses.
   running, `blocked` needs_input, `done` done, `failed` failed, `stopped`
   interrupted; an adopted terminal or SDK session by `status`. Not listed:
   idle with its reply when the transcript exists, else not found. An
-  unreadable list is an error, never a state. The project is the session's
+  unreadable list is an error, never a state.
+- **Removal closure.** `claude rm` drops a session from the list and keeps
+  its transcript; the hourly idle reap keeps the entry and its state. A
+  session not listed whose transcript's last turn ran in the background
+  (`sessionKind: "bg"`) and ended (`turn_duration`) is `closed: archived`
+  (provenance `harness_archived`; toggle "Complete tasks when removed in
+  Claude Code"), so a done task completes ([inferred completion](api.md#user-acceptance-api-v4)).
+  An adopted terminal session leaving the list, `rm` mid-turn and a refused
+  `rm` are not closures. A removed session stays adoptable and linkable
+  (`archived` false): it can be resumed. The project is the session's
   cwd, or its repository for a Claude worktree. The reply is the last
   assistant text of the current turn, bounded to 4,000 characters, shown
   once the session is not running; best effort. `executionId` is the
@@ -528,7 +540,8 @@ real executable with a state file), and `TestContractClaude*` in
 `internal/sync` with the real adapter in process and behind a worker
 channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
-two scratch folders trusted in Claude's state file, launches a reply, a
+two scratch folders trusted in Claude's state file, launches a reply (then
+removes it with `claude rm` and checks the closure), a
 permission prompt it stops and a worktree session, then removes the
 sessions (`claude rm`) and purges the folders (`claude purge`). Claude
 processes rewrite the state file, so a trust entry removed by hand can come

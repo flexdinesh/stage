@@ -324,8 +324,16 @@ func truncate(s string, n int) (string, bool) {
 	return string(r[:n]), true
 }
 
+// removed reports a `claude rm` of a background session whose last turn had
+// ended: the list no longer has it but its transcript is kept. The idle reap
+// keeps the entry, an interactive session leaves the list when its process
+// exits, and `rm` mid-turn ends the turn unfinished: none is a removal.
+func (s session) removed() bool {
+	return !s.listed && s.hasLog && s.transcript.Background && s.transcript.TurnOver
+}
+
 // observation maps a session (ADR 0005 decision 4). Not listed: idle with
-// the reply (the transcript exists).
+// the reply (the transcript exists), closed (archived) when removed.
 func (a *Adapter) observation(s session) (execution.Observation, error) {
 	state := "idle"
 	if s.listed {
@@ -353,6 +361,9 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 	}
 	if o.Title == "" {
 		o.Title = s.entry.Name
+	}
+	if s.removed() {
+		o.Closed = &execution.Closure{Signal: execution.ClosedArchived}
 	}
 	created := t.FirstAt
 	if created.IsZero() && s.entry.StartedAt > 0 {

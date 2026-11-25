@@ -54,8 +54,11 @@ func (f *documentHarness) Observe(_ context.Context, ref execution.SessionRef) (
 		return execution.Observation{}, execution.ErrNotFound
 	}
 	state := "running"
-	if f.phase == "published" {
+	switch f.phase {
+	case "published":
 		state = "done"
+	case "withdrawn": // the service no longer knows the outcome
+		state = "idle"
 	}
 	if f.malformed {
 		state = "unrecognized vendor state"
@@ -245,6 +248,42 @@ func TestContractArchivedSessionInfersCompletion(t *testing.T) {
 		}
 	})
 }
+// An idle observation keeps the task's state but may carry a closure: it
+// completes a task Stage recorded done, never one still running.
+func TestContractIdleClosureInfersFromStoredDone(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		store, fake, svc, task := contractSetup(t, p)
+		ctx := t.Context()
+		got, err := svc.StartTask(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		poll := func(want db.TaskState) db.Task {
+			t.Helper()
+			if err := svc.PollTask(ctx, got); err != nil {
+				t.Fatal(err)
+			}
+			got, err = store.GetTask(ctx, task.ID)
+			if err != nil || got.State != want {
+				t.Fatalf("want %s: %+v %v", want, got, err)
+			}
+			return got
+		}
+		fake.phase, fake.closed = "withdrawn", execution.ClosedArchived
+		if got = poll(db.StateRunning); got.AcceptanceID != nil {
+			t.Fatal("an idle closure completed running work")
+		}
+		fake.phase, fake.closed = "published", ""
+		poll(db.StateDone)
+		fake.phase, fake.closed = "withdrawn", execution.ClosedArchived
+		got = poll(db.StateDone)
+		evidence, err := store.Acceptances(ctx, task.ID)
+		if err != nil || got.AcceptanceID == nil || len(evidence) != 1 || evidence[0].Provenance != "harness_archived" || evidence[0].Evidence.Reply == nil || *evidence[0].Evidence.Reply != "Saved result" {
+			t.Fatalf("idle closure %+v %+v %v", got, evidence, err)
+		}
+	})
+}
+
 func TestContractOptionalCapabilitiesAndOfflineDoNotClaim(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, fake, svc, task := contractSetup(t, p)
