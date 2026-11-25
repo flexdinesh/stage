@@ -3,6 +3,9 @@ package api_test
 import (
 	"fmt"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 )
 
 // T3 offers no interaction operations: the generic routes answer 409
@@ -35,5 +38,29 @@ func TestInteractionRoutesUnavailable(t *testing.T) {
 	}
 	if code, _ := e.raw("GET", "/api/tasks/99999/requests", ""); code != 404 {
 		t.Errorf("unknown task: %d", code)
+	}
+}
+
+// Only the user answers: a request naming an agent's session, or forwarded
+// by a worker's agent gateway, is refused before anything else; listing
+// stays open.
+func TestRespondRefusesAgents(t *testing.T) {
+	e := gatewayEnv(t)
+	j := e.join("laptop")
+	p := e.project("/w/agents")
+	a := e.task(p.ID, "running", map[string]any{"start": true})
+	path := fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID)
+	var out struct {
+		Code string `json:"code"`
+	}
+	headers := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: "1:agent-1"}
+	if rec := raw(t, e.h, "POST", path, headers, map[string]any{"option": "allow"}, &out); rec.Code != 403 || out.Code != "agent_forbidden" {
+		t.Fatalf("caller session: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.gw(j.Token, "POST", path, map[string]any{"option": "allow"}, &out); rec.Code != 403 || out.Code != "agent_forbidden" {
+		t.Fatalf("gateway: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.gw(j.Token, "GET", fmt.Sprintf("/api/tasks/%d/requests", a.ID), nil, &out); rec.Code != 409 || out.Code != "operation_unavailable" {
+		t.Fatalf("gateway listing: %d %s", rec.Code, rec.Body)
 	}
 }

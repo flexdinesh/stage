@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Push events (ADR 0005 decision 16): every session Stage launches gets
@@ -26,6 +29,14 @@ import (
 // and transcript again (Events). Polling stays the reconciliation, so a
 // hook that never arrives (Stage down, a policy blocking HTTP hooks) only
 // delays.
+//
+// Approvals and questions (ADR 0005 decision 8, #375): a PermissionRequest
+// hook also stays open as a request the user can answer in Stage, until the
+// user answers, Claude gives up (its timeout, or the process ends), the
+// session stops waiting, a newer request of the same session supersedes it,
+// or the receiver closes. Claude shows its own prompt meanwhile, so an
+// answer in Claude still wins; every way the hook ends without a Stage
+// answer leaves Claude's prompt in place. Open requests are memory only.
 
 // HookEvents are the Claude hook events Stage subscribes to.
 var HookEvents = []string{"Stop", "StopFailure", "Notification", "PermissionRequest", "SessionEnd", "UserPromptSubmit"}
@@ -41,11 +52,19 @@ const HooksFile = "hooks-settings.json"
 const HooksHeadFile = "hooks-settings-head.json"
 
 const (
-	hookPath    = "/hooks"
-	maxHookBody = 64 << 10
+	hookPath = "/hooks"
+	// maxHookBody fits a PermissionRequest's tool input (a Write's whole
+	// file).
+	maxHookBody = 1 << 20
 	// hookTimeout is how long Claude waits for Stage's answer (seconds);
 	// Stage answers before it reads anything.
 	hookTimeout = 5
+	// permissionTimeout is how long Claude keeps a PermissionRequest hook
+	// open for an answer in Stage (seconds; the daemon retires a session
+	// idle for 60 minutes, waiting ones included).
+	permissionTimeout = 3600
+	// hookIOTimeout bounds reading a hook and writing Stage's answer.
+	hookIOTimeout = 10 * time.Second
 	// hookQueue bounds the nudges waiting for the adapter; beyond it a
 	// nudge is dropped and polling reconciles.
 	hookQueue = 256
@@ -88,10 +107,26 @@ type Hooks struct {
 	ln    net.Listener
 	srv   *http.Server
 	now   func() time.Time
+	io    time.Duration
 
-	mu   sync.Mutex
-	sub  *Subscription
-	last time.Time
+	mu      sync.Mutex
+	sub     *Subscription
+	last    time.Time
+	pending map[string][]*pendingRequest // by session id
+}
+
+// pendingRequest is one open PermissionRequest hook.
+type pendingRequest struct {
+	id          string
+	session     string
+	created     time.Time
+	tool        string
+	input       json.RawMessage
+	suggestions []json.RawMessage
+
+	claimed bool        // an answer or release took it (Hooks.mu)
+	answer  chan []byte // the response body (nil: no decision); buffered
+	result  chan error  // the handler's write result; buffered
 }
 
 // Subscription delivers nudges to one adapter until it is superseded or
@@ -117,6 +152,9 @@ type HooksOptions struct {
 	Dir    string
 	Logger *slog.Logger
 	Now    func() time.Time
+	// IOTimeout bounds reading a hook and writing an answer (default 10s);
+	// tests shorten it.
+	IOTimeout time.Duration
 }
 
 // OpenHooks starts the receiver. It keeps the token and, when it can bind
@@ -130,6 +168,9 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
+	}
+	if o.IOTimeout == 0 {
+		o.IOTimeout = hookIOTimeout
 	}
 	if o.Dir == "" {
 		return nil, errors.New("Stage has no folder for its Claude Code hook settings.")
@@ -158,12 +199,12 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't open its local hook port (unexpected address %s).", ln.Addr())
 	}
-	h := &Hooks{path: path, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath, token: token, ln: ln, now: o.Now}
+	h := &Hooks{path: path, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath, token: token, ln: ln, now: o.Now, io: o.IOTimeout, pending: map[string][]*pendingRequest{}}
 	if err := h.writeSettings(o.Dir); err != nil {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't write its Claude Code hook settings (%v).", err)
 	}
-	h.srv = &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+	h.srv = &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: h.io, WriteTimeout: h.io}
 	log := o.Logger.With("component", "claude-hooks")
 	go func() {
 		if err := h.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -184,10 +225,25 @@ func (h *Hooks) HeadSettingsPath() string { return filepath.Join(filepath.Dir(h.
 // URL is where Claude posts hooks.
 func (h *Hooks) URL() string { return h.url }
 
-// Close stops the listener; its port is free when Close returns.
+// Close releases every open request (Claude keeps its prompt) and stops
+// the listener; its port is free when Close returns.
 func (h *Hooks) Close() error {
 	h.Reset()
-	err := h.srv.Close()
+	h.mu.Lock()
+	for _, ps := range h.pending {
+		for _, p := range ps {
+			h.claimLocked(p, nil)
+		}
+	}
+	h.pending = map[string][]*pendingRequest{}
+	h.mu.Unlock()
+	// The released requests answer first; then connections close.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := h.srv.Shutdown(ctx)
+	if err != nil {
+		err = h.srv.Close()
+	}
 	// Serve may not hold the listener yet: close it here too.
 	if lerr := h.ln.Close(); lerr != nil && !errors.Is(lerr, net.ErrClosed) && err == nil {
 		err = lerr
@@ -241,17 +297,26 @@ func (h *Hooks) Status() EventsStatus {
 	return st
 }
 
-// hookInput is the part of Claude's hook input Stage reads. The rest (the
-// prompt, the last reply, tool input) is never read, logged or stored.
+// hookInput is the part of Claude's hook input Stage reads. A
+// PermissionRequest's tool and input are kept in memory while it is open,
+// never logged or stored; the rest (the prompt, the last reply) is never
+// read.
 type hookInput struct {
-	Event            string `json:"hook_event_name"`
-	Session          string `json:"session_id"`
-	NotificationType string `json:"notification_type"`
+	Event            string            `json:"hook_event_name"`
+	Session          string            `json:"session_id"`
+	NotificationType string            `json:"notification_type"`
+	ToolName         string            `json:"tool_name"`
+	ToolInput        json.RawMessage   `json:"tool_input"`
+	Suggestions      []json.RawMessage `json:"permission_suggestions"`
 }
+
+// eventPermissionRequest is the hook Stage can answer.
+const eventPermissionRequest = "PermissionRequest"
 
 // ServeHTTP accepts a hook: POST /hooks with Stage's bearer token and a
 // JSON body naming a session. It answers 204 with no body (Claude reads no
-// decision from it) before anything else happens.
+// decision from it) before anything else happens, except a
+// PermissionRequest naming a tool: that one stays open as a request (hold).
 func (h *Hooks) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != hookPath {
 		http.NotFound(w, r)
@@ -281,7 +346,158 @@ func (h *Hooks) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.deliver(Nudge{Session: in.Session, Event: in.Event, NotificationType: in.NotificationType, At: h.now()})
+	if in.Event == eventPermissionRequest && in.ToolName != "" {
+		h.hold(w, r, in)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// hold keeps a PermissionRequest open until it is answered (200 with the
+// decision) or released (204, no decision). Claude closing the connection
+// drops it.
+func (h *Hooks) hold(w http.ResponseWriter, r *http.Request, in hookInput) {
+	// The server's read and write bounds would end the request while it
+	// waits; they apply again to the answer.
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
+	p := h.add(in)
+	var body []byte
+	select {
+	case body = <-p.answer:
+	case <-r.Context().Done():
+		h.drop(p)
+		p.result <- execution.ErrNotFound
+		return
+	}
+	h.drop(p)
+	_ = rc.SetWriteDeadline(time.Now().Add(h.io))
+	if body == nil {
+		w.WriteHeader(http.StatusNoContent)
+		p.result <- nil
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(body)
+	if err == nil {
+		err = rc.Flush()
+	}
+	p.result <- err
+}
+
+// add registers a request, releasing the session's older ones (Claude asks
+// one at a time: an older one was answered in Claude).
+func (h *Hooks) add(in hookInput) *pendingRequest {
+	p := &pendingRequest{
+		id: randomHex(8), session: in.Session, created: h.now().UTC(), tool: in.ToolName, input: in.ToolInput, suggestions: in.Suggestions,
+		answer: make(chan []byte, 1), result: make(chan error, 1),
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, old := range h.pending[in.Session] {
+		h.claimLocked(old, nil)
+	}
+	h.pending[in.Session] = []*pendingRequest{p}
+	return p
+}
+
+// drop removes p from the open requests.
+func (h *Hooks) drop(p *pendingRequest) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ps := h.pending[p.session]
+	for i, q := range ps {
+		if q == p {
+			ps = append(ps[:i:i], ps[i+1:]...)
+			break
+		}
+	}
+	if len(ps) == 0 {
+		delete(h.pending, p.session)
+	} else {
+		h.pending[p.session] = ps
+	}
+}
+
+// claimLocked hands p its response body once (h.mu held); false when an
+// answer or release already took it.
+func (h *Hooks) claimLocked(p *pendingRequest, body []byte) bool {
+	if p.claimed {
+		return false
+	}
+	p.claimed = true
+	p.answer <- body
+	return true
+}
+
+// open are the session's unclaimed requests.
+func (h *Hooks) open(session string) []*pendingRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []*pendingRequest
+	for _, p := range h.pending[session] {
+		if !p.claimed {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// find is the session's unclaimed request id.
+func (h *Hooks) find(session, id string) (*pendingRequest, bool) {
+	for _, p := range h.open(session) {
+		if p.id == id {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// release answers the session's open requests with no decision (Claude
+// keeps its prompt).
+func (h *Hooks) release(session string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, p := range h.pending[session] {
+		h.claimLocked(p, nil)
+	}
+}
+
+// answer sends body to request id and waits until Claude got it.
+// ErrNotFound: no longer open, or Claude went away first.
+func (h *Hooks) answer(ctx context.Context, session, id string, body []byte) error {
+	h.mu.Lock()
+	var p *pendingRequest
+	for _, q := range h.pending[session] {
+		if q.id == id {
+			p = q
+		}
+	}
+	if p == nil || !h.claimLocked(p, body) {
+		h.mu.Unlock()
+		return execution.ErrNotFound
+	}
+	h.mu.Unlock()
+	select {
+	case err := <-p.result:
+		if errors.Is(err, execution.ErrNotFound) {
+			return err
+		}
+		if err != nil {
+			return fmt.Errorf("answer Claude Code: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func (h *Hooks) authorized(header string) bool {
@@ -326,7 +542,8 @@ type httpHook struct {
 }
 
 // HookSettings is the settings file's content: one HTTP hook per event,
-// no matcher.
+// no matcher. PermissionRequest waits up to permissionTimeout for an
+// answer in Stage; Claude prompts meanwhile.
 func HookSettings(hookURL, token string) ([]byte, error) {
 	return hookSettings(hookURL, token, nil)
 }
@@ -335,7 +552,11 @@ func HookSettings(hookURL, token string) ([]byte, error) {
 func hookSettings(hookURL, token string, wt *worktreeSettings) ([]byte, error) {
 	f := hookSettingsFile{Hooks: map[string][]hookMatcher{}, Worktree: wt}
 	for _, e := range HookEvents {
-		f.Hooks[e] = []hookMatcher{{Hooks: []httpHook{{Type: "http", URL: hookURL, Headers: map[string]string{"Authorization": "Bearer " + token}, Timeout: hookTimeout}}}}
+		timeout := hookTimeout
+		if e == eventPermissionRequest {
+			timeout = permissionTimeout
+		}
+		f.Hooks[e] = []hookMatcher{{Hooks: []httpHook{{Type: "http", URL: hookURL, Headers: map[string]string{"Authorization": "Bearer " + token}, Timeout: timeout}}}}
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

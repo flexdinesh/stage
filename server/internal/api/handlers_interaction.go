@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -23,7 +25,15 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// respondRequest answers for the user only: a request naming an agent's
+// session (the Stage-Caller-Session header the CLI and MCP send) or
+// forwarded by a worker's agent gateway is refused, so an agent cannot
+// approve a session's prompt (best effort: a bare request carries neither).
 func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
+	if r.Header.Get(agentctx.CallerHeader) != "" || db.ActingMachine(r.Context()) != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Approvals and answers come from you, in Stage or in the harness, not from an agent.", "code": "agent_forbidden"})
+		return nil
+	}
 	id, err := pathID(r)
 	if err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -170,6 +171,67 @@ func (f *Fake) Hook(id, event string, extra map[string]any) int {
 // via was launched with (a hook for a session Stage does not know).
 func (f *Fake) HookAs(via, id, event string, extra map[string]any) int {
 	f.t.Helper()
+	c := f.post(via, id, event, extra)
+	if c.Wait(f.t, 5*time.Second).Err != nil {
+		f.t.Fatal(c.Err)
+	}
+	return c.Status
+}
+
+// HookCall is one hook a fake session sent, as Claude sends it: an HTTP
+// request that a PermissionRequest keeps open until Stage answers.
+type HookCall struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	Status int
+	Body   string
+	Err    error
+}
+
+// Wait is the hook's response (fails the test after d).
+func (c *HookCall) Wait(t testing.TB, d time.Duration) *HookCall {
+	t.Helper()
+	select {
+	case <-c.done:
+	case <-time.After(d):
+		t.Fatal("hook not answered")
+	}
+	return c
+}
+
+// Answered reports whether the hook got its response.
+func (c *HookCall) Answered() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// Abandon closes the hook request (Claude's timeout, or the process ended).
+func (c *HookCall) Abandon() { c.cancel(); <-c.done }
+
+// Ask blocks session id on a permission prompt for tool (the session list
+// shows it waiting) and sends its PermissionRequest hook, which stays open.
+func (f *Fake) Ask(id, tool string, input any, suggestions []any) *HookCall {
+	f.t.Helper()
+	waitingFor := "permission prompt"
+	if tool == "AskUserQuestion" {
+		waitingFor = "input needed"
+	}
+	f.SetState(id, "blocked", "waiting", waitingFor)
+	if suggestions == nil {
+		suggestions = []any{}
+	}
+	return f.post(id, id, "PermissionRequest", map[string]any{"tool_name": tool, "tool_input": input, "permission_suggestions": suggestions})
+}
+
+// post sends event naming session id, asynchronously, to the HTTP hook in
+// the settings file session via was launched with, with that hook's
+// headers and Claude's input shape; extra adds input fields.
+func (f *Fake) post(via, id, event string, extra map[string]any) *HookCall {
+	f.t.Helper()
 	s := f.Session(via)
 	if s.Settings == "" {
 		f.t.Fatalf("session %s was launched without --settings", via)
@@ -205,20 +267,34 @@ func (f *Fake) HookAs(via, id, event string, extra map[string]any) int {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range hook.Headers {
-		req.Header.Set(k, v)
-	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	return res.StatusCode
+	return Post(hook.URL, hook.Headers, body)
+}
+
+// Post sends a hook request with headers, asynchronously.
+func Post(url string, headers map[string]string, body []byte) *HookCall {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &HookCall{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(c.done)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			c.Err = err
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			c.Err = err
+			return
+		}
+		defer res.Body.Close()
+		b, err := io.ReadAll(res.Body)
+		c.Status, c.Body, c.Err = res.StatusCode, string(b), err
+	}()
+	return c
 }
 
 // Update changes the fake's state.

@@ -202,7 +202,28 @@ func TestLiveClaude(t *testing.T) {
 		}
 	}
 
-	// A permission prompt is needs input; stop interrupts it.
+	// A permission prompt is needs input, listed as a request through the
+	// PermissionRequest hook; Allow from Stage runs the tool.
+	_, o = launch("live-allow", plain, "root", "manual", "Use the Bash tool to run exactly: touch stage-live-allowed.txt. Then reply done.")
+	await(o.Session, "needs_input")
+	var rs []execution.Request
+	for deadline := time.Now().Add(30 * time.Second); len(rs) == 0; time.Sleep(time.Second) {
+		if rs, err = a.Requests(ctx, o.Session); err != nil || time.Now().After(deadline) {
+			t.Fatalf("requests %+v %v", rs, err)
+		}
+	}
+	if rs[0].Kind != "approval" || !strings.Contains(rs[0].Preview, "stage-live-allowed.txt") {
+		t.Fatalf("request %+v", rs[0])
+	}
+	if err := a.Respond(ctx, o.Session, rs[0].ID, execution.Response{Option: "allow"}); err != nil {
+		t.Fatal(err)
+	}
+	await(o.Session, "done")
+	if _, err := os.Stat(filepath.Join(plain, "stage-live-allowed.txt")); err != nil {
+		t.Fatalf("allowed command did not run: %v", err)
+	}
+
+	// Another prompt; stop interrupts it.
 	_, o = launch("live-block", plain, "root", "manual", "Use the Bash tool to run exactly: touch stage-live-blocked.txt. Then reply done.")
 	await(o.Session, "needs_input")
 	pushed(o.Session, "needs_input")

@@ -1,6 +1,6 @@
 ---
 title: Claude Code
-description: Run Stage tasks as Claude Code background sessions, answer their questions in Claude, and track sessions you started yourself.
+description: Run Stage tasks as Claude Code background sessions, answer their approvals and questions in Stage or in Claude, and track sessions you started yourself.
 showAskAi: false
 ---
 
@@ -41,9 +41,20 @@ Create a task on the Claude Code connection. Choose:
 
 Stage starts one background session per task and follows its state: running, needs input, done, failed or interrupted. **Stop** ends a background session.
 
+### Answer in Stage
+
+When a session Stage started stops for a permission prompt or a question, the task turns to needs input and task detail shows it under **Requests**:
+
+- **A permission prompt**: what Claude wants to do (the command, file or URL), then **Allow**, an **Always allow** choice for each rule Claude suggests (the button names the rule and where Claude saves it, such as `.claude/settings.local.json` in the project), and **Deny**, which asks for an optional reason Claude reads.
+- **A question**: Claude's options, or **Other** with your own answer, then **Send**.
+
+A task row or inbox row with one permission prompt shows it on one line with **Allow** and **Deny**; anything else offers **Answer**, which opens the task. Claude keeps its own prompt open the whole time: whichever answer comes first wins, and an answer Claude already got shows "Already answered in Claude Code or expired".
+
+Only you answer: an agent calling Stage cannot approve a session's prompt. Sessions you track and sessions started before this version have no requests in Stage; answer them in Claude.
+
 ### Answer in Claude
 
-When a session stops for a question or a permission prompt, the task turns to needs input. Claude Code has no link to open, so Stage offers **Copy resume command** on task detail, task rows and notifications. Run it in a terminal:
+Claude Code has no link to open, so Stage also offers **Copy resume command** on task detail, task rows and notifications. Run it in a terminal:
 
 ```sh
 claude attach 1a2b3c4d
@@ -73,7 +84,7 @@ A Claude session that T3 started belongs to T3. Stage refuses it: "This Claude s
 
 ## Check the connection
 
-The status button at the bottom of the sidebar includes Claude Code. In Settings > Connections its row shows the config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens the card: the command Stage runs, the version, the config folder, the login, whether sessions keep running when Stage restarts, and how updates arrive. **Check connection** runs the checks again.
+The status button at the bottom of the sidebar includes Claude Code. In Settings > Connections its row shows the config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens the card: the command Stage runs, the version, the config folder, the login, whether sessions keep running when Stage restarts, how updates arrive, and where approvals are answered. **Check connection** runs the checks again.
 
 Sessions Stage starts tell it right away when a turn ends, a permission prompt opens or the session stops: each launch passes Claude a hook settings file (`--settings`), and the card's **Updates** line reads "instant". Stage still checks every few seconds, so sessions you track, or hooks your Claude settings block (`allowedHttpHookUrls`, `disableAllHooks`), still update, a little later.
 
@@ -87,7 +98,8 @@ prints the same, with the next step when something is wrong. Details: [Connectio
 
 - Images on the prompt are not sent to Claude Code sessions.
 - A worktree starts from origin's default branch or a needed task's branch: no other base, and Claude names the branch.
-- Questions, approvals and follow-ups are answered in Claude, not in Stage.
+- Follow-ups are typed in Claude, not in Stage. A turn that ended with a question in its reply is a follow-up too.
+- If Stage restarts while a prompt waits, answer that prompt in Claude.
 - Not in Docker. On a worker, only with the worker service or `stage worker run --local-harnesses`; the resume command names the machine to run it on.
 
 ## Next steps

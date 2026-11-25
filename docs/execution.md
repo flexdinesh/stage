@@ -370,8 +370,18 @@ interaction).
   (`Capabilities.OptionsFor`); an id reused between them is malformed
   (`Capabilities.Valid`), so a selection always names one option.
 - **Interaction.** `execution.Interactive` (requests, respond, send) behind
-  operations `respond` and `send`. API: [session interaction](api.md#session-interaction-api-v6);
-  no UI or MCP yet. A harness without it answers `operation_unavailable`.
+  operations `respond` and `send`. A `Request` is an `approval` (pick an
+  option; `textOption` names the option that may carry text, e.g. a denial's
+  reason), a `question` (its `questions` answered together through
+  `Response.answers`, keyed by question id: option labels, or one custom
+  text when `custom`) or `input` (free text); `preview` is the command,
+  path, URL or input it acts on. An answer that does not fit is
+  `*execution.Invalid` (400; the worker channel carries it as
+  `invalid_answer`); a request no longer pending is `ErrNotFound` (404).
+  API: [session interaction](api.md#session-interaction-api-v6); the app
+  answers on task detail and needs-input rows, never MCP or the CLI (only
+  the user answers). A harness without it answers `operation_unavailable`.
+  Claude Code implements it; T3, OpenCode and Codex do not.
 
 ## Durable launch lifecycle
 
@@ -617,7 +627,8 @@ to run on that machine.
   `SessionEnd`, `UserPromptSubmit`) with a bearer token. Every launch passes
   the file with `--settings`. A hook is a wake-up: Stage answers 204 at
   once and reads only `session_id`, `hook_event_name` and
-  `notification_type`; Events then reads the session list (one read taken
+  `notification_type` (a `PermissionRequest` naming a tool is also held
+  for an answer: Approvals and questions, below); Events then reads the session list (one read taken
   after the hook, shared) and transcript, again after 250 ms, 500 ms, 1 s
   and 2 s until the list shows what the event announces (Stop, StopFailure,
   SessionEnd: not running; PermissionRequest, a `permission_prompt`
@@ -652,8 +663,33 @@ to run on that machine.
   `bypassPermissions`. Workspaces: the project folder or a Claude worktree.
   Images and `predecessorBase` are available. Unavailable with reasons:
   worktree bases (Claude starts worktrees from origin's default branch and
-  names the branch), registering a folder, and respond and send (answer in
-  Claude: attach or resume).
+  names the branch), registering a folder, send (follow-ups are typed in
+  Claude: attach or resume), and respond without the hook receiver (no
+  state folder, or it could not open).
+- **Approvals and questions** ([ADR 0005](adr/0005-claude-code-harness.md)
+  decision 8, E11). The push receiver (`claudecode.Hooks`, above) also holds
+  each `PermissionRequest` hook naming a tool (its hook timeout is 3600 s,
+  the others 5 s) after nudging, with its tool, input and suggestions in
+  memory; every other hook still gets 204 at once. With no receiver,
+  respond is unavailable ("Answer in Claude Code"). A hook request stays open until the
+  user answers in Stage, the session list shows the session no longer
+  waiting (answered in Claude), a newer request of the session supersedes
+  it, Claude closes it (timeout, process end) or the receiver closes; each
+  of those answers 204 (no decision) and Claude keeps its own prompt, which the user
+  can always answer with the resume command. Requests are memory only.
+  **Requests** lists a waiting session's open hooks: `AskUserQuestion` as a
+  question (every question `custom`, Claude's "Other"), any other tool as
+  an approval titled by tool (Bash: "Run a command" with the command;
+  Edit/Write: the file path; WebFetch: the URL; else the JSON input)
+  with options `allow`, `always:<i>` for each suggestion Stage can describe
+  (allow rules, directory access, accept edits; the label names the rule
+  and where Claude writes it) and `deny` (`textOption`). **Respond**
+  re-reads the session list first (not waiting: `ErrNotFound`, the hook is
+  released), then answers: `{"behavior":"allow"}`, the suggestion verbatim
+  as `updatedPermissions`, `{"behavior":"deny","message": "Denied in Stage: <reason>"}` (no
+  reason: "Denied in Stage."), or for a question `allow` with `updatedInput` =
+  the tool input plus `answers` (`{<question>: <labels joined by ", ">}`).
+  A late answer on a hook Claude already settled is ignored by Claude.
 - **Health** is `claude auth status --json`, reused for 30 seconds:
   unavailable when logged out or when Claude reports another config
   directory than the connection's.
@@ -662,15 +698,18 @@ to run on that machine.
   a stale `T3CODE_THREAD_ID` from the daemon) and yields to T3 inside a
   Claude process T3 runs (`T3CODE_THREAD_ID`, or `CLAUDE_CODE_ENTRYPOINT=t3-code`).
 
-Tests: parser tests on the captured fixtures (`claudecode/testdata`), the
-adapter and setup against a fake claude CLI (`claudecode/claudetest`, a
+Tests: parser tests on the captured fixtures (`claudecode/testdata`,
+including `hooks/`), the hook receiver and requests with the fake sending
+hooks as Claude does (`claudetest` `Ask`), the adapter and setup against a
+fake claude CLI (`claudecode/claudetest`, a
 real executable with a state file), and `TestContractClaude*` in
 `internal/sync` with the real adapter in process and behind a worker
 channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
 two scratch folders trusted in Claude's state file, launches a reply (then
 removes it with `claude rm` and checks the closure), an image it must name
-the color of (manual permissions, no prompt), a permission prompt it stops,
+the color of (manual permissions, no prompt), a permission prompt it allows
+from Stage through the hook, another it stops,
 a worktree session and a dependent worktree from that session's branch (a
 predecessor base), then removes the sessions newest first (`claude rm`;
 when Claude keeps the predecessor's worktree for its commit, it deletes

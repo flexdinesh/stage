@@ -7,7 +7,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useHarnessApi, useSetupCopy } from "../api/harnessScope.tsx";
 import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus, useHarnesses } from "../api/queries.ts";
 import type { HarnessStatus } from "../api/types.ts";
-import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "../lib/claude.ts";
+import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, approvalsText, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "../lib/claude.ts";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { Alert, Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "./ui.tsx";
@@ -125,9 +125,13 @@ function Connected({ status, checking, check }: { status: HarnessStatus; checkin
         <Fact label="Login">{d === null || d.version === "" ? "-" : d.loggedIn ? "logged in" : "logged out"}</Fact>
         <Fact label="Restarts">{d === null ? "-" : d.scope ? "sessions keep running when Stage restarts" : "a Stage restart may stop Claude's sessions"}</Fact>
         <Fact label="Updates">{d === null || d.events === null ? "-" : <Updates events={d.events} />}</Fact>
+        <Fact label="Approvals">{d === null || d.events === null ? "-" : approvalsText(d.events)}</Fact>
       </dl>
       <ul className="flex list-none flex-col gap-1 text-small text-muted">
-        <li>Questions and approvals are answered in Claude Code: copy a task's resume command and run it in a terminal.</li>
+        <li>
+          Approvals and questions of the sessions Stage starts can be answered on the task, or in Claude Code with the task's resume command.
+          Tracked sessions are answered in Claude Code.
+        </li>
         <li>
           Claude must trust a folder before it runs there: run <code className="font-mono text-fg">claude</code> in it once.
         </li>

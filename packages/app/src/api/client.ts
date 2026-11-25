@@ -48,6 +48,8 @@ import type {
   T3State,
   T3Status,
   T3StatusWire,
+  RequestResponse,
+  SessionRequest,
   Task,
   TaskDetail,
   LaunchLinkPreview,
@@ -292,6 +294,10 @@ export function createApi(transport: Transport) {
     unarchiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/unarchive`, post()),
     startTask: (id: number) => apiFetch<Task>(`/tasks/${id}/start`, post()),
     stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
+    /** What the task's session waits on (409 `operation_unavailable` when its harness can't answer from Stage). */
+    taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
+    /** Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `agent_forbidden` for agents). */
+    respondRequest: (id: number, requestId: string, body: RequestResponse) => apiFetch<Task>(`/tasks/${id}/requests/${encodeURIComponent(requestId)}`, post(body)),
     duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
     /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),

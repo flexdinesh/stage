@@ -221,8 +221,8 @@ func eventsOf(t *testing.T, st harness.Status) *claudecode.EventsStatus {
 
 // Push starts with the first adapter: the connected status reports push
 // (no hook yet, then the last one), the adapter launches with the hook
-// settings and receives hooks; disconnect ends its subscription and the
-// status drops events.
+// settings, receives hooks and answers approvals (respond); disconnect
+// ends its subscription and the status drops events.
 func TestHookEventsStatus(t *testing.T) {
 	e := newEnv(t)
 	e.opts.StateDir = filepath.Join(t.TempDir(), "claude")
@@ -243,6 +243,9 @@ func TestHookEventsStatus(t *testing.T) {
 	a, ok := installed.(*claudecode.Adapter)
 	if !ok {
 		t.Fatalf("adapter %T", installed)
+	}
+	if caps, _ := a.Features(ctx); !caps.Operations[execution.OpRespond].Available {
+		t.Fatalf("respond %+v", caps.Operations[execution.OpRespond])
 	}
 	done := make(chan error, 1)
 	go func() {
@@ -278,7 +281,7 @@ func TestHookEventsStatus(t *testing.T) {
 }
 
 // Without a folder for the hook settings Stage follows sessions by polling
-// and says why.
+// and says why; approvals are answered in Claude Code.
 func TestHookEventsPollingWithoutStateDir(t *testing.T) {
 	e := newEnv(t)
 	s := e.service(t)
@@ -288,5 +291,10 @@ func TestHookEventsPollingWithoutStateDir(t *testing.T) {
 	ev := eventsOf(t, s.Status(t.Context(), false))
 	if ev == nil || ev.Mode != claudecode.ModePolling || ev.Reason != "Stage has no folder for its Claude Code hook settings. It checks Claude Code every few seconds instead." {
 		t.Fatalf("events %+v", ev)
+	}
+	id, _ := e.ports.Active(t.Context(), claudecode.Kind)
+	a, _ := e.local.Adapter(id)
+	if caps, _ := a.Features(t.Context()); caps.Operations[execution.OpRespond].Available {
+		t.Fatal("respond without hooks")
 	}
 }

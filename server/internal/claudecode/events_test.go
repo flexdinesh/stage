@@ -109,10 +109,13 @@ func TestEventsPushWhatHooksAnnounce(t *testing.T) {
 	for len(ch) > 0 { // repeated Stops while subscribing
 		<-ch
 	}
-	f.SetState(id, "blocked", "waiting", "permission prompt")
-	f.Hook(id, "PermissionRequest", map[string]any{"tool_name": "Bash"})
+	// The prompt's hook stays open for an answer in Stage; it nudges first.
+	call := f.Ask(id, "Bash", map[string]any{"command": "ls"}, nil)
 	if o := next(t, ch); o.State != "needs_input" {
 		t.Fatalf("after PermissionRequest %+v", o)
+	}
+	if call.Answered() {
+		t.Fatal("PermissionRequest answered without Stage")
 	}
 	f.SetState(id, "working", "busy", "")
 	f.Hook(id, "UserPromptSubmit", nil)

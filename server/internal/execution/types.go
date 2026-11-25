@@ -297,6 +297,12 @@ type Refused struct{ Reason string }
 
 func (e *Refused) Error() string { return e.Reason }
 
+// Invalid: the harness refused an answer that does not fit its request
+// (Interactive.Respond); nothing was sent. The API answers 400.
+type Invalid struct{ Reason string }
+
+func (e *Invalid) Error() string { return e.Reason }
+
 type LinkResolver interface {
 	ResolveLink(context.Context, string) (SessionRef, error)
 }

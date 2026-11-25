@@ -77,6 +77,8 @@ The palette also offers Sync now.
 
 Needs-input tasks and notifications open the source harness for questions and approvals. In the desktop app, T3 links open the T3 app, else T3 in the browser. OpenCode opens the configured web client; with a separate client configured, task detail also offers **Open on service** and **Copy session ID** ([Connections](/docs/reference/connections)). Claude Code has no link: task detail offers **Copy resume command**, and its needs-input alert reads "Claude Code needs input. Answer it in a terminal with the resume command." Task rows and notifications offer the same button, as does Codex ([Claude Code](/docs/guides/claude-code)).
 
+A harness that lets Stage answer (Claude Code, for the sessions Stage starts) lists what its session waits on in a **Requests** panel under the needs-input alert, which then reads "Claude Code is waiting for your answer.": a permission prompt with its command, file or URL and the harness's choices (Allow, Always allow with the rule it saves, Deny with an optional reason), or questions with their options and Other, answered together with **Send**. A task row or inbox row with exactly one permission prompt shows it on one line with its first and last choice (Allow, Deny); a question or several requests show **Answer**, which opens the panel. An answer the harness already got shows "Already answered in Claude Code or expired". The harness's own client keeps working the whole time.
+
 ## Snippets
 
 Reusable prompt text, global or per project. Type `/` in a task prompt or notes to pick one and insert it.
