@@ -3,8 +3,11 @@ package api_test
 import (
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -75,5 +78,58 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	read()
 	if len(inbox.Waiting) != 0 || len(inbox.Groups) != 1 || inbox.Unread != 1 {
 		t.Fatalf("duplicate waiting session %+v", inbox)
+	}
+}
+
+// A waiting session of a harness with no web destination (Claude Code)
+// carries its working folder and the stored resume command; a session
+// answered where it runs carries no links at all.
+func TestSilentWaitingSessionsCarryDirectoryAndCommand(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	sw, err := e.store.SwitchInstance(ctx, db.LocalMachine, claudecode.Descriptor, "/home/u/.claude", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := sw.New
+	put := func(id, dir, command string, at time.Time) {
+		t.Helper()
+		o := execution.Observation{Session: execution.SessionRef{ConnectionID: conn, ExternalSessionID: id}, Project: dir, Directory: dir, Title: "Waiting " + id[:4],
+			State: "needs_input", Active: true, Links: execution.Links{Command: command}, CreatedAt: at, UpdatedAt: at,
+			Artifacts: []execution.Artifact{}, Config: execution.Config{Options: []execution.ModelOption{}}}
+		if err := e.store.PutObservation(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bg, term := "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	now := time.Now().UTC()
+	put(bg, "/src/app", "claude attach 11111111", now.Add(-time.Minute))
+	put(term, "/src/lib", "", now)
+	var inbox struct {
+		Waiting []struct {
+			Connection int64   `json:"connectionId"`
+			ID         string  `json:"externalSessionId"`
+			Directory  *string `json:"directory"`
+			Links      links   `json:"links"`
+		} `json:"waitingSessions"`
+	}
+	e.must("GET", "/api/notifications/groups", nil, 200, &inbox)
+	if len(inbox.Waiting) != 2 {
+		t.Fatalf("waiting %+v", inbox.Waiting)
+	}
+	for _, w := range inbox.Waiting {
+		if w.Connection != conn || w.Directory == nil {
+			t.Fatalf("row %+v", w)
+		}
+		switch w.ID {
+		case bg:
+			if *w.Directory != "/src/app" || w.Links != (links{Command: "claude attach 11111111"}) {
+				t.Fatalf("background row %+v", w)
+			}
+		case term:
+			if *w.Directory != "/src/lib" || w.Links != (links{}) {
+				t.Fatalf("terminal row %+v", w)
+			}
+		}
 	}
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, matchPath, useLocation, useSearchParams } from "react-router";
 import { useBadge } from "../api/queries.ts";
+import type { SessionRef } from "../api/types.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { useTheme, type Theme } from "../lib/theme.ts";
@@ -26,6 +27,7 @@ import { BackForward, NavHistoryProvider, PhoneBack, useCanGoBack } from "./NavH
 import { NewTaskProvider, useNewTask } from "./NewTask.tsx";
 import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefresh, useSystemNotificationSync } from "./Notifications.tsx";
 import { PullToReload } from "./PullToReload.tsx";
+import { AdoptSessionDrawer } from "./trees/AdoptSessionDrawer.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
 import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
 import { StatusButton, useStatusAlert } from "./StatusRow.tsx";
@@ -106,6 +108,8 @@ function Shell() {
   useSystemNotificationSync();
   const needsInput = badge ?? 0;
   const [inbox, setInbox] = useState(false);
+  // A waiting session handed from the inbox to the Track session drawer.
+  const [tracking, setTracking] = useState<SessionRef | null>(null);
   const openInbox = useCallback(() => setInbox(true), []);
   const newTask = useNewTask();
   const [palette, setPalette] = useState(false);
@@ -285,7 +289,19 @@ function Shell() {
         </Drawer>
       ) : null}
 
-      {inbox ? <NotificationsDrawer onClose={() => setInbox(false)} /> : <NotificationToasts onOpenInbox={openInbox} />}
+      {inbox ? (
+        <NotificationsDrawer
+          onClose={() => setInbox(false)}
+          onTrack={(session) => {
+            setInbox(false);
+            setTracking(session);
+          }}
+        />
+      ) : (
+        <NotificationToasts onOpenInbox={openInbox} />
+      )}
+
+      {tracking === null ? null : <AdoptSessionDrawer initial={tracking} onClose={() => setTracking(null)} />}
 
       {palette ? <CommandPalette onClose={closePalette} onNewTask={openNewTask} /> : null}
     </div>

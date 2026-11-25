@@ -104,6 +104,24 @@ export function rowSessionAction(
   return command === null ? null : { kind: "resume", command, primary: needsInput };
 }
 
+/**
+ * What a session row offers: open the host destination, else copy the resume command, else nothing (the session
+ * is answered where it runs, e.g. a Claude Code terminal).
+ */
+export type SessionAction = { kind: "open"; href: string } | { kind: "copy"; command: string } | { kind: "none" };
+
+export function sessionAction(href: string | null, command: string | null): SessionAction {
+  if (href !== null && href !== "") return { kind: "open", href };
+  if (command !== null && command !== "") return { kind: "copy", command };
+  return { kind: "none" };
+}
+
+/** The last segment of a folder path ("/src/app/" is "app"); null for none. */
+export function folderName(directory: string | null | undefined): string | null {
+  const name = directory?.split("/").filter((part) => part !== "").at(-1);
+  return name === undefined || name === "" ? null : name;
+}
+
 /** Task detail Alert for a task on a retired (replaced or forgotten) connection; `name` is its harness's name. */
 export function retiredNotice(t: Pick<Task, "connectionLabel">, name: string): string {
   return `Ran on ${name}${quoted(t.connectionLabel)}, which Stage no longer uses. Its history and result stay here.`;

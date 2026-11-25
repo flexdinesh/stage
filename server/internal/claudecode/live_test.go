@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,11 @@ func TestLiveClaude(t *testing.T) {
 	// A permission prompt is needs input; stop interrupts it.
 	_, o = launch("live-block", plain, "root", "manual", "Use the Bash tool to run exactly: touch stage-live-blocked.txt. Then reply done.")
 	await(o.Session, "needs_input")
+	// The attention feed lists it (discovery reads the same session list).
+	refs, err := a.Attention(ctx)
+	if err != nil || !slices.Contains(refs, o.Session) {
+		t.Fatalf("attention %v %v, want %v", refs, err, o.Session)
+	}
 	if err := a.Stop(ctx, o.Session); err != nil {
 		t.Fatal(err)
 	}

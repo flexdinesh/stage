@@ -219,6 +219,12 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   descriptor declares; the descriptor supplies the stored provenance, the
   journal event, the auto-complete toggle label and the accepted-result copy.
   A harness that declares none has no auto-complete.
+- **Attention.** What a session from the adapter's attention feed that no
+  task owns may produce. `notify` (the default; T3, OpenCode): a silent
+  waiting row, plus an inbox event and push for transitions into
+  `needs_input|done|failed` after startup. `silent` (Claude Code): the
+  waiting row and the needs-input count only, never an event or push.
+  Either way discovery never tracks a session: adoption does.
 
 ## Contracts for roadmap tasks 5 and 6
 
@@ -490,7 +496,7 @@ hosted harnesses.
   transcript (`<projectsDirectory>/<cwd with / and . as ->/<uuid>.jsonl`,
   else any project folder). Background sessions map by `state`: `working`
   running, `blocked` needs_input, `done` done, `failed` failed, `stopped`
-  interrupted; an adopted terminal or SDK session by `status`. Not listed:
+  interrupted; a terminal, IDE or SDK session by `status`. Not listed:
   idle with its reply when the transcript exists, else not found. An
   unreadable list is an error, never a state.
 - **Removal closure.** `claude rm` drops a session from the list and keeps
@@ -510,11 +516,20 @@ hosted harnesses.
   is T3's: Observe, Stop and link resolution refuse it ("Track it through
   T3").
 - **Stop** is `claude stop <short>`, for background sessions only.
-  **Attention** is empty: Stage watches the sessions it launched or adopted
-  from its own records and does not discover others. **Opening** is the
-  first typed prompt. **Links**: `command` is `claude attach <short>` while
-  Claude lists the background session, else `cd <cwd> && claude --resume
-  <uuid>`. **Links** to resolve: a UUID or the 8-character id, also inside a
+  **Attention** lists every session Claude lists as waiting for its user:
+  a `blocked` background session (also one the daemon retired after an hour
+  idle; attach wakes it) and a terminal, IDE or SDK session with status
+  `waiting`, leaving out sessions T3 started (T3 surfaces them). The
+  descriptor's attention policy is `silent`: they show as waiting rows in the
+  inbox and in the needs-input count, never as events or pushes, and Stage
+  tracks one only when the user adopts it (the row's Track). A finished
+  discovered background session stays watched until `claude rm`; the
+  adapter reuses a parsed transcript while its size and modification time
+  are unchanged. **Opening** is the first typed prompt. **Links**: `command`
+  is `claude attach <short>` while Claude lists the background session; none
+  for a terminal, IDE or SDK session whose process runs (it is answered where
+  it runs: a resume would open a second client on it); else `cd <cwd> &&
+  claude --resume <uuid>`. **Links** to resolve: a UUID or the 8-character id, also inside a
   pasted `claude attach` or `--resume` command.
 - **Inventory** is the `projects` of Claude's state file (`~/.claude.json`,
   or `.claude.json` in a `CLAUDE_CONFIG_DIR`); a Git checkout's top is

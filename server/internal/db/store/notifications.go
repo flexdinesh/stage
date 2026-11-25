@@ -59,6 +59,9 @@ type WaitingSession struct {
 	ThreadID     string  `json:"externalSessionId"`
 	Title        string  `json:"title"`
 	ProjectTitle *string `json:"projectTitle"`
+	// Directory is the session's working folder when the harness reports
+	// one (null for T3 threads).
+	Directory *string `json:"directory"`
 }
 
 // Notifications is the inbox repository. A group key is
