@@ -584,13 +584,15 @@ func TestFeatures(t *testing.T) {
 	if err != nil || c.Valid() != nil {
 		t.Fatal(err, c.Valid())
 	}
-	for _, op := range []string{"predecessorBase", "worktreeBase", "respond", "send", "registerWorkspace"} {
+	for _, op := range []string{"worktreeBase", "respond", "send", "registerWorkspace"} {
 		if a := c.Operations[op]; a.Available || a.Reason == "" {
 			t.Fatalf("%s %+v", op, a)
 		}
 	}
-	if a := c.Operations["images"]; !a.Available {
-		t.Fatalf("images %+v", a)
+	for _, op := range []string{"images", "predecessorBase"} {
+		if a := c.Operations[op]; !a.Available {
+			t.Fatalf("%s %+v", op, a)
+		}
 	}
 	if err := c.ValidateConfig(execution.Config{}); err != nil {
 		t.Fatal("Claude's defaults", err)

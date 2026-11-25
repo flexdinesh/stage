@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +86,30 @@ func New(t testing.TB) *Fake {
 	})
 	f.WriteClaudeJSON(f.Workspace)
 	return f
+}
+
+// Git runs git in dir with a fixed identity and no user or system config,
+// failing the test on error; it returns trimmed stdout.
+func (f *Fake) Git(dir string, args ...string) string {
+	f.t.Helper()
+	c := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=stage", "-c", "user.email=stage@example.invalid"}, args...)...)
+	c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	out, err := c.Output()
+	if err != nil {
+		f.t.Fatalf("git %v in %s: %v", args, dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// GitInit makes Workspace a real Git repository on main with one commit,
+// so `-w` launches make real worktrees (fakeclaude makeWorktree).
+func (f *Fake) GitInit() {
+	f.t.Helper()
+	if err := os.RemoveAll(filepath.Join(f.Workspace, ".git")); err != nil {
+		f.t.Fatal(err)
+	}
+	f.Git(f.Workspace, "init", "-q", "-b", "main")
+	f.Git(f.Workspace, "commit", "-q", "--allow-empty", "-m", "init")
 }
 
 // ConfigDir is the fake's config directory (the connection identity).

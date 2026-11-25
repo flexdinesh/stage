@@ -14,6 +14,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 const maxBody = 1 << 20
@@ -148,19 +149,37 @@ func taskStateStrings() []string {
 	return out
 }
 
-func validateWorkspace(w db.Workspace) (db.Workspace, error) {
-	// No destination: validated as T3 (the most permissive).
-	return validateWorkspaceFor(w, 0, func(int64) bool { return true })
+// worktreeRule is a destination connection's harness name and worktree
+// policy (harness.Descriptor.Worktree).
+type worktreeRule func(connection int64) (name string, policy harness.Worktree)
+
+// anyWorktree is the rule without a destination: the most permissive.
+func anyWorktree(int64) (string, harness.Worktree) {
+	return "", harness.Worktree{BaseRef: true, Predecessor: true}
 }
 
-func validateWorkspaceFor(w db.Workspace, connection int64, isT3 func(int64) bool) (db.Workspace, error) {
-	if connection > 0 && !isT3(connection) {
-		if w.Base != "" || w.BaseRef != "" || w.Branch != nil || w.BaseTaskID != nil {
-			return w, db.Invalid("OpenCode manages the worktree base and branch. Choose root or worktree without a ref, branch or predecessor.")
-		}
-		if w.Type == "worktree" {
-			return w, nil
-		}
+// worktreeRule reads a connection's policy from its harness descriptor; an
+// unknown kind takes nothing from Stage.
+func (s *server) worktreeRule(connection int64) (string, harness.Worktree) {
+	if connection <= 0 {
+		return anyWorktree(connection)
+	}
+	kind := s.Store.Harness(connection)
+	d, ok := s.registry().Lookup(kind)
+	if !ok {
+		return kind, harness.Worktree{}
+	}
+	return d.Name, d.Worktree
+}
+
+func validateWorkspace(w db.Workspace) (db.Workspace, error) {
+	return validateWorkspaceFor(w, 0, anyWorktree)
+}
+
+func validateWorkspaceFor(w db.Workspace, connection int64, rule worktreeRule) (db.Workspace, error) {
+	name, policy := rule(connection)
+	if !policy.BaseRef {
+		return harnessWorktree(w, name, policy)
 	}
 	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
 		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
@@ -191,6 +210,40 @@ func validateWorkspaceFor(w db.Workspace, connection int64, isT3 func(int64) boo
 			}
 		}
 		return w, nil
+	}
+	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
+}
+
+// harnessWorktree validates a workspace for a harness that chooses the
+// worktree base and branch: no ref or branch, and a predecessor base only
+// when the policy allows it (the harness's default is its fallback).
+func harnessWorktree(w db.Workspace, name string, policy harness.Worktree) (db.Workspace, error) {
+	if name == "" {
+		name = "This harness"
+	}
+	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
+		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
+	}
+	if w.BaseTaskID != nil && w.Base != db.BasePredecessor {
+		return w, db.Invalid("workspace.baseTaskId needs base predecessor")
+	}
+	if !policy.Predecessor && (w.Base == db.BasePredecessor || strings.TrimSpace(w.BaseRef) != "" || w.Branch != nil) {
+		return w, db.Invalid("%s manages the worktree base and branch. Choose root or worktree without a ref, branch or predecessor.", name)
+	}
+	if strings.TrimSpace(w.BaseRef) != "" || w.Branch != nil {
+		return w, db.Invalid("%s manages the worktree base and branch. Choose root, worktree or a predecessor's branch, without a ref or branch.", name)
+	}
+	switch w.Type {
+	case "root":
+		if w.Base == db.BasePredecessor {
+			return w, db.Invalid("workspace.base predecessor needs type worktree")
+		}
+		return db.Workspace{Type: "root"}, nil
+	case "worktree":
+		if w.Base != db.BasePredecessor {
+			return db.Workspace{Type: "worktree"}, nil
+		}
+		return db.Workspace{Type: "worktree", Base: db.BasePredecessor, BaseTaskID: w.BaseTaskID}, nil
 	}
 	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
 }

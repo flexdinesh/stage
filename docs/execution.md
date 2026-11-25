@@ -270,7 +270,12 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   Product code reads policy from these, never a harness name: `images`,
   `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
   worktree base and branch itself) gate form fields, and `ModeLabel` names the
-  mode choice in the harness's words. Tasks and schedules store only an
+  mode choice in the harness's words. The descriptor's static `worktree`
+  policy is what the API validates a saved workspace against (it holds
+  without the harness reachable): `baseRef` (Stage passes a base ref and
+  branch: T3) and `predecessor` (a worktree may start from a need's branch:
+  T3, Claude Code). Without `baseRef`, a worktree carries no ref or branch
+  and the harness picks them. Tasks and schedules store only an
   execution config: legacy T3 model inputs are translated on write
   (`store.LegacyT3Config`, equal to `t3.LegacyConfig`) and migration 0027
   backfilled T3 rows saved before configs.
@@ -522,14 +527,22 @@ to run on that machine.
   cgroup and outlives a Stage restart.
 - **Launch.** In the workspace folder: `claude --bg -n <title> [--model M]
   [--effort E] [--permission-mode P] [-w stage-<requestId>] [--add-dir
-  <images>] [--settings <hooks file>] -- <prompt>` (the prompt carries the launch marker; `--` keeps a
-  prompt starting with `-` from reading as a flag). A base or branch, a
-  workspace other than the project folder or a Claude worktree, a config
-  the features do not offer, an image type other than PNG, JPEG, GIF or
-  WebP, a missing folder or executable, and Claude's `Workspace not
-  trusted` or `Added folder not trusted` refusal are `Rejected` (the task
-  returns to backlog with the reason; trusting a folder is done in
-  Claude). Exit 0 prints
+  <images>] [--settings <file>] -- <prompt>` (the prompt carries the launch
+  marker; `--` keeps a prompt starting with `-` from reading as a flag).
+  Claude takes one `--settings`: the hooks file, or for a predecessor base
+  its variant with `worktree.baseRef` `head` (`hooks-settings-head.json`;
+  the inline `{"worktree":{"baseRef":"head"}}` without hooks). A
+  predecessor base (`Workspace.Base`, a worktree only) launches from the
+  checkout that has that branch checked out (`git worktree list
+  --porcelain` of the project), so Claude branches the new worktree from
+  the predecessor's commit; no such checkout is `Rejected`
+  ([ADR 0005 E10](adr/0005-claude-code-harness.md#e10-predecessor-base)).
+  A branch, a base with the project folder, a workspace other than the
+  project folder or a Claude worktree, a config the features do not offer,
+  an image type other than PNG, JPEG, GIF or WebP, a missing folder or
+  executable, and Claude's `Workspace not trusted` or `Added folder not
+  trusted` refusal are `Rejected` (the task returns to backlog with the
+  reason; trusting a folder is done in Claude). Exit 0 prints
   `backgrounded · <short>`; the session list maps the short id to the
   session within 5 seconds. Anything else is uncertain.
 - **Images** are files Claude reads with its Read tool. Before running
@@ -557,7 +570,11 @@ to run on that machine.
   running, `blocked` needs_input, `done` done, `failed` failed, `stopped`
   interrupted; a terminal, IDE or SDK session by `status`. Not listed:
   idle with its reply when the transcript exists, else not found. An
-  unreadable list is an error, never a state.
+  unreadable list is an error, never a state. `Base` (whether a dependent
+  can start from the session's branch) reads the worktree's Git files:
+  unavailable with a reason for a session in the project folder, without
+  a branch, whose worktree was removed, or whose worktree is now on
+  another branch.
 - **Removal closure.** `claude rm` drops a session from the list and keeps
   its transcript; the hourly idle reap keeps the entry and its state. A
   session not listed whose transcript's last turn ran in the background
@@ -633,9 +650,10 @@ to run on that machine.
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`). Permissions: `manual`, `acceptEdits`, `auto`, `plan`, `dontAsk`,
   `bypassPermissions`. Workspaces: the project folder or a Claude worktree.
-  Images are available. Unavailable with reasons: predecessor and worktree bases (Claude
-  branches from the checkout's HEAD), registering a folder, and respond and
-  send (answer in Claude: attach or resume).
+  Images and `predecessorBase` are available. Unavailable with reasons:
+  worktree bases (Claude starts worktrees from origin's default branch and
+  names the branch), registering a folder, and respond and send (answer in
+  Claude: attach or resume).
 - **Health** is `claude auth status --json`, reused for 30 seconds:
   unavailable when logged out or when Claude reports another config
   directory than the connection's.
@@ -652,8 +670,11 @@ channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
 two scratch folders trusted in Claude's state file, launches a reply (then
 removes it with `claude rm` and checks the closure), an image it must name
-the color of (manual permissions, no prompt), a permission prompt it stops and a worktree session, then removes the
-sessions (`claude rm`) and purges the folders (`claude purge`). Claude
+the color of (manual permissions, no prompt), a permission prompt it stops,
+a worktree session and a dependent worktree from that session's branch (a
+predecessor base), then removes the sessions newest first (`claude rm`;
+when Claude keeps the predecessor's worktree for its commit, it deletes
+the scratch worktrees and retries) and purges the folders (`claude purge`). Claude
 processes rewrite the state file, so a trust entry removed by hand can come
 back; the purge is what removes them.
 

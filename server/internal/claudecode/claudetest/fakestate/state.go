@@ -152,12 +152,21 @@ func uuidFor(id, kind string) string {
 // AppendUser writes a typed user prompt. sessionKind is "bg" in a
 // background session, "" otherwise (Claude omits it).
 func AppendUser(projects, cwd, id, entrypoint, sessionKind, prompt string, at time.Time) error {
+	return AppendUserOn(projects, cwd, id, entrypoint, sessionKind, prompt, "", at)
+}
+
+// AppendUserOn is AppendUser in a checkout on branch (Claude's gitBranch;
+// "" outside Git).
+func AppendUserOn(projects, cwd, id, entrypoint, sessionKind, prompt, branch string, at time.Time) error {
 	rec := map[string]any{
 		"type": "user", "entrypoint": entrypoint, "uuid": uuidFor(id, "u"), "timestamp": at.Format(time.RFC3339Nano),
 		"message": map[string]any{"role": "user", "content": prompt},
 	}
 	if sessionKind != "" {
 		rec["sessionKind"] = sessionKind
+	}
+	if branch != "" {
+		rec["gitBranch"] = branch
 	}
 	return appendRecord(projects, cwd, id, rec)
 }

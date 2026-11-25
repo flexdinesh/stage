@@ -241,6 +241,100 @@ func TestContractClaudeUntrustedFolderReturnsToBacklog(t *testing.T) {
 	})
 }
 
+// A predecessor base: once the predecessor's Claude worktree session is
+// accepted, its dependent launches Claude's worktree from that checkout, so
+// it starts at the predecessor's commit; the launch base records the
+// branch. Claude makes both worktrees; Stage makes none.
+func TestContractClaudePredecessorBase(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		f.GitInit()
+		store, svc, first, _ := claudeSetup(t, p, f)
+		ctx := t.Context()
+		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", RuntimeMode: "full-access", InteractionMode: "default", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := claudeFinish(t, store, svc, f, pred)
+		o, err := store.Observation(ctx, *done.Session)
+		if err != nil || !o.Base.Available || o.Branch == "" {
+			t.Fatalf("predecessor observation %+v %v", o, err)
+		}
+		f.Git(o.Directory, "commit", "-q", "--allow-empty", "-m", "built")
+		tip := f.Git(o.Directory, "rev-parse", "HEAD")
+		preview, err := store.CompletionPreview(ctx, pred.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ChangeAcceptance(ctx, pred.ID, db.AcceptanceRequest{RequestID: "accept-pred", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}, false); err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.StartTask(ctx, dep.ID)
+		if err != nil || got.State != db.StateRunning || got.Session == nil {
+			t.Fatalf("dependent start %+v %v", got, err)
+		}
+		ls := f.Launches()
+		if last := ls[len(ls)-1]; last.Dir != o.Directory || !slices.Contains(last.Args, "--settings") {
+			t.Fatalf("dependent launched in %s with %q", last.Dir, last.Args)
+		}
+		do, err := store.Observation(ctx, *got.Session)
+		if err != nil || do.Project != f.Workspace {
+			t.Fatalf("dependent observation %+v %v", do, err)
+		}
+		if head := f.Git(do.Directory, "rev-parse", "HEAD"); head != tip {
+			t.Fatalf("dependent starts at %s, want %s", head, tip)
+		}
+		base, err := store.GetLaunchBase(ctx, dep.ID, got.LaunchAttempt)
+		if err != nil || base.Source != db.LaunchBasePredecessor || base.BaseRef != o.Branch || base.SourceTaskID == nil || *base.SourceTaskID != pred.ID {
+			t.Fatalf("launch base %+v %v", base, err)
+		}
+	})
+}
+
+// A predecessor whose Claude worktree is gone blocks the dependent's launch
+// with the reason; nothing is dispatched.
+func TestContractClaudeRemovedPredecessorBlocksLaunch(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		f.GitInit()
+		store, svc, first, _ := claudeSetup(t, p, f)
+		ctx := t.Context()
+		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", RuntimeMode: "full-access", InteractionMode: "default", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := claudeFinish(t, store, svc, f, pred)
+		o, err := store.Observation(ctx, *done.Session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Git(f.Workspace, "worktree", "remove", "--force", o.Directory)
+		preview, err := store.CompletionPreview(ctx, pred.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ChangeAcceptance(ctx, pred.ID, db.AcceptanceRequest{RequestID: "accept-pred", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}, false); err != nil {
+			t.Fatal(err)
+		}
+		launches := len(f.Launches())
+		if _, err := svc.StartTask(ctx, dep.ID); err == nil || !strings.Contains(err.Error(), "worktree was removed") {
+			t.Fatalf("removed predecessor: %v", err)
+		}
+		got, err := store.GetTask(ctx, dep.ID)
+		if err != nil || got.State != db.StateBacklog || got.LaunchAttempt != 0 || len(f.Launches()) != launches {
+			t.Fatalf("blocked launch dispatched: %+v %v", got, err)
+		}
+	})
+}
+
 // A session T3 started is refused with a conflict that says where to track
 // it.
 func TestContractClaudeT3SessionRefused(t *testing.T) {

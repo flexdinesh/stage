@@ -19,9 +19,14 @@ export type TreeStartChoice = "inherit" | StartMode;
 /** A one-shot start time, or null for none. */
 export type TimedStart = { startLocal: string; startTz: string } | null;
 
-/** The workspace a form saves. A harness that picks its own worktree base and branch gets neither from Stage. */
+/**
+ * The workspace a form saves. A harness that picks its own worktree base and branch gets neither from Stage; a
+ * predecessor base reaches it without a configured ref (the harness's own worktree is the fallback).
+ */
 export function formWorkspace(choice: WorkspaceChoice, baseRef: string, branch: string, baseTaskId: number | null, harnessWorktree: boolean): Workspace {
-  return harnessWorktree && choice === "worktree" ? { type: "worktree", baseRef: "", branch: null } : choiceToWorkspace(choice, baseRef, branch, baseTaskId);
+  if (!harnessWorktree) return choiceToWorkspace(choice, baseRef, branch, baseTaskId);
+  if (choice === "worktree") return { type: "worktree", baseRef: "", branch: null };
+  return choiceToWorkspace(choice, "", "", baseTaskId);
 }
 
 export function scheduleBody(template: TaskTemplate, s: { notes: string; attachmentIds: number[]; cron: string; tz: string }): CreateScheduleRequest {

@@ -11,6 +11,8 @@
 - **Amended** 2026-11-25 by #377: decision 16 (push via HTTP hooks),
   evidence E9, the hooks approval route.
 - **Amended** 2026-11-25 by #380: decision 17 (usage).
+- **Amended** 2026-11-25 by #379: decision 10 (predecessor bases),
+  evidence [E10](#e10-predecessor-base).
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -104,8 +106,13 @@ them. 2, 3, 13 and 14 come from the evidence.
    rejected: they would write the user's global Claude settings, and the
    roster already reports waiting sessions.
 10. **Workspaces**: the project root, or Claude's `-w <name>`. Claude picks
-    the base (HEAD of the checkout) and the branch (`worktree-<name>`), so
-    `worktreeBase` and `predecessorBase` are unavailable. Stage names
+    the base and the branch (`worktree-<name>`), so `worktreeBase` is
+    unavailable. `predecessorBase` is available (#379): Stage launches
+    from the checkout that has the predecessor's branch checked out (its
+    Claude worktree) with `worktree.baseRef` `head` in its one
+    `--settings` (the hooks file's head variant, decision 16), so Claude makes, names and owns the new worktree, starting at the
+    predecessor's commit ([E10](#e10-predecessor-base)). Stage never creates
+    or removes worktrees itself. Stage names
     worktrees uniquely per attempt (e.g. `stage-<taskId>-<attempt>`):
     `-w` silently reuses an existing worktree of that name, dirty or not
     ([E5](#e5-worktrees)). Stage never removes worktrees; `claude rm`
@@ -377,6 +384,28 @@ The binary also documents `allowedHttpHookUrls` and
 headers (`allowedEnvVars`); background sessions inherit the daemon's
 environment, not the launcher's (decision 13), so Stage writes the token
 into the file.
+
+### E10 Predecessor base
+
+Claude 2.1.332's `worktree.baseRef` setting picks where `-w` branches
+from: `fresh` (the default) is origin's default branch, `head` is the HEAD
+of the checkout Claude is launched from. Probed (#379, and on every
+`mise run claude:live`) with `claude --bg -w stage-live-dep --settings
+'{"worktree":{"baseRef":"head"}}'` launched from a Claude worktree
+(`<repo>/.claude/worktrees/stage-live-wt`, branch
+`worktree-stage-live-wt`) holding a commit not on `main`:
+
+- `--bg` keeps `--settings`. The new worktree is
+  `<repo>/.claude/worktrees/stage-live-dep` (under the main repository,
+  not the launch worktree), on a new branch at the launch worktree's
+  HEAD.
+- Trust comes from the repository: the launch worktree needs no prompt.
+- `claude rm` of the predecessor then refuses while its branch holds
+  commits on no remote: `kept 08ad94b4`, then `its worktree is
+  still at "…/stage-live-wt"`, `2 unpushed commits on "worktree-stage-live-wt":
+  dc8167e "predecessor" and 1 more. They exist on no remote, so deleting
+  the worktree would lose them.`, with a `claude rm <short>
+  --discard-unpushed <token>` hint.
 
 ## Approval routes (record only)
 

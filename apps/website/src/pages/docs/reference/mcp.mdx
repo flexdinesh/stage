@@ -146,7 +146,7 @@ When a task with needs starts, its launch prompt gets one block per accepted nee
 
 ### Predecessor base
 
-`base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `baseTaskId` picks the need, else the sole need; `baseRef` keeps an explicit base choice. CLI: `--base predecessor --base-task ID --base-ref origin/main`.
+`base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `baseTaskId` picks the need, else the sole need; `baseRef` keeps an explicit base choice. CLI: `--base predecessor --base-task ID --base-ref origin/main`. On Claude Code, which makes and names the worktree, pass `workspaceType: "worktree"` instead of `baseRef` (CLI `--workspace worktree`).
 
 - Tasks only; schedules reject it (their runs have no needs). It needs an available branch in the same harness and project.
 - Unavailable, ambiguous, merged or deleted predecessor branches block launch. Choose the configured base explicitly to continue.

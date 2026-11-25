@@ -126,14 +126,15 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	}
 }
 
-func (req createTaskReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
-	in, err := req.taskConfigReq.validate(isT3)
+func (req createTaskReq) validate(isT3 func(int64) bool, rule worktreeRule) (db.NewTask, error) {
+	in, err := req.taskConfigReq.validate(isT3, rule)
 	in.InitialNote = req.InitialNote
 	return in, err
 }
 
-// isT3 reports whether a connection is a T3 instance (db.Store.IsT3).
-func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
+// isT3 reports whether a connection is a T3 instance (db.Store.IsT3); rule
+// is its worktree policy (server.worktreeRule).
+func (req taskConfigReq) validate(isT3 func(int64) bool, rule worktreeRule) (db.NewTask, error) {
 	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
 		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
 	}
@@ -209,7 +210,7 @@ func (req taskConfigReq) validate(isT3 func(int64) bool) (db.NewTask, error) {
 		in.InteractionMode = *req.InteractionMode
 	}
 	if req.Workspace != nil {
-		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID, isT3); err != nil {
+		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID, rule); err != nil {
 			return in, err
 		}
 	}
@@ -263,7 +264,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.Store.IsT3)
+	in, err := req.validate(s.Store.IsT3, s.worktreeRule)
 	if err != nil {
 		return err
 	}
@@ -411,7 +412,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
-	}, s.Store.IsT3); err != nil {
+	}, s.worktreeRule); err != nil {
 		return err
 	}
 	if p.StartMode.Set && !p.StartMode.Null && !p.StartMode.V.Valid() {
@@ -462,7 +463,7 @@ type configPatch struct {
 }
 
 // validateConfigPatch validates and normalizes the shared config fields.
-func validateConfigPatch(c configPatch, isT3 func(int64) bool) error {
+func validateConfigPatch(c configPatch, rule worktreeRule) error {
 	var err error
 	if c.ExecutionConfig != nil && c.ExecutionConfig.Set && (c.ProviderInstanceID.Set || c.Model.Set || c.ModelOptions.Set || c.RuntimeMode.Set || c.InteractionMode.Set) {
 		return db.Invalid("executionConfig cannot be combined with legacy T3 configuration fields")
@@ -494,7 +495,7 @@ func validateConfigPatch(c configPatch, isT3 func(int64) bool) error {
 		if c.Workspace.Null {
 			return db.Invalid("workspace must not be null")
 		}
-		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID, isT3); err != nil {
+		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID, rule); err != nil {
 			return err
 		}
 	}

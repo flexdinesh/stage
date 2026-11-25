@@ -272,7 +272,7 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
-	WorkspaceType   string            `json:"workspaceType,omitempty" jsonschema:"root or worktree; OpenCode worktrees use the service default base"`
+	WorkspaceType   string            `json:"workspaceType,omitempty" jsonschema:"root or worktree; a harness that picks its own worktree base (OpenCode, Claude Code) takes no baseRef or branch, and Claude Code takes base=predecessor without baseRef"`
 	ConnectionID    int64             `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
 	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty" jsonschema:"use the selected connection model, options, permission and mode from list_models"`
 	Project         string            `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
@@ -286,7 +286,7 @@ type ConfigArgs struct {
 	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
 	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
 	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
-	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only)"`
+	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only); without baseRef pass workspaceType worktree"`
 	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
 
@@ -391,7 +391,7 @@ func workspace(baseRef, branch, base string) *db.Workspace {
 }
 
 // errBaseNeedsWorktree: base without a worktree to apply it to.
-var errBaseNeedsWorktree = errors.New("base needs a worktree: pass baseRef (with base predecessor it is the fallback)")
+var errBaseNeedsWorktree = errors.New("base needs a worktree: pass workspaceType worktree, or baseRef where the harness takes one (with base predecessor it is the fallback)")
 
 // baseOnly patches task id's current workspace with base and/or baseTask
 // (given without baseRef; nil = unchanged).
@@ -530,24 +530,23 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	} else if err := o.resolveModel(ctx, a, pin, &rc); err != nil {
 		return rc, err
 	}
-	if rc.workspace = workspace(a.BaseRef, a.Branch, a.Base); rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
-		return rc, errBaseNeedsWorktree
-	}
+	// The server checks the base against the harness's worktree policy.
+	rc.workspace = workspace(a.BaseRef, a.Branch, a.Base)
 	switch a.WorkspaceType {
 	case "root":
-		if rc.workspace != nil || a.Branch != "" {
-			return rc, errors.New("a root workspace cannot select a branch or base ref")
+		if rc.workspace != nil || a.Branch != "" || strings.TrimSpace(a.Base) != "" {
+			return rc, errors.New("a root workspace cannot select a branch, base or base ref")
 		}
 	case "worktree":
 		if rc.workspace == nil {
-			rc.workspace = &db.Workspace{Type: "worktree", Branch: strPtr(a.Branch)}
+			rc.workspace = &db.Workspace{Type: "worktree", Branch: strPtr(a.Branch), Base: strings.TrimSpace(a.Base)}
 		}
 	case "":
+		if rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
+			return rc, errBaseNeedsWorktree
+		}
 	default:
 		return rc, errors.New("choose workspaceType root or worktree")
-	}
-	if !toT3 && (a.Branch != "" || a.Base != "" || a.BaseRef != "") {
-		return rc, errors.New("OpenCode selects the worktree base and branch; choose workspaceType worktree without a branch or base")
 	}
 	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
 	return rc, err
@@ -735,18 +734,18 @@ type UpdateArgs struct {
 // workspacePatch is the workspace baseRef/branch/base set (ok false without
 // baseRef).
 func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
-	if a.BaseRef == nil {
-		if a.WorkspaceType != nil {
-			return db.Workspace{Type: *a.WorkspaceType, Branch: a.Branch}, true
-		}
-		return db.Workspace{}, false
-	}
 	branch, base := "", ""
 	if a.Branch != nil {
 		branch = *a.Branch
 	}
 	if a.Base != nil {
-		base = *a.Base
+		base = strings.TrimSpace(*a.Base)
+	}
+	if a.BaseRef == nil {
+		if a.WorkspaceType != nil {
+			return db.Workspace{Type: *a.WorkspaceType, Branch: a.Branch, Base: base}, true
+		}
+		return db.Workspace{}, false
 	}
 	if w := workspace(*a.BaseRef, branch, base); w != nil {
 		return *w, true
@@ -895,7 +894,7 @@ func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, er
 			p["startMode"] = *mode.mode
 		}
 	}
-	if (a.Base != nil || a.BaseTaskID != nil) && a.BaseRef == nil {
+	if (a.Base != nil || a.BaseTaskID != nil) && a.BaseRef == nil && a.WorkspaceType == nil {
 		if err := o.baseOnly(ctx, a.ID, a.Base, a.BaseTaskID, p); err != nil {
 			return client.Task{}, err
 		}

@@ -18,6 +18,8 @@ const (
 // instance for good; a settled thread may complete its task.
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "T3", Hosting: harness.Connected, StableIdentity: true,
+	// T3 creates worktrees from the base ref and branch Stage passes.
+	Worktree: harness.Worktree{BaseRef: true, Predecessor: true},
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedSettled, Provenance: "harness_settled",
 		Setting:   "Complete tasks when settled in T3",

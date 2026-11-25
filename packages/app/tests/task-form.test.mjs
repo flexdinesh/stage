@@ -29,6 +29,23 @@ test("formWorkspace leaves base and branch to a harness that picks its own workt
   assert.deepEqual(formWorkspace("root", "origin/main", "", null, false), { type: "root" });
 });
 
+test("formWorkspace sends a predecessor base without a ref or branch to a harness that names its worktree", () => {
+  assert.deepEqual(formWorkspace("predecessor", "origin/main", "feat", 12, true), {
+    type: "worktree",
+    baseRef: "",
+    branch: null,
+    base: "predecessor",
+    baseTaskId: 12,
+  });
+  assert.deepEqual(formWorkspace("predecessor", "origin/main", "feat", 12, false), {
+    type: "worktree",
+    baseRef: "origin/main",
+    branch: "feat",
+    base: "predecessor",
+    baseTaskId: 12,
+  });
+});
+
 test("taskCreateBody: start now, or at a time, or join a tree with needs and a start mode", () => {
   const base = { notes: "n", attachmentIds: [], timed: null, startNow: true, tree: undefined, treeStart: "inherit" };
   assert.deepEqual(taskCreateBody(template, base), { ...template, initialNote: "n", start: true });

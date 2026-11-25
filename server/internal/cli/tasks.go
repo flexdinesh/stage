@@ -73,7 +73,7 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.mode, "mode", "", "interaction mode: default|plan")
 	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
-	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; unavailable predecessors block launch)")
+	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; unavailable predecessors block launch; without --base-ref pass --workspace worktree)")
 	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
 	c.fs.Var(&f.images, "image", "image file (repeatable)")
 }

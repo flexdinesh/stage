@@ -83,7 +83,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.Store.IsT3)
+	in, err := req.validate(s.Store.IsT3, s.worktreeRule)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
 		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
 		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
-	}, s.Store.IsT3); err != nil {
+	}, s.worktreeRule); err != nil {
 		return err
 	}
 	if p.Workspace.Set && p.Workspace.V.FromPredecessor() {
