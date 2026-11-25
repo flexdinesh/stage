@@ -41,8 +41,8 @@ restarting Stage leaves them running. Codex is another
 
 | Profile | When | Local processes |
 | --- | --- | --- |
-| `desktop` | `stage serve --managed` (the per-user service the desktop app ensures) | yes |
-| `server` | foreground `stage serve` | only with `--local-harnesses` or `STAGE_LOCAL_HARNESSES=1` (desktop dev, tests) |
+| `desktop` | `stage serve --managed` (the per-user service the desktop app ensures), or `stage worker run --managed` (the worker service) | yes |
+| `server` | foreground `stage serve` or `stage worker run` | only with `--local-harnesses` or `STAGE_LOCAL_HARNESSES=1` (desktop dev, tests, a worker in a terminal) |
 | `container` | `STAGE_MACHINE_PROFILE=container`, set by the Docker image | never, whatever else is set |
 
 `GET /api/harnesses` reports the profile and, per harness, whether it is
@@ -51,8 +51,11 @@ is refused with that reason everywhere: its setup routes answer 409
 `harness_unavailable` without starting anything, the server composes no
 setup or adapter for it, and a task on a connection of that kind (one a
 desktop run left in the same data dir) cannot start (409
-`connection_unavailable`). A remote machine runs connected harnesses only
-for now, whatever its worker's profile
+`connection_unavailable`). A remote machine follows its worker's profile:
+the worker reports it over the channel, and its unavailable reason names the
+worker's fix (`stage worker run --local-harnesses`, or the worker service);
+until the worker described it since the server started, every kind is
+listed and setup answers that the machine is offline or still starting
 ([execution.md](execution.md#remote-machines)). The profile is not stored: it is
 computed at each start. Every connection belongs to a machine
 (`harness_connections.machine_id`); one local machine (`machines` id 1)
@@ -386,7 +389,7 @@ serving), `server/internal/api` (routes and auth), `server/internal/worker`
 | Command | Does |
 | --- | --- |
 | `stage worker join <link> [--label L]` | Redeems the pairing link's code (`POST /api/worker/join`) and writes the worker config. Refuses when already joined (`stage worker leave` first). Plain `http://` links are accepted (LAN and loopback mains). |
-| `stage worker run [--listen ADDR]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. Over the channel it serves this machine's adapters, fs/process work and connection setup (`remote.Host`, `workersetup`; harness credentials in `credentials.json` beside the config, `0600`). Harness options (`T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN`) come from its environment: the managed worker reads them only from `worker.env`. Connections are set up in Settings > Connections; the T3 admin token, like the T3 token, stays in `credentials.json`. |
+| `stage worker run [--listen ADDR] [--local-harnesses]` | The foreground worker: holds the worker dir, serves the [agent gateway](#agent-gateway), connects the channel and reconnects until stopped. Over the channel it serves this machine's adapters, fs/process work and connection setup (`remote.Host`, `workersetup`; harness credentials in `credentials.json` beside the config, `0600`). Its [machine profile](#machine-profile-and-hosted-harnesses) decides whether hosted harnesses (Claude Code) may run here: the worker service always, a foreground worker with `--local-harnesses` or `STAGE_LOCAL_HARNESSES=1`, a container never; it logs `machine profile` with `localHarnesses=on|off` at start. Harness options (`T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN`) come from its environment: the managed worker reads them only from `worker.env`. Connections are set up in Settings > Connections; the T3 admin token, like the T3 token, stays in `credentials.json`. |
 | `stage worker status` | Config, the server's view of this machine and the running process. Exit 0 the server says online, 1 not online (or unreachable, or an invalid config), 4 not joined, 7 revoked. |
 | `stage worker leave [--local]` | Removes this machine on the main server (`POST /api/worker/leave`), then deletes the local config and state. A revoked token counts as already removed. `--local` only deletes locally. |
 | `stage worker service ...` | The worker service ([service.md](service.md#worker-service)). |

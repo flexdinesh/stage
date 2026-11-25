@@ -36,6 +36,7 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 		"URLRequest":        URLRequest{URL: "http://x"},
 		"MessageRequest":    MessageRequest{Message: "m"},
 		"OpenCodeSettings":  OpenCodeSettings{Setup: config.OpenCodeSetup{Endpoint: "e", BrowserEndpoint: "b", WebClient: "w", Auth: "paired"}, Verified: "e"},
+		"ClaudeSettings":    config.ClaudeSettings{Binary: "/usr/bin/claude", ConfigDir: "/home/u/.claude", Disconnected: true},
 		"KindRequest":       KindRequest{Kind: "t3"},
 		"IDResult":          IDResult{ID: 7},
 		"IDsResult":         IDsResult{IDs: []int64{1, 2}},

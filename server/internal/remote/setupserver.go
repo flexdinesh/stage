@@ -63,6 +63,16 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		// The credential stays on the worker.
 		return Empty{}, p.SaveOpenCodeSettings(ctx, r.Setup, config.OpenCodeCredential{})
 	})
+	handle(KindClaudeGet, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
+		return p.ClaudeSettings(ctx)
+	})
+	handle(KindClaudeSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r config.ClaudeSettings
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		return Empty{}, p.SaveClaudeSettings(ctx, r)
+	})
 	handle(KindIdentityActive, func(_ context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r KindRequest
 		if err := decodeBody(body, &r); err != nil {

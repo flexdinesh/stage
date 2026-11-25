@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork, useTask } from "../api/queries.ts";
+import { useHarnesses, useInvalidateWork, useMachines, useTask } from "../api/queries.ts";
 import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "../components/SessionAction.tsx";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
@@ -56,6 +56,7 @@ import { treeTaskPath } from "../lib/trees.ts";
 import { isRetired, resumeCommand, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
 import { HarnessConnectionState } from "../components/ConnectionState.tsx";
+import { machineTag, withMachine } from "../lib/machines.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 export function TaskDetailPage() {
@@ -212,7 +213,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const phoneBar = action !== null || stoppable;
 
   const openInApp = (variant: "primary" | "secondary", className?: string) => (
-    <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} {...(className === undefined ? {} : { className })} />
+    <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} connectionId={task.connectionId} {...(className === undefined ? {} : { className })} />
   );
 
   const stopButton = (className?: string) => (
@@ -455,13 +456,14 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
 }
 
 function ConfigPanel({ task }: { task: TaskDetail }) {
-  const { kindName } = useHarnesses();
+  const { kindName, connection } = useHarnesses();
+  const { machines } = useMachines();
   return (
     <Panel title="Config">
       <Details>
         <Detail label="Harness">
           <HarnessConnectionState connectionId={task.connectionId}>
-            {kindName(task.harness)}
+            {withMachine(kindName(task.harness), machineTag(machines, connection(task.connectionId)?.machineId ?? 0))}
             {task.connectionLabel === "" ? null : <span className="text-muted"> {task.connectionLabel}</span>}
             {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
           </HarnessConnectionState>

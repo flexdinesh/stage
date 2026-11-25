@@ -128,7 +128,7 @@ A disconnected OpenCode leaves planning and the other harness available.
 
 ## Claude Code
 
-Stage runs tasks as Claude Code background sessions (`claude --bg`) on the computer Stage runs on: the desktop app, or `stage serve --local-harnesses`. Not in Docker, and not on worker machines yet. Stage uses Claude's own login and stores no Claude credentials.
+Stage runs tasks as Claude Code background sessions (`claude --bg`) on a computer: where Stage runs (the desktop app, or `stage serve --local-harnesses`), or on a [worker](/docs/usage/workers) (the worker service, or `stage worker run --local-harnesses`). Not in Docker. Stage uses that computer's Claude login and stores no Claude credentials.
 
 ### Connect
 
@@ -158,7 +158,7 @@ On a problem it adds the error and the next steps: `claude auth login`, then `st
 
 Each task starts one background session in the project folder or in a new Claude worktree (Claude branches it from the checkout's current commit). Pick Claude's default model or opus, sonnet, haiku or fable, an effort and a permission mode. Claude must trust a folder before it runs there: run `claude` in it once and accept the prompt. Otherwise the task returns to backlog saying so.
 
-When a session waits for you, answer in Claude: task detail, task rows and notifications offer **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). Projects come from the folders Claude knows; Git checkouts import as Stage projects. **Track session** takes a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command. A session T3 started is refused: "This Claude session was started by T3. Track it through T3."
+When a session waits for you, answer in Claude: task detail, task rows and notifications offer **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). For a session on a worker it reads **Copy resume command for** the machine: run it there. Projects come from the folders Claude knows; Git checkouts import as Stage projects. **Track session** takes a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command. A session T3 started is refused: "This Claude session was started by T3. Track it through T3."
 
 Removing a finished session with `claude rm` completes its done task (**Complete tasks when removed in Claude Code**, on by default). Claude ending an idle session after about an hour does not, and neither does removing one mid-turn or one waiting for you.
 

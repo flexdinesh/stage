@@ -12,6 +12,8 @@ import {
   machineTone,
   pairingPhase,
   removePrompt,
+  resumeLabel,
+  resumeMachine,
   serverVersion,
   setupCopy,
   versionDiffers,
@@ -83,6 +85,14 @@ test("machine tag only with more than one machine", () => {
   assert.equal(machineTag([local, desk], 9), undefined);
   assert.equal(withMachine("T3", undefined), "T3");
   assert.equal(withMachine("T3", "desk"), "T3 · desk");
+});
+
+test("resume command names the remote machine it must run on, never the local one", () => {
+  assert.equal(resumeMachine([local, desk], 2), "desk");
+  assert.equal(resumeMachine([local, desk], LOCAL_MACHINE_ID), undefined);
+  assert.equal(resumeMachine([desk], 2), undefined);
+  assert.equal(resumeLabel(undefined), "Copy resume command");
+  assert.equal(resumeLabel("desk"), "Copy resume command for desk");
 });
 
 test("connection options: one machine reads as today (no tag, no reorder)", () => {

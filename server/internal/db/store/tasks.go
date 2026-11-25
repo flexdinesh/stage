@@ -223,7 +223,9 @@ type Attempt struct {
 }
 
 // ObservedSession is a session a harness reported for a launch attempt before
-// Stage recorded it. Links are filled at the API edge, never stored.
+// Stage recorded it. Links are filled at the API edge; only the resume
+// command (Links.Command) is stored, as the fallback when no destination
+// or stored observation resolves one.
 type ObservedSession struct {
 	SessionRef
 	Title string           `json:"title"`

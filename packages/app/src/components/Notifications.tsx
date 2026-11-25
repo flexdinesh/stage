@@ -249,9 +249,9 @@ function useNotificationAction() {
 }
 
 /** Open in <harness> or Copy resume command, primary while waiting. A waiting session with neither is answered where it runs: say so instead of offering nothing. */
-function RowSessionButton({ action, harness, waiting }: { action: SessionAction | null; harness: string; waiting: boolean }) {
+function RowSessionButton({ action, harness, waiting, connectionId }: { action: SessionAction | null; harness: string; waiting: boolean; connectionId: number }) {
   if (action === null) return waiting ? <span className="text-small text-muted">Answer in {harness}</span> : null;
-  return <SessionActionButton action={action} name={harness} small variant={waiting ? "primary" : "secondary"} />;
+  return <SessionActionButton action={action} name={harness} small variant={waiting ? "primary" : "secondary"} connectionId={connectionId} />;
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
@@ -304,7 +304,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           <ToastView n={n} onDismiss={onDismiss} />
-          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={stillWaiting(n)} />
+          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={stillWaiting(n)} connectionId={n.connectionId} />
         </div>
       </div>
     </div>
@@ -566,7 +566,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
-          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={waiting} />
+          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={waiting} connectionId={n.connectionId} />
         </div>
       </div>
       <div id={historyId} hidden={!expanded}>
@@ -649,7 +649,7 @@ function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTra
             Track
           </Button>
         )}
-        <RowSessionButton action={action} harness={harness} waiting />
+        <RowSessionButton action={action} harness={harness} waiting connectionId={session.connectionId} />
       </div>
     </div>
     {action?.kind === "resume" ? <code title={action.command} className="mt-1 block truncate font-mono text-meta text-muted">{action.command}</code> : null}

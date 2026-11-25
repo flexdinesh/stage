@@ -8,7 +8,7 @@ showAskAi: false
 
 Stage can run tasks as Claude Code background sessions (`claude --bg`) on the computer Stage runs on. Claude keeps what it owns: the sessions, their worktrees, the models and your login. Stage keeps the task, its journal, its final reply and what comes next.
 
-You need Stage on the computer where you use Claude Code: the [desktop app](/docs/usage/desktop), or `stage serve --local-harnesses`. Claude Code is not available when Stage runs in Docker, or on worker machines yet. Install Claude Code and log in with `claude auth login`; Stage uses that login and stores no Claude credentials.
+You need Stage on the computer where you use Claude Code: the [desktop app](/docs/usage/desktop), `stage serve --local-harnesses`, or a [worker](/docs/usage/workers) running the worker service or `stage worker run --local-harnesses`. Claude Code is not available when Stage runs in Docker. Install Claude Code and log in with `claude auth login`; Stage uses that login and stores no Claude credentials.
 
 :::steps
 
@@ -82,7 +82,7 @@ prints the same, with the next step when something is wrong. Details: [Connectio
 - Images on the prompt are not sent to Claude Code sessions.
 - A worktree always starts from the checkout's current commit: no predecessor branch or other base.
 - Questions, approvals and follow-ups are answered in Claude, not in Stage.
-- Not in Docker, and not on worker machines yet.
+- Not in Docker. On a worker, only with the worker service or `stage worker run --local-harnesses`; the resume command names the machine to run it on.
 
 ## Next steps
 

@@ -32,12 +32,17 @@ const (
 // Setup port calls a worker sends the main server (no request: answered by
 // the main server's hub handlers, scoped to the worker's machine).
 const (
-	KindT3Get            = "setup.t3.get"
-	KindT3SetURL         = "setup.t3.setURL"
-	KindT3SetPublicURL   = "setup.t3.setPublicURL"
-	KindT3LastError      = "setup.t3.lastError"
-	KindOpenCodeGet      = "setup.opencode.get"
-	KindOpenCodeSave     = "setup.opencode.save"
+	KindT3Get          = "setup.t3.get"
+	KindT3SetURL       = "setup.t3.setURL"
+	KindT3SetPublicURL = "setup.t3.setPublicURL"
+	KindT3LastError    = "setup.t3.lastError"
+	KindOpenCodeGet    = "setup.opencode.get"
+	KindOpenCodeSave   = "setup.opencode.save"
+	// KindClaudeGet and KindClaudeSave carry config.ClaudeSettings (the
+	// command, the config directory connected with, disconnected): Claude
+	// Code's setup holds no secrets.
+	KindClaudeGet        = "setup.claude.get"
+	KindClaudeSave       = "setup.claude.save"
 	KindIdentityActive   = "setup.identity.active"
 	KindIdentitySwitch   = "setup.identity.switch"
 	KindIdentityGet      = "setup.identity.get"

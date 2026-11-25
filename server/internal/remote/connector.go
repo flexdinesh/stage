@@ -32,8 +32,8 @@ func (e *UnavailableError) Unwrap() error { return execution.ErrUnavailable }
 
 // SetupHooks connect remote connectors to the main server's record.
 type SetupHooks struct {
-	// Kinds are the connected harness kinds every worker sets up (registry
-	// order).
+	// Kinds are the harness kinds a worker sets up (registry order); a
+	// hosted kind only where its machine allows it (Machine.Allows).
 	Kinds []string
 	// Active is the machine's active connection of kind (0: none).
 	Active func(machineID int64, kind string) int64

@@ -138,12 +138,15 @@ Usage:
   stage machine ping ID               a round trip through the machine's worker channel
   stage worker join LINK [--label L]  join this machine to the server in LINK (from stage machine pair)
                                       as a remote worker; writes the worker config and token (0600)
-  stage worker run [--listen ADDR]    run the worker in the foreground: keep a channel to the server
+  stage worker run [--listen ADDR] [--local-harnesses]
+                                      run the worker in the foreground: keep a channel to the server
                                       open, reconnecting, and serve the agent gateway (local /api and
                                       /mcp forwarded to the server) on --listen (repeatable, env
-                                      STAGE_WORKER_LISTEN, default and required: unix) (exit 75 worker
-                                      dir or gateway socket in use, 78 not joined, invalid config or
-                                      machine removed)
+                                      STAGE_WORKER_LISTEN, default and required: unix);
+                                      --local-harnesses (env STAGE_LOCAL_HARNESSES=1) lets harnesses
+                                      that run as local processes (Claude Code) run here, as the
+                                      worker service always does (exit 75 worker dir or gateway socket
+                                      in use, 78 not joined, invalid config or machine removed)
   stage worker status                 the worker config, the local worker process and what the server
                                       reports (exit 0 online, 1 not online, 4 not joined, 7 revoked)
   stage worker leave [--local]        remove this machine on the server, then delete the worker config

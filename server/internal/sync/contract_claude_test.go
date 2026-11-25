@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
@@ -13,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
@@ -300,4 +302,37 @@ func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
 			t.Fatalf("discovered sessions recorded events: %+v", events)
 		}
 	})
+}
+
+// A worker restarted without local harnesses no longer hosts its Claude
+// Code connection: the coordinator answers connection_unavailable with
+// the fix, not that the worker hosts no adapter.
+func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
+	f := claudetest.New(t)
+	pool := testDB.Reset(t)
+	store := db.NewStore(pool)
+	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness,machine_id) VALUES($1,$2,$3)", claudeConn, claudecode.Kind, placement{remote: true}.machine(t, pool)); err != nil {
+		t.Fatal(err)
+	}
+	rig := remotetest.New(t, remoteMachine, map[int64]execution.Adapter{claudeConn: f.Adapter(claudeConn)})
+	svc := coordinator.NewForMachines(store, rig.Set(), nil)
+	svc.Harnesses = harness.MustRegistry(claudecode.Descriptor)
+	if _, err := svc.Adapter(claudeConn); err != nil {
+		t.Fatalf("hosted: %v", err)
+	}
+	rig.StopWorker()
+	rig.SetProfile(harness.Profile{Kind: harness.ProfileServer})
+	rig.StartWorker()
+	var conflict *db.ConflictError
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := svc.Adapter(claudeConn)
+		if errors.As(err, &conflict) && conflict.Code == "connection_unavailable" && strings.Contains(conflict.Msg, "stage worker run --local-harnesses") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("adapter: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

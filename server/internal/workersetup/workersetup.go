@@ -1,21 +1,26 @@
 // Package workersetup composes a worker's connection setup (ADR 0002,
-// docs/execution.md "Remote machines"): the real T3 and OpenCode setups,
-// connectors and adapters of the worker's machine, built by the same
-// constructors the main server's own machine uses, over ports that reach
-// the main server through the worker channel (Ports). Harness credentials
-// stay in the worker's credentials file. Harness settings set in the
-// worker's environment lock those settings for this machine.
+// docs/execution.md "Remote machines"): the real T3, OpenCode and (where
+// the machine allows local harnesses) Claude Code setups, connectors and
+// adapters of the worker's machine, built by the same constructors the
+// main server's own machine uses, over ports that reach the main server
+// through the worker channel (Ports). Harness credentials stay in the
+// worker's credentials file. Harness settings set in the worker's
+// environment lock those settings for this machine.
 package workersetup
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/remote"
@@ -33,7 +38,10 @@ type Options struct {
 	// Config is the worker's harness settings (config.HarnessFrom).
 	Config config.Config
 	// T3 overrides the T3 client (tests); nil builds it from Config.
-	T3     t3.Client
+	T3 t3.Client
+	// Claude overrides Claude Code's machine-local environment (tests);
+	// nil: this process's, with a systemd scope where one works.
+	Claude *claudecodesetup.Options
 	Logger *slog.Logger
 }
 
@@ -142,8 +150,37 @@ func (s *Setup) build(ctx context.Context) error {
 	if conn.ConnectionID != 0 {
 		local.Install(conn.ConnectionID, conn.ConnectionID, t3.NewConnectionAdapter(client, conn.ConnectionID))
 	}
+	// Claude Code runs as local processes: only where this machine's
+	// profile allows them.
+	var claude *claudecodesetup.Service
+	if local.Allows(claudecode.Descriptor).Available {
+		if claude, err = s.claude(ctx, ports, local.Install); err != nil {
+			return err
+		}
+	}
 	local.SetConnector(t3.Kind, t3setup.NewConnector(t3Setup, nil))
 	local.SetConnector(opencode.Kind, opencodesetup.NewConnector(openCode))
+	if claude != nil {
+		local.SetConnector(claudecode.Kind, claudecodesetup.NewConnector(claude))
+	}
 	ok = true
 	return nil
+}
+
+// claude builds Claude Code's setup over the main server's record (no
+// secrets). An older main server that does not serve Claude's settings
+// leaves it out (nil), so T3 and OpenCode still compose; the main server
+// then reports the machine as needing an update for Claude Code.
+func (s *Setup) claude(ctx context.Context, ports Ports, install machine.Install) (*claudecodesetup.Service, error) {
+	o := claudecodesetup.Options{Scope: claudecode.ScopeAvailable()}
+	if s.o.Claude != nil {
+		o = *s.o.Claude
+	}
+	o.Logger = s.log
+	c, err := claudecodesetup.New(ctx, claudecodesetup.Ports{Settings: ports, Identity: ports, Install: install}, o)
+	if errors.Is(err, errNotServed) {
+		s.log.Warn("the Stage server does not set up Claude Code yet; update it to use Claude Code on this machine", "err", err)
+		return nil, nil
+	}
+	return c, err
 }

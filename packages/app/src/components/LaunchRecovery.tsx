@@ -3,8 +3,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
 import type { Task, LaunchLinkPreview } from "../api/types.ts";
+import { resumeCommand } from "../lib/harnesses.ts";
 import { launchNotice } from "../lib/launch.ts";
 import { useSessionDestination } from "../lib/hostState.ts";
+import { SessionActionButton } from "./SessionAction.tsx";
 import { Alert, AppButton, Button, ErrorText, Field, Input } from "./ui.tsx";
 
 export function LaunchRecovery({ task }: { task: Task }) {
@@ -31,7 +33,10 @@ export function LaunchRecovery({ task }: { task: Task }) {
   const notice = launchNotice(task, name);
   const seen = task.launch?.session ?? null;
   // The session Stage already knows needs no pasted link; Open goes straight to it.
-  const open = seen === null ? null : destination({ ...(seen.links === undefined ? {} : { links: seen.links }), ...(task.connectionActive === undefined ? {} : { connectionActive: task.connectionActive }) });
+  const seenLinks = seen === null ? null : { ...(seen.links === undefined ? {} : { links: seen.links }), ...(task.connectionActive === undefined ? {} : { connectionActive: task.connectionActive }) };
+  const open = seenLinks === null ? null : destination(seenLinks);
+  // No destination to open: the command that resumes it in the harness's own client, when it has one.
+  const resume = seenLinks === null || open !== null ? null : resumeCommand(seenLinks);
   return (
     <Alert tone="need">
       <div className="flex min-w-0 flex-col gap-3">
@@ -42,6 +47,11 @@ export function LaunchRecovery({ task }: { task: Task }) {
         {open === null ? null : (
           <div>
             <AppButton href={open} variant="primary">Open in {name}</AppButton>
+          </div>
+        )}
+        {resume === null || seen === null ? null : (
+          <div>
+            <SessionActionButton action={{ kind: "resume", command: resume }} name={name} connectionId={seen.connectionId} />
           </div>
         )}
         {notice.reason === null && notice.meta === null ? null : (

@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
+	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
@@ -43,14 +46,32 @@ type rig struct {
 	listen  []listen.Addr
 	env     map[string]string
 	fake    *t3.Fake
+	opts    rigOptions
 	stop    context.CancelFunc
 	done    chan error
 	changes int
 }
 
+// rigOptions shape the worker: its profile (default: a foreground worker
+// without local harnesses), Claude Code's machine-local environment, and
+// an older main server that serves no Claude Code setup calls.
+type rigOptions struct {
+	profile   harness.Profile
+	claude    *claudecodesetup.Options
+	oldServer bool
+}
+
+// registry is the main server's harnesses.
+var registry = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor, codex.Descriptor)
+
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func newRig(t *testing.T, env map[string]string) *rig {
+	t.Helper()
+	return newRigWith(t, env, rigOptions{profile: harness.Profile{Kind: harness.ProfileServer}})
+}
+
+func newRigWith(t *testing.T, env map[string]string, o rigOptions) *rig {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var temp dbtest.DB
@@ -64,10 +85,10 @@ func newRig(t *testing.T, env map[string]string) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, store: store, id: grant.MachineID, env: env, fake: t3.NewFake()}
+	r := &rig{t: t, store: store, id: grant.MachineID, env: env, fake: t3.NewFake(), opts: o}
 	r.hub = workerchan.NewHub(ctx, workerchan.Options{Version: "test"})
 	r.set = machine.MustSet(machine.NewLocal(db.LocalMachine, harness.Profile{}, nil))
-	reg := harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	reg := registry
 	conns := func(id int64) []int64 {
 		var ids []int64
 		for _, c := range store.ActiveConnections() {
@@ -79,7 +100,7 @@ func newRig(t *testing.T, env map[string]string) *rig {
 	}
 	r.hosts = remote.NewHosts(r.set, r.hub, conns, nil, quiet())
 	r.hosts.SetSetup(remote.SetupHooks{
-		Kinds: []string{t3.Kind, opencode.Kind}, Active: store.ActiveID,
+		Kinds: []string{t3.Kind, opencode.Kind, claudecode.Kind, codex.Kind}, Active: store.ActiveID,
 		Changed: func(int64, string, string) { r.changes++ },
 	})
 	remote.ServeSetup(r.hub, func(id int64) machine.StorePorts { return machine.NewStorePorts(store.OnMachine(id), reg) }, nil)
@@ -118,10 +139,20 @@ func (r *rig) startWorker() {
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.done = cancel, make(chan error, 1)
 	host := func(id int64, call workerchan.Upcall) worker.Host {
-		h := remote.NewHost(machine.NewLocal(id, harness.Profile{Kind: harness.ProfileServer}, machine.LocalOps{}))
+		h := remote.NewHost(machine.NewLocal(id, r.opts.profile, machine.LocalOps{}))
+		if r.opts.oldServer {
+			// A main server from before Claude Code on workers.
+			up := call
+			call = func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
+				if strings.HasPrefix(kind, "setup.claude.") {
+					return nil, &workerchan.RemoteError{Code: workerchan.CodeUnknownKind, Message: "unknown kind " + kind}
+				}
+				return up(ctx, kind, body)
+			}
+		}
 		workersetup.Attach(workersetup.Options{
 			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath)},
-			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Logger: quiet(),
+			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Claude: r.opts.claude, Logger: quiet(),
 		})
 		return h
 	}

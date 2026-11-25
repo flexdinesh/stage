@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"errors"
 	"fmt"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"testing"
@@ -62,4 +64,41 @@ func TestRecoveryPreviewRejectsForeignOwnedAndUnverifiedSessions(t *testing.T) {
 	}
 	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL(t3.FakeEnvironmentID, foreign.ThreadID)}, 409, nil)
 	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL("other-environment", foreign.ThreadID)}, 400, nil)
+}
+
+// A launch whose session Stage saw but could not record, on a connection
+// whose adapter resolves no destination (a remote machine's) and with no
+// stored observation, still offers the resume command the attempt kept.
+func TestUnrecordedLaunchOffersTheKeptResumeCommand(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	p := e.project("/w/resume")
+	pending := e.task(p.ID, "Resume", nil)
+	if _, err := e.store.TransitionTask(ctx, db.Transition{TaskID: pending.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	// A connection this server hosts no adapter for.
+	if _, err := testDB.Pool.ExecContext(ctx, "INSERT INTO harness_connections(id,harness,machine_id) VALUES(77,'hosted-elsewhere',1)"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := e.store.Attempt(ctx, pending.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := db.Observed(execution.Observation{Session: execution.SessionRef{ConnectionID: 77, ExternalSessionID: "s-1"}, Title: "Resume", State: "running",
+		Links: execution.Links{Command: "claude attach s1"}})
+	if err := e.store.Unconfirmed(ctx, a, errors.New("record failed"), seen); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Launch struct {
+			Session struct {
+				Links links `json:"links"`
+			} `json:"session"`
+		} `json:"launch"`
+	}
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", pending.ID), nil, 200, &got)
+	if got.Launch.Session.Links.Command != "claude attach s1" {
+		t.Fatalf("launch session links %+v", got.Launch.Session.Links)
+	}
 }

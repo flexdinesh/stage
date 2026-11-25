@@ -316,6 +316,14 @@ above. What differs:
 The unit adds `[X-Stage] Role=worker`. Golden copies:
 `server/internal/service/testdata/stage-worker.*`.
 
+- **Local harnesses.** The worker service runs with the `desktop` profile,
+  so hosted harnesses (Claude Code) may run on this machine, as under the
+  server service ([runtime.md](runtime.md#machine-profile-and-hosted-harnesses));
+  nothing in `worker.env` turns that off, and a harness still runs only
+  once it is connected in Settings > Connections. Claude Code uses the
+  `claude` command, login and config directory the service's environment
+  sees; a launch starts Claude's daemon in its own systemd user scope
+  (Linux), so restarting the worker leaves sessions running.
 - **Join first.** `start` refuses (exit 7) until `stage worker join` wrote
   the config the service will use, and validates `worker.env` before
   starting.

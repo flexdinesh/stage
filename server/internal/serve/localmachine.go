@@ -127,17 +127,15 @@ func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.
 	return nil
 }
 
-// remoteSetupHooks connect remote machines' connectors to this server: the
-// connected kinds every worker sets up (hosted kinds stay on the main
-// machine until workers set them up, #374), the active connection from the
+// remoteSetupHooks connect remote machines' connectors to this server:
+// every registered kind (a hosted one only where the worker's profile
+// allows it, remote.Machine.Allows), the active connection from the
 // store, the full sync on a T3 status, and a sync after a setup change
 // (as onPaired does for the local machine).
 func remoteSetupHooks(store *db.Store, reg *harness.Registry, progress func(connection int64) t3setup.SyncProgress, kick func()) remote.SetupHooks {
 	var kinds []string
 	for _, d := range reg.All() {
-		if d.Hosting == harness.Connected {
-			kinds = append(kinds, d.Kind)
-		}
+		kinds = append(kinds, d.Kind)
 	}
 	return remote.SetupHooks{
 		Kinds:  kinds,

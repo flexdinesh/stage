@@ -112,6 +112,17 @@ export function connectionOptions(
     }));
 }
 
+/**
+ * Where a resume command must run: the session's machine label when it is a remote machine (a worker), so the
+ * command copied here is run there; undefined on the local machine or when only one machine exists.
+ */
+export function resumeMachine(machines: readonly Pick<Machine, "id" | "label">[], machineId: number): string | undefined {
+  return machineId === LOCAL_MACHINE_ID ? undefined : machineTag(machines, machineId);
+}
+
+/** The resume command's copy label: "Copy resume command", or "… for <machine>" when it runs on another machine. */
+export const resumeLabel = (machine: string | undefined): string => (machine === undefined ? "Copy resume command" : `Copy resume command for ${machine}`);
+
 /** A connection's name with its machine when one is given: "T3 · desk", else "T3". */
 export const withMachine = (name: string, tag: string | undefined): string => (tag === undefined ? name : `${name} · ${tag}`);
 

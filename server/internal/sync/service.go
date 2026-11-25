@@ -58,6 +58,10 @@ func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service 
 	return NewWithAdapters(store, map[int64]execution.Adapter{store.LegacyT3ID(): adapter}, log)
 }
 
+// hostsAll is the profile of a machine handed its adapters directly: it
+// hosts whatever it was given.
+var hostsAll = harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}
+
 // NewWithAdapters hosts adapters on in-process machines, each on its
 // connection's machine (tests and fixed compositions).
 func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
@@ -68,12 +72,12 @@ func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log 
 			m = db.LocalMachine
 		}
 		if locals[m] == nil {
-			locals[m] = machine.NewLocal(m, harness.Profile{}, nil)
+			locals[m] = machine.NewLocal(m, hostsAll, nil)
 		}
 		locals[m].Install(id, id, a)
 	}
 	if locals[db.LocalMachine] == nil {
-		locals[db.LocalMachine] = machine.NewLocal(db.LocalMachine, harness.Profile{}, nil)
+		locals[db.LocalMachine] = machine.NewLocal(db.LocalMachine, hostsAll, nil)
 	}
 	ms := make([]machine.Machine, 0, len(locals))
 	for _, l := range locals {
@@ -110,21 +114,23 @@ func (s *Service) Ops(id int64) (machine.Ops, bool) {
 
 func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 	a, ok := s.machines.Adapter(id)
-	if !ok {
-		// A replaced instance keeps its history but is never reached again.
-		kind := s.store.Harness(id)
-		if kind != "" && !s.store.ConnectionActive(id) {
-			return nil, db.ConnectionRetired()
-		}
-		// Its machine does not allow the kind (a hosted harness on a
-		// profile without local processes, or on a worker): say why.
-		if d, ok := s.descriptor(kind); ok {
-			if m, ok := s.machines.Get(s.store.ConnectionMachine(id)); ok {
-				if a := m.Allows(d); !a.Available {
-					return nil, &db.ConflictError{Code: "connection_unavailable", Msg: a.Reason}
-				}
+	kind := s.store.Harness(id)
+	// A replaced instance keeps its history but is never reached again.
+	if !ok && kind != "" && !s.store.ConnectionActive(id) {
+		return nil, db.ConnectionRetired()
+	}
+	// Its machine does not allow the kind (a hosted harness on a profile
+	// without local processes): say why. Checked before an installed
+	// adapter too, so a worker restarted without local harnesses names the
+	// fix instead of answering that it hosts no adapter.
+	if d, found := s.descriptor(kind); found {
+		if m, found := s.machines.Get(s.store.ConnectionMachine(id)); found {
+			if av := m.Allows(d); !av.Available {
+				return nil, &db.ConflictError{Code: "connection_unavailable", Msg: av.Reason}
 			}
 		}
+	}
+	if !ok {
 		return nil, &db.ConflictError{Code: "connection_unavailable", Msg: "This harness is unavailable. Select a supported connection."}
 	}
 	return a, nil
