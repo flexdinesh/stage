@@ -18,8 +18,9 @@ import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
 import { BlockedReason, useLaunchGate } from "./LaunchGate.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { AppButton, Button, Chip, CopyButton, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
+import { Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
+import { SessionActionButton } from "./SessionAction.tsx";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
 
@@ -350,12 +351,8 @@ export function TaskRow({
             </Button>
           </BlockedReason>
         ) : null}
-        {session === null ? null : session.kind === "open" ? (
-          <AppButton small variant={session.primary ? "primary" : "secondary"} href={session.href}>
-            Open in {kindName(task.harness)}
-          </AppButton>
-        ) : (
-          <CopyButton text={session.command} label="Copy resume command" variant={session.primary ? "primary" : "secondary"} />
+        {session === null ? null : (
+          <SessionActionButton action={session} name={kindName(task.harness)} small variant={session.primary ? "primary" : "secondary"} />
         )}
         {extra}
         <RowCopyLink subject={{ kind: "task", id: task.id, title: task.title }} />

@@ -93,6 +93,10 @@ type Descriptor struct {
 	// Attention is what an unowned session from the attention feed may
 	// produce ("" is notify).
 	Attention AttentionPolicy `json:"-"`
+	// SessionHint says what names one of the harness's sessions when a
+	// user tracks it (Track session); a host shows it as the field's hint.
+	// "": the host's generic copy.
+	SessionHint string `json:"sessionHint,omitempty"`
 }
 
 // OwnsProcesses: the harness runs its sessions as processes Stage (or a

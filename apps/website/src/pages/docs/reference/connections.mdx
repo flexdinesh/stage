@@ -140,11 +140,25 @@ Click **Connect**, or `stage harness claude run connect`. Stage checks the `clau
 | `logged_out` | Run `claude auth login` in a terminal, then connect again |
 | `error` | The command did not answer within 20 seconds, or Claude now uses another config folder: check the command and connect again |
 
+In Settings, the Claude Code row shows its config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens its card: **Connect** while not connected; the reason and **Connect again** on a problem (plus `claude auth login` to copy when logged out); once connected, the command Stage runs, the version, the config folder, the login and whether sessions keep running when Stage restarts, with **Check connection** and **Disconnect**. **Claude command** and its **Save** are at the bottom.
+
+`stage harness claude` prints the same:
+
+```text
+claude connected (Claude Code 2.1.332)
+  command  /home/me/.local/bin/claude (default lookup)
+  config   /home/me/.claude
+  login    logged in
+  scope    own systemd scope (Claude's daemon outlives a Stage restart)
+```
+
+On a problem it adds the error and the next steps: `claude auth login`, then `stage harness claude run connect` when logged out; `stage harness claude set binary=PATH` when the command is not found; `stage harness claude run connect` when disconnected.
+
 ### Running tasks
 
 Each task starts one background session in the project folder or in a new Claude worktree (Claude branches it from the checkout's current commit). Pick Claude's default model or opus, sonnet, haiku or fable, an effort and a permission mode. Claude must trust a folder before it runs there: run `claude` in it once and accept the prompt. Otherwise the task returns to backlog saying so.
 
-When a session waits for you, answer in Claude: task detail offers **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). Projects come from the folders Claude knows; Git checkouts import as Stage projects. A session T3 started is tracked through T3, not adopted here.
+When a session waits for you, answer in Claude: task detail, task rows and notifications offer **Copy resume command** (`claude attach <id>`, or `claude --resume` once the session is gone from `claude agents`). Projects come from the folders Claude knows; Git checkouts import as Stage projects. **Track session** takes a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command. A session T3 started is refused: "This Claude session was started by T3. Track it through T3."
 
 Removing a finished session with `claude rm` completes its done task (**Complete tasks when removed in Claude Code**, on by default). Claude ending an idle session after about an hour does not, and neither does removing one mid-turn or one waiting for you.
 

@@ -64,6 +64,7 @@ export default defineConfig({
           { text: 'Your first tree', link: '/docs/guides/first-tree' },
           { text: 'Agents that queue work', link: '/docs/guides/agents' },
           { text: 'Answer from your phone', link: '/docs/guides/phone' },
+          { text: 'Claude Code', link: '/docs/guides/claude-code' },
         ],
       },
       {

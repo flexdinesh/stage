@@ -85,8 +85,21 @@ export function sessionLinks(links: { links?: { native?: string; web?: string; c
 /** The copyable resume command, offered when the host has no destination to open; none on a replaced connection. */
 export const resumeCommand = (links: Parameters<typeof sessionLinks>[0]): string | null => sessionLinks(links)?.command ?? null;
 
-/** A task row's session action: Open in the harness, or Copy resume command when the host has nowhere to open it. */
-export type RowSessionAction = { kind: "open"; href: string; primary: boolean } | { kind: "resume"; command: string; primary: boolean };
+/**
+ * What a session's rows, toasts and alerts offer: open its destination, else copy the command that resumes it. Null:
+ * neither (the session is answered where it runs, e.g. a Claude Code terminal), or a replaced connection.
+ */
+export type SessionAction = { kind: "open"; href: string } | { kind: "resume"; command: string };
+
+/** `href`: the host's destination for the session (useSessionDestination); the resume command only without one. */
+export function sessionAction(href: string | null, links: Parameters<typeof sessionLinks>[0]): SessionAction | null {
+  if (href !== null && href !== "") return { kind: "open", href };
+  const command = resumeCommand(links);
+  return command === null || command === "" ? null : { kind: "resume", command };
+}
+
+/** A task row's session action (sessionAction), primary while the task needs input. */
+export type RowSessionAction = SessionAction & { primary: boolean };
 
 /**
  * The task row's session action: the host's destination (`destination`) when it has one, else the session's resume
@@ -98,22 +111,8 @@ export function rowSessionAction(
   task: Parameters<typeof sessionLinks>[0],
   { needsInput, hidden }: { needsInput: boolean; hidden: boolean },
 ): RowSessionAction | null {
-  if (hidden) return null;
-  if (destination !== null) return { kind: "open", href: destination, primary: needsInput };
-  const command = resumeCommand(task);
-  return command === null ? null : { kind: "resume", command, primary: needsInput };
-}
-
-/**
- * What a session row offers: open the host destination, else copy the resume command, else nothing (the session
- * is answered where it runs, e.g. a Claude Code terminal).
- */
-export type SessionAction = { kind: "open"; href: string } | { kind: "copy"; command: string } | { kind: "none" };
-
-export function sessionAction(href: string | null, command: string | null): SessionAction {
-  if (href !== null && href !== "") return { kind: "open", href };
-  if (command !== null && command !== "") return { kind: "copy", command };
-  return { kind: "none" };
+  const action = hidden ? null : sessionAction(destination, task);
+  return action === null ? null : { ...action, primary: needsInput };
 }
 
 /** The last segment of a folder path ("/src/app/" is "app"); null for none. */

@@ -2,12 +2,13 @@
 // A harness with its own panel registers it in CONNECTION_PANELS (its
 // harness-specific UI, behind this one boundary); every other harness gets
 // the generic card rendered from its setup schema (GET /api/harnesses).
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useState, type ComponentType, type FormEvent } from "react";
-import { useHarnessApi, useScopedKey } from "../api/harnessScope.tsx";
-import { harnessStatusQuery, invalidateConnectionChange, keys } from "../api/queries.ts";
-import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
+import { useHarnessApi } from "../api/harnessScope.tsx";
+import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus } from "../api/queries.ts";
+import type { HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
+import { ClaudeSetup } from "./ClaudeSetup.tsx";
 import { CodexSetup } from "./CodexSetup.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
@@ -20,6 +21,7 @@ const CONNECTION_PANELS: Record<string, ComponentType> = {
   t3: T3ConnectionPanel,
   opencode: OpenCodeSetup,
   codex: CodexSetup,
+  claude: ClaudeSetup,
 };
 
 /** One harness's setup on the harness scope's machine: its own panels, or the generic card and its New tasks panel. */
@@ -32,25 +34,6 @@ export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor 
       <NewTaskDefaults harness={descriptor.kind} />
     </>
   );
-}
-
-/** A generic harness's status on the harness scope's machine (shared by its card and its Settings row). */
-export function useHarnessStatus(kind: Harness) {
-  const api = useHarnessApi();
-  return useQuery(harnessStatusQuery(api, useScopedKey()([...keys.harnessStatus, kind]), kind));
-}
-
-/** Disconnects a generic harness on the harness scope's machine. */
-export function useDisconnectHarness(kind: Harness, onDone?: () => void) {
-  const api = useHarnessApi();
-  const apply = useApply(kind);
-  return useMutation({
-    mutationFn: () => api.disconnectHarness(kind),
-    onSuccess: (s) => {
-      onDone?.();
-      apply(s);
-    },
-  });
 }
 
 /** The generic card: state, settings, actions and disconnect from the setup schema. */
@@ -72,15 +55,6 @@ export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }
       </QueryState>
     </Panel>
   );
-}
-
-function useApply(kind: string) {
-  const qc = useQueryClient();
-  const scoped = useScopedKey();
-  return (s: HarnessStatus) => {
-    qc.setQueryData(scoped([...keys.harnessStatus, kind]), s);
-    void invalidateConnectionChange(qc, scoped);
-  };
 }
 
 function ConnectionBody({ descriptor, status }: { descriptor: HarnessDescriptor; status: HarnessStatus }) {
@@ -146,7 +120,7 @@ function Inputs({ fields, status, values, onChange }: { fields: SetupField[]; st
 
 function SettingsForm({ descriptor, status }: { descriptor: HarnessDescriptor; status: HarnessStatus }) {
   const api = useHarnessApi();
-  const apply = useApply(descriptor.kind);
+  const apply = useApplyHarnessStatus(descriptor.kind);
   const fields = descriptor.setup.fields;
   const [values, setValues] = useState<Values>(() => initialValues(fields, status.fields));
   // Compared with the fields as the form opened, not the live poll: an untouched field never reverts a change made elsewhere.
@@ -181,7 +155,7 @@ function SettingsForm({ descriptor, status }: { descriptor: HarnessDescriptor; s
 
 function ActionForm({ kind, action, state }: { kind: string; action: SetupAction; state: HarnessStatus["actions"][number] | undefined }) {
   const api = useHarnessApi();
-  const apply = useApply(kind);
+  const apply = useApplyHarnessStatus(kind);
   const input = action.input ?? [];
   const [values, setValues] = useState<Values>(() => initialValues(input, []));
   const run = useMutation({
