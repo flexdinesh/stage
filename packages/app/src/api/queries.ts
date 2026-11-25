@@ -3,16 +3,18 @@ import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
-import { harnessStatusView, openCodeStatusView, statusRead, t3StatusView, type StatusRead, type StatusView } from "../lib/connections.ts";
+import { codexStatusView, harnessStatusView, openCodeStatusView, statusRead, t3StatusView, type StatusRead, type StatusView } from "../lib/connections.ts";
+import { parseCodexStatus } from "../lib/codex.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { CodexStatus, ExecutionConfig, Harness, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
   openCodeStatus: ["opencode-status"],
+  codexStatus: ["codex-status"],
   harnessStatus: ["harness-status"],
   connections: ["connections"],
   machines: ["machines"],
@@ -192,6 +194,17 @@ const openCodeStatusQuery = (api: HarnessApi, key: readonly unknown[]) => queryO
 export const harnessStatusQuery = (api: HarnessApi, key: readonly unknown[], kind: Harness) =>
   queryOptions({ queryKey: key, queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
 
+/** Codex's setup status on the harness scope's machine. */
+export function useCodexStatus() {
+  const api = useHarnessApi();
+  const key = useScopedKey();
+  return useQuery(codexStatusQuery(api, key(keys.codexStatus)));
+}
+
+/** Codex's status on a machine (`api`, `key`: that machine's calls and scoped key), its details parsed. */
+const codexStatusQuery = (api: HarnessApi, key: readonly unknown[]) =>
+  queryOptions({ queryKey: key, queryFn: () => api.harnessStatus("codex").then(parseCodexStatus), refetchInterval: 15000 });
+
 const T3_STATUS_POLL_MS = 5000;
 const T3_SYNC_POLL_MS = 1000;
 
@@ -248,9 +261,10 @@ const GENERIC_STATUS: StatusSlot<HarnessStatus> = {
 };
 
 /** Harness-specific status reads by kind: the only place status reading names a harness. */
-const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus> } = {
+const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus>; codex: StatusSlot<CodexStatus> } = {
   t3: { query: (m, _kind, qc) => t3StatusQuery(m.api, m.key(keys.t3Status), qc), view: (read) => t3StatusView(read) },
   opencode: { query: (m) => openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), view: (read) => openCodeStatusView(read) },
+  codex: { query: (m) => codexStatusQuery(m.api, m.key(keys.codexStatus)), view: (read) => codexStatusView(read) },
 };
 
 const hasStatusSlot = (kind: Harness): boolean => Object.hasOwn(STATUS_SLOTS, kind);
@@ -270,6 +284,7 @@ export function useConnectionStatuses<C extends MachineConnection>(
   const read = [
     ...useSlotStatuses(STATUS_SLOTS.t3, of("t3"), every, name),
     ...useSlotStatuses(STATUS_SLOTS.opencode, of("opencode"), every, name),
+    ...useSlotStatuses(STATUS_SLOTS.codex, of("codex"), every, name),
     ...useSlotStatuses(
       GENERIC_STATUS,
       connections.filter((c) => !hasStatusSlot(c.harness)),

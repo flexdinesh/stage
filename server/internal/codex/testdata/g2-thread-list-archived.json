@@ -1,0 +1,59 @@
+{
+  "id": 4,
+  "result": {
+    "data": [
+      {
+        "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "environments": null,
+        "extra": null,
+        "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "forkedFromId": null,
+        "attachedToThreadId": null,
+        "parentThreadId": null,
+        "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+        "ephemeral": false,
+        "section": null,
+        "sectionEnteredAt": null,
+        "projectId": null,
+        "historyMode": "paginated",
+        "modelProvider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low",
+        "createdAt": 1795589794,
+        "updatedAt": 1795589803,
+        "recencyAt": 1795589794,
+        "status": {
+          "type": "notLoaded"
+        },
+        "path": "/home/u/.codex/archived_sessions/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+        "cwd": "/home/u/work/g1",
+        "cliVersion": "0.171.0",
+        "originator": "Codex Desktop",
+        "source": "vscode",
+        "canAcceptDirectInput": null,
+        "threadSource": null,
+        "agentNickname": null,
+        "agentRole": null,
+        "gitInfo": {
+          "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+          "branch": "main",
+          "originUrl": null
+        },
+        "name": null,
+        "daybreakEnabled": null,
+        "turns": []
+      }
+    ],
+    "readStates": {
+      "01a2117d-eb29-7543-b695-e11bb3ce70fa": {
+        "firstUnread": {
+          "type": "turn",
+          "turnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d"
+        },
+        "revision": "65a6f75e-ca77-40b9-bab2-bd60601ba541"
+      }
+    },
+    "nextCursor": null,
+    "backwardsCursor": "2026-11-25T06:56:34.605Z"
+  }
+}

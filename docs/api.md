@@ -225,11 +225,11 @@ A connectable harness (a harness, `connected` or `hosted`, this server composes 
   "details": { "...": "the harness's own setup state, below" }
 }
 ```
-- `connectionId`, `configured`, `connected`, `lastError`: as in health, from the same connector (`lastError` and `reason` are omitted when empty). `state` is a harness-defined word (T3: T3State; OpenCode: `unconfigured`, `connected`, `unavailable`, `rejected`). `reason`: why it is not connected.
+- `connectionId`, `configured`, `connected`, `lastError`: as in health, from the same connector (`lastError` and `reason` are omitted when empty). `state` is a harness-defined word (T3: T3State; OpenCode: `unconfigured`, `connected`, `unavailable`, `rejected`; Codex: `connected`, `not_connected`, `signed_out`, `unreachable`, `not_installed`). `reason`: why it is not connected.
 - `fields`: each setting's current value (`source`: `saved` or `default`). No environment variable sets a field. A secret's `value` is always `""`; `set` says whether one is stored.
 - `actions`: whether each setup action can run now, with a `reason` when not.
-- `details`: the harness's setup panel state (T3: the T3 details; OpenCode: the OpenCode details). Generic clients ignore it.
-- Refreshes a stale probe first (bounded, T3: 3s; OpenCode health check: 4s).
+- `details`: the harness's setup panel state (T3: the T3 details; OpenCode: the OpenCode details; Codex: the Codex details). Generic clients ignore it.
+- Refreshes a stale probe first (bounded, T3: 3s; OpenCode health check: 4s; Codex: the daemon CLI's 20s). Codex reuses a probe for 5s; `?refresh=1` forces one.
 
 ### `PUT /api/harnesses/{kind}/settings`
 Body: one strict JSON object keyed by setup field id; `null` resets a setting to its default. 200 `HarnessStatus` (freshly probed), plus `replaced` (the retired connection, as in `GET /api/connections`) when the change retired the active connection. 400 invalid or unknown field. 409 the harness's own conflicts (below).
@@ -404,6 +404,14 @@ Claude Code's setup (kind `claude`, hosted: only where the machine allows local 
 - `DELETE /api/harnesses/claude/connection`: disconnect. Removes the adapter, survives restarts, keeps the connection's tasks and history; connect again resumes it. Never locked.
 
 Instance check: an address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service with the same repository at the same path is never bound silently. `connectionId` in the status changes with it.
+
+Codex's setup (hosted; [ADR 0006](adr/0006-codex-app-server-harness.md)): field `binary` (the Codex CLI path; empty or `null` uses `codex` on PATH), action `connect` (`{}`), disconnect. `GET /api/harnesses/codex/status` `state`: `connected`, `not_connected`, `signed_out` (the daemon answers but Codex has no login), `unreachable` (the daemon is down or not answering), `not_installed` (the CLI is missing). `details`: `{binary, cliVersion, appServerVersion, codexHome, daemon: running|stopped|unknown, account: {type, email, plan} | null, fix, checkedAt}`. `fix` is a shell command that fixes the current problem (`codex login`, `codex app-server daemon start`), else `""`.
+
+- `POST /api/harnesses/codex/actions/connect`: starts the daemon if it is down, reads the account and connects the Codex home as the connection's identity (label `Codex · <email>`). 409 `codex_not_installed`, `codex_signed_out` or `codex_unavailable` with the problem as the message; nothing changes.
+- `PUT /api/harnesses/codex/settings`: `{binary}`. A connected Codex reconnects through the new CLI on next use.
+- `DELETE /api/harnesses/codex/connection`: deactivates the adapter; the daemon keeps running and its threads stay in Codex.
+
+Codex tasks: respond and send report unavailable (answer in Codex); every Codex session's links carry `command`, the `cd <dir> && codex resume <id>` line to copy. Adoption accepts a thread id or that command; a T3 Code thread is refused with "Track it through T3".
 
 Request `/api/connections/:connectionId/capabilities?projectId=ID` for workspace-specific options. A REST create with one binding can omit connectionId. Multiple bindings require an explicit connectionId. Legacy unbound requests retain the T3 planning default. Task and schedule edits can change the destination with an explicit connectionId, executionConfig and workspace before launch. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply and links.web, links.native, links.service or links.command when available. `links.command` is a shell command that resumes the session in the harness's own client; hosts offer to copy it (Copy resume command) when there is no destination to open. Capabilities may list harness-wide `options` (any model) beside each model's `options`; an `executionConfig` may set the union, and option ids never collide (capabilities that reuse an id are rejected).
 

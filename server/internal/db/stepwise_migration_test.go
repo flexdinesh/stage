@@ -62,6 +62,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	28: {{"legacy storage dropped", seedV0028DropLegacy, checkV0028DropLegacy}},
 	29: {{"search index built and kept", seedV0029Search, checkV0029Search}},
 	30: {{"claude settings table", seedV0030ClaudeSettings, checkV0030ClaudeSettings}},
+	31: {{"codex settings per machine", seedV0031CodexSettings, checkV0031CodexSettings}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -599,4 +600,19 @@ func checkV0030ClaudeSettings(t *testing.T, pool *sqlite.DB) {
 	mustFail(t, pool, "unknown machine", `INSERT INTO claude_settings(machine_id) VALUES(9)`)
 	mustFail(t, pool, "duplicate machine", `INSERT INTO claude_settings(machine_id) VALUES(1)`)
 	mustFail(t, pool, "non-boolean disconnected", `UPDATE claude_settings SET disconnected=2 WHERE machine_id=1`)
+}
+
+func seedV0031CodexSettings(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT OR IGNORE INTO machines(id,label) VALUES(2,'worker')`)
+}
+
+// checkV0031CodexSettings: one row per existing machine, defaults never
+// connected, connected is a boolean, and a missing machine is refused.
+func checkV0031CodexSettings(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO codex_settings(machine_id) VALUES(1)`)
+	mustExec(t, pool, `INSERT INTO codex_settings(machine_id,binary_path,connected) VALUES(2,'/opt/codex',1)`)
+	wantRows(t, pool, `SELECT machine_id||':'||binary_path||':'||connected FROM codex_settings ORDER BY machine_id`, "1::0", "2:/opt/codex:1")
+	mustFail(t, pool, "a second row for one machine", `INSERT INTO codex_settings(machine_id) VALUES(1)`)
+	mustFail(t, pool, "connected outside 0/1", `UPDATE codex_settings SET connected=2 WHERE machine_id=1`)
+	mustFail(t, pool, "an unknown machine", `INSERT INTO codex_settings(machine_id) VALUES(99)`)
 }

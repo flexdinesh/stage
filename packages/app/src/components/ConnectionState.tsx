@@ -2,9 +2,12 @@
 // tones, read on the connection's machine) and, while Settings can fix a problem there, a link to it.
 // Logic: lib/connections.ts (connectionGate, liveChip).
 import type { ReactNode } from "react";
-import { useHarnesses, useMachines, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { useCodexStatus, useHarnesses, useMachines, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
 import type { Harness } from "../api/types.ts";
 import {
+  codexErrorText,
+  codexRowDetail,
+  codexSummary,
   connectionGate,
   harnessSummary,
   liveChip,
@@ -52,6 +55,8 @@ function LiveState({ harness, name }: { harness: Harness; name: string }) {
       return <T3State />;
     case "opencode":
       return <OpenCodeState />;
+    case "codex":
+      return <CodexState />;
     default:
       return <GenericState harness={harness} name={name} />;
   }
@@ -65,6 +70,11 @@ function T3State() {
 function OpenCodeState() {
   const read = statusRead(useOpenCodeStatus());
   return <State chip={liveChip(openCodeSummary(read), read.data === undefined ? "" : openCodeRowDetail(read.data), openCodeErrorText(read))} />;
+}
+
+function CodexState() {
+  const read = statusRead(useCodexStatus());
+  return <State chip={liveChip(codexSummary(read), read.data === undefined ? "" : codexRowDetail(read.data), codexErrorText(read))} />;
 }
 
 function GenericState({ harness, name }: { harness: Harness; name: string }) {

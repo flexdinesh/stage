@@ -167,8 +167,9 @@ function harnessCalls(apiFetch: Fetch, apiSend: Send, base: string) {
   return {
     /** The harness kinds the server knows, their policies and copy, and what the machine can run and set up. */
     harnesses: () => apiFetch<HarnessesReply>(`${base}/harnesses`),
-    /** Connection setup of a connectable harness (404 unknown kind, 409 none on the machine). */
-    harnessStatus: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(path(kind, "/status")),
+    /** Connection setup of a connectable harness (404 unknown kind, 409 none on the machine); `refresh` probes again instead of answering from cache. */
+    harnessStatus: <D = unknown>(kind: Harness, { refresh = false }: { refresh?: boolean } = {}) =>
+      apiFetch<HarnessStatus<D>>(path(kind, refresh ? "/status?refresh=1" : "/status")),
     /** Saves settings keyed by setup field id (null resets). */
     configureHarness: <D = unknown>(kind: Harness, settings: Record<string, unknown>) => apiFetch<HarnessStatus<D>>(path(kind, "/settings"), put(settings)),
     runHarnessAction: <D = unknown>(kind: Harness, action: string, input?: Record<string, unknown>) =>

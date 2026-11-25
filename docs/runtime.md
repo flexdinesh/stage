@@ -36,7 +36,8 @@ harnesses run as processes on this machine and need a profile that allows
 local processes. Claude Code is one ([execution.md](execution.md#claude-code-adapter)): its
 background sessions belong to Claude's per-user daemon, which a launch from
 the managed service starts in its own systemd user scope (Linux), so
-restarting Stage leaves them running.
+restarting Stage leaves them running. Codex is another
+([runtime](#codex-connection)): its app-server daemon outlives Stage too.
 
 | Profile | When | Local processes |
 | --- | --- | --- |
@@ -553,3 +554,7 @@ Settings connect OpenCode three ways: the service on the Stage server's machine 
 - Paired: the link's code is redeemed once for a 30-day session token, stored like a password. Stage renews it after 7 days through the service (`POST /api/pair`); a failed renewal keeps the old token, logs a warning and retries after an hour. A server password change on the OpenCode host revokes the token (state `rejected`): pair again.
 
 No environment variable sets the connection: it lives in Settings only. Browser links omit credentials. Stage readiness and project planning are independent of either harness.
+
+## Codex connection
+
+Codex is hosted ([ADR 0006](adr/0006-codex-app-server-harness.md)): the server talks to the Codex app-server daemon on this machine, over WebSocket on the daemon's unix control socket (`codex app-server daemon version` reports its path). Connect (Settings or `stage harness codex run connect`) starts the daemon when it is down, reads the Codex login and connects the Codex home as the connection. Stage starts the daemon on demand (at most once every 30 s) and never stops, restarts or updates it: it outlives Stage, keeps running turns across Stage restarts and serves `codex resume` and Codex Desktop. The CLI runs with the server's environment minus caller session variables (`CODEX_THREAD_ID`, `STAGE_CALLER_SESSION`, T3 and Claude session variables), so its threads are never attributed to the server's own caller. `codex_settings` keeps the CLI path (`stage harness codex set binary=PATH`; empty: `codex` on PATH) and whether this machine connected, so a restart reinstalls the adapter without contacting the daemon until first use. Stage stores no Codex credentials: log in with `codex login`. `stage harness codex disconnect` stops tracking; the daemon and its threads stay.

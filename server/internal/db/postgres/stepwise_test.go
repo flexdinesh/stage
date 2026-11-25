@@ -26,6 +26,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	28: {{name: "baseline", check: checkBaseline}},
 	29: {{name: "search indexes", seed: seedV0029Search, check: checkV0029Search}},
 	30: {{name: "claude settings table", seed: seedV0030ClaudeSettings, check: checkV0030ClaudeSettings}},
+	31: {{name: "codex settings", seed: seedV0031CodexSettings, check: checkV0031CodexSettings}},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -190,6 +191,40 @@ func checkV0030ClaudeSettings(t *testing.T, pool *sql.DB) {
 	} {
 		if _, err := pool.ExecContext(ctx, q); err == nil {
 			t.Fatalf("%s: %s accepted", why, q)
+		}
+	}
+}
+
+func seedV0031CodexSettings(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	if _, err := pool.ExecContext(context.Background(), `INSERT INTO machines (id, label) VALUES (2, 'worker') ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkV0031CodexSettings: one row per existing machine, defaults never
+// connected, and a duplicate or unknown machine is refused.
+func checkV0031CodexSettings(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO codex_settings (machine_id) VALUES (1)`,
+		`INSERT INTO codex_settings (machine_id, binary_path, connected) VALUES (2, '/opt/codex', true)`,
+	} {
+		if _, err := pool.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	var got string
+	if err := pool.QueryRowContext(ctx, `SELECT string_agg(machine_id || ':' || binary_path || ':' || connected, ',' ORDER BY machine_id) FROM codex_settings`).Scan(&got); err != nil || got != "1::false,2:/opt/codex:true" {
+		t.Fatalf("codex_settings %q %v", got, err)
+	}
+	for _, q := range []string{
+		`INSERT INTO codex_settings (machine_id) VALUES (1)`,
+		`INSERT INTO codex_settings (machine_id) VALUES (99)`,
+	} {
+		if _, err := pool.ExecContext(ctx, q); err == nil {
+			t.Fatalf("%s: accepted", q)
 		}
 	}
 }

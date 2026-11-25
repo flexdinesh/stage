@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { usePlatform } from "../../platform/context.tsx";
-import { Button } from "./button.tsx";
+import { Button, type Variant } from "./button.tsx";
 
 export type CopyStatus = "idle" | "copied" | "failed";
 
@@ -28,11 +28,11 @@ export function copyStatusText(status: CopyStatus, idle: string): string {
 }
 
 /** Copy button whose label confirms the copy for 1.5s; the result is announced politely. */
-export function CopyButton({ text, label, small = true, title }: { text: string; label: string; small?: boolean; title?: string }) {
+export function CopyButton({ text, label, small = true, variant = "secondary", title }: { text: string; label: string; small?: boolean; variant?: Variant; title?: string }) {
   const [status, copy] = useCopy();
   return (
     <>
-      <Button small={small} title={title} onClick={() => copy(text)}>
+      <Button small={small} variant={variant} title={title} onClick={() => copy(text)}>
         {copyStatusText(status, label)}
       </Button>
       <span className="sr-only" aria-live="polite">

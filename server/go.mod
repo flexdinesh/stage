@@ -3,7 +3,10 @@ module github.com/flexdinesh/stage/server
 go 1.27.3
 
 require (
+	charm.land/lipgloss/v2 v2.1.1
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -13,8 +16,6 @@ require (
 )
 
 require (
-	charm.land/lipgloss/v2 v2.1.1 // indirect
-	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
 	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect

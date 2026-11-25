@@ -8,6 +8,7 @@ import { useHarnessApi, useScopedKey } from "../api/harnessScope.tsx";
 import { harnessStatusQuery, invalidateConnectionChange, keys } from "../api/queries.ts";
 import type { Harness, HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
+import { CodexSetup } from "./CodexSetup.tsx";
 import { AutoCompleteToggle } from "./Completion.tsx";
 import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
 import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
@@ -18,6 +19,7 @@ import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, I
 const CONNECTION_PANELS: Record<string, ComponentType> = {
   t3: T3ConnectionPanel,
   opencode: OpenCodeSetup,
+  codex: CodexSetup,
 };
 
 /** One harness's setup on the harness scope's machine: its own panels, or the generic card and its New tasks panel. */

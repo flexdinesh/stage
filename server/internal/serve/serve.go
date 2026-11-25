@@ -19,6 +19,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
@@ -177,6 +178,9 @@ func Run(ctx context.Context, o Options) error {
 	defer func() {
 		stop()
 		wg.Wait() // background loops exit once ctx ends
+		if local != nil && local.codex != nil {
+			local.codex.Close()
+		}
 		if local != nil && local.close != nil {
 			local.close()
 		}
@@ -186,7 +190,7 @@ func Run(ctx context.Context, o Options) error {
 	home, _ := os.UserHomeDir()
 	cliName := install.CLIName(home, buildinfo.Identity)
 	// The fixed harness composition: every kind this server knows, in order.
-	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor)
+	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor, codex.Descriptor)
 	profile := o.Profile
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer

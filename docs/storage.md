@@ -17,7 +17,7 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 30; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 30 (0030 `claude_settings`, #372); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 31; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 31 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
@@ -124,7 +124,7 @@ destinations and inputs, launch bases, handoffs), `Observations` (normalized
 execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
 projects, imports), `Connections` (harness connections, T3, OpenCode and
-Claude Code settings, shared paths), `Machines` (pairing codes, machine tokens),
+Claude Code and Codex settings, shared paths), `Machines` (pairing codes, machine tokens),
 `Notifications`, `Sessions` (session identities), `Threads` (the T3 mirror,
 watcher state, last words), `Stats` (read-only counts), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
@@ -387,7 +387,10 @@ and paging. (Thread search was removed with API v3.)
   lookup, not `binary`, a reserved word on Postgres; `config_dir`, the
   config directory Claude reported at the last connect, the connection's
   identity that health checks; `disconnected`; `updated_at`). No row reads the defaults and the first save inserts one,
-  so neither engine seeds it.
+  so neither engine seeds it. 0031 `codex_settings` (#384): each machine's
+  Codex setup (`binary_path`, the Codex CLI, `''` for `codex` on PATH;
+  `connected`, set by connect and cleared by disconnect; `updated_at`),
+  unseeded the same way.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -573,7 +576,7 @@ from the Docker image; any other binary exits 78 before touching anything.
   target must be either fresh (no tables: the copy migrates it to the head) or
   at the head holding only the baseline's seeded rows (user 1, machine 1,
   harness connection 1, its `t3_connection` and `opencode_settings`, the
-  preferences row; for example after a server started on it once). Anything
+  preferences row; `claude_settings` and `codex_settings` have no seeded row; for example after a server started on it once). Anything
   else is refused: another version, other rows, or tables without a Stage
   schema. Refusals write no rows; only a schema mismatch (below) is found
   after a fresh target was migrated.
@@ -731,7 +734,7 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `journal_entries.source_thread_id` | Old task events only (`task_event_journal` copied it until 0026; Go events write `source_session_id` only); the note input is unreachable; `COALESCE` puts it first for API `sourceThreadId` | Fallback-only: Dropped (0027, 0028) | Backfill `source_session_id`; derive `sourceThreadId`; note and event `text` unchanged |
 | `task_acceptances.source_session_id` | Set by Go on insert from the task's session (#399; `acceptance_session_insert` until 0026); read as a fallback when evidence has no `session` | Keep | None |
 | `question_responses` (table) | None (read once by 0008) | Dropped (0028) | None |
-| `t3_connection`, `opencode_settings` (all columns) | Live harness setup | Keep | None |
+| `t3_connection`, `opencode_settings`, `claude_settings`, `codex_settings` (all columns) | Live harness setup | Keep | None |
 
 ### Triggers
 

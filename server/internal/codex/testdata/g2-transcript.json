@@ -1,0 +1,772 @@
+[
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "stage",
+          "title": null,
+          "version": "0.0.1"
+        },
+        "capabilities": {
+          "experimentalApi": true
+        }
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 1,
+      "result": {
+        "userAgent": "Codex Desktop/0.171.0 (Arch Linux Unknown; x86_64) unknown (stage; 0.0.1)",
+        "codexHome": "/home/u/.codex",
+        "platformFamily": "unix",
+        "platformOs": "linux"
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "method": "initialized"
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "observer",
+          "title": null,
+          "version": "0.0.1"
+        },
+        "capabilities": {
+          "experimentalApi": true
+        }
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 1,
+      "result": {
+        "userAgent": "Codex Desktop/0.171.0 (Arch Linux Unknown; x86_64) unknown (observer; 0.0.1)",
+        "codexHome": "/home/u/.codex",
+        "platformFamily": "unix",
+        "platformOs": "linux"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "method": "initialized"
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 2,
+      "method": "thread/loaded/list",
+      "params": {}
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 2,
+      "result": {
+        "data": [
+          "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+        ],
+        "nextCursor": null
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 3,
+      "method": "thread/archive",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589829576
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "status": {
+          "type": "notLoaded"
+        }
+      },
+      "emittedAtMs": 1795589829576
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 3,
+      "result": {}
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/archived",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589829586
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/archived",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589829586
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 2,
+      "method": "thread/read",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 2,
+      "result": {
+        "thread": {
+          "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "environments": null,
+          "extra": null,
+          "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low",
+          "createdAt": 1795589794,
+          "updatedAt": 1795589803,
+          "recencyAt": 1795589794,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/home/u/.codex/archived_sessions/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+          "cwd": "/home/u/work/g1",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+            "branch": "main",
+            "originUrl": null
+          },
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "readState": {
+          "firstUnread": {
+            "type": "turn",
+            "turnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d"
+          },
+          "revision": "65a6f75e-ca77-40b9-bab2-bd60601ba541"
+        }
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 3,
+      "method": "thread/read",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "includeTurns": true
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "deprecationNotice",
+      "params": {
+        "summary": "Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`.",
+        "details": null
+      },
+      "emittedAtMs": 1795589832195
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 3,
+      "result": {
+        "thread": {
+          "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "environments": null,
+          "extra": null,
+          "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low",
+          "createdAt": 1795589794,
+          "updatedAt": 1795589803,
+          "recencyAt": 1795589794,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/home/u/.codex/archived_sessions/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+          "cwd": "/home/u/work/g1",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+            "branch": "main",
+            "originUrl": null
+          },
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": [
+            {
+              "id": "01a2117d-eb4a-7a43-be59-c4ce7611074d",
+              "rootTurnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d",
+              "items": [
+                {
+                  "type": "userMessage",
+                  "id": "01a2117d-eeb2-7691-a7ee-f5c82075b719",
+                  "clientId": null,
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+                      "text_elements": []
+                    }
+                  ],
+                  "startedAtMs": 1795589795506,
+                  "completedAtMs": 1795589795506
+                },
+                {
+                  "type": "reasoning",
+                  "id": "rs_03ecce0e75efde9b016b0686a4779087d0aa802310d5c17593",
+                  "summary": [
+                    "**Assessing command execution constraints**"
+                  ],
+                  "content": [],
+                  "startedAtMs": 1795589796493,
+                  "completedAtMs": 1795589797763
+                },
+                {
+                  "type": "agentMessage",
+                  "moderation": null,
+                  "id": "msg_03ecce0e75efde9b016b0686a5bd4887d089a6238be578cebb",
+                  "text": "",
+                  "phase": "commentary",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null,
+                  "startedAtMs": 1795589797769,
+                  "completedAtMs": 1795589797788
+                },
+                {
+                  "type": "commandExecution",
+                  "id": "exec-9bee8da6-6a1d-4215-a05a-16c4d8297b2a",
+                  "pluginId": null,
+                  "scriptPath": null,
+                  "command": "/usr/bin/bash -lc 'touch x'",
+                  "cwd": "/home/u/work/g1",
+                  "processId": "72185",
+                  "source": "unifiedExecStartup",
+                  "status": "completed",
+                  "commandActions": [
+                    {
+                      "type": "unknown",
+                      "command": "touch x"
+                    }
+                  ],
+                  "aggregatedOutput": null,
+                  "exitCode": 0,
+                  "durationMs": 0,
+                  "startedAtMs": 1795589799073,
+                  "completedAtMs": 1795589803139
+                },
+                {
+                  "type": "agentMessage",
+                  "moderation": null,
+                  "id": "msg_03ecce0e75efde9b016b0686abc06c87d0a3faa9364dadabd7",
+                  "text": "OK",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null,
+                  "startedAtMs": 1795589803776,
+                  "completedAtMs": 1795589803864
+                }
+              ],
+              "itemsView": "full",
+              "status": "completed",
+              "error": null,
+              "startedAt": 1795589794,
+              "completedAt": 1795589803,
+              "durationMs": 9247
+            }
+          ]
+        },
+        "readState": {
+          "firstUnread": {
+            "type": "turn",
+            "turnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d"
+          },
+          "revision": "65a6f75e-ca77-40b9-bab2-bd60601ba541"
+        }
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 4,
+      "method": "thread/list",
+      "params": {
+        "cwd": "/home/u/work/g1",
+        "archived": true,
+        "limit": 10
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 4,
+      "result": {
+        "data": [
+          {
+            "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+            "environments": null,
+            "extra": null,
+            "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+            "forkedFromId": null,
+            "attachedToThreadId": null,
+            "parentThreadId": null,
+            "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "openai",
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low",
+            "createdAt": 1795589794,
+            "updatedAt": 1795589803,
+            "recencyAt": 1795589794,
+            "status": {
+              "type": "notLoaded"
+            },
+            "path": "/home/u/.codex/archived_sessions/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+            "cwd": "/home/u/work/g1",
+            "cliVersion": "0.171.0",
+            "originator": "Codex Desktop",
+            "source": "vscode",
+            "canAcceptDirectInput": null,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": {
+              "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+              "branch": "main",
+              "originUrl": null
+            },
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          }
+        ],
+        "readStates": {
+          "01a2117d-eb29-7543-b695-e11bb3ce70fa": {
+            "firstUnread": {
+              "type": "turn",
+              "turnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d"
+            },
+            "revision": "65a6f75e-ca77-40b9-bab2-bd60601ba541"
+          }
+        },
+        "nextCursor": null,
+        "backwardsCursor": "2026-11-25T06:56:34.605Z"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 5,
+      "method": "thread/list",
+      "params": {
+        "cwd": "/home/u/work/g1",
+        "limit": 10
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 5,
+      "result": {
+        "data": [],
+        "readStates": {},
+        "nextCursor": null,
+        "backwardsCursor": null
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 6,
+      "method": "thread/list",
+      "params": {
+        "includedThreadIds": [
+          "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+        ],
+        "archived": true
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 6,
+      "result": {
+        "data": [
+          {
+            "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+            "environments": null,
+            "extra": null,
+            "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+            "forkedFromId": null,
+            "attachedToThreadId": null,
+            "parentThreadId": null,
+            "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "openai",
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low",
+            "createdAt": 1795589794,
+            "updatedAt": 1795589803,
+            "recencyAt": 1795589794,
+            "status": {
+              "type": "notLoaded"
+            },
+            "path": "/home/u/.codex/archived_sessions/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+            "cwd": "/home/u/work/g1",
+            "cliVersion": "0.171.0",
+            "originator": "Codex Desktop",
+            "source": "vscode",
+            "canAcceptDirectInput": null,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": {
+              "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+              "branch": "main",
+              "originUrl": null
+            },
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          }
+        ],
+        "readStates": {
+          "01a2117d-eb29-7543-b695-e11bb3ce70fa": {
+            "firstUnread": {
+              "type": "turn",
+              "turnId": "01a2117d-eb4a-7a43-be59-c4ce7611074d"
+            },
+            "revision": "65a6f75e-ca77-40b9-bab2-bd60601ba541"
+          }
+        },
+        "nextCursor": null,
+        "backwardsCursor": "2026-11-25T06:56:33.999Z"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 7,
+      "method": "thread/list",
+      "params": {
+        "includedThreadIds": [
+          "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+        ]
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "id": 7,
+      "result": {
+        "data": [],
+        "readStates": {},
+        "nextCursor": null,
+        "backwardsCursor": null
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "out",
+    "msg": {
+      "id": 8,
+      "method": "thread/resume",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+        "excludeTurns": true
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "error": {
+        "code": -32600,
+        "message": "session 01a2117d-eb29-7543-b695-e11bb3ce70fa is archived. Run `codex unarchive 01a2117d-eb29-7543-b695-e11bb3ce70fa` to unarchive it first."
+      },
+      "id": 8
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 4,
+      "method": "thread/loaded/list",
+      "params": {}
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 4,
+      "result": {
+        "data": [],
+        "nextCursor": null
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 5,
+      "method": "thread/unarchive",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/unarchived",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589833233
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 5,
+      "result": {
+        "thread": {
+          "id": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "environments": null,
+          "extra": null,
+          "sessionId": "01a2117d-eb29-7543-b695-e11bb3ce70fa",
+          "forkedFromId": null,
+          "attachedToThreadId": null,
+          "parentThreadId": null,
+          "preview": "Run exactly `touch x` in the shell (request escalation if needed), then reply OK.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low",
+          "createdAt": 1795589794,
+          "updatedAt": 1795589833,
+          "recencyAt": 1795589794,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/home/u/.codex/sessions/2026/11/25/rollout-2026-11-25T17-56-34-01a2117d-eb29-7543-b695-e11bb3ce70fa.jsonl",
+          "cwd": "/home/u/work/g1",
+          "cliVersion": "0.171.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "a0b39dc246b02e3b1e6bb5952a962e11982d172b",
+            "branch": "main",
+            "originUrl": null
+          },
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        }
+      }
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/unarchived",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589833233
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "out",
+    "msg": {
+      "id": 6,
+      "method": "thread/delete",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      }
+    }
+  },
+  {
+    "client": "observer",
+    "dir": "in",
+    "msg": {
+      "method": "thread/deleted",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589836425
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "id": 6,
+      "result": {}
+    }
+  },
+  {
+    "client": "stage",
+    "dir": "in",
+    "msg": {
+      "method": "thread/deleted",
+      "params": {
+        "threadId": "01a2117d-eb29-7543-b695-e11bb3ce70fa"
+      },
+      "emittedAtMs": 1795589836425
+    }
+  }
+]

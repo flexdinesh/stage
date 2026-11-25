@@ -1,7 +1,8 @@
 // Per-harness status summaries for the sidebar status button and its details panel (lib/status.ts,
 // components/StatusRow.tsx), the one-line detail of a Settings connection row, and the state chip of a Config
 // panel's Harness row (components/ConnectionState.tsx).
-import type { Harness, HarnessConnection, HarnessStatus, Machine, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
+import type { CodexState, CodexStatus, Harness, HarnessConnection, HarnessStatus, Machine, OpenCodeStatus, T3State, T3Status } from "../api/types.ts";
+import { codexAccountShort, codexState } from "./codex.ts";
 import { connectedRows, connectionRows } from "./connectionRows.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
@@ -28,6 +29,13 @@ export function t3RowDetail(s: T3Status, now: number = Date.now()): string {
 /** An OpenCode row's detail: the service's host:port and how Stage signs in. */
 export function openCodeRowDetail(s: OpenCodeStatus, now: number = Date.now()): string {
   return [s.endpoint === "" ? null : serviceHostText(s), signInText(s, now)].filter((p) => p !== null && p !== "").join(" · ");
+}
+
+/** A Codex row's detail: the CLI version and who it is signed in as. */
+export function codexRowDetail(s: CodexStatus): string {
+  const d = s.details;
+  if (d === null) return "";
+  return [d.cliVersion === "" ? null : `codex-cli ${d.cliVersion}`, codexAccountShort(d.account)].filter((p) => p !== null).join(" · ");
 }
 
 export type HarnessTone = "ok" | "need" | "bad" | "idle";
@@ -67,6 +75,32 @@ export function openCodeSummary(read: StatusRead<OpenCodeStatus>, now = Date.now
   if (read.data === undefined) return { harness: "opencode", state: "offline", tone: "bad", label: "OpenCode offline" };
   const chip = openCodeChip(read.data, now);
   return { harness: "opencode", state: chip.label, tone: chip.tone, label: `OpenCode ${chip.label}` };
+}
+
+const CODEX_CHIP: Record<CodexState, { state: string; tone: HarnessTone; label: string }> = {
+  connected: { state: "connected", tone: "ok", label: "Codex connected" },
+  signed_out: { state: "signed out", tone: "need", label: "Codex signed out" },
+  unreachable: { state: "unreachable", tone: "bad", label: "Codex unreachable" },
+  not_installed: { state: "not installed", tone: "bad", label: "Codex not installed" },
+  not_connected: { state: "not connected", tone: "idle", label: "Codex not connected" },
+};
+
+/** Codex's summary: signed out asks the user (need), unreachable or not installed is a fault; an unknown state reads generically. */
+export function codexSummary(read: StatusRead<CodexStatus>): HarnessSummary {
+  if (read.checking) return { harness: "codex", state: "checking", tone: "idle", label: "Checking Codex" };
+  const s = read.data;
+  if (s === undefined) return { harness: "codex", state: "offline", tone: "bad", label: "Codex offline" };
+  const state = codexState(s.state);
+  return state === null ? harnessSummary(read, "codex", "Codex") : { harness: "codex", ...CODEX_CHIP[state] };
+}
+
+/** Codex section error line: why it is not connected (reason, else last error), else the failed fetch. */
+export function codexErrorText(read: StatusRead<CodexStatus>): string | null {
+  const s = read.data;
+  if (s === undefined) return read.error;
+  if (s.connected) return null;
+  const reason = s.reason ?? s.lastError ?? "";
+  return reason === "" ? null : reason;
 }
 
 /** T3 section error line: the probe error while unreachable, else the last error, else the failed fetch. */
@@ -127,6 +161,14 @@ export function openCodeStatusView(read: StatusRead<OpenCodeStatus>, now: number
       ? []
       : [[d.endpoint === "" ? null : serviceHostText(d), signInText(d, now)].filter((p) => p !== null).join(" · "), `checked ${relativeTime(d.checkedAt ?? null, now)}`];
   return { summary: openCodeSummary(read, now), detail: { lines, error: openCodeErrorText(read) } };
+}
+
+/** Codex's status view: the CLI version and account, then when it was checked. */
+export function codexStatusView(read: StatusRead<CodexStatus>, now: number = Date.now()): StatusView {
+  const d = read.data;
+  const checkedAt = d?.details?.checkedAt ?? null;
+  const lines = d === undefined ? [] : [codexRowDetail(d), checkedAt === null ? "" : `checked ${relativeTime(checkedAt, now)}`].filter((l) => l !== "");
+  return { summary: codexSummary(read), detail: { lines, error: codexErrorText(read) } };
 }
 
 /** A generic harness's status view: its summary, and why it is not connected (reason, else last error) as the detail. */

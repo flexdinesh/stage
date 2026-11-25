@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
+import { rowSessionAction } from "../lib/harnesses.ts";
 import type { Task } from "../api/types.ts";
 import { configModelText, dateTime, duration, relativeTime } from "../lib/format.ts";
 import type { SettledItem } from "../lib/settled.ts";
@@ -17,7 +18,7 @@ import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
 import { BlockedReason, useLaunchGate } from "./LaunchGate.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
-import { AppButton, Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
+import { AppButton, Button, Chip, CopyButton, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { RowCopyLink } from "./StageLinks.tsx";
 import { TreeRow } from "./trees/TreeRow.tsx";
@@ -247,7 +248,8 @@ export function TaskRow({
   const undo = useUndoComplete(task);
   const confirming = review ? quick.confirm : null;
   const rowError = review ? quick.error : justCompleted ? undo.error : null;
-  const hasActions = justCompleted || review || showStart || appLink !== null || extra !== undefined;
+  const session = rowSessionAction(appLink, task, { needsInput, hidden: justCompleted || confirming !== null });
+  const hasActions = justCompleted || review || showStart || session !== null || extra !== undefined;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -348,10 +350,12 @@ export function TaskRow({
             </Button>
           </BlockedReason>
         ) : null}
-        {appLink === null || justCompleted || confirming !== null ? null : (
-          <AppButton small variant={needsInput ? "primary" : "secondary"} href={appLink}>
+        {session === null ? null : session.kind === "open" ? (
+          <AppButton small variant={session.primary ? "primary" : "secondary"} href={session.href}>
             Open in {kindName(task.harness)}
           </AppButton>
+        ) : (
+          <CopyButton text={session.command} label="Copy resume command" variant={session.primary ? "primary" : "secondary"} />
         )}
         {extra}
         <RowCopyLink subject={{ kind: "task", id: task.id, title: task.title }} />

@@ -6,14 +6,15 @@
 // Logic: lib/connectionRows.ts.
 import { useMemo, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
-import { useForgetConnection, useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
+import { useCodexStatus, useForgetConnection, useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
-import { openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
+import { codexRowDetail, codexSummary, openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
 import { shortDate } from "../lib/format.ts";
 import { forgetPrompt, usageText } from "../lib/harnesses.ts";
 import { machineScopeId } from "../lib/machines.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
+import { CODEX_DISCONNECT_PROMPT, useDisconnectCodex } from "./CodexSetup.tsx";
 import { ConnectionSetup, useDisconnectHarness, useHarnessStatus } from "./HarnessConnections.tsx";
 import { IconStep } from "./icons.tsx";
 import { OPENCODE_DISCONNECT_PROMPT, useDisconnectOpenCode } from "./OpenCodeSetup.tsx";
@@ -111,6 +112,8 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
             return <T3Row key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           case "opencode":
             return <OpenCodeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
+          case "codex":
+            return <CodexRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           default:
             return <GenericRow key={r.id} descriptor={descriptor} machine={machine} onManage={manage} isDefault={isDefault} />;
         }
@@ -291,6 +294,34 @@ function OpenCodeRow({ name, machine, onManage, isDefault }: { name: string; mac
           ? null
           : {
               prompt: OPENCODE_DISCONNECT_PROMPT,
+              busy: disconnect.isPending,
+              error: disconnect.error,
+              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+              reset: disconnect.reset,
+            }
+      }
+    />
+  );
+}
+
+function CodexRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
+  const read = statusRead(useCodexStatus());
+  const summary = codexSummary(read);
+  const disconnect = useDisconnectCodex();
+  const s = read.data;
+  return (
+    <ConnectionRow
+      name={name}
+      machine={machine}
+      detail={s === undefined ? (read.error ?? "") : codexRowDetail(s)}
+      chip={{ tone: summary.tone, label: summary.state }}
+      onManage={onManage}
+      isDefault={isDefault}
+      disconnect={
+        s === undefined || !s.configured
+          ? null
+          : {
+              prompt: CODEX_DISCONNECT_PROMPT,
               busy: disconnect.isPending,
               error: disconnect.error,
               run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
