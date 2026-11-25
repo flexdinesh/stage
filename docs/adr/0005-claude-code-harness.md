@@ -6,6 +6,8 @@
   [storage adapters](0003-storage-adapters.md) first, so this is 0005.
 - **Amended** 2026-11-25 by #378: decision 11 (`rm` is the archived
   closure) and the "entry gone" row of decision 4.
+- **Extended** 2026-11-25 by #382: [cloud sessions](#cloud-sessions-claude---cloud-not-built)
+  researched and not built.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -315,6 +317,76 @@ it survives Stage restarts, shows in `claude agents`, and the user can
 attach to it. Stage stays a Go server with no Node runtime, at the cost of
 answering prompts in Claude for now. The SDK route stays open as #385.
 
+## Cloud sessions (`claude --cloud`): not built
+
+Stage task #382 asked for Claude Code cloud sessions as a harness that
+works from a container (connected hosting). Research only; no code.
+
+**Sources** (2026-11-25): the bundled JavaScript of the `claude` 2.1.332
+binary, read only (no request sent, no cloud session created), and the
+public docs at `code.claude.com/docs/en/` (`claude-code-on-the-web`,
+`authentication`, `headless`, `routines`, `self-hosted-environments`,
+`self-hosted-environments-testing`, `legal-and-compliance`) and
+`platform.claude.com/docs/en/` (Managed Agents,
+`api/claude-code/routines-fire`). "Seen" is in the binary, "documented"
+in the docs, "inferred" neither.
+
+### API surface (seen, undocumented)
+
+`claude --cloud` talks to `https://api.anthropic.com` with
+`Authorization: Bearer <claude.ai OAuth access token>` and
+`anthropic-version: 2023-06-01`; create, the event stream and interrupt
+add `x-organization-uuid`. No `x-api-key`, no beta header. Sessions open at
+`https://claude.ai/code/session_<id>` (`cse_<id>` is the same session).
+
+| Method, path | Purpose | Shape |
+| --- | --- | --- |
+| `GET /v1/environment_providers` | environments | first `kind: anthropic_cloud` unless configured; `--environment` takes only self-hosted `ccpool_` ids |
+| `POST /v1/code/sessions` | create | `title`, `environment_id`, `events` (optional `control_request`s such as `set_permission_mode`, then the user prompt), `config` (`sources: [{type: git_repository, url, revision}]` from the local `origin`, `model`, `outcomes`), `tags`, `metadata`; returns `{session: {id}}` |
+| `GET /v1/code/sessions/{id}` | status | `status` (`paused`, `archived`, `failed`), `worker_status` (`running`, `idle`, `requires_action`), `connection_status`, `status_bucket` (`working`, `blocked`, `completed`, `failed`), `external_metadata.pending_action` (the prompt waiting for an answer), pushed branch in `config.outcomes[].git_info` |
+| `GET /v1/code/sessions?limit&cursor&statuses` | list | `{data, next_cursor}`; no server-side tag filter |
+| `GET /v1/code/sessions/watch` | change feed | SSE |
+| `GET /v1/code/sessions/{id}/events`, `.../events/stream` | events | `{data: [{sequence_num, payload}], next_cursor}`; SSE frames `client_event` |
+| `POST /v1/code/sessions/{id}/events` | follow-up, interrupt, permission answer | `{events: [{payload}]}`: a `user` message, `control_request` `interrupt`, or `control_response` `allow`/`deny` |
+| `POST /v1/code/sessions/{id}/archive` | archive | also `unarchive`, `DELETE`, `PUT` (title, tags, `client_metadata`) |
+
+It has moved once: the CLI still tries `POST /v1/sessions` (beta
+`ccr-byoc-2025-07-29`) and repeats on `/v1/code/sessions` when that answers
+400 `sessions_v1_retired`. `/v1/sessions?beta=true` with
+`managed-agents-2026-04-01` is a different product, Managed Agents.
+
+### Why not
+
+- **Credentials Stage may not hold.** Cloud sessions take only a claude.ai
+  login: API keys, Console sign-ins and `claude setup-token` tokens are
+  refused (documented; seen: "A cloud session would run on your claude.ai
+  login, but this session signs in another way…"). The session scope
+  (`user:sessions:claude_code`) is capped at 30 days server-side
+  (documented). The Claude Code legal page: "Developers may not collect,
+  store, or intermediate Claude.ai credentials or session tokens"; the
+  only carve-out is a user signed in to the unmodified `claude` binary.
+  A connected harness would have to store, refresh and send the user's
+  claude.ai token, which is exactly that. Stage stores no Claude
+  credentials (decision 1).
+- **No public API.** The docs describe no API to create, list, observe or
+  stop Claude Code cloud sessions; `/v1/code/sessions` is internal and
+  has already changed version.
+- **No scripted create through the CLI.** `claude -p --cloud "<task>"` is
+  rejected (documented): creating a cloud session is interactive only.
+  `claude -p "<msg>" --cloud <session id>` only queues a follow-up.
+
+### Routes left open (not chosen)
+
+| Route | What works | Why not now |
+| --- | --- | --- |
+| Managed Agents (`/v1/agents`, `/v1/sessions`, `/v1/environments`, beta `managed-agents-2026-04-01`) | Public API with an API key, so it works from a container: sessions with GitHub repository resources, statuses `idle`/`running`/`rescheduling`/`terminated`, SSE events, `requires_action` (needs input), interrupt, archive, follow-ups | A different product: API billing, not the subscription; sessions do not show in claude.ai/code. A new connected kind, not `claude --cloud` |
+| Routine fire (`POST /v1/claude_code/routines/{id}/fire`, per-routine token) | Starts a claude.ai session from a container; returns its id and URL | Experimental and launch-only: no status or reply, so Stage cannot observe the session |
+| Self-hosted pool (`claude -p --environment ccpool_… --output-format json`) | Scripted create through the unmodified CLI and the user's own login; `--metadata`, `--correlation-id` | Team and Enterprise only; needs the binary (hosted, not a container); no documented way to observe the session |
+
+Revisit when Anthropic publishes an API for Claude Code cloud sessions, or
+allows third-party apps to act on claude.ai sessions, or when a Managed
+Agents harness is wanted on its own merits.
+
 ## Consequences
 
 - #371 (hosted plumbing, merged as ca5cfeb): unaffected.
@@ -330,6 +402,8 @@ answering prompts in Claude for now. The SDK route stays open as #385.
 - #383 (discovery): `Attention` reads the roster (decision 9, amended); a
   live interactive session has no resume command, since it is answered
   where it runs.
+- #382 (cloud sessions): no harness; findings and the routes left open
+  are [above](#cloud-sessions-claude---cloud-not-built).
 
 ## Reproduce
 
