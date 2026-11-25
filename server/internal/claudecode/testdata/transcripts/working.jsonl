@@ -1,0 +1,15 @@
+{"type":"custom-title","customTitle":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"agent-name","agentName":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"mode","mode":"normal","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"parentUuid":null,"isSidechain":false,"promptId":"8c2a14b2-9f3a-432d-9868-6d9ccbb080fe","type":"user","message":{"role":"user","content":"Without using any tools, write a 400 word story about a lighthouse.\n\nstage-launch:req-working2"},"uuid":"222401dc-333b-4405-bba1-dc54f18d66ea","timestamp":"2026-11-25T03:19:46.890Z","permissionMode":"bypassPermissions","origin":{"kind":"human"},"promptSource":"typed","turnOrigin":"human","turnPromptId":"8c2a14b2-9f3a-432d-9868-6d9ccbb080fe","turnPosition":{"promptIndex":1,"turnIndex":1},"sessionKind":"bg","userType":"external","entrypoint":"cli","cwd":"/home/user/src/spike/plain","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c","version":"2.1.332","gitBranch":"HEAD","dataFlowOn":true}
+{"type":"last-prompt","lastPrompt":"Without using any tools, write a 400 word story about a lighthouse.  stage-launch:req-working2","leafUuid":"14fdbd5d-877b-4f37-94fa-ed627658ca96","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"custom-title","customTitle":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"agent-name","agentName":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"mode","mode":"normal","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"last-prompt","lastPrompt":"Without using any tools, write a 400 word story about a lighthouse.  stage-launch:req-working2","leafUuid":"14fdbd5d-877b-4f37-94fa-ed627658ca96","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"custom-title","customTitle":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"agent-name","agentName":"Stage working probe 2","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"mode","mode":"normal","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"c6b773af-da92-49f8-a4dc-a5f304d5ba0c"}

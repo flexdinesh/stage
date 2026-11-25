@@ -1,0 +1,27 @@
+{
+  "pid": 2173681,
+  "sessionId": "caf89456-0d11-4f96-96bb-b6d89889ed3a",
+  "cwd": "/home/user/src/spike/plain",
+  "startedAt": 1795576660175,
+  "procStart": "25005598",
+  "version": "2.1.332",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "bg",
+  "entrypoint": "cli",
+  "pidDomain": "linux:00000000000000000000000000000000:pid:[4026531836]",
+  "asksForConvertedSkills": false,
+  "messagingSocketPath": "/run/user/1000/cc-socks/2173681.sock",
+  "name": "Stage blocked probe",
+  "nameSince": 1795576660215,
+  "jobId": "caf89456",
+  "status": "waiting",
+  "updatedAt": 1795576661809,
+  "statusUpdatedAt": 1795576661809,
+  "nameSource": "peer",
+  "waitingFor": "permission prompt"
+}

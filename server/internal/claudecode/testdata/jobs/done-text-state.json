@@ -1,0 +1,41 @@
+{
+  "state": "done",
+  "detail": "lighthouse story: Ada guides a boat through a storm",
+  "tempo": "idle",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "tokens": 4875,
+  "output": {
+    "result": "Short story about lighthouse keeper Ada, who guides a drifting boat to safety in a storm shortly before her light is automated."
+  },
+  "children": null,
+  "linkScanOffset": 398510,
+  "linkScanPath": "/home/user/.claude/projects/-home-user-src-spike-plain/c6b773af-da92-49f8-a4dc-a5f304d5ba0c.jsonl",
+  "template": "bg",
+  "respawnFlags": [
+    "-n",
+    "Stage working probe 2",
+    "--model",
+    "haiku"
+  ],
+  "intent": "Without using any tools, write a 400 word story about a lighthouse.\n\nstage-launch:req-working2",
+  "name": "Stage working probe 2",
+  "nameSource": "user",
+  "sessionId": "c6b773af-da92-49f8-a4dc-a5f304d5ba0c",
+  "resumeSessionId": "c6b773af-da92-49f8-a4dc-a5f304d5ba0c",
+  "daemonShort": "c6b773af",
+  "cliVersion": "2.1.332",
+  "cwd": "/home/user/src/spike/plain",
+  "providerEnv": {
+    "CLAUDE_BG_SESSION_CREDENTIAL": "env-login"
+  },
+  "backend": "daemon",
+  "createdAt": "2026-11-25T03:19:46.451Z",
+  "updatedAt": "2026-11-25T03:20:09.825Z",
+  "firstTerminalAt": "2026-11-25T03:20:09.825Z",
+  "lastTerminalAt": "2026-11-25T03:20:09.825Z"
+}

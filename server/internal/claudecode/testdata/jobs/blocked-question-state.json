@@ -1,0 +1,43 @@
+{
+  "state": "blocked",
+  "detail": "harness blocked sleep 30 command; awaiting how to proceed",
+  "tempo": "blocked",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "tokens": 665,
+  "needs": "run `! sleep 30 && echo slept` yourself, or say whether to run it as a background task",
+  "needsAsk": {
+    "id": "ada33c17-1e64-4ced-9da9-0a429049f7ed",
+    "text": "run `! sleep 30 && echo slept` yourself, or say whether to run it as a background task"
+  },
+  "output": null,
+  "children": null,
+  "linkScanOffset": 416661,
+  "linkScanPath": "/home/user/.claude/projects/-home-user-src-spike-plain/abab23c5-491c-40ac-99d1-4145cabdb38c.jsonl",
+  "template": "bg",
+  "respawnFlags": [
+    "-n",
+    "Stage working probe",
+    "--model",
+    "haiku"
+  ],
+  "intent": "Use the Bash tool to run exactly: sleep 30 && echo slept. Then reply with exactly: slept ok\n\nstage-launch:req-working1",
+  "name": "Stage working probe",
+  "nameSource": "user",
+  "sessionId": "abab23c5-491c-40ac-99d1-4145cabdb38c",
+  "resumeSessionId": "abab23c5-491c-40ac-99d1-4145cabdb38c",
+  "daemonShort": "abab23c5",
+  "cliVersion": "2.1.332",
+  "cwd": "/home/user/src/spike/plain",
+  "providerEnv": {
+    "CLAUDE_BG_SESSION_CREDENTIAL": "env-login"
+  },
+  "backend": "daemon",
+  "createdAt": "2026-11-25T03:18:13.304Z",
+  "updatedAt": "2026-11-25T03:18:21.450Z",
+  "firstTerminalAt": null
+}

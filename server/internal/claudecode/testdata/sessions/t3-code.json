@@ -1,0 +1,26 @@
+{
+  "pid": 2149155,
+  "sessionId": "b1831473-c45f-4c46-bf39-5f1add4b5c5b",
+  "cwd": "/home/user/.t3/worktrees/stage/97531423-693e4d917a1e131b",
+  "startedAt": 1795575238735,
+  "procStart": "24868359",
+  "version": "2.1.331",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "interactive",
+  "entrypoint": "t3-code",
+  "pidDomain": "linux:00000000000000000000000000000000:pid:[4026531836]",
+  "asksForConvertedSkills": false,
+  "messagingSocketPath": "/run/user/1000/cc-socks/2149155.sock",
+  "name": "Codex harness via app-server",
+  "nameSource": "auto",
+  "nameSince": 1795575238752,
+  "status": "waiting",
+  "updatedAt": 1795576390533,
+  "statusUpdatedAt": 1795576390533,
+  "waitingFor": "input needed"
+}

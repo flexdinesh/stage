@@ -1,0 +1,73 @@
+[
+  {
+    "pid": 2113338,
+    "cwd": "/home/user/.t3/worktrees/stage/fd8db62f-9b3d25a88e365a6a",
+    "kind": "interactive",
+    "startedAt": 1795573758525,
+    "sessionId": "9c1cd302-2d47-4c82-9e03-89ed384cef8b",
+    "name": "Claude harness: spike + ADR 0003",
+    "status": "busy"
+  },
+  {
+    "pid": 2149155,
+    "cwd": "/home/user/.t3/worktrees/stage/97531423-693e4d917a1e131b",
+    "kind": "interactive",
+    "startedAt": 1795575238735,
+    "sessionId": "b1831473-c45f-4c46-bf39-5f1add4b5c5b",
+    "name": "Codex harness via app-server",
+    "status": "busy"
+  },
+  {
+    "id": "2277a5ab",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795575750541,
+    "sessionId": "2277a5ab-9e15-412d-b392-c80c15f138bd",
+    "name": "Reply with exactly: r1 ok",
+    "state": "failed"
+  },
+  {
+    "pid": 2158018,
+    "id": "385d212a",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795575766019,
+    "sessionId": "385d212a-048c-44cd-8d6a-9e04c72bbe46",
+    "name": "reap probe ok",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2157818,
+    "id": "62d9077f",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795575807087,
+    "sessionId": "62d9077f-ad27-4418-9dd1-38fd5ec2013f",
+    "name": "r2 bg seed",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2159080,
+    "id": "d7423c16",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576360192,
+    "sessionId": "d7423c16-9dfe-42bf-8502-ecb3bd03de8f",
+    "name": "check-utc-date-time",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2165809,
+    "id": "c83c2203",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576360856,
+    "sessionId": "c83c2203-ad7e-4930-a862-42d321338731",
+    "name": "env-variable-dump-check",
+    "status": "idle",
+    "state": "done"
+  }
+]
