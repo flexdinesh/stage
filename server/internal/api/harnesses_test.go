@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
@@ -168,6 +169,7 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 			Kind        string        `json:"kind"`
 			Hosting     string        `json:"hosting"`
 			Launch      string        `json:"launch"`
+			SessionHint *string       `json:"sessionHint"`
 			Setup       harness.Setup `json:"setup"`
 			Attribution struct {
 				Env        string              `json:"env"`
@@ -177,6 +179,10 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 	}
 	e.must("GET", "/api/harnesses", nil, 200, &list)
 	cc := list.Harnesses[2]
+	// Claude Code names how its sessions are pasted; T3 leaves the field out.
+	if cc.SessionHint == nil || !strings.Contains(*cc.SessionHint, "claude agents") || list.Harnesses[0].SessionHint != nil {
+		t.Fatalf("sessionHint claude %v t3 %v", cc.SessionHint, list.Harnesses[0].SessionHint)
+	}
 	p := cc.Attribution.Precedence
 	if cc.Kind != claudecode.Descriptor.Kind || cc.Hosting != "hosted" || cc.Launch != "correlated" || cc.Attribution.Env != "CLAUDE_CODE_SESSION_ID" || p == nil ||
 		len(p.Owns) != 1 || p.Owns[0] != (harness.EnvMatch{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}) || len(p.Yields) != 2 {

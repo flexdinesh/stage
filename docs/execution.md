@@ -188,8 +188,9 @@ suite cannot tell a remote machine from the local one.
 ## Harness registry
 
 Each harness package declares a `harness.Descriptor`: kind, name, hosting,
-whether its instance identity is stable, and the closure signals it reports
-with their copy. `serve` composes a fixed `harness.Registry` (T3, OpenCode, Claude Code, Codex)
+whether its instance identity is stable, the closure signals it reports
+with their copy, and an optional session hint (how a user names one of its
+sessions in Track session). `serve` composes a fixed `harness.Registry` (T3, OpenCode, Claude Code, Codex)
 and runs one release and one schedule runner per active connection, on
 every machine (`serve/runners.go` follows instance switches). The database
 stores kinds as text; the registry, not a schema CHECK, decides which exist.

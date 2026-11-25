@@ -28,11 +28,25 @@ export function copyStatusText(status: CopyStatus, idle: string): string {
 }
 
 /** Copy button whose label confirms the copy for 1.5s; the result is announced politely. */
-export function CopyButton({ text, label, small = true, variant = "secondary", title }: { text: string; label: string; small?: boolean; variant?: Variant; title?: string }) {
+export function CopyButton({
+  text,
+  label,
+  small = true,
+  variant = "secondary",
+  title,
+  className,
+}: {
+  text: string;
+  label: string;
+  small?: boolean;
+  variant?: Variant;
+  title?: string;
+  className?: string | undefined;
+}) {
   const [status, copy] = useCopy();
   return (
     <>
-      <Button small={small} variant={variant} title={title} onClick={() => copy(text)}>
+      <Button small={small} variant={variant} title={title} className={className} onClick={() => copy(text)}>
         {copyStatusText(status, label)}
       </Button>
       <span className="sr-only" aria-live="polite">

@@ -1,0 +1,91 @@
+---
+title: Claude Code
+description: Run Stage tasks as Claude Code background sessions, answer their questions in Claude, and track sessions you started yourself.
+showAskAi: false
+---
+
+# Claude Code
+
+Stage can run tasks as Claude Code background sessions (`claude --bg`) on the computer Stage runs on. Claude keeps what it owns: the sessions, their worktrees, the models and your login. Stage keeps the task, its journal, its final reply and what comes next.
+
+You need Stage on the computer where you use Claude Code: the [desktop app](/docs/usage/desktop), or `stage serve --local-harnesses`. Claude Code is not available when Stage runs in Docker, or on worker machines yet. Install Claude Code and log in with `claude auth login`; Stage uses that login and stores no Claude credentials.
+
+:::steps
+
+### Connect
+
+Open Settings > Connections, choose **Add connection** > **Claude Code**, and click **Connect**. Stage checks the `claude` command and that Claude is logged in, then names the connection by Claude's config folder (`Claude Code (~/.claude)`).
+
+From a terminal:
+
+```sh
+stage harness claude run connect
+```
+
+If Stage cannot find `claude`, set **Claude command** in the card (or `stage harness claude set binary=/path/to/claude`). If Claude is logged out, run `claude auth login`, then connect again.
+
+### Let Claude trust the folder
+
+Claude runs only in folders it trusts. Run `claude` once in each project folder and accept the prompt. A task in a folder Claude does not trust returns to backlog saying so.
+
+Stage's projects come from the folders Claude knows (`~/.claude.json`); a Git checkout among them is imported as a Stage project.
+
+### Start a task
+
+Create a task on the Claude Code connection. Choose:
+
+- **Workspace**: the project folder, or a new Claude Code worktree (Claude branches it from the checkout's current commit).
+- **Model**: Claude's default, or opus, sonnet, haiku or fable.
+- **Effort**: low to max.
+- **Permission**: Ask before acting, Accept edits, Auto, Plan only, Don't ask or Bypass permissions.
+
+Stage starts one background session per task and follows its state: running, needs input, done, failed or interrupted. **Stop** ends a background session.
+
+### Answer in Claude
+
+When a session stops for a question or a permission prompt, the task turns to needs input. Claude Code has no link to open, so Stage offers **Copy resume command** on task detail, task rows and notifications. Run it in a terminal:
+
+```sh
+claude attach 1a2b3c4d
+```
+
+Once Claude no longer lists the background session, the command resumes it in its folder instead: `cd <folder> && claude --resume <session id>`.
+
+:::
+
+When the session finishes, task detail shows its final reply, read from the end of Claude's transcript (best effort, up to 4000 characters). Complete the task in Stage to start what depends on it, or remove the session with `claude rm`: with **Complete tasks when removed in Claude Code** on (the default), Stage completes a successful task when its finished session is removed.
+
+## Track a session you started
+
+A Claude session you started yourself can become a Stage task. Use **Track session**, pick Claude Code and paste one of:
+
+- the session UUID,
+- the 8-character ID `claude agents` shows,
+- a `claude attach` or `claude --resume` command.
+
+Preview it, then confirm. Stage never starts the session; it follows it and copies its resume command like any other.
+
+A Claude session that T3 started belongs to T3. Stage refuses it: "This Claude session was started by T3. Track it through T3."
+
+## Check the connection
+
+The status button at the bottom of the sidebar includes Claude Code. In Settings > Connections its row shows the config folder and version (`~/.claude · 2.1.332`), or why it is not connected. **Manage** opens the card: the command Stage runs, the version, the config folder, the login, and whether sessions keep running when Stage restarts. **Check connection** runs the checks again.
+
+```sh
+stage harness claude
+```
+
+prints the same, with the next step when something is wrong. Details: [Connections reference](/docs/reference/connections#claude-code).
+
+## Limits
+
+- Images on the prompt are not sent to Claude Code sessions.
+- A worktree always starts from the checkout's current commit: no predecessor branch or other base.
+- Questions, approvals and follow-ups are answered in Claude, not in Stage.
+- Not in Docker, and not on worker machines yet.
+
+## Next steps
+
+- [Sessions and references](/docs/concepts/sessions): what Stage keeps from a session.
+- [Connections](/docs/concepts/connections): connections, machines and the status button.
+- [Agents that queue work](/docs/guides/agents): let Claude add tasks and notes to Stage from inside its sessions.

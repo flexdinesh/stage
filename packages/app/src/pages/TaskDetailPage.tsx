@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork, useTask } from "../api/queries.ts";
-import { useSessionDestination } from "../lib/hostState.ts";
+import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
+import { SessionActionButton } from "../components/SessionAction.tsx";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
@@ -22,7 +23,6 @@ import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.t
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
-  AppButton,
   Button,
   Chip,
   CopyButton,
@@ -207,23 +207,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
   // A live connection that cannot launch now (disconnected, offline, unreachable, no workspace): Start stays, disabled.
   const block = startable ? launchGate(task) : null;
   const lockedHint = retired ? retiredHint(kindName(task.harness)) : block?.reason;
-  const appUrl = useSessionDestination()(task);
-  // A harness without a destination to open may offer a command that resumes the session in its own client.
-  const resume = appUrl === null ? resumeCommand(task) : null;
-  const phoneBar = appUrl !== null || resume !== null || stoppable;
+  // Open in the harness, or (a harness without a destination to open) copy the command that resumes it in its own client.
+  const action = useSessionAction()(task);
+  const phoneBar = action !== null || stoppable;
 
-  const openInApp = (variant: "primary" | "secondary", className?: string) =>
-    appUrl === null ? (
-      resume === null ? null : (
-        <span className={className}>
-          <CopyButton text={resume} label="Copy resume command" />
-        </span>
-      )
-    ) : (
-      <AppButton href={appUrl} variant={variant} {...(className === undefined ? {} : { className })}>
-        Open in {kindName(task.harness)}
-      </AppButton>
-    );
+  const openInApp = (variant: "primary" | "secondary", className?: string) => (
+    <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} {...(className === undefined ? {} : { className })} />
+  );
 
   const stopButton = (className?: string) => (
     <Button busy={stop.isPending} disabled={retired} title={lockedHint} onClick={() => stop.mutate()} className={className}>
@@ -274,8 +264,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
-          <Alert tone="need" actions={appUrl === null && resume === null ? undefined : openInApp("primary", "max-md:hidden")}>
-            {kindName(task.harness)} needs input
+          <Alert tone="need" actions={action === null ? undefined : openInApp("primary", "max-md:hidden")}>
+            {kindName(task.harness)} needs input{action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : null}
           </Alert>
         ) : null}
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}

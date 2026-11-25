@@ -152,9 +152,9 @@ func (s *Service) install(bin, identity string) {
 
 func (s *Service) notFound() string {
 	if s.saved.Binary != "" {
-		return fmt.Sprintf("Stage can't find %s. Check the Claude command above.", s.saved.Binary)
+		return fmt.Sprintf("Stage can't find %s. Check the Claude command setting.", s.saved.Binary)
 	}
-	return "Stage can't find the claude command. Install Claude Code, or enter its full path above."
+	return "Stage can't find the claude command. Install Claude Code, or set the Claude command to its full path."
 }
 
 // check runs the CLI checks: the command, its version and its login. It
@@ -254,7 +254,9 @@ func (s *Service) Disconnect(ctx context.Context) error {
 }
 
 // Configure applies {"binary": string|null}; null resets to the default
-// lookup. A connected adapter moves to the new command.
+// lookup. A set-up connection moves to the new command: its adapter is
+// (re)installed when the command is found (also after a command that was
+// not), and removed when it is not.
 func (s *Service) Configure(ctx context.Context, raw json.RawMessage) error {
 	var in struct {
 		Binary *string `json:"binary"`
@@ -273,7 +275,7 @@ func (s *Service) Configure(ctx context.Context, raw json.RawMessage) error {
 		return err
 	}
 	s.saved, s.checked = next, false
-	if s.active {
+	if s.active || (s.id != 0 && !s.saved.Disconnected) {
 		if bin := s.find(); bin != "" {
 			s.install(bin, s.saved.ConfigDir)
 		} else {

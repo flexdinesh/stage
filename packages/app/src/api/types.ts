@@ -333,6 +333,8 @@ export interface HarnessDescriptor {
   reason?: string;
   /** This server has connection setup for it (/harnesses/{kind}/status and friends). */
   connectable: boolean;
+  /** How its sessions are named when tracking one (the Track session field's hint); absent: the generic hint. */
+  sessionHint?: string;
 }
 /** GET /api/harnesses/{kind}/status; D is the harness's own details (its panel's state). */
 export interface HarnessStatus<D = unknown> {

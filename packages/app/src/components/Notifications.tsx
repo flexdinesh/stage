@@ -12,13 +12,12 @@ import {
   useHarnesses,
 } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
-import { folderName, resumeCommand, sessionAction, type SessionAction } from "../lib/harnesses.ts";
+import { folderName, type SessionAction } from "../lib/harnesses.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import {
-  AppButton,
   Button,
   Chip,
   DisclosureChevron,
@@ -41,8 +40,8 @@ import {
   needEdgeClass,
   toneClass,
 } from "./ui.tsx";
-import { useSessionDestination } from "../lib/hostState.ts";
-import { CopyButton } from "./ui/copy.tsx";
+import { useSessionAction } from "../lib/hostState.ts";
+import { SessionActionButton } from "./SessionAction.tsx";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -242,30 +241,17 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
   );
 }
 
-/** A row's way to its session (null on a replaced connection: Stage no longer follows it). */
+/** A notification's or waiting session's action: Open in its harness, else its resume command; none once its connection was replaced. */
 function useNotificationAction() {
-  const destination = useSessionDestination();
+  const action = useSessionAction();
   const harnesses = useHarnesses();
-  return (n: Pick<Notification, "connectionId" | "links">): SessionAction | null =>
-    harnesses.retired(n.connectionId) ? null : sessionAction(destination(n), resumeCommand(n));
+  return (n: Pick<Notification, "connectionId" | "links">): SessionAction | null => (harnesses.retired(n.connectionId) ? null : action(n));
 }
 
-/**
- * Open in <harness>, or Copy resume command when the harness has only a resume command (Claude Code). A waiting session
- * with neither is answered where it runs: say so instead of offering nothing.
- */
-function SessionActionButton({ action, harness, waiting }: { action: SessionAction | null; harness: string; waiting: boolean }) {
-  const variant = waiting ? "primary" : "secondary";
-  switch (action?.kind) {
-    case "open":
-      return <AppButton small variant={variant} href={action.href}>Open in {harness}</AppButton>;
-    case "copy":
-      return <CopyButton text={action.command} label="Copy resume command" title={action.command} variant={variant} />;
-    case "none":
-      return waiting ? <span className="text-small text-muted">Answer in {harness}</span> : null;
-    default:
-      return null;
-  }
+/** Open in <harness> or Copy resume command, primary while waiting. A waiting session with neither is answered where it runs: say so instead of offering nothing. */
+function RowSessionButton({ action, harness, waiting }: { action: SessionAction | null; harness: string; waiting: boolean }) {
+  if (action === null) return waiting ? <span className="text-small text-muted">Answer in {harness}</span> : null;
+  return <SessionActionButton action={action} name={harness} small variant={waiting ? "primary" : "secondary"} />;
 }
 
 function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
@@ -318,7 +304,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} onStarted={onDismiss} /> : null}
           <ToastView n={n} onDismiss={onDismiss} />
-          <SessionActionButton action={action} harness={name(n.connectionId)} waiting={stillWaiting(n)} />
+          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={stillWaiting(n)} />
         </div>
       </div>
     </div>
@@ -580,7 +566,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {startable(n) ? <StartButton taskId={n.taskId} /> : null}
-          <SessionActionButton action={action} harness={name(n.connectionId)} waiting={waiting} />
+          <RowSessionButton action={action} harness={name(n.connectionId)} waiting={waiting} />
         </div>
       </div>
       <div id={historyId} hidden={!expanded}>
@@ -647,7 +633,7 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
  */
 function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTrack: ((session: SessionRef) => void) | undefined }) {
   const action = useNotificationAction()(session);
-  const { name } = useHarnesses();
+  const { name, retired } = useHarnesses();
   const harness = name(session.connectionId);
   const place = session.projectTitle ?? folderName(session.directory) ?? harness;
   return <div className={cx(needEdgeClass(true), "px-3 py-row")}>
@@ -658,14 +644,14 @@ function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTra
     <div className="mt-1 flex items-center justify-between gap-2.5">
       <Meta className="min-w-0 truncate" title={session.directory ?? place}>{place}</Meta>
       <div className="flex shrink-0 items-center gap-1.5">
-        {onTrack === undefined || action === null ? null : (
+        {onTrack === undefined || retired(session.connectionId) ? null : (
           <Button small title="Track this session as a Stage task" onClick={() => onTrack({ connectionId: session.connectionId, externalSessionId: session.externalSessionId })}>
             Track
           </Button>
         )}
-        <SessionActionButton action={action} harness={harness} waiting />
+        <RowSessionButton action={action} harness={harness} waiting />
       </div>
     </div>
-    {action?.kind === "copy" ? <code title={action.command} className="mt-1 block truncate font-mono text-meta text-muted">{action.command}</code> : null}
+    {action?.kind === "resume" ? <code title={action.command} className="mt-1 block truncate font-mono text-meta text-muted">{action.command}</code> : null}
   </div>;
 }

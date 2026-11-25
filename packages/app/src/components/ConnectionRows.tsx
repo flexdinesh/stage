@@ -6,7 +6,17 @@
 // Logic: lib/connectionRows.ts.
 import { useMemo, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
-import { useCodexStatus, useForgetConnection, useHarnesses, useOpenCodeStatus, usePreferences, useScopedHarnessDescriptors, useT3Status } from "../api/queries.ts";
+import {
+  useCodexStatus,
+  useDisconnectHarness,
+  useForgetConnection,
+  useHarnesses,
+  useHarnessStatus,
+  useOpenCodeStatus,
+  usePreferences,
+  useScopedHarnessDescriptors,
+  useT3Status,
+} from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { codexRowDetail, codexSummary, openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
@@ -15,7 +25,8 @@ import { forgetPrompt, usageText } from "../lib/harnesses.ts";
 import { machineScopeId } from "../lib/machines.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
 import { CODEX_DISCONNECT_PROMPT, useDisconnectCodex } from "./CodexSetup.tsx";
-import { ConnectionSetup, useDisconnectHarness, useHarnessStatus } from "./HarnessConnections.tsx";
+import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeChip, claudeRowDetail } from "../lib/claude.ts";
+import { ConnectionSetup } from "./HarnessConnections.tsx";
 import { IconStep } from "./icons.tsx";
 import { OPENCODE_DISCONNECT_PROMPT, useDisconnectOpenCode } from "./OpenCodeSetup.tsx";
 import { useDisconnectT3 } from "./T3Setup.tsx";
@@ -114,6 +125,8 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
             return <OpenCodeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           case "codex":
             return <CodexRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
+          case CLAUDE:
+            return <ClaudeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
           default:
             return <GenericRow key={r.id} descriptor={descriptor} machine={machine} onManage={manage} isDefault={isDefault} />;
         }
@@ -322,6 +335,33 @@ function CodexRow({ name, machine, onManage, isDefault }: { name: string; machin
           ? null
           : {
               prompt: CODEX_DISCONNECT_PROMPT,
+              busy: disconnect.isPending,
+              error: disconnect.error,
+              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+              reset: disconnect.reset,
+            }
+      }
+    />
+  );
+}
+
+function ClaudeRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
+  const status = useHarnessStatus(CLAUDE);
+  const disconnect = useDisconnectHarness(CLAUDE);
+  const s = status.data;
+  return (
+    <ConnectionRow
+      name={name}
+      machine={machine}
+      detail={s === undefined ? (status.error?.message ?? "") : claudeRowDetail(s)}
+      chip={s === undefined ? { tone: "idle", label: "checking" } : claudeChip(s)}
+      onManage={onManage}
+      isDefault={isDefault}
+      disconnect={
+        s === undefined || !s.configured
+          ? null
+          : {
+              prompt: CLAUDE_DISCONNECT_PROMPT,
               busy: disconnect.isPending,
               error: disconnect.error,
               run: (done) => disconnect.mutate(undefined, { onSuccess: done }),

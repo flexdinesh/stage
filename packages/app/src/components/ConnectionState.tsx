@@ -2,7 +2,8 @@
 // tones, read on the connection's machine) and, while Settings can fix a problem there, a link to it.
 // Logic: lib/connections.ts (connectionGate, liveChip).
 import type { ReactNode } from "react";
-import { useCodexStatus, useHarnesses, useMachines, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { useCodexStatus, useHarnessStatus, useHarnesses, useMachines, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
+import { CLAUDE, claudeStatusView } from "../lib/claude.ts";
 import type { Harness } from "../api/types.ts";
 import {
   codexErrorText,
@@ -22,7 +23,6 @@ import {
 } from "../lib/connections.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { MachineScope } from "./ConnectionRows.tsx";
-import { useHarnessStatus } from "./HarnessConnections.tsx";
 import { Chip, TextLink } from "./ui.tsx";
 
 /** The Harness row's value: `children` (the name) with the connection's state chip, and "Fix in Settings" under it on a problem. */
@@ -57,6 +57,8 @@ function LiveState({ harness, name }: { harness: Harness; name: string }) {
       return <OpenCodeState />;
     case "codex":
       return <CodexState />;
+    case CLAUDE:
+      return <ClaudeState name={name} />;
     default:
       return <GenericState harness={harness} name={name} />;
   }
@@ -75,6 +77,12 @@ function OpenCodeState() {
 function CodexState() {
   const read = statusRead(useCodexStatus());
   return <State chip={liveChip(codexSummary(read), read.data === undefined ? "" : codexRowDetail(read.data), codexErrorText(read))} />;
+}
+
+function ClaudeState({ name }: { name: string }) {
+  const read = statusRead(useHarnessStatus(CLAUDE));
+  const view = claudeStatusView(read, name);
+  return <State chip={liveChip(view.summary, view.detail.lines.join(" · "), view.detail.error)} />;
 }
 
 function GenericState({ harness, name }: { harness: Harness; name: string }) {

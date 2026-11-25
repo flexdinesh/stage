@@ -11,7 +11,7 @@ const routes = [
     (p) => `docs/concepts/${p}/index.html`,
   ),
   ...['desktop', 'server', 'workers'].map((p) => `docs/usage/${p}/index.html`),
-  ...['first-tree', 'agents', 'phone'].map((p) => `docs/guides/${p}/index.html`),
+  ...['first-tree', 'agents', 'phone', 'claude-code'].map((p) => `docs/guides/${p}/index.html`),
   ...['install', 'connections', 'configuration', 'security', 'app', 'cli', 'mcp'].map(
     (p) => `docs/reference/${p}/index.html`,
   ),

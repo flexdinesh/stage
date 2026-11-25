@@ -122,7 +122,7 @@ Agents are found by their command on `PATH` or their config directory. The skill
 | `stage harness [list]` | harnesses this server knows, its machine profile, which can run here |
 | `stage harness KIND [status]` | KIND's connection: state, settings, actions |
 | `stage harness KIND set FIELD=VALUE... [--reset FIELD]...` | save settings |
-| `stage harness KIND run ACTION [FIELD=VALUE...]` | `t3`: `auto-pair`, `pair code=CODE`; `opencode`: `connect-local`, `pair link=LINK`; `codex`: `connect` |
+| `stage harness KIND run ACTION [FIELD=VALUE...]` | `t3`: `auto-pair`, `pair code=CODE`; `opencode`: `connect-local`, `pair link=LINK`; `codex`: `connect`; `claude`: `connect` |
 | `stage harness KIND disconnect` | forget the credentials (tasks stay) |
 
 Fields and actions: [Connections](/docs/reference/connections).
@@ -205,7 +205,7 @@ Commands that create tasks, write notes, adopt sessions or show context know the
 
 1. `--caller-connection ID --caller-session ID`
 2. `STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>`
-3. the harness's session variable (`T3CODE_THREAD_ID` for T3, `OPENCODE_SESSION_ID` for OpenCode, `CODEX_THREAD_ID` for Codex), on that harness's connection on this machine. The CLI and `stage mcp` run as the agent's child processes, so they read it themselves.
+3. the harness's session variable (`T3CODE_THREAD_ID` for T3, `OPENCODE_SESSION_ID` for OpenCode, `CODEX_THREAD_ID` for Codex, `CLAUDE_CODE_SESSION_ID` for Claude Code; inside a Claude process T3 runs, T3's wins), on that harness's connection on this machine. The CLI and `stage mcp` run as the agent's child processes, so they read it themselves.
 
 `stage context` shows the session and where it came from. Without a session, supply a project or journal owner explicitly.
 

@@ -33,6 +33,7 @@ export function AdoptSessionDrawer({
   const [chosen, setConnection] = useState(initial === undefined ? "" : String(initial.connectionId));
   const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
+  const sessionHint = harnessNames.descriptor(harnessNames.harness(Number(connection)) ?? "")?.sessionHint;
   const [projectId, setProjectId] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const invalidate = useInvalidateWork();
@@ -134,7 +135,7 @@ export function AdoptSessionDrawer({
               />
             )}
           </Field>
-          <Field label="Session link or ID">
+          <Field label="Session link or ID" {...(sessionHint === undefined || sessionHint === "" ? {} : { hint: sessionHint })}>
             {(id) => (
               <Input
                 id={id}

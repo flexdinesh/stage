@@ -47,6 +47,7 @@ Two homes, no shared or generated content between them:
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy) | `/docs/usage/server`, `/docs/guides/phone` |
 | [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), [storage.md](storage.md) (engines), `examples/kubernetes/`, `examples/postgres/` | `/docs/usage/workers` |
 | [features.md](features.md), [api.md](api.md) (MCP, tree rules) | `/docs/guides/first-tree`, `/docs/guides/agents` |
+| [features.md](features.md) (Claude Code), [execution.md](execution.md#claude-code-adapter) (Claude Code adapter), [api.md](api.md) (Claude setup, adopt) | `/docs/guides/claude-code` |
 | [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/reference/install` |
 | [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 and OpenCode pairing) | `/docs/reference/connections` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), [storage.md](storage.md) (engines), `.env.example` | `/docs/reference/configuration` |

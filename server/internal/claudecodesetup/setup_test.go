@@ -159,6 +159,37 @@ func TestConnectFailures(t *testing.T) {
 	}
 }
 
+// A connected Claude whose command went missing recovers when the Claude
+// command is fixed: the adapter comes back and the status is connected
+// again, without another Connect.
+func TestConfigureRecoversAMissingCommand(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	s := e.service(t)
+	if _, err := s.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id := s.Summary().ConnectionID
+	if err := s.Configure(ctx, []byte(`{"binary":"`+filepath.Join(e.f.Home, "missing")+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(ctx, true); st.State != claudecodesetup.StateNotFound || st.Connected || !st.Configured {
+		t.Fatalf("missing command: %+v", st)
+	}
+	if _, ok := e.local.Adapter(id); ok {
+		t.Fatal("adapter kept for a missing command")
+	}
+	if err := s.Configure(ctx, []byte(`{"binary":"`+e.f.Bin+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(ctx, true); st.State != claudecodesetup.StateConnected || !st.Connected {
+		t.Fatalf("fixed command: %+v", st)
+	}
+	if _, ok := e.local.Adapter(id); !ok {
+		t.Fatal("no adapter after the command was fixed")
+	}
+}
+
 // The connector speaks the generic setup contract.
 func TestConnector(t *testing.T) {
 	e := newEnv(t)

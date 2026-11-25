@@ -15,12 +15,13 @@ Stage does not run agents itself. It hands each task to a **harness**, a service
 | T3 Code | T3's MCP endpoint, with T3's OAuth and upload endpoints |
 | OpenCode V2 | OpenCode's V2 HTTP API (tested with 2.3.0) |
 | Codex | The Codex app-server daemon on the computer where Stage runs |
+| Claude Code | The `claude` command on the computer Stage runs on (background sessions) |
 
 The harness keeps what it owns: models, workspaces and worktrees, conversations and its own UI. Stage keeps tasks, trees, journals, acceptance and handoff.
 
 ## One service, one machine
 
-Each harness instance is its own connection: a T3 environment, an OpenCode service, or a Codex home. A machine has at most one active connection per harness, so one T3, one OpenCode and one Codex. With workers, each machine has its own.
+Each harness instance is its own connection: a T3 environment, an OpenCode service, a Codex home or a Claude Code config folder. A machine has at most one active connection per harness, so one T3, one OpenCode, one Codex and one Claude Code. With workers, each machine has its own.
 
 ## Connecting
 
@@ -29,6 +30,7 @@ A new install has no connections. Until one is set up, the Dashboard shows **Con
 - **T3**: pair Stage with T3, in one click when T3 runs on the same machine, else with a code from `t3 pair`. T3 counts as connected only once paired; before that Stage never contacts it.
 - **OpenCode**: click **Connect** for the service on the same machine, or paste an `opencode pair` link from another machine.
 - **Codex**: click **Connect**. See [Codex](#codex).
+- **Claude Code**: click **Connect**. Stage checks the `claude` command and Claude's own login. Only on the computer Stage runs on (the desktop app, or `stage serve --local-harnesses`); see the [Claude Code guide](/docs/guides/claude-code).
 
 Setup details, addresses and tokens: [Connections reference](/docs/reference/connections).
 
@@ -72,4 +74,5 @@ A connection can complete a task for you. When a run succeeds and its T3 thread 
 
 - [Tasks](/docs/concepts/tasks): what runs on a connection.
 - [Machines](/docs/concepts/machines): connections on more than one computer.
-- [Connections reference](/docs/reference/connections): pair T3, connect OpenCode and Codex.
+- [Connections reference](/docs/reference/connections): pair T3, connect OpenCode, Codex and Claude Code.
+- [Claude Code](/docs/guides/claude-code): run tasks as Claude Code background sessions.

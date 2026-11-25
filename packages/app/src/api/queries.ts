@@ -6,6 +6,7 @@ import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx
 import { codexStatusView, harnessStatusView, openCodeStatusView, statusRead, t3StatusView, type StatusRead, type StatusView } from "../lib/connections.ts";
 import { parseCodexStatus } from "../lib/codex.ts";
 import { firstSyncLanded } from "../lib/onboarding.ts";
+import { claudeStatusView } from "../lib/claude.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
@@ -194,6 +195,35 @@ const openCodeStatusQuery = (api: HarnessApi, key: readonly unknown[]) => queryO
 export const harnessStatusQuery = (api: HarnessApi, key: readonly unknown[], kind: Harness) =>
   queryOptions({ queryKey: key, queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
 
+/** A generic harness's status on the harness scope's machine (shared by its card and its Settings row). */
+export function useHarnessStatus(kind: Harness) {
+  const api = useHarnessApi();
+  return useQuery(harnessStatusQuery(api, useScopedKey()([...keys.harnessStatus, kind]), kind));
+}
+
+/** Disconnects a generic harness on the harness scope's machine. */
+export function useDisconnectHarness(kind: Harness, onDone?: () => void) {
+  const api = useHarnessApi();
+  const apply = useApplyHarnessStatus(kind);
+  return useMutation({
+    mutationFn: () => api.disconnectHarness(kind),
+    onSuccess: (s) => {
+      onDone?.();
+      apply(s);
+    },
+  });
+}
+
+/** Puts a setup reply's status in the cache and refreshes what a connection change affects. */
+export function useApplyHarnessStatus(kind: string) {
+  const qc = useQueryClient();
+  const scoped = useScopedKey();
+  return (s: HarnessStatus) => {
+    qc.setQueryData(scoped([...keys.harnessStatus, kind]), s);
+    void invalidateConnectionChange(qc, scoped);
+  };
+}
+
 /** Codex's setup status on the harness scope's machine. */
 export function useCodexStatus() {
   const api = useHarnessApi();
@@ -261,10 +291,12 @@ const GENERIC_STATUS: StatusSlot<HarnessStatus> = {
 };
 
 /** Harness-specific status reads by kind: the only place status reading names a harness. */
-const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus>; codex: StatusSlot<CodexStatus> } = {
+const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus>; codex: StatusSlot<CodexStatus>; claude: StatusSlot<HarnessStatus> } = {
   t3: { query: (m, _kind, qc) => t3StatusQuery(m.api, m.key(keys.t3Status), qc), view: (read) => t3StatusView(read) },
   opencode: { query: (m) => openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), view: (read) => openCodeStatusView(read) },
   codex: { query: (m) => codexStatusQuery(m.api, m.key(keys.codexStatus)), view: (read) => codexStatusView(read) },
+  // The generic status (same query and cache as its Settings row), read as Claude Code's.
+  claude: { query: GENERIC_STATUS.query, view: (read, _kind, name) => claudeStatusView(read, name) },
 };
 
 const hasStatusSlot = (kind: Harness): boolean => Object.hasOwn(STATUS_SLOTS, kind);
@@ -285,6 +317,7 @@ export function useConnectionStatuses<C extends MachineConnection>(
     ...useSlotStatuses(STATUS_SLOTS.t3, of("t3"), every, name),
     ...useSlotStatuses(STATUS_SLOTS.opencode, of("opencode"), every, name),
     ...useSlotStatuses(STATUS_SLOTS.codex, of("codex"), every, name),
+    ...useSlotStatuses(STATUS_SLOTS.claude, of("claude"), every, name),
     ...useSlotStatuses(
       GENERIC_STATUS,
       connections.filter((c) => !hasStatusSlot(c.harness)),

@@ -33,6 +33,7 @@ const T3Originator = "T3 Code"
 // turn. An archived thread may complete its task.
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "Codex", Hosting: harness.Hosted, StableIdentity: true,
+	SessionHint: "A thread ID, or a pasted codex resume command.",
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in Codex",

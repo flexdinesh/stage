@@ -3,8 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { usePlatform } from "../platform/context.tsx";
 import type { HostServerEntry, HostServers, HostState } from "../platform/index.ts";
-import { sessionLinks } from "./harnesses.ts";
-
+import { sessionAction, sessionLinks } from "./harnesses.ts";
 
 const unsubscribed = () => {};
 
@@ -32,6 +31,12 @@ export function useSessionDestination() {
     const target = sessionLinks(links);
     return target === null ? null : hostLinks.executionDestination(target);
   }, [hostLinks]);
+}
+
+/** A session's action: open the host's destination, else copy its resume command (harnesses.ts sessionAction). */
+export function useSessionAction() {
+  const destination = useSessionDestination();
+  return useCallback((links: Parameters<typeof sessionLinks>[0]) => sessionAction(destination(links), links), [destination]);
 }
 
 export interface HostServerList {

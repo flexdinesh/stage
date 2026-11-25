@@ -144,6 +144,16 @@ test("a session with only a resume command offers it to copy, never on a replace
   assert.equal(resumeCommand({ links: { web: "http://oc/s" } }), null);
 });
 
+test("session action opens the host's destination, else offers the resume command, else nothing", () => {
+  const claude = { links: { command: "claude attach 1a2b3c4d" } };
+  assert.deepEqual(sessionAction("t3code://threads/t-1", claude), { kind: "open", href: "t3code://threads/t-1" });
+  assert.deepEqual(sessionAction(null, claude), { kind: "resume", command: "claude attach 1a2b3c4d" });
+  // A replaced connection is history: no resume command either.
+  assert.equal(sessionAction(null, { ...claude, connectionActive: false }), null);
+  assert.equal(sessionAction(null, { links: { web: "http://oc/s" } }), null);
+  assert.equal(sessionAction(null, {}), null);
+});
+
 test("retired notice names the harness and the instance Stage no longer uses", () => {
   assert.equal(
     retiredNotice(task(), "T3"),
@@ -283,11 +293,12 @@ test("session and workspace endpoints take the connection id", async () => {
 });
 
 test("a session row opens the host destination, else copies the resume command, else offers nothing", () => {
-  assert.deepEqual(sessionAction("t3code://threads/env/t", "ignored"), { kind: "open", href: "t3code://threads/env/t" });
-  assert.deepEqual(sessionAction(null, "claude attach 1a2b3c4d"), { kind: "copy", command: "claude attach 1a2b3c4d" });
-  assert.deepEqual(sessionAction("", "claude attach 1a2b3c4d"), { kind: "copy", command: "claude attach 1a2b3c4d" });
-  assert.deepEqual(sessionAction(null, null), { kind: "none" });
-  assert.deepEqual(sessionAction(null, ""), { kind: "none" });
+  const claude = { links: { command: "claude attach 1a2b3c4d" } };
+  assert.deepEqual(sessionAction("t3code://threads/env/t", claude), { kind: "open", href: "t3code://threads/env/t" });
+  assert.deepEqual(sessionAction(null, claude), { kind: "resume", command: "claude attach 1a2b3c4d" });
+  assert.deepEqual(sessionAction("", claude), { kind: "resume", command: "claude attach 1a2b3c4d" });
+  assert.equal(sessionAction(null, { links: {} }), null);
+  assert.equal(sessionAction(null, { links: { command: "" } }), null);
 });
 
 test("folderName is a folder path's last segment", () => {
