@@ -1,0 +1,29 @@
+{
+  "state": "working",
+  "detail": "starting\u2026",
+  "tempo": "active",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "bg",
+  "respawnFlags": [
+    "-n",
+    "Stage working probe 2",
+    "--model",
+    "haiku"
+  ],
+  "providerEnv": {
+    "CLAUDE_BG_SESSION_CREDENTIAL": "env-login"
+  },
+  "intent": "Without using any tools, write a 400 word story about a lighthouse.\n\nstage-launch:req-working2",
+  "name": "Stage working probe 2",
+  "nameSource": "user",
+  "sessionId": "c6b773af-da92-49f8-a4dc-a5f304d5ba0c",
+  "resumeSessionId": "c6b773af-da92-49f8-a4dc-a5f304d5ba0c",
+  "daemonShort": "c6b773af",
+  "cwd": "/home/user/src/spike/plain",
+  "createdAt": "2026-11-25T03:19:46.451Z",
+  "updatedAt": "2026-11-25T03:19:46.451Z",
+  "firstTerminalAt": null,
+  "backend": "daemon"
+}

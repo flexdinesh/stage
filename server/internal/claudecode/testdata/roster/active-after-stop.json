@@ -1,0 +1,109 @@
+[
+  {
+    "pid": 2113338,
+    "cwd": "/home/user/.t3/worktrees/stage/fd8db62f-9b3d25a88e365a6a",
+    "kind": "interactive",
+    "startedAt": 1795573758525,
+    "sessionId": "9c1cd302-2d47-4c82-9e03-89ed384cef8b",
+    "name": "Claude harness: spike + ADR 0003",
+    "status": "busy"
+  },
+  {
+    "pid": 2149155,
+    "cwd": "/home/user/.t3/worktrees/stage/97531423-693e4d917a1e131b",
+    "kind": "interactive",
+    "startedAt": 1795575238735,
+    "sessionId": "b1831473-c45f-4c46-bf39-5f1add4b5c5b",
+    "name": "Codex harness via app-server",
+    "status": "waiting",
+    "waitingFor": "input needed"
+  },
+  {
+    "pid": 2158018,
+    "id": "385d212a",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795575766019,
+    "sessionId": "385d212a-048c-44cd-8d6a-9e04c72bbe46",
+    "name": "reap probe ok",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2157818,
+    "id": "62d9077f",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795575807087,
+    "sessionId": "62d9077f-ad27-4418-9dd1-38fd5ec2013f",
+    "name": "r2 bg seed",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2165809,
+    "id": "c83c2203",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576360856,
+    "sessionId": "c83c2203-ad7e-4930-a862-42d321338731",
+    "name": "env-variable-dump-check",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2167561,
+    "id": "b7b5415c",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576438071,
+    "sessionId": "b7b5415c-948a-4453-b4cc-aeabcf678db9",
+    "name": "envprobe env-2 stage-marker",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2168279,
+    "id": "ea01826d",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576454807,
+    "sessionId": "ea01826d-693f-49d3-ab6c-be963ab5d988",
+    "name": "copy probe r2 seed",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2168938,
+    "id": "c8ed5945",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576474108,
+    "sessionId": "c8ed5945-31f6-40a1-bf45-44ccacb084c2",
+    "name": "resumed after stop",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2169569,
+    "id": "19e6075e",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576495167,
+    "sessionId": "19e6075e-2603-4533-a63e-936b7bc1e5dc",
+    "name": "touch blocked file",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 2171393,
+    "id": "b4889af7",
+    "cwd": "/home/user/src/spike/plain",
+    "kind": "background",
+    "startedAt": 1795576611225,
+    "sessionId": "b4889af7-15e0-489c-8d5e-b99b9a214240",
+    "name": "Stage task 999",
+    "status": "idle",
+    "state": "done"
+  }
+]

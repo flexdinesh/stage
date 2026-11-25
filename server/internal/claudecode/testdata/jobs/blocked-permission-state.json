@@ -1,0 +1,41 @@
+{
+  "state": "working",
+  "detail": "Creating blocked3.txt in current directory",
+  "tempo": "blocked",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "tokens": 88,
+  "needs": "approve Bash: touch blocked3.txt",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 233845,
+  "linkScanPath": "/home/user/.claude/projects/-home-user-src-spike-plain/caf89456-0d11-4f96-96bb-b6d89889ed3a.jsonl",
+  "template": "bg",
+  "respawnFlags": [
+    "-n",
+    "Stage blocked probe",
+    "--permission-mode",
+    "manual",
+    "--model",
+    "haiku"
+  ],
+  "intent": "Use the Bash tool to run exactly: touch blocked3.txt. Then reply done.\n\nstage-launch:req-blocked3",
+  "name": "Stage blocked probe",
+  "nameSource": "user",
+  "sessionId": "caf89456-0d11-4f96-96bb-b6d89889ed3a",
+  "resumeSessionId": "caf89456-0d11-4f96-96bb-b6d89889ed3a",
+  "daemonShort": "caf89456",
+  "cliVersion": "2.1.332",
+  "cwd": "/home/user/src/spike/plain",
+  "providerEnv": {
+    "CLAUDE_BG_SESSION_CREDENTIAL": "env-login"
+  },
+  "backend": "daemon",
+  "createdAt": "2026-11-25T03:17:39.799Z",
+  "updatedAt": "2026-11-25T03:17:41.817Z",
+  "firstTerminalAt": null
+}
