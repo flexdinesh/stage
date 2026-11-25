@@ -98,6 +98,22 @@ func (r *roster) list(ctx context.Context, fresh bool) ([]Entry, error) {
 	if !fresh && !r.at.IsZero() && r.now().Sub(r.at) < r.ttl {
 		return r.entries, nil
 	}
+	return r.load(ctx)
+}
+
+// listSince is the session list as read at or after at: concurrent
+// callers woken by one change share one read.
+func (r *roster) listSince(ctx context.Context, at time.Time) ([]Entry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.at.IsZero() && !r.at.Before(at) {
+		return r.entries, nil
+	}
+	return r.load(ctx)
+}
+
+// load reads the list from the CLI (r.mu held).
+func (r *roster) load(ctx context.Context) ([]Entry, error) {
 	call, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	res, err := r.cli.Run(call, "", "agents", "--json", "--all")

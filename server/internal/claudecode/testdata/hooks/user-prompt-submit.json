@@ -1,0 +1,11 @@
+{
+  "session_id": "aa583336-6a62-4182-889a-55d74d490cfb",
+  "transcript_path": "/home/user/.claude/projects/-home-user-src-spike/aa583336-6a62-4182-889a-55d74d490cfb.jsonl",
+  "cwd": "/home/user/src/spike",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-src-spike/SESSION/scratchpad",
+  "prompt_id": "82d1f856-3850-42f6-9c5a-eba8e2ee3a18",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Reply with exactly: hello probe. Do not use tools.",
+  "session_title": "hookprobe1"
+}

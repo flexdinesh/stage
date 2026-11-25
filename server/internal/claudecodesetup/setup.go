@@ -70,6 +70,10 @@ type Options struct {
 	Scope bool
 	// CheckTimeout bounds each CLI check (default 20s).
 	CheckTimeout time.Duration
+	// StateDir holds the hook settings file Claude sessions Stage launches
+	// read (claudecode.HooksFile): <data dir>/claude. Empty: no push, polling
+	// alone follows sessions.
+	StateDir string
 	// NewAdapter builds the adapter (nil: claudecode.New); tests shorten
 	// its timings.
 	NewAdapter func(claudecode.Options) execution.Adapter
@@ -84,6 +88,9 @@ type Details struct {
 	ConfigDirectory string `json:"configDirectory,omitempty"`
 	LoggedIn        bool   `json:"loggedIn"`
 	Scope           bool   `json:"scope"`
+	// Events is how Stage hears about the sessions it launches (set up
+	// connections only).
+	Events *claudecode.EventsStatus `json:"events,omitempty"`
 }
 
 // Service is Claude Code's setup on one machine.
@@ -100,6 +107,14 @@ type Service struct {
 	state   string
 	reason  string
 	details Details
+	// life is the server's (or worker's) lifetime: the hook listener closes
+	// with it.
+	life context.Context
+	// hooks is the machine's hook receiver, opened with the first adapter;
+	// hooksErr says why it is not (once tried).
+	hooks      *claudecode.Hooks
+	hooksTried bool
+	hooksErr   string
 }
 
 // New loads the setup and, when Claude Code is connected here, installs
@@ -125,7 +140,7 @@ func New(ctx context.Context, p Ports, o Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{ports: p, opts: o, log: o.Logger, saved: saved, id: id}
+	s := &Service{ports: p, opts: o, log: o.Logger, saved: saved, id: id, life: ctx}
 	if id != 0 && !saved.Disconnected {
 		if bin := s.find(); bin != "" {
 			s.install(bin, saved.ConfigDir)
@@ -146,8 +161,58 @@ func (s *Service) cli(bin string) *claudecode.CLI {
 
 // install puts the adapter for bin on the connection (s.mu held or setup).
 func (s *Service) install(bin, identity string) {
-	s.ports.Install(s.id, s.id, s.opts.NewAdapter(claudecode.Options{Connection: s.id, CLI: s.cli(bin), Identity: identity, Logger: s.log}))
+	s.ports.Install(s.id, s.id, s.adapter(s.id, bin, identity))
 	s.active = true
+}
+
+// adapter builds the connection's adapter on the machine's hook receiver,
+// which it opens first if it was never tried; the previous adapter's
+// subscription ends (s.mu held or setup).
+func (s *Service) adapter(conn int64, bin, identity string) execution.Adapter {
+	s.openHooks()
+	if s.hooks != nil {
+		s.hooks.Reset()
+	}
+	return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(bin), Identity: identity, Hooks: s.hooks, Logger: s.log})
+}
+
+// openHooks starts the hook receiver once; it closes with s.life. A
+// failure leaves launches without hooks (s.mu held or setup).
+func (s *Service) openHooks() {
+	if s.hooksTried {
+		return
+	}
+	s.hooksTried = true
+	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: s.opts.StateDir, Logger: s.log})
+	if err != nil {
+		s.hooksErr = err.Error() + " It checks Claude Code every few seconds instead."
+		s.log.Warn("claude hooks unavailable; polling only", "err", err)
+		return
+	}
+	s.hooks = h
+	context.AfterFunc(s.life, func() { _ = h.Close() })
+}
+
+// uninstall removes the connection's adapter and ends its push
+// subscription (s.mu held).
+func (s *Service) uninstall() {
+	if s.hooks != nil {
+		s.hooks.Reset()
+	}
+	s.ports.Install(s.id, s.id, nil)
+}
+
+// events is details.events: nil before the connection is set up (s.mu
+// held).
+func (s *Service) events(sum harness.Summary) *claudecode.EventsStatus {
+	switch {
+	case !sum.Configured || !s.hooksTried:
+		return nil
+	case s.hooks != nil:
+		st := s.hooks.Status()
+		return &st
+	}
+	return &claudecode.EventsStatus{Mode: claudecode.ModePolling, Reason: s.hooksErr}
 }
 
 func (s *Service) notFound() string {
@@ -225,7 +290,7 @@ func (s *Service) Connect(ctx context.Context) (harness.Result, error) {
 	s.saved = next
 	res, err := machine.Connect(ctx, s.ports.Identity, s.ports.Install, claudecode.Kind, au.ConfigDirectory, label(au.ConfigDirectory, s.opts.Home), func(conn int64) execution.Adapter {
 		s.id = conn
-		return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(d.Binary), Identity: au.ConfigDirectory})
+		return s.adapter(conn, d.Binary, au.ConfigDirectory)
 	})
 	if err != nil {
 		return res, err
@@ -247,7 +312,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	}
 	s.saved = next
 	if s.active {
-		s.ports.Install(s.id, s.id, nil)
+		s.uninstall()
 	}
 	s.active, s.state, s.reason = false, StateDisconnected, ""
 	return nil
@@ -279,7 +344,7 @@ func (s *Service) Configure(ctx context.Context, raw json.RawMessage) error {
 		if bin := s.find(); bin != "" {
 			s.install(bin, s.saved.ConfigDir)
 		} else {
-			s.ports.Install(s.id, s.id, nil)
+			s.uninstall()
 			s.active, s.state, s.reason = false, StateNotFound, s.notFound()
 		}
 	}
@@ -328,6 +393,8 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 			state, reason = StateDisconnected, ""
 		}
 	}
+	details := s.details
+	details.Events = s.events(sum)
 	src := "saved"
 	if s.saved.Binary == "" {
 		src = "default"
@@ -338,6 +405,6 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 		Reason:  reason,
 		Fields:  []harness.FieldState{{ID: "binary", Value: s.saved.Binary, Set: s.saved.Binary != "", Source: src}},
 		Actions: []harness.ActionState{{ID: claudecode.ActionConnect, Available: true}},
-		Details: s.details,
+		Details: details,
 	}
 }

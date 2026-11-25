@@ -37,9 +37,11 @@ type Entry struct {
 }
 
 // Session is a listed session; Removed ones are no longer listed (rm).
+// Settings is the --settings file it was launched with (its hooks).
 type Session struct {
 	Entry
-	Removed bool `json:"removed,omitempty"`
+	Removed  bool   `json:"removed,omitempty"`
+	Settings string `json:"settings,omitempty"`
 }
 
 // Call is one invocation of the fake.

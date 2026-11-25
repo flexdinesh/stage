@@ -39,10 +39,11 @@ type Attached struct {
 }
 
 // Args are the CLI arguments of a background launch (ADR 0005 decision 2).
-// The prompt follows "--", so a prompt starting with "-" is not a flag; the
-// image folder's --add-dir comes right before it, since the flag takes
-// several folders.
-func Args(in execution.Intent, att Attached) []string {
+// settings is the hook settings file (HooksFile; "" for none). The prompt
+// follows "--", so a prompt starting with "-" is not a flag; the image
+// folder's --add-dir comes right before it, since the flag takes several
+// folders.
+func Args(in execution.Intent, att Attached, settings string) []string {
 	args := []string{"--bg"}
 	if t := strings.TrimSpace(in.Title); t != "" {
 		args = append(args, "-n", t)
@@ -60,6 +61,9 @@ func Args(in execution.Intent, att Attached) []string {
 	}
 	if in.Workspace.Kind == workspaceWorktree {
 		args = append(args, "-w", WorktreeName(in.RequestID))
+	}
+	if settings != "" {
+		args = append(args, "--settings", settings)
 	}
 	prompt := in.Prompt
 	if len(att.Paths) > 0 {
@@ -142,7 +146,11 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	}
 	call, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	res, err := a.cli.Launch(call, in.Directory, Args(in, att)...)
+	settings := ""
+	if a.hooks != nil {
+		settings = a.hooks.SettingsPath()
+	}
+	res, err := a.cli.Launch(call, in.Directory, Args(in, att, settings)...)
 	var start *StartError
 	if errors.As(err, &start) {
 		return reject(fmt.Sprintf("Stage can't run %s (%v). Check the Claude command in Settings.", a.cli.Bin, start.Err))

@@ -1,0 +1,9 @@
+{
+  "session_id": "e9455d86-e696-4452-8002-0a373629eec8",
+  "transcript_path": "/home/user/.claude/projects/-home-user-src-spike/e9455d86-e696-4452-8002-0a373629eec8.jsonl",
+  "cwd": "/home/user/src/spike",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-src-spike/SESSION/scratchpad",
+  "prompt_id": "8f8e16a4-44e5-49d2-a7a1-08f4a4b54a63",
+  "hook_event_name": "SessionEnd",
+  "reason": "other"
+}

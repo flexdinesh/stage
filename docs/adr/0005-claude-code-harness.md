@@ -8,6 +8,8 @@
   closure) and the "entry gone" row of decision 4.
 - **Extended** 2026-11-25 by #382: [cloud sessions](#cloud-sessions-claude---cloud-not-built)
   researched and not built.
+- **Amended** 2026-11-25 by #377: decision 16 (push via HTTP hooks),
+  evidence E9, the hooks approval route.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -144,6 +146,23 @@ them. 2, 3, 13 and 14 come from the evidence.
     below the workspace because Claude refuses an untrusted added folder
     ([E8](#e8-images)). A worktree session's cwd is its worktree, so the
     folder is added either way.
+16. **Push via HTTP hooks** (#377, [E9](#e9-hooks)). Every launch passes
+    `--settings <state dir>/hooks-settings.json`: Claude HTTP hooks for
+    `Stop`, `StopFailure`, `Notification`, `PermissionRequest`,
+    `SessionEnd` and `UserPromptSubmit`, posting to a Stage listener on
+    `127.0.0.1` with a bearer token from the file. A hook only wakes Stage:
+    it names the session, and the adapter reads the roster and transcript
+    again (retrying briefly until the roster shows the event's change),
+    then pushes that observation through `execution.EventSource`. The body
+    is never trusted for state (Stop cannot tell done from blocked; the
+    roster can), so a forged hook costs a read. Polling stays the
+    reconciliation: adopted sessions, copies (`--resume` of a live session
+    drops `--settings`), a session woken after the port moved, and hooks a
+    policy blocks (`allowedHttpHookUrls`, `disableAllHooks`,
+    `allowManagedHooksOnly`, which fail silently) are polled only. Stage's
+    main API is not the target: the managed service listens on a Unix socket
+    only, and HTTP hooks need TCP. A command hook running the `stage` binary
+    was rejected: its path changes with updates and identities.
 
 ## Evidence
 
@@ -309,6 +328,30 @@ claude 2.1.332, 2026-11-25, `mise run claude:live`:
   permissions) haiku session read a PNG listed in the prompt with the Read
   tool, never blocked on a permission prompt, and named its color.
 - The added folder does not join `~/.claude.json` `projects`.
+### E9 Hooks
+
+Probed 2026-11-25 on 2.1.332 (scratch folder, haiku, cleaned up), with a
+logging HTTP server on `127.0.0.1` and `--settings <file>` naming one
+`type: "http"` hook per event with an `Authorization` header. Fixtures:
+`testdata/hooks/`.
+
+| Probe | Result |
+| --- | --- |
+| `--bg --settings <file>` | the hooks fire from the background session (axios POST, `Content-Type: application/json`, the header as written); the user's own hooks still run beside them |
+| Turn ends | `Stop` about 10 ms after the roster shows `done`; input has `session_id`, `transcript_path`, `cwd`, `prompt_id`, `permission_mode`, `last_assistant_message`, `stop_hook_active` |
+| Permission prompt | `PermissionRequest` 0.3 s after the roster shows `blocked` (`tool_name`, `tool_input`, `permission_suggestions`); `Notification` `permission_prompt` only about 6 s later. An empty 200 is no decision: Claude's own prompt stays |
+| `claude stop` | `SessionEnd`, `reason: "other"` |
+| New turn | `UserPromptSubmit` (`prompt`, `session_title`) |
+| `SessionStart` | not observed |
+| Saved options | `~/.claude/jobs/<short>/state.json` `respawnFlags` keeps `--settings <path>`; a woken session (`--bg --resume <uuid>` after stop: "woke session … with its saved options (… --settings …)") reads the file again: a rewritten port is used |
+| Copy | `--bg --resume` of a live session starts a copy without `--settings` |
+| Listener down / 401 | `hook_non_blocking_error` attachment (`connect ECONNREFUSED …`, `HTTP 401 from …`) and `stop_hook_summary.hookErrors`; the turn completes, the roster is unaffected |
+
+The binary also documents `allowedHttpHookUrls` and
+`httpHookAllowedEnvVars` (managed allowlists) and env interpolation in
+headers (`allowedEnvVars`); background sessions inherit the daemon's
+environment, not the launcher's (decision 13), so Stage writes the token
+into the file.
 
 ## Approval routes (record only)
 
@@ -316,7 +359,7 @@ v1 answers in Claude (decision 8). Candidates for #375:
 
 | Route | How | Fit |
 | --- | --- | --- |
-| Hooks (not probed) | `PermissionRequest` and `Notification` hooks in settings Stage passes (`--settings`) or the user installs, calling Stage's CLI | Push only, not an answer channel unless the hook blocks and waits for Stage; adds a settings contract |
+| Hooks (probed, [E9](#e9-hooks); push built in decision 16) | the `PermissionRequest` HTTP hook Stage already passes (`--settings`) | An answer channel only if the hook holds the request open until Stage answers (its `timeout`); today it answers 204 at once |
 | `--permission-prompt-tool` / `--permission-prompts host` | an MCP tool Stage serves decides each prompt | `-p` (print/SDK) mode only, not `--bg` |
 | Agent SDK sidecar (T3's route) | a Node process hosting `query()` with `canUseTool` | Full control, but Stage then owns the process (#385); not a `--bg` session |
 | Messaging socket | `CLAUDE_CODE_MESSAGING_SOCKET`, `peerProtocol` in `~/.claude/sessions/<pid>.json`, daemon `control.sock` | Undocumented internal protocol; do not build on it |
@@ -419,7 +462,10 @@ Agents harness is wanted on its own merits.
   `CLAUDE_CODE_SESSION_ID` first, then T3. Parser tests use the fixtures.
 - #373 (surfacing): the setup and launch copy explains trust ("Open
   Claude in this folder once and trust it").
-- #375: choose among the approval routes above.
+- #375: choose among the approval routes above. The hooks route reuses
+  `claudecode.Hooks` and its settings file: the `PermissionRequest` hook
+  would wait for Stage's decision instead of answering 204.
+- #377 (push): decision 16.
 - #383 (discovery): `Attention` reads the roster (decision 9, amended); a
   live interactive session has no resume command, since it is answered
   where it runs.

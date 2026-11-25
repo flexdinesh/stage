@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, versionText } from "../src/lib/claude.ts";
+import { claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, updatesText, versionText } from "../src/lib/claude.ts";
 
 const details = { binary: "/home/dee/.local/bin/claude", version: "2.1.332 (Claude Code)", configDirectory: "/home/dee/.claude", loggedIn: true, scope: true };
 const status = (extra = {}) => ({
@@ -18,9 +18,23 @@ const status = (extra = {}) => ({
 const read = (data, extra = {}) => ({ data, checking: false, error: null, ...extra });
 
 test("details are read defensively from the status", () => {
-  assert.deepEqual(claudeDetails(status()), details);
+  assert.deepEqual(claudeDetails(status()), { ...details, events: null });
   assert.equal(claudeDetails(status({ details: undefined })), null);
-  assert.deepEqual(claudeDetails(status({ details: { loggedIn: "yes", version: 2 } })), { binary: "", version: "", configDirectory: "", loggedIn: false, scope: false });
+  assert.deepEqual(claudeDetails(status({ details: { loggedIn: "yes", version: 2 } })), { binary: "", version: "", configDirectory: "", loggedIn: false, scope: false, events: null });
+  const events = (e) => claudeDetails(status({ details: { ...details, events: e } }))?.events;
+  assert.deepEqual(events({ mode: "push", lastEventAt: "2026-11-25T07:00:00Z" }), { mode: "push", reason: "", lastEventAt: "2026-11-25T07:00:00Z" });
+  assert.deepEqual(events({ mode: "polling", reason: "No port.", lastEventAt: null }), { mode: "polling", reason: "No port.", lastEventAt: null });
+  assert.equal(events({ mode: "webhook" }), null);
+  assert.equal(events("push"), null);
+});
+
+test("updates: instant while hooks push (last hook or none yet), every few seconds with the reason while polling", () => {
+  const now = Date.parse("2026-11-25T07:02:00Z");
+  assert.deepEqual(updatesText({ mode: "push", reason: "", lastEventAt: "2026-11-25T07:00:00Z" }, now), { text: "instant · last hook 2m ago", reason: null });
+  assert.deepEqual(updatesText({ mode: "push", reason: "", lastEventAt: null }, now), { text: "instant · no hook yet", reason: null });
+  const why = "Stage couldn't open its local hook port (address in use). It checks Claude Code every few seconds instead.";
+  assert.deepEqual(updatesText({ mode: "polling", reason: why, lastEventAt: null }, now), { text: "every few seconds", reason: why });
+  assert.deepEqual(updatesText({ mode: "polling", reason: "", lastEventAt: null }, now), { text: "every few seconds", reason: null });
 });
 
 test("chip: connected ok, not connected idle, a problem bad only once set up", () => {
@@ -69,6 +83,12 @@ test("status panel: summary, identity line, reason as the error", () => {
     summary: { harness: "claude", state: "connected", tone: "ok", label: "Claude Code connected" },
     detail: { lines: ["~/.claude · 2.1.332"], error: null },
   });
+  const now = Date.parse("2026-11-25T07:02:00Z");
+  const pushing = status({ details: { ...details, events: { mode: "push", lastEventAt: "2026-11-25T07:00:00Z" } } });
+  assert.deepEqual(claudeStatusView(read(pushing), "Claude Code", now).detail, { lines: ["~/.claude · 2.1.332", "updates instant · last hook 2m ago"], error: null });
+  const polling = status({ details: { ...details, events: { mode: "polling", reason: "No folder." } } });
+  assert.deepEqual(claudeStatusView(read(polling), "Claude Code", now).detail, { lines: ["~/.claude · 2.1.332", "updates every few seconds"], error: null });
+  assert.equal(claudeStatusView(read(polling), "Claude Code").summary.tone, "ok");
   const down = claudeStatusView(read(status({ connected: false, state: "error", reason: "claude --version didn't answer." })), "Claude Code");
   assert.deepEqual(down.detail, { lines: [], error: "claude --version didn't answer." });
   assert.equal(down.summary.tone, "bad");

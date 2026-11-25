@@ -30,6 +30,12 @@ const claudeConn = 3
 
 func claudeSetup(t *testing.T, p placement, f *claudetest.Fake) (*db.Store, *coordinator.Service, db.Task, *claudecode.Adapter) {
 	t.Helper()
+	return claudeSetupWith(t, p, f, f.Adapter(claudeConn))
+}
+
+// claudeSetupWith is claudeSetup on adapter a (one with hooks).
+func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecode.Adapter) (*db.Store, *coordinator.Service, db.Task, *claudecode.Adapter) {
+	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness,machine_id) VALUES($1,$2,$3)", claudeConn, claudecode.Kind, p.machine(t, pool)); err != nil {
@@ -43,7 +49,6 @@ func claudeSetup(t *testing.T, p placement, f *claudetest.Fake) (*db.Store, *coo
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := f.Adapter(claudeConn)
 	svc := p.coordinator(t, store, map[int64]execution.Adapter{claudeConn: a}, nil)
 	svc.Harnesses = harness.MustRegistry(claudecode.Descriptor)
 	return store, svc, task, a
@@ -376,6 +381,77 @@ func TestContractClaudeImages(t *testing.T) {
 		}
 		if prompt := args[len(args)-1]; !strings.HasSuffix(prompt, "\n1. shot.png: "+file) {
 			t.Fatalf("prompt %q", prompt)
+		}
+	})
+}
+
+// Claude's hooks push the task's session through the coordinator's stream
+// (in process and over the worker channel) with no poll: the permission
+// prompt is needs input, the finished turn done with its reply. A hook for
+// a session Stage does not own changes nothing.
+func TestContractClaudeHooksPushWithoutPolling(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		store, svc, task, a := claudeSetupWith(t, p, f, f.HookedAdapter(claudeConn, f.Hooks()))
+		got, err := svc.StartTask(t.Context(), task.ID)
+		if err != nil || got.State != db.StateRunning || got.Session == nil {
+			t.Fatalf("start %+v %v", got, err)
+		}
+		ref := *got.Session
+		id := ref.ExternalSessionID
+		ctx, cancel := context.WithCancel(t.Context())
+		streamed := make(chan struct{})
+		go func() {
+			defer close(streamed)
+			_ = svc.Stream(ctx, claudeConn)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			<-streamed
+		})
+		// The stream subscribes asynchronously: hook until the task moves.
+		await := func(want db.TaskState, event string) db.Task {
+			t.Helper()
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				if code := f.Hook(id, event, nil); code != 204 {
+					t.Fatalf("%s: %d", event, code)
+				}
+				time.Sleep(50 * time.Millisecond)
+				got, err := store.GetTask(t.Context(), task.ID)
+				if err == nil && got.State == want {
+					return got
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%s: want %s, task %+v %v", event, want, got, err)
+				}
+			}
+		}
+		f.SetState(id, "blocked", "waiting", "permission prompt")
+		await(db.StateNeedsInput, "PermissionRequest")
+		f.Reply(id, "All done.", true)
+		f.SetState(id, "done", "idle", "")
+		await(db.StateDone, "Stop")
+		o, err := store.Observation(t.Context(), ref)
+		if err != nil || o.Reply == nil || o.Reply.Text != "All done." {
+			t.Fatalf("observation %+v %v", o, err)
+		}
+		// Another Claude session, launched outside Stage's task, finishes.
+		other, err := a.Launch(t.Context(), execution.Intent{
+			RequestID: "other", ConnectionID: claudeConn, Project: f.Workspace, Directory: f.Workspace, Title: "Other",
+			Prompt: "x", Workspace: execution.Workspace{Kind: "root"},
+		}, execution.Checkpoint{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.SetState(other.Session.ExternalSessionID, "done", "idle", "")
+		f.Hook(other.Session.ExternalSessionID, "Stop", nil)
+		time.Sleep(200 * time.Millisecond)
+		if got, err := store.GetTask(t.Context(), task.ID); err != nil || got.State != db.StateDone {
+			t.Fatalf("unowned hook moved the task %+v %v", got, err)
+		}
+		if _, err := store.TaskBySession(t.Context(), other.Session); !errors.Is(err, db.ErrNotFound) {
+			t.Fatalf("unowned session adopted: %v", err)
 		}
 	})
 }

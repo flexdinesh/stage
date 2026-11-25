@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -42,7 +43,11 @@ type Options struct {
 	// Claude overrides Claude Code's machine-local environment (tests);
 	// nil: this process's, with a systemd scope where one works.
 	Claude *claudecodesetup.Options
-	Logger *slog.Logger
+	// StateDir is the worker's own folder: harness setups keep machine-local
+	// files under it (Claude Code's hook settings in <StateDir>/claude,
+	// unless Claude sets its own StateDir).
+	StateDir string
+	Logger   *slog.Logger
 }
 
 // Setup composes the connection setup once the main server is reachable.
@@ -177,6 +182,9 @@ func (s *Setup) claude(ctx context.Context, ports Ports, install machine.Install
 		o = *s.o.Claude
 	}
 	o.Logger = s.log
+	if o.StateDir == "" && s.o.StateDir != "" {
+		o.StateDir = filepath.Join(s.o.StateDir, "claude")
+	}
 	c, err := claudecodesetup.New(ctx, claudecodesetup.Ports{Settings: ports, Identity: ports, Install: install}, o)
 	if errors.Is(err, errNotServed) {
 		s.log.Warn("the Stage server does not set up Claude Code yet; update it to use Claude Code on this machine", "err", err)

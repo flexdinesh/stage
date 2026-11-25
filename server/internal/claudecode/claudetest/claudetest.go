@@ -3,7 +3,10 @@
 package claudetest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,6 +111,89 @@ func (f *Fake) Environ() []string {
 // Adapter is an adapter on connection over the fake.
 func (f *Fake) Adapter(connection int64) *claudecode.Adapter {
 	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second})
+}
+
+// Hooks opens a hook receiver in a temporary folder, closed when the test
+// ends.
+func (f *Fake) Hooks() *claudecode.Hooks {
+	f.t.Helper()
+	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(f.Home, "stage-claude")})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { _ = h.Close() })
+	return h
+}
+
+// HookedAdapter is Adapter with hooks: launches pass their settings file
+// and Events pushes what hooks announce.
+func (f *Fake) HookedAdapter(connection int64, h *claudecode.Hooks) *claudecode.Adapter {
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h,
+		SettleDelays: []time.Duration{0, 20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond}})
+}
+
+// Hook posts event for session id as Claude does: to the HTTP hook in the
+// settings file the session was launched with, with that hook's headers
+// and Claude's input shape; extra adds input fields (notification_type).
+// It returns the HTTP status.
+func (f *Fake) Hook(id, event string, extra map[string]any) int {
+	f.t.Helper()
+	return f.HookAs(id, id, event, extra)
+}
+
+// HookAs posts event naming session id through the hook settings session
+// via was launched with (a hook for a session Stage does not know).
+func (f *Fake) HookAs(via, id, event string, extra map[string]any) int {
+	f.t.Helper()
+	s := f.Session(via)
+	if s.Settings == "" {
+		f.t.Fatalf("session %s was launched without --settings", via)
+	}
+	b, err := os.ReadFile(s.Settings)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var settings struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Type    string            `json:"type"`
+				URL     string            `json:"url"`
+				Headers map[string]string `json:"headers"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(b, &settings); err != nil {
+		f.t.Fatal(err)
+	}
+	if len(settings.Hooks[event]) == 0 || len(settings.Hooks[event][0].Hooks) == 0 || settings.Hooks[event][0].Hooks[0].Type != "http" {
+		f.t.Fatalf("settings %s have no HTTP hook for %s", s.Settings, event)
+	}
+	hook := settings.Hooks[event][0].Hooks[0]
+	input := map[string]any{
+		"session_id": id, "transcript_path": fakestate.TranscriptPath(f.ProjectsDir(), s.Cwd, id), "cwd": s.Cwd,
+		"hook_event_name": event, "permission_mode": "default",
+	}
+	for k, v := range extra {
+		input[k] = v
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range hook.Headers {
+		req.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
 }
 
 // Update changes the fake's state.
