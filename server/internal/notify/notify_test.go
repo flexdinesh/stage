@@ -19,8 +19,8 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 var testDB dbtest.DB
@@ -111,15 +111,15 @@ func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 func TestEventSelection(t *testing.T) {
 	n := New(nil, subject, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	for _, to := range []db.TaskState{db.StateInterrupted, db.StateCancelled, db.StateRunning, db.StateLaunching, db.StateBacklog} {
-		n.OnTransition(context.Background(), t3sync.Change{TaskID: 1, To: to})
-		n.OnSessionChange(context.Background(), t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "external"}, To: to})
+		n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: to})
+		n.OnSessionChange(context.Background(), workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "external"}, To: to})
 	}
 	if len(n.events) != 0 {
 		t.Fatalf("queued %d events for non-notifying states", len(n.events))
 	}
 	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateDone, db.StateFailed} {
-		n.OnTransition(context.Background(), t3sync.Change{TaskID: 1, To: to})
-		n.OnSessionChange(context.Background(), t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "external"}, To: to})
+		n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: to})
+		n.OnSessionChange(context.Background(), workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "external"}, To: to})
 	}
 	if len(n.events) != 6 {
 		t.Fatalf("queued %d events, want 6", len(n.events))
@@ -128,7 +128,7 @@ func TestEventSelection(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for range queueSize + 10 {
-			n.OnTransition(context.Background(), t3sync.Change{TaskID: 1, To: db.StateDone})
+			n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: db.StateDone})
 		}
 		close(done)
 	}()
@@ -157,13 +157,13 @@ func TestPayload(t *testing.T) {
 		e    event
 		want Payload
 	}{
-		{"task needs input", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
+		{"task needs input", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}},
 			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
-		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
+		{"task done", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
-		{"session with Stage project", event{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
+		{"session with Stage project", event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
 			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "session-1:ext-1", Badge: 2}},
-		{"session without Stage project", event{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-2"}, ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
+		{"session without Stage project", event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-2"}, ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "session-1:ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
@@ -225,11 +225,11 @@ func TestHandleSignalsInbox(t *testing.T) {
 	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
 	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || signalled() {
 		t.Fatalf("filtered event: rows %d err %v, want no row and no signal", len(got), err)
 	}
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}})
 	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 1 || !signalled() {
 		t.Fatalf("recorded event: rows %d err %v, want one row and a signal", len(got), err)
 	}
@@ -244,7 +244,7 @@ func TestSendPath(t *testing.T) {
 	subscribe(t, store, endpoint)
 	task := seedTask(t, store, db.StateNeedsInput)
 
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}})
 	reqs := srv.requests()
 	if len(reqs) != 1 {
 		t.Fatalf("push requests %d, want 1", len(reqs))
@@ -280,7 +280,7 @@ func TestSendPath(t *testing.T) {
 
 	// Done → normal urgency; 500 records last_error and keeps the subscription.
 	srv.setStatus(http.StatusInternalServerError)
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
 	reqs = srv.requests()
 	if len(reqs) != 2 || reqs[1].header.Get("Urgency") != "normal" {
 		t.Fatalf("second push %d %v", len(reqs), reqs[len(reqs)-1].header)
@@ -295,7 +295,7 @@ func TestSendPath(t *testing.T) {
 
 	// 410 Gone deletes the subscription.
 	srv.setStatus(http.StatusGone)
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateFailed}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}})
 	if _, err := store.GetPushSubscription(ctx, endpoint); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("after 410: %v", err)
 	}
@@ -310,8 +310,8 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
-	n.handle(ctx, event{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}})
+	n.handle(ctx, event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
 
 	got, err := store.ListNotifications(ctx, 10, nil)
 	if err != nil {
@@ -358,12 +358,12 @@ func TestNotifyEventsFilter(t *testing.T) {
 	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput, db.StateFailed}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
-	n.handle(ctx, event{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
 	if c, r := count(), len(srv.requests()); c != 0 || r != 0 {
 		t.Fatalf("done disabled: %d notifications, %d pushes", c, r)
 	}
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}})
 	if c, r := count(), len(srv.requests()); c != 1 || r != 1 {
 		t.Fatalf("needs input enabled: %d notifications, %d pushes", c, r)
 	}
@@ -372,8 +372,8 @@ func TestNotifyEventsFilter(t *testing.T) {
 	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
-	n.handle(ctx, event{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
 	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
 		t.Fatalf("done enabled: %d notifications, %d pushes", c, r)
 	}
@@ -381,7 +381,7 @@ func TestNotifyEventsFilter(t *testing.T) {
 		got[0].Event != db.StateDone || got[1].Event != db.StateDone {
 		t.Fatalf("done notifications %+v %v", got, err)
 	}
-	if p, _, err := n.payload(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}); err != nil || p.Title != "Done" {
+	if p, _, err := n.payload(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}}); err != nil || p.Title != "Done" {
 		t.Fatalf("done payload %+v %v", p, err)
 	}
 
@@ -390,7 +390,7 @@ func TestNotifyEventsFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, to := range db.NotificationEvents {
-		n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: to}})
+		n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: to}})
 	}
 	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
 		t.Fatalf("all disabled: %d notifications, %d pushes", c, r)
@@ -444,8 +444,8 @@ func TestNotificationNavigationWithExternalSessionID(t *testing.T) {
 	}
 	want := "/?inbox"
 	for _, e := range []event{
-		{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
-		{session: &t3sync.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, Title: "External", ProjectID: "p", To: db.StateDone}},
+		{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}},
+		{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, Title: "External", ProjectID: "p", To: db.StateDone}},
 	} {
 		payload, record, err := n.payload(ctx, e)
 		wantPayload, wantRecord := want, want
@@ -470,7 +470,7 @@ func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, Session: &db.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: sessionID}}); err != nil {
 			t.Fatal(err)
 		}
-		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}
+		e := event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}}
 		payload, _, err := n.payload(ctx, e)
 		if err != nil || payload.URL != fmt.Sprintf("/tasks/%d", task.ID) {
 			t.Fatalf("session navigation: %+v %v", payload, err)

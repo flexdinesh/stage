@@ -25,13 +25,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -156,7 +156,7 @@ type env struct {
 	h      http.Handler
 	fake   *t3.Fake
 	t3     *flakyT3
-	sync   *t3sync.Service
+	engine *engine.Engine
 	runner *release.Runner
 	store  *db.Store
 }
@@ -173,15 +173,14 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
-	svc.Harnesses = testHarnesses
-	runner := release.NewRunner(store, svc, log)
-	svc.OnTransition = runner.OnTransition
+	svc := engine.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
+	runner := release.NewRunner(store, svc.Coordinator, log)
+	svc.Coordinator.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)
 	runner.OnReady = push.OnReady
 	deps := api.Deps{
 		Config: config.Config{},
-		Store:  store, Sync: svc, Push: push, Logger: log, Harnesses: testHarnesses,
+		Store:  store, Engine: svc, Push: push, Logger: log, Harnesses: testHarnesses,
 	}
 	for _, opt := range opts {
 		opt(&deps)
@@ -190,7 +189,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 		withT3Setup(&deps, t3setup.Options{Client: client, Fake: true})
 	}
 	h := api.NewRouter(deps)
-	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
+	return &env{t: t, h: h, fake: fake, t3: client, engine: svc, runner: runner, store: store}
 }
 
 // withT3Setup installs a T3 connector backed by the local machine, keeping
@@ -245,7 +244,7 @@ func (e *env) must(method, path string, body any, want int, out any) {
 
 func (e *env) poll() {
 	e.t.Helper()
-	if err := e.sync.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -772,7 +771,7 @@ func TestRecoverLaunching(t *testing.T) {
 	if _, err := e.store.TransitionTask(context.Background(), db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	e.sync.RecoverLaunching(context.Background())
+	e.engine.Coordinator.RecoverLaunching(context.Background())
 	e.poll()
 	if got := e.getTask(a.ID); got.State != "backlog" || got.LastError == nil {
 		t.Fatalf("after recover %+v", got)
@@ -798,7 +797,7 @@ func TestProjects(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/app")
 	ext := e.fake.AddProject("Discovered", "/w/elsewhere")
-	if _, err := e.sync.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// Sync imports the unbound live T3 project; the bound one is untouched.
@@ -821,7 +820,7 @@ func TestProjects(t *testing.T) {
 	if err := e.fake.SetProject(p.T3ProjectID, func(x *t3.Project) { x.Title = "External rename"; x.ArchivedAt = &at; x.WorkspaceRoot = "/moved" }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.sync.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := e.store.GetProject(context.Background(), p.ID)
@@ -836,7 +835,7 @@ func TestProjects(t *testing.T) {
 	if err := e.fake.SetProject(ext.ID, func(x *t3.Project) { x.DeletedAt = &at }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.sync.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = e.store.GetProject(context.Background(), p.ID)
@@ -908,7 +907,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	if got := e.getTask(a.ID); got.State != "cancelled" {
 		t.Fatalf("stale cancelled task polled before the mirror changed: %s", got.State)
 	}
-	if _, err := e.sync.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
@@ -927,7 +926,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 		t.Fatalf("dependent of cancelled task %s", got.State)
 	}
 	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusRunning)
-	if _, err := e.sync.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()

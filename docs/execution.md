@@ -1,581 +1,535 @@
-# Stage execution boundary
+# Stage execution contract
 
-Stage owns task identity, dependencies, acceptance, journals and durable handoff.
-`internal/execution` defines the adapter contract. A connection resolves to
-an adapter on its machine, in process or through the worker proxy. Each
-harness translates its native protocol, models, options and session state.
-This document describes the shipped contracts. [ADR 0008](adr/0008-harness-foundation.md)
-defines the target foundation, including the role split and rewrite in layer 09.
+Stage launches tasks through harness connections and records their execution.
+`server/internal/execution` defines the shared contract. Harness adapters
+translate their native protocols, options and session state.
 
-## Design rules
+## Ownership: Stage and the harness
 
-The boundary is [ADR 0007](adr/0007-harness-boundary.md); these rules
-apply it.
+- **Keep Stage lean.** Stage owns projects, tasks, trees, schedules, journals,
+  acceptance and durable handoff. The harness owns sessions, its project and
+  model catalogs, workspaces, worktrees, branches, archive, UI and processes.
+  Stage resolves project identity across harnesses from read-only evidence.
+  [Harness boundary](adr/0007-harness-boundary.md) · [Discovery](discovery.md)
+- **Use generic code and declared policy.** Stage reads descriptors and
+  capabilities to make its decisions. Each adapter validates and translates its
+  own options. Harness-specific operations and display data use declared actions
+  and facts. The boundary tests enforce where harness names can appear.
+  [Harness foundation](adr/0008-harness-foundation.md)
+- **Scope every session.** A session is `{connectionId, externalSessionId}`.
+  Parents, adoption, task events and journal provenance use the connection of
+  the session they describe. A bare external ID carries no connection identity.
+  Project bindings retain the verified connection, external project, path,
+  binding ID and revision. A task or schedule may choose a binding on its
+  connection. Otherwise launch uses the primary binding.
+- **Attribute the caller independently of the destination.** Agent tools
+  accept `callerSession`. A harness can declare a native per-call metadata
+  key (OpenCode supplies its session ID in MCP metadata) or a session
+  environment variable. HTTP MCP can use `Stage-Caller-Session` and the CLI
+  can use `STAGE_CALLER_SESSION`. The launch's journal
+  instructions carry the descriptor's caller hint. Stage records the caller's
+  session on created work and journal entries.
+  [Agent interface](api.md#agent-interface)
 
-- **Lean.** The harness keeps what it owns: sessions, model catalog,
-  workspaces, worktrees and branches, archive, harness projects, its UI and
-  its processes. Core code does no harness work (no git for sessions, no
-  worktree naming, no creating harness projects). Stage owns tasks and their
-  launch and observation, plus best-effort project identity across harnesses
-  (ADR 0007 decision 11).
-- **Generic code, explicit policies.** Product code reads the harness
-  descriptor, capabilities, operations and launch options. Harness-specific
-  actions and facts travel through the extension declarations. Typed
-  operations describe decisions Stage makes itself.
-  An adapter translates its own launch options into harness calls.
-  `internal/harness/boundary_test.go` fails on
-  harness names outside the adapters, their connection setup and the server
-  composition (its pending list only shrinks, to empty).
-- **Worker-ready placement.** Remote machines run a thin worker with no
-  database ([ADR 0002](adr/0002-machines-and-workers.md)). The main server
-  keeps the store, coordinator and acceptance, and drives each machine through
-  the machine-runtime seam: in process for the local machine, through a
-  remote adapter proxy over the worker channel for a remote one. So adapters
-  and connection setup take narrow ports (settings, credentials, checkpoint
-  save, event sink, identity), never the store; contract types stay
-  JSON-serializable; connections, workspace paths, machine-local fs work and
-  hosting policy belong to a machine; and pushed observations are the shape
-  the worker channel carries.
+The main server composes `coordinator`, `observe` and `discovery` in
+`internal/engine`. The coordinator owns launch, link repair, handoff and
+`PollTask` and its apply path. Observation owns event ingestion, streaming
+and attention. Discovery reads workspace inventory and filesystem evidence,
+and owns full sync, which calls the coordinator to poll tracked tasks.
 
-## Machine-runtime seam
+## Modules and the registry
 
-`internal/machine` is the per-machine host of harness code; it names no
-harness. A `machine.Machine` has an id, `Online`, a hosting `Profile`,
-`Allows(descriptor)`, the adapters of its active connections, a connector
-per kind and `Ops`. `machine.Set` holds the server's machines:
-`sync.Service` resolves every connection's adapter through it
-(`Adapter(id)`; a retired or unhosted connection answers
-`connection_retired` or `connection_unavailable` as before, and a
-connection whose kind its machine does not allow answers
-`connection_unavailable` with that reason), `GET /api/harnesses` reads the
-machine's profile and `Allows`, and `harness.Connectors` is built from the
-machines' connectors, leaving out a connector for a kind its machine does
-not allow.
+The ordered module list in `internal/harnesses/modules.go` supplies the
+registry and API list. Each `harness.Module` provides a descriptor,
+`Compose(context.Context, harness.Ports)`, a public settings validator and
+any environment or legacy secret declarations. Serve and the worker compose
+the same modules in registry order, subject to the machine's hosting policy.
 
-- **Hosting decision.** `Machine.Allows` is the one place a machine decides
-  whether it may host a harness kind, with the reason when not. The local
-  machine answers with its profile's policy (`harness.Profile.Allows`); a
-  remote machine with the profile its worker last described (the same
-  policy, with the fix in the worker's terms: `stage worker run
-  --local-harnesses` or the worker service, or the worker outside Docker).
-  Once the worker's setup is ready, a hosted kind it did not set up is not
-  allowed either: workers set up Claude Code and Codex where their profile
-  allows local harnesses, so on an older worker without one of them it
-  reads unavailable ("Update Stage on that machine"), never as a connect
-  that fails. Until its worker described it since this server started, a remote
-  machine's profile is unknown and every kind is allowed, so the calls
-  themselves answer offline or still starting. The API refuses a
-  disallowed kind's setup routes with that reason (409
-  `harness_unavailable`) without reaching its connector, the connectors
-  index leaves it out, and the coordinator answers
-  `connection_unavailable` with the reason for a connection of that kind,
-  before any installed adapter (a worker restarted without local harnesses
-  names the fix). `serve` and `workersetup` compose a hosted harness's
-  setup and adapters only when their machine allows it, so a profile
-  without local processes never starts the harness's processes.
+### Descriptor policies
 
-- **LocalMachine.** `machine.Local` is the in-process machine (machine 1). `serve/localmachine.go` composes it: the T3 client
-  (fake or MCP) and adapter, the T3 and OpenCode setups and their
-  connectors, and the Codex setup (`codexsetup`) when the profile allows it. Setup code installs adapters through `Local.Install(old, next,
-  adapter)` (the install port; nil disconnects); its change hook moves the
-  coordinator (`sync.Service.ConnectionsChanged`) and resyncs the runners.
-- **Ops.** `machine.Ops.Inventory` enriches workspaces the adapter reports
-  as local to its filesystem. `machine.LocalOps` resolves absolute
-  directories and reads Git metadata directly, including the canonical
-  common directory for linked worktrees. It also evaluates checkout-based
-  import conditions (`checkoutTop` for Claude Code, `inCheckout` for Codex).
-  Adapters report harness facts. Stage stores evidence and resolves project
-  identity on the main server. See [workspace discovery](discovery.md).
-- **Setup ports.** Each `harness.Module` composes over machine-bound ports
-  in `harness/module.go`. `Settings.Get` reads a public JSON object by kind
-  and `Settings.Save` applies a partial update. Omitted fields retain their
-  values. Null resets a field to its module default. `Secrets.Get`, `Set`
-  and `Delete` address an opaque value by kind and key. The setup package
-  owns the typed settings and credential formats. The local placement can
-  commit a settings patch and a secret edit in one transaction.
-  `Identity` loads the active instance, switches or stamps it, and supplies
-  Stage's stored evidence for continuity proof. The install port registers
-  the adapter on the returned connection. Data dir, profile, environment,
-  binary lookup and logging are supplied where the module runs. Module
-  cleanup releases Stage's client resources at shutdown. Checkpoint save
-  stays the `Launch` callback.
-- **RemoteMachine.** A joined machine is hosted as `remote.Machine`
-  ([Remote machines](#remote-machines)); `machine.Set` gains and loses
-  remote machines as they join and are removed.
-- **JSON.** Every type that crosses the seam round-trips through JSON
-  (`machine/contract_json_test.go`): the adapter contract, connector setup
-  states, port payloads and ops. `WorkspaceInfo.OriginRemote` may carry
-  credentials; it is never returned to a client. Harness descriptors are
-  static and identical on both sides, so a port names a harness by kind.
+The descriptor declares process requirements, session locality, launch
+identity, caller attribution, wrapper origins, state reasons, closure
+signals and attention policy. It also supplies connection fields and actions,
+disconnect availability, session and discovery hints, and link policy.
 
-## Remote machines
+`localProcesses` requires a profile that permits those processes (Claude
+Code and Codex). T3 and OpenCode connect to services. All four declare
+machine-local sessions. Cloud session locality is independent of process
+requirements. [Machine profiles](runtime.md#machine-profile-and-hosted-harnesses)
 
-`server/internal/remote` is a joined machine over its worker channel
-([runtime.md](runtime.md#worker-channel), ADR 0002). The main server hosts a
-`remote.Machine` per machine that is not removed (`remote.Hosts`: at boot,
-on join, gone on remove or leave); the worker serves a `remote.Host` (an
-in-process `machine.Local` whose adapters setup installs, plus
-`machine.LocalOps`). The coordinator, sync, the runners and the contract
-suite cannot tell a remote machine from the local one.
+`linkSchemes` lists the harness's native URL schemes, such as T3's
+`t3code`. The registry checks them for valid lowercase syntax, uniqueness
+and reserved names. Reply Markdown allows standard web, FTP, email, phone,
+Stage and relative links. Harness links gain a destination after the host
+loads and validates the descriptors. Script URLs stay blocked.
+[Descriptor API](api.md#harness-connections-api-v6)
 
-- **Adapters.** The machine proxies active connections recorded by the
-  main server. Both placements expose session links through
-  `Observation.Links`. Task and session reads use the latest stored
-  observation and show empty links until one exists.
-- **Optional interfaces.** One registry in `execution/optional.go` names
-  traits and defines their Go interfaces. `execution.As[T]` requires a
-  remote proxy's current ready snapshot to declare the trait. Unknown
-  trait names have no effect. An absent channel request kind limits that
-  operation, and an absent harness kind limits that harness.
-- **Launch.** The intent goes down without image bytes. While the call
-  waits, the worker calls back: `checkpoint.save` runs the coordinator's
-  `SaveCheckpoint` before each external effect (a failure stops the
-  worker's adapter; after the call stopped waiting the save is refused with
-  `call_ended`), and `launch.image` returns one image by index. A lost reply
-  leaves the attempt unconfirmed and the replay reconciles from the saved
-  checkpoint, as for any uncertain launch.
-- **Push.** `Events` is one long-running `adapter.events` call (10 minute
-  window): each pushed observation is an `events.observation` callback,
-  ingested (`sync.Service.Ingest`) before the worker continues. Unexpected
-  termination goes to connection status and logs while polling reconciles.
-  The stream renews at the end of the window and stops on cancellation.
-- **Health.** Offline, negotiating and incompatible channels answer at
-  once with their reason. A ready snapshot scopes the 5s health cache.
-- **Ops.** `ops.inventory` sends `{workspaces}` to `machine.LocalOps` on
-  the worker and returns the inventory with optional filesystem evidence.
-  Protocol 3 changes that request and removes `ops.checkout` from the
-  advertised channel kinds. The product API remains v9. Upgrade server and
-  workers together.
-- **Errors.** `execution.ErrUnavailable`, `ErrNotFound`, `ErrNoReply`,
-  `Rejected` and `Refused` keep their meaning (`unavailable`, `not_found`,
-  `no_reply`, `rejected`, `refused`). Offline and `not_hosted` mean the
-  connection cannot answer. An absent optional trait or request kind
-  returns `operation_unavailable`; `unsupported` and `unknown_kind` are
-  defensive replies. A lost reply or worker timeout after dispatch stays
-  uncertain; only the worker adapter's own rejection is
-  `Rejected`. The removed `adapter.registerWorkspace` (an older main
-  server's call) answers `unknown_kind`. A session's `origin` crosses the
-  channel raw; the main server's registry decides a wrapped refusal.
-- **An offline worker is an offline harness.** Health is unavailable, polls
-  and streams idle, task states and acceptance do not change, a backlog
-  launch is refused as `connection_unavailable`, and an attempt already
-  dispatched stays unconfirmed and retries until the worker is back.
-- **Setup.** The worker and serve compose the same modules in
-  registry order (`workersetup`, `serve/localmachine.go`). Both apply
-  their machine profile before calling `Compose`. The worker also
-  checks the server's advertised harness kinds before composing.
-  `setup.settings.get` takes `{kind}` and returns the public settings
-  object. `setup.settings.save` takes `{kind, patch}` and applies the
-  module-validated patch. These requests and all `setup.identity.*`
-  requests use the authenticated machine. `setup.status.error` reports
-  a redacted setup error for that machine and kind. Active identity
-  reads use `setup.identity.activeIdentity`; connection existence uses
-  `setup.identity.exists`.
-  The main server stores identity, public settings and sync status.
-  Worker credentials are local values under kind and key in
-  `credentials.json` (schema 2, mode `0600`, deleted on join and leave).
-  First use upgrades known schema-1 entries atomically. Credential values
-  stay out of settings replies, negotiation and status. Entered secrets
-  can reach the worker in the intended `connector.configure` or
-  `connector.run` request. Layer 10 can cache the public settings
-  document on the worker independently of its local secrets.
-  A `remote.Connector` proxies status and setup mutations over
-  `connector.*`; its summary reads the active ID and the latest ready
-  snapshot or connector status. The first successful pair or connect
-  creates the connection. Worker switches follow the same retirement
-  and revival policy as serve, and wake sync and scheduling after ready.
-  Offline, incompatible and starting workers have distinct availability
-  reasons. Connection settings come from Settings > Connections.
-- **Verification.** Every `TestContract*` in `server/internal/sync` runs
-  twice, in process and behind a real worker channel
-  (`remote/remotetest`: the hub and its HTTP serving on a loopback server
-  and a real `worker.Run`), plus remote-only tests: a lost launch reply, a
-  worker restart mid-launch, an offline machine, refused and late saves,
-  images, traits and ops. Setup runs end to end over a real channel and
-  store in `workersetup` (T3 pair creating the machine's connection,
-  OpenCode credentials kept on the worker, calls scoped
-  to the caller's machine, Claude Code against the fake `claude` CLI and
-  Codex against the fake daemon (`codextest`): connect, a task through the
-  coordinator whose stored observation carries the resume command,
-  disconnect; refused without local harnesses; left out against an older
-  main server).
-- **Resume command.** Both placements read the command from
-  `Observation.Links`. An unconfirmed launch also keeps the reported
-  command on its attempt (`execution_attempts.observed_session`) in case
-  saving the observation failed. Handoffs keep the link recorded at
-  acceptance. With multiple machines, task rows and detail name the machine
-  to run the command on ("Copy resume command for laptop").
+### Connection setup and ports
 
-## Harness registry
+A setup package implements `harness.Connector` for its machine and kind.
+A connector supplies an in-memory summary, status, configure, run and
+disconnect. Status includes a common phase, facts and an optional fix,
+plus harness details. The API attaches full-sync time, error and progress as
+`sync`. Hosts render declared settings and actions or use a registered setup
+panel. The API exposes the same setup routes on each machine.
+[Connection API](api.md#harness-connections-api-v6)
 
-One ordered list in `server/internal/harnesses/modules.go` registers the
-modules used by the local server and the worker. A module supplies a
-`Descriptor`, `Compose(context.Context, harness.Ports)`, its public
-settings validator, and any process environment or legacy secret
-declarations. `Compose` installs existing adapters through the install
-port and returns the connector and optional cleanup. A connector is
-available before the first connection exists. The registry, whose order
-also controls the API list, decides which kinds Stage knows. Serve runs a
-release and schedule runner per active connection and follows switches
-(`serve/runners.go`).
+`Compose` takes machine-bound ports. `Settings.Get` reads a public JSON
+object by kind and `Settings.Save` applies a partial update. Omitted fields
+keep their values. Null resets a setting to its module default. `Secrets`
+addresses opaque values by kind and key. The local placement can commit
+a settings patch and secret edit together. Setup owns settings types and
+credential formats. `Identity` reads, switches or stamps an instance and
+supplies the evidence Stage stored for continuity checks. The module also
+receives its data directory, profile, environment, binary lookup and logger.
+It installs adapters through the install port and returns the connector and
+optional cleanup for its client resources.
 
-Stage does not seed connection rows. A fresh installation shows the
-automatic-completion preference after the harness first connects because
-the preference belongs to that connection. Existing connection preferences
-survive the settings migration.
+### Connection identity
 
-- **Placement.** `localProcesses` requires a profile that allows local
-  processes (Claude Code and Codex). T3 and OpenCode connect to a service.
-  All four declare machine-local sessions. A module may independently
-  declare cloud sessions. `GET /api/harnesses` reports the machine's
-  availability and reason. [Machine profiles](runtime.md#machine-profile-and-hosted-harnesses)
-- **Stable identity.** When the identity names one instance for good (a T3
-  environment id), pairing a retired connection's identity revives it, and
-  identities are unique per machine and kind. Otherwise (an OpenCode address)
-  the module declares continuity proof and selects the connection to revive.
-  A stable-identity module may also declare a moved-retire predicate. Stage
-  evaluates it against the old and new connector summaries when the old
-  machine is reachable.
-- **Connection setup.** A harness's descriptor carries settings fields,
-  declared connection actions and disconnect availability. Its setup
-  package implements `harness.Connector`
-  (memory-only summary, status with harness details, configure, run,
-  disconnect) over narrow ports ([machine-runtime seam](#machine-runtime-seam));
-  each machine hosts one per kind (`harness.Connectors`, built from the
-  machines and checked against the registry, leaving out kinds a machine
-  does not allow). A hosted harness has no connection row until its
-  connect action creates one through the identity port (`machine.Connect`).
-  The API exposes them generically under `/api/harnesses/{kind}/...`; health, sync skipping and
-  connection lists read connector summaries. Setup status carries Stage’s
-  full sync timestamp, error and progress in top-level `sync`. Hosts render the schema, or a
-  panel registered for the kind (UI `packages/app/src/harnesses/` slot registry, CLI `slots_*.go`).
-- **Closures.** Completion is inferred only from a closure the harness's
-  descriptor declares; the descriptor supplies the stored provenance, the
-  journal event, the auto-complete toggle label and the accepted-result copy.
-  A harness that declares none has no auto-complete. Hosts use the matching
-  closure from the task's descriptor for inferred provenance, with generic
-  copy when no closure matches. User and historical acceptance use fixed copy.
-- **Attention.** What a session from the adapter's attention feed that no
-  task owns may produce. `notify` (the default; T3, OpenCode): a silent
-  waiting row, plus an inbox event and push for transitions into
-  `needs_input|done|failed` after startup. `silent` (Claude Code): the
-  waiting row and the needs-input count only, never an event or push.
-  Either way discovery never tracks a session: adoption does.
-- **Wrapping** ([ADR 0007](adr/0007-harness-boundary.md) decision 13). A
-  harness that runs other harnesses' sessions declares `wraps: {origins}`:
-  the session origins it leaves in them, as the wrapped harness records
-  them (T3: `t3-code`, Claude Code's entrypoint; `T3 Code`, Codex's
-  originator). An origin belongs to one harness (the registry rejects a
-  second). Adapters report a session's `origin` raw (`Observation.origin`)
-  and never name another harness (`harness` `boundary_test.go`
-  `TestAdaptersDoNotNameOtherHarnesses`). The coordinator refuses to track
-  a session whose origin another registered harness wraps (adoption, track
-  preview, link repair, polling: `session_refused`, "Track it through
-  <wrapper>"), and leaves it out of discovery's waiting rows. A harness
-  that records origins declares `attribution.origin` (`{env?}`: the
-  variable holding a session's origin in its agents; Claude Code
-  `CLAUDE_CODE_ENTRYPOINT`, Codex none); among several harness session
-  variables in one process, such a harness's yields when a wrapper's
-  variable is set or its origin variable holds a wrapped origin (unless
-  its precedence owns), so the wrapper's variable names the caller.
+Stage seeds no default harness or connection. A connector is available
+before a connection exists. The first successful pair or connect creates
+the connection through the identity port. Automatic-completion preferences
+belong to that connection.
 
-<a id="contracts-for-roadmap-tasks-5-and-6"></a>
+An identity is unique per machine and kind. A stable identity such as a T3
+environment ID revives its retired connection on the same machine. When an
+address is insufficient, as with OpenCode, the module proves continuity from
+stored evidence and selects the connection to revive. A stable-identity
+module may also declare a moved-retire predicate. Stage evaluates it using
+both connector summaries when the old machine is reachable.
 
-## Session identity, capabilities and agent transport
+Replacing an instance retires its connection. Tasks, sessions and bindings
+remain on it as history. Unlaunched backlog tasks and schedules follow the
+new active connection. Bindings change through workspace discovery or a
+user action. Serve follows connection changes and runs release and schedule
+runners per active connection.
+[Connection storage and lifecycle](architecture.md#project-and-session-identity)
 
-- A session is `{connectionId, externalSessionId}`. Neither a directory string
-  nor an external session ID identifies another connection. Project bindings
-  and launch destinations retain the verified connection, external project,
-  reported path, binding ID and revision. A task or schedule can choose a
-  binding on its connection, otherwise it uses the primary at launch.
-  Workspace-scoped catalogs and project actions accept the same binding ID.
-  The claimed attempt pins its destination for reconciliation.
-- `Config.model` is an opaque adapter key. Options are named string/boolean
-  values; permission and interaction mode are opaque adapter selections.
-  `Features` supplies models, options (launch options included),
-  permissions, modes and operation availability with reasons. Operations
-  are typed (`execution.Op`, UI `OperationId`): `launch`, `stop`, `adopt`,
-  `reply`, `opening`, `attention`, `images`, `respond`, `send`. Every adapter declares each one, with a reason when unavailable
-  (`Capabilities.DeclaresOperations`, its contract tests); the remote proxy
-  passes them through. Unsupported operations return actionable
-  errors. Adapters must validate the requested semantics before dispatch.
-  Product code reads policy from these, never a harness name: `images`
-  gates the image field, the API and MCP (images on a connection without
-  it are refused with its reason), and `ModeLabel` names the mode choice
-  in the harness's words. Tasks and schedules store only an execution
-  config (migration 0027 backfilled T3 rows saved before configs); API v8
-  removed the legacy T3 model inputs (400 naming `executionConfig` with
-  `connectionId`) and `workspace` (400 naming `executionConfig.options`).
-- **Launch options** (#420). Where and how a session starts (a new
-  worktree, its base ref, its branch) is a harness-wide option the adapter
-  declares and translates; Stage keeps no workspace of its own and makes
-  no worktree. An `Option` has an `id`, a `kind` (`choice`, `boolean` or
-  `text`; omitted in older declarations: `boolean` when every value is a
-  boolean, else `choice`), a `label`, its `values` (none for `text`), a
-  `default` and an optional `dependsOn` (`{option, value}`: it applies only
-  when that option, set or by default, has that value). `Capabilities.Valid`
-  rejects malformed declarations; `ValidateConfig` checks a selection:
-  a boolean takes `true` or `false`, a text a non-empty trimmed string
-  (leave it out for the harness default), a choice one of its values, and
-  a dependent option only when its dependency holds. Per harness: T3
-  `worktree` (boolean), `baseRef` and `branch` (text, with `worktree`
-  `true`), translated to `workspaceStrategy` (`root`, or `worktree` with
-  `baseRef`, `branch` and `startFromOrigin` when the ref starts with
-  `origin/` or `upstream/`; T3 requires a base ref, so a worktree without
-  one is `Rejected` with the reason); Claude Code `worktree`
-  (`claude --bg -w stage-<requestId>`); OpenCode `worktree` (its
-  `POST /api/worktree` flow); Codex none. A dependent no longer starts
-  from its predecessor's branch: the handoff names the branch the
-  predecessor reported (migration 0033 moved stored workspaces into
-  options, a T3 predecessor's stored fallback base ref and branch
-  included, and journaled where each predecessor-based task now starts).
-- `Observation` is a validated snapshot: session/project, normalized state,
-  activity, top-level/archive eligibility, directory and branch, links, and a bounded
-  reply. States are running, needs_input, done, failed,
-  interrupted, cancelled or idle. Idle does not overwrite a known task state.
-  Unknown/malformed snapshots and missing/offline sessions never imply execution
-  failure or completion. Connection health is independent. `closed`
-  (`{signal}`, omitted when open) reports a closure in the harness: `settled`
-  (T3) or `archived` (OpenCode or Codex archive, Claude Code `rm`). Stage
-  separately verifies that execution succeeded before inferring completion. An idle observation may carry a closure (the harness closed
-  the session and dropped its state with it): the task keeps its state and
-  inference reads the stored `done`.
-- A `Reply` contains `itemId`, `runId`, `text`, `truncated` and `updatedAt`.
-  The opening prompt exposes the item ID. Acceptance uses the item and run
-  IDs to identify the cached reply and its execution. `Links` contains `web`, `native` and `command` as available.
-  Acceptance captures the web link first, then the native link.
-- `usage` (`execution.Usage`, omitted when the harness reports none) is what
-  the session consumed over its whole life: `turns`, `inputTokens`
-  (uncached), `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`,
-  `workingMs` (finished turns; 0 unknown) and `costUsd`. Cumulative, best
-  effort, harness-neutral. `costUsd` is only a cost the harness itself
-  reports (null otherwise); Stage never prices tokens. The store keeps the
-  last usage when an observation carries none (an unreadable transcript).
-  Task detail shows the current session's usage.
-- `Launch` receives an immutable intent plus versioned adapter JSON checkpoints.
-  It must call the durable save callback before each external effect, stop if
-  saving fails, and reconcile the same operation on replay. Checkpoints contain
-  references and non-secret identity only. An adapter with multi-step creation
-  must reserve deterministic session/message identifiers before sending either
-  step and reconcile their existence after interruption.
-- `Rejected` certifies that no execution started. It returns the task to backlog
-  for repair. Every other launch error keeps the attempt unconfirmed. A harness
-  must never use rejection merely because it is offline, timed out or returned
-  malformed data.
-- `Refused` (`execution.Refused{reason}`) is Stage declining to track a
-  session another registered harness wraps (its `origin` among that
-  harness's `wraps`: a Claude Code session or Codex thread T3 started). The
-  coordinator decides it from the descriptors, never an adapter by name. It
-  is a decision, not a failure: the coordinator answers 409
-  `session_refused` with the reason ("This Claude Code session was started
-  by T3. Track it through T3."), and nothing about the session changes.
-- Optional link resolution supports explicit repair. Preview verifies the pinned
-  destination, current environment, top-level session and ownership. Attachment
-  rechecks those facts and the attempt revision. It sends no launch and grants
-  no Stage acceptance.
-- Schedules, manual starts and automatic tree starts share the coordinator.
-  Completion snapshots and handoff read Stage storage. A source harness can be
-  offline. Only acceptance releases dependencies: user completion, or
-  completion Stage infers from a closure of a done session after polling it
-  (once per execution, per-connection `autoComplete`; see
-  [inferred completion](api.md#user-acceptance-api-v4)). Unaccepted done tasks
-  stay in the throttled stale poll so a late closure is seen.
-- Hosts choose native versus web destinations through
-  `Links.executionDestination`. Product code does not inspect browser location
-  or dispatch native URLs directly.
+## Adapter roles
 
-Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. A harness names the caller through its descriptor's attribution (OpenCode attaches its native session ID to each MCP call) or the generic `Stage-Caller-Session` header and `STAGE_CALLER_SESSION` variable; the launch instructions carry the descriptor's caller hint. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
+`execution.Adapter` embeds four roles. `machine.Connections` resolves the
+full adapter or a narrow role from the connection's machine. The local
+adapter and remote proxy implement the same contract.
 
-<a id="execution-contract-v2"></a>
+### Catalog
 
-## Declared actions and facts
+`Health` reports availability, a reason, instance identity and the check
+time. It is independent of session outcomes. `Features` describes models,
+options, permissions, modes and supported operations with reasons when
+unavailable. `ModeLabel` names the mode selector in the harness's words.
+A workspace-scoped catalog uses `WorkspaceFeatures` with the selected
+binding's external project and directory.
+[Capabilities API](api.md#get-apiconnectionsconnectionidcapabilities)
 
-An operation is typed in core only when Stage's own logic branches on it.
-Launch, stop, adopt, reply, opening, attention, images, respond and send
-remain typed operations. Harness-owned operations Stage relays are
-declared actions. Extra harness data for display is a declared fact.
-Trees, acceptance, handoff, journals, schedules and projects work
-independently of any action or fact a harness declares.
+### Inventory
 
-- `execution.Action` defines a stable ID, target, caller policy, availability
-  and input schema. A connector owns connection actions including initial
-  setup. `execution.Capabilities.Actions` describes session and project
-  actions. `execution.As[execution.Actor]` reaches the owner with the same
-  request in process or on the worker.
-- Stage resolves the scoped target and checks policy and schema. The action
-  owner validates semantic input. `adapter.act` is the generic worker
-  request kind and `actor` the advertised optional trait. A lost reply
-  leaves the outcome uncertain and does not trigger a replay.
-- A successful session action records a redacted journal event. Dispatch
-  runs outside the journal transaction so a storage retry cannot re-run the
-  action. Clients can distinguish a journal failure from dispatch failure.
-- `execution.Fact` is display metadata on connection status, observations
-  or action results. Stage filters duplicate or malformed facts and clears
-  unsafe links at the relay boundary. Session observations persist in the
-  existing JSON column. `harness.Status` supplies a common phase and
-  optional fix while retaining the harness's own details.
+`Workspaces` reports harness project IDs, directories, timestamps,
+availability and import evidence. The adapter marks paths on its machine's
+filesystem. Discovery uses that machine's `Ops.Inventory` to enrich those
+paths, refreshes stored workspaces and runs project import. Failed inventory
+reads leave the last stored inventory in place. Full sync guards against
+concurrent runs per connection, reports progress and records successful sync
+for the active connection. [Workspace discovery](discovery.md)
 
-See [the action API](api.md#declared-actions-and-facts) for wire shapes.
+### Sessions
 
-## Optional adapter interfaces
+`Observe` returns the current snapshot for a scoped session.
+`Opening` reads its first prompt, including the item ID. `Attention` lists
+sessions the harness surfaces to Stage, such as sessions waiting on the user. Stage adds a task through explicit adoption.
 
-Optional parts of the adapter contract (`internal/execution/optional.go`).
-Product code uses `execution.As[T]` and reads the operation's
-availability; the descriptor states the policies the coordinator enforces.
-The contract tests prove them on fake harnesses (`internal/sync`
-`contract_v2_test.go`): `assigned` (server-assigned ids, non-idempotent
-create) and `hosted` (owns its processes, pushes, loses its owner, answers
-interaction).
+### Launcher
 
-- **Launch identity.** The descriptor's `launch` is `reserved` (default): the
-  adapter reserves the session identity before any effect, so replaying
-  `Launch` reconciles the same session (T3's deterministic thread id,
-  OpenCode's checkpointed session). `correlated`: the harness assigns the id
-  and creation is not idempotent. Stage appends `execution.LaunchMarker(requestId)`
-  to the prompt (`Intent.marker`), records the dispatch before calling
-  `Launch` exactly once, and after an uncertain outcome only searches for the
-  marker (`execution.Correlator`). Not found keeps the attempt **Launch
-  unconfirmed** until the user links the session; Stage never launches it
-  again. A correlated harness without a correlator cannot launch.
-- **State reasons.** `Observation.stateReason` qualifies a common state.
-  The coordinator requires the module to declare the reason in `stateReasons`.
-  `owner_exited` means an execution owner died without reporting an outcome
-  and requires `interrupted`.
-- **Push.** An adapter implementing `execution.EventSource` streams
-  observations of its connection; the coordinator runs the stream per
-  connection and ingests each through the same path as polling (validation,
-  policies, transition, inferred completion). Unowned sessions are left to
-  discovery, launching tasks to their launch. Polling continues as
-  reconciliation, so a lost event only delays; the stream is the shape a
-  worker's upstream channel will take. An external bridge or hook (no
-  in-process `EventSource`) may push observations of an existing connection
-  to `POST /api/connections/{id}/observations`
-  ([api.md](api.md#harness-connections-api-v6), ADR 0007 decision 8): the
-  same `sync.Service.Ingest`, after `CheckObservation` with the
-  connection's kind, so a malformed one is reported `invalid` and changes
-  nothing; each result says `ingested`, `ignored` or `invalid`. A push for
-  a connection on an offline worker (or one that needs an update) is 409
-  `connection_unavailable` and changes nothing. Polling still reconciles.
-  API v9 rejects `artifacts`, `modelLabel`, `links.service`, `links.app`,
-  `reply.messageId` and `reply.position` before strict decoding or ingestion.
-  The 400 response names the indexed field, for example
-  `observations[0].reply.position was removed in API v9`. Stored observation
-  JSON may retain older fields until the next write. Readers ignore them.
-- **Resume command.** `Links.command` is a copyable shell command that
-  resumes the session in the harness's own client, for a harness without a web
-  or app destination. The platform's `ExecutionLinks.command` carries it; hosts
-  never open it, and the task page offers Copy resume command when no
-  destination exists.
-- **Native link schemes.** `Descriptor.linkSchemes` declares lower-case scheme
-  names without a colon, such as T3's `t3code`. `harness.NewRegistry` emits
-  an empty array for no schemes and rejects duplicates, malformed names and
-  reserved schemes with `harness <kind>: invalid link scheme "<s>"`. See the
-  [API descriptor](api.md#harness-connections-api-v6) for the validation rules.
-  Reply Markdown allows HTTP(S), FTP(S), `mailto`, `tel`, Stage and relative
-  links immediately. Harness links gain a destination once clients
-  load and validate the descriptors. Script URLs stay blocked.
-- **Harness-wide options.** `Capabilities.options` apply whatever the model,
-  beside each model's own. A config may set the union
-  (`Capabilities.OptionsFor`); an id reused between them is malformed
-  (`Capabilities.Valid`), so a selection always names one option.
-- **Interaction.** `execution.Interactive` (requests, respond, send) behind
-  operations `respond` and `send`. A `Request` is an `approval` (pick an
-  option; `textOption` names the option that may carry text, e.g. a denial's
-  reason), a `question` (its `questions` answered together through
-  `Response.answers`, keyed by question id: option labels, or one custom
-  text when `custom`) or `input` (free text); `preview` is the command,
-  path, URL or input it acts on. An answer that does not fit is
-  `*execution.Invalid` (400; the worker channel carries it as
-  `invalid_answer`); a request no longer pending is `ErrNotFound` (404).
-  API: [session interaction](api.md#session-interaction-api-v6); the app
-  answers on task detail and needs-input rows, never MCP or the CLI (only
-  the user answers). A harness without it answers `operation_unavailable`.
-  A session that can't take a message now is `*execution.Busy` (409
-  `session_busy` with the reason; the worker channel carries it as `busy`);
-  a sent message records "Follow-up sent from Stage" on the task's timeline.
-  Send, like respond, is the user's only (agent callers are refused).
-  Claude Code implements it (respond and send); T3, OpenCode and Codex do not.
+`Launch` starts execution from a frozen intent and reconciles a prior
+dispatch when the launch policy permits it. `Stop` interrupts a session
+when its operation is available. The harness performs the native command
+against the scoped session.
 
-## Durable launch lifecycle
+### Optional traits
 
-The launch claim transaction pins acceptance inputs and destination and creates a
-prepared attempt. Prompt, journal instructions, configuration, images and chosen
-base are persisted before the adapter runs. A crash during preparation has made
-no harness call and returns to backlog. Historical attempts without safe identity
-remain unconfirmed and require linking.
+Use `execution.As[T](role)` to reach a trait and check the corresponding
+operation or descriptor policy before dispatch. `execution/optional.go`
+registers `LinkResolver`, `WorkspaceFeatures`, `Correlator`,
+`EventSource`, `Interactive` and `Actor`. A local adapter implements
+the Go interface. A partial adapter, such as a worker proxy, must also
+declare that trait in the connection's current ready snapshot. Unknown traits
+are ignored. Channel negotiation also scopes each request and harness kind.
 
-After dispatch, recovery retries automatically with backoff (5 seconds to one
-minute), including after restart. UI labels the state **Launch unconfirmed**.
-When the harness returned a session but Stage failed to record it (its
-observation or the confirmation write), the attempt keeps the cause, the backoff
-and that session; task detail leads with "Launched in <harness>; Stage can't
-record it" and opens the session, and the next retry records it once the cause is
-gone. A revision check that no longer matches reports a conflict, never a silent
-no-op.
+### Errors
 
-Session identities are always scoped by the observed session's own connection:
-an observation's parent and a task event's journal row take the session of
-that observation or task, never the local machine's T3 (which may be retired
-once T3 moved to a worker). A bare session id names no connection, so it
-records no session.
-A per-task lock serializes reconciliation and manual attachment; database
-revision checks reject stale checkpoints and attachments. The server data-dir
-lock prevents concurrent owners of the same database.
+| Error | Meaning |
+| --- | --- |
+| `Rejected` | The launch certified that no execution started. Stage returns the task to Backlog for repair. Other launch failures leave the attempt unconfirmed. |
+| `Refused` | Stage declines to track a session that a registered harness wraps. The API returns 409 `session_refused` with where to track it. |
+| `Invalid` | The answer does not fit a pending interaction request. Nothing was sent. The API returns 400 and the worker channel uses `invalid_answer`. |
+| `Busy` | The session cannot take a message now. Nothing was sent. The API returns 409 `session_busy` with the reason and the channel uses `busy`. |
 
-T3 checkpoints pin the OAuth authentication session namespace, environment,
-expected deterministic thread ID and upload references. Registration client ID
-alone is insufficient. Re-pairing cannot replay an old namespace. A known thread
-may still be read in the same verified environment after re-pairing. A conflicting
-launch reply is held for explicit linking. Uploaded images stay with uncertain
-attempts; only certified rejection permits discarding them.
+`ErrUnavailable`, `ErrNotFound` and `ErrNoReply` preserve their meaning
+over the channel (`unavailable`, `not_found`, `no_reply`). An absent
+trait or operation returns `operation_unavailable`. Only an adapter that
+can certify rejection may return `Rejected` after dispatch.
 
-## Compatibility and verification
+## Launch
 
-There is no default harness (ADR 0007 decision 12, API v8): no connection is
-seeded, nothing outside a harness's adapter and setup branches on its kind, and
-a request names its connection (`connectionId`) unless the project's bindings
-or the default connection choose one. `executionConfig` is the only
-task/schedule model field; the legacy T3 model inputs, `/api/catalog`,
-`/api/connections/t3/projects`, the T3 thread read and the `threads` mirror are
-removed. Historical settlement/run/PR records remain readable. Newly observed
-execution uses Stage states for every harness, from `execution_observations`
-(run span, last word, origin title, tree activity). The T3 adapter decides
-T3's states: idle after a run (a latest run id) or settled reads `done`, idle
-that never ran stays `idle` (an adopted never-ran T3 session is `backlog`);
-T3 settlement never hides active work and accepts a task only through
-inferred completion. T3 reports a thread's newest run; a cancelled or
-rolled-back run that never started (a queued follow-up) did no work, so the
-newest other run decides the observed state and end time. Full-sync progress
-and the one-sync-at-a-time guard cover every connection; T3's
-`lastFullSyncAt` is recorded by `t3setup.RecordFullSync` (the sync service's
-`OnConnectionSynced` hook).
+Manual starts, schedules and automatic tree starts share the coordinator.
+A launch claim pins the verified destination and accepted dependency inputs.
+Reconciliation verifies the pinned workspace on the same connection.
 
-Contract tests use a second fake harness with document IDs, a non-T3 model,
-two-step creation, optional capabilities, lost replies, restart, offline reads,
-malformed states and offline acceptance. T3 tests cover namespace rotation and
-checkpoint failures. API tests cover compatibility, frozen handoff/journals,
-explicit base repair and link-preview-attach ownership/revision checks.
-These contract tests use isolated harnesses. The OpenCode live suite is described below.
+### Intent, options and checkpoints
 
-## OpenCode V2 adapter
+`execution.Intent` carries the request ID, connection, external project,
+directory, title, prompt, execution configuration and images. Tasks and
+schedules store `executionConfig`. Model, permission and mode are opaque
+adapter keys. The selected model's options and the harness-wide options
+share one namespace. Option kinds are `choice`, `boolean` and `text`.
+A choice takes a declared value, a boolean takes true or false, and text takes
+a nonempty trimmed string. Omit an option to use its default. A `dependsOn`
+condition must hold for a dependent selection. `Capabilities.Valid` checks
+the declarations and `ValidateConfig` checks selections.
 
-Stage connects to an existing
-service using its URL and optional HTTP Basic credentials. It accepts OpenCode V2
-(tested with 2.3.0); any version whose API has the operations Stage uses. Stage does
-not pin the reported version: it checks the required V2 operations and worktree, session
-and prompt request schemas in `/openapi.json`, and refuses to connect when one is missing
-(the error names the version and the operation). Version-specific handling, when a
-release needs it, branches on the reported version. The server does not advertise a
-binary digest. Repeat the live suite when a release changes behavior Stage relies on.
+The adapter owns worktree creation. T3 declares `worktree`, `baseRef` and
+`branch`, with the last two applying to a worktree launch. OpenCode and
+Claude Code offer a worktree option and choose the base themselves. Codex
+runs in the selected checkout. Handoff carries a predecessor's reported
+branch as context.
+
+`Launch` receives the immutable intent and an adapter-owned, versioned JSON
+checkpoint. Save the checkpoint durably before each external effect and
+stop if the save fails. Checkpoints contain references and non-secret identity
+only. For multi-step creation, persist the identifiers needed to reconcile
+each step before dispatch. Supply images through the intent. On a worker,
+`launch.image` fetches each image by index and `checkpoint.save` calls the
+coordinator's `SaveCheckpoint`. After the launch call stops waiting, the
+channel refuses further saves with `call_ended`.
+
+### Launch identity
+
+- **Reserved** (default) uses a deterministic or checkpointed identity to
+  reconcile the same session and input on replay.
+- **Correlated** covers a harness that assigns the session ID and whose
+  create operation cannot safely be repeated. Stage appends
+  `execution.LaunchMarker(requestId)` to the prompt, records the dispatch
+  and calls `Launch` once. Recovery uses `execution.Correlator` to find the
+  session by that marker. If none is found, the attempt stays unconfirmed
+  and supports explicit linking. The correlator is required for launch.
+
+### Durable attempt lifecycle
+
+The claim transaction creates a prepared attempt. Stage freezes the prompt,
+journal instructions, config, images and destination before calling the
+adapter. Interrupted preparation with no frozen intent returns the task to
+Backlog. Attempts without enough identity for safe recovery require linking.
+
+A lost reply or timeout after dispatch leaves the attempt **Launch
+unconfirmed**. Recovery retries with backoff (5 seconds to 1 minute),
+including after restart, through the checkpoint or correlation policy.
+When the harness returned a session but Stage could not persist the
+observation or confirmation, the attempt retains the error, backoff and
+reported session. Task detail can open that session or display its resume
+command. Once storage recovers, a retry can record the session.
+
+A per-task lock serializes reconciliation and manual attachment. Database
+revision checks reject stale checkpoints and attachments. The server
+data-dir lock prevents concurrent owners of the same database.
+
+### Link repair
+
+An optional `LinkResolver` translates a pasted ID, URL or command.
+Preview verifies the pinned destination, current environment, top-level
+session and ownership. Attachment rechecks those facts and the attempt
+revision. The repair attaches the existing session without dispatching
+launch or granting acceptance.
+[Task API](api.md#tasks)
+
+### Handoff and journal instructions
+
+Only acceptance releases dependencies. When handoff is enabled the claim
+pins each need's immutable accepted result, even if the source harness is
+offline or the source task is later reopened. The coordinator builds the
+blocks from Stage storage and records them per attempt. They include the
+accepted evidence, cached reply excerpt, journal references and any reported
+branch, worktree or session link. Excerpts preserve truncation and
+run provenance. The budget per need is `min(4000, max(1000, 8000 / sources))`
+Unicode characters. Retries reuse the stored blocks. A storage error aborts
+launch preparation.
+
+Every launch adds separate journal instructions, including launches without
+handoff. They identify the task and tree at launch, the connection, the
+agent transport and caller hint. They ask the agent to refresh task and tree
+context, read relevant notes and journal progress and outcomes. Retries
+reuse the instruction block. [Handoff API](api.md#handoff)
+
+## Observation
+
+### The snapshot
+
+`Observation` contains scoped session and project identity, activity, child and
+archive flags, the reported directory and branch, links and a bounded reply. A normalized state is `running`, `needs_input`, `done`,
+`failed`, `interrupted`, `cancelled` or `idle`. The descriptor must declare
+any `stateReason`. Only `running` and `needs_input` are active. For example,
+`owner_exited` requires `interrupted` and means that an execution owner exited without reporting a
+result. A missing, offline or malformed snapshot provides no evidence of
+failure or completion.
+
+A `Reply` has `itemId`, `runId`, `text`, `truncated` and `updatedAt`.
+Acceptance uses the IDs to identify the cached reply and its execution.
+`Links` can carry a web address, a native address and a resume command.
+Hosts choose where to open a session through `Links.executionDestination`.
+Without a destination, the task UI offers to copy `Links.command` and names
+the machine when more than one is configured. Both placements read links
+from the stored observation. An unconfirmed attempt can retain the reported
+command when that write fails. Acceptance and handoff retain their captured
+session link (web first, then native).
+
+`Usage` is optional, cumulative and best effort. It carries turns, uncached
+input tokens, cache read and write tokens, output tokens, finished-turn
+working time (0 when unknown) and the harness's reported cost (null if
+absent). Stage keeps the last reported usage when an update omits it and
+does not estimate cost. Task detail shows the current session's usage.
+
+### Polling, streams and attention
+
+Per-connection polling, streams, attention and full-sync loops run on the
+main server, for both local and worker connections. A slow connection does
+not delay another's tick. Polling reconciles missed events and keeps
+unaccepted done tasks on a throttled poll to see late closure. Full sync
+refreshes inventory and calls the coordinator's `PollTask` for tracked
+sessions. Layer 10 moves observation beside the adapter.
+[ADR 0008 D11](adr/0008-harness-foundation.md#d11)
+
+An `EventSource` streams observations through the connection's event loop.
+The stream restarts after failure, with the last error exposed in status
+until recovery. The attention loop reads sessions from the adapter and
+refreshes previously watched ones. For unowned sessions, the default
+`notify` policy (T3 and OpenCode) surfaces waiting rows, and after startup
+can send an inbox event and push for transitions into `needs_input`, `done`
+or `failed`. Claude Code's `silent` policy surfaces waiting rows and the
+needs-input count. Adoption creates the tracked task.
+
+### Ingest and transitions
+
+Adapter events and external pushes converge on `observe.Service.Ingest`.
+It looks up the task by scoped session and delegates to the coordinator's
+apply path, also used by `PollTask`. Unowned sessions are left to attention
+and launches reconcile their own sessions. Apply verifies the session and
+descriptor policy, stores the observation and applies the transition.
+Older `updatedAt` values cannot replace newer snapshots. An idle
+observation leaves a known task state in place.
+
+### Closures and inferred completion
+
+A closure carries a signal from the harness, such as T3 `settled` or
+OpenCode, Codex or Claude Code `archived`. A descriptor maps a declared
+signal to acceptance provenance, a journal event and the toggle and result
+copy. With no declared closure, the connection has no auto-complete option.
+
+Inference requires per-connection `autoComplete` and a successful execution
+recorded as `done`. An idle observation can still carry a closure, in which
+case inference checks the stored task state. Stage infers completion once
+per execution. Acceptance snapshots are durable and release dependencies.
+[Inferred completion](api.md#user-acceptance-api-v4)
+
+### Wrapping and refusal
+
+A wrapper declares `wraps.origins` for the markers it leaves in sessions
+run through it (T3 leaves `t3-code` in Claude Code and `T3 Code` in
+Codex). Each origin has one owner in the registry. Adapters report the
+raw `Observation.origin`, including across the worker channel. Stage
+refuses tracking through the wrapped harness in adoption, preview, link
+repair and polling, and omits those sessions from attention. The reason
+directs the user to the wrapper.
+
+A harness that records origin can also declare an attribution origin
+variable. When resolving a caller, a wrapped harness's session variable
+yields to the wrapper's variable or a wrapped origin, unless a declared
+precedence condition owns the session.
+
+### External push
+
+A bridge or hook may push snapshots for an existing connection to
+`POST /api/connections/{id}/observations`. The handler checks the
+connection and validates each observation against the same descriptor policy
+used by adapter events before calling `observe.Service.Ingest`. Each result
+is `ingested`, `ignored` or `invalid` with a reason where applicable.
+A pushed snapshot needs `updatedAt`. Timestamps more than five minutes
+ahead of the server are invalid. An offline or incompatible worker
+connection returns 409 `connection_unavailable`. Polling continues to reconcile lost events.
+[Observation API](api.md#harness-connections-api-v6)
+
+## Extension kinds
+
+[The harness authoring guide](harnesses.md) covers where to implement each
+extension. Stage-wide features work across harnesses or degrade through
+declared capabilities.
+
+### Typed operations
+
+Use a typed operation when Stage branches on availability.
+`execution.Op` (UI `OperationId`) covers `launch`, `stop`, `adopt`,
+`reply`, `opening`, `attention`, `images`, `respond` and `send`.
+Every adapter declares each operation and a reason when unavailable.
+For example, `images` gates image fields and image delivery in the API
+and MCP. The remote proxy passes the declarations through.
+
+### Interaction
+
+The `Interactive` trait exposes requests, responses and messages behind
+`respond` and `send`. An approval takes an option and may accept text
+for a designated option. A question group takes answers keyed by question
+ID, using option labels or custom text when allowed. An input takes free
+text. A preview can describe the command, path, URL or input the request
+acts on. A request that is no longer pending returns `ErrNotFound` (404).
+A successful follow-up records a task timeline entry. Only users can send
+and respond. Claude Code supplies both operations, with responses requiring
+its hook receiver. [Interaction API](api.md#session-interaction-api-v6)
+
+### Actions and facts
+
+A declared action is a harness-owned operation Stage relays. `execution.Action`
+carries the target, stable ID, caller policy, availability, confirmation
+and input schema. Connectors own connection actions, including setup.
+`Capabilities.Actions` describes session and project actions. Project
+actions use the selected binding's connection and workspace. Stage resolves
+that scope, checks caller policy and schema, and reaches the owner through
+`execution.As[execution.Actor]`. The owner validates semantic input.
+Workers advertise the `actor` trait and receive `adapter.act`.
+A lost reply leaves the outcome uncertain. Stage does not replay the action.
+
+A successful session action records a redacted journal event. Dispatch runs
+outside the journal transaction, so a storage retry cannot repeat the action.
+`execution.Fact` carries display data in status, observations or action
+results. Stage filters malformed or duplicate facts and clears unsafe links.
+[Actions and facts API](api.md#declared-actions-and-facts)
+
+## Machines
+
+### The machine seam
+
+`internal/machine` hosts adapters, connectors and local operations. A machine
+has an ID, online status, a hosting profile and `Ops`. `machine.Set`
+tracks the local machine and joined workers. `machine.Connections` resolves
+an adapter or role using the connection's machine and its registered kind.
+A retired connection returns `connection_retired`. An unhosted or
+disallowed connection returns `connection_unavailable` with the reason.
+
+`Machine.Allows` is the hosting decision shared by setup, the connector
+index and adapter lookup. The local machine uses its profile. Remote
+machines use the worker's advertised profile and available setups. A worker
+that allows local processes but lacks a setup reports the reason to update
+it. Before the first profile arrives, availability is unknown and requests
+report offline or starting as appropriate. A disallowed setup route returns
+409 `harness_unavailable` with the fix. Serve and workers compose only
+allowed modules.
+
+`machine.Local` hosts machine 1 in process. `serve/localmachine.go`
+composes its modules. Setup uses `Local.Install(old, next, adapter)` to
+install or move a connection's adapter (nil uninstalls). Connection change
+hooks wake the engine and resync runners.
+
+`machine.LocalOps` enriches filesystem-local inventory with absolute
+canonical paths, Git metadata including the common directory for linked
+worktrees, and checkout import eligibility. Claude Code uses
+`checkoutTop` and Codex `inCheckout`. Stage stores the evidence and resolves
+project identity on the main server. Raw `WorkspaceInfo.OriginRemote` can
+contain credentials and is kept out of client responses.
+[Workspace evidence](discovery.md)
+
+### Remote machines
+
+A joined machine is a `remote.Machine` on the main server. Its worker
+serves `remote.Host` over the authenticated channel, dispatching calls to
+a `machine.Local` and its ops. The worker has no Stage database. The
+server keeps the store, task state and acceptance.
+[Worker channel](runtime.md#worker-channel)
+
+- **Adapter and ops calls.** The proxy scopes calls to ready connections
+  and advertised traits. It forwards inventory enrichment as
+  `ops.inventory` with `{workspaces}`, and caches health for five seconds
+  within a ready snapshot. The launch intent travels without image bytes.
+  The worker calls back for images and checkpoint saves.
+- **Events.** `adapter.events` runs in a ten-minute window, renewed until
+  cancellation. Each `events.observation` callback is ingested before the
+  worker continues. Stream errors are visible in status and logs.
+- **Setup.** `remote.Connector` proxies `connector.*` status and mutations.
+  The worker composes only kinds the server advertises that its profile
+  allows. `setup.settings.get` (`{kind}`), `setup.settings.save`
+  (`{kind, patch}`), `setup.identity.*` and `setup.status.error` use the
+  authenticated machine. Active identity reads use
+  `setup.identity.activeIdentity` and connection checks use
+  `setup.identity.exists`. The main server stores public settings,
+  identity and sync status. Credentials stay in the worker's
+  `credentials.json` (mode `0600`, deleted on join and leave), outside
+  settings replies, negotiation and status. A secret entered during setup
+  can reach the worker through the intended configure or run call.
+  Pair and connect use the same retirement and revival rules as local
+  setup and wake sync and scheduling when ready.
+
+### Offline
+
+Offline, negotiating and incompatible workers report availability reasons
+immediately. Offline health pauses polls and streams without moving task
+state or acceptance. A new launch is refused with `connection_unavailable`.
+A dispatched attempt stays unconfirmed and retries through its saved
+checkpoint or correlation policy when the worker returns. Only a worker
+adapter's certified rejection can return a dispatched task to Backlog.
+
+### Verification
+
+The machine JSON round-trip tests cover the adapter contract, setup ports
+and ops. The `internal/engine` contract suite exercises local adapters
+and remote proxies through a real `worker.Run` and a loopback channel
+(`remote/remotetest`). Cases cover lost replies, restarts during launch,
+offline reads and acceptance, failed and late checkpoint saves, images and
+traits. Fake harnesses cover deterministic two-step launch, a correlated
+harness with assigned IDs and a hosted harness that pushes, loses its
+owner and answers interaction. API tests cover immutable handoff and
+journal context, destination repair and link ownership and revisions.
+
+`workersetup` tests run over a real channel and store. They cover T3 pairing,
+OpenCode credentials on the worker, caller machine scoping, and Claude Code
+and Codex setup and launch against their fakes, including stored resume
+commands and disconnect. Profile tests cover workers without local
+processes and harnesses an older server omits.
+
+## T3 adapter
+
+The T3 adapter maps a T3 environment's projects and threads to a connection.
+The adapter sends a root `workspaceStrategy` by default and a worktree
+strategy with `baseRef` and `branch` when `worktree` is enabled. A ref
+starting with `origin/` or `upstream/` sets `startFromOrigin`. A worktree with no base ref is rejected.
+
+Checkpoints pin the OAuth authentication session namespace, environment,
+deterministic thread ID and upload references. Re-pairing cannot replay
+the old namespace. A known thread can still be read in the same verified
+environment after re-pairing. A conflicting launch reply is held for
+explicit linking. Uploaded images stay with uncertain attempts and may be
+discarded on certified rejection. T3 tests cover namespace rotation and
+failed checkpoint saves.
+
+Settlement or an idle thread with a prior run reads `done` when no active
+work takes precedence. A thread that has never run stays `idle` and adopts
+as Backlog. The newest run supplies the observed state and end time, skipping
+cancelled or rolled-back runs that never started, such as queued follow-ups.
+Settlement reports a `settled` closure and grants acceptance only through
+inferred completion.
+
+## OpenCode adapter
+
+Stage connects to an existing OpenCode V2 service using its URL and optional
+HTTP Basic credentials. It checks the required operations and worktree, session
+and prompt request schemas in `/openapi.json`. If a requirement is missing,
+the error names the reported version and operation. Any version that meets
+those requirements can connect. The live suite below records the tested
+binary and should run again when a release changes behavior Stage relies on.
 
 OpenCode owns project inventory, workspace strategy, model selection and agent policy.
 An empty selection uses its defaults. A bound directory provides the model catalog,
 variants and visible primary agents. The capabilities endpoint accepts an optional
 Stage `projectId` to resolve that binding. Its launch option `worktree`
-(boolean, default off) asks OpenCode for its selected strategy and default
-base. Stage verifies the resulting inventory entry, project and directory.
-OpenCode declares no base ref or branch option; permission overrides and
-image delivery report an actionable reason.
+(boolean, default off) asks OpenCode to create the worktree using its
+default base. Stage verifies the resulting inventory entry, project and
+directory. Permission overrides and image delivery report a reason when
+unavailable.
 
 ### Launch and recovery
 
@@ -663,12 +617,10 @@ to run on that machine.
   keeps a retry from reusing an earlier attempt's worktree. Claude takes
   one `--settings`: the hooks file, which carries the image root's read
   rule (Images). Without hooks it is inline JSON with the read rule for
-  images, else none. `hooks-settings-head.json`, the predecessor-base
-  variant earlier versions wrote, is rewritten with the hooks file's
-  content when it exists (sessions launched with it read it again when
-  they wake) and never created. A config the features do not offer,
-  an image type other than PNG, JPEG, GIF or WebP, a missing folder or
-  executable, images without an image root, and Claude's `Workspace not
+  images, else none. An existing `hooks-settings-head.json` also receives the
+  current hook settings because sessions using that file read it on wake.
+  An unsupported config, an image type outside PNG, JPEG, GIF or WebP,
+  a missing folder or executable, images without an image root, and Claude's `Workspace not
   trusted` refusal are `Rejected` (the task returns to backlog with the
   reason; trusting a folder is done in Claude). Exit 0 prints
   `backgrounded · <short>`; the session list maps the short id to the
@@ -689,11 +641,10 @@ to run on that machine.
   its folder; an uncertain one keeps it. Each launch with images removes
   image folders older than 30 days (best effort); Claude keeps what it read
   in the transcript. Without an image root (no data dir) `images` is
-  unavailable with a reason. Earlier versions wrote images into
-  `<project>/.claude/stage-images`: each launch in a project, and the first
-  workspace discovery of each adapter for every known project, remove its
-  `stage-*` folders and Stage's `.gitignore` there, then the folder if
-  empty (best effort; nothing else under `.claude`).
+  unavailable with a reason. The adapter cleans up the legacy
+  `<project>/.claude/stage-images` directory on launch and first workspace
+  discovery. Cleanup removes
+  Stage's `stage-*` folders and `.gitignore`, then the directory if empty.
 - **Correlate.** Background sessions listed in the launch folder (or its
   per-attempt worktree, `<folder>/.claude/worktrees/stage-<requestId>`) and
   the transcripts of those folders, matched by the marker in the first
@@ -721,16 +672,15 @@ to run on that machine.
   current turn's prompt.
 - **Origin.** An observation's `origin` is the entrypoint of the
   transcript's first typed prompt (`cli`, `sdk-cli`, `t3-code`, ...), raw.
-  The adapter refuses nothing by origin: the coordinator refuses a session
-  another harness wraps ([harness registry](#harness-registry)).
+  The adapter reports this value for Stage's wrapping check.
+  [Wrapping policy](#wrapping-and-refusal)
 - **Stop** is `claude stop <short>`, for background sessions only.
   **Attention** lists every session Claude lists as waiting for its user:
   a `blocked` background session (also one the daemon retired after an hour
   idle; attach wakes it) and a terminal, IDE or SDK session with status
-  `waiting`; the coordinator leaves out a session another harness wraps
-  (its origin; T3 surfaces those). The descriptor's attention policy is `silent`: they show as waiting rows in the
-  inbox and in the needs-input count, never as events or pushes, and Stage
-  tracks one only when the user adopts it (the row's Track). A finished
+  `waiting`. The attention loop filters out wrapped sessions by origin.
+  The `silent` policy shows waiting rows and the needs-input count. The
+  row's Track action adopts the session. A finished
   discovered background session stays watched until `claude rm`; the
   adapter reuses a parsed transcript while its size and modification time
   are unchanged. **Opening** is the first typed prompt. **Links**: `command`
@@ -756,10 +706,10 @@ to run on that machine.
   SessionEnd: not running; PermissionRequest, a `permission_prompt`
   Notification: needs input; UserPromptSubmit: running), and pushes the
   last observation (one session at a time, four at once, the newest hook
-  wins). The coordinator ingests it as a poll. Polling continues: adopted
-  sessions, copies, a woken session after the listener moved, and hooks a
-  policy blocks (`allowedHttpHookUrls`, `disableAllHooks`,
-  `allowManagedHooksOnly`) are polled only. Replacing or removing the
+  wins). The event loop ingests it through `observe.Service.Ingest`.
+  Polling covers adopted sessions, copies, sessions that wake after the
+  listener moves, and sessions whose hooks are blocked by policy
+  (`allowedHttpHookUrls`, `disableAllHooks`, `allowManagedHooksOnly`). Replacing or removing the
   adapter (connect, the command setting, disconnect) ends its
   subscription; hooks meanwhile are answered and dropped. The setup status
   reports `details.events` ([api.md](api.md#harness-connections-api-v6)).
@@ -844,7 +794,7 @@ including `hooks/`), the hook receiver and requests with the fake sending
 hooks as Claude does (`claudetest` `Ask`), the adapter and setup against a
 fake claude CLI (`claudecode/claudetest`, a
 real executable with a state file), and `TestContractClaude*` in
-`internal/sync` with the real adapter in process and behind a worker
+`internal/engine` with the real adapter in process and behind a worker
 channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
 two scratch folders trusted in Claude's state file, launches a reply,
@@ -893,8 +843,8 @@ server's `harness_settings` row for that machine
   has no terminal evidence and is an error. Archive closes the session
   (`archived` closure). The reply is the final answer, 4,000 characters.
 - **Push.** `execution.EventSource`: the daemon broadcasts thread status,
-  archive and turn completion for every thread; Stage observes each and
-  ingests it like a poll. `Attention` lists loaded threads waiting on input.
+  archive and turn completion for every thread. Stage reads each thread and
+  ingests the observation through `observe.Service.Ingest`. `Attention` lists loaded threads waiting on input.
 - **Interaction.** Respond and send are unavailable: the user answers in
   Codex. Links carry `command` (`cd <dir> && codex resume <id>`), which the
   task list offers as Copy resume command.
@@ -907,6 +857,6 @@ server's `harness_settings` row for that machine
   the wrapper's variable names the caller.
 
 The fake daemon (`codex/codextest`) speaks the same subset over a temp
-socket; `internal/sync` `contract_codex_test.go` runs the coordinator
+socket; `internal/engine/contract_codex_test.go` runs the execution
 contract on it in both placements, and `codex/testdata` holds sanitized
 fixtures from the live gates.

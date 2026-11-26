@@ -9,9 +9,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	stageharness "github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 func TestCodexCommands(t *testing.T) {
@@ -20,8 +20,7 @@ func TestCodexCommands(t *testing.T) {
 	h := newHarness(t, func(d *api.Deps) {
 		reg := stageharness.MustRegistry(codex.Descriptor)
 		local := machine.NewLocal(db.LocalMachine, stageharness.Profile{Kind: stageharness.ProfileDesktop, LocalProcesses: true}, nil)
-		svc := t3sync.NewForMachines(d.Store, machine.MustSet(local), nil)
-		svc.Harnesses = reg
+		svc := engine.NewForMachines(d.Store, reg, machine.MustSet(local), nil)
 		local.OnChange(svc.ConnectionsChanged)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), reg)
 		setup, err := codexsetup.New(t.Context(), codexsetup.Options{
@@ -36,7 +35,7 @@ func TestCodexCommands(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.Harnesses, d.Connectors, d.Sync = reg, c, svc
+		d.Harnesses, d.Connectors, d.Engine = reg, c, svc
 	})
 	code, out, errOut := h.run("", "harness", "codex")
 	if code != 0 || !strings.Contains(out, "codex not connected") || !strings.Contains(out, "daemon      running") || !strings.Contains(out, "harness codex run connect") {

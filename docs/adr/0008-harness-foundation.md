@@ -198,10 +198,12 @@ stable and gives users a way to correct the evidence.
 
 ### D11
 
-**Run observation beside the adapter** (layer 09 splits the roles, layer
-10 changes placement). One observe package runs in the server for the
-local machine and in `stage worker` for a remote machine. The main
-server sends a watch set. The observer pushes cursor-bearing batches and
+**Run observation beside the adapter.** Layer 09 composes `coordinator`,
+`observe` and `discovery` in `engine`. Per-connection loops still run on
+the main server, and adapter events and bridge pushes meet at
+`observe.Service.Ingest`. Layer 10 changes placement. The `observe`
+package then runs in the server for the local machine and in
+`stage worker` for a remote machine. The main server sends a watch set. The observer pushes cursor-bearing batches and
 keeps a bounded outbox during an outage. Commands remain request and
 response. The existing processes host observation without a separate
 daemon or per-harness process. This lets remote observation continue

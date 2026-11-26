@@ -30,7 +30,7 @@ values keep their old meaning. Empty items and duplicates are errors.
 ## Machine profile and hosted harnesses
 
 The way the server runs decides which harnesses it may run
-([execution.md](execution.md#harness-registry)). Connected harnesses (a
+([execution.md](execution.md#modules-and-the-registry)). Connected harnesses (a
 service Stage connects to: T3, OpenCode) run on every profile. Hosted
 harnesses run as processes on this machine and need a profile that allows
 local processes. Claude Code is one ([execution.md](execution.md#claude-code-adapter)): its
@@ -350,10 +350,12 @@ A worker dials out; the main server never dials a worker. One channel per
 machine: an SSE stream down (`GET /api/worker/channel`) and one POST per
 message up (`POST /api/worker/channel`), both worker routes
 ([api.md](api.md#get-apiworkerchannel), [ADR 0002](adr/0002-machines-and-workers.md)).
-Code: `server/internal/workerchan` (protocol, hub, stream and POST
-serving), `server/internal/api` (routes and auth), `server/internal/worker`
-(client), `server/internal/remote` (the remote machine's calls,
-[execution.md](execution.md#remote-machines)).
+`server/internal/workerchan` owns protocol and transport.
+`server/internal/api` serves the routes and authenticates callers.
+`server/internal/worker` runs the client and `server/internal/remote`
+proxies remote machine calls. The main server runs each connection's
+observation loops and routes event callbacks to `observe.Service.Ingest`.
+[Remote machines](execution.md#remote-machines) · [Observation](execution.md#observation)
 
 - **Handshake.** The authenticated opening GET carries the inclusive
   `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max` integer

@@ -22,12 +22,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -38,7 +38,7 @@ type env struct {
 	t       *testing.T
 	handler http.Handler // the /api router
 	fake    *t3.Fake
-	sync    *t3sync.Service
+	engine  *engine.Engine
 	runner  *release.Runner
 	client  *client.Client
 	store   *db.Store
@@ -64,18 +64,17 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 		}
 		adapters[7] = other
 	}
-	svc := t3sync.NewWithAdapters(store, adapters, log)
-	svc.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
-	runner := release.NewRunner(store, svc, log)
-	svc.OnTransition = runner.OnTransition
+	svc := engine.NewWithAdapters(store, harness.MustRegistry(t3.Descriptor, opencode.Descriptor), adapters, log)
+	runner := release.NewRunner(store, svc.Coordinator, log)
+	svc.Coordinator.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{
 		Config:    config.Config{},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Engine: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &env{store: store, t: t, handler: h, fake: fake, sync: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
+	return &env{store: store, t: t, handler: h, fake: fake, engine: svc, runner: runner, client: client.New(srv.URL), url: srv.URL}
 }
 
 func (e *env) project(root string) db.Project {
@@ -85,7 +84,7 @@ func (e *env) project(root string) db.Project {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if _, err := e.sync.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		e.t.Fatal(err)
 	}
 	// The sync pass imports the T3 project.
@@ -109,7 +108,7 @@ func (e *env) session(p db.Project, title string) string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.sync.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
+	if err := e.engine.Coordinator.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 		e.t.Fatal(err)
 	}
 	return out.ThreadID
@@ -257,7 +256,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	// T3 settlement with auto-completion disabled leaves the dependent blocked.
 	_ = e.fake.SetStatus(s, t3.StatusCompleted)
 	_ = e.fake.Settle(s)
-	if err := e.sync.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.runner.Reconcile(context.Background()); err != nil {
@@ -360,7 +359,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 	}
 
 	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
-	if err := e.sync.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var w agenttools.WaitOut
@@ -392,7 +391,7 @@ func (e *env) acceptTask(tk client.Task) {
 	if err := e.fake.SetStatus(*tk.ExternalSessionID, t3.StatusCompleted); err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.sync.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
 	p, err := e.store.CompletionPreview(context.Background(), tk.ID)
@@ -739,7 +738,7 @@ func TestLastWordTools(t *testing.T) {
 	}
 	_ = e.fake.SetStatus(id, t3.StatusCompleted)
 
-	if err := e.sync.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
+	if err := e.engine.Coordinator.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	var got client.TaskDetail
@@ -1006,7 +1005,7 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = e.fake.SetStatus(sessionID, t3.StatusCompleted)
-	if err := e.sync.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 

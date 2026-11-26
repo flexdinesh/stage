@@ -42,7 +42,7 @@ Groundwork that already exists:
 - "Connection" already means one harness instance
   ([architecture.md](../architecture.md#project-and-session-identity)).
 - Execution's worker-ready rules: narrow ports, JSON-serializable contract
-  types, pushed observations ([execution.md](../execution.md#design-rules)).
+  types, pushed observations ([execution.md](../execution.md#ownership-stage-and-the-harness)).
 - Stage has no authentication. `guard.Policy` is request-origin hygiene. Remote
   use sits behind an authenticating HTTPS reverse proxy
   ([runtime.md](../runtime.md#request-origin-policy)).
@@ -217,7 +217,7 @@ Browser and API access stays behind the authenticating proxy.
 - **Harness secrets stay on the worker.** The main server stores connection
   identity, status and non-secret settings only. Checkpoints already carry
   only references and non-secret identity
-  ([execution.md](../execution.md#contracts-for-roadmap-tasks-5-and-6)), so
+  ([execution.md](../execution.md#intent-options-and-checkpoints)), so
   storing them on the main server is safe. #345 implements it: the worker
   runs its machine's connection setup and keeps the T3 token and OpenCode
   credentials in `credentials.json` (0600) in the worker dir; the main
@@ -279,7 +279,7 @@ completion.
 | --- | --- |
 | Worker offline (no channel, missed heartbeats) | Its connections report `connected: false`. `/api/health` stays 200. Polls skip. Task states, sessions and acceptance are unchanged. |
 | Launch while the machine is offline | The remote adapter returns an offline error, never `Rejected`. The attempt stays **Launch unconfirmed**, and recovery retries until the worker is back. |
-| Lost reply after dispatch (deadline, stream drop, worker or main restart) | The attempt stays **Launch unconfirmed**. Recovery retries with the existing backoff (5s to 1 min). The replay reconciles from the checkpoint ([execution.md](../execution.md#durable-launch-lifecycle)). |
+| Lost reply after dispatch (deadline, stream drop, worker or main restart) | The attempt stays **Launch unconfirmed**. Recovery retries with the existing backoff (5s to 1 min). The replay reconciles from the checkpoint ([execution.md](../execution.md#durable-attempt-lifecycle)). |
 | `checkpoint.save` cannot reach the main server | The adapter stops before the external effect, as the Launch contract already requires. |
 | `Rejected` | Only when the worker's adapter certifies that no execution started. Never because the worker or harness is offline, timed out, or returned malformed data. |
 | API version mismatch | The machine shows "needs update", and its connections are offline until the versions match. |

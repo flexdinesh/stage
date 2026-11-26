@@ -16,12 +16,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -29,7 +29,7 @@ import (
 type Deps struct {
 	Config config.Config
 	Store  *db.Store
-	Sync   *coordinator.Service
+	Engine *engine.Engine
 	Push   *notify.Notifier
 	Logger *slog.Logger
 	// Inbox wakes GET /api/notifications/stream (nil = a private hub).
@@ -340,7 +340,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	h.Harnesses = []HealthHarness{}
 	// The harness setup API serves the local machine's connectors.
 	s.connectors().Each(func(machine int64, d harness.Descriptor, c harness.Connector) {
-		if machine != s.Sync.Machines().DefaultID() {
+		if machine != s.Engine.Connections.Machines().DefaultID() {
 			return
 		}
 		sum := c.Summary(r.Context())

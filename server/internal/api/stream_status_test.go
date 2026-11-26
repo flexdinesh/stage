@@ -13,11 +13,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -63,7 +63,7 @@ func TestStreamStatusParity(t *testing.T) {
 			var logs bytes.Buffer
 			var connection int64
 			var route string
-			var svc *coordinator.Service
+			var svc *engine.Engine
 			var rig *remotetest.Rig
 			e := newEnv(t, func(d *api.Deps) {
 				const machineID = 2
@@ -95,10 +95,9 @@ func TestStreamStatusParity(t *testing.T) {
 					local.SetConnector(t3.Kind, connector)
 					set = machine.MustSet(local)
 				}
-				svc = coordinator.NewForMachines(d.Store, set, slog.New(slog.NewTextHandler(&logs, nil)))
-				svc.Harnesses = testHarnesses
-				svc.PublicURL = publicURL
-				d.Sync = svc
+				svc = engine.NewForMachines(d.Store, testHarnesses, set, slog.New(slog.NewTextHandler(&logs, nil)))
+				svc.Coordinator.PublicURL = publicURL
+				d.Engine = svc
 				connectors, err := set.Connectors(testHarnesses)
 				if err != nil {
 					t.Fatal(err)
@@ -120,7 +119,7 @@ func TestStreamStatusParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tk, err = svc.StartTask(ctx, tk.ID)
+			tk, err = svc.Coordinator.StartTask(ctx, tk.ID)
 			if err != nil || tk.Session == nil {
 				t.Fatalf("launch: %+v %v", tk, err)
 			}
@@ -156,7 +155,7 @@ func TestStreamStatusParity(t *testing.T) {
 				}
 			}
 			src.fail.Store(true)
-			if err := svc.Stream(ctx, connection); err == nil || !strings.Contains(err.Error(), streamFailure) {
+			if err := svc.Observe.Stream(ctx, connection); err == nil || !strings.Contains(err.Error(), streamFailure) {
 				t.Fatalf("stream error %v", err)
 			}
 			checkStatus(streamFailure)
@@ -172,8 +171,8 @@ func TestStreamStatusParity(t *testing.T) {
 			}
 			if rig != nil {
 				rig.StopWorker()
-				if err := svc.Stream(ctx, connection); err != nil || !strings.Contains(svc.StreamError(connection), streamFailure) {
-					t.Fatalf("offline stream changed previous error to %q (returned %v)", svc.StreamError(connection), err)
+				if err := svc.Observe.Stream(ctx, connection); err != nil || !strings.Contains(svc.Observe.StreamError(connection), streamFailure) {
+					t.Fatalf("offline stream changed previous error to %q (returned %v)", svc.Observe.StreamError(connection), err)
 				}
 				rig.StartWorker()
 			}
@@ -181,7 +180,7 @@ func TestStreamStatusParity(t *testing.T) {
 			if err := fake.SetStatus(tk.Session.ExternalSessionID, t3.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-			if err := svc.PollActive(ctx); err != nil {
+			if err := svc.Observe.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if got := e.getTask(tk.ID); got.State != "done" {
@@ -196,7 +195,7 @@ func TestStreamStatusParity(t *testing.T) {
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)
-				_ = svc.Stream(streamCtx, connection)
+				_ = svc.Observe.Stream(streamCtx, connection)
 			}()
 			select {
 			case <-src.started:
@@ -215,7 +214,7 @@ func TestStreamStatusParity(t *testing.T) {
 			checkStatus(streamFailure)
 			src.wait.Store(false)
 			src.fail.Store(false)
-			if err := svc.Stream(ctx, connection); err != nil {
+			if err := svc.Observe.Stream(ctx, connection); err != nil {
 				t.Fatal(err)
 			}
 			checkStatus("")

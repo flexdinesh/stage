@@ -12,10 +12,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/worker"
 )
@@ -97,15 +97,14 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := coordinator.NewForMachines(r.store, r.set, quiet())
-	svc.Harnesses = registry
-	got, err := svc.StartTask(ctx, task.ID)
+	svc := engine.NewForMachines(r.store, registry, r.set, quiet())
+	got, err := svc.Coordinator.StartTask(ctx, task.ID)
 	if err != nil || got.State != db.StateRunning || got.Session == nil {
 		t.Fatalf("start %+v %v", got, err)
 	}
 	thread := got.Session.ExternalSessionID
 	srv.Finish(thread, "completed", "Fixed.")
-	if err := svc.PollTask(ctx, got); err != nil {
+	if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ = r.store.GetTask(ctx, task.ID); got.State != db.StateDone {

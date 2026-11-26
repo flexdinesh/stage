@@ -109,7 +109,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 			Directory:         site.binding.Workspace,
 		}
 	}
-	site.adapter, err = s.Sync.Adapter(conn.ID)
+	site.adapter, err = s.Engine.Connections.Adapter(conn.ID)
 	return site, actionError(err)
 }
 
@@ -135,7 +135,7 @@ func (s *server) actionBinding(ctx context.Context, projectID, connectionID int6
 }
 
 // actionCapabilities uses the same workspace scope for discovery and dispatch.
-func actionCapabilities(ctx context.Context, adapter execution.Adapter, binding *db.ProjectBinding) (execution.Capabilities, error) {
+func actionCapabilities(ctx context.Context, adapter execution.Catalog, binding *db.ProjectBinding) (execution.Capabilities, error) {
 	var caps execution.Capabilities
 	var err error
 	if scoped, ok := execution.As[execution.WorkspaceFeatures](adapter); ok && binding != nil {
@@ -149,7 +149,7 @@ func actionCapabilities(ctx context.Context, adapter execution.Adapter, binding 
 	return validateActionCapabilities(adapter, caps)
 }
 
-func validateActionCapabilities(adapter execution.Adapter, caps execution.Capabilities) (execution.Capabilities, error) {
+func validateActionCapabilities(adapter execution.Catalog, caps execution.Capabilities) (execution.Capabilities, error) {
 	if err := execution.ValidateActions(caps.Actions, ""); err != nil {
 		return caps, &db.HarnessError{Err: fmt.Errorf("malformed action declarations: %w", err)}
 	}

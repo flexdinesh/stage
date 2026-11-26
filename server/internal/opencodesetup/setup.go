@@ -631,7 +631,7 @@ func (s *Service) previous(ctx context.Context, a *opencode.Adapter) (int64, err
 	return 0, nil
 }
 
-func (s *Service) verifyContinuity(ctx context.Context, a *opencode.Adapter, id int64) error {
+func (s *Service) verifyContinuity(ctx context.Context, a execution.Adapter, id int64) error {
 	bindings, sessions, unknown, err := s.identity.ConnectionEvidence(ctx, id)
 	if err != nil {
 		return err
@@ -655,6 +655,10 @@ func (s *Service) verifyContinuity(ctx context.Context, a *opencode.Adapter, id 
 			return db.Conflict("it does not serve stored workspace %s", b.Workspace)
 		}
 	}
+	return s.verifySessionContinuity(ctx, a, sessions)
+}
+
+func (s *Service) verifySessionContinuity(ctx context.Context, a execution.Sessions, sessions []execution.Observation) error {
 	for _, old := range sessions {
 		// a is scoped to the active connection; the session is compared on
 		// the candidate service whatever connection recorded it.

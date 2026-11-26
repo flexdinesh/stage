@@ -43,6 +43,10 @@ type Adapter struct {
 
 var (
 	_ execution.Adapter           = (*Adapter)(nil)
+	_ execution.Catalog           = (*Adapter)(nil)
+	_ execution.Inventory         = (*Adapter)(nil)
+	_ execution.Sessions          = (*Adapter)(nil)
+	_ execution.Launcher          = (*Adapter)(nil)
 	_ execution.Partial           = (*Adapter)(nil)
 	_ execution.LinkResolver      = (*Adapter)(nil)
 	_ execution.WorkspaceFeatures = (*Adapter)(nil)

@@ -22,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/guard"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/harnesses"
@@ -33,9 +34,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/webui"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // ShutdownTimeout lets in-flight launches (bounded at 90s) record their
@@ -192,24 +193,23 @@ func Run(ctx context.Context, o Options) error {
 	// machine per joined worker (below, ADR 0002).
 	local = &localMachine{Local: machine.NewLocal(db.LocalMachine, profile, machine.LocalOps{})}
 	machines := machine.MustSet(local)
-	syncSvc := coordinator.NewForMachines(store, machines, logger)
-	syncSvc.Harnesses = registry
-	syncSvc.PublicURL = cfg.PublicURL
-	syncSvc.CLI = cliName
+	eng := engine.New(engine.Options{Store: store, Machines: machines, Harnesses: registry, Log: logger})
+	eng.Coordinator.PublicURL = cfg.PublicURL
+	eng.Coordinator.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).
-	moved := newMovedRetirer(store, syncSvc.FullSyncEvery, logger)
-	syncSvc.OnFullSync = moved.Kick
+	moved := newMovedRetirer(store, eng.Discovery.FullSyncEvery, logger)
+	eng.Discovery.OnFullSync = moved.Kick
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
 	releases := newPerConnection(store, func(id int64) *release.Runner {
-		r := release.NewRunner(store, syncSvc, logger)
+		r := release.NewRunner(store, eng.Coordinator, logger)
 		r.ConnectionID = id
 		r.OnReady = notifier.OnReady
 		return r
 	})
 	schedules := newPerConnection(store, func(id int64) *schedule.Runner {
-		sc := schedule.NewRunner(store, syncSvc, logger)
+		sc := schedule.NewRunner(store, eng.Coordinator, logger)
 		sc.ConnectionID = id
 		return sc
 	})
@@ -218,7 +218,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	// The coordinator and runners follow the machine's adapters.
 	local.OnChange(func(old, next int64) {
-		syncSvc.ConnectionsChanged(old, next)
+		eng.ConnectionsChanged(old, next)
 		releases.Resync()
 		schedules.Resync()
 		moved.Kick()
@@ -228,14 +228,14 @@ func Run(ctx context.Context, o Options) error {
 	inbox := notify.NewHub(ctx)
 	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
-	syncSvc.OnTransition = func(ctx context.Context, c coordinator.Change) {
+	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
-	syncSvc.OnSessionChange = notifier.OnSessionChange
-	syncSvc.OnAccepted = kickTrees
-	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, syncSvc.Kick, logger); err != nil {
+	eng.Observe.OnSessionChange = notifier.OnSessionChange
+	eng.Coordinator.OnAccepted = kickTrees
+	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
 		return err
 	}
 	// Worker channels end with ctx, so Shutdown does not wait on their
@@ -254,7 +254,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 		return ids
 	}, func() {
-		syncSvc.Kick()
+		eng.Kick()
 		releases.Resync()
 		schedules.Resync()
 		moved.Kick()
@@ -262,14 +262,14 @@ func Run(ctx context.Context, o Options) error {
 	// Remote connection setup: each worker runs its machine's connectors;
 	// the main server proxies them and answers their setup ports from its
 	// record (never storing harness credentials).
-	hosts.SetSetup(remoteSetupHooks(store, registry, syncSvc.Kick))
+	hosts.SetSetup(remoteSetupHooks(store, registry, eng.Kick))
 	remote.ServeSetup(channels, func(machineID int64) machine.StorePorts {
 		return machine.NewStorePorts(store.OnMachine(machineID), registry)
 	}, func(machineID int64, sw db.Switch) {
 		if !channels.Presence(machineID).Online {
 			return // the ready snapshot will wake sync and scheduling
 		}
-		syncSvc.ConnectionsChanged(sw.Old, sw.New)
+		eng.ConnectionsChanged(sw.Old, sw.New)
 		releases.Resync()
 		schedules.Resync()
 		moved.Kick()
@@ -301,13 +301,13 @@ func Run(ctx context.Context, o Options) error {
 		if m, ok := machines.Get(id); ok {
 			m.Retired(old)
 		}
-		syncSvc.ConnectionsChanged(old, next)
+		eng.ConnectionsChanged(old, next)
 	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
-	syncSvc.RecoverLaunching(ctx)
+	eng.Coordinator.RecoverLaunching(ctx)
 	wg.Add(4)
 	go func() { defer wg.Done(); notifier.Run(ctx) }()
-	go func() { defer wg.Done(); syncSvc.Run(ctx) }()
+	go func() { defer wg.Done(); eng.Run(ctx) }()
 	wg.Go(func() { releases.Run(ctx) })
 	wg.Go(func() { schedules.Run(ctx) })
 	wg.Go(func() { moved.Run(ctx) })
@@ -321,7 +321,7 @@ func Run(ctx context.Context, o Options) error {
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
-		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
+		Config: cfg, Store: store, Engine: eng, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees,
 		LiveConnectors: func() harness.Connectors {
 			c, err := machines.Connectors(registry)

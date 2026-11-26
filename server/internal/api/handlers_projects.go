@@ -155,7 +155,7 @@ func (s *server) plannedConnection(ctx context.Context, id int64) error {
 	if _, _, ok := s.connectors().Owner(ctx, id); ok {
 		return nil
 	}
-	_, err := s.Sync.Adapter(id)
+	_, err := s.Engine.Connections.Adapter(id)
 	return err
 }
 
@@ -216,7 +216,7 @@ func (s *server) resolveConnection(w http.ResponseWriter, r *http.Request) error
 	if !ok {
 		return &db.InvalidError{Msg: fmt.Sprintf("harness: unknown kind %q", kind)}
 	}
-	machine := s.Sync.Machines().DefaultID()
+	machine := s.Engine.Connections.Machines().DefaultID()
 	if m := db.ActingMachine(r.Context()); m != nil {
 		machine = *m
 	}
@@ -248,7 +248,7 @@ func (s *server) configured(ctx context.Context, c db.HarnessConnection) db.Harn
 		c.Configured = k.Summary(ctx).Configured
 		return c
 	}
-	_, adapterErr := s.Sync.Adapter(c.ID)
+	_, adapterErr := s.Engine.Connections.Adapter(c.ID)
 	c.Configured = adapterErr == nil
 	return c
 }
@@ -267,7 +267,7 @@ func (s *server) forgetConnection(w http.ResponseWriter, r *http.Request) error 
 	}
 	if !c.Active {
 		err = s.Store.ForgetConnection(r.Context(), id)
-	} else if m, ok := s.Sync.Machines().Get(c.MachineID); !ok || !m.Online() {
+	} else if m, ok := s.Engine.Connections.Machines().Get(c.MachineID); !ok || !m.Online() {
 		err = db.Conflict("This connection's machine is offline. Forget it once the machine is back.")
 	} else if s.configured(r.Context(), c).Configured {
 		err = db.Conflict("This connection is in use. Disconnect it first.")

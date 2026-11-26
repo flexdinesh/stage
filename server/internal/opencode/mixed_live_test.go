@@ -16,8 +16,8 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -123,7 +123,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{1: first, 2: f.a}, nil)
+	service := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{1: first, 2: f.a}, nil)
 	var tasks []db.Task
 	for _, harness := range []int64{1, 2, 1} {
 		model := t3.ModelKey("evalbot", "eval/scripted")
@@ -144,7 +144,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 	}
 	var acceptedReply string
 	for i, task := range tasks {
-		started, err := service.StartTask(ctx, task.ID)
+		started, err := service.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatalf("start step %d: %v", i+1, err)
 		}
@@ -156,7 +156,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 		}
 		deadline := time.Now().Add(40 * time.Second)
 		for started.State != db.StateDone {
-			pollErr := service.PollTask(ctx, started)
+			pollErr := service.Coordinator.PollTask(ctx, started)
 			if time.Now().After(deadline) {
 				t.Fatalf("step %d still %s; last observation error: %v", i+1, started.State, pollErr)
 			}
@@ -167,7 +167,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		if i+1 < len(tasks) {
-			if _, err := service.StartTask(ctx, tasks[i+1].ID); err == nil {
+			if _, err := service.Coordinator.StartTask(ctx, tasks[i+1].ID); err == nil {
 				t.Fatal("run finish released successor before acceptance")
 			}
 		}

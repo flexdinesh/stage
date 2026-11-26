@@ -42,7 +42,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			if err == nil && !strings.ContainsAny(raw, "/<>[]") {
 				ref.ConnectionID = id
 			} else {
-				a, e := s.Sync.Adapter(id)
+				a, e := s.Engine.Connections.Adapter(id)
 				if e != nil {
 					return e
 				}
@@ -62,7 +62,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			if err == nil {
 				return
 			}
-			a, e := s.Sync.Adapter(c.Summary(r.Context()).ConnectionID)
+			a, e := s.Engine.Connections.Adapter(c.Summary(r.Context()).ConnectionID)
 			if e != nil {
 				return
 			}
@@ -111,7 +111,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		}
 		obs, err := s.Store.Observation(ctx, target)
 		if errors.Is(err, db.ErrNotFound) && r.URL.Query().Get("cached") != "true" {
-			if err = s.Sync.RefreshScopedSession(ctx, target); err == nil {
+			if err = s.Engine.Coordinator.RefreshScopedSession(ctx, target); err == nil {
 				obs, err = s.Store.Observation(ctx, target)
 			}
 		}

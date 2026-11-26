@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -56,9 +56,9 @@ func TestJournalLaunchRetryAfterRestartAndMove(t *testing.T) {
 	}
 	e.must("POST", treePath(newTree, "/tasks"), map[string]any{"taskId": a.ID}, 200, nil)
 	// A new service uses the persisted attempt, with no in-memory launch context.
-	restarted := t3sync.NewWithAdapters(e.store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(e.t3)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	restarted.RecoverLaunching(t.Context())
-	started, err := restarted.StartTask(t.Context(), a.ID)
+	restarted := engine.NewWithAdapters(e.store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(e.t3)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	restarted.Coordinator.RecoverLaunching(t.Context())
+	started, err := restarted.Coordinator.StartTask(t.Context(), a.ID)
 	if err != nil || started.LaunchAttempt != failed.LaunchAttempt || started.TreeID == nil || *started.TreeID != newTree {
 		t.Fatalf("restart %+v: %v", started, err)
 	}

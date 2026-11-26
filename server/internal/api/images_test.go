@@ -9,11 +9,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -50,10 +50,9 @@ func imagesEnv(t *testing.T) (e *env, local *machine.Local, imageConn, textConn,
 	e = newEnv(t, func(d *api.Deps) {
 		local = machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil)
 		set := machine.MustSet(local)
-		svc := t3sync.NewForMachines(d.Store, set, nil)
-		svc.Harnesses = imageHarnesses
+		svc := engine.NewForMachines(d.Store, imageHarnesses, set, nil)
 		local.OnChange(svc.ConnectionsChanged)
-		d.Harnesses, d.Sync = imageHarnesses, svc
+		d.Harnesses, d.Engine = imageHarnesses, svc
 	})
 	ports := machine.NewStorePorts(e.store.OnMachine(db.LocalMachine), imageHarnesses)
 	connect := func(kind string, a execution.Adapter) int64 {

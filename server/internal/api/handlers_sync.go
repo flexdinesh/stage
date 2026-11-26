@@ -25,7 +25,7 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 	if !configured {
 		skip = nil
 	}
-	res, err := s.Sync.FullSync(r.Context(), skip...)
+	res, err := s.Engine.Discovery.FullSync(r.Context(), skip...)
 	if err != nil {
 		return err
 	}
@@ -35,7 +35,7 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 
 // refreshWorkspaces persists a complete live inventory without applying the resolver.
 func (s *server) refreshWorkspaces(ctx context.Context, connection int64) ([]execution.WorkspaceInfo, error) {
-	ws, err := s.Sync.Inventory(ctx, connection)
+	ws, err := s.Engine.Discovery.Inventory(ctx, connection)
 	if err != nil {
 		return nil, &db.HarnessError{Err: err}
 	}
@@ -85,7 +85,7 @@ func (s *server) resolveWorkspaces(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx := r.Context()
 	if *in.Apply {
-		ws, err := s.Sync.Inventory(ctx, id)
+		ws, err := s.Engine.Discovery.Inventory(ctx, id)
 		if err != nil {
 			return &db.HarnessError{Err: err}
 		}

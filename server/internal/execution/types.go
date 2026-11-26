@@ -399,13 +399,29 @@ type LinkResolver interface {
 type WorkspaceFeatures interface {
 	FeaturesForWorkspace(ctx context.Context, projectID, directory string) (Capabilities, error)
 }
-type Adapter interface {
+type Catalog interface {
 	Health(context.Context) Health
 	Features(context.Context) (Capabilities, error)
+}
+
+type Inventory interface {
 	Workspaces(context.Context) ([]WorkspaceInfo, error)
+}
+
+type Sessions interface {
 	Observe(context.Context, SessionRef) (Observation, error)
+	Opening(context.Context, SessionRef, bool) (*Reply, error)
+	Attention(context.Context) ([]SessionRef, error)
+}
+
+type Launcher interface {
 	Launch(context.Context, Intent, Checkpoint, SaveCheckpoint) (Observation, error)
 	Stop(context.Context, SessionRef) error
-	Attention(context.Context) ([]SessionRef, error)
-	Opening(context.Context, SessionRef, bool) (*Reply, error)
+}
+
+type Adapter interface {
+	Catalog
+	Inventory
+	Sessions
+	Launcher
 }

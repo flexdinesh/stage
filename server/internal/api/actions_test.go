@@ -13,11 +13,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -116,7 +116,7 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			withoutActor.Kind, withoutActor.Name = "declarations-only", "Declarations only"
 			reg := harness.MustRegistry(t3.Descriptor, hostedKit, withoutActor)
 			var conn, noActor int64
-			var svc *coordinator.Service
+			var svc *engine.Engine
 			e := newEnv(t, func(d *api.Deps) {
 				const remoteID = 2
 				machineID := db.LocalMachine
@@ -153,9 +153,8 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 					}
 					set = machine.MustSet(local)
 				}
-				svc = coordinator.NewForMachines(d.Store, set, slog.Default())
-				svc.Harnesses = reg
-				d.Sync, d.Harnesses = svc, reg
+				svc = engine.NewForMachines(d.Store, reg, set, slog.Default())
+				d.Engine, d.Harnesses = svc, reg
 				d.LiveConnectors = func() harness.Connectors {
 					out, err := set.Connectors(reg)
 					if err != nil {
@@ -203,7 +202,7 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			}
 			path := fmt.Sprintf("/api/tasks/%d/actions", task.ID)
 			e.must("GET", path, nil, http.StatusNotFound, nil)
-			task, err = svc.StartTask(ctx, task.ID)
+			task, err = svc.Coordinator.StartTask(ctx, task.ID)
 			if err != nil || task.Session == nil {
 				t.Fatalf("launch: %+v %v", task, err)
 			}

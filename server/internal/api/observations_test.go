@@ -9,10 +9,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
@@ -197,9 +197,8 @@ func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 			}
 			return ids
 		}, nil, nil)
-		svc := t3sync.NewForMachines(store, set, nil)
-		svc.Harnesses = testHarnesses
-		d.Sync, d.Channels, d.Machines = svc, hub, hosts
+		svc := engine.NewForMachines(store, testHarnesses, set, nil)
+		d.Engine, d.Channels, d.Machines = svc, hub, hosts
 	})
 	j := e.join("laptop")
 	sw, err := e.store.SwitchInstance(t.Context(), j.MachineID, t3.Descriptor, "env-laptop", "laptop t3", 0)
