@@ -76,7 +76,7 @@ func requestSession(r *http.Request) (db.SessionRef, error) {
 
 // A session's directory can be a worktree. Verify its external project's workspace with the adapter.
 func (s *server) workspaceFor(r *http.Request, o execution.Observation) (*db.ProjectBinding, error) {
-	a, err := s.Engine.Connections.Adapter(o.Session.ConnectionID)
+	a, err := s.Engine.Connections.Inventory(o.Session.ConnectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.Projec
 	if !errors.Is(err, db.ErrNotFound) {
 		return nil, err
 	}
-	a, err := s.Engine.Connections.Adapter(ref.ConnectionID)
+	a, err := s.Engine.Connections.Catalog(ref.ConnectionID)
 	if err != nil {
 		return nil, err
 	}

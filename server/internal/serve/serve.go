@@ -19,7 +19,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
@@ -37,6 +36,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	"github.com/flexdinesh/stage/server/internal/webui"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // ShutdownTimeout lets in-flight launches (bounded at 90s) record their
@@ -228,7 +228,7 @@ func Run(ctx context.Context, o Options) error {
 	inbox := notify.NewHub(ctx)
 	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
-	eng.Coordinator.OnTransition = func(ctx context.Context, c coordinator.Change) {
+	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()

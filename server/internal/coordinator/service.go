@@ -15,7 +15,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
-type Change = workevent.TaskChange
 type Service struct {
 	store      *db.Store
 	conns      *machine.Connections
@@ -26,7 +25,7 @@ type Service struct {
 	PublicURL            string // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	CLI                  string // installed CLI name (install.CLIName), named in launch journal instructions
 	LaunchAttemptTimeout time.Duration
-	OnTransition         func(context.Context, Change)
+	OnTransition         func(context.Context, workevent.TaskChange)
 	OnAccepted           func() // a completion was inferred (tree release may follow)
 }
 
@@ -66,7 +65,7 @@ func (s *Service) RecoverLaunching(ctx context.Context) {
 func (s *Service) transition(ctx context.Context, t db.Transition) (db.TransitionResult, error) {
 	r, e := s.store.TransitionTask(ctx, t)
 	if e == nil && r.Changed && s.OnTransition != nil {
-		s.OnTransition(ctx, Change{TaskID: t.TaskID, From: r.From, To: t.To, Detail: t.Detail})
+		s.OnTransition(ctx, workevent.TaskChange{TaskID: t.TaskID, From: r.From, To: t.To, Detail: t.Detail})
 	}
 	return r, e
 }

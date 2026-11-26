@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.SessionRef) error {
-	a, e := s.conns.Adapter(ref.ConnectionID)
+	a, e := s.conns.Sessions(ref.ConnectionID)
 	if e != nil {
 		return e
 	}

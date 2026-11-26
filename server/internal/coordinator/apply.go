@@ -16,7 +16,7 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 	if task.Session == nil || task.State == db.StateLaunching {
 		return nil
 	}
-	a, e := s.conns.Adapter(task.ConnectionID)
+	a, e := s.conns.Sessions(task.ConnectionID)
 	if e != nil {
 		return e
 	}

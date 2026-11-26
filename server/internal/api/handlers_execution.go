@@ -123,7 +123,7 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	if c.Actions != nil {
-		if a, err := s.Engine.Connections.Adapter(id); err == nil {
+		if a, err := s.Engine.Connections.Catalog(id); err == nil {
 			checked, err := validateActionCapabilities(a, c)
 			if err != nil {
 				s.log.Warn("discarded invalid action declarations", "connection", id, "err", err)
@@ -140,7 +140,7 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 }
 func (s *server) capabilities(ctx context.Context, d taskDestination) (execution.Capabilities, error) {
 	var empty execution.Capabilities
-	a, err := s.Engine.Connections.Adapter(d.connectionID)
+	a, err := s.Engine.Connections.Catalog(d.connectionID)
 	if err != nil {
 		return empty, err
 	}

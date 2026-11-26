@@ -8,6 +8,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
@@ -221,7 +222,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 		return t, e
 	}
 	if s.OnTransition != nil {
-		s.OnTransition(record, Change{TaskID: t.ID, From: db.StateLaunching, To: db.TaskState(o.State), Detail: "execution confirmed"})
+		s.OnTransition(record, workevent.TaskChange{TaskID: t.ID, From: db.StateLaunching, To: db.TaskState(o.State), Detail: "execution confirmed"})
 	}
 	return s.store.GetTask(record, t.ID)
 }
@@ -230,7 +231,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 // (the attempt leaves prepared) before the harness creates anything. Once
 // dispatched, the outcome is found by the intent's marker and never launched
 // again; not found keeps the attempt unconfirmed until the user links it.
-func (s *Service) correlated(ctx context.Context, a execution.Adapter, attempt *db.Attempt, save execution.SaveCheckpoint) (execution.Observation, error) {
+func (s *Service) correlated(ctx context.Context, a execution.Launcher, attempt *db.Attempt, save execution.SaveCheckpoint) (execution.Observation, error) {
 	if attempt.Phase == "prepared" {
 		if err := save(ctx, attempt.Checkpoint); err != nil {
 			return execution.Observation{}, err
