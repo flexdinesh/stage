@@ -61,7 +61,12 @@ type State struct {
 	Launch      string    `json:"launch,omitempty"`
 	HangVersion bool      `json:"hangVersion,omitempty"`
 	FailAgents  bool      `json:"failAgents,omitempty"`
-	Sessions    []Session `json:"sessions"`
+	// CopyOnResume: `--bg --resume` starts a copy even of an exited
+	// session (it got busy between Stage's check and the resume).
+	CopyOnResume bool `json:"copyOnResume,omitempty"`
+	// FailResume: `--bg --resume` exits 1 without waking the session.
+	FailResume bool      `json:"failResume,omitempty"`
+	Sessions   []Session `json:"sessions"`
 	Calls       []Call    `json:"calls"`
 }
 

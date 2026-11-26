@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -294,5 +295,36 @@ func TestJournalEventRowsExact(t *testing.T) {
 	}
 	if dups != 0 {
 		t.Fatalf("%d duplicated events", dups)
+	}
+}
+
+// AddTaskEvent records on the timeline and journal at the task's current
+// state without changing it; an unknown task is not found.
+func TestAddTaskEventKeepsState(t *testing.T) {
+	s, ctx := setup(t)
+	p := mustProject(t, s, ctx, "p")
+	a := mustTask(t, s, ctx, p.ID, "a", nil)
+	launch(t, s, ctx, a.ID, "thread-a", db.StateDone)
+	if err := s.AddTaskEvent(ctx, a.ID, "Follow-up sent from Stage"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetTask(ctx, a.ID)
+	if err != nil || got.State != db.StateDone {
+		t.Fatalf("state %+v %v", got, err)
+	}
+	evs, err := s.TaskEvents(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := evs[len(evs)-1]
+	if last.Detail != "Follow-up sent from Stage" || last.ToState != db.StateDone || last.FromState == nil || *last.FromState != db.StateDone {
+		t.Fatalf("event %+v", last)
+	}
+	entries := journal(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, db.JournalQuery{Kind: "events", Limit: 1}).Entries
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "Follow-up sent from Stage") {
+		t.Fatalf("journal %+v", entries)
+	}
+	if err := s.AddTaskEvent(ctx, 99999, "x"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("unknown task: %v", err)
 	}
 }

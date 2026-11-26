@@ -71,7 +71,11 @@ func run(s *fakestate.State, args []string) (int, error) {
 		for i := range s.Sessions {
 			e := &s.Sessions[i]
 			if !e.Removed && e.Kind == "background" && e.ID == args[1] {
-				e.State, e.Status, e.WaitingFor, e.PID = "stopped", "", "", 0
+				// A finished session stays done (claude 2.1.332, ADR 0005 E12).
+				if e.State != "done" {
+					e.State = "stopped"
+				}
+				e.Status, e.WaitingFor, e.PID = "", "", 0
 				fmt.Printf("stopped %s\n", e.ID)
 				return 0, nil
 			}
@@ -90,6 +94,8 @@ func run(s *fakestate.State, args []string) (int, error) {
 		}
 		fmt.Fprintf(os.Stderr, "No session matching '%s'.\n", args[1])
 		return 1, nil
+	case len(args) >= 3 && args[0] == "--bg" && args[1] == "--resume":
+		return resume(s, args[2], args[3:])
 	case len(args) >= 1 && args[0] == "--bg":
 		return launch(s, args[1:])
 	}
@@ -175,6 +181,48 @@ func launch(s *fakestate.State, args []string) (int, error) {
 		return 1, nil
 	}
 	fmt.Printf("backgrounded · %s · %s\n\n  claude agents          list sessions\n", id[:8], name)
+	return 0, nil
+}
+
+// resume is `--bg --resume <uuid> [--] <prompt>` as claude 2.1.332 does it
+// (ADR 0005 E1, E12): an exited listed session wakes under its id with its
+// saved options; a live one (a process), or any flag, starts a copy.
+func resume(s *fakestate.State, id string, args []string) (int, error) {
+	if s.FailResume {
+		fmt.Fprintln(os.Stderr, "lost connection to the background service")
+		return 1, nil
+	}
+	flags := len(args) > 1 && args[0] != "--"
+	prompt := strings.Join(args, " ")
+	if len(args) > 0 && args[0] == "--" {
+		prompt = strings.Join(args[1:], " ")
+	}
+	now := time.Now().UTC()
+	for i := range s.Sessions {
+		e := &s.Sessions[i]
+		if e.Removed || e.Kind != "background" || e.SessionID != id {
+			continue
+		}
+		if e.PID > 0 || flags || s.CopyOnResume {
+			cp := newUUID()
+			s.Sessions = append(s.Sessions, fakestate.Session{Entry: fakestate.Entry{
+				PID: 4244, ID: cp[:8], Cwd: e.Cwd, Kind: "background", StartedAt: now.UnixMilli(),
+				SessionID: cp, Name: e.Name, Status: "busy", State: "working",
+			}})
+			fmt.Fprintf(os.Stderr, "note: session %s is already running in the background, so this started a copy as %s.\n", id[:8], cp[:8])
+			fmt.Printf("backgrounded · %s\n", cp[:8])
+			return 0, nil
+		}
+		e.PID, e.Status, e.WaitingFor, e.State, e.StartedAt = 4243, "busy", "", "working", now.UnixMilli()
+		if err := fakestate.AppendUser(s.ProjectsDir, e.Cwd, id, "cli", "bg", prompt, now); err != nil {
+			return 2, err
+		}
+		fmt.Fprintf(os.Stderr, "note: woke session %s with its saved options (-n).\n", id[:8])
+		fmt.Printf("backgrounded · %s · %s\n", id[:8], e.Name)
+		return 0, nil
+	}
+	// An unknown id still prints it; the session then fails (E1).
+	fmt.Printf("backgrounded · %s\n", id[:8])
 	return 0, nil
 }
 

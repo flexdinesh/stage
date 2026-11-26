@@ -389,6 +389,19 @@ func (s *Store) TouchTask(ctx context.Context, id int64) error {
 	return err
 }
 
+// AddTaskEvent records detail on task id's timeline (and journal) at its
+// current state, without changing it.
+func (s *Store) AddTaskEvent(ctx context.Context, id int64, detail string) error {
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		ls, err := tx.Tasks().LaunchState(ctx, id)
+		if err != nil {
+			return err
+		}
+		state := ls.State
+		return addTaskEvent(ctx, tx, id, &state, state, detail)
+	})
+}
+
 type (
 	// Transition is a guarded task state change.
 	Transition = store.Transition

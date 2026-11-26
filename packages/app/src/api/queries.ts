@@ -595,13 +595,13 @@ const NO_REQUESTS: SessionRequest[] = [];
 const REQUESTS_POLL = 3000;
 
 /**
- * What a task's session waits on, when its connection offers operation `respond` (connection capabilities, cached as
- * NewTaskDefaults reads them). Read only while the task needs input on an active connection; polled meanwhile.
+ * Whether connection `connectionId` offers operation `op` (its capabilities, cached as NewTaskDefaults reads them).
+ * Read only while `enabled`; `known` is false until the capabilities answer (or always, when disabled or retired).
  */
-export function useSessionRequests({ taskId, connectionId, needsInput }: { taskId: number | null; connectionId: number; needsInput: boolean }) {
+export function useConnectionOperation(connectionId: number, op: string, enabled: boolean): { offered: boolean; known: boolean } {
   const api = useApi();
   const harnesses = useHarnesses();
-  const live = needsInput && taskId !== null && !harnesses.retired(connectionId);
+  const live = enabled && !harnesses.retired(connectionId);
   const caps = useQuery({
     queryKey: ["capabilities", connectionId, "", false],
     queryFn: () => api.capabilities(connectionId),
@@ -609,7 +609,19 @@ export function useSessionRequests({ taskId, connectionId, needsInput }: { taskI
     staleTime: 60_000,
     retry: false,
   });
-  const respondable = caps.data?.operations.respond?.available === true;
+  return { offered: live && caps.data?.operations[op]?.available === true, known: live && (caps.isSuccess || caps.isError) };
+}
+
+/**
+ * What a task's session waits on, when its connection offers operation `respond`. Read only while the task needs
+ * input on an active connection; polled meanwhile. `settled`: whether the list is final for now (nothing to read, or
+ * the first read answered), so a caller can tell "no requests" from "not read yet".
+ */
+export function useSessionRequests({ taskId, connectionId, needsInput }: { taskId: number | null; connectionId: number; needsInput: boolean }) {
+  const api = useApi();
+  const live = needsInput && taskId !== null;
+  const respond = useConnectionOperation(connectionId, "respond", live);
+  const respondable = respond.offered;
   const q = useQuery({
     queryKey: [...keys.requests, taskId],
     queryFn: () => api.taskRequests(taskId ?? 0),
@@ -617,7 +629,8 @@ export function useSessionRequests({ taskId, connectionId, needsInput }: { taskI
     refetchInterval: REQUESTS_POLL,
     retry: false,
   });
-  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error };
+  const settled = !live || (respond.known && (!respondable || q.isSuccess || q.isError));
+  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error, settled };
 }
 
 /** Answers one of a task's requests; the task, its requests and the inbox refresh either way (a 404 means it was answered elsewhere). */
@@ -632,5 +645,15 @@ export function useRespondRequest(taskId: number) {
         qc.invalidateQueries({ queryKey: keys.notifications }),
         invalidateWork(qc),
       ]),
+  });
+}
+
+/** Sends a task's session a follow-up message; the task and the inbox refresh either way (409 `session_busy` names why it can't take one now). */
+export function useSendMessage(taskId: number) {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => api.sendMessage(taskId, { text }),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.notifications }), invalidateWork(qc)]),
   });
 }

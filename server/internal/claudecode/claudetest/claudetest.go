@@ -134,9 +134,13 @@ func (f *Fake) Environ() []string {
 	}
 }
 
+// fakePID: the fake's pids are made up, never this machine's processes; a
+// stopped fake session's process is gone at once.
+func fakePID(int) bool { return false }
+
 // Adapter is an adapter on connection over the fake.
 func (f *Fake) Adapter(connection int64) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second})
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, ProcessAlive: fakePID})
 }
 
 // Hooks opens a hook receiver in a temporary folder, closed when the test
@@ -154,7 +158,7 @@ func (f *Fake) Hooks() *claudecode.Hooks {
 // HookedAdapter is Adapter with hooks: launches pass their settings file
 // and Events pushes what hooks announce.
 func (f *Fake) HookedAdapter(connection int64, h *claudecode.Hooks) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h,
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h, ProcessAlive: fakePID,
 		SettleDelays: []time.Duration{0, 20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond}})
 }
 

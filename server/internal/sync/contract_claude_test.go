@@ -122,6 +122,37 @@ func TestContractClaudeStatesReplyAndStop(t *testing.T) {
 	})
 }
 
+// A follow-up wakes a done session under its id: the task runs again and
+// its timeline records the send; a working session is 409 session_busy
+// (across a worker channel too), and an oversized message is invalid.
+func TestContractClaudeFollowUp(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		f := claudetest.New(t)
+		store, svc, task, _ := claudeSetup(t, p, f)
+		ctx := t.Context()
+		done := claudeFinish(t, store, svc, f, task)
+		got, err := svc.Send(ctx, task.ID, execution.Message{Text: "now add tests"})
+		if err != nil || got.State != db.StateRunning || *got.Session != *done.Session {
+			t.Fatalf("send %+v %v", got, err)
+		}
+		if n := len(f.Read().Sessions); n != 1 {
+			t.Fatalf("a copy started: %d sessions", n)
+		}
+		evs, err := store.TaskEvents(ctx, task.ID)
+		if err != nil || !slices.ContainsFunc(evs, func(e db.TaskEvent) bool { return e.Detail == coordinator.FollowUpSent }) {
+			t.Fatalf("events %+v %v", evs, err)
+		}
+		var ce *db.ConflictError
+		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "and docs"}); !errors.As(err, &ce) || ce.Code != "session_busy" || !strings.Contains(ce.Msg, "is working") {
+			t.Fatalf("busy: %v", err)
+		}
+		var invalid *db.InvalidError
+		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: strings.Repeat("x", coordinator.MaxMessage+1)}); !errors.As(err, &invalid) {
+			t.Fatalf("oversized: %v", err)
+		}
+	})
+}
+
 // claudeFinish runs the task's session to Claude's done with a reply and
 // polls it: the task is done, not yet accepted.
 func claudeFinish(t *testing.T, store *db.Store, svc *coordinator.Service, f *claudetest.Fake, task db.Task) db.Task {

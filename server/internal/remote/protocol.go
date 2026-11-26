@@ -74,6 +74,9 @@ const (
 	// CodeInvalidAnswer: the worker's adapter refused an answer
 	// (execution.Invalid).
 	CodeInvalidAnswer = "invalid_answer"
+	// CodeBusy: the worker's adapter can't send the session a message now
+	// (execution.Busy).
+	CodeBusy = "busy"
 	// CodeNotHosted: the worker hosts no adapter for the connection.
 	CodeNotHosted = "not_hosted"
 	// CodeUnsupported: the worker's adapter lacks the optional interface.
@@ -178,6 +181,7 @@ func encodeError(err error) error {
 	var rejected *execution.Rejected
 	var refused *execution.Refused
 	var invalid *execution.Invalid
+	var busy *execution.Busy
 	var re *workerchan.RemoteError
 	switch {
 	case errors.As(err, &re):
@@ -188,6 +192,8 @@ func encodeError(err error) error {
 		return &workerchan.RemoteError{Code: CodeRefused, Message: refused.Reason}
 	case errors.As(err, &invalid):
 		return &workerchan.RemoteError{Code: CodeInvalidAnswer, Message: invalid.Reason}
+	case errors.As(err, &busy):
+		return &workerchan.RemoteError{Code: CodeBusy, Message: busy.Reason}
 	case errors.Is(err, execution.ErrUnavailable):
 		return &workerchan.RemoteError{Code: CodeUnavailable, Message: err.Error()}
 	case errors.Is(err, execution.ErrNotFound):
@@ -223,6 +229,8 @@ func decodeError(err error) error {
 		return &execution.Refused{Reason: re.Message}
 	case CodeInvalidAnswer:
 		return &execution.Invalid{Reason: re.Message}
+	case CodeBusy:
+		return &execution.Busy{Reason: re.Message}
 	case CodeUnavailable:
 		return fmt.Errorf("%w: %s", execution.ErrUnavailable, re.Message)
 	case CodeNotFound:

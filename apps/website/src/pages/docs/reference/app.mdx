@@ -79,6 +79,8 @@ Needs-input tasks and notifications open the source harness for questions and ap
 
 A harness that lets Stage answer (Claude Code, for the sessions Stage starts) lists what its session waits on in a **Requests** panel under the needs-input alert, which then reads "Claude Code is waiting for your answer.": a permission prompt with its command, file or URL and the harness's choices (Allow, Always allow with the rule it saves, Deny with an optional reason), or questions with their options and Other, answered together with **Send**. A task row or inbox row with exactly one permission prompt shows it on one line with its first and last choice (Allow, Deny); a question or several requests show **Answer**, which opens the panel. An answer the harness already got shows "Already answered in Claude Code or expired". The harness's own client keeps working the whole time.
 
+A harness that takes messages from Stage (Claude Code) adds a **Follow up** box under Last word once the session finishes: **Send** (Ctrl or Cmd + Enter) continues the same session and the task runs again. When the turn ended asking you something, the box leads as **Reply** under "Claude Code is waiting for your reply.". While the session works the box keeps your draft and Send waits; a session that can't take a message says why. The timeline records "Follow-up sent from Stage".
+
 ## Snippets
 
 Reusable prompt text, global or per project. Type `/` in a task prompt or notes to pick one and insert it.

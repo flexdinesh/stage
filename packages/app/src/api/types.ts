@@ -871,6 +871,11 @@ export interface RequestResponse {
   answers?: Record<string, string[]>;
 }
 
+/** A follow-up message into a task's session (POST /tasks/:id/messages); nonblank, at most 32 KiB. */
+export interface SendMessageRequest {
+  text: string;
+}
+
 export interface AdoptSessionRequest {
   projectId?: number;
   newProjectTitle?: string;

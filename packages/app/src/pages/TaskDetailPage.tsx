@@ -3,10 +3,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork, useMachines, useSessionRequests, useTask } from "../api/queries.ts";
+import { useConnectionOperation, useHarnesses, useInvalidateWork, useMachines, useSendMessage, useSessionRequests, useTask } from "../api/queries.ts";
 import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "../components/SessionAction.tsx";
 import { RequestsPanel } from "../components/Requests.tsx";
+import { FollowUpPanel } from "../components/FollowUp.tsx";
+import { followUpView, mayFollowUp, replyPrompt } from "../lib/followup.ts";
 import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
@@ -214,8 +216,37 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const action = useSessionAction()(task);
   const phoneBar = action !== null || stoppable;
   // Requests the harness lets Stage answer: the panel below leads, the harness's own client stays as the alternative.
-  const { requests } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
+  const { requests, settled: requestsSettled } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
   const answerable = requests.length > 0;
+  // A follow-up into the session: leads under the alert when its turn ended asking you, else sits under Last word.
+  // The draft and the send live here so both survive the panel moving and the session working.
+  const sendOp = useConnectionOperation(task.connectionId, "send", task.externalSessionId !== null && mayFollowUp(task.state));
+  const followUp = followUpView(task, { offered: sendOp.offered, requestsSettled, requestCount: requests.length });
+  const replyLeads = followUp?.placement === "lead";
+  const sendMessage = useSendMessage(task.id);
+  const [draft, setDraft] = useState("");
+  const [sentAt, setSentAt] = useState<string | null>(null);
+  const composer =
+    followUp === null ? null : (
+      <FollowUpPanel
+        view={followUp}
+        harness={kindName(task.harness)}
+        draft={draft}
+        onDraft={setDraft}
+        onSend={(text) =>
+          sendMessage.mutate(text, {
+            onSuccess: () => {
+              // Keep whatever was typed while it sent.
+              setDraft((d) => (d === text ? "" : d));
+              setSentAt(new Date().toISOString());
+            },
+          })
+        }
+        sending={sendMessage.isPending}
+        sentAt={sentAt}
+        error={sendMessage.error}
+      />
+    );
 
   const openInApp = (variant: "primary" | "secondary", className?: string) => (
     <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} connectionId={task.connectionId} {...(className === undefined ? {} : { className })} />
@@ -270,13 +301,16 @@ function TaskBody({ task }: { task: TaskDetail }) {
       <div className="flex flex-col gap-3.5">
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
-          <Alert tone="need" actions={action === null ? undefined : openInApp(answerable ? "secondary" : "primary", "max-md:hidden")}>
+          <Alert tone="need" actions={action === null ? undefined : openInApp(answerable || replyLeads ? "secondary" : "primary", "max-md:hidden")}>
             {answerable
               ? `${kindName(task.harness)} is waiting for your answer.`
-              : `${kindName(task.harness)} needs input${action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
+              : replyLeads
+                ? replyPrompt(kindName(task.harness))
+                : `${kindName(task.harness)} needs input${action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
           </Alert>
         ) : null}
         <RequestsPanel taskId={task.id} requests={requests} harness={kindName(task.harness)} needsInput={task.state === "needs_input"} />
+        {replyLeads ? composer : null}
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
         {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
 
@@ -364,6 +398,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             )}
             {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} harness={task.harness} />)}
             <LastWordPanel task={task} />
+            {replyLeads ? null : composer}
             {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><ExternalLink href={artifact.url} className="text-small">{artifact.label}</ExternalLink></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
@@ -381,7 +416,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
 
       {phoneBar ? (
         <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {openInApp(waiting && !answerable ? "primary" : "secondary", "flex-1")}
+          {openInApp(waiting && !answerable && !replyLeads ? "primary" : "secondary", "flex-1")}
           {stoppable ? stopButton("flex-1") : null}
         </div>
       ) : null}

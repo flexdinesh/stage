@@ -166,6 +166,20 @@ func TestLiveClaude(t *testing.T) {
 		}
 	}
 
+	// A follow-up wakes the done session (its process still lives) under
+	// its own id, never a copy; the new turn's reply replaces the last.
+	if err := a.Send(ctx, o.Session, execution.Message{Text: "Without using any tools, reply with exactly: stage follow-up ok"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	pushed(o.Session, "running")
+	followed := await(o.Session, "done")
+	if followed.Reply == nil || !strings.Contains(followed.Reply.Text, "stage follow-up ok") || followed.ExecutionID == done.ExecutionID || followed.Links.Command != done.Links.Command {
+		t.Fatalf("follow-up %+v", followed)
+	}
+	if es, err := cli.Run(ctx, "", "agents", "--json", "--all"); err != nil || strings.Count(es.Stdout, filepath.Base(plain)) != 1 {
+		t.Fatalf("a copy started: %v %s", err, es.Stdout)
+	}
+
 	// `claude rm` of the done session is the archived closure: no longer
 	// listed, reply kept (the session list is reused for 2 seconds).
 	short, _ := strings.CutPrefix(done.Links.Command, "claude attach ")
@@ -173,7 +187,7 @@ func TestLiveClaude(t *testing.T) {
 		t.Fatalf("rm %s: %v %+v", short, err, res)
 	}
 	removed := await(o.Session, "idle")
-	if removed.Closed == nil || removed.Closed.Signal != execution.ClosedArchived || removed.Reply == nil || !strings.Contains(removed.Reply.Text, "stage live ok") {
+	if removed.Closed == nil || removed.Closed.Signal != execution.ClosedArchived || removed.Reply == nil || !strings.Contains(removed.Reply.Text, "stage follow-up ok") {
 		t.Fatalf("removed %+v", removed)
 	}
 

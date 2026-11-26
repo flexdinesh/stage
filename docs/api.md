@@ -643,14 +643,16 @@ operations `respond` and `send` in its capabilities). Each route needs a task
 with an execution session (409 otherwise); a harness without the operation,
 or reporting it unavailable, answers 409 `{"code": "operation_unavailable"}`
 with the reason, and nothing else is limited. Claude Code offers `respond`
-(its approvals and questions, through the hook its launches carry:
-[execution.md](execution.md#claude-code-adapter)); T3, OpenCode and Codex
-offer neither, and nothing offers `send` yet. The app answers on task detail
-and needs-input rows; no MCP tool or CLI command answers.
+(its approvals and questions, through the hook its launches carry) and
+`send` (a follow-up to a finished background session, or one whose turn
+ended asking you: [execution.md](execution.md#claude-code-adapter)); T3,
+OpenCode and Codex offer neither. The app answers and sends on task detail
+(answers also on needs-input rows); no MCP tool or CLI command answers or
+sends.
 
 - `GET /api/tasks/:id/requests` (operation `respond`): 200 `{"requests": [{id, kind: approval|question|input, title, detail?, preview?, options?: [{id, label, available, reason?}], textOption?, questions?: [{id, header?, prompt, options?: [{label, description?}], multi?, custom?}], createdAt}]}`. `preview`: the command, path, URL or input the request acts on (monospaced). `textOption`: the option whose answer may carry `text`. A `question` request lists its `questions`, answered together. Claude Code: approvals offer `allow`, `always:<i>` (one per Claude suggestion; the label names the rule and where Claude writes it) and `deny` (`textOption`; Claude reads "Denied in Stage: <reason>", or "Denied in Stage." without one); `AskUserQuestion` is a question request whose questions are all `custom`. A session with no open hook (answered in Claude, adopted, launched before Stage could answer) lists none: answer it with the resume command.
 - `POST /api/tasks/:id/requests/:rid` body `{"option"?: string, "text"?: string, "answers"?: {questionId: string[]}}` (one required; `answers` for a question request: every question, option labels or one custom text, several only when `multi`): answers the request, then polls the session once. 200 `Task`; 400 (also an answer that does not fit the request); 403 `{"code": "agent_forbidden"}` when the request carries `Stage-Caller-Session` or comes through a worker's agent gateway (only the user answers; listing stays open); 404 the request is no longer pending (answered in the harness, superseded or expired).
-- `POST /api/tasks/:id/messages` body `{"text": string}` (nonblank): sends the session a message, then polls once. 200 `Task`; 400.
+- `POST /api/tasks/:id/messages` (operation `send`) body `{"text": string}` (`SendMessageRequest`: nonblank, at most 32 KiB): sends the session a message, records a "Follow-up sent from Stage" task event (not the text), then polls once. 200 `Task`; 400; 403 `{"code": "agent_forbidden"}` as for answers (only the user sends); 409 `{"code": "session_busy"}` with the reason when the session can't take a message now (Claude Code: working, waiting on a permission prompt or question, stopped, failed, removed, a terminal or SDK session, or its folder is gone; nothing was sent).
 
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), model config, workspace; no copied notes, no tree, no needs, no start time, no schedule.

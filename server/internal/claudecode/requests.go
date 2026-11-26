@@ -25,7 +25,6 @@ const toolAskUserQuestion = "AskUserQuestion"
 const (
 	defaultDenial = "Denied in Stage."
 	denialPrefix  = "Denied in Stage: "
-	reasonSend    = "Claude Code background sessions take follow-ups in Claude Code: copy the resume command."
 	maxRuleLabel  = 80
 )
 
@@ -97,11 +96,6 @@ func (a *Adapter) Respond(ctx context.Context, ref execution.SessionRef, request
 		return execution.ErrNotFound
 	}
 	return a.hooks.answer(ctx, ref.ExternalSessionID, requestID, body)
-}
-
-// Send: follow-ups are typed in Claude Code.
-func (a *Adapter) Send(context.Context, execution.SessionRef, execution.Message) error {
-	return fmt.Errorf("%w: %s", execution.ErrUnavailable, reasonSend)
 }
 
 // askInput is AskUserQuestion's input.
