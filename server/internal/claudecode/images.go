@@ -13,22 +13,16 @@ import (
 )
 
 // Images reach a background session as files: Stage writes a launch's images
-// into its own folder under the workspace's .claude/stage-images, adds that
-// folder with --add-dir (Claude reads it without a permission prompt) and
-// lists the paths at the end of the prompt. Claude reads them with its Read
-// tool. The folder is inside the workspace because Claude refuses an added
-// folder it does not trust, and trust covers the folders below a trusted one
-// (claude 2.1.332); a worktree session's cwd is its worktree, so the folder
-// is added either way. A "*" .gitignore keeps the images out of Git.
+// into its own folder under Stage's image root (<data dir>/claude/images,
+// never the user's repository; ADR 0007 decision 10), lets Claude read the
+// root through a permission rule in the launch's settings (ReadRule; Claude
+// reads it without a prompt) and lists the paths at the end of the prompt.
+// Claude reads them with its Read tool. No --add-dir: Claude refuses an
+// added folder it does not trust (ADR 0005 E8).
 
 // imageRetention is how long an attempt's image folder is kept. Claude keeps
 // what it read in its transcript, so a resumed session does not need it.
 const imageRetention = 30 * 24 * time.Hour
-
-// ImageRoot is the folder of a workspace's launch images.
-func ImageRoot(workspace string) string {
-	return filepath.Join(workspace, ".claude", "stage-images")
-}
 
 // imageExt is the file extension of each image type Claude reads.
 var imageExt = map[string]string{
@@ -41,25 +35,15 @@ var imageExt = map[string]string{
 // maxImageStem bounds the name part of an image file.
 const maxImageStem = 60
 
-// ImageDir is the folder of one launch's images.
-func ImageDir(workspace, requestID string) string {
-	return filepath.Join(ImageRoot(workspace), WorktreeName(requestID))
+// ImageDir is the folder of one launch's images under the image root.
+func ImageDir(root, requestID string) string {
+	return filepath.Join(root, WorktreeName(requestID))
 }
 
-// ignoreAll is the image root's .gitignore: Git ignores the folder and
-// everything in it.
-const ignoreAll = "# Stage: task images for Claude Code launches\n*\n"
-
-// prepareImageRoot creates the image root with its .gitignore.
-func prepareImageRoot(root string) error {
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return err
-	}
-	p := filepath.Join(root, ".gitignore")
-	if b, err := os.ReadFile(p); err == nil && string(b) == ignoreAll {
-		return nil
-	}
-	return writeFile(p, []byte(ignoreAll))
+// ReadRule is the permission rule that lets Claude read everything under
+// root, an absolute folder ("//" starts an absolute path in a rule).
+func ReadRule(root string) string {
+	return "Read(/" + filepath.ToSlash(filepath.Clean(root)) + "/**)"
 }
 
 // ImageFileName is image i's file name (1-based): its index, its name kept to
@@ -183,6 +167,45 @@ func pruneImages(root string, cutoff time.Time) error {
 			continue
 		}
 		errs = append(errs, os.RemoveAll(filepath.Join(root, e.Name())))
+	}
+	return errors.Join(errs...)
+}
+
+// legacyIgnore is the .gitignore earlier versions wrote in a project's
+// image folder.
+const legacyIgnore = "# Stage: task images for Claude Code launches\n*\n"
+
+// LegacyImageRoot is where earlier versions wrote a project's launch images.
+func LegacyImageRoot(project string) string {
+	return filepath.Join(project, ".claude", "stage-images")
+}
+
+// removeLegacyImages removes what earlier versions wrote in project: the
+// stage-* folders and Stage's .gitignore in its .claude/stage-images, then
+// that folder if it is left empty. Nothing else under .claude is touched.
+func removeLegacyImages(project string) error {
+	root := LegacyImageRoot(project)
+	es, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range es {
+		p := filepath.Join(root, e.Name())
+		switch {
+		case e.IsDir() && strings.HasPrefix(e.Name(), "stage-"):
+			errs = append(errs, os.RemoveAll(p))
+		case e.Name() == ".gitignore" && e.Type().IsRegular():
+			if b, err := os.ReadFile(p); err == nil && string(b) == legacyIgnore {
+				errs = append(errs, os.Remove(p))
+			}
+		}
+	}
+	if left, err := os.ReadDir(root); err == nil && len(left) == 0 {
+		errs = append(errs, os.Remove(root))
 	}
 	return errors.Join(errs...)
 }

@@ -550,12 +550,14 @@ to run on that machine.
   transient scope, so the daemon it may start is not in Stage's service
   cgroup and outlives a Stage restart.
 - **Launch.** In the workspace folder: `claude --bg -n <title> [--model M]
-  [--effort E] [--permission-mode P] [-w stage-<requestId>] [--add-dir
-  <images>] [--settings <file>] -- <prompt>` (the prompt carries the launch
+  [--effort E] [--permission-mode P] [-w stage-<requestId>] [--settings
+  <file|json>] -- <prompt>` (the prompt carries the launch
   marker; `--` keeps a prompt starting with `-` from reading as a flag).
   Claude takes one `--settings`: the hooks file, or for a predecessor base
-  its variant with `worktree.baseRef` `head` (`hooks-settings-head.json`;
-  the inline `{"worktree":{"baseRef":"head"}}` without hooks). A
+  its variant with `worktree.baseRef` `head` (`hooks-settings-head.json`);
+  both carry the image root's read rule (Images). Without hooks it is
+  inline JSON with what the launch needs: `{"worktree":{"baseRef":"head"}}`
+  for a predecessor base, the read rule for images, else none. A
   predecessor base (`Workspace.Base`, a worktree only) launches from the
   checkout that has that branch checked out (`git worktree list
   --porcelain` of the project), so Claude branches the new worktree from
@@ -564,25 +566,32 @@ to run on that machine.
   A branch, a base with the project folder, a workspace other than the
   project folder or a Claude worktree, a config the features do not offer,
   an image type other than PNG, JPEG, GIF or WebP, a missing folder or
-  executable, and Claude's `Workspace not trusted` or `Added folder not
+  executable, images without an image root, and Claude's `Workspace not
   trusted` refusal are `Rejected` (the task returns to backlog with the
   reason; trusting a folder is done in Claude). Exit 0 prints
   `backgrounded · <short>`; the session list maps the short id to the
   session within 5 seconds. Anything else is uncertain.
-- **Images** are files Claude reads with its Read tool. Before running
-  claude, Stage writes them to `<project>/.claude/stage-images/stage-<requestId>/`
-  (folder `0700`, files `0600`, named `<n>-<name>.<ext>` with the name kept
-  to `[A-Za-z0-9._-]` and the extension from the type), with a `*`
-  `.gitignore` in `stage-images` so Git never sees them. It passes the
-  folder with `--add-dir`, so Claude reads it without a permission prompt
-  (a worktree session's cwd is its worktree, outside the folder), and
-  appends `Images attached to this task (open each with the Read tool):`
-  with one `<n>. <name>: <path>` line each, after the marker. The folder is
-  inside the project because Claude refuses an added folder it does not
-  trust, and trust covers the folders below a trusted one (ADR 0005 E8).
-  A rejected launch removes its folder; an uncertain one keeps it. Each
-  launch with images removes that project's image folders older than 30
-  days (best effort); Claude keeps what it read in the transcript.
+- **Images** are files Claude reads with its Read tool, kept out of the
+  user's repository ([ADR 0007](adr/0007-harness-boundary.md) decision 10).
+  Before running claude, Stage writes them to the image root,
+  `<data dir>/claude/images/stage-<requestId>/` (a worker's own data dir on
+  a worker; the setup passes the root to the adapter and the hook receiver;
+  folders `0700`, files `0600`, named `<n>-<name>.<ext>` with the name kept
+  to `[A-Za-z0-9._-]` and the extension from the type). The launch's
+  settings allow `Read(//<image root>/**)` (`permissions.allow`; `//` is an
+  absolute path), so Claude reads them without a permission prompt in any
+  mode, from the project folder or a worktree, and appends `Images attached
+  to this task (open each with the Read tool):` with one `<n>. <name>:
+  <path>` line each, after the marker. No `--add-dir`: Claude refuses an
+  added folder it does not trust (ADR 0005 E8). A rejected launch removes
+  its folder; an uncertain one keeps it. Each launch with images removes
+  image folders older than 30 days (best effort); Claude keeps what it read
+  in the transcript. Without an image root (no data dir) `images` is
+  unavailable with a reason. Earlier versions wrote images into
+  `<project>/.claude/stage-images`: each launch in a project, and the first
+  workspace discovery of each adapter for every known project, remove its
+  `stage-*` folders and Stage's `.gitignore` there, then the folder if
+  empty (best effort; nothing else under `.claude`).
 - **Correlate.** Background sessions listed in the launch folder (or its
   per-attempt worktree, `<folder>/.claude/worktrees/stage-<requestId>`) and
   the transcripts of those folders, matched by the marker in the first

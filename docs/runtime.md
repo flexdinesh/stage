@@ -153,6 +153,7 @@ two owners lock different inodes.
 | Default socket dir, data dir | the server | never |
 | `<data dir>/backups/stage-schema*.db` | the server, before a migration | the server, keeping the newest 3 |
 | `<data dir>/claude/hooks-settings.json` and `hooks-settings-head.json` (worker: `<worker dir>/claude/`) | the server (or worker) with its first Claude Code adapter | never: Claude sessions read it again whenever they wake ([Claude Code hooks](#claude-code-hooks)) |
+| `<data dir>/claude/images/stage-<requestId>/` (worker: `<worker dir>/claude/images/`) | a Claude Code launch with images ([execution.md](execution.md#claude-code-adapter)) | a rejected launch (its own folder); any launch with images, for folders older than 30 days |
 
 ## Shutdown
 
@@ -581,7 +582,9 @@ meanwhile ([execution.md](execution.md#claude-code-adapter)).
 settings file every launch passes with `--settings`: one HTTP hook per
 event, all with that URL and token (timeout 5 s, `PermissionRequest`
 3600 s). `hooks-settings-head.json` beside it
-(same modes, written with it) adds `worktree.baseRef` `head`; a launch
+(same modes, written with it) adds `worktree.baseRef` `head`; both also
+allow `Read(//<state dir>/images/**)` so sessions read their launch
+images without a prompt. A launch
 with a predecessor base passes it instead, since Claude takes one
 `--settings`. Claude saves the file's path with each
 session and reads it again when it wakes the session, so the file always

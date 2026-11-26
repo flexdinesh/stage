@@ -40,10 +40,9 @@ type Attached struct {
 
 // Args are the CLI arguments of a background launch (ADR 0005 decision 2).
 // settings is the one --settings value, a file or JSON (launchSettings; ""
-// for none): Claude takes a single --settings. The prompt
-// follows "--", so a prompt starting with "-" is not a flag; the image
-// folder's --add-dir comes right before it, since the flag takes several
-// folders.
+// for none): Claude takes a single --settings, which also lets Claude read
+// the images. The prompt follows "--", so a prompt starting with "-" is not
+// a flag.
 func Args(in execution.Intent, att Attached, settings string) []string {
 	args := []string{"--bg"}
 	if t := strings.TrimSpace(in.Title); t != "" {
@@ -68,7 +67,6 @@ func Args(in execution.Intent, att Attached, settings string) []string {
 	}
 	prompt := in.Prompt
 	if len(att.Paths) > 0 {
-		args = append(args, "--add-dir", att.Dir)
 		prompt += "\n\n" + ImagePrompt(in.Images, att.Paths)
 	}
 	return append(args, "--", prompt)
@@ -111,17 +109,14 @@ func ParseBackgrounded(stdout string) (string, bool) {
 	return m[1], true
 }
 
-// The CLI's refusals of a folder its user never trusted, as the workspace
-// or as an added folder (the images' folder, below the workspace); exit 1
-// before anything starts (ADR 0005 E1).
-const (
-	untrusted      = "Workspace not trusted"
-	untrustedAdded = "Added folder not trusted"
-)
+// untrusted is the CLI's refusal of a workspace its user never trusted;
+// exit 1 before anything starts (ADR 0005 E1).
+const untrusted = "Workspace not trusted"
 
 // Launch starts the background session once (the coordinator recorded the
 // dispatch first) and maps its short id to the session through the session
-// list. Images are written to files first. Rejected: the intent is invalid,
+// list. Images are written to files first, and what earlier versions wrote
+// in the project is removed (best effort). Rejected: the intent is invalid,
 // its images can't be written, claude could not start, or Claude refused the
 // folder; the images written are removed. Any other failure is uncertain and
 // keeps them: the coordinator finds the session by the intent's marker
@@ -132,6 +127,9 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	}
 	if fi, err := os.Stat(a.cli.Bin); err != nil || fi.IsDir() || fi.Mode().Perm()&0o111 == 0 {
 		return execution.Observation{}, &execution.Rejected{Reason: fmt.Sprintf("Stage can't run %s. Check the Claude command in Settings.", a.cli.Bin)}
+	}
+	if err := removeLegacyImages(in.Directory); err != nil {
+		a.log.Warn("claude: remove old project images", "dir", LegacyImageRoot(in.Directory), "err", err)
 	}
 	att, err := a.attach(in)
 	if err != nil {
@@ -148,14 +146,14 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	call, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	// A base is a branch: launch from its checkout so Claude's worktree
-	// starts at its HEAD (launchSettings). Images stay in the project.
+	// starts at its HEAD (launchSettings).
 	dir := in.Directory
 	if in.Workspace.Base != "" {
 		if dir, err = baseCheckout(call, in.Directory, in.Workspace.Base); err != nil {
 			return reject(err.Error())
 		}
 	}
-	res, err := a.cli.Launch(call, dir, Args(in, att, a.launchSettings(in.Workspace.Base != ""))...)
+	res, err := a.cli.Launch(call, dir, Args(in, att, a.launchSettings(in.Workspace.Base != "", len(att.Paths) > 0))...)
 	var start *StartError
 	if errors.As(err, &start) {
 		return reject(fmt.Sprintf("Stage can't run %s (%v). Check the Claude command in Settings.", a.cli.Bin, start.Err))
@@ -164,7 +162,7 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 		return execution.Observation{}, fmt.Errorf("claude --bg: %w", err)
 	}
 	if res.Code != 0 {
-		if out := res.Stderr + res.Stdout; strings.Contains(out, untrusted) || strings.Contains(out, untrustedAdded) {
+		if out := res.Stderr + res.Stdout; strings.Contains(out, untrusted) {
 			return reject(fmt.Sprintf("Claude Code doesn't trust %s yet. Run claude in that folder once and accept the trust prompt, then start the task again.", in.Directory))
 		}
 		return execution.Observation{}, exitError("--bg", res)
@@ -176,23 +174,23 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	return a.awaitListed(ctx, short)
 }
 
-// attach prunes the workspace's old image folders and writes the launch's
-// images.
+// attach prunes old image folders and writes the launch's images under the
+// image root.
 func (a *Adapter) attach(in execution.Intent) (Attached, error) {
 	if len(in.Images) == 0 {
 		return Attached{}, nil
 	}
-	root := ImageRoot(in.Directory)
+	root := a.imageRoot
+	if root == "" {
+		return Attached{}, errors.New(reasonImages)
+	}
 	if err := pruneImages(root, a.now().Add(-imageRetention)); err != nil {
 		a.log.Warn("claude: prune launch images", "dir", root, "err", err)
 	}
-	dir := ImageDir(in.Directory, in.RequestID)
+	dir := ImageDir(root, in.RequestID)
 	fail := func(err error) (Attached, error) {
 		_ = os.RemoveAll(dir)
 		return Attached{}, fmt.Errorf("Stage can't write the task's images to %s for Claude Code: %v", root, err)
-	}
-	if err := prepareImageRoot(root); err != nil {
-		return fail(err)
 	}
 	paths, err := writeImages(dir, in.Images)
 	if err != nil {
