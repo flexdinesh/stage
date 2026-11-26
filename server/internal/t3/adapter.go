@@ -98,8 +98,21 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 				group = p.ProviderInstanceID
 			}
 			model := execution.Model{Choice: execution.Choice{ID: ModelKey(p.ProviderInstanceID, m.ID), Label: label, Availability: av}, Group: group, Options: []execution.Option{}}
+			taken := map[string]bool{}
+			for _, o := range out.Options {
+				taken[o.ID] = true
+			}
 			for _, o := range m.Options {
-				model.Options = append(model.Options, execution.Option{ID: o.ID, Values: o.Values, Default: o.Default})
+				opt := execution.Option{ID: o.ID, Values: o.Values, Default: o.Default}
+				// T3's catalog is passed through: an option that collides with a
+				// launch option or another of the model's, or that is malformed
+				// (a default it does not take), is left out rather than making
+				// every launch on this connection fail.
+				if taken[o.ID] || opt.Declared() != nil {
+					continue
+				}
+				taken[o.ID] = true
+				model.Options = append(model.Options, opt)
 			}
 			// Unreported runtime modes leave Permissions nil: the model inherits the harness list.
 			if p.RuntimeModes != nil {

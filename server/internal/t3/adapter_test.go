@@ -268,3 +268,33 @@ func TestLaunchOptionsTranslateToWorkspaceStrategy(t *testing.T) {
 		})
 	}
 }
+
+func TestMalformedCatalogOptionsAreLeftOut(t *testing.T) {
+	fake := NewFake()
+	bad := OptionValue{Str: "max"}
+	m := &fake.Catalog.Providers[0].Models[0]
+	m.Options = append(m.Options,
+		ModelOptionSpec{ID: "speed", Values: []OptionValue{StringValue("fast")}, Default: &bad},
+		ModelOptionSpec{ID: "worktree", Values: []OptionValue{StringValue("yes")}},
+		ModelOptionSpec{ID: "effort", Values: []OptionValue{StringValue("low")}},
+	)
+	adapter := NewAdapter(fake)
+	caps, err := adapter.Features(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := caps.Valid(); err != nil {
+		t.Fatal("one bad catalog option made the capabilities malformed:", err)
+	}
+	var ids []string
+	for _, o := range caps.Models[0].Options {
+		ids = append(ids, o.ID)
+	}
+	if len(ids) != 1 || ids[0] != "effort" {
+		t.Fatalf("model options = %v, want only the well-formed effort", ids)
+	}
+	in := execution.Intent{Config: execution.Config{Model: caps.Models[0].ID}}
+	if err := adapter.validate(t.Context(), in); err != nil {
+		t.Fatal("launch blocked by a dropped catalog option:", err)
+	}
+}

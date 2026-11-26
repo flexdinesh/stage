@@ -99,6 +99,12 @@ func validDeclarations(set []Option) error {
 	return nil
 }
 
+// Declared reports whether o, on its own, is a well-formed declaration
+// (kind, values, default). An adapter that passes another system's options
+// through drops the ones that fail, so one bad option never makes its whole
+// capabilities malformed.
+func (o Option) Declared() error { return validDeclaration(o) }
+
 func validDeclaration(o Option) error {
 	switch o.EffectiveKind() {
 	case OptionChoice:

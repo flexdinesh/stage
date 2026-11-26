@@ -89,4 +89,6 @@ SELECT 'event', id, tree_id, session_id, launch_attempt, 'task_event',
       'Predecessor bases were removed: this task no longer starts from its predecessor''s branch. Its worktree now starts from the harness default. The handoff carries the branch the predecessor reported.'
   END
 FROM tasks WHERE json_extract(workspace, '$.type') = 'worktree' AND json_extract(workspace, '$.base') = 'predecessor'
+  -- only work that can still start: finished or archived history keeps its record
+  AND state IN ('backlog', 'failed', 'interrupted', 'cancelled') AND archived_at IS NULL
 ORDER BY id;

@@ -411,7 +411,8 @@ and paging. (Thread search was removed with API v3.)
   predecessor-based workspace's stored fallback included. Unfinished launch attempts (`prepared`, `unconfirmed`)
   get the same options in their intent's config, so recovery keeps the
   worktree. An option already set is kept. Each predecessor-based task
-  gets one `task_event` journal entry naming where its worktree now
+  that can still start (backlog, failed, interrupted or cancelled, not
+  archived; finished history gets none) gets one `task_event` journal entry naming where its worktree now
   starts, and that the handoff carries the predecessor's branch: T3 from
   its `baseRef`; a T3 task with no stored `baseRef` (it carries `worktree`
   without one, which T3 rejects at launch) that a base ref must be set

@@ -299,6 +299,9 @@ var launchOptionsSeed = []string{
 	 (6, 1, 't3 predecessor', 'p', 2, '{"type":"worktree","baseRef":"origin/main","branch":null,"base":"predecessor","baseTaskId":1}', '{"model":"","options":[],"permission":"","mode":""}', 1, 1, 2, 'failed'),
 	 (7, 1, 'claude predecessor', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 1, NULL, 0, 'backlog'),
 	 (9, 1, 't3 predecessor without ref', 'p', 2, '{"type":"worktree","baseRef":"","branch":"stack-b","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 1, NULL, 0, 'backlog')`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id, workspace, execution_config, state, archived_at) VALUES
+	 (10, 1, 'claude predecessor done', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 'done', NULL),
+	 (11, 1, 'claude predecessor archived', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 'backlog', '2026-01-01 00:00:00+00')`,
 	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, connection_id, workspace, execution_config) VALUES
 	 (1, 1, 't3 nightly', 'p', '@daily', 'UTC', 2, '{"type":"worktree","baseRef":"main","branch":null,"base":"ref"}', '{"model":"","options":[],"permission":"","mode":""}'),
 	 (2, 1, 'claude nightly', 'p', '@daily', 'UTC', 3, '{"type":"root"}', '{"model":"","options":[],"permission":"","mode":""}')`,
@@ -346,7 +349,9 @@ func checkV0033LaunchOptions(t *testing.T, pool *sql.DB) {
 		`6 [{"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}]`,
 		`7 [{"id": "worktree", "value": true}]`,
 		`8 []`,
-		`9 [{"id": "worktree", "value": true}, {"id": "branch", "value": "stack-b"}]`)
+		`9 [{"id": "worktree", "value": true}, {"id": "branch", "value": "stack-b"}]`,
+		`10 [{"id": "worktree", "value": true}]`,
+		`11 [{"id": "worktree", "value": true}]`)
 	wantPGRows(t, pool, `SELECT execution_config->>'model' FROM tasks WHERE id = 1`, "m")
 	wantPGRows(t, pool, `SELECT id || ' ' || (execution_config->'options')::text FROM schedules ORDER BY id`,
 		`1 [{"id": "worktree", "value": true}, {"id": "baseRef", "value": "main"}]`, `2 []`)
