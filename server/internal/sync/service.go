@@ -411,7 +411,7 @@ func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observati
 	if o.Session != *task.Session {
 		return errors.New("observation returned a different session")
 	}
-	if e := s.checkObservation(task.Harness, o); e != nil {
+	if e := s.CheckObservation(task.Harness, o); e != nil {
 		return e
 	}
 	if e := s.store.PutObservation(ctx, o); e != nil {
@@ -468,9 +468,10 @@ func (s *Service) refusal(kind string, o execution.Observation) error {
 	return nil
 }
 
-// checkObservation validates o against kind's policies: only a harness that
-// owns its processes may report an execution lost with its owner.
-func (s *Service) checkObservation(kind string, o execution.Observation) error {
+// CheckObservation validates o against kind's policies: only a harness that
+// owns its processes may report an execution lost with its owner. An
+// observation passes it before it changes anything.
+func (s *Service) CheckObservation(kind string, o execution.Observation) error {
 	if err := o.Valid(); err != nil {
 		return err
 	}
@@ -506,24 +507,39 @@ func (s *Service) Stream(ctx context.Context, id int64) error {
 		if o.Session.ConnectionID != id {
 			return errors.New("pushed observation names another connection")
 		}
-		return s.Ingest(ctx, o)
+		_, err := s.Ingest(ctx, o)
+		return err
 	})
 }
 
-// Ingest applies a pushed observation to the task that owns its session.
+// Ingested is what Ingest did with a pushed observation.
+type Ingested int
+
+const (
+	// Applied: the task that owns the session took the observation.
+	Applied Ingested = iota
+	// Unowned: no task owns the session; it is left to discovery.
+	Unowned
+	// Launching: the owning task is launching; its launch reconciles the
+	// session.
+	Launching
+)
+
+// Ingest applies a pushed observation (an EventSource event, or POST
+// /api/connections/{id}/observations) to the task that owns its session.
 // An unowned session is left to discovery.
-func (s *Service) Ingest(ctx context.Context, o execution.Observation) error {
+func (s *Service) Ingest(ctx context.Context, o execution.Observation) (Ingested, error) {
 	t, err := s.store.TaskBySession(ctx, o.Session)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil
+		return Unowned, nil
 	}
 	if err != nil {
-		return err
+		return Unowned, err
 	}
 	if t.State == db.StateLaunching {
-		return nil // the launch reconciles its own session
+		return Launching, nil // the launch reconciles its own session
 	}
-	return s.apply(ctx, t, o)
+	return Applied, s.apply(ctx, t, o)
 }
 
 // closure is the harness's declared closure for o's signal.
@@ -721,7 +737,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	record, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer done()
 	if e == nil {
-		e = s.checkObservation(t.Harness, o)
+		e = s.CheckObservation(t.Harness, o)
 	}
 	if e == nil && (o.Session.ConnectionID != attempt.Intent.ConnectionID || o.Project != attempt.Intent.Project) {
 		e = errors.New("launch returned a different destination")
