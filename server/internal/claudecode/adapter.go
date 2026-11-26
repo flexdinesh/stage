@@ -39,6 +39,10 @@ type Options struct {
 	// SettleDelays are the waits before each read after a hook (default
 	// 0, 250ms, 500ms, 1s, 2s); tests shorten them.
 	SettleDelays []time.Duration
+	// ProcessAlive reports whether a session's process (its list pid)
+	// still runs (default: signal 0); tests of a fake CLI, whose pids are
+	// made up, report false.
+	ProcessAlive func(pid int) bool
 	Now          func() time.Time
 	Logger       *slog.Logger
 }
@@ -56,6 +60,7 @@ type Adapter struct {
 	log        *slog.Logger
 	// settleDelays are the waits before each read after a hook (Events).
 	settleDelays []time.Duration
+	alive        func(pid int) bool
 
 	authMu sync.Mutex
 	auth   authCache
@@ -64,6 +69,12 @@ type Adapter struct {
 	invAt  time.Time // ~/.claude.json mtime of inv
 	invKey string
 	inv    []execution.WorkspaceInfo
+
+	// sendMu serializes Send; wakeMu guards waking, the sessions a Send is
+	// delivering to, each until its deadline (send.go).
+	sendMu sync.Mutex
+	wakeMu sync.Mutex
+	waking map[string]time.Time
 }
 
 var (
@@ -90,9 +101,12 @@ func New(o Options) *Adapter {
 	if len(o.SettleDelays) == 0 {
 		o.SettleDelays = settleDelays
 	}
+	if o.ProcessAlive == nil {
+		o.ProcessAlive = processAlive
+	}
 	return &Adapter{
 		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now, log: o.Logger,
-		hooks: o.Hooks, settleDelays: o.SettleDelays,
+		hooks: o.Hooks, settleDelays: o.SettleDelays, alive: o.ProcessAlive,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
 		logs:   &transcripts{now: o.Now},
 	}
@@ -198,7 +212,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			"worktreeBase":      {Reason: reasonBase},
 			"registerWorkspace": {Reason: reasonFolder},
 			execution.OpRespond: a.hooksRunning(),
-			execution.OpSend:    {Reason: reasonSend},
+			execution.OpSend:    available,
 		},
 		Models:      slices.Clone(models),
 		Options:     []execution.Option{effort},
@@ -362,13 +376,17 @@ func (s session) removed() bool {
 }
 
 // observation maps a session (ADR 0005 decision 4). Not listed: idle with
-// the reply (the transcript exists), closed (archived) when removed.
+// the reply (the transcript exists), closed (archived) when removed. A
+// session a Send stopped to wake reads running meanwhile (send.go).
 func (a *Adapter) observation(s session) (execution.Observation, error) {
 	state := "idle"
 	if s.listed {
 		var err error
 		if state, err = MapState(s.entry); err != nil {
 			return execution.Observation{}, err
+		}
+		if state == "interrupted" && a.isWaking(s.id) {
+			state = "running"
 		}
 	}
 	cwd := s.cwd()

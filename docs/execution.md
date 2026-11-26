@@ -381,7 +381,11 @@ interaction).
   API: [session interaction](api.md#session-interaction-api-v6); the app
   answers on task detail and needs-input rows, never MCP or the CLI (only
   the user answers). A harness without it answers `operation_unavailable`.
-  Claude Code implements it; T3, OpenCode and Codex do not.
+  A session that can't take a message now is `*execution.Busy` (409
+  `session_busy` with the reason; the worker channel carries it as `busy`);
+  a sent message records "Follow-up sent from Stage" on the task's timeline.
+  Send, like respond, is the user's only (agent callers are refused).
+  Claude Code implements it (respond and send); T3, OpenCode and Codex do not.
 
 ## Durable launch lifecycle
 
@@ -661,11 +665,27 @@ to run on that machine.
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`). Permissions: `manual`, `acceptEdits`, `auto`, `plan`, `dontAsk`,
   `bypassPermissions`. Workspaces: the project folder or a Claude worktree.
-  Images and `predecessorBase` are available. Unavailable with reasons:
-  worktree bases (Claude starts worktrees from origin's default branch and
-  names the branch), registering a folder, send (follow-ups are typed in
-  Claude: attach or resume), and respond without the hook receiver (no
-  state folder, or it could not open).
+  Images, `predecessorBase` and send are available. Unavailable with
+  reasons: worktree bases (Claude starts worktrees from origin's default
+  branch and names the branch), registering a folder, and respond without
+  the hook receiver (no state folder, or it could not open).
+- **Follow-ups** ([ADR 0005](adr/0005-claude-code-harness.md) decision 18,
+  E12). **Send** reads the session list fresh (one send at a time) and
+  takes a message only for a listed background session that is `done`, or
+  `blocked` on a finished turn (no `waitingFor`, status not `waiting`, the
+  transcript's turn over). Else `Busy` with what to do: working, a
+  permission prompt or question, stopped, failed, removed or interactive
+  (with the resume command where one helps), or a folder that is gone. A
+  live process is stopped first (`claude stop <short>`), and Send waits
+  until the list shows no pid and the process is gone; then
+  `claude --bg --resume <uuid> -- <text>` in the session's folder, with no
+  other flag, wakes the same session with its saved options (hooks
+  included), and Send waits briefly for it to run. A copy (another id
+  printed, or "started a copy") is stopped and removed and the send is
+  `Busy`; a failed wake after the stop is an error (the session stays
+  resumable). While a send delivers (at most 15 s) the session's `stopped`
+  entry observes as running, so a blocked session stopped to wake records
+  no interrupted. Text only, at most 32 KiB.
 - **Approvals and questions** ([ADR 0005](adr/0005-claude-code-harness.md)
   decision 8, E11). The push receiver (`claudecode.Hooks`, above) also holds
   each `PermissionRequest` hook naming a tool (its hook timeout is 3600 s,
@@ -706,8 +726,9 @@ real executable with a state file), and `TestContractClaude*` in
 `internal/sync` with the real adapter in process and behind a worker
 channel. `STAGE_TEST_CLAUDE=/absolute/path/to/claude mise run claude:live`
 runs the adapter against the real CLI with your login and haiku: it marks
-two scratch folders trusted in Claude's state file, launches a reply (then
-removes it with `claude rm` and checks the closure), an image it must name
+two scratch folders trusted in Claude's state file, launches a reply,
+sends it a follow-up from Stage (same session, no copy, the new reply),
+then removes it with `claude rm` and checks the closure, an image it must name
 the color of (manual permissions, no prompt), a permission prompt it allows
 from Stage through the hook, another it stops,
 a worktree session and a dependent worktree from that session's branch (a

@@ -1,6 +1,6 @@
 ---
 title: Claude Code
-description: Run Stage tasks as Claude Code background sessions, answer their approvals and questions in Stage or in Claude, and track sessions you started yourself.
+description: Run Stage tasks as Claude Code background sessions, answer their approvals and questions and send follow-ups in Stage or in Claude, and track sessions you started yourself.
 showAskAi: false
 ---
 
@@ -52,6 +52,14 @@ A task row or inbox row with one permission prompt shows it on one line with **A
 
 Only you answer: an agent calling Stage cannot approve a session's prompt. Sessions you track and sessions started before this version have no requests in Stage; answer them in Claude.
 
+### Follow up in Stage
+
+When a session finishes, task detail shows a **Follow up** box under the last reply: type a message and **Send** (Ctrl or Cmd + Enter). Claude continues the same session with your message and the task runs again. When a turn ends with Claude asking you something, the box leads the page as **Reply**, under "Claude Code is waiting for your reply.".
+
+While Claude works, the box keeps your draft and **Send** waits. A session that can't take a message says why: it is working, waits on a permission prompt or question (answer that first), was stopped or removed, or runs in a terminal. Messages are text only. Only you send: an agent calling Stage cannot. The task's timeline records each follow-up; the message itself stays in Claude's transcript.
+
+To deliver a message, Stage briefly stops the finished session's idle process and wakes it with the message and the session's own options, so Claude never starts a copy.
+
 ### Answer in Claude
 
 Claude Code has no link to open, so Stage also offers **Copy resume command** on task detail, task rows and notifications. Run it in a terminal:
@@ -98,7 +106,7 @@ prints the same, with the next step when something is wrong. Details: [Connectio
 
 - Images on the prompt are not sent to Claude Code sessions.
 - A worktree starts from origin's default branch or a needed task's branch: no other base, and Claude names the branch.
-- Follow-ups are typed in Claude, not in Stage. A turn that ended with a question in its reply is a follow-up too.
+- Follow-ups from Stage are text only, and go to background sessions Stage can see: a session you run in a terminal takes them there.
 - If Stage restarts while a prompt waits, answer that prompt in Claude.
 - Not in Docker. On a worker, only with the worker service or `stage worker run --local-harnesses`; the resume command names the machine to run it on.
 

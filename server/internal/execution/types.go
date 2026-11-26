@@ -303,6 +303,13 @@ type Invalid struct{ Reason string }
 
 func (e *Invalid) Error() string { return e.Reason }
 
+// Busy: the session can't take a message now (it is working, waits on a
+// request, or runs where Stage can't reach it); nothing was sent. Reason
+// says why and what to do. The API answers 409 session_busy.
+type Busy struct{ Reason string }
+
+func (e *Busy) Error() string { return e.Reason }
+
 type LinkResolver interface {
 	ResolveLink(context.Context, string) (SessionRef, error)
 }

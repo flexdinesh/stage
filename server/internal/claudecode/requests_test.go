@@ -107,7 +107,7 @@ func TestApprovalAllow(t *testing.T) {
 	if i := slices.Index(args, "--settings"); i < 0 || args[i+1] != h.SettingsPath() || slices.Index(args, "--") < i {
 		t.Fatalf("args %q", args)
 	}
-	if caps, _ := a.Features(t.Context()); !caps.Operations[execution.OpRespond].Available || caps.Operations[execution.OpSend].Available {
+	if caps, _ := a.Features(t.Context()); !caps.Operations[execution.OpRespond].Available || !caps.Operations[execution.OpSend].Available {
 		t.Fatalf("operations %+v", caps.Operations)
 	}
 	call := ask(f, ref.ExternalSessionID, loadHook(t, "permission-request.json"))

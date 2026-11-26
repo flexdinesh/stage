@@ -3,8 +3,11 @@
 import { useState, type ReactNode } from "react";
 import { IconClose, IconPlus, IconSearch } from "../components/icons.tsx";
 import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
+import { FollowUpPanel } from "../components/FollowUp.tsx";
+import { ApiError } from "../api/client.ts";
 import type { SessionRequest } from "../api/types.ts";
 import { rowRequestAction } from "../lib/requests.ts";
+import { replyPrompt, type FollowUpView } from "../lib/followup.ts";
 import {
   Alert,
   Button,
@@ -102,6 +105,13 @@ const SAMPLE_QUESTION: SessionRequest = {
   createdAt: "2026-11-25T07:00:00Z",
 };
 const noop = () => undefined;
+const BUSY_ERROR = new ApiError(409, "Claude Code is working. Send once it finishes.", "session_busy");
+
+/** One composer with its own draft, as task detail holds it. */
+function FollowUpDemo({ view, initial = "", ...rest }: { view: FollowUpView; initial?: string; sentAt?: string; error?: unknown }) {
+  const [draft, setDraft] = useState(initial);
+  return <FollowUpPanel view={view} harness="Claude Code" draft={draft} onDraft={setDraft} onSend={noop} {...rest} />;
+}
 
 function Section({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
   return (
@@ -426,6 +436,14 @@ export function DevUiPage() {
             </Row>
           </RowList>
         </Panel>
+      </Section>
+
+      <Section title="Follow-up" meta="components/FollowUp.tsx · a message into the session">
+        <Alert tone="need">{replyPrompt("Claude Code")}</Alert>
+        <FollowUpDemo view={{ placement: "lead", title: "Reply", busy: false }} />
+        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Also add a test for the empty case." />
+        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: true }} initial="Then open a PR." sentAt="2026-11-25T07:00:00Z" />
+        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Run the live test again." error={BUSY_ERROR} />
       </Section>
 
       <Section title="Layout">

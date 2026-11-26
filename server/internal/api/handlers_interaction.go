@@ -25,13 +25,22 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// respondRequest answers for the user only: a request naming an agent's
-// session (the Stage-Caller-Session header the CLI and MCP send) or
-// forwarded by a worker's agent gateway is refused, so an agent cannot
-// approve a session's prompt (best effort: a bare request carries neither).
+// agentCaller refuses (403 agent_forbidden, true) a request naming an
+// agent's session (the Stage-Caller-Session header the CLI and MCP send)
+// or forwarded by a worker's agent gateway, so only the user answers or
+// drives a session (best effort: a bare request carries neither).
+func agentCaller(w http.ResponseWriter, r *http.Request, msg string) bool {
+	if r.Header.Get(agentctx.CallerHeader) == "" && db.ActingMachine(r.Context()) == nil {
+		return false
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "agent_forbidden"})
+	return true
+}
+
+// respondRequest answers for the user only (agentCaller), so an agent
+// cannot approve a session's prompt.
 func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
-	if r.Header.Get(agentctx.CallerHeader) != "" || db.ActingMachine(r.Context()) != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Approvals and answers come from you, in Stage or in the harness, not from an agent.", "code": "agent_forbidden"})
+	if agentCaller(w, r, "Approvals and answers come from you, in Stage or in the harness, not from an agent.") {
 		return nil
 	}
 	id, err := pathID(r)
@@ -50,7 +59,11 @@ func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// sendMessage sends for the user only (agentCaller).
 func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
+	if agentCaller(w, r, "Follow-ups come from you, in Stage or in the harness, not from an agent.") {
+		return nil
+	}
 	id, err := pathID(r)
 	if err != nil {
 		return err

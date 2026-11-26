@@ -91,6 +91,14 @@ func TestErrorsCrossTheChannel(t *testing.T) {
 	if err := roundTrip(&execution.Refused{Reason: "Track it through T3."}); !errors.As(err, &refused) || refused.Reason != "Track it through T3." {
 		t.Fatal("refusal lost", err)
 	}
+	var busy *execution.Busy
+	if err := roundTrip(&execution.Busy{Reason: "Claude Code is working."}); !errors.As(err, &busy) || busy.Reason != "Claude Code is working." {
+		t.Fatal("busy lost", err)
+	}
+	var invalid *execution.Invalid
+	if err := roundTrip(&execution.Invalid{Reason: "Answer each question."}); !errors.As(err, &invalid) || invalid.Reason != "Answer each question." {
+		t.Fatal("invalid answer lost", err)
+	}
 	for _, sentinel := range []error{execution.ErrUnavailable, execution.ErrNotFound, execution.ErrNoReply} {
 		if err := roundTrip(fmt.Errorf("observe: %w", sentinel)); !errors.Is(err, sentinel) {
 			t.Fatal(sentinel, err)

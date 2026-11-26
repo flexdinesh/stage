@@ -84,10 +84,22 @@ func (s *Service) Respond(ctx context.Context, id int64, requestID string, r exe
 	return s.observeAfter(ctx, t)
 }
 
-// Send sends the task's session a message, then observes it once.
+// MaxMessage bounds a message's text (bytes): a harness may pass it as one
+// command-line argument.
+const MaxMessage = 32 << 10
+
+// FollowUpSent is the task event a sent message records.
+const FollowUpSent = "Follow-up sent from Stage"
+
+// Send sends the task's session a message, records it on the task's
+// timeline, then observes the session once. *execution.Busy (the session
+// can't take it now) is 409 session_busy.
 func (s *Service) Send(ctx context.Context, id int64, m execution.Message) (db.Task, error) {
 	if strings.TrimSpace(m.Text) == "" {
 		return db.Task{}, db.Invalid("message text is required")
+	}
+	if len(m.Text) > MaxMessage {
+		return db.Task{}, db.Invalid("message text is longer than %d KiB", MaxMessage>>10)
 	}
 	t, in, err := s.interactive(ctx, id, execution.OpSend)
 	if err != nil {
@@ -95,6 +107,9 @@ func (s *Service) Send(ctx context.Context, id int64, m execution.Message) (db.T
 	}
 	if err = in.Send(ctx, *t.Session, m); err != nil {
 		return t, harnessErr(err)
+	}
+	if err := s.store.AddTaskEvent(ctx, t.ID, FollowUpSent); err != nil {
+		s.log.Warn("record follow-up", "task", t.ID, "err", err)
 	}
 	return s.observeAfter(ctx, t)
 }

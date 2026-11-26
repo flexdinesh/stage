@@ -49,6 +49,7 @@ import type {
   T3Status,
   T3StatusWire,
   RequestResponse,
+  SendMessageRequest,
   SessionRequest,
   Task,
   TaskDetail,
@@ -298,6 +299,8 @@ export function createApi(transport: Transport) {
     taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
     /** Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `agent_forbidden` for agents). */
     respondRequest: (id: number, requestId: string, body: RequestResponse) => apiFetch<Task>(`/tasks/${id}/requests/${encodeURIComponent(requestId)}`, post(body)),
+    /** Sends the session a follow-up (409 `session_busy` when it can't take one now, 403 `agent_forbidden` for agents). */
+    sendMessage: (id: number, body: SendMessageRequest) => apiFetch<Task>(`/tasks/${id}/messages`, post(body)),
     duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
     /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),

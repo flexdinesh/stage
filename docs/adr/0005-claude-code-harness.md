@@ -15,6 +15,8 @@
 - **Amended** 2026-11-25 by #377: decision 16 (push via HTTP hooks),
   evidence E9, the hooks approval route.
 - **Amended** 2026-11-25 by #380: decision 17 (usage).
+- **Amended** 2026-11-26 by #376: decision 18 (follow-ups from Stage),
+  evidence [E12](#e12-follow-ups); decision 8's follow-up note.
 - **Amended** 2026-11-25 by #379: decision 10 (predecessor bases),
   evidence [E10](#e10-predecessor-base).
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
@@ -109,7 +111,7 @@ them. 2, 3, 13 and 14 come from the evidence.
    Claude reads the bare message as the tool's error, not as a denial);
    `AskUserQuestion` is a question request answered as `updatedInput`
    `answers`. A turn that ended asking the user (roster `blocked`, `idle`)
-   is a follow-up, not a request (#376). Adopted sessions and sessions
+   is not a request: Stage answers it with a follow-up (decision 18). Adopted sessions and sessions
    launched without the hook list no requests. A live session never
    re-reads the settings file, so the receiver binds its port again after a
    restart (decision 16). Requests are memory only. Only the user answers: the respond
@@ -218,6 +220,33 @@ them. 2, 3, 13 and 14 come from the evidence.
     overlap with the main file. Nested subagents (depth 2 and more) were not
     probed and may be undercounted. Stage never prices tokens: the
     observation's `costUsd` stays null.
+18. **Follow-ups** (#376, [E12](#e12-follow-ups)) are
+    `claude --bg --resume <uuid> -- "<message>"` in the session's folder,
+    with no other flag: a flag starts a copy, and so does a live process,
+    even an idle one. So Stage first runs `claude stop <short>` on a live
+    process and waits until the list shows no `pid` and that process is
+    gone (the list drops the pid at once; a resume while the process still
+    ends starts a copy; Stage and the session share a machine); the resume then wakes
+    the same session with its saved options (`--settings` included, so the
+    hooks stay). Only a listed background session takes one: `done`, or
+    `blocked` on a finished turn (no `waitingFor`, status not `waiting`,
+    the transcript's turn over: a reaped session no longer reports a
+    pending prompt). Anything else is `execution.Busy` (409
+    `session_busy`) with what to do: working, a permission prompt or
+    question (answer it), stopped, failed, removed or interactive (resume
+    or answer it in Claude), or a folder that is gone. A copy (the session
+    got busy between the check and the resume: the printed id differs or
+    Claude says "started a copy") is stopped and removed, and the send is
+    Busy. Stopping a `blocked` session lists it `stopped` until the wake
+    (about 0.5 s), so while a send delivers (at most 15 s) the adapter reads
+    that session's `stopped` as running: no false interrupted. A wake that
+    fails after the stop leaves the session stopped and resumable, and is
+    reported. Text only (an image needs `--add-dir`, a flag); at most
+    32 KiB (one argument). The follow-up is a typed prompt (`origin.kind`
+    `human`), so turns, the reply and `executionId` move on. Only the user
+    sends (the route refuses agent callers), and Stage records "Follow-up
+    sent from Stage" on the task's timeline, not the text: the transcript
+    is the record.
 
 ## Evidence
 
@@ -448,6 +477,21 @@ haiku, in a scratch folder; fixtures in `testdata/hooks/`.
 | Settings file changed while the session lives | the next hook still goes to the old URL (read at start; a woken session reads it again, #377) |
 | Empty 200 | no decision; the prompt stays (#377) |
 
+### E12 Follow-ups
+
+#376, claude 2.1.332, 2026-11-26, haiku, a plain scratch folder below a
+trusted one (cleaned up with `rm` and `purge`):
+
+| Probe | Result |
+| --- | --- |
+| `--bg --resume U -- "<m>"` on a `done` session whose process lives (`status: idle`) | exit 0 in 0.44 s: `note: session 3923bfbc is already running in the background, so this started a copy as 1462c3ac.` and `backgrounded · 1462c3ac` |
+| `claude stop <short>` on that `done` session | `stopped 3923bfbc` in 0.41 s; the entry keeps `state: done`, no `pid` or `status` |
+| Then `--bg --resume U -- "<m>"` (no other flag) | `note: woke session 3923bfbc with its saved options (-n, --model).`, `backgrounded · 3923bfbc · probe376`; the list shows a new `pid`, `status: busy`, `state: working` at once; same `sessionId` |
+| Transcript after the wake | a `user` record with `origin.kind: human`, `entrypoint: cli`, `sessionKind: bg`, a new `promptId`; reply and `turn_duration` follow in the same file |
+| A turn that ended asking (`state: blocked`, `status: idle`, no `waitingFor`) | `stop` lists it `state: stopped`; a resume with a message starting `-` after `--` wakes it (`working`, then `done` with the answer) |
+| `--` before the message | not a flag: the session wakes, no copy |
+| Resume right after `stop` (no gap) | a copy: the list already shows no `pid`, but the old process is still ending. Waiting until the old pid is gone (321 ms here) and then resuming wakes the session; `mise run claude:live` caught it |
+
 ## Approval routes
 
 v1 answered in Claude (decision 8). #375 chose the PermissionRequest hook:
@@ -567,6 +611,8 @@ Agents harness is wanted on its own merits.
   are [above](#cloud-sessions-claude---cloud-not-built).
 - #380 (usage): the observation carries `usage` from the transcript
   (decision 17); task detail, `stage task show` and `get_task` show it.
+- #376 (follow-ups): `send` is available (decision 18); task detail has a
+  composer that leads when the turn ended asking the user.
 
 ## Reproduce
 
