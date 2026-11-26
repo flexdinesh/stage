@@ -29,18 +29,18 @@ export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: strin
 }
 
 /** Detail-page header: "Copy link" (self-describing markdown, for prompts) joined to "URL" (bare). */
-export function CopyLinkPair({ subject }: { subject: LinkSubject }) {
+export function CopyLinkPair({ subject, small = false }: { subject: LinkSubject; small?: boolean }) {
   const { links } = usePlatform();
   const { markdown, url, name } = subjectLinks(subject, (path) => links.stageLink(path));
   const [mdStatus, copyMd] = useCopy();
   const [urlStatus, copyUrl] = useCopy();
   return (
     <span role="group" aria-label={`Copy link to ${name}`} className="inline-flex">
-      <Button small title={markdown} onClick={() => copyMd(markdown)}>
+      <Button small={small} title={markdown} onClick={() => copyMd(markdown)}>
         <IconChainLink />
         {copyStatusText(mdStatus, "Copy link")}
       </Button>
-      <Button small title={url} aria-label={urlStatus === "idle" ? "Copy URL" : undefined} className="-ml-px" onClick={() => copyUrl(url)}>
+      <Button small={small} title={url} aria-label={urlStatus === "idle" ? "Copy URL" : undefined} className="-ml-px" onClick={() => copyUrl(url)}>
         {copyStatusText(urlStatus, "URL")}
       </Button>
       <span className="sr-only" aria-live="polite">

@@ -261,7 +261,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
     <div className={cx(phoneBar && "pb-16 md:pb-0")}>
       <PageHeader
         title={task.title}
-        actions={<CopyLinkPair subject={{ kind: "task", id: task.id, title: task.title }} />}
+        actions={<CopyLinkPair small subject={{ kind: "task", id: task.id, title: task.title }} />}
         trail={[
           { label: task.projectTitle, to: `/projects/${task.projectId}` },
           ...(task.tree === null ? [] : [{ label: task.tree.title, to: treeTaskPath(task.tree.id, task.id) }]),
