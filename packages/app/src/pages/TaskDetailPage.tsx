@@ -1,9 +1,9 @@
 import { LaunchRecovery } from "../components/LaunchRecovery.tsx";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useConnectionCapabilities, useConnectionOperation, useHarnesses, useInvalidateWork, useMachines, useSendMessage, useSessionRequests, useTask } from "../api/queries.ts";
+import { useConnectionCapabilities, useConnectionOperation, useHarnesses, useInvalidateWork, useMachines, useProjects, useSendMessage, useSessionRequests, useTask, useTaskActions } from "../api/queries.ts";
 import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "../components/SessionAction.tsx";
 import { RequestsPanel } from "../components/Requests.tsx";
@@ -15,7 +15,9 @@ import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { AcceptedResult } from "../components/Completion.tsx";
-import { BlockedReason, LaunchBlockAlert, useLaunchGate } from "../components/LaunchGate.tsx";
+import { BlockedReason, LaunchBlockAlert, useStartTask, useStopTask } from "../components/LaunchGate.tsx";
+import { DeclaredActions } from "../components/DeclaredActions.tsx";
+import { HarnessFacts } from "../components/HarnessPresentation.tsx";
 import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { UsagePanel } from "../components/Usage.tsx";
@@ -46,7 +48,7 @@ import {
   cx,
   ConfirmInline,
 } from "../components/ui.tsx";
-import { configModelText, dateTime, executionModes } from "../lib/format.ts";
+import { dateTime } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
 import { useIdParam } from "../lib/params.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
@@ -57,7 +59,6 @@ import { treeTaskPath } from "../lib/trees.ts";
 import { isRetired, resumeCommand, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
 import { LaunchMeta } from "../components/LaunchMeta.tsx";
-import { harnessSlots } from "../harnesses/index.ts";
 import { launchParts } from "../lib/capabilities.ts";
 import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { machineTag, withMachine } from "../lib/machines.ts";
@@ -173,13 +174,11 @@ function stamp(iso: string): string {
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
   const { kindName } = useHarnesses();
-  const launchGate = useLaunchGate();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
-  const stop = useMutation({ mutationFn: () => api.stopTask(task.id), onSettled: invalidate });
+  const { start, block: launchBlock } = useStartTask(task);
   const duplicate = useMutation({
     mutationFn: () => api.duplicateTask(task.id),
     // The copy's page fetches itself; the rest refreshes behind the navigation.
@@ -199,7 +198,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
     mutationFn: (archived: boolean) => (archived ? api.archiveTask(task.id) : api.unarchiveTask(task.id)),
     onSettled: invalidate,
   });
-  const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
   const archived = task.archivedAt !== null;
 
   const waiting = task.state === "needs_input";
@@ -208,12 +206,24 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const live = { ...task, connectionActive: true };
   const startable = canStart(live);
   const stoppable = canStop(live);
-  // A live connection that cannot launch now (disconnected, offline, unreachable, no workspace): Start stays, disabled.
-  const block = startable ? launchGate(task) : null;
-  const lockedHint = retired ? retiredHint(kindName(task.harness)) : block?.reason;
+  const { stop, block: stopBlock } = useStopTask(task, stoppable);
+  const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
+  const block = startable && !retired ? launchBlock : null;
+  const retiredReason = retired ? retiredHint(kindName(task.harness)) : undefined;
+  const lockedHint = retiredReason ?? block?.reason;
   // Open in the harness, or (a harness without a destination to open) copy the command that resumes it in its own client.
   const action = useSessionAction()(task);
-  const phoneBar = action !== null || stoppable;
+  const { actions, run } = useTaskActions(task, !retired && task.session !== null);
+  const phoneBar = action !== null || stoppable || actions.length > 0;
+  const phoneBarRef = useRef<HTMLDivElement>(null);
+  const [phoneBarHeight, setPhoneBarHeight] = useState(0);
+  useEffect(() => {
+    const bar = phoneBarRef.current;
+    if (!phoneBar || bar === null) return;
+    const observer = new ResizeObserver(() => setPhoneBarHeight(bar.offsetHeight));
+    observer.observe(bar, { box: "border-box" });
+    return () => observer.disconnect();
+  }, [phoneBar]);
   // Requests the harness lets Stage answer: the panel below leads, the harness's own client stays as the alternative.
   const { requests, ready: requestsReady } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
   const answerable = requests.length > 0;
@@ -251,14 +261,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
     <SessionActionButton action={action} name={kindName(task.harness)} variant={variant} connectionId={task.connectionId} {...(className === undefined ? {} : { className })} />
   );
 
-  const stopButton = (className?: string) => (
-    <Button busy={stop.isPending} disabled={retired} title={lockedHint} onClick={() => stop.mutate()} className={className}>
-      Stop
-    </Button>
-  );
-
   return (
-    <div className={cx(phoneBar && "pb-16 md:pb-0")}>
+    <div style={phoneBar ? { paddingBottom: phoneBarHeight } : undefined}>
       <PageHeader
         title={task.title}
         actions={<CopyLinkPair small subject={{ kind: "task", id: task.id, title: task.title }} />}
@@ -288,7 +292,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
               ),
             })}
       />
-      {/* Flags only: state lives in the State panel, model and workspace in Config. */}
+      {/* State is in the State panel and launch metadata is in the session panel. */}
       {archived || task.adopted || retired ? (
         <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
           {archived ? <Chip title={`Archived ${dateTime(task.archivedAt ?? "")}`}>archived</Chip> : null}
@@ -312,6 +316,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {replyLeads ? composer : null}
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
         {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
+        {stopBlock === null || retired ? null : <LaunchBlockAlert block={stopBlock} tone="plain" />}
 
         <div className="flex flex-wrap items-center gap-2">
           {startable ? (
@@ -327,8 +332,22 @@ function TaskBody({ task }: { task: TaskDetail }) {
               </Button>
             </BlockedReason>
           ) : null}
-          {waiting ? null : openInApp("secondary", "max-md:hidden")}
-          {stoppable ? stopButton("max-md:hidden") : null}
+          {phoneBar ? (
+            <div
+              ref={phoneBarRef}
+              className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex max-h-[45dvh] flex-wrap gap-2 overflow-y-auto border-t border-line bg-bg px-3 py-2.5 md:contents"
+            >
+              {openInApp(waiting && !answerable && !replyLeads ? "primary" : "secondary", cx("max-md:flex-1", waiting && "md:hidden"))}
+              {stoppable ? (
+                <BlockedReason reason={retiredReason ?? stopBlock?.reason} className="max-md:flex-1">
+                  <Button busy={stop.isPending} disabled={retired || stopBlock !== null} onClick={() => stop.mutate()} className="max-md:flex-1">
+                    Stop
+                  </Button>
+                </BlockedReason>
+              ) : null}
+              <DeclaredActions key={`${task.launchAttempt}:${task.externalSessionId}`} actions={actions} run={run} className="max-md:basis-full" />
+            </div>
+          ) : null}
           {task.adopted ? null : (
             <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
               Duplicate
@@ -410,13 +429,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
         </div>
       </div>
 
-      {phoneBar ? (
-        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-line bg-bg px-3 py-2.5 md:hidden">
-          {openInApp(waiting && !answerable && !replyLeads ? "primary" : "secondary", "flex-1")}
-          {stoppable ? stopButton("flex-1") : null}
-        </div>
-      ) : null}
-
       {editing ? <TaskFormModal task={task} onClose={() => setEditing(false)} /> : null}
     </div>
   );
@@ -433,9 +445,13 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
 
 function SessionPanel({ task }: { task: TaskDetail }) {
   const destination = useSessionDestination();
-  const name = useHarnesses().kindName(task.harness);
+  const { kindName, descriptor } = useHarnesses();
+  const name = kindName(task.harness);
   const title = `${name} session`;
-  const caps = useConnectionCapabilities(task.connectionId, true);
+  const projects = useProjects();
+  const binding = projects.data?.projects.find((project) => project.id === task.projectId)?.bindings
+    .find((item) => item.connectionId === task.connectionId && item.status === "available" && item.connectionActive);
+  const caps = useConnectionCapabilities(task.connectionId, true, binding);
   const meta = <LaunchMeta parts={launchParts(task.executionConfig, caps.data)} reported={task.reported} harness={name} />;
   const session = task.session;
   if (session === null) {
@@ -468,8 +484,11 @@ function SessionPanel({ task }: { task: TaskDetail }) {
           </span>
         </Detail>
       </Details>
-      <div className="mt-3 empty:hidden">{meta}</div>
-      {harnessSlots(task.harness).webAddress && destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
+      <div className="mt-3 flex flex-col gap-3 empty:hidden">
+        {meta}
+        <HarnessFacts facts={task.facts} />
+      </div>
+      {descriptor(task.harness)?.webAddress === true && destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
         <TextLink to={SETTINGS_PATH.connections} className="mt-3 inline-block text-small text-fg">
           Configure browser address
         </TextLink>
@@ -491,9 +510,6 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
             {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
           </HarnessConnectionState>
         </Detail>
-        <Detail label="Model">{configModelText(task.executionConfig)}</Detail>
-        <Detail label="Permission">{executionModes(task).permission || "Harness default"}</Detail>
-        <Detail label="Mode">{executionModes(task).mode || "Harness default"}</Detail>
         {task.startAt === null ? null : (
           <Detail label="Starts">
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>

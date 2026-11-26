@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionGate, connectionStatusItem, harnessStatusView, harnessSummary, liveChip, statusRead, statusTargets, unreachableDetail } from "../src/lib/connections.ts";
+import { connectionGate, connectionStatusChip, connectionStatusItem, harnessStatusView, harnessSummary, liveChip, statusRead, statusTargets, unreachableDetail } from "../src/lib/connections.ts";
 import { statusRow } from "../src/lib/status.ts";
 import { serviceHostText } from "../src/harnesses/opencode/opencode.ts";
 import { openCodeErrorText, openCodeRowDetail, openCodeStatusView, openCodeSummary } from "../src/harnesses/opencode/status.ts";
@@ -189,6 +189,12 @@ test("liveChip: OpenCode rejected links to Settings; checking does not", () => {
 });
 
 const status = (over) => loaded({ kind: "x", name: "X", connectionId: 9, configured: true, connected: true, state: "connected", fields: [], actions: [], ...over });
+
+test("connection phases pair a human state label with a shared tone", () => {
+  assert.deepEqual(connectionStatusChip({ phase: "needs_setup", state: "signed_out" }), { tone: "need", label: "Signed out" });
+  assert.deepEqual(connectionStatusChip({ phase: "unavailable", state: "not_installed" }), { tone: "bad", label: "Not installed" });
+  assert.deepEqual(connectionStatusChip({ phase: "connected", state: "" }), { tone: "ok", label: "Connected" });
+});
 
 test("harnessSummary: a generic harness reads as its Settings row does", () => {
   assert.deepEqual(harnessSummary(status({}), "x", "X"), { harness: "x", state: "connected", tone: "ok", label: "X connected" });

@@ -37,9 +37,10 @@ export function normalizeT3Status(w: T3DetailsWire, now = Date.now()): T3Status 
 }
 
 /** T3's panel state from its harness status, including sync and the replaced connection. */
-export function t3Details({ details, sync, replaced }: HarnessStatus<T3DetailsWire>, now = Date.now()): T3Status {
+export function t3Details(statusReply: HarnessStatus<T3DetailsWire>, now = Date.now()): T3Status {
+  const { details, sync, replaced } = statusReply;
   if (details === undefined) throw new ApiError(502, "T3 status without details");
-  const status = normalizeT3Status({ ...details, replaced: replaced ?? null }, now);
+  const status = normalizeT3Status({ ...details, replaced: replaced ?? null, presentation: statusReply }, now);
   if (sync === undefined) return status;
   return {
     ...status,
@@ -56,7 +57,7 @@ export function t3Details({ details, sync, replaced }: HarnessStatus<T3DetailsWi
 
 /** T3's setup calls on a machine (`api`: that machine's harness calls). */
 export const t3Api = (api: HarnessApi) => ({
-  status: () => api.harnessStatus<T3DetailsWire>(T3_KIND).then((s) => t3Details(s)),
+  status: (refresh = false) => api.harnessStatus<T3DetailsWire>(T3_KIND, { refresh }).then((s) => t3Details(s)),
   pair: (body: PairRequest) => api.runHarnessAction<T3DetailsWire>(T3_KIND, "pair", { ...body }).then((s) => t3Details(s)),
   /** Pairs through the t3 CLI on the machine (409 when unavailable, 502 when it fails). */
   autoPair: () => api.runHarnessAction<T3DetailsWire>(T3_KIND, "auto-pair").then((s) => t3Details(s)),

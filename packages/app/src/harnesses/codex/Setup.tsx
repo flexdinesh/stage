@@ -8,14 +8,13 @@ import { useHarnessApi, useScopedKey } from "../../api/harnessScope.tsx";
 import { invalidateConnectionChange } from "../../api/queries.ts";
 import type { HarnessStatus, SetupField } from "../../api/types.ts";
 import { initialValues, settingsBody, type SetupValues } from "../../lib/connectionSetup.ts";
-import { statusRead } from "../../lib/connections.ts";
 import { AutoCompleteToggle } from "../../components/Completion.tsx";
 import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
-import { Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, InlineError, Input, MetaLine, Muted, Panel, QueryState, RelTime } from "../../components/ui.tsx";
-import { CODEX_KIND as KIND, codexAccountText, codexDaemonText, codexVersionText, parseCodexStatus } from "./codex.ts";
+import { CheckConnection, ConfirmConnectionAction, HarnessFacts, HarnessFix, HarnessStatusChip, ReplacedConnectionNotice } from "../../components/HarnessPresentation.tsx";
+import { Button, ErrorText, Field, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
+import { CODEX_KIND as KIND, parseCodexStatus } from "./codex.ts";
 import { CODEX_STATUS_KEY, useCodexStatus } from "./queries.ts";
-import { codexSummary } from "./status.ts";
-import type { CodexDetails, CodexStatus } from "./types.ts";
+import type { CodexStatus } from "./types.ts";
 
 /** The CLI path setting (the descriptor's `binary` field). */
 const BINARY: SetupField = { id: "binary", kind: "text", label: "Codex CLI", help: "Path to the codex binary. Empty uses codex on PATH." };
@@ -50,108 +49,66 @@ export function useDisconnectCodex(onDone?: () => void) {
 
 export function CodexSetup() {
   const status = useCodexStatus();
-  const summary = codexSummary(statusRead(status));
+  const s = status.data;
+  const api = useHarnessApi();
+  const { apply } = useCodexCache();
+  const check = () => api.harnessStatus(KIND, { refresh: true }).then(apply);
   return (
     <>
       <Panel
         title="Codex connection"
-        actions={
-          <Chip tone={summary.tone} dot>
-            {summary.state}
-          </Chip>
-        }
+        actions={s === undefined ? undefined : <HarnessStatusChip status={s} />}
       >
-        <QueryState isPending={status.isPending} error={status.error} hasData={status.data !== undefined}>
-          {status.data === undefined ? null : <CodexBody status={status.data} />}
+        <ReplacedConnectionNotice replaced={s?.replaced} />
+        <QueryState isPending={status.isPending} error={s === undefined ? status.error : null} hasData={s !== undefined}>
+          {s === undefined ? null : <CodexBody status={s} check={check} />}
         </QueryState>
+        {s === undefined && status.error !== null ? <CheckConnection run={check} /> : null}
       </Panel>
       <NewTaskDefaults harness={KIND} />
     </>
   );
 }
 
-function CodexBody({ status }: { status: CodexStatus }) {
+function CodexBody({ status, check }: { status: CodexStatus; check: () => Promise<unknown> }) {
   return (
     <div className="flex flex-col gap-3">
-      {status.details === null ? null : <Facts details={status.details} state={status.state} />}
-      <Connection status={status} />
+      <HarnessFacts facts={status.facts} />
+      <Connection status={status} check={check} />
       <SettingsForm status={status} />
       <AutoCompleteToggle harness={KIND} className="border-t border-line pt-2" />
     </div>
   );
 }
 
-/** Mono fact lines: versions, account, CODEX_HOME, daemon and when it was checked. */
-function Facts({ details: d, state }: { details: CodexDetails; state: string }) {
-  const version = codexVersionText(d);
-  const account = codexAccountText(d.account, state);
-  const daemon = codexDaemonText(d.daemon);
-  return (
-    <div className="flex flex-col gap-0.5">
-      {version === "" ? null : <MetaLine className="break-all">{version}</MetaLine>}
-      {account === null ? null : <MetaLine className="break-all">{account}</MetaLine>}
-      {d.codexHome === "" ? null : <MetaLine className="break-all">CODEX_HOME {d.codexHome}</MetaLine>}
-      {daemon === null && d.checkedAt === null ? null : (
-        <MetaLine>
-          {daemon}
-          {d.checkedAt === null ? null : <RelTime at={d.checkedAt} prefix="checked" />}
-        </MetaLine>
-      )}
-    </div>
-  );
-}
-
-/** Why it is not connected and the command that fixes it, then Connect; Check again once connected; Disconnect behind a confirm. */
-function Connection({ status }: { status: CodexStatus }) {
+function Connection({ status, check }: { status: CodexStatus; check: () => Promise<unknown> }) {
   const api = useHarnessApi();
   const { apply, recheck } = useCodexCache();
-  const [confirm, setConfirm] = useState(false);
-  // A failed connect may have changed the state (signed out, not installed): read it again.
-  const connect = useMutation({ mutationFn: () => api.runHarnessAction(KIND, "connect", {}), onSuccess: apply, onError: recheck });
-  const check = useMutation({ mutationFn: () => api.harnessStatus(KIND, { refresh: true }), onSuccess: apply });
-  const disconnect = useDisconnectCodex(() => setConfirm(false));
-  const reason = status.connected ? "" : (status.reason ?? status.lastError ?? "");
-  const fix = status.connected ? "" : (status.details?.fix ?? "");
-  const action = status.actions.find((a) => a.id === "connect");
-  const canConnect = action?.available !== false;
-  // The connect error that only repeats the reason shown above is not printed twice.
+  const connect = useMutation({ mutationFn: () => api.runHarnessAction(KIND, "connect"), onSuccess: apply, onError: recheck });
+  const disconnect = useDisconnectCodex();
+  const reason = status.connected ? undefined : (status.reason ?? status.lastError);
+  const availability = status.actions.find((action) => action.id === "connect");
   const connectError = connect.error instanceof ApiError && connect.error.message === reason ? null : connect.error;
+  const checkButton = <CheckConnection run={check} />;
   return (
-    <div className="flex flex-col gap-2">
-      {reason === "" ? null : <InlineError>{reason}</InlineError>}
-      {fix === "" ? null : <CommandBox command={fix} />}
-      <div className="flex flex-wrap items-center gap-2">
-        {status.connected ? (
-          <Button small busy={check.isPending} onClick={() => check.mutate()}>
-            Check again
-          </Button>
-        ) : (
-          <Button variant="primary" busy={connect.isPending} disabled={!canConnect} onClick={() => connect.mutate()}>
-            Connect
-          </Button>
-        )}
-        {status.connected || canConnect || action?.reason === undefined ? null : <Muted>Unavailable: {action.reason}</Muted>}
-        {status.configured ? (
-          <Button
-            small
-            variant="danger"
-            className="ml-auto"
-            disabled={confirm}
-            onClick={() => {
-              disconnect.reset();
-              setConfirm(true);
-            }}
-          >
-            Disconnect
-          </Button>
-        ) : null}
-      </div>
-      {confirm ? (
-        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} error={disconnect.error} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          {CODEX_DISCONNECT_PROMPT}
-        </ConfirmInline>
-      ) : null}
-      <ErrorText error={status.connected ? check.error : connectError} />
+    <div className="flex min-w-0 flex-col gap-2">
+      <HarnessFix fix={status.fix} reason={reason} />
+      {status.connected ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="primary" busy={connect.isPending} disabled={availability?.available !== true} onClick={() => {
+            if (availability?.available === true && !connect.isPending) connect.mutate();
+          }}>Connect</Button>
+          {availability?.reason ? <Muted>{availability.reason}</Muted> : null}
+        </div>
+      )}
+      {status.configured ? <ConfirmConnectionAction action={{
+        prompt: CODEX_DISCONNECT_PROMPT,
+        busy: disconnect.isPending,
+        error: disconnect.error,
+        run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+        reset: disconnect.reset,
+      }}>{checkButton}</ConfirmConnectionAction> : checkButton}
+      <ErrorText error={connectError} />
     </div>
   );
 }

@@ -126,6 +126,7 @@ export function ImageDropzone({
 }: {
   set: ImageSet;
   children: ReactNode;
+  /** Block adding images while keeping the current ones removable. */
   disabled?: boolean;
   label?: string;
 }) {
@@ -206,16 +207,14 @@ export function ImageDropzone({
                   className="absolute inset-0 m-auto size-3 animate-spin border-[1.5px] border-fg border-t-transparent"
                 />
               ) : null}
-              {disabled ? null : (
-                <IconButton
-                  small
-                  variant="secondary"
-                  label={`Remove ${it.name}`}
-                  icon={IconClose}
-                  onClick={() => set.remove(it.key)}
-                  className="absolute -top-1.5 -right-1.5"
-                />
-              )}
+              <IconButton
+                small
+                variant="secondary"
+                label={`Remove ${it.name}`}
+                icon={IconClose}
+                onClick={() => set.remove(it.key)}
+                className="absolute -top-1.5 -right-1.5"
+              />
             </li>
           ))}
         </ul>

@@ -1,7 +1,7 @@
 // Harness status as the sidebar status button and its details panel (lib/status.ts, components/StatusRow.tsx), a
 // Settings connection row and a Config panel's Harness row (components/ConnectionState.tsx) read it: the generic
 // reading and the shapes every harness's reader returns. A harness's own reader lives with it (src/harnesses/).
-import type { Harness, HarnessConnection, HarnessStatus, Machine } from "../api/types.ts";
+import type { ConnectionPhase, Harness, HarnessConnection, HarnessStatus, Machine } from "../api/types.ts";
 import { connectedRows, connectionRows } from "./connectionRows.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupAlert, machineSetupState, machineStatusLabel } from "./machines.ts";
@@ -13,6 +13,24 @@ export function statusRead<T>(q: { data: T | undefined; isPending: boolean; erro
 }
 
 export type HarnessTone = "ok" | "need" | "bad" | "idle";
+
+const phaseTone: Record<ConnectionPhase, HarnessTone> = {
+  disconnected: "idle",
+  needs_setup: "need",
+  connecting: "idle",
+  connected: "ok",
+  degraded: "need",
+  unavailable: "bad",
+};
+
+export function humanizeConnectionState(state: string): string {
+  const label = state.replace(/[_-]+/g, " ").trim();
+  return label === "" ? "" : label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+export function connectionStatusChip(status: Pick<HarnessStatus, "phase" | "state">): { tone: HarnessTone; label: string } {
+  return { tone: phaseTone[status.phase] ?? "idle", label: humanizeConnectionState(status.state || status.phase || "checking") };
+}
 
 /** A status query as the control reads it: `checking` before the first answer, `error` once a fetch failed. */
 export interface StatusRead<T> {
@@ -34,8 +52,9 @@ export function harnessSummary(read: StatusRead<HarnessStatus>, kind: Harness, n
   if (read.checking) return { harness: kind, state: "checking", tone: "idle", label: `Checking ${name}` };
   const s = read.data;
   if (s === undefined) return { harness: kind, state: "offline", tone: "bad", label: `${name} offline` };
-  const tone: HarnessTone = s.connected ? "ok" : s.configured ? "bad" : "idle";
-  return { harness: kind, state: s.state, tone, label: `${name} ${s.state}` };
+  const tone = phaseTone[s.phase] ?? (s.connected ? "ok" : s.configured ? "bad" : "idle");
+  const state = s.phase === undefined ? s.state : humanizeConnectionState(s.state || s.phase).toLowerCase();
+  return { harness: kind, state, tone, label: `${name} ${state}` };
 }
 
 /** A connection's detail lines and error line in the status panel. */

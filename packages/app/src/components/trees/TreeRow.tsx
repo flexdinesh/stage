@@ -1,11 +1,10 @@
-import { useMutation } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { useInvalidateWork } from "../../api/queries.ts";
+import { useTree } from "../../api/queries.ts";
 import type { TreeSummary } from "../../api/types.ts";
-import { useApi } from "../../platform/context.tsx";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMetaParts, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { RowCopyLink } from "../StageLinks.tsx";
+import { BlockedReason, useStartReadyTasks } from "../LaunchGate.tsx";
 import { Button, Chip, DisclosureButton, InlineError, MetaLine, Row, RowList, Skeleton, SkeletonBar, TextLink, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
 /** Above this many members the bar draws one stretch per state instead of one cell per task. */
@@ -108,17 +107,16 @@ export function TreeRowsSkeleton({ count = 3 }: { count?: number }) {
  * `controls` element holds them).
  */
 export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: boolean; onToggle: () => void; controls: string } }) {
-  const api = useApi();
-  const invalidate = useInvalidateWork();
-  const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
   const rollup = treeRollup(tree.counts);
   const next = rollup.next;
   const closed = treeClosed(tree);
+  const detail = useTree(tree.id, !closed && next.kind === "start");
+  const { start, count, reason: startBlock } = useStartReadyTasks(detail.data?.tasks, detail.error);
   const chip = closedLabel(tree, tree.counts);
   const to = `/trees/${tree.id}`;
   const failures = start.data?.errors ?? [];
   const error = errorText(start.error) ?? (failures[0] === undefined ? null : `#${failures[0].taskId}: ${failures[0].error}`);
-  const [count, ...meta] = treeMetaParts(tree);
+  const [memberCount, ...meta] = treeMetaParts(tree);
 
   return (
     <div className={cx("group/row", TREE_ROW_GRID)}>
@@ -137,18 +135,18 @@ export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: bo
         <p className="mt-0.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</p>
         <MetaLine className="mt-0.5 tabular">
           {tasks === undefined ? (
-            count
+            memberCount
           ) : (
             <DisclosureButton
               open={tasks.open}
               onClick={tasks.onToggle}
               aria-controls={tasks.controls}
               // Starts with the visible text (label in name); aria-expanded says shown or hidden.
-              aria-label={`${count} in ${tree.title}`}
+              aria-label={`${memberCount} in ${tree.title}`}
               // Inline in the meta line; the hit area reaches past the text without growing the row.
               className="relative align-bottom transition-colors duration-150 hover:text-fg before:absolute before:-inset-x-1 before:-inset-y-2"
             >
-              {count}
+              {memberCount}
             </DisclosureButton>
           )}
           {meta}
@@ -180,9 +178,11 @@ export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: bo
             View tasks
           </Link>
         ) : next.kind === "start" ? (
-          <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()}>
-            Start ready <span className="font-mono tabular">{next.count}</span>
-          </Button>
+          <BlockedReason reason={startBlock ?? undefined} showOnPhone>
+            <Button small variant="primary" disabled={startBlock !== null} busy={start.isPending} onClick={() => start.mutate()}>
+              Start ready <span className="font-mono tabular">{detail.data === undefined ? next.count : count}</span>
+            </Button>
+          </BlockedReason>
         ) : (
           <Link to={to} className={buttonClass("secondary", true)}>
             Open

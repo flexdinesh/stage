@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ func (c *hostedConnector) Status(ctx context.Context, _ bool) (harness.Status, e
 	if s.Connected {
 		state = "connected"
 	}
-	return harness.Status{Summary: s, State: state, Actions: []harness.ActionState{{ID: "connect", Available: true}}}, nil
+	return harness.Status{Summary: s, State: state, Facts: []execution.Fact{{ID: "folder", Label: "Config folder", Value: "/home/u/.kit", Link: "javascript:invalid", Copyable: true}}, Actions: []harness.ActionState{{ID: "connect", Available: true}}}, nil
 }
 func (c *hostedConnector) Configure(context.Context, json.RawMessage) (harness.Result, error) {
 	c.calls.Add(1)
@@ -175,7 +176,7 @@ func (l hostedListing) kit(t *testing.T) (available bool, reason string, connect
 // connectable, its connect action creates the connection row, and a task on
 // that connection launches and is observed running.
 func TestHostedHarnessEndToEnd(t *testing.T) {
-	e, _ := hostedEnv(t, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true})
+	e, connector := hostedEnv(t, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true})
 	ctx := t.Context()
 	var list hostedListing
 	e.must("GET", "/api/harnesses", nil, 200, &list)
@@ -200,6 +201,16 @@ func TestHostedHarnessEndToEnd(t *testing.T) {
 	if conn == 0 || st.ConnectionID != conn || !st.Connected {
 		t.Fatalf("after connect %+v, active %d", st, conn)
 	}
+	probes := connector.calls.Load()
+	var snapshot struct {
+		Facts []execution.Fact `json:"facts"`
+	}
+	e.must("GET", fmt.Sprintf("/api/connections/%d/facts", conn), nil, 200, &snapshot)
+	want := []execution.Fact{{ID: "folder", Label: "Config folder", Value: "/home/u/.kit", Copyable: true}}
+	if !slices.Equal(snapshot.Facts, want) || connector.calls.Load() != probes {
+		t.Fatalf("saved display facts %v, connector calls %d (was %d)", snapshot.Facts, connector.calls.Load(), probes)
+	}
+
 	var conns struct {
 		Connections []struct {
 			ID      int64  `json:"id"`
@@ -236,6 +247,14 @@ func TestHostedHarnessEndToEnd(t *testing.T) {
 	if err != nil || got.State != db.StateRunning || got.Session == nil || got.Session.ConnectionID != conn || got.Session.ExternalSessionID != "kit-"+mustRequestID(t, e, task.ID) {
 		t.Fatalf("task %+v %v", got, err)
 	}
+	var stop struct {
+		Error string `json:"error"`
+	}
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", task.ID), nil, 409, &stop)
+	if stop.Error != "This connection does not support stopping tasks." {
+		t.Fatalf("stop reason %q", stop.Error)
+	}
+
 }
 
 // mustRequestID is the request id of the task's first launch attempt.

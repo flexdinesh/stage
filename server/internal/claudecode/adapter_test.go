@@ -769,6 +769,9 @@ func TestFeatures(t *testing.T) {
 	if i := slices.IndexFunc(c.Options, func(o execution.Option) bool { return o.ID == "worktree" }); i < 0 || c.Options[i].EffectiveKind() != execution.OptionBoolean || c.Options[i].Label == "" {
 		t.Fatalf("worktree option %+v", c.Options)
 	}
+	if i := slices.IndexFunc(c.Options, func(o execution.Option) bool { return o.ID == "effort" }); i < 0 || c.Options[i].ValueLabels["xhigh"] != "Extra high" {
+		t.Fatalf("effort choice labels %+v", c.Options)
+	}
 	for _, id := range []string{"baseRef", "branch"} {
 		if err := c.ValidateConfig(execution.Config{Options: []execution.ModelOption{worktreeOn, {ID: id, Value: execution.StringValue("x")}}}); err == nil {
 			t.Fatalf("%s is not a Claude Code option", id)

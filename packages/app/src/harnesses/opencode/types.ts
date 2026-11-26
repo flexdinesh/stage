@@ -1,6 +1,9 @@
 // OpenCode's own status details (GET /api/harnesses/opencode/status `details`; docs/api.md).
 
+import type { HarnessStatus } from "../../api/types.ts";
+
 export interface OpenCodeStatus {
+  presentation?: HarnessStatus;
   connectionId: number;
   endpoint: string;
   browserEndpoint: string;

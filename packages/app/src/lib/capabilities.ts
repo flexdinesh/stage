@@ -1,10 +1,8 @@
-import type { Capabilities, ExecutionConfig, HarnessConnection, HarnessModel, HarnessOption, ModelOption, OperationId, ProjectBinding } from "../api/types.ts";
+import type { Capabilities, ExecutionConfig, HarnessConnection, OperationId, ProjectBinding } from "../api/types.ts";
 import { modelName } from "./format.ts";
+import { optionLabel, optionValueLabel, optionsFor } from "./options.ts";
 
-/** What a config may set: the harness-wide options, then the model's own. */
-export function optionsFor(caps: Pick<Capabilities, "options"> | undefined, model: Pick<HarnessModel, "options"> | undefined): HarnessOption[] {
-  return [...(caps?.options ?? []), ...(model?.options ?? [])];
-}
+export { optionsFor } from "./options.ts";
 
 /** New-task prefill from a connection's pin: model and options only (mode and permission start at the harness default). */
 export function prefillConfig(connection: Pick<HarnessConnection, "newTaskConfig"> | undefined): ExecutionConfig | undefined {
@@ -46,7 +44,7 @@ export const OPERATION_LABELS: Record<OperationId, string> = {
   send: "Send follow-ups",
 };
 
-const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "reply", "opening", "attention", "images", "respond", "send"];
+const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send"];
 
 /** One line of a connection's capability list. */
 export interface CapabilityLine {
@@ -75,8 +73,8 @@ export interface LaunchPart {
 
 /**
  * A task's chosen launch options in the harness's own labels and order: the model (its label, else the saved id),
- * then each option set to something other than its default (harness-wide, then the model's own; undeclared ones by
- * id), permission and mode when set. Nothing for a config at the harness defaults.
+ * then explicit boolean overrides and other non-default options (harness-wide, then the model's own; undeclared ones
+ * by id), permission and mode when set. Nothing for a config with no overrides.
  */
 export function launchParts(config: ExecutionConfig | null | undefined, caps: Pick<Capabilities, "models" | "options" | "permissions" | "modes" | "modeLabel"> | undefined): LaunchPart[] {
   if (config === null || config === undefined) return [];
@@ -87,8 +85,8 @@ export function launchParts(config: ExecutionConfig | null | undefined, caps: Pi
   const ordered = [...declared.flatMap((o) => config.options.filter((v) => v.id === o.id)), ...config.options.filter((v) => !declared.some((o) => o.id === v.id))];
   for (const v of ordered) {
     const o = declared.find((d) => d.id === v.id);
-    if (o !== undefined && o.default !== undefined && o.default !== null && o.default === v.value) continue;
-    parts.push({ label: o?.label || v.id, value: optionText(v) });
+    if (typeof v.value !== "boolean" && o?.default === v.value) continue;
+    parts.push({ label: o === undefined ? v.id : optionLabel(o), value: optionValueLabel(o, v.value) });
   }
   const permission = (model?.permissions ?? caps?.permissions)?.find((p) => p.id === config.permission);
   if (config.permission !== "") parts.push({ label: "Permission", value: permission?.label || config.permission });
@@ -96,5 +94,3 @@ export function launchParts(config: ExecutionConfig | null | undefined, caps: Pi
   if (config.mode !== "") parts.push({ label: caps?.modeLabel || "Interaction mode", value: mode?.label || config.mode });
   return parts;
 }
-
-const optionText = (v: ModelOption): string => (typeof v.value === "boolean" ? (v.value ? "on" : "off") : v.value);

@@ -2,16 +2,17 @@
 // machine, a pairing link or address for another machine, sign-in recovery,
 // Disconnect, and the Advanced drawer. Logic lives in opencode.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useState, type FormEvent } from "react";
 import { invalidateConnectionChange, useHarnesses } from "../../api/queries.ts";
+import type { HarnessStatus, ReplacedConnection } from "../../api/types.ts";
 import { activeOn } from "../../lib/harnesses.ts";
 import { usePlatform } from "../../platform/context.tsx";
 import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "../../api/harnessScope.tsx";
-import { dateTime } from "../../lib/format.ts";
 import { AutoCompleteToggle } from "../../components/Completion.tsx";
 import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
-import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "../../components/ui.tsx";
-import { OPENCODE_KIND, openCodeApi } from "./api.ts";
+import { CheckConnection, ConfirmConnectionAction, HarnessFacts, HarnessFix, HarnessStatusChip, ReplacedConnectionNotice } from "../../components/HarnessPresentation.tsx";
+import { Alert, Button, ConfirmInline, Drawer, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
+import { OPENCODE_KIND, openCodeApi, openCodeDetails } from "./api.ts";
 import {
   advancedChanges,
   isAuthRequired,
@@ -19,22 +20,25 @@ import {
   isInstanceReturned,
   localNote,
   newServicePrompt,
-  openCodeChip,
   parseTarget,
   returnedServicePrompt,
   serviceHost,
-  serviceText,
-  signInText,
   targetReadBack,
 } from "./opencode.ts";
 import { OPENCODE_STATUS_KEY, useOpenCodeStatus } from "./queries.ts";
-import type { OpenCodeStatus } from "./types.ts";
+import type { OpenCodeStatus, OpenCodeStatusWire } from "./types.ts";
+
+const ReplacementContext = createContext<(replaced: ReplacedConnection | null) => void>(() => {});
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: waits for the status, the rest refreshes behind. */
-function useRefresh(): () => Promise<void> {
+function useRefresh(): (reply?: HarnessStatus) => Promise<void> {
   const qc = useQueryClient();
   const key = useScopedKey();
-  return () => invalidateConnectionChange(qc, key, [OPENCODE_STATUS_KEY]);
+  const onReplaced = useContext(ReplacementContext);
+  return (reply) => {
+    if (reply !== undefined) onReplaced(reply.replaced ?? null);
+    return invalidateConnectionChange(qc, key, [OPENCODE_STATUS_KEY]);
+  };
 }
 
 /**
@@ -43,7 +47,7 @@ function useRefresh(): () => Promise<void> {
  * resent with newInstance. `confirming` stays true while that resend runs, and
  * `returned` is kept from the conflict, so the confirm's copy does not flip.
  */
-function useConnect<T>(run: (arg: T, newInstance: boolean) => Promise<void>, onSuccess: () => Promise<void>, onError?: (err: unknown, arg: T) => void) {
+function useConnect<T>(run: (arg: T, newInstance: boolean) => Promise<HarnessStatus>, onSuccess: (reply: HarnessStatus) => Promise<void>, onError?: (err: unknown, arg: T) => void) {
   const [returned, setReturned] = useState(false);
   const mutation = useMutation({
     mutationFn: (v: { arg: T; newInstance: boolean }) => run(v.arg, v.newInstance),
@@ -73,32 +77,41 @@ export function OpenCodeSetup() {
   const status = useOpenCodeStatus();
   const [editing, setEditing] = useState(false);
   const info = status.data;
-  const chip = info === undefined ? null : openCodeChip(info);
+  const [replaced, setReplaced] = useState<ReplacedConnection | null>(null);
+  const api = useHarnessApi();
+  const key = useScopedKey()(OPENCODE_STATUS_KEY);
+  const qc = useQueryClient();
+  const check = async () => {
+    const checked = await api.harnessStatus<OpenCodeStatusWire>(OPENCODE_KIND, { refresh: true });
+    qc.setQueryData(key, openCodeDetails(checked));
+  };
+  const presentation = info?.presentation;
   return (
-    <>
-      <Panel
-        title="OpenCode connection"
-        actions={
-          chip === null ? undefined : (
-            <Chip tone={chip.tone} dot>
-              {chip.label}
-            </Chip>
-          )
-        }
-      >
-        <div className="flex flex-col items-stretch gap-3">
-          <ErrorText error={status.error} />
-          {info === undefined ? null : info.state === "unconfigured" ? (
-            <NotConnected info={info} />
-          ) : (
-            <Connection info={info} checking={status.isFetching} check={() => void status.refetch()} advanced={() => setEditing(true)} />
+    <ReplacementContext.Provider value={setReplaced}>
+      <Panel title="OpenCode connection" actions={presentation === undefined ? undefined : <HarnessStatusChip status={presentation} />}>
+        <QueryState isPending={status.isPending} error={info === undefined ? status.error : null} hasData={info !== undefined}>
+          {info === undefined ? null : (
+            <div className="flex min-w-0 flex-col gap-3">
+              <ReplacedConnectionNotice replaced={replaced} />
+              <HarnessFix fix={info.state === "unconfigured" ? undefined : presentation?.fix} reason={presentation?.reason} />
+              <HarnessFacts facts={info.state === "unconfigured" && info.local.available
+                ? [{ id: "localService", label: "Local service", value: info.local.url, copyable: true }, ...(presentation?.facts ?? [])]
+                : presentation?.facts} />
+              {info.state === "unconfigured" ? (
+                <>
+                  <NotConnected info={info} />
+                  <CheckConnection run={check} />
+                </>
+              ) : <Connection info={info} check={check} advanced={() => setEditing(true)} />}
+              <AutoCompleteToggle harness={OPENCODE_KIND} className="w-full border-t border-line pt-2" />
+            </div>
           )}
-          <AutoCompleteToggle harness={OPENCODE_KIND} className="w-full border-t border-line pt-2" />
-        </div>
+        </QueryState>
+        {info === undefined && status.error !== null ? <CheckConnection run={check} /> : null}
         {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
       </Panel>
       <NewTaskDefaults harness={OPENCODE_KIND} />
-    </>
+    </ReplacementContext.Provider>
   );
 }
 
@@ -113,19 +126,9 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-small font-medium text-fg">OpenCode is running on {copy.machine}</p>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 font-mono text-detail">
-          <dt className="text-muted">service</dt>
-          <dd className="min-w-0 break-all">{info.local.url}</dd>
-          {info.local.version === "" ? null : (
-            <>
-              <dt className="text-muted">version</dt>
-              <dd className="min-w-0 break-all">{info.local.version}</dd>
-            </>
-          )}
-        </dl>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button variant="primary" busy={connect.mutation.isPending && !connect.confirming} disabled={connect.confirming} onClick={() => connect.mutation.mutate({ arg: null, newInstance: false })}>
-            Connect
+            Connect local service
           </Button>
           <Hint>signs in with the service's own password</Hint>
         </div>
@@ -140,8 +143,7 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
   return (
     <div className="flex flex-col gap-3">
       {note === null ? null : <Muted>{note}</Muted>}
-      <Muted>On the machine running OpenCode, run this and paste one link. Links work once and expire in 5 minutes.</Muted>
-      <CommandBox command="opencode pair" />
+      <HarnessFix fix={info.presentation?.fix ?? { text: "On the machine running OpenCode, generate a pairing link. Links work once and expire in 5 minutes.", command: "opencode pair" }} />
       <TargetForm primary />
     </div>
   );
@@ -151,7 +153,7 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
  * The pairing-link-or-address field. A link pairs; an address connects and, when
  * OpenCode asks for a password, reveals one. `linkOnly` takes links alone (pair again).
  */
-function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary: boolean; linkOnly?: boolean; pairLabel?: string }) {
+function TargetForm({ primary, linkOnly = false, pairLabel = "Pair with link" }: { primary: boolean; linkOnly?: boolean; pairLabel?: string }) {
   const api = openCodeApi(useHarnessApi());
   const refresh = useRefresh();
   const [text, setText] = useState("");
@@ -161,11 +163,11 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
   const value = text.trim();
   const parsed = parseTarget(value);
   const target = linkOnly && parsed?.kind !== "link" ? null : parsed;
-  const done = async () => {
+  const done = async (reply: HarnessStatus) => {
     setText("");
     setPassword("");
     setAskedFor(null);
-    await refresh();
+    await refresh(reply);
   };
   // A link is resent as is after a confirm: Stage kept its redeemed token (links work once).
   const pair = useConnect((link: string, newInstance: boolean) => api.pair(link, newInstance), done);
@@ -173,7 +175,7 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
     if (isAuthRequired(e)) setAskedFor(endpoint);
   });
   const signIn = useConnect(
-    (endpoint: string, newInstance: boolean) => api.save({ endpoint, username: "opencode", password, ...(newInstance ? { newInstance: true } : {}) }),
+    (credentials: { endpoint: string; password: string }, newInstance: boolean) => api.save({ ...credentials, username: "opencode", ...(newInstance ? { newInstance: true } : {}) }),
     done,
   );
   const asking = askedFor !== null && askedFor === value && target?.kind === "address";
@@ -184,15 +186,20 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (target === null || asking || confirming) return;
-    if (target.kind === "link") pair.mutation.mutate({ arg: value, newInstance: false });
-    else connect.mutation.mutate({ arg: value, newInstance: false });
+    if (target === null || asking || confirming || pair.mutation.isPending || connect.mutation.isPending) return;
+    if (target.kind === "link") {
+      pair.mutation.mutate({ arg: value, newInstance: false });
+      setText("");
+    } else connect.mutation.mutate({ arg: value, newInstance: false });
   };
   const submitPassword = (e: FormEvent) => {
     e.preventDefault();
-    if (asking && password !== "" && !signIn.confirming) signIn.mutation.mutate({ arg: value, newInstance: false });
+    if (!asking || password === "" || signIn.confirming || signIn.mutation.isPending) return;
+    signIn.mutation.mutate({ arg: { endpoint: value, password }, newInstance: false });
+    setPassword("");
   };
-  const address = target === null ? value : target.service;
+  const lastLink = pair.mutation.variables?.arg;
+  const pairedService = lastLink === undefined ? value : (parseTarget(lastLink)?.service ?? value);
   const readBack = targetReadBack(target);
   return (
     <div className="flex flex-col gap-2">
@@ -228,7 +235,9 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
           {readBack}
         </p>
       </form>
-      <ConnectOutcome address={address} connect={pair} confirm={() => pair.mutation.mutate({ arg: value, newInstance: true })} />
+      <ConnectOutcome address={pairedService} connect={pair} confirm={() => {
+        if (lastLink !== undefined) pair.mutation.mutate({ arg: lastLink, newInstance: true });
+      }} />
       {asking ? (
         <form onSubmit={submitPassword} className="flex flex-col gap-2">
           <Alert tone="need">
@@ -244,7 +253,10 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
               Connect
             </Button>
           </div>
-          <ConnectOutcome address={value} connect={signIn} confirm={() => signIn.mutation.mutate({ arg: value, newInstance: true })} />
+          <ConnectOutcome address={value} connect={signIn} confirm={() => {
+              const arg = signIn.mutation.variables?.arg;
+              if (arg !== undefined) signIn.mutation.mutate({ arg, newInstance: true });
+            }} />
         </form>
       ) : isAuthRequired(connect.mutation.error) ? null : (
         <ConnectOutcome address={value} connect={connect} confirm={() => connect.mutation.mutate({ arg: value, newInstance: true })} />
@@ -253,31 +265,26 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="border-b border-line py-1.5 pr-4 font-mono text-meta text-muted">{label}</dt>
-      <dd className="min-w-0 border-b border-line py-1.5 font-mono text-detail break-all">{children}</dd>
-    </>
-  );
-}
-
-/** A3/A4: a configured connection, its sign-in recovery when OpenCode refuses it, and its actions. */
-function Connection({ info, checking, check, advanced }: { info: OpenCodeStatus; checking: boolean; check: () => void; advanced: () => void }) {
+/** A configured connection, sign-in recovery, and its actions. */
+function Connection({ info, check, advanced }: { info: OpenCodeStatus; check: () => Promise<unknown>; advanced: () => void }) {
   const browser = info.browserEndpoint || info.endpoint;
+  const disconnect = useDisconnectOpenCode();
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       {info.state === "rejected" ? <SignInLost info={info} advanced={advanced} /> : null}
-      {info.state === "unavailable" && info.reason ? <InlineError>{info.reason}</InlineError> : null}
-      <dl className="grid grid-cols-[max-content_1fr] border-t border-line">
-        <Row label="Service">{info.endpoint === "" ? "-" : serviceText(info)}</Row>
-        <Row label="Sign-in">{signInText(info)}</Row>
-        <Row label="Checked">{info.checkedAt === undefined ? "-" : dateTime(info.checkedAt)}</Row>
-      </dl>
       {info.webClient && info.webClient !== browser ? (
         <BrowserSetupHint key={info.webClient + "|" + browser} client={info.webClient} service={browser} />
       ) : null}
-      <ConnectionActions checking={checking} check={check} advanced={advanced} />
+      <ConfirmConnectionAction action={{
+        prompt: OPENCODE_DISCONNECT_PROMPT,
+        busy: disconnect.isPending,
+        error: disconnect.error,
+        run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+        reset: disconnect.reset,
+      }}>
+        <CheckConnection run={check} />
+        {info.state === "rejected" && info.auth === "basic" ? null : <Button small onClick={advanced}>Advanced</Button>}
+      </ConfirmConnectionAction>
     </div>
   );
 }
@@ -296,7 +303,7 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
             tone="need"
             actions={
               <Button small busy={reconnect.mutation.isPending && !reconnect.confirming} disabled={reconnect.confirming} onClick={() => reconnect.mutation.mutate({ arg: null, newInstance: false })}>
-                Reconnect
+                Connect local service
               </Button>
             }
           >
@@ -325,7 +332,7 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
             OpenCode at {host} no longer accepts Stage's session. Run <code className="font-mono">opencode pair</code> there and paste the new link. Tasks
             and history are kept.
           </Alert>
-          <TargetForm primary linkOnly pairLabel="Pair again" />
+          <TargetForm primary linkOnly />
         </div>
       );
     case "none":
@@ -341,33 +348,6 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
   }
 }
 
-/** Check connection, Advanced, and Disconnect with an inline confirm. */
-function ConnectionActions({ checking, check, advanced }: { checking: boolean; check: () => void; advanced: () => void }) {
-  const [confirm, setConfirm] = useState(false);
-  const disconnect = useDisconnectOpenCode(() => setConfirm(false));
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button small busy={checking} onClick={check}>
-          Check connection
-        </Button>
-        <Button small onClick={advanced}>
-          Advanced
-        </Button>
-        <Button small variant="danger" className="ml-auto" disabled={confirm} onClick={() => setConfirm(true)}>
-          Disconnect
-        </Button>
-      </div>
-      {confirm ? (
-        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          {OPENCODE_DISCONNECT_PROMPT}
-        </ConfirmInline>
-      ) : null}
-      <ErrorText error={disconnect.error} />
-    </div>
-  );
-}
-
 export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.";
 
 /** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
@@ -376,9 +356,9 @@ export function useDisconnectOpenCode(onDone?: () => void) {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: api.disconnect,
-    onSuccess: async () => {
+    onSuccess: async (reply) => {
       onDone?.();
-      await refresh();
+      await refresh(reply);
     },
   });
 }
@@ -427,8 +407,8 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   // A different service answers 409 instance_changed (a replaced one instance_returned): the same body is resent with newInstance once confirmed.
   const save = useMutation({
     mutationFn: (newInstance: boolean) => api.save(newInstance ? { ...body, newInstance: true } : body),
-    onSuccess: async () => {
-      await refresh();
+    onSuccess: async (reply) => {
+      await refresh(reply);
       close();
     },
     onError: (err) => {

@@ -1,7 +1,8 @@
-import type { HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
+import type { Capabilities, HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
 import type { HarnessSummary } from "./connections.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
+import { canStart } from "./tasks.ts";
 
 /** Copy for the task detail banner of a launch Stage has not confirmed; `name` is the harness's name. */
 export interface LaunchNotice {
@@ -40,7 +41,21 @@ function retryMeta(failed: number, retryAt: string | null, since: string | null,
 }
 
 /** Why a task's connection cannot launch it right now. */
-export type LaunchBlockKind = "disconnected" | "offline" | "negotiating" | "needs_update" | "unreachable" | "unbound";
+export type LaunchBlockKind = "disconnected" | "offline" | "negotiating" | "needs_update" | "unreachable" | "unbound" | "operation";
+
+export type SessionOperation = "launch" | "stop" | "adopt";
+
+const operationTarget = { launch: "start this task", stop: "stop this task", adopt: "track sessions" };
+const operationName = { launch: "starting tasks", stop: "stopping tasks", adopt: "tracking sessions" };
+
+/** An operation is usable only when the connection has explicitly advertised it. */
+export function operationReason(op: SessionOperation, capabilities: Capabilities | undefined, error: Error | null = null): string | null {
+  const declaration = capabilities?.operations?.[op];
+  if (error !== null) return error.message;
+  if (declaration?.available === true) return null;
+  if (capabilities === undefined) return `Checking whether this connection supports ${operationName[op]}.`;
+  return declaration?.reason?.trim() || `This connection does not support ${operationName[op]}.`;
+}
 
 /** A task Start refuses before the request: why (a sentence for an Alert or a tooltip) and where the user fixes it. */
 export interface LaunchBlock {
@@ -72,28 +87,39 @@ export interface LaunchContext {
  * unpaired, expired, rejected), the project without an available workspace there. A replaced connection is not a
  * block here: it never launches again (isRetired).
  */
-export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projectTitle">, c: LaunchContext): LaunchBlock | null {
-  const { connection, machine, live, bindings, name, where, settings } = c;
+export function connectionBlock(c: Omit<LaunchContext, "bindings">, op: SessionOperation): LaunchBlock | null {
+  const { connection, machine, live, name, where, settings } = c;
+  const target = operationTarget[op];
+  const action = target.charAt(0).toUpperCase() + target.slice(1);
   if (connection === undefined || !connection.active) return null;
   if (!connection.configured) {
-    return { kind: "disconnected", reason: `${name} is disconnected. Connect it to start this task.`, fix: { label: "Connect in Settings", to: settings } };
+    return { kind: "disconnected", reason: `${name} is disconnected. Connect it to ${target}.`, fix: { label: "Connect in Settings", to: settings } };
   }
   if (machine !== undefined) {
     const state = machineSetupState(machine);
     switch (state) {
       case "offline":
-        return { kind: "offline", reason: `${machine.label} is offline. Start this task once it is back.`, fix: null };
+        return { kind: "offline", reason: `${machine.label} is offline. ${action} once it is back.`, fix: null };
       case "negotiating":
-        return { kind: state, reason: `${machine.label} is connecting. Start this task when it is online.`, fix: null };
+        return { kind: state, reason: `${machine.label} is connecting. ${action} when it is online.`, fix: null };
       case "needs_update":
-        return { kind: state, reason: machine.statusReason || "A Stage update is required before this task can start.", fix: { label: "Open Settings", to: settings } };
+        return { kind: state, reason: machine.statusReason || (op === "launch" ? "A Stage update is required before this task can start." : `Update Stage to ${target}.`), fix: { label: "Open Settings", to: settings } };
       case "ready":
         break;
     }
   }
   if (live !== undefined && (live.tone === "bad" || live.tone === "need")) {
-    return { kind: "unreachable", reason: `${live.label}${where === "" ? "" : ` ${where}`}, so this task cannot start.`, fix: { label: "Fix in Settings", to: settings } };
+    const reason = op === "launch" ? "this task cannot start" : `Stage cannot ${target}`;
+    return { kind: "unreachable", reason: `${live.label}${where === "" ? "" : ` ${where}`}, so ${reason}.`, fix: { label: "Fix in Settings", to: settings } };
   }
+  return null;
+}
+
+export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projectTitle">, c: LaunchContext): LaunchBlock | null {
+  const block = connectionBlock(c, "launch");
+  if (block !== null) return block;
+  const { connection, bindings, name } = c;
+  if (connection === undefined || !connection.active) return null;
   if (bindings !== undefined && !bindings.some((b) => b.connectionId === t.connectionId && b.status === "available")) {
     return {
       kind: "unbound",
@@ -102,4 +128,15 @@ export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projec
     };
   }
   return null;
+}
+
+/** Start ready includes ready members only, even though an individual Start can also retry a task. */
+export function readyTreeStarts(tasks: readonly Task[], gate: (task: Task) => LaunchBlock | null) {
+  const ready = tasks.filter((t) => t.readiness === "ready" && !t.adopted);
+  const checked = ready.map((task) => ({ task, block: gate(task) }));
+  return {
+    tasks: checked.flatMap(({ task, block }) => block === null && canStart(task) ? [task] : []).toSorted((a, b) => a.id - b.id),
+    readyCount: ready.length,
+    firstBlock: checked.find(({ block }) => block !== null)?.block ?? null,
+  };
 }

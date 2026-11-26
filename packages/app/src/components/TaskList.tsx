@@ -1,8 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { useApi } from "../platform/context.tsx";
-import { useHarnesses, useInvalidateWork, useSessionRequests } from "../api/queries.ts";
+import { useHarnesses, useSessionRequests } from "../api/queries.ts";
 import { rowSessionAction } from "../lib/harnesses.ts";
 import type { Task } from "../api/types.ts";
 import { configModelText, dateTime, duration, relativeTime } from "../lib/format.ts";
@@ -16,7 +14,7 @@ import { CompletionButton } from "./Completion.tsx";
 import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickComplete.tsx";
 import { LastWordLine } from "./LastWord.tsx";
 import { autoCompletedMeta } from "../lib/completion.ts";
-import { BlockedReason, useLaunchGate } from "./LaunchGate.tsx";
+import { BlockedReason, useStartTask } from "./LaunchGate.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { Button, Chip, EmptyState, ErrorText, IdTag, InlineError, Meta, RelTime, Row, RowList, SkeletonBar, TextLink, cx, needEdgeClass } from "./ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -225,12 +223,9 @@ export function TaskRow({
   /** The Start lives elsewhere (a chain head's Start chain). */
   hideStart?: boolean;
 }) {
-  const api = useApi();
-  const invalidate = useInvalidateWork();
-  const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
+  const { start, block } = useStartTask(task);
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
-  const block = useLaunchGate()(task);
   const chip = rowChip(task);
   // A closed tree's row chip already links it.
   const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
@@ -345,7 +340,7 @@ export function TaskRow({
           </>
         ) : null}
         {showStart ? (
-          <BlockedReason reason={block?.reason}>
+          <BlockedReason reason={block?.reason} showOnPhone>
             <Button small variant="primary" busy={start.isPending} disabled={block !== null} onClick={() => start.mutate()}>
               {task.state !== "backlog" ? "Restart" : task.startAt !== null ? "Start now" : "Start"}
             </Button>

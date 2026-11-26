@@ -158,7 +158,13 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	if st.Actions == nil {
 		st.Actions = []harness.ActionState{}
 	}
-	st.Facts = d.DisplayFacts(append(slices.Clone(res.Facts), st.Facts...))
+	statusFacts := d.DisplayFacts(st.Facts)
+	if st.Connected {
+		if err := s.Store.SaveConnectionFacts(ctx, st.ConnectionID, statusFacts); err != nil {
+			s.log.Warn("could not save connection facts", "connection", st.ConnectionID, "err", err)
+		}
+	}
+	st.Facts = d.DisplayFacts(append(slices.Clone(res.Facts), statusFacts...))
 	out := connectionStatusJSON{Kind: d.Kind, Name: d.Name, Status: st, Message: res.Message, Link: res.Link}
 	if res.Replaced != 0 {
 		if old, err := s.Store.GetHarnessConnection(ctx, res.Replaced); err == nil {
@@ -166,6 +172,22 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+func (s *server) connectionFacts(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.connectionPath(r)
+	if err != nil {
+		return err
+	}
+	facts, err := s.Store.ConnectionFacts(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if facts == nil {
+		facts = []execution.Fact{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"facts": facts})
 	return nil
 }
 

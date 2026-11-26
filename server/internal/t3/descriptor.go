@@ -26,7 +26,7 @@ const (
 // instance for good; a settled thread may complete its task. It wraps the
 // sessions it runs in other harnesses (Wraps).
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "T3", Sessions: harness.SessionsMachine, StableIdentity: true,
+	Kind: Kind, Name: "T3", Sessions: harness.SessionsMachine, WebAddress: true, StableIdentity: true,
 	MovedRetire: func(old, next harness.Summary) bool { return !old.Configured && next.Configured },
 	LinkSchemes: []string{"t3code"},
 	Closures: []harness.Closure{{
@@ -52,7 +52,7 @@ var Descriptor = harness.Descriptor{
 				Availability: execution.Availability{Available: true},
 			},
 			{
-				ID: ActionAutoPair, Label: "Pair automatically",
+				ID: ActionAutoPair, Label: "Pair automatically", Primary: true,
 				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 				Availability: execution.Availability{Available: true},
 			},

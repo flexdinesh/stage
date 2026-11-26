@@ -2,11 +2,41 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
+
+// ConnectionFacts returns the latest saved display facts without consulting a harness.
+func (s *Store) ConnectionFacts(ctx context.Context, id int64) ([]execution.Fact, error) {
+	data, err := read(ctx, s, func(tx store.Tx) (string, error) { return tx.Connections().ConnectionFacts(ctx, id) })
+	if err != nil {
+		return nil, err
+	}
+	var facts []execution.Fact
+	if err := json.Unmarshal([]byte(data), &facts); err != nil {
+		return nil, err
+	}
+	return facts, nil
+}
+
+// SaveConnectionFacts remembers a status report on its active connection.
+func (s *Store) SaveConnectionFacts(ctx context.Context, id int64, facts []execution.Fact) error {
+	if id == 0 || len(facts) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(facts)
+	if err != nil {
+		return err
+	}
+	_, err = write(ctx, s, func(tx store.Tx) (struct{}, error) {
+		return struct{}{}, tx.Connections().SaveConnectionFacts(ctx, id, string(data))
+	})
+	return err
+}
 
 // LocalMachine is the machine this server runs on (migration 0015).
 const LocalMachine int64 = 1

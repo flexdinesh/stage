@@ -10,6 +10,7 @@ export const OPENCODE_STATUS_KEY: readonly unknown[] = ["opencode-status"];
 
 export const OPENCODE_STATUS: StatusReader<OpenCodeStatus> = {
   query: (m) => queryOptions({ queryKey: m.key(OPENCODE_STATUS_KEY), queryFn: openCodeApi(m.api).status, refetchInterval: 15000 }),
+  presentation: (status) => status.presentation,
   view: (read) => openCodeStatusView(read),
   rowDetail: (s) => openCodeRowDetail(s),
 };

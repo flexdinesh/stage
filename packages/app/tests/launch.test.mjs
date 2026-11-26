@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { launchBlock, launchNotice } from "../src/lib/launch.ts";
+import { connectionBlock, launchBlock, launchNotice, operationReason, readyTreeStarts } from "../src/lib/launch.ts";
 
 const NOW = Date.parse("2026-11-24T04:10:00Z");
 const launch = (over = {}) => ({ attempt: 1, revision: 4, phase: "unconfirmed", reason: "", retryAt: null, retryCount: 0, session: null, ...over });
@@ -104,4 +104,39 @@ test("launchBlock checks in order: disconnected, machine, live status, workspace
 test("launchBlock leaves a replaced or unloaded connection to its own path", () => {
   assert.equal(launchBlock(subject, ctx({ connection: { active: false, configured: false } })), null);
   assert.equal(launchBlock(subject, ctx({ connection: undefined })), null);
+});
+
+test("Start, Stop and Track require their own available declaration", () => {
+  const capabilities = {
+    operations: { launch: { available: true }, stop: { available: false, reason: "Stop this run in its client." } },
+  };
+  assert.equal(operationReason("launch", capabilities), null);
+  assert.equal(operationReason("stop", capabilities), "Stop this run in its client.");
+  assert.match(operationReason("adopt", capabilities), /does not support tracking sessions/);
+  assert.match(operationReason("launch", undefined), /Checking/);
+  assert.equal(operationReason("launch", capabilities, new Error("Worker unavailable.")), "Worker unavailable.");
+});
+
+test("Stop and Track check connection readiness independently of the task workspace", () => {
+  const unbound = ctx({ bindings: [] });
+  assert.equal(launchBlock(subject, unbound)?.kind, "unbound");
+  assert.equal(connectionBlock(unbound, "stop"), null);
+  assert.equal(connectionBlock(unbound, "adopt"), null);
+  const offline = ctx({ machine: { kind: "remote", status: "offline", label: "desk" } });
+  assert.equal(connectionBlock(offline, "stop")?.reason, "desk is offline. Stop this task once it is back.");
+  assert.equal(connectionBlock(offline, "adopt")?.reason, "desk is offline. Track sessions once it is back.");
+});
+
+const member = (id, fields = {}) => ({
+  id, state: "backlog", treeStatus: "open", readiness: "ready", acceptanceId: null, adopted: false, connectionActive: true, ...fields,
+});
+
+test("Start ready targets only launchable members of a mixed tree, in ID order", () => {
+  const blocked = { kind: "operation", reason: "Read-only harness.", fix: null };
+  const ready = readyTreeStarts([
+    member(5), member(3), member(4), member(2, { adopted: true }), member(1, { readiness: "blocked" }),
+  ], (task) => task.id === 3 ? blocked : null);
+  assert.deepEqual(ready.tasks.map((task) => task.id), [4, 5]);
+  assert.equal(ready.readyCount, 3);
+  assert.equal(ready.firstBlock, blocked);
 });

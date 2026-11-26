@@ -56,9 +56,9 @@ test("capability lines: declared operations in Stage's order and words, with the
   assert.deepEqual(capabilityLines({}), []);
 });
 
-test("launch parts: the model, non-default options in declared order, permission and mode, in the harness's labels", () => {
+test("launch parts show labelled choices and explicit boolean overrides in declaration order", () => {
   const caps = {
-    models: [{ id: "m1", label: "Model One", available: true, options: [{ id: "effort", label: "Reasoning effort", kind: "choice", values: ["low", "high"], default: "low" }] }],
+    models: [{ id: "m1", label: "Model One", available: true, options: [{ id: "effort", label: "Reasoning effort", kind: "choice", values: ["low", "high"], valueLabels: { high: "High effort" }, default: "low" }] }],
     options: [{ id: "fast", label: "Fast mode", kind: "boolean", values: [true, false], default: false }],
     permissions: [{ id: "full", label: "Full access", available: true }],
     modes: [{ id: "plan", label: "Plan", available: true }],
@@ -67,14 +67,17 @@ test("launch parts: the model, non-default options in declared order, permission
   const config = { model: "m1", options: [{ id: "effort", value: "high" }, { id: "fast", value: true }, { id: "extra", value: "x" }], permission: "full", mode: "plan" };
   assert.deepEqual(launchParts(config, caps), [
     { label: "Model", value: "Model One" },
-    { label: "Fast mode", value: "on" },
-    { label: "Reasoning effort", value: "high" },
+    { label: "Fast mode", value: "On" },
+    { label: "Reasoning effort", value: "High effort" },
     { label: "extra", value: "x" },
     { label: "Permission", value: "Full access" },
     { label: "Agent mode", value: "Plan" },
   ]);
   const defaults = { model: "m1", options: [{ id: "effort", value: "low" }, { id: "fast", value: false }], permission: "", mode: "" };
-  assert.deepEqual(launchParts(defaults, caps), [{ label: "Model", value: "Model One" }], "options at their default drop out");
+  assert.deepEqual(launchParts(defaults, caps), [
+    { label: "Model", value: "Model One" },
+    { label: "Fast mode", value: "Off" },
+  ], "an explicit Off survives even when Off is the harness default");
   assert.deepEqual(launchParts({ model: "", options: [], permission: "", mode: "" }, caps), []);
   assert.deepEqual(launchParts(null, caps), []);
   assert.deepEqual(launchParts({ model: "gone", options: [], permission: "auto", mode: "" }, undefined), [

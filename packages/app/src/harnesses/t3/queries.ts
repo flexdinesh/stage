@@ -31,6 +31,7 @@ function t3StatusQuery(api: HarnessApi, key: readonly unknown[], qc: QueryClient
 
 export const T3_STATUS: StatusReader<T3Status> = {
   query: (m, _kind, qc) => t3StatusQuery(m.api, m.key(T3_STATUS_KEY), qc),
+  presentation: (status) => status.presentation,
   view: (read) => t3StatusView(read),
   rowDetail: (s) => t3RowDetail(s),
 };

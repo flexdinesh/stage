@@ -4,7 +4,7 @@
 import type { QueryClient, UseQueryOptions } from "@tanstack/react-query";
 import type { ComponentType, ReactNode } from "react";
 import type { HarnessApi } from "../api/client.ts";
-import type { Harness, HarnessDescriptor, Machine } from "../api/types.ts";
+import type { Harness, HarnessDescriptor, HarnessStatus, Machine } from "../api/types.ts";
 import type { ConnectionChip, StatusRead, StatusView } from "../lib/connections.ts";
 
 /** A machine's harness calls and its scoped query key. */
@@ -33,6 +33,7 @@ export interface StatusReader<S> {
   query: (m: MachineCalls, kind: Harness, qc: QueryClient) => UseQueryOptions<S, Error, S, readonly unknown[]>;
   view: (read: StatusRead<S>, kind: Harness, name: string) => StatusView;
   rowDetail: (s: S) => string;
+  presentation: (s: S) => HarnessStatus | undefined;
 }
 
 /** A Settings > Connections row for a live connection (components/ConnectionRow.tsx draws it). */
@@ -40,6 +41,7 @@ export interface ConnectionRowProps {
   descriptor: HarnessDescriptor;
   machine: Machine;
   onManage: () => void;
+  overflow?: ReactNode;
   /** New tasks start on this connection (Preferences.defaultConnectionId). */
   isDefault: boolean;
 }
@@ -56,6 +58,8 @@ export interface HarnessSlots {
   LiveChip: ComponentType<{ kind: Harness; name: string; children: (chip: ConnectionChip) => ReactNode }>;
   /** The status query's key prefix, refreshed after Sync now. */
   statusKey: (kind: Harness) => readonly unknown[];
-  /** Its session links need an address Stage is told in Settings (a browser URL): task detail offers to configure it when a link is missing. */
-  webAddress: boolean;
+  /** Read the full status envelope through the setup panel’s existing cache. */
+  Presentation: ComponentType<{ kind: Harness; enabled: boolean; children: (status: HarnessStatus | undefined) => ReactNode }>;
+  /** Actions currently rendered by the setup panel itself. */
+  handledSetupActions: (id: string) => boolean;
 }

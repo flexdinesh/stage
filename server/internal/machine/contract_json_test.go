@@ -30,13 +30,15 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	avail := execution.Availability{Available: true, Reason: "why"}
 	choice := execution.Choice{ID: "c", Label: "C", Availability: avail}
 	action := execution.Action{
-		ID: "clear", Label: "Clear", Target: execution.TargetSession,
+		Primary: true,
+		ID:      "clear", Label: "Clear", Target: execution.TargetSession,
 		Input:   []execution.Field{{ID: "scope", Label: "Scope", Kind: execution.FieldChoice, Help: "Choose what to clear.", Required: true, Choices: []execution.ActionChoice{{ID: "c", Label: "C"}}}},
 		Confirm: "Clear this scope?", Destructive: true, Callers: []execution.Caller{execution.CallerUser}, Availability: avail,
 	}
 	def := execution.BoolValue(true)
 	option := execution.Option{ID: "effort", Kind: execution.OptionChoice, Label: "Effort", Values: []execution.OptionValue{execution.StringValue("high"), execution.BoolValue(false)}, Default: &def,
-		DependsOn: &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}}
+		ValueLabels: map[string]string{"high": "High effort"},
+		DependsOn:   &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}}
 	cfg := execution.Config{Model: "brain-7", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}, {ID: "fast", Value: execution.BoolValue(true)}}, Permission: "full-access", Mode: "plan"}
 	observation := execution.Observation{
 		Parent: &execution.SessionRef{ConnectionID: 7, ExternalSessionID: "parent"}, Config: cfg, Session: ref,

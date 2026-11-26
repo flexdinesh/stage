@@ -1,3 +1,4 @@
+import { PreviousConnections } from "../components/ConnectionRows.tsx";
 // Settings: three tabs, each its own route (lib/settings.ts). General: user, theme, Info.
 // Connections: machines and their harness connections (components/Machines.tsx), each with its new-task defaults.
 // Notifications: events and this device's delivery.
@@ -356,6 +357,7 @@ export function SettingsConnectionsPage() {
         )}
         <ErrorText error={sync.error} />
         <MachinesPanel meta="synced every 5 min" />
+        <PreviousConnections />
       </div>
       {adding ? <AddMachineDrawer onClose={() => setAdding(false)} /> : null}
     </>

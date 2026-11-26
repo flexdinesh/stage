@@ -44,7 +44,7 @@ var Descriptor = harness.Descriptor{
 			{ID: "binary", Label: "Codex CLI", Kind: harness.FieldText, Help: "Path to the codex binary. Empty uses codex on PATH."},
 		},
 		Actions: []execution.Action{{
-			ID: ActionConnect, Label: "Connect",
+			ID: ActionConnect, Label: "Connect", Primary: true,
 			Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 			Availability: execution.Availability{Available: true},
 		}, {

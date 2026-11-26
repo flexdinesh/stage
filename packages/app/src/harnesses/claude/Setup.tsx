@@ -3,38 +3,38 @@
 // shows which Claude it uses, takes the Claude command, and disconnects. Status is the generic
 // GET /harnesses/claude/status (shared cache with the status button). Logic: claude.ts.
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { useHarnessApi, useSetupCopy } from "../../api/harnessScope.tsx";
 import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus, useHarnesses } from "../../api/queries.ts";
-import type { HarnessStatus } from "../../api/types.ts";
+import type { HarnessFact, HarnessStatus } from "../../api/types.ts";
 import { AutoCompleteToggle } from "../../components/Completion.tsx";
 import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
-import { Alert, Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
-import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, approvalsText, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "./claude.ts";
+import { CheckConnection, ConfirmConnectionAction, HarnessFacts, HarnessFix, HarnessStatusChip, ReplacedConnectionNotice } from "../../components/HarnessPresentation.tsx";
+import { Button, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
+import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, approvalsText, claudeDetails, commandText, updatesText } from "./claude.ts";
 
 export function ClaudeSetup() {
   const status = useHarnessStatus(CLAUDE);
   const s = status.data;
-  const chip = s === undefined ? null : claudeChip(s);
+
+  const api = useHarnessApi();
+  const apply = useApplyHarnessStatus(CLAUDE);
+  const check = () => api.harnessStatus(CLAUDE, { refresh: true }).then(apply);
   return (
     <>
       <Panel
         title="Claude Code connection"
-        actions={
-          chip === null ? undefined : (
-            <Chip tone={chip.tone} dot>
-              {chip.label}
-            </Chip>
-          )
-        }
+        actions={s === undefined ? undefined : <HarnessStatusChip status={s} />}
       >
-        <QueryState isPending={status.isPending} error={status.error} hasData={s !== undefined}>
+        <ReplacedConnectionNotice replaced={s?.replaced} />
+        <QueryState isPending={status.isPending} error={s === undefined ? status.error : null} hasData={s !== undefined}>
           {s === undefined ? null : s.configured ? (
-            <Connected status={s} checking={status.isFetching} check={() => void status.refetch()} />
+            <Connected status={s} check={check} />
           ) : (
-            <NotConnected status={s} />
+            <NotConnected status={s} check={check} />
           )}
         </QueryState>
+        {s === undefined && status.error !== null ? <CheckConnection run={check} /> : null}
       </Panel>
       <NewTaskDefaults harness={CLAUDE} />
     </>
@@ -49,84 +49,65 @@ function useConnect() {
 }
 
 /** Not set up (or disconnected): what Stage does with Claude Code, what stops it here, and Connect. */
-function NotConnected({ status }: { status: HarnessStatus }) {
+function NotConnected({ status, check }: { status: HarnessStatus; check: () => Promise<unknown> }) {
   const copy = useSetupCopy();
   const connect = useConnect();
-  const problem = status.state !== "disconnected" && status.reason !== undefined && status.reason !== "" ? status.reason : null;
+  const availability = status.actions.find((action) => action.id === "connect");
   return (
     <div className="flex flex-col gap-3">
       <Muted>
         Stage runs each task as a Claude Code background session on {copy.machine}, signed in with Claude's own login. Stage stores no Claude
         credentials.
       </Muted>
-      {problem === null ? null : <Problem status={status} reason={problem} />}
+      <HarnessFix fix={status.fix} reason={status.reason} />
+      <HarnessFacts facts={status.facts} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <Button variant="primary" busy={connect.isPending} onClick={() => connect.mutate()}>
+        <Button variant="primary" busy={connect.isPending} disabled={availability?.available !== true} onClick={() => {
+          if (availability?.available === true && !connect.isPending) connect.mutate();
+        }}>
           Connect
         </Button>
-        <Hint>checks the claude command and that Claude is logged in</Hint>
+        <Hint>{availability?.reason || "Checks the claude command and that Claude is logged in."}</Hint>
       </div>
       <ErrorText error={connect.error} />
+      <CheckConnection run={check} />
       <CommandForm status={status} />
     </div>
   );
 }
 
-/** A problem state's reason and, when a terminal fixes it, the command to run. */
-function Problem({ status, reason, action }: { status: HarnessStatus; reason: string; action?: ReactNode }) {
-  const fix = claudeFix(status);
-  return (
-    <div className="flex flex-col gap-2">
-      <Alert tone="need" {...(action === undefined ? {} : { actions: action })}>
-        {reason}
-      </Alert>
-      {fix === null ? null : <CommandBox command={fix} />}
-    </div>
-  );
-}
-
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="border-b border-line py-1.5 pr-4 font-mono text-meta text-muted">{label}</dt>
-      <dd className="min-w-0 border-b border-line py-1.5 font-mono text-detail break-words">{children}</dd>
-    </>
-  );
-}
-
-/** Set up: which Claude it uses, a problem's fix and Connect again, how tasks run, and its actions. */
-function Connected({ status, checking, check }: { status: HarnessStatus; checking: boolean; check: () => void }) {
+function Connected({ status, check }: { status: HarnessStatus; check: () => Promise<unknown> }) {
   const connect = useConnect();
-  const d = claudeDetails(status);
+  const disconnect = useDisconnectHarness(CLAUDE);
+  const details = claudeDetails(status);
   const { command, source } = commandText(status);
-  const problem = !status.connected && status.reason !== undefined && status.reason !== "" ? status.reason : null;
+  const availability = status.actions.find((action) => action.id === "connect");
+  const facts: HarnessFact[] = [
+    { id: "binary", label: "Command", value: `${command} (${source})`, copyable: false },
+    ...(status.facts ?? []).filter((fact) => fact.id !== "binary" && fact.id !== "events"),
+  ];
+  if (details !== null) {
+    if (details.version !== "") facts.push({ id: "login", label: "Login", value: details.loggedIn ? "Logged in" : "Logged out" });
+    facts.push({ id: "restarts", label: "Restarts", value: details.scope ? "Sessions keep running when Stage restarts" : "A Stage restart may stop Claude’s sessions" });
+    if (details.events !== null) {
+      const { text, reason } = updatesText(details.events);
+      facts.push({ id: "events", label: "Updates", value: reason === null ? text : `${text} · ${reason}` });
+      facts.push({ id: "approvals", label: "Approvals", value: approvalsText(details.events) });
+    }
+  }
   return (
     <div className="flex flex-col gap-3">
-      {problem === null ? null : (
-        <>
-          <Problem
-            status={status}
-            reason={problem}
-            action={
-              <Button small busy={connect.isPending} onClick={() => connect.mutate()}>
-                Connect again
-              </Button>
-            }
-          />
+      <HarnessFix fix={status.fix} reason={status.connected ? undefined : status.reason} />
+      {status.connected ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button small busy={connect.isPending} disabled={availability?.available !== true} onClick={() => {
+            if (availability?.available === true && !connect.isPending) connect.mutate();
+          }}>Connect</Button>
+          {availability?.reason ? <Hint>{availability.reason}</Hint> : null}
           <ErrorText error={connect.error} />
-        </>
+        </div>
       )}
-      <dl className="grid grid-cols-[max-content_1fr] border-t border-line">
-        <Fact label="Command">
-          <span className="break-all">{command}</span> <span className="text-muted">({source})</span>
-        </Fact>
-        <Fact label="Version">{d === null || d.version === "" ? "-" : versionText(d.version)}</Fact>
-        <Fact label="Config">{d === null || d.configDirectory === "" ? "-" : configText(d.configDirectory)}</Fact>
-        <Fact label="Login">{d === null || d.version === "" ? "-" : d.loggedIn ? "logged in" : "logged out"}</Fact>
-        <Fact label="Restarts">{d === null ? "-" : d.scope ? "sessions keep running when Stage restarts" : "a Stage restart may stop Claude's sessions"}</Fact>
-        <Fact label="Updates">{d === null || d.events === null ? "-" : <Updates events={d.events} />}</Fact>
-        <Fact label="Approvals">{d === null || d.events === null ? "-" : approvalsText(d.events)}</Fact>
-      </dl>
+      <HarnessFacts facts={facts} />
       <ul className="flex list-none flex-col gap-1 text-small text-muted">
         <li>
           Approvals and questions of the sessions Stage starts can be answered on the task, or in Claude Code with the task's resume command.
@@ -136,51 +117,15 @@ function Connected({ status, checking, check }: { status: HarnessStatus; checkin
           Claude must trust a folder before it runs there: run <code className="font-mono text-fg">claude</code> in it once.
         </li>
       </ul>
-      <Actions checking={checking} check={check} />
+      <ConfirmConnectionAction action={{
+        prompt: CLAUDE_DISCONNECT_PROMPT,
+        busy: disconnect.isPending,
+        error: disconnect.error,
+        run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+        reset: disconnect.reset,
+      }}><CheckConnection run={check} /></ConfirmConnectionAction>
       <CommandForm status={status} />
       <AutoCompleteToggle harness={CLAUDE} className="border-t border-line pt-2" />
-    </div>
-  );
-}
-
-/** How Stage hears about the sessions it launches: hooks (instant) or polling, with why it only polls. */
-function Updates({ events }: { events: ClaudeEvents }) {
-  const { text, reason } = updatesText(events);
-  return (
-    <>
-      {text}
-      {reason === null ? null : <span className="block font-sans text-small text-muted">{reason}</span>}
-    </>
-  );
-}
-
-/** Check connection, and Disconnect behind an inline confirm. */
-function Actions({ checking, check }: { checking: boolean; check: () => void }) {
-  const [confirm, setConfirm] = useState(false);
-  const disconnect = useDisconnectHarness(CLAUDE, () => setConfirm(false));
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button small busy={checking} onClick={check}>
-          Check connection
-        </Button>
-        <Button
-          small
-          variant="ghost"
-          disabled={confirm}
-          onClick={() => {
-            disconnect.reset();
-            setConfirm(true);
-          }}
-        >
-          Disconnect
-        </Button>
-      </div>
-      {confirm ? (
-        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} error={disconnect.error} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          {CLAUDE_DISCONNECT_PROMPT}
-        </ConfirmInline>
-      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // T3's own status details and setup bodies (GET /api/harnesses/t3/status `details`; docs/api.md).
-import type { ReplacedConnection } from "../../api/types.ts";
+import type { HarnessStatus, ReplacedConnection } from "../../api/types.ts";
 
 /** Precedence: unreachable > unpaired > expired > rejected > connected. */
 export type T3State = "unreachable" | "unpaired" | "expired" | "rejected" | "connected";
@@ -50,6 +50,7 @@ export interface T3Status {
   sync: T3SyncProgress;
   /** Pair and auto-pair only: the previous T3 connection this pairing replaced. */
   replaced?: ReplacedConnection | null;
+  presentation?: HarnessStatus;
 }
 
 /** T3Status as an older server may send it: fields added with onboarding can be missing. */

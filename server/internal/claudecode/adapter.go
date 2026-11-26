@@ -173,7 +173,13 @@ var models = []execution.Model{
 // Effort is the harness-wide effort option (--effort).
 const optionEffort = "effort"
 
-var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+var efforts = []struct{ id, label string }{
+	{"low", "Low"},
+	{"medium", "Medium"},
+	{"high", "High"},
+	{"xhigh", "Extra high"},
+	{"max", "Maximum"},
+}
 
 // Permission modes (--permission-mode).
 var permissions = []execution.Choice{
@@ -204,10 +210,11 @@ const (
 // Features is static: the catalog is Claude's aliases, not a probe.
 func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 	off := execution.BoolValue(false)
-	effort := execution.Option{ID: optionEffort, Kind: execution.OptionChoice, Label: "Effort"}
+	effort := execution.Option{ID: optionEffort, Kind: execution.OptionChoice, Label: "Effort", ValueLabels: make(map[string]string, len(efforts))}
 	worktree := execution.Option{ID: optionWorktree, Kind: execution.OptionBoolean, Label: "Claude Code worktree", Values: []execution.OptionValue{execution.BoolValue(true), off}, Default: &off}
 	for _, e := range efforts {
-		effort.Values = append(effort.Values, execution.StringValue(e))
+		effort.Values = append(effort.Values, execution.StringValue(e.id))
+		effort.ValueLabels[e.id] = e.label
 	}
 	return execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{

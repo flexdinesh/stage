@@ -133,6 +133,10 @@ func permissionFor(id string) (permission, bool) {
 // effortOption is the per-model reasoning effort option.
 const effortOption = "effort"
 
+var reasoningEffortLabels = map[string]string{
+	"none": "None", "minimal": "Minimal", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high",
+}
+
 var available = execution.Availability{Available: true}
 
 const answerInCodex = "Answer in Codex: copy the resume command and run it in a terminal."
@@ -164,9 +168,12 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		}
 		em := execution.Model{Choice: execution.Choice{ID: m.ID, Label: label, Availability: available}, Group: "Codex"}
 		if len(m.SupportedReasoningEfforts) > 0 {
-			opt := execution.Option{ID: effortOption, Kind: execution.OptionChoice, Label: "Reasoning effort"}
+			opt := execution.Option{ID: effortOption, Kind: execution.OptionChoice, Label: "Reasoning effort", ValueLabels: make(map[string]string)}
 			for _, e := range m.SupportedReasoningEfforts {
 				opt.Values = append(opt.Values, execution.StringValue(e.ReasoningEffort))
+				if label := reasoningEffortLabels[e.ReasoningEffort]; label != "" {
+					opt.ValueLabels[e.ReasoningEffort] = label
+				}
 			}
 			if m.DefaultReasoningEffort != "" {
 				d := execution.StringValue(m.DefaultReasoningEffort)

@@ -13,12 +13,17 @@ import type { ConnectionStatus, HarnessSlots, MachineCalls, MachineConnection, P
 export const GENERIC_STATUS: StatusReader<HarnessStatus> = {
   query: (m, kind) => harnessStatusQuery(m.api, m.key([...keys.harnessStatus, kind]), kind),
   view: harnessStatusView,
+  presentation: (status) => status,
   rowDetail: (s) => s.reason ?? s.lastError ?? "",
 };
 
 /** The status slots of a reader. */
-export function statusSlots<S>(reader: StatusReader<S>): Pick<HarnessSlots, "useStatuses" | "LiveChip"> {
+export function statusSlots<S>(reader: StatusReader<S>): Pick<HarnessSlots, "useStatuses" | "LiveChip" | "Presentation"> {
   return {
+    Presentation: function Presentation({ kind, enabled, children }) {
+      const query = useScopedStatus(reader, kind, enabled);
+      return children(query.data === undefined ? undefined : reader.presentation(query.data));
+    },
     useStatuses: <C extends MachineConnection>(connections: readonly C[], poll: PollOverride, name: (kind: Harness) => string): ConnectionStatus<C>[] => {
       const api = useApi();
       const qc = useQueryClient();
@@ -41,9 +46,9 @@ export function statusSlots<S>(reader: StatusReader<S>): Pick<HarnessSlots, "use
 }
 
 /** One harness's scoped status query (its Setup panel and Settings row share it). */
-export function useScopedStatus<S>(reader: StatusReader<S>, kind: Harness) {
+export function useScopedStatus<S>(reader: StatusReader<S>, kind: Harness, enabled = true) {
   const api = useHarnessApi();
   const key = useScopedKey();
   const qc = useQueryClient();
-  return useQuery(reader.query({ api, key }, kind, qc));
+  return useQuery({ ...reader.query({ api, key }, kind, qc), enabled });
 }
