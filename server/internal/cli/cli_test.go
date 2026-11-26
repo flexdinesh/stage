@@ -361,7 +361,7 @@ func TestTreeCommandsAndOriginSessionFilter(t *testing.T) {
 	if err := h.fake.SetStatus(launched.Session.ExternalSessionID, t3.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.engine.Coordinator.PollActive(ctx); err != nil {
+	if err := h.engine.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	preview, err := h.store.CompletionPreview(ctx, third.ID)

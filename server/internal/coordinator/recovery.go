@@ -34,7 +34,7 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if err != nil {
 		return p, err
 	}
-	adapter, err := s.Adapter(t.ConnectionID)
+	adapter, err := s.conns.Adapter(t.ConnectionID)
 	if err != nil {
 		return p, err
 	}
@@ -90,7 +90,7 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if err == nil && owner.ID != id {
 		return p, db.Conflict("Session already belongs to task #%d.", owner.ID)
 	}
-	d, _ := s.descriptor(t.Harness)
+	d, _ := s.conns.Descriptor(t.Harness)
 	o.Facts = d.DisplayFacts(o.Facts)
 	p = LinkPreview{Attempt: a.Number, Revision: a.Revision, Environment: h.Identity, Observation: o}
 	return p, nil

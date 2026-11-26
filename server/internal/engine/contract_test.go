@@ -173,7 +173,7 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE execution_attempts SET retry_at=NULL"); err != nil {
 			t.Fatal(err)
 		}
-		if err := restarted.Coordinator.PollActive(ctx); err != nil {
+		if err := restarted.Observe.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err := store.GetTask(ctx, task.ID)

@@ -82,3 +82,9 @@ func (c *Connections) Sessions(id int64) (execution.Sessions, error) {
 func (c *Connections) Launcher(id int64) (execution.Launcher, error) {
 	return c.Adapter(id)
 }
+
+// Online reports whether the machine currently serves its connections.
+func (c *Connections) Online(machineID int64) bool {
+	m, ok := c.set.Get(machineID)
+	return ok && m.Online()
+}

@@ -227,7 +227,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	observeUntil(t, a, idleRef, "running")
-	if e = svc.Coordinator.PollActive(ctx); e != nil {
+	if e = svc.Observe.PollActive(ctx); e != nil {
 		t.Fatal(e)
 	}
 	active, e := store.TaskBySession(ctx, idleRef)

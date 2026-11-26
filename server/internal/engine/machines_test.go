@@ -71,7 +71,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	// task; the laptop's task is unchanged.
 	fakes[3].offline = true
 	fakes[2].phase = "published"
-	if err := svc.Coordinator.PollActive(ctx); err != nil {
+	if err := svc.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, tasks[2].ID); got.State != db.StateDone {
@@ -82,7 +82,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	}
 	fakes[3].offline = false
 	fakes[3].phase = "published"
-	if err := svc.Coordinator.PollActive(ctx); err != nil {
+	if err := svc.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, tasks[3].ID); got.State != db.StateDone {

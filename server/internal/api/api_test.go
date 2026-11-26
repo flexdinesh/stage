@@ -244,7 +244,7 @@ func (e *env) must(method, path string, body any, want int, out any) {
 
 func (e *env) poll() {
 	e.t.Helper()
-	if err := e.engine.Coordinator.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
 }

@@ -233,7 +233,7 @@ func Run(ctx context.Context, o Options) error {
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
-	eng.Coordinator.OnSessionChange = notifier.OnSessionChange
+	eng.Observe.OnSessionChange = notifier.OnSessionChange
 	eng.Coordinator.OnAccepted = kickTrees
 	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
 		return err

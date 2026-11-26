@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/observe"
 )
 
 // maxPushedObservations caps one POST /api/connections/{id}/observations.
@@ -156,13 +156,13 @@ func (s *server) pushObservation(r *http.Request, kind string, o execution.Obser
 	if o.UpdatedAt.After(time.Now().Add(maxPushSkew)) {
 		return ObservationResult{Status: observationInvalid, Reason: "malformed observation: updatedAt is more than 5 minutes ahead of the server's clock"}, nil
 	}
-	got, err := s.Engine.Coordinator.Ingest(r.Context(), o)
+	got, err := s.Engine.Observe.Ingest(r.Context(), o)
 	switch {
 	case err != nil:
 		return ObservationResult{}, err
-	case got == coordinator.Unowned:
+	case got == observe.Unowned:
 		return ObservationResult{Status: observationIgnored, Reason: "no task owns this session; discovery may track it"}, nil
-	case got == coordinator.Launching:
+	case got == observe.Launching:
 		return ObservationResult{Status: observationIgnored, Reason: "the task is launching; its launch reconciles the session"}, nil
 	}
 	return ObservationResult{Status: observationIngested}, nil

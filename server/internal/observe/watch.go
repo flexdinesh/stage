@@ -1,4 +1,4 @@
-package coordinator
+package observe
 
 import (
 	"context"
@@ -8,11 +8,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
-type SessionChange = workevent.SessionChange
-
 // WatchAttention polls sessions that need attention across active connections.
 func (s *Service) WatchAttention(ctx context.Context) error {
-	for id := range s.connections() {
+	for id := range s.adapters.All() {
 		if err := s.watchAttention(ctx, id); err != nil {
 			return err
 		}
@@ -20,7 +18,7 @@ func (s *Service) WatchAttention(ctx context.Context) error {
 	return nil
 }
 func (s *Service) watchAttention(ctx context.Context, connection int64) error {
-	a, err := s.Adapter(connection)
+	a, err := s.adapters.Adapter(connection)
 	if err != nil {
 		return err
 	}
@@ -31,7 +29,8 @@ func (s *Service) watchAttention(ctx context.Context, connection int64) error {
 	// A silent harness's unowned sessions are current state only (the
 	// waiting row and needs-input count): no inbox event, no push.
 	kind := s.store.Harness(connection)
-	d, _ := s.descriptor(kind)
+	d, _ := s.adapters.Descriptor(kind)
+	registry := s.adapters.Harnesses()
 	silent := d.Attention == harness.AttentionSilent
 	refs, e := a.Attention(ctx)
 	if e != nil {
@@ -50,11 +49,13 @@ func (s *Service) watchAttention(ctx context.Context, connection int64) error {
 		seen[ref.ExternalSessionID] = true
 		o, e := a.Observe(ctx, ref)
 		// A session another harness wraps is that harness's to surface.
-		if e != nil || o.Child || o.Session != ref || s.refusal(kind, o) != nil {
+		if e != nil || o.Child || o.Session != ref || registry != nil && registry.Refusal(kind, o.Origin) != nil {
 			continue
 		}
 		previous, e := s.store.Observation(ctx, ref)
-		if e = s.putObservation(ctx, o); e != nil {
+		descriptor, _ := s.adapters.Descriptor(s.store.Harness(o.Session.ConnectionID))
+		o.Facts = descriptor.DisplayFacts(o.Facts)
+		if e = s.store.PutObservation(ctx, o); e != nil {
 			return e
 		}
 		o, e = s.store.Observation(ctx, ref)
@@ -72,7 +73,7 @@ func (s *Service) watchAttention(ctx context.Context, connection int64) error {
 		}
 		prev := db.TaskState(previous.State)
 		if s.OnSessionChange != nil {
-			s.OnSessionChange(ctx, SessionChange{Session: &ref, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State)})
+			s.OnSessionChange(ctx, workevent.SessionChange{Session: &ref, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State)})
 		}
 	}
 	s.watchSeeded.Store(connection, true)

@@ -20,7 +20,7 @@ func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (d
 	if t.Session == nil {
 		return t, nil, db.Conflict("task has no execution session")
 	}
-	a, err := s.Adapter(t.ConnectionID)
+	a, err := s.conns.Adapter(t.ConnectionID)
 	if err != nil {
 		return t, nil, err
 	}

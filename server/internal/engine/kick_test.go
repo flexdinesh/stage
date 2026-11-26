@@ -60,7 +60,7 @@ func TestKickRunsFullSyncNow(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	client := &gateT3{Fake: t3.NewFake()}
 	svc := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	svc.Discovery.FullSyncEvery, svc.Coordinator.PollEvery = time.Hour, time.Hour
+	svc.Discovery.FullSyncEvery, svc.Observe.PollEvery = time.Hour, time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.Run(ctx); close(done) }()

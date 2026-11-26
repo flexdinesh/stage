@@ -22,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 // The real Claude Code adapter against a fake claude CLI, through the
@@ -67,7 +68,7 @@ func TestContractClaudeLostReplyDispatchesOnce(t *testing.T) {
 		}
 		for range 2 {
 			clearRetry(t)
-			if err := svc.Coordinator.PollActive(ctx); err != nil {
+			if err := svc.Observe.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -95,7 +96,7 @@ func TestContractClaudeStatesReplyAndStop(t *testing.T) {
 		ref := *got.Session
 		poll := func(want db.TaskState) db.Task {
 			t.Helper()
-			if err := svc.Coordinator.PollActive(ctx); err != nil {
+			if err := svc.Observe.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 			got, err := store.GetTask(ctx, task.ID)
@@ -350,11 +351,11 @@ func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
 		f := claudetest.New(t)
 		store, svc, _, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
-		var events []coordinator.SessionChange
-		svc.Coordinator.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) { events = append(events, c) }
+		var events []workevent.SessionChange
+		svc.Observe.OnSessionChange = func(_ context.Context, c workevent.SessionChange) { events = append(events, c) }
 		watch := func() {
 			t.Helper()
-			if err := svc.Coordinator.WatchAttention(ctx); err != nil {
+			if err := svc.Observe.WatchAttention(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -495,7 +496,7 @@ func TestContractClaudeHooksPushWithoutPolling(t *testing.T) {
 		streamed := make(chan struct{})
 		go func() {
 			defer close(streamed)
-			_ = svc.Coordinator.Stream(ctx, claudeConn)
+			_ = svc.Observe.Stream(ctx, claudeConn)
 		}()
 		t.Cleanup(func() {
 			cancel()

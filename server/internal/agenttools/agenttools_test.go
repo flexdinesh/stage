@@ -256,7 +256,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	// T3 settlement with auto-completion disabled leaves the dependent blocked.
 	_ = e.fake.SetStatus(s, t3.StatusCompleted)
 	_ = e.fake.Settle(s)
-	if err := e.engine.Coordinator.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.runner.Reconcile(context.Background()); err != nil {
@@ -359,7 +359,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 	}
 
 	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
-	if err := e.engine.Coordinator.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var w agenttools.WaitOut
@@ -391,7 +391,7 @@ func (e *env) acceptTask(tk client.Task) {
 	if err := e.fake.SetStatus(*tk.ExternalSessionID, t3.StatusCompleted); err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.engine.Coordinator.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
 	p, err := e.store.CompletionPreview(context.Background(), tk.ID)
@@ -1005,7 +1005,7 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = e.fake.SetStatus(sessionID, t3.StatusCompleted)
-	if err := e.engine.Coordinator.PollActive(context.Background()); err != nil {
+	if err := e.engine.Observe.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 

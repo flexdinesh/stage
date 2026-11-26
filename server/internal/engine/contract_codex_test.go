@@ -115,7 +115,7 @@ func TestContractCodexLostTurnReplyReconcilesOnce(t *testing.T) {
 			t.Fatal("lost reply confirmed", got)
 		}
 		clearRetry(t)
-		if err := svc.Coordinator.PollActive(ctx); err != nil {
+		if err := svc.Observe.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err = store.GetTask(ctx, task.ID)
@@ -159,7 +159,7 @@ func TestContractCodexPushIngest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = svc.Coordinator.Stream(ctx, 3) }()
+		go func() { _ = svc.Observe.Stream(ctx, 3) }()
 		deadline := time.Now().Add(5 * time.Second)
 		for i := 0; time.Now().Before(deadline); i++ {
 			if i%10 == 0 {

@@ -155,7 +155,7 @@ func TestStreamStatusParity(t *testing.T) {
 				}
 			}
 			src.fail.Store(true)
-			if err := svc.Coordinator.Stream(ctx, connection); err == nil || !strings.Contains(err.Error(), streamFailure) {
+			if err := svc.Observe.Stream(ctx, connection); err == nil || !strings.Contains(err.Error(), streamFailure) {
 				t.Fatalf("stream error %v", err)
 			}
 			checkStatus(streamFailure)
@@ -171,8 +171,8 @@ func TestStreamStatusParity(t *testing.T) {
 			}
 			if rig != nil {
 				rig.StopWorker()
-				if err := svc.Coordinator.Stream(ctx, connection); err != nil || !strings.Contains(svc.Coordinator.StreamError(connection), streamFailure) {
-					t.Fatalf("offline stream changed previous error to %q (returned %v)", svc.Coordinator.StreamError(connection), err)
+				if err := svc.Observe.Stream(ctx, connection); err != nil || !strings.Contains(svc.Observe.StreamError(connection), streamFailure) {
+					t.Fatalf("offline stream changed previous error to %q (returned %v)", svc.Observe.StreamError(connection), err)
 				}
 				rig.StartWorker()
 			}
@@ -180,7 +180,7 @@ func TestStreamStatusParity(t *testing.T) {
 			if err := fake.SetStatus(tk.Session.ExternalSessionID, t3.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-			if err := svc.Coordinator.PollActive(ctx); err != nil {
+			if err := svc.Observe.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if got := e.getTask(tk.ID); got.State != "done" {
@@ -195,7 +195,7 @@ func TestStreamStatusParity(t *testing.T) {
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)
-				_ = svc.Coordinator.Stream(streamCtx, connection)
+				_ = svc.Observe.Stream(streamCtx, connection)
 			}()
 			select {
 			case <-src.started:
@@ -214,7 +214,7 @@ func TestStreamStatusParity(t *testing.T) {
 			checkStatus(streamFailure)
 			src.wait.Store(false)
 			src.fail.Store(false)
-			if err := svc.Coordinator.Stream(ctx, connection); err != nil {
+			if err := svc.Observe.Stream(ctx, connection); err != nil {
 				t.Fatal(err)
 			}
 			checkStatus("")

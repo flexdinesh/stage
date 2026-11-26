@@ -52,7 +52,7 @@ func TestRemoteLostLaunchReplyReplaysOnce(t *testing.T) {
 		t.Fatalf("attempt %+v %v", attempt, err)
 	}
 	clearRetry(t)
-	if err := svc.Coordinator.PollActive(ctx); err != nil {
+	if err := svc.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err = store.GetTask(ctx, task.ID)
@@ -125,7 +125,7 @@ func TestRemoteWorkerRestartMidLaunchReplaysFromCheckpoint(t *testing.T) {
 	}
 	// Offline: recovery waits, nothing changes.
 	clearRetry(t)
-	if err := svc.Coordinator.PollActive(ctx); err != nil {
+	if err := svc.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateLaunching {
@@ -133,7 +133,7 @@ func TestRemoteWorkerRestartMidLaunchReplaysFromCheckpoint(t *testing.T) {
 	}
 	rig.StartWorker()
 	clearRetry(t)
-	if err := svc.Coordinator.PollActive(ctx); err != nil {
+	if err := svc.Observe.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetTask(ctx, task.ID)
@@ -164,7 +164,7 @@ func TestRemoteOfflineMachineIsAnOfflineHarness(t *testing.T) {
 	if err := svc.Coordinator.PollTask(ctx, running); !errors.Is(err, execution.ErrUnavailable) {
 		t.Fatal("offline observe", err)
 	}
-	if err := svc.Coordinator.Stream(ctx, 2); err != nil {
+	if err := svc.Observe.Stream(ctx, 2); err != nil {
 		t.Fatal("offline stream", err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateRunning {

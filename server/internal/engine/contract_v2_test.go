@@ -223,7 +223,7 @@ func TestContractCorrelatedLaunchDispatchesOnce(t *testing.T) {
 		}
 		f.loseReply = false
 		clearRetry(t)
-		if err := svc.Coordinator.PollActive(ctx); err != nil {
+		if err := svc.Observe.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err = store.GetTask(ctx, task.ID)
@@ -244,7 +244,7 @@ func TestContractCorrelatedLaunchNotFoundStaysUnconfirmed(t *testing.T) {
 		f.failBeforeCreate = false
 		for range 2 {
 			clearRetry(t)
-			if err := svc.Coordinator.PollActive(ctx); err != nil {
+			if err := svc.Observe.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -286,7 +286,7 @@ func TestContractPushIngest(t *testing.T) {
 		done.UpdatedAt = done.UpdatedAt.Add(time.Second)
 		unowned := f.snapshot(execution.SessionRef{ConnectionID: 3, ExternalSessionID: "elsewhere"})
 		f.pushes = []execution.Observation{unowned, done}
-		if err := svc.Coordinator.Stream(ctx, 3); err != nil {
+		if err := svc.Observe.Stream(ctx, 3); err != nil {
 			t.Fatal(err)
 		}
 		got, _ = store.GetTask(ctx, task.ID)
@@ -296,7 +296,7 @@ func TestContractPushIngest(t *testing.T) {
 		other := done
 		other.Session.ConnectionID = 2
 		f.pushes = []execution.Observation{other}
-		if err := svc.Coordinator.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
+		if err := svc.Observe.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
 			t.Fatal("pushed observation crossed connections", err)
 		}
 	})

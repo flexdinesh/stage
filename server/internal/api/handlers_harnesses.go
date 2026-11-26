@@ -193,7 +193,7 @@ func (s *server) connectionFacts(w http.ResponseWriter, r *http.Request) error {
 
 func (s *server) harnessSummary(summary harness.Summary) harness.Summary {
 	if summary.Configured && summary.LastError == "" {
-		summary.LastError = s.Engine.Coordinator.StreamError(summary.ConnectionID)
+		summary.LastError = s.Engine.Observe.StreamError(summary.ConnectionID)
 	}
 	return summary
 }

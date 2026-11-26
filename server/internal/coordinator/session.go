@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.SessionRef) error {
-	a, e := s.Adapter(ref.ConnectionID)
+	a, e := s.conns.Adapter(ref.ConnectionID)
 	if e != nil {
 		return e
 	}
@@ -31,7 +31,7 @@ func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.Sessio
 
 // putObservation filters display metadata without interfering with execution state.
 func (s *Service) putObservation(ctx context.Context, o execution.Observation) error {
-	d, _ := s.descriptor(s.store.Harness(o.Session.ConnectionID))
+	d, _ := s.conns.Descriptor(s.store.Harness(o.Session.ConnectionID))
 	o.Facts = d.DisplayFacts(o.Facts)
 	return s.store.PutObservation(ctx, o)
 }

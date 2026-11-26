@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 var testDB dbtest.DB
@@ -100,7 +100,7 @@ func TestWatchAttention(t *testing.T) {
 
 	svc := engine.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var got []change
-	svc.Coordinator.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) {
+	svc.Observe.OnSessionChange = func(_ context.Context, c workevent.SessionChange) {
 		from := ""
 		if c.From != nil {
 			from = string(*c.From)
@@ -110,7 +110,7 @@ func TestWatchAttention(t *testing.T) {
 	pass := func(want ...change) {
 		t.Helper()
 		got = nil
-		if err := svc.Coordinator.WatchAttention(ctx); err != nil {
+		if err := svc.Observe.WatchAttention(ctx); err != nil {
 			t.Fatal(err)
 		}
 		byID := func(a, b change) int { return strings.Compare(a.id, b.id) }
