@@ -8,10 +8,10 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	stageharness "github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 func TestCodexCommands(t *testing.T) {
@@ -20,7 +20,7 @@ func TestCodexCommands(t *testing.T) {
 	h := newHarness(t, func(d *api.Deps) {
 		reg := stageharness.MustRegistry(codex.Descriptor)
 		local := machine.NewLocal(db.LocalMachine, stageharness.Profile{Kind: stageharness.ProfileDesktop, LocalProcesses: true}, nil)
-		svc := t3sync.NewForMachines(d.Store, reg, machine.MustSet(local), nil)
+		svc := coordinator.NewForMachines(d.Store, reg, machine.MustSet(local), nil)
 		local.OnChange(svc.ConnectionsChanged)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), reg)
 		setup, err := codexsetup.New(t.Context(), codexsetup.Options{

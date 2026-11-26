@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )

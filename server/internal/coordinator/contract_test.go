@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // This harness has documents and phases, not T3 threads, providers or runs.

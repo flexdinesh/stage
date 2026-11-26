@@ -22,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -31,7 +32,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -43,7 +43,7 @@ type harness struct {
 	url     string
 	handler http.Handler // the /api router
 	fake    *t3.Fake
-	sync    *t3sync.Service
+	sync    *coordinator.Service
 	store   *db.Store
 	caller  agentctx.Caller
 	execs   [][]string
@@ -61,7 +61,7 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
-	h.sync = t3sync.NewWithAdapters(store, reg, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
+	h.sync = coordinator.NewWithAdapters(store, reg, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
 	local, _ := h.sync.Machines().Local(db.LocalMachine)
 	ports := machine.NewStorePorts(store.OnMachine(db.LocalMachine), reg)
 	openCode, err := opencodesetup.Module.Compose(t.Context(), stageharness.Ports{

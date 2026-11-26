@@ -12,12 +12,12 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 

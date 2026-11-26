@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	gosync "sync"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -53,7 +53,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := t3sync.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewConnectionAdapter(a, first)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := coordinator.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewConnectionAdapter(a, first)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: first, Title: "run", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)

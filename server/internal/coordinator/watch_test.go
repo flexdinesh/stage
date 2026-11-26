@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -97,9 +97,9 @@ func TestWatchAttention(t *testing.T) {
 	old(oldIdle)
 	setStatus(oldIdle, t3.StatusCompleted)
 
-	svc := t3sync.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := coordinator.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var got []change
-	svc.OnSessionChange = func(_ context.Context, c t3sync.SessionChange) {
+	svc.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) {
 		from := ""
 		if c.From != nil {
 			from = string(*c.From)

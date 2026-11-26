@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -7,12 +7,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 type inventoryAdapter struct {

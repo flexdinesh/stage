@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"

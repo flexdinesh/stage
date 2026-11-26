@@ -8,11 +8,11 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
@@ -197,7 +197,7 @@ func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 			}
 			return ids
 		}, nil, nil)
-		svc := t3sync.NewForMachines(store, testHarnesses, set, nil)
+		svc := coordinator.NewForMachines(store, testHarnesses, set, nil)
 		d.Sync, d.Channels, d.Machines = svc, hub, hosts
 	})
 	j := e.join("laptop")

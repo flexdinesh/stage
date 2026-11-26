@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -27,7 +28,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -38,7 +38,7 @@ type env struct {
 	t       *testing.T
 	handler http.Handler // the /api router
 	fake    *t3.Fake
-	sync    *t3sync.Service
+	sync    *coordinator.Service
 	runner  *release.Runner
 	client  *client.Client
 	store   *db.Store
@@ -64,7 +64,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 		}
 		adapters[7] = other
 	}
-	svc := t3sync.NewWithAdapters(store, harness.MustRegistry(t3.Descriptor, opencode.Descriptor), adapters, log)
+	svc := coordinator.NewWithAdapters(store, harness.MustRegistry(t3.Descriptor, opencode.Descriptor), adapters, log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{

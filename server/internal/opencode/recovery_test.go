@@ -15,10 +15,10 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 type transportFunc func(*http.Request) (*http.Response, error)

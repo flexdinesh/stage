@@ -1,16 +1,16 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
 	"log/slog"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // placement is where the contract suite's harness runs: in the main

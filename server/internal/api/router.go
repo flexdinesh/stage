@@ -15,13 +15,13 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 

@@ -19,6 +19,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
@@ -33,7 +34,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/webui"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )

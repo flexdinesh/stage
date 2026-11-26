@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -33,7 +33,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	client := &replyClient{Fake: t3.NewFake()}
-	svc := t3sync.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	res, err := client.LaunchThread(ctx, t3.LaunchInput{ProjectID: "p", Title: "t"})
 	if err != nil {
 		t.Fatal(err)

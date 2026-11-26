@@ -12,11 +12,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/worker"
 )

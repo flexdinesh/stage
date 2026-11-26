@@ -9,12 +9,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -64,7 +64,7 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 			e := newEnv(t, func(d *api.Deps) {
 				d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, hostedFake)
 				// The local machine hosts with the case's profile.
-				d.Sync = t3sync.NewForMachines(d.Store, nil, machine.MustSet(machine.NewLocal(db.LocalMachine, tc.profile, nil)), nil)
+				d.Sync = coordinator.NewForMachines(d.Store, nil, machine.MustSet(machine.NewLocal(db.LocalMachine, tc.profile, nil)), nil)
 			})
 			var out harnessesReply
 			if code := e.do(http.MethodGet, "/api/harnesses", nil, &out); code != http.StatusOK {

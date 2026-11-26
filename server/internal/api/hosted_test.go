@@ -11,13 +11,13 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
@@ -135,7 +135,7 @@ func hostedEnv(t *testing.T, profile harness.Profile) (*env, *hostedConnector) {
 	e := newEnv(t, func(d *api.Deps) {
 		local := machine.NewLocal(db.LocalMachine, profile, nil)
 		set := machine.MustSet(local)
-		svc := t3sync.NewForMachines(d.Store, hostedHarnesses, set, nil)
+		svc := coordinator.NewForMachines(d.Store, hostedHarnesses, set, nil)
 		local.OnChange(svc.ConnectionsChanged)
 		conn = &hostedConnector{identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), hostedHarnesses), install: local.Install}
 		local.SetConnector(hostedKit.Kind, conn)
@@ -326,7 +326,7 @@ func TestHostedHarnessOnAnUndescribedRemoteMachineAnswersOffline(t *testing.T) {
 		set := machine.MustSet(machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil))
 		hosts := remote.NewHosts(set, hub, func(int64) []int64 { return nil }, nil, nil)
 		hosts.SetSetup(remote.SetupHooks{Kinds: []string{t3.Kind, opencode.Kind, hostedKit.Kind}, Active: d.Store.ActiveID})
-		svc := t3sync.NewForMachines(d.Store, hostedHarnesses, set, nil)
+		svc := coordinator.NewForMachines(d.Store, hostedHarnesses, set, nil)
 		d.Harnesses, d.Sync, d.Channels, d.Machines = hostedHarnesses, svc, hub, hosts
 		d.LiveConnectors = func() harness.Connectors {
 			c, err := set.Connectors(hostedHarnesses)

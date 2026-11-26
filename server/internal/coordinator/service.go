@@ -1,5 +1,5 @@
-// Package sync coordinates Stage-owned execution, discovery and recovery.
-package sync
+// Package coordinator coordinates Stage-owned execution, discovery and recovery.
+package coordinator
 
 import (
 	"context"

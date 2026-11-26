@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // Failures only a remote machine has: the worker channel loses a reply, the

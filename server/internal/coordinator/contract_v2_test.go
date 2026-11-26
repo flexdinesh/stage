@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // Two more fake harnesses prove the optional contract without T3 or

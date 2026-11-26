@@ -22,6 +22,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
@@ -31,7 +32,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -156,7 +156,7 @@ type env struct {
 	h      http.Handler
 	fake   *t3.Fake
 	t3     *flakyT3
-	sync   *t3sync.Service
+	sync   *coordinator.Service
 	runner *release.Runner
 	store  *db.Store
 }
@@ -173,7 +173,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
+	svc := coordinator.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)

@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // machineJSON is the machine in a harness list: its /api/machines shape

@@ -1,4 +1,4 @@
-package sync_test
+package coordinator_test
 
 import (
 	"bytes"
@@ -12,11 +12,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
-	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 type documentLinkConnector struct {
