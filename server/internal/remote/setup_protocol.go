@@ -41,8 +41,13 @@ const (
 	// KindClaudeGet and KindClaudeSave carry config.ClaudeSettings (the
 	// command, the config directory connected with, disconnected): Claude
 	// Code's setup holds no secrets.
-	KindClaudeGet        = "setup.claude.get"
-	KindClaudeSave       = "setup.claude.save"
+	KindClaudeGet  = "setup.claude.get"
+	KindClaudeSave = "setup.claude.save"
+	// KindCodexGet and KindCodexSave carry config.CodexSettings (the CLI
+	// path, connected): Codex's setup holds no secrets (`codex login` on
+	// that machine).
+	KindCodexGet         = "setup.codex.get"
+	KindCodexSave        = "setup.codex.save"
 	KindIdentityActive   = "setup.identity.active"
 	KindIdentitySwitch   = "setup.identity.switch"
 	KindIdentityGet      = "setup.identity.get"

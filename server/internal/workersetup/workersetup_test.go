@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
@@ -53,12 +55,14 @@ type rig struct {
 }
 
 // rigOptions shape the worker: its profile (default: a foreground worker
-// without local harnesses), Claude Code's machine-local environment, and
-// an older main server that serves no Claude Code setup calls.
+// without local harnesses), Claude Code's machine-local environment,
+// Codex's options (its daemon), and an older main server that serves no
+// setup calls with these prefixes.
 type rigOptions struct {
-	profile   harness.Profile
-	claude    *claudecodesetup.Options
-	oldServer bool
+	profile  harness.Profile
+	claude   *claudecodesetup.Options
+	codex    *codexsetup.Options
+	unserved []string
 }
 
 // registry is the main server's harnesses.
@@ -140,11 +144,11 @@ func (r *rig) startWorker() {
 	r.stop, r.done = cancel, make(chan error, 1)
 	host := func(id int64, call workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(id, r.opts.profile, machine.LocalOps{}))
-		if r.opts.oldServer {
-			// A main server from before Claude Code on workers.
+		if unserved := r.opts.unserved; len(unserved) > 0 {
+			// A main server from before these harnesses on workers.
 			up := call
 			call = func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
-				if strings.HasPrefix(kind, "setup.claude.") {
+				if slices.ContainsFunc(unserved, func(p string) bool { return strings.HasPrefix(kind, p) }) {
 					return nil, &workerchan.RemoteError{Code: workerchan.CodeUnknownKind, Message: "unknown kind " + kind}
 				}
 				return up(ctx, kind, body)
@@ -152,7 +156,7 @@ func (r *rig) startWorker() {
 		}
 		workersetup.Attach(workersetup.Options{
 			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath)},
-			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Claude: r.opts.claude, Logger: quiet(),
+			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Claude: r.opts.claude, Codex: r.opts.codex, Logger: quiet(),
 		})
 		return h
 	}

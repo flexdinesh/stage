@@ -73,6 +73,16 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		}
 		return Empty{}, p.SaveClaudeSettings(ctx, r)
 	})
+	handle(KindCodexGet, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
+		return p.CodexSettings(ctx)
+	})
+	handle(KindCodexSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r config.CodexSettings
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		return Empty{}, p.SaveCodexSettings(ctx, r)
+	})
 	handle(KindIdentityActive, func(_ context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r KindRequest
 		if err := decodeBody(body, &r); err != nil {

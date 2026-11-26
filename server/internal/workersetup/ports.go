@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
+	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -37,6 +38,7 @@ var (
 	_ opencodesetup.Settings   = Ports{}
 	_ opencodesetup.Identity   = Ports{}
 	_ claudecodesetup.Settings = Ports{}
+	_ codexsetup.Settings      = Ports{}
 	_ machine.Identity         = Ports{}
 )
 
@@ -143,6 +145,19 @@ func (p Ports) ClaudeSettings(ctx context.Context) (config.ClaudeSettings, error
 // server.
 func (p Ports) SaveClaudeSettings(ctx context.Context, c config.ClaudeSettings) error {
 	return p.call(ctx, remote.KindClaudeSave, c, nil)
+}
+
+// CodexSettings is the machine's Codex setup as the main server records it
+// (no secrets: `codex login` on this machine).
+func (p Ports) CodexSettings(ctx context.Context) (config.CodexSettings, error) {
+	var c config.CodexSettings
+	err := p.call(ctx, remote.KindCodexGet, nil, &c)
+	return c, err
+}
+
+// SaveCodexSettings saves the machine's Codex setup on the main server.
+func (p Ports) SaveCodexSettings(ctx context.Context, c config.CodexSettings) error {
+	return p.call(ctx, remote.KindCodexSave, c, nil)
 }
 
 // Active is the machine's active connection of kind (0: none).

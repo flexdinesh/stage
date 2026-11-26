@@ -168,7 +168,7 @@ Removing a finished session with `claude rm` completes its done task (**Complete
 
 ## Codex
 
-Stage talks to the Codex app-server daemon on its own machine, so Codex runs only where Stage runs on your computer: the desktop app (or Stage's per-user service), or `stage serve --local-harnesses`. It is unavailable in the Docker image and on workers. Stage stores no Codex credentials; log in with `codex login`.
+Stage talks to the Codex app-server daemon on the machine Codex runs on: where Stage runs on your computer (the desktop app or Stage's per-user service, or `stage serve --local-harnesses`), or a [worker](/docs/usage/workers) with local harnesses (the worker service, or `stage worker run --local-harnesses`). It is unavailable in the Docker image. Stage stores no Codex credentials; log in with `codex login`.
 
 ### Connect
 

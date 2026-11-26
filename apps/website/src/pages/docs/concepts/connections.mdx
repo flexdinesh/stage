@@ -14,8 +14,8 @@ Stage does not run agents itself. It hands each task to a **harness**, a service
 |---|---|
 | T3 Code | T3's MCP endpoint, with T3's OAuth and upload endpoints |
 | OpenCode V2 | OpenCode's V2 HTTP API (tested with 2.3.0) |
-| Codex | The Codex app-server daemon on the computer where Stage runs |
-| Claude Code | The `claude` command on the computer Stage runs on (background sessions) |
+| Codex | The Codex app-server daemon on its computer (where Stage runs, or a worker) |
+| Claude Code | The `claude` command on its computer (where Stage runs, or a worker; background sessions) |
 
 The harness keeps what it owns: models, workspaces and worktrees, conversations and its own UI. Stage keeps tasks, trees, journals, acceptance and handoff.
 
@@ -30,13 +30,13 @@ A new install has no connections. Until one is set up, the Dashboard shows **Con
 - **T3**: pair Stage with T3, in one click when T3 runs on the same machine, else with a code from `t3 pair`. T3 counts as connected only once paired; before that Stage never contacts it.
 - **OpenCode**: click **Connect** for the service on the same machine, or paste an `opencode pair` link from another machine.
 - **Codex**: click **Connect**. See [Codex](#codex).
-- **Claude Code**: click **Connect**. Stage checks the `claude` command and Claude's own login. Only on the computer Stage runs on (the desktop app, or `stage serve --local-harnesses`); see the [Claude Code guide](/docs/guides/claude-code).
+- **Claude Code**: click **Connect**. Stage checks the `claude` command and Claude's own login. Only on your computer: where Stage runs (the desktop app, or `stage serve --local-harnesses`), or on a [worker](/docs/usage/workers) with local harnesses (the worker service, or `stage worker run --local-harnesses`); never in the Docker image. See the [Claude Code guide](/docs/guides/claude-code).
 
 Setup details, addresses and tokens: [Connections reference](/docs/reference/connections).
 
 ## Codex
 
-Codex runs only where Stage runs on your computer: the desktop app (or Stage's per-user service), or `stage serve --local-harnesses`. It is unavailable in the Docker image and on worker machines.
+Codex runs on your computer: where Stage runs (the desktop app or Stage's per-user service, or `stage serve --local-harnesses`), or on a [worker](/docs/usage/workers) with local harnesses (the worker service, or `stage worker run --local-harnesses`). It is unavailable in the Docker image.
 
 - **Connect**: click **Connect** in Settings > Connections, or run `stage harness codex run connect`. Stage uses `codex` on your PATH; set **Codex CLI** to a path to use another (`stage harness codex set binary=PATH`).
 - **Signed out**: the panel shows the command that fixes it. Run `codex login`, then **Connect**. Stage stores no Codex credentials.

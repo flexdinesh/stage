@@ -6,7 +6,7 @@ showAskAi: false
 
 # Multiple machines
 
-Pick this setup when your harnesses run on more than one machine, or when Stage should live on an always-on host (a VM, a home server, a Kubernetes cluster) while the work happens on your laptops. One **main server** keeps the database, the backlog, journals, schedules and the UI. Each laptop or desktop joins it as a **worker**: it runs that machine's T3, OpenCode and Claude Code connections, keeps their credentials, and does the machine-local work such as Git checkouts.
+Pick this setup when your harnesses run on more than one machine, or when Stage should live on an always-on host (a VM, a home server, a Kubernetes cluster) while the work happens on your laptops. One **main server** keeps the database, the backlog, journals, schedules and the UI. Each laptop or desktop joins it as a **worker**: it runs that machine's T3, OpenCode, Claude Code and Codex connections, keeps their credentials, and does the machine-local work such as Git checkouts.
 
 ```txt
                  +-------------------------------+
@@ -82,9 +82,9 @@ Settings > Connections shows the machine online within seconds.
 
 ### Set up harnesses
 
-In Settings > Connections, use **Add connection** on the new machine to pair T3, connect OpenCode or connect Claude Code there. The setup runs on that machine through its worker. Credentials stay on the machine; the main server keeps only the connection and its status ([Connections reference](/docs/reference/connections)).
+In Settings > Connections, use **Add connection** on the new machine to pair T3, connect OpenCode, Claude Code or Codex there. The setup runs on that machine through its worker. Credentials stay on the machine; the main server keeps only the connection and its status ([Connections reference](/docs/reference/connections)).
 
-Claude Code runs as processes on the machine, with its own `claude` and login there. The worker service allows that. A worker started in a terminal does only with `stage worker run --local-harnesses`; otherwise **Add connection** lists Claude Code as unavailable and says so. A task's **Copy resume command** names the machine to run it on.
+Claude Code and Codex run as processes on the machine, with its own `claude` or `codex` and login there (Codex: `codex login`; Stage starts its daemon when it is down and never stops it). The worker service allows that. A worker started in a terminal does only with `stage worker run --local-harnesses`; otherwise **Add connection** lists them as unavailable and says so. A worker on an older Stage than the main server lists a harness it does not set up yet as unavailable: update Stage on that machine. A task's **Copy resume command** names the machine to run it on.
 
 :::
 
