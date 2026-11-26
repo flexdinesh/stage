@@ -71,7 +71,7 @@ them. 2, 3, 13 and 14 come from the evidence.
    restart), the correlator lists roster entries and transcript files under
    the workspace's project directory created after the dispatch and matches
    the marker in the first user prompt. Stage never launches again
-   ([execution.md](../execution.md#execution-contract-v2)). A seeded reserve
+   ([execution.md](../execution.md#launch-identity)). A seeded reserve
    (`-p --session-id U` then `--bg --resume U`) keeps the UUID but costs a
    model turn, writes a fake first exchange and runs it in the foreground:
    rejected.

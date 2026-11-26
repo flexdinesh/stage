@@ -11,7 +11,7 @@
 ## Context
 
 Stage grew four harnesses (T3 Code, OpenCode, Claude Code, Codex). The
-rules in [execution.md](../execution.md#design-rules) already said the
+rules in [execution.md](../execution.md#ownership-stage-and-the-harness) already said the
 harness keeps what it owns and product code reads descriptors and
 capabilities, never a harness name. The code drifted:
 
