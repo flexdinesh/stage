@@ -90,7 +90,7 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := r.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: id, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+	task, err := r.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: id, Title: "Work", Prompt: "Do it", ExecutionConfig: &execution.Config{Model: "haiku"}})
 	if err != nil {
 		t.Fatal(err)
 	}

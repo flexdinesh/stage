@@ -252,7 +252,7 @@ func TestHookEventsStatus(t *testing.T) {
 	go func() {
 		done <- a.Events(ctx, func(context.Context, execution.Observation) error { return nil })
 	}()
-	o, err := a.Launch(ctx, execution.Intent{RequestID: "r", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x", Workspace: execution.Workspace{Kind: "root"}}, execution.Checkpoint{}, nil)
+	o, err := a.Launch(ctx, execution.Intent{RequestID: "r", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x"}, execution.Checkpoint{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestHookEventsStatus(t *testing.T) {
 		t.Fatalf("launch args %q", args)
 	}
 	// Images go under the state dir (<data dir>/claude/images).
-	img := execution.Intent{RequestID: "r-img", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x", Workspace: execution.Workspace{Kind: "root"},
+	img := execution.Intent{RequestID: "r-img", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x",
 		Images: []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte("x")}}}
 	if _, err := a.Launch(ctx, img, execution.Checkpoint{}, nil); err != nil {
 		t.Fatal(err)

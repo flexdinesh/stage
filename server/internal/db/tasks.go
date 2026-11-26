@@ -45,7 +45,6 @@ type NewTask struct {
 	ProjectID       int64
 	Title           string
 	Prompt          string
-	Workspace       Workspace
 	InitialNote     string
 	AttachmentIDs   []int64 // staged images to attach (setAttachments)
 	StartAt         *time.Time
@@ -113,7 +112,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		originID = &value
 	}
 	id, err := tx.Tasks().Insert(ctx, store.TaskInsert{
-		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt, Workspace: in.Workspace,
+		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
 		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, Handoff: in.Handoff,
 		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: config,
 		CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
@@ -145,9 +144,6 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 	if err := addTaskEvent(ctx, tx, id, nil, StateBacklog, "created"); err != nil {
 		return 0, err
 	}
-	if err := checkBaseTask(ctx, tx, id); err != nil {
-		return 0, err
-	}
 	if len(in.AttachmentIDs) > 0 {
 		if err := setOwned(ctx, tx, store.OwnerTask, id, in.AttachmentIDs); err != nil {
 			return 0, err
@@ -176,7 +172,6 @@ type TaskPatch struct {
 	ProjectID           Optional[int64]            `json:"projectId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
-	Workspace           Optional[Workspace]        `json:"workspace"`
 	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 	Handoff             Optional[bool]             `json:"handoff"`       // append the needs' handoff at launch
 	StartMode           Optional[StartMode]        `json:"startMode"`     // null = inherit the tree's
@@ -189,7 +184,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
+	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
@@ -224,9 +219,9 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			}
 		}
 		u := store.TaskUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
-			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Handoff: p.Handoff, StartMode: p.StartMode}
+			Title: p.Title, Prompt: p.Prompt, Handoff: p.Handoff, StartMode: p.StartMode}
 		if p.ConnectionID.Set {
-			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig); err != nil {
 				return err
 			}
 		}
@@ -236,34 +231,15 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			}
 		}
 		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
-			!p.Workspace.Set && !p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
+			!p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
-		if err := tx.Tasks().Update(ctx, id, u); err != nil {
-			return err
-		}
-		if p.Workspace.Set {
-			return checkBaseTask(ctx, tx, id)
-		}
-		return nil
+		return tx.Tasks().Update(ctx, id, u)
 	})
 	if err != nil {
 		return Task{}, err
 	}
 	return s.GetTask(ctx, id)
-}
-
-// checkBaseTask: workspace.baseTaskId, when set, names one of the task's
-// needs (Invalid otherwise).
-func checkBaseTask(ctx context.Context, tx store.Tx, id int64) error {
-	base, isNeed, err := tx.Tasks().BaseTask(ctx, id)
-	if err != nil {
-		return err
-	}
-	if base != nil && !isNeed {
-		return Invalid("workspace.baseTaskId: task %d is not a need of this task", *base)
-	}
-	return nil
 }
 
 // DeleteTask removes a task without notes or execution history;
@@ -324,8 +300,6 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	if src.Adopted {
 		return Task{}, Conflict("task %d tracks an adopted session: it has no prompt to duplicate", id)
 	}
-	ws := src.Workspace
-	ws.BaseTaskID = nil
 	copyImages := func(tx store.Tx, dst int64) error {
 		if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
 			return err
@@ -334,7 +308,6 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	}
 	return s.createTask(ctx, NewTask{
 		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
-		Workspace: ws,
 	}, copyImages)
 }
 
@@ -463,4 +436,3 @@ func nonNilIDs(ids []int64) []int64 {
 	}
 	return ids
 }
-

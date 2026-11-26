@@ -43,7 +43,7 @@ func twoMachineSetup(t *testing.T) (*db.Store, *coordinator.Service, map[int64]*
 	fakes := map[int64]*documentHarness{2: {}, 3: {}}
 	tasks := map[int64]db.Task{}
 	for id := range fakes {
-		task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, ConnectionID: id, Title: "Write", Prompt: "p", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed"}})
+		task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, ConnectionID: id, Title: "Write", Prompt: "p", ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 
 	// A schedule targets a machine and harness through its connection: its
 	// task launches on that machine only.
-	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 3, ProjectID: tasks[3].ProjectID, Title: "Nightly", Prompt: "p", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: tasks[3].ExecutionConfig, Cron: "0 3 * * *", Tz: "UTC"})
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 3, ProjectID: tasks[3].ProjectID, Title: "Nightly", Prompt: "p", ExecutionConfig: tasks[3].ExecutionConfig, Cron: "0 3 * * *", Tz: "UTC"})
 	if err != nil {
 		t.Fatal(err)
 	}

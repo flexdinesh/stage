@@ -24,8 +24,7 @@ func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int6
 	t.Helper()
 	sc, err := s.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
 		ProjectID: projectID, Title: "nightly", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"},
-		Cron:      cron, Tz: "UTC",
+		Cron: cron, Tz: "UTC",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +238,7 @@ func caseTaskStartAt(t *testing.T, open Factory) {
 	tz := "Asia/Kolkata"
 	b, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
 		ProjectID: p.ID, Title: "b", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, StartAt: &at, StartTz: &tz,
+		StartAt: &at, StartTz: &tz,
 	})
 	if err != nil || b.StartAt == nil || !b.StartAt.Equal(at) || *b.StartTz != tz {
 		t.Fatalf("create = %+v %v", b, err)

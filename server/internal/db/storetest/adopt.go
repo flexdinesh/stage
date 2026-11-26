@@ -115,7 +115,7 @@ func caseCreateTaskNeedsSession(t *testing.T, open Factory) {
 	}
 	other := mustTask(t, s, ctx, p.ID, "other", nil)
 	b, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "follow-up", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller")), Needs: []int64{other.ID}})
+		NeedsSession: ptr(session("caller")), Needs: []int64{other.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,14 +128,14 @@ func caseCreateTaskNeedsSession(t *testing.T, open Factory) {
 	}
 	// A second task needing the same session reuses its task.
 	c, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "second", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller"))})
+		NeedsSession: ptr(session("caller"))})
 	if err != nil || !slices.Equal(c.Needs, []int64{owner.ID}) || *c.TreeID != *b.TreeID {
 		t.Fatalf("second %+v %v", c, err)
 	}
 	var invalid *db.InvalidError
 	at := now.Add(time.Hour)
 	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller")), StartAt: &at, StartTz: ptr("UTC")}); !errors.As(err, &invalid) {
+		NeedsSession: ptr(session("caller")), StartAt: &at, StartTz: ptr("UTC")}); !errors.As(err, &invalid) {
 		t.Fatalf("start time with a session need: %v", err)
 	}
 }

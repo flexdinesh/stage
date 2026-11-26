@@ -77,21 +77,32 @@ func printCapabilities(w io.Writer, c execution.Capabilities) {
 	for _, m := range c.Models {
 		fmt.Fprintf(w, "%s  %s  %s\n", m.ID, m.Label, m.Reason)
 	}
-	for _, v := range c.Workspaces {
-		fmt.Fprintf(w, "workspace %s  %s\n", v.ID, v.Reason)
-	}
 	for _, v := range c.Modes {
 		fmt.Fprintf(w, "mode %s  %s\n", v.ID, v.Reason)
 	}
 	for _, o := range c.Options {
-		vals := make([]string, len(o.Values))
-		for i, v := range o.Values {
-			b, _ := v.MarshalJSON()
-			vals[i] = strings.Trim(string(b), `"`)
+		vals := "TEXT"
+		if o.EffectiveKind() != execution.OptionText {
+			vals = optionValues(o.Values, "|")
 		}
-		fmt.Fprintf(w, "option %s=%s  (any model)\n", o.ID, strings.Join(vals, "|"))
+		when := ""
+		if o.DependsOn != nil {
+			when = fmt.Sprintf(", with %s=%s", o.DependsOn.Option, optionValues([]execution.OptionValue{o.DependsOn.Value}, ""))
+		}
+		fmt.Fprintf(w, "option %s=%s  %s (any model%s)\n", o.ID, vals, o.Title(), when)
 	}
 	fmt.Fprintln(w, "Use --json for model options, permissions and operation availability.")
+}
+
+// optionValues joins option values as the CLI prints them (strings
+// unquoted).
+func optionValues(vs []execution.OptionValue, sep string) string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		b, _ := v.MarshalJSON()
+		out[i] = strings.Trim(string(b), `"`)
+	}
+	return strings.Join(out, sep)
 }
 
 func printTaskRows(w io.Writer, res agenttools.TasksOut) {
@@ -131,11 +142,12 @@ func printTask(w io.Writer, t client.Task) {
 		permission, mode = cfg.Permission, cfg.Mode
 	}
 	fmt.Fprintf(w, "  model    %s  %s  %s\n", model, permission, mode)
-	switch {
-	case t.Workspace.FromPredecessor():
-		fmt.Fprintf(w, "  worktree from %s's branch (configured ref %s, branch %s)\n", predecessorLabel(t), orDash(&t.Workspace.BaseRef), orDash(t.Workspace.Branch))
-	case t.Workspace.Type == "worktree":
-		fmt.Fprintf(w, "  worktree %s (branch %s)\n", t.Workspace.BaseRef, orDash(t.Workspace.Branch))
+	if cfg := t.ExecutionConfig; cfg != nil && len(cfg.Options) > 0 {
+		opts := make([]string, len(cfg.Options))
+		for i, o := range cfg.Options {
+			opts[i] = o.ID + "=" + optionValues([]execution.OptionValue{o.Value}, "")
+		}
+		fmt.Fprintf(w, "  options  %s\n", strings.Join(opts, " "))
 	}
 	if t.TreeID != nil {
 		mode := "-"
@@ -185,7 +197,6 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	printTask(w, d.Task)
 	printUsage(w, d.Usage)
 	printHandoff(w, d)
-	printLaunchBase(w, d.CurrentLaunchBase)
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
 	if d.FinalReply != nil {
 		fmt.Fprintf(w, "\nFinal reply\n%s\n", d.FinalReply.Text)
@@ -233,36 +244,6 @@ func needLabels(ids []int64) string {
 		labels[i] = fmt.Sprintf("#%d", id)
 	}
 	return strings.Join(labels, " ")
-}
-
-// predecessorLabel names the need a worktree starts from: workspace
-// baseTaskId, else the sole need, else `a need`.
-func predecessorLabel(t client.Task) string {
-	switch {
-	case t.Workspace.BaseTaskID != nil:
-		return fmt.Sprintf("#%d", *t.Workspace.BaseTaskID)
-	case len(t.Needs) == 1:
-		return fmt.Sprintf("#%d", t.Needs[0])
-	}
-	return "a need"
-}
-
-// printLaunchBase prints the base the current launch attempt used:
-// `base     feat-x (from #12)` or `base     origin/main (fallback: <reason>)`.
-func printLaunchBase(w io.Writer, b *db.LaunchBase) {
-	if b == nil {
-		return
-	}
-	if b.Source == db.LaunchBasePredecessor {
-		from := db.HandoffSource{TaskID: b.SourceTaskID, Title: b.SourceTitle}.Label()
-		fmt.Fprintf(w, "  base     %s (from %s)\n", b.BaseRef, from)
-		return
-	}
-	reason := ""
-	if b.Reason != nil {
-		reason = *b.Reason
-	}
-	fmt.Fprintf(w, "  base     %s (fallback: %s)\n", b.BaseRef, reason)
 }
 
 func printTreeRows(w io.Writer, res agenttools.TreesOut) {

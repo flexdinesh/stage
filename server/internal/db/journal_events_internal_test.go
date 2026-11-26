@@ -13,7 +13,7 @@ import (
 // under thread, ending running.
 func launchedTask(t *testing.T, s *Store, ctx context.Context, project int64, thread string) int64 {
 	t.Helper()
-	task, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: project, Title: "t", Prompt: "p", Workspace: Workspace{Type: "root"}})
+	task, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: project, Title: "t", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	gosync "sync"
 	"sync/atomic"
 	"time"
@@ -25,30 +24,31 @@ type Result struct {
 	Threads     int       `json:"threads"`
 	FinishedAt  time.Time `json:"finishedAt"`
 }
+
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
-	store                                                                        *db.Store
-	machines                                                                     *machine.Set // every machine's adapters, connectors and ops
-	log                                                                          *slog.Logger
-	OnTransition                                                                 func(context.Context, Change)
-	OnThreadChange                                                               func(context.Context, ThreadChange)
-	OnAccepted                                                                   func()                         // a completion was inferred (tree release may follow)
-	OnFullSync                                                                   func()                         // a full sync (Sync now) finished
+	store          *db.Store
+	machines       *machine.Set // every machine's adapters, connectors and ops
+	log            *slog.Logger
+	OnTransition   func(context.Context, Change)
+	OnThreadChange func(context.Context, ThreadChange)
+	OnAccepted     func() // a completion was inferred (tree release may follow)
+	OnFullSync     func() // a full sync (Sync now) finished
 	// OnConnectionSynced runs after a connection's full sync succeeded
 	// (the composition records it where a harness's setup shows it).
-	OnConnectionSynced func(ctx context.Context, connection int64, at time.Time) error
-	Harnesses                                                                    *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
-	PublicURL                                                                    string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
-	CLI                                                                          string                         // installed CLI name (install.CLIName), named in launch journal instructions
-	Gateways                                                                     func(machineID int64) []string // a remote machine's agent gateway URLs (workerchan.Hub.Gateways), named in its launch journal instructions; nil: none known
+	OnConnectionSynced                                             func(ctx context.Context, connection int64, at time.Time) error
+	Harnesses                                                      *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
+	PublicURL                                                      string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                            string                         // installed CLI name (install.CLIName), named in launch journal instructions
+	Gateways                                                       func(machineID int64) []string // a remote machine's agent gateway URLs (workerchan.Hub.Gateways), named in its launch journal instructions; nil: none known
 	FullSyncEvery, PollEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
-	syncs                                                                        gosync.Map // connection ID to *syncState (full syncs)
-	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
-	kickSync                                                                     chan struct{}
-	locks                                                                        gosync.Map
-	started                                                                      time.Time
-	watchSeeded                                                                  gosync.Map // connection IDs with a successful first observation pass
+	syncs                                                          gosync.Map // connection ID to *syncState (full syncs)
+	lastStalePoll                                                  gosync.Map // connection ID to *atomic.Int64
+	kickSync                                                       chan struct{}
+	locks                                                          gosync.Map
+	started                                                        time.Time
+	watchSeeded                                                    gosync.Map // connection IDs with a successful first observation pass
 }
 
 // hostsAll is the profile of a machine handed its adapters directly: it
@@ -600,22 +600,11 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if _, ok := execution.As[execution.Correlator](a); correlated && !ok {
 		return t, db.Conflict("Launch unavailable: this harness cannot reconcile a launch it does not reserve.")
 	}
-	if t.Workspace.FromPredecessor() {
-		if op := features.Operations[execution.OpPredecessorBase]; !op.Available {
-			return t, db.Conflict("Predecessor base unavailable: %s", op.Reason)
-		}
-	}
 	ps, e := s.inventory(ctx, t.ConnectionID, a)
 	if e != nil {
 		return t, &db.ConflictError{Code: "connection_unavailable", Msg: "Cannot verify the workspace. Check its connection in Settings."}
 	}
 	if _, e = s.store.RefreshWorkspaces(ctx, t.ConnectionID, ps); e != nil {
-		return t, e
-	}
-	// Resolve a requested base before claiming anything. No fallback is implicit.
-	workspace, e := s.workspace(ctx, t, a)
-	if e != nil {
-		_ = s.store.NoteBlockedLaunch(ctx, id, e.Error())
 		return t, e
 	}
 	config := t.ExecutionConfig
@@ -642,21 +631,6 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 			}
 		}
 	}()
-	if t.Workspace.FromPredecessor() {
-		pick := t.Workspace.BaseTaskID
-		if pick == nil && len(t.Needs) == 1 {
-			pick = &t.Needs[0]
-		}
-		if pick != nil {
-			need, err := s.store.GetTask(ctx, *pick)
-			if err != nil {
-				return t, err
-			}
-			if err = s.store.RecordLaunchBase(ctx, id, db.LaunchBase{Session: need.Session, Attempt: t.LaunchAttempt, BaseRef: workspace.Base, Source: db.LaunchBasePredecessor, SourceTaskID: pick, SourceTitle: need.Title}); err != nil {
-				return t, err
-			}
-		}
-	}
 	dest, e := s.store.LaunchDestination(ctx, id, t.LaunchAttempt)
 	if e != nil {
 		return t, e
@@ -678,7 +652,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
-	in := execution.Intent{RequestID: claim.RequestID, ConnectionID: t.ConnectionID, Project: dest.ExternalProjectID, Directory: dest.Workspace, Title: t.Title, Prompt: prompt, Config: *config, Workspace: workspace, Images: []execution.Image{}}
+	in := execution.Intent{RequestID: claim.RequestID, ConnectionID: t.ConnectionID, Project: dest.ExternalProjectID, Directory: dest.Workspace, Title: t.Title, Prompt: prompt, Config: *config, Images: []execution.Image{}}
 	if correlated {
 		in.Marker = execution.LaunchMarker(claim.RequestID)
 		in.Prompt += "\n\n" + in.Marker
@@ -803,39 +777,4 @@ func (s *Service) correlated(ctx context.Context, a execution.Adapter, attempt *
 		return o, errors.New("no session carries this launch's marker; if it started, link the session")
 	}
 	return o, err
-}
-
-func (s *Service) workspace(ctx context.Context, t db.Task, a execution.Adapter) (execution.Workspace, error) {
-	w := execution.Workspace{Kind: t.Workspace.Type, Base: t.Workspace.BaseRef, FromRemote: strings.HasPrefix(t.Workspace.BaseRef, "origin/") || strings.HasPrefix(t.Workspace.BaseRef, "upstream/")}
-	if t.Workspace.Branch != nil {
-		w.Branch = *t.Workspace.Branch
-	}
-	if !t.Workspace.FromPredecessor() {
-		return w, nil
-	}
-	var pick int64
-	if t.Workspace.BaseTaskID != nil {
-		pick = *t.Workspace.BaseTaskID
-	} else if len(t.Needs) == 1 {
-		pick = t.Needs[0]
-	} else {
-		return w, db.Conflict("Choose the predecessor or an explicit base before starting.")
-	}
-	need, e := s.store.GetTask(ctx, pick)
-	if e != nil {
-		return w, e
-	}
-	if need.ConnectionID != t.ConnectionID || need.ProjectID != t.ProjectID || need.Session == nil {
-		return w, db.Conflict("The predecessor cannot supply a branch in this harness and project. Choose a base.")
-	}
-	o, e := a.Observe(ctx, *need.Session)
-	if e != nil {
-		return w, db.Conflict("Predecessor branch unavailable. Restore the connection or choose a base.")
-	}
-	if !o.Base.Available {
-		return w, db.Conflict("%s Choose a base.", o.Base.Reason)
-	}
-	w.Base = o.Branch
-	w.FromRemote = false
-	return w, nil
 }

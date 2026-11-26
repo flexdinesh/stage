@@ -96,8 +96,7 @@ func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Say OK", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}})
+	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Say OK", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}

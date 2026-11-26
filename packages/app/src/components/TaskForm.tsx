@@ -31,9 +31,8 @@ import {
   type RepeatSpec,
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
-import { branchLabel, effectiveChoice, predecessorName, workspaceChoice, workspaceOptions, type WorkspaceChoice } from "../lib/launchbase.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
-import { blockedStartModes, formWorkspace, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { LaunchBlockAlert, useLaunchGate } from "./LaunchGate.tsx";
@@ -88,10 +87,6 @@ interface FormState {
   projectId: string;
   title: string;
   prompt: string;
-  /** root, worktree from baseRef, or worktree from a need's branch (baseRef retained for an explicit ref choice). */
-  workspaceType: WorkspaceChoice;
-  baseRef: string;
-  branch: string;
   notes: string;
   mode: StartMode;
   /** Append each need's handoff at launch (a task with needs). */
@@ -114,7 +109,6 @@ type Template = Pick<
   | "projectId"
   | "title"
   | "prompt"
-  | "workspace"
 >;
 
 function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeStart" | "startLocal" | "repeat" | "tz"> {
@@ -122,9 +116,6 @@ function fromTemplate(t: Template): Omit<FormState, "mode" | "handoff" | "treeSt
     projectId: String(t.projectId),
     title: t.title,
     prompt: t.prompt,
-    workspaceType: workspaceChoice(t.workspace),
-    baseRef: t.workspace.type === "worktree" ? t.workspace.baseRef : "origin/main",
-    branch: t.workspace.type === "worktree" ? (t.workspace.branch ?? "") : "",
     notes: "",
   };
 }
@@ -185,9 +176,6 @@ function initialState(
     projectId: defaultProjectId === undefined ? "" : String(defaultProjectId),
     title: "",
     prompt: "",
-    workspaceType: "root",
-    baseRef: "origin/main",
-    branch: "",
     notes: "",
     mode: defaultMode ?? newModes(tree)[0] ?? "now",
   };
@@ -260,8 +248,6 @@ function TaskFormDrawer({
     bound,
     caps,
     acceptsImages,
-    supportsPredecessor,
-    harnessWorktree,
     prefilled,
     draftConfig,
     setDraftConfig,
@@ -282,15 +268,6 @@ function TaskFormDrawer({
   const block = selectedProject === undefined || connection === 0 ? null : launchGate({ connectionId: connection, projectId: selectedProject.id, projectTitle: selectedProject.title });
   const offModes = blockedStartModes(modes, block !== null, opened === null ? null : opened.state.mode);
   const mode: StartMode = offModes.includes(s.mode) ? "backlog" : s.mode;
-  // The need a worktree can stack on (editing a task with needs); baseTaskId is kept from the task.
-  const taskWs = task?.workspace;
-  const baseTaskId = taskWs?.type === "worktree" ? (taskWs.baseTaskId ?? null) : null;
-  const predName = task === undefined ? null : predecessorName(task);
-  const wsChoice = effectiveChoice(s.workspaceType, predName);
-  const workspaces = workspaceOptions(supportsPredecessor ? predName : null, wsChoice === "predecessor").filter(option => {
-    const kind = option.value === "predecessor" ? "worktree" : option.value;
-    return option.value === wsChoice || !caps.data?.workspaces || caps.data.workspaces.some(w => w.available && w.id === kind);
-  });
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
   // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
@@ -306,7 +283,6 @@ function TaskFormDrawer({
       prompt: s.prompt,
       connectionId: connection,
       executionConfig: effectiveConfig,
-      workspace: formWorkspace(wsChoice, s.baseRef, s.branch, baseTaskId, harnessWorktree),
     };
   }
 
@@ -359,8 +335,6 @@ function TaskFormDrawer({
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
     full && unverifiedConfig && "verify or clear saved settings",
     full && !acceptsImages && images.items.length > 0 && "remove images",
-    full && harnessWorktree && wsChoice !== "root" && ((wsChoice === "predecessor" && !supportsPredecessor) || s.baseRef !== "" || s.branch !== "") && "resolve workspace base or branch",
-    !harnessWorktree && wsChoice !== "root" && s.baseRef.trim() === "" && (wsChoice === "predecessor" ? "configured base ref" : "base ref"),
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -495,34 +469,6 @@ function TaskFormDrawer({
           {unverifiedConfig ? <p className="text-small">Connect and bind this harness to verify saved choices, or clear each unavailable choice above.</p> : null}
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
         </> : null}
-        <fieldset disabled={!full || !connection} className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-55 md:grid-cols-2">
-          <FieldGroup
-            label="Workspace"
-            start
-            hint={harnessWorktree && supportsPredecessor && wsChoice === "predecessor" ? `${harnesses.name(connection)} makes the worktree from ${branchLabel(predName)} and names its branch.` : undefined}
-          >
-            <Segmented
-              label="Workspace"
-              options={workspaces}
-              value={wsChoice}
-              onChange={(workspaceType) => set(harnessWorktree ? {workspaceType,baseRef:"",branch:""} : {workspaceType})}
-            />
-          </FieldGroup>
-          {harnessWorktree && wsChoice !== "root" && (s.baseRef || s.branch || (wsChoice === "predecessor" && !supportsPredecessor)) ? <Alert>{caps.data?.operations.worktreeBase?.reason || "This harness chooses the worktree base and branch."} Saved base: {s.baseRef || wsChoice}. Saved branch: {s.branch || "default"}. <Button small onClick={()=>set({workspaceType: wsChoice === "predecessor" && supportsPredecessor ? "predecessor" : "worktree",baseRef:"",branch:""})}>Use {harnesses.name(connection)} worktree defaults</Button></Alert> : null}
-          {!harnessWorktree && wsChoice !== "root" ? (
-            <>
-              <Field
-                label={wsChoice === "predecessor" ? "Configured base ref" : "Base ref"}
-                hint={wsChoice === "predecessor" ? `Switch to a ref-based workspace to use this ref if ${predName ?? "a need"} has no usable branch.` : undefined}
-              >
-                {(id) => <Input id={id} value={s.baseRef} onChange={(e) => set({ baseRef: e.target.value })} />}
-              </Field>
-              <Field label="Branch" hint={mode === "repeat" ? `Empty = ${harnesses.name(connection)} picks a name each run.` : `Empty = ${harnesses.name(connection)} picks a name.`}>
-                {(id) => <Input id={id} value={s.branch} onChange={(e) => set({ branch: e.target.value })} />}
-              </Field>
-            </>
-          ) : null}
-        </fieldset>
         {prefilled === undefined || draftConfig ? null : (
           <Hint className="-mt-1.5">model prefilled from the {connectionName(connection)} pin (Settings › Connections)</Hint>
         )}
@@ -654,9 +600,6 @@ function useHarnessConfig(
     bound,
     caps,
     acceptsImages: operation("images"),
-    supportsPredecessor: operation("predecessorBase"),
-    // A harness that chooses the worktree base and branch itself takes neither from Stage.
-    harnessWorktree: !operation("worktreeBase"),
     prefilled,
     draftConfig,
     setDraftConfig,

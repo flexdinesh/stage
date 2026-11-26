@@ -17,7 +17,6 @@ type Schedule struct {
 	ProjectTitle    string            `json:"projectTitle"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
-	Workspace       Workspace         `json:"workspace"`
 	Notes           string            `json:"notes"`
 	Attachments     []Attachment      `json:"attachments"`
 	Cron            string            `json:"cron"`
@@ -64,7 +63,6 @@ type ScheduleInsert struct {
 	ProjectID       int64
 	Title           string
 	Prompt          string
-	Workspace       Workspace
 	Notes           string
 	Cron            string
 	Tz              string
@@ -95,7 +93,6 @@ type ScheduleUpdate struct {
 	ProjectID       Optional[int64]
 	Title           Optional[string]
 	Prompt          Optional[string]
-	Workspace       Optional[Workspace]
 	Notes           Optional[string]
 	Cron            Optional[string]
 	Tz              Optional[string]
@@ -108,7 +105,6 @@ type ScheduleTemplate struct {
 	ProjectID       int64
 	Title           string
 	Prompt          string
-	Workspace       Workspace
 	Notes           string
 	Tz              string
 	ConnectionID    int64

@@ -15,7 +15,7 @@ type schedules struct{ *runner }
 func (t *tx) Schedules() store.Schedules { return schedules{t.r} }
 
 const scheduleSelect = `
-SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.workspace, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
+SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.notes, s.cron, s.tz, s.paused, s.next_run_at,
   (SELECT r.fire_at FROM schedule_runs r WHERE r.schedule_id = s.id ORDER BY r.id DESC LIMIT 1),
   (SELECT max(t.id) FROM tasks t WHERE t.schedule_id = s.id),
   (SELECT t.state FROM tasks t WHERE t.schedule_id = s.id ORDER BY t.id DESC LIMIT 1),
@@ -27,14 +27,11 @@ JOIN projects p ON p.id = s.project_id`
 
 func scanSchedule(row rowScanner) (store.Schedule, error) {
 	var s store.Schedule
-	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.Workspace, &s.Notes, &s.Cron, &s.Tz,
+	err := row.Scan(&s.ID, &s.ProjectID, &s.ProjectTitle, &s.Title, &s.Prompt, &s.Notes, &s.Cron, &s.Tz,
 		&s.Paused, &s.NextRunAt, &s.LastRunAt, &s.LastTaskID, &s.LastTaskState, &s.CreatedAt, &s.UpdatedAt,
 		&s.Attachments, &s.ConnectionID, &s.OriginSession, &s.ExecutionConfig, &s.CreatedBy, &s.SourceMachineID)
 	if err != nil {
 		return store.Schedule{}, notFound(err)
-	}
-	if s.Workspace.Type == "" {
-		s.Workspace.Type = "root"
 	}
 	return s, nil
 }
@@ -70,10 +67,10 @@ func (r schedules) Exists(ctx context.Context, id int64) (bool, error) {
 func (r schedules) Insert(ctx context.Context, in store.ScheduleInsert) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `
-INSERT INTO schedules (project_id, title, prompt, workspace, notes, cron, tz, paused, next_run_at, origin_session_id,
+INSERT INTO schedules (project_id, title, prompt, notes, cron, tz, paused, next_run_at, origin_session_id,
   execution_config, connection_id, created_by_user_id, source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
-		in.ProjectID, in.Title, in.Prompt, in.Workspace, in.Notes,
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+		in.ProjectID, in.Title, in.Prompt, in.Notes,
 		in.Cron, in.Tz, in.Paused, in.NextRunAt, in.OriginSessionID, in.ExecutionConfig, in.ConnectionID,
 		in.CreatedBy, in.SourceMachineID,
 	).Scan(&id)
@@ -106,9 +103,6 @@ func (r schedules) Update(ctx context.Context, id int64, u store.ScheduleUpdate)
 	}
 	if u.Prompt.Set {
 		set("prompt", u.Prompt.V)
-	}
-	if u.Workspace.Set {
-		set("workspace", u.Workspace.V)
 	}
 	if u.Notes.Set {
 		set("notes", u.Notes.V)
@@ -152,8 +146,8 @@ WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 func (r schedules) Template(ctx context.Context, id int64) (store.ScheduleTemplate, error) {
 	var in store.ScheduleTemplate
 	err := r.QueryRow(ctx, `
-SELECT project_id, title, prompt, workspace, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config,created_by_user_id FROM schedules WHERE id = $1`, id).
-		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.Workspace, &in.Notes, &in.Tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig, &in.CreatedBy)
+SELECT project_id, title, prompt, notes, tz, connection_id,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=schedules.origin_session_id),execution_config,created_by_user_id FROM schedules WHERE id = $1`, id).
+		Scan(&in.ProjectID, &in.Title, &in.Prompt, &in.Notes, &in.Tz, &in.ConnectionID, &in.OriginSession, &in.ExecutionConfig, &in.CreatedBy)
 	return in, notFound(err)
 }
 

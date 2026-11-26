@@ -30,9 +30,9 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	avail := execution.Availability{Available: true, Reason: "why"}
 	choice := execution.Choice{ID: "c", Label: "C", Availability: avail}
 	def := execution.BoolValue(true)
-	option := execution.Option{ID: "effort", Values: []execution.OptionValue{execution.StringValue("high"), execution.BoolValue(false)}, Default: &def}
+	option := execution.Option{ID: "effort", Kind: execution.OptionChoice, Label: "Effort", Values: []execution.OptionValue{execution.StringValue("high"), execution.BoolValue(false)}, Default: &def,
+		DependsOn: &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}}
 	cfg := execution.Config{Model: "brain-7", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}, {ID: "fast", Value: execution.BoolValue(true)}}, Permission: "full-access", Mode: "plan"}
-	workspace := execution.Workspace{Kind: "worktree", Base: "origin/main", Branch: "feat", FromRemote: true}
 	observation := execution.Observation{
 		ModelLabel: "Brain 7", Parent: &execution.SessionRef{ConnectionID: 7, ExternalSessionID: "parent"}, Config: cfg, Session: ref,
 		Project: "p", Title: "t", State: "running", Active: true, Archived: true, Child: true, Branch: "feat", Directory: "/w",
@@ -41,7 +41,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Reply:     &execution.Reply{ItemID: "i", RunID: "r", MessageID: "m", Text: "done", Truncated: true, Position: 2, UpdatedAt: at},
 		Usage:     &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
 		Artifacts: []execution.Artifact{{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "reply", State: "open"}},
-		Base:      avail, Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
+		Closed:    &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
 	}
 	binding := db.ProjectBinding{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Origin: db.BindingPath}
 	samples := map[string]any{
@@ -57,10 +57,10 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",
 			Operations: map[execution.Op]execution.Availability{execution.OpLaunch: avail}, Models: []execution.Model{{Choice: choice, Group: "g", Options: []execution.Option{option}, Permissions: []execution.Choice{choice}}},
-			Modes: []execution.Choice{choice}, Workspaces: []execution.Choice{choice},
+			Modes: []execution.Choice{choice},
 		},
 		"Intent": execution.Intent{
-			RequestID: "req-1", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do it", Config: cfg, Workspace: workspace,
+			RequestID: "req-1", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do it", Config: cfg,
 			Images: []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte{0, 1, 2}}}, Marker: execution.LaunchMarker("req-1"),
 		},
 		"Checkpoint":  execution.Checkpoint{Version: 2, Data: json.RawMessage(`{"thread":"t-1"}`)},

@@ -83,8 +83,7 @@ func TestScheduledTaskInheritsScheduleCreator(t *testing.T) {
 	p := mustProject(t, s, ctx, "proj")
 	sc, err := s.CreateSchedule(as2, db.NewSchedule{ConnectionID: dbtest.T3Connection,
 		ProjectID: p.ID, Title: "nightly", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"},
-		Cron:      "*/5 * * * *", Tz: "UTC", Notes: "remember",
+		Cron: "*/5 * * * *", Tz: "UTC", Notes: "remember",
 	})
 	if err != nil {
 		t.Fatal(err)

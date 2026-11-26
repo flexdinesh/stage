@@ -321,15 +321,6 @@ func (r trees) DropNeeds(ctx context.Context, taskID int64) ([]store.TreeEdge, e
 	return r.deleteNeeds(ctx, `task_id = $1 OR need_id = $1`, taskID)
 }
 
-func (r trees) ClearStaleBases(ctx context.Context) error {
-	_, err := r.Exec(ctx, `
-UPDATE tasks SET workspace = jsonb_set(workspace, '{baseTaskId}', 'null'::jsonb)
-WHERE workspace->>'baseTaskId' IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = tasks.id
-    AND to_jsonb(n.need_id) = tasks.workspace->'baseTaskId')`)
-	return err
-}
-
 func (r trees) NeedsState(ctx context.Context, taskID int64) (store.NeedsState, error) {
 	var n store.NeedsState
 	err := r.QueryRow(ctx, `SELECT state, tree_id, start_at FROM tasks WHERE id = $1`, taskID).Scan(&n.State, &n.TreeID, &n.StartAt)

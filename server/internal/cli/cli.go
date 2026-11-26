@@ -188,10 +188,10 @@ Usage:
   stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
-                   [--start-mode auto|manual|inherit] [--base-task ID]
+                   [--start-mode auto|manual|inherit]
                    [--start-at YYYY-MM-DDTHH:mm --tz ZONE] [--start] [--handoff=false]
   stage task edit ID [config] [--start-at TIME --tz ZONE | --start-at ""] [--handoff=true|false]
-                   [--start-mode auto|manual|inherit] [--base-task ID]
+                   [--start-mode auto|manual|inherit]
   stage task needs ID [NEED...]       replace a backlog task's needs (none clears them)
   stage task rm|start|stop|dup ID     start requires completed prerequisites;
                                       rm only for a task that never started
@@ -228,8 +228,8 @@ Usage:
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
 
-Config: --project P --connection ID --execution-config JSON (models ls shows the choices)
-        --workspace root|worktree --base-ref REF --branch NAME --base ref|predecessor
+Config: --project P --connection ID --execution-config JSON (models ls shows the choices,
+        including launch options such as a worktree, its base ref or branch)
         --prompt-file PATH --image PATH...
 Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
 Trees: joining a tree without --needs makes a parallel root; --needs ID runs it after

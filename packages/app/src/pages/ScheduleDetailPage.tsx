@@ -32,7 +32,7 @@ import {
   needEdgeClass,
   ConfirmInline,
 } from "../components/ui.tsx";
-import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
+import { configModelText, dateTime, executionModes } from "../lib/format.ts";
 import { useIdParam } from "../lib/params.ts";
 import { cronSummary, wallTime } from "../lib/schedules.ts";
 import { NotFoundPage, RecordNotFound } from "./NotFoundPage.tsx";
@@ -201,7 +201,6 @@ function ConfigPanel({ schedule: s }: { schedule: ScheduleDetail }) {
         <Detail label="Model">{configModelText(s.executionConfig)}</Detail>
         <Detail label="Permission">{executionModes(s).permission || "Harness default"}</Detail>
         <Detail label="Mode">{executionModes(s).mode || "Harness default"}</Detail>
-        <Detail label="Workspace">{workspaceText(s.workspace)}</Detail>
         <Detail label="Created">
           <RelTime at={s.createdAt} />
         </Detail>

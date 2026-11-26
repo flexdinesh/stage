@@ -17,7 +17,7 @@ func init() {
 	register("CreateTreeAndLevels", caseCreateTreeAndLevels)
 	register("TreeLevels", caseTreeLevels)
 	register("SetNeedsRules", caseSetNeedsRules)
-	register("SpliceDiamondDedupeAndBaseTask", caseSpliceDiamondDedupeAndBaseTask)
+	register("SpliceDiamondDedupe", caseSpliceDiamondDedupe)
 	register("MoveBetweenTrees", caseMoveBetweenTrees)
 	register("DissolveAndEmptyTrees", caseDissolveAndEmptyTrees)
 	register("ReadinessAndLaunchable", caseReadinessAndLaunchable)
@@ -170,21 +170,21 @@ func caseSetNeedsRules(t *testing.T, open Factory) {
 	other := mustTask(t, s, ctx, p.ID, "other", nil)
 	otherDep := mustTask(t, s, ctx, p.ID, "other dep", []int64{other.ID})
 	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, Needs: []int64{a.ID, other.ID}}); !errors.As(err, &conflict) {
+		Needs: []int64{a.ID, other.ID}}); !errors.As(err, &conflict) {
 		t.Fatalf("needs in two trees: %v", err)
 	}
 	// Explicit tree: a need in another tree is refused; no needs just joins.
 	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, TreeID: &tree, Needs: []int64{other.ID}}); !errors.As(err, &conflict) {
+		TreeID: &tree, Needs: []int64{other.ID}}); !errors.As(err, &conflict) {
 		t.Fatalf("need outside explicit tree: %v", err)
 	}
 	joined, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "joined", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, TreeID: otherDep.TreeID})
+		TreeID: otherDep.TreeID})
 	if err != nil || joined.TreeID == nil || *joined.TreeID != *otherDep.TreeID || len(joined.Needs) != 0 {
 		t.Fatalf("join explicit tree %+v %v", joined, err)
 	}
 	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, TreeID: ptr[int64](9999)}); !errors.Is(err, db.ErrNotFound) {
+		TreeID: ptr[int64](9999)}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("missing tree: %v", err)
 	}
 
@@ -237,7 +237,7 @@ func caseSetNeedsRules(t *testing.T, open Factory) {
 	}
 }
 
-func caseSpliceDiamondDedupeAndBaseTask(t *testing.T, open Factory) {
+func caseSpliceDiamondDedupe(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
@@ -245,25 +245,14 @@ func caseSpliceDiamondDedupeAndBaseTask(t *testing.T, open Factory) {
 	c := mustTask(t, s, ctx, p.ID, "c", []int64{a.ID})
 	d := mustTask(t, s, ctx, p.ID, "d", []int64{b.ID, c.ID})
 	tree := *d.TreeID
-	ws := db.Workspace{Type: "worktree", BaseRef: "origin/main", Base: db.BasePredecessor, BaseTaskID: &b.ID}
-	if got, err := s.UpdateTask(ctx, d.ID, db.TaskPatch{Workspace: db.Optional[db.Workspace]{Set: true, V: ws}}); err != nil ||
-		got.Workspace.BaseTaskID == nil || *got.Workspace.BaseTaskID != b.ID {
-		t.Fatalf("base task %+v %v", got.Workspace, err)
-	}
-	var invalid *db.InvalidError
-	notNeed := ws
-	notNeed.BaseTaskID = &a.ID
-	if _, err := s.UpdateTask(ctx, d.ID, db.TaskPatch{Workspace: db.Optional[db.Workspace]{Set: true, V: notNeed}}); !errors.As(err, &invalid) {
-		t.Fatalf("base task not a need: %v", err)
-	}
 
-	// Splice b: d takes over b's need a (alongside c), and its base on b is stale.
+	// Splice b: d takes over b's need a (alongside c).
 	if err := s.RemoveFromTree(ctx, tree, b.ID); err != nil {
 		t.Fatal(err)
 	}
 	got := getTask(t, s, ctx, d.ID)
-	if !slices.Equal(got.Needs, []int64{a.ID, c.ID}) || got.Workspace.BaseTaskID != nil || !got.Workspace.FromPredecessor() {
-		t.Fatalf("after splicing b: %+v %+v", got.Needs, got.Workspace)
+	if !slices.Equal(got.Needs, []int64{a.ID, c.ID}) {
+		t.Fatalf("after splicing b: %+v", got.Needs)
 	}
 	if gb := getTask(t, s, ctx, b.ID); gb.TreeID != nil || len(gb.Needs) != 0 || len(gb.Dependents) != 0 {
 		t.Fatalf("spliced b must be standalone %+v", gb)
@@ -328,10 +317,6 @@ func caseDissolveAndEmptyTrees(t *testing.T, open Factory) {
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
-	ws := db.Workspace{Type: "worktree", BaseRef: "origin/main", Base: db.BasePredecessor, BaseTaskID: &a.ID}
-	if _, err := s.UpdateTask(ctx, b.ID, db.TaskPatch{Workspace: db.Optional[db.Workspace]{Set: true, V: ws}}); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.DissolveTree(ctx, *b.TreeID); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +324,7 @@ func caseDissolveAndEmptyTrees(t *testing.T, open Factory) {
 		t.Fatalf("dissolved tree must remain archived: %+v %v", got, err)
 	}
 	for _, id := range []int64{a.ID, b.ID} {
-		if got := getTask(t, s, ctx, id); got.TreeID != nil || len(got.Needs)+len(got.Dependents) != 0 || got.Workspace.BaseTaskID != nil {
+		if got := getTask(t, s, ctx, id); got.TreeID != nil || len(got.Needs)+len(got.Dependents) != 0 {
 			t.Fatalf("dissolved member %+v", got)
 		}
 	}

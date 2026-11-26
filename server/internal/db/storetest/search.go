@@ -228,7 +228,6 @@ func searchTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64,
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
 		ProjectID: projectID, Title: title, Prompt: prompt,
-		Workspace: db.Workspace{Type: "root"},
 	})
 	if err != nil {
 		t.Fatal(err)

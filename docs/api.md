@@ -51,16 +51,12 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 // ModelOption: T3 ProviderOptionSelection
 { "id": "effort", "value": "low" }          // value: string | boolean
 
-// Workspace
-{ "type": "root" }
-{ "type": "worktree", "baseRef": "origin/main", "branch": "feat-x", "base": "ref", "baseTaskId": null }   // branch: string | null (null = T3 picks)
+// ModelOption with a launch option (T3: a new worktree from origin/main)
+{ "id": "worktree", "value": true }
+{ "id": "baseRef", "value": "origin/main" }
 ```
 
-`Workspace` maps to T3 `workspaceStrategy`: root → `{type:"root"}`; worktree → `{type:"worktree", baseRef, branch?, startFromOrigin: baseRef has a "<remote>/" prefix}` (remote = `origin` or `upstream`; `feature/x` is treated as local).
-
-`base` (worktree only, always emitted; `ref` when omitted on input): `ref` starts from `baseRef`; `predecessor` starts the worktree from a need's branch, with `baseRef` retained for an explicit ref choice (see "Predecessor base"). `baseTaskId` (worktree only, always emitted, null unless `base` is `predecessor`): the need whose branch it starts from; null = the sole need. Invalid values, `predecessor` with `root`, `predecessor` on a schedule and `baseTaskId` without `predecessor` are 400. A needs change or splice clears a `baseTaskId` that is no longer a need.
-
-The connection's harness descriptor `worktree` policy decides the rest. Without `baseRef` (OpenCode, Codex, Claude Code) the harness picks the worktree base and branch: `baseRef` and `branch` must be empty (400), and with `predecessor` (Claude Code) `base: predecessor` needs no `baseRef`; without it, `predecessor` is 400.
+Where and how a session starts is a harness launch option in `executionConfig.options` (#420): the connection's capabilities declare them (see [capabilities](#get-apiconnectionsconnectionidcapabilities)) and its adapter translates them. T3: `worktree` (boolean), `baseRef` and `branch` (text, only with `worktree` `true`), sent as T3 `workspaceStrategy` (`root`, or `worktree` with `baseRef`, `branch` and `startFromOrigin` when `baseRef` starts with `origin/` or `upstream/`; T3 requires `baseRef` for a worktree, so a launch without one returns the task to backlog with the reason). Claude Code and OpenCode: `worktree` (the harness picks the base and branch). Codex: none. A dependent never starts from its predecessor's branch; the handoff names the branch the predecessor reported. API v8 removed `workspace` (400, see [API v8 changes](#api-v8-changes)).
 
 ## Health
 
@@ -339,7 +335,7 @@ includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?, precedence?: {owns?, yields?}, origin?: {env?}}, launch, sessionHint?, worktree: {baseRef, predecessor}, wraps?: {origins}, available, reason?, connectable}]}`. `worktree`: what a saved worktree workspace may carry on the harness, validated without reaching it: `baseRef` (Stage passes a base ref and branch: T3) and `predecessor` (it may start from a need's branch: T3, Claude Code); see `Workspace` in [Shared shapes](#shared-shapes). `sessionHint`: what names one of the harness's sessions when a user tracks it (Codex: a thread ID or a pasted `codex resume` command; Claude Code: a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command); hosts show it as the Track session field's hint, and the field keeps its generic copy when it is absent. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable it sets to the session id in agent processes, which the CLI and stdio MCP read (see [Agent interface](#agent-interface)). `precedence` ranks `env` when several harness variables are set: `owns` and `yields` are `[{env, value?}]` conditions (`value` absent: any non-empty value). `origin`: the harness records the client that started each session, so another harness may wrap it; `env` is the variable holding that origin in its agents (Claude Code `CLAUDE_CODE_ENTRYPOINT`). `wraps`: the harness runs other harnesses' sessions and leaves these `origins` in them (T3: `t3-code`, `T3 Code`); Stage refuses to track such a session on the wrapped harness (409 `session_refused`, "Track it through T3"), and when the wrapper's `env` is set (or a wrapped harness's origin variable holds one of its origins) the wrapped harness's `env` yields to it ([execution.md](execution.md#harness-registry)). `profile.kind`: `desktop` (a managed per-user service: the server's, or on a remote machine the worker service), `server` (foreground `stage serve` or `stage worker run`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`; a remote machine reports its worker's last described profile, and the reason names the worker's fix, `stage worker run --local-harnesses` or the worker service; before its worker described it since the server started, every kind is available and setup calls answer 503 `machine_offline` or `machine_setup_starting`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
+- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], setup: {fields, actions, disconnect}, attribution: {metaKeys, env?, precedence?: {owns?, yields?}, origin?: {env?}}, launch, sessionHint?, wraps?: {origins}, available, reason?, connectable}]}`. `sessionHint`: what names one of the harness's sessions when a user tracks it (Codex: a thread ID or a pasted `codex resume` command; Claude Code: a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command); hosts show it as the Track session field's hint, and the field keeps its generic copy when it is absent. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable it sets to the session id in agent processes, which the CLI and stdio MCP read (see [Agent interface](#agent-interface)). `precedence` ranks `env` when several harness variables are set: `owns` and `yields` are `[{env, value?}]` conditions (`value` absent: any non-empty value). `origin`: the harness records the client that started each session, so another harness may wrap it; `env` is the variable holding that origin in its agents (Claude Code `CLAUDE_CODE_ENTRYPOINT`). `wraps`: the harness runs other harnesses' sessions and leaves these `origins` in them (T3: `t3-code`, `T3 Code`); Stage refuses to track such a session on the wrapped harness (409 `session_refused`, "Track it through T3"), and when the wrapper's `env` is set (or a wrapped harness's origin variable holds one of its origins) the wrapped harness's `env` yields to it ([execution.md](execution.md#harness-registry)). `profile.kind`: `desktop` (a managed per-user service: the server's, or on a remote machine the worker service), `server` (foreground `stage serve` or `stage worker run`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`; a remote machine reports its worker's last described profile, and the reason names the worker's fix, `stage worker run --local-harnesses` or the worker service; before its worker described it since the server started, every kind is available and setup calls answer 503 `machine_offline` or `machine_setup_starting`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. Clients name harnesses and closures from this list, never from a list of their own; an unknown kind reads as its kind.
 - `GET /api/connections`: `{connections: [{id, machineId, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. `machineId`: the machine that runs the instance (one local machine today). One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness on each machine. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `PUT /api/connections/:connectionId/new-task-config`: strict `{config: {model, options} | null}`, the model and options new tasks on the connection start with (`newTaskConfig` on its row; null or an empty config unpins). Checked against the connection's capabilities (no project). Pairing another instance of the harness carries the pin to the replacement. 200 `{connection}`; 400 unknown or replaced connection, a model or option value the connection does not offer, or a `permission` / `mode` (never pinned).
@@ -448,7 +444,6 @@ attempt is consumed.
   "connectionId": 1,
   "harness": "t3",
   "executionConfig": { "model": "[\"claude\",\"claude-haiku-5-5\"]", "options": [{ "id": "effort", "value": "low" }], "permission": "full-access", "mode": "" },
-  "workspace": { "type": "root" },
   "state": "running",
   "externalSessionId": "thread_abc",
   "session": { "connectionId": 1, "externalSessionId": "thread_abc" },
@@ -514,7 +509,7 @@ attempt is consumed.
 ```
 `fromState` null for the creation event.
 
-`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "finalReply"?: {text, truncated, updatedAt, runId}, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "currentLaunchBase": LaunchBase | null, "usage"?: Usage }`. `usage`: the current session's usage, omitted when its harness reports none; `Usage` = `{ "turns", "inputTokens" (uncached), "cacheReadTokens", "cacheWriteTokens", "outputTokens", "workingMs" (finished turns; 0 unknown), "costUsd": number | null }`, cumulative and best effort ([execution.md](execution.md)). `costUsd` is a cost the harness itself reports, else null; Stage never prices tokens, and Claude Code reports none. `stage task show` prints it as one line (`usage    1 turn · 44.3k in (27.6k cached) · 4.9k out · 23s working`, plus `$1.23` when a cost is reported). `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `currentLaunchBase`: the worktree base the current launch attempt used (see "Predecessor base"); null before the first launch or without `workspace.base` `predecessor`. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originSession` is null. `finalReply`: the session's latest reply excerpt, omitted before one is read (API v8 removed `thread`).
+`TaskDetail` = `Task` + `{ "events": TaskEvent[] (oldest first), "finalReply"?: {text, truncated, updatedAt, runId}, "tree": TreeDetail | null, "batch": CreatedTasks | null, "currentHandoffs": Handoff[], "usage"?: Usage }`. `usage`: the current session's usage, omitted when its harness reports none; `Usage` = `{ "turns", "inputTokens" (uncached), "cacheReadTokens", "cacheWriteTokens", "outputTokens", "workingMs" (finished turns; 0 unknown), "costUsd": number | null }`, cumulative and best effort ([execution.md](execution.md)). `costUsd` is a cost the harness itself reports, else null; Stage never prices tokens, and Claude Code reports none. `stage task show` prints it as one line (`usage    1 turn · 44.3k in (27.6k cached) · 4.9k out · 23s working`, plus `$1.23` when a cost is reported). `tree`: the task's tree (see "Trees"); null outside one. `currentHandoffs`: the current launch attempt's handoff records, one per need, by need id (see "Handoff"); `[]` before the first launch, without needs, or with `handoff` off. `batch`: the tasks the task's origin session created (see "Session batch"); null when `originSession` is null. `finalReply`: the session's latest reply excerpt, omitted before one is read (API v8 removed `thread`).
 
 ### `GET /api/tasks`
 Query (all optional): `originConnectionId` with `originSessionId` (the creator session; `originThreadId` is 400 since v6), `project` (project id), `state` (repeatable TaskState), `q` (case-insensitive substring of title or prompt), `from`, `to` (createdAt), `settledFrom` (`completedAt >= settledFrom`; legacy query name retained in v4), `closed` (`false` default: open tasks only, not archived and not in a done or archived tree; `true`: only those; `all`: both; else 400).
@@ -529,7 +524,6 @@ Body `CreateTaskRequest`:
   "prompt": "reply OK",          // required
   "connectionId": 1,             // the harness connection; omitted only when the project's bindings or the default connection choose one (else 400)
   "executionConfig": { "model": "", "options": [], "permission": "", "mode": "" }, // optional; "" = harness default
-  "workspace": { "type": "root" },// optional
   "initialNote": "",             // optional: first task journal note
   "treeId": null,                // optional: join this tree (tree rules)
   "needs": [],                   // optional: tasks this one needs (tree rules)
@@ -549,7 +543,7 @@ Body `CreateTaskRequest`:
 200 `TaskDetail`. 404.
 
 ### `PATCH /api/tasks/:id`
-Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig workspace` `attachmentIds` `startLocal` `startTz` `handoff` `startMode`. `executionConfig` replaces the stored config; a `connectionId` change needs one. The removed T3 model inputs are 400 (see create).
+Body `UpdateTaskRequest`: any of `projectId title prompt connectionId executionConfig` `attachmentIds` `startLocal` `startTz` `handoff` `startMode`. `executionConfig` replaces the stored config; a `connectionId` change needs one. The removed T3 model inputs are 400 (see create).
 In `backlog` all fields are editable; otherwise only `title` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it; a task with needs cannot have one (400). `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`). `startMode`: `auto|manual`, `null` inherits the tree's (backlog only). Needs change with `PUT /api/tasks/:id/needs`; tree membership with the tree endpoints.
 200 `Task`. 404.
@@ -569,7 +563,7 @@ failed, interrupted or cancelled. Every prerequisite needs user acceptance in
 Stage at the atomic claim. Adopted tasks cannot launch.
 
 The attempt freezes destination, accepted inputs, prompt, journal context,
-configuration, images and workspace before dispatch. An uncertain outcome stays
+configuration (launch options included) and images before dispatch. An uncertain outcome stays
 `launching` (UI: Launch unconfirmed). Automatic reconciliation and repeated Start
 use the same attempt, including after restart. Legacy attempts without safe
 identity require explicit linking. A certified rejection before execution
@@ -595,10 +589,17 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 
 ### `GET /api/connections/:connectionId/capabilities`
 Stage-owned operation availability/reasons, models/options, permissions,
-interaction modes and workspace kinds. `operations` maps every operation
+interaction modes and launch options. `operations` maps every operation
 (`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `images`,
-`predecessorBase`, `worktreeBase`, `respond`, `send`) to `{available,
-reason?}`; an unavailable one says why. Task/schedule `executionConfig` is
+`respond`, `send`) to `{available, reason?}`; an unavailable one says why.
+An option (harness-wide in `options`, or a model's) is `{id, kind?, label?,
+values, default, dependsOn?}`: `kind` `choice` (one of `values`),
+`boolean` (`true` or `false`) or `text` (a non-empty string; `values`
+empty; leave it out for the harness default); an option without `kind`
+(an older harness) is `boolean` when every value is a boolean, else
+`choice`. `dependsOn` `{option, value}`: the option applies only when that
+option (set, or by default) has that value; otherwise it is 400. Clients
+render options by `kind` and `label` and never name one. Task/schedule `executionConfig` is
 `{model,options,permission,mode}`; model IDs are opaque catalog keys. A model's
 `permissions: null` (not reported) inherits the top-level `permissions`.
 Legacy T3 request fields remain supported through translation. Create requests
@@ -637,7 +638,7 @@ sends.
 - `POST /api/tasks/:id/messages` (operation `send`) body `{"text": string}` (`SendMessageRequest`: nonblank, at most 32 KiB): sends the session a message, records a "Follow-up sent from Stage" task event (not the text), then polls once. 200 `Task`; 400; 403 `{"code": "agent_forbidden"}` as for answers (only the user sends); 409 `{"code": "session_busy"}` with the reason when the session can't take a message now (Claude Code: working, waiting on a permission prompt or question, stopped, failed, removed, a terminal or SDK session, or its folder is gone; nothing was sent).
 
 ### `POST /api/tasks/:id/duplicate`
-New `backlog` task with the same project, title, prompt, images (copied), model config, workspace; no copied notes, no tree, no needs, no start time, no schedule.
+New `backlog` task with the same project, title, prompt, images (copied), execution config (launch options included); no copied notes, no tree, no needs, no start time, no schedule.
 201 `Task`. 404. 409 for an adopted task.
 
 ## Journals
@@ -738,8 +739,7 @@ A schedule is a recurring task template: on each cron fire it spawns a new task 
   "title": "Nightly deps bump",
   "prompt": "bump deps, run tests",
   "connectionId": 1,
-  "executionConfig": { "model": "[\"claude\",\"claude-sonnet-5-5\"]", "options": [], "permission": "full-access", "mode": "" },
-  "workspace": { "type": "worktree", "baseRef": "origin/main", "branch": null, "base": "ref" },
+  "executionConfig": { "model": "[\"claude\",\"claude-sonnet-5-5\"]", "options": [{ "id": "worktree", "value": true }, { "id": "baseRef", "value": "origin/main" }], "permission": "full-access", "mode": "" },
   "notes": "",
   "attachments": [],
   "cron": "0 2 * * *",
@@ -776,7 +776,7 @@ Query (optional): `project` (project id), `dueWithin` (Go duration, e.g. `24h`: 
 200 `{ "schedules": Schedule[] }` ordered by `nextRunAt` asc (paused last), then id.
 
 ### `POST /api/schedules`
-Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig workspace attachmentIds originSession`; the removed T3 model inputs are 400 as on tasks), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSession`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
+Body `CreateScheduleRequest`: shared task config (`projectId connectionId title prompt executionConfig attachmentIds originSession`; the removed T3 model inputs are 400 as on tasks), `notes` (initial-note template for each spawned task), required `cron` and `tz`, optional `paused` (default false). Example: `"cron": "0 2 * * *", "tz": "America/New_York"`. `initialNote`, `treeId`, `needs`, `needsSession`, `startMode`, `start`, `startLocal`, `startTz` are 400; spawned tasks are standalone.
 201 `Schedule`. 400 (invalid cron or zone, plus task field rules). 404 project.
 
 ### `GET /api/schedules/:id`
@@ -839,6 +839,7 @@ Breaking, so `apiVersion` is 8 and v7 clients refuse this server. T3 is no longe
 - Removed fields: `thread` on task detail (use `session`, `links`, `finalReply`, `runStartedAt` / `runEndedAt` and `lastWordPreview`, now derived from the session's observation for every harness).
 - References: a bare session id or `…/sessions/<id>` names no connection: 400 without `connectionId`. T3 web and `t3code://` links resolve only through the T3 connection's adapter.
 - MCP: `list_models` requires `connectionId`; the removed T3 model arguments fail schema validation. CLI: `--provider`, `--model`, `--effort`, `--option`, `--runtime` and `--mode` are errors naming `--connection ID --execution-config JSON`; `models ls` needs `--connection`.
+- Worktree as a harness launch option (#420): `workspace` on task and schedule create and update is 400 `workspace was removed in API v8; set the harness's launch options in executionConfig.options (worktree, baseRef, branch where the connection declares them; see its capabilities)`. Tasks and schedules drop `workspace`, task detail drops `currentLaunchBase`, the harness descriptor drops `worktree`, and capability operations `predecessorBase` and `worktreeBase` are gone. Options gain `kind`, `label` and `dependsOn` (see [capabilities](#get-apiconnectionsconnectionidcapabilities)). Predecessor bases are gone: a dependent starts where its own launch options say, and the handoff names the predecessor's branch. MCP: `workspaceType`, `baseRef`, `branch`, `base` and `baseTaskId` fail schema validation; CLI: `--workspace`, `--base-ref`, `--branch`, `--base` and `--base-task` are errors naming `--execution-config`. Storage: migration 0033 moves each stored workspace into the execution config's options (T3 `worktree`, `baseRef`, `branch`; Claude Code and OpenCode `worktree`; Codex none) (a T3 predecessor-based task keeps its stored fallback `baseRef` and `branch`), as well as unfinished launch attempts' intents, and journals on each predecessor-based task that can still start (not finished or archived) where its worktree now starts (T3: from its `baseRef`, or, with none stored, that one must be set before it starts, since T3 rejects a worktree without one; Claude Code and OpenCode: the harness default); migration 0034 drops `tasks.workspace`, `schedules.workspace` and `task_launch_bases`.
 - Storage (migration 0032): the T3-only `threads` mirror is dropped (sessions live in `execution_observations`), and a fresh install has no connection: the seeded T3 connection 1 is removed when it was never configured and nothing references it. A never-ran T3 session (idle, no run) adopts as `backlog`; T3 idle after a run still reads `done` (the T3 adapter decides it). Project `lastActivity` no longer counts external sessions. The T3 status's `lastFullSyncAt` is recorded by the T3 setup after any successful full sync of its connection.
 
 ## API v7 changes
@@ -847,13 +848,13 @@ Breaking, so `apiVersion` is 7 and v6 clients refuse this server. New-task defau
 
 Session interaction answers (#375; additive, no version bump): requests gain `preview`, `textOption` and `questions`, responses `answers`; Claude Code offers `respond`; and the respond route answers 403 `agent_forbidden` to agent callers.
 
-Legacy storage dropped (#417; no version bump, no client reads these): sessions drop `providerInstanceId`, `creationSource` and `runCount`. Journal `sourceThreadId` is the external ID of a T3 `sourceSession` (else null); handoff and launch-base `sourceThreadId` is the source session's external ID. PR links of the old thread mirror leave `artifactLinks` (accepted evidence keeps its copy). The legacy T3 model inputs are translated into `executionConfig` on write instead of stored.
+Legacy storage dropped (#417; no version bump, no client reads these): sessions drop `providerInstanceId`, `creationSource` and `runCount`. Journal `sourceThreadId` is the external ID of a T3 `sourceSession` (else null); handoff `sourceThreadId` is the source session's external ID (launch bases were later dropped, #420). PR links of the old thread mirror leave `artifactLinks` (accepted evidence keeps its copy). The legacy T3 model inputs are translated into `executionConfig` on write instead of stored.
 
 ## API v6 changes
 
 Breaking, so `apiVersion` was 6 and v5 clients refuse this server. Removed, returning 404: `GET /api/t3/status`, `POST /api/t3/pair`, `POST /api/t3/pair/auto`, `DELETE /api/t3/pair`, `PUT /api/t3/url`, `GET /api/opencode/status`, `PUT /api/opencode/settings`, `DELETE /api/opencode/settings`, `POST /api/opencode/connect-local`, `POST /api/opencode/pair`. Use [Harness connections](#harness-connections-api-v6): their old bodies are the new settings and action bodies, and their old replies are the status `details` (the OpenCode routes now answer 200 with the status instead of 204). Health's `t3` object is now `harnesses[]`. CLI: `stage t3` and `stage opencode` are `stage harness KIND status|set|run|disconnect`.
 
-Added: [session interaction](#session-interaction-api-v6) routes, descriptor `launch`, `links.command`, harness-wide capability `options` and `modeLabel`, capability operation `worktreeBase` (unavailable when the harness chooses the worktree base and branch itself).
+Added: [session interaction](#session-interaction-api-v6) routes, descriptor `launch`, `links.command`, harness-wide capability `options` and `modeLabel`, capability operation `worktreeBase` (unavailable when the harness chooses the worktree base and branch itself; removed in v8, #420).
 
 T3 legacy fields are gone from responses: tasks, threads, notifications and waiting sessions drop `t3WebUrl`, `t3AppUrl` and `t3DeepLink` (use `links`); tasks and schedules drop `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` (use `executionConfig`, now always present for T3 rows) and `originThreadId` (use `originSession`); the task's `originThreadTitle` is `originSessionTitle`; resolved references drop `threadId` (use `session`). Inputs removed: `needsSessionId` and `originThreadId` on task and schedule create (use `needsSession` and `originSession`; strict decoding answers 400), the `originThreadId` task list query (400; use `originConnectionId` and `originSessionId`), MCP `list_tasks {originThreadId}` and CLI `task ls --origin-thread`. `artifactLinks` now include harness-reported artifacts for every harness. The legacy T3 model inputs on create and update stay accepted for now.
 
@@ -1044,7 +1045,7 @@ Execution `state` and `settledAt` remain observations. `acceptanceId` (nullable)
 - A need is passed only when `acceptanceId` is non-null. Execution success, stopping, failure and PR merge never release new work; settlement or archive does only through inferred completion. Complete the need in Stage or edit dependencies.
 - `readiness` (backlog members only, else null): `blocked` while a need lacks user acceptance; `ready` when every need has user acceptance, there is no start time, and the task is manual or has no needs. Roots read `ready` (auto never launches them; the user starts them, or Start ready).
 - Release runner (on user or inferred completion/reopening, every transition into `settled` or out of `backlog`, every tree change, at startup and every 10s): launches every `auto` member whose needs all have user acceptance (no start time, not adopted); a `manual` member with needs that became ready gets `readyAt` and a `ready: needs completed` event once per episode and notifies `ready`. `readyAt` clears when it stops being ready or launches.
-- Splice (remove from tree, delete, move to another tree): each dependent drops the task and takes over its needs (A→X→B becomes A→B, deduplicated); the task loses its needs and leaves the tree; stale `workspace.baseTaskId` values are cleared; an emptied tree is archived. Splicing an unfinished middle task can make dependents ready at once.
+- Splice (remove from tree, delete, move to another tree): each dependent drops the task and takes over its needs (A→X→B becomes A→B, deduplicated); the task loses its needs and leaves the tree; an emptied tree is archived. Splicing an unfinished middle task can make dependents ready at once.
 - Moving between trees = remove + add (no merge). `POST /api/trees/:id/dissolve` dissolves a tree.
 - Launch claims atomically check dependencies, tree status and effective policy, then pin acceptance IDs. Reopen blocks future claims; already claimed attempts continue with their original snapshots. Unknown launch outcomes reconcile with the same attempt, request ID and pins. A fresh retry checks current acceptance again.
 
@@ -1084,28 +1085,6 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
   "at": "2026-11-14T10:02:01Z" }
 ```
 
-## Predecessor base
-
-A task's predecessor worktree uses its selected need's branch, or the sole need.
-The source must belong to the same harness and Stage project and provide an
-available branch. Ambiguous, offline, root, merged or deleted predecessors block
-launch. Edit `workspace.base` to `ref` explicitly before using `baseRef`.
-
-The resolved branch is frozen per attempt in `task_launch_bases`.
-A certified T3 base rejection returns to backlog for repair. No fallback launch
-is sent. Historical fallback records remain readable.
-
-`LaunchBase`:
-```jsonc
-{ "attempt": 1, "baseRef": "feat/api", "startFromOrigin": false,
-  "source": "predecessor",          // predecessor (a need's branch) | fallback
-  "sourceTaskId": 12,               // null when no need was chosen
-  "sourceThreadId": "thread-abc",   // null when no need was chosen
-  "sourceTitle": "Build API",
-  "reason": null,                   // why it fell back
-  "at": "2026-11-14T10:02:01Z" }
-```
-
 ## Session batch
 
 A session batch is the set of tasks one session created (`originSession`), usually a plan an agent broke into tasks.
@@ -1138,12 +1117,12 @@ A session batch is the set of tasks one session created (`originSession`), usual
 - Model: explicit `executionConfig` > the destination connection's pin (`newTaskConfig`) > harness default. The pin supplies model and options only; permission and mode are explicit or unset. The removed T3 model arguments (`provider`, `model`, `effort`, `options`, `runtimeMode`, `interactionMode`) fail schema validation.
 - `get_task` returns the grouped creator batch, current tree, cached `finalReply`, `usage` (when the harness reports one), available links and accepted snapshots.
 - `afterMe` submits the scoped caller as `needsSession`. Owner reuse, adoption, tree placement and the dependent task commit together.
-- Trees: `create_task` takes `treeId`, `needs`, `startMode` (`auto|manual|inherit`) and `baseTaskId` (CLI `task add --tree ID --needs 3,5 --start-mode M --base-task ID --after-me`); `update_task` takes `startMode` (`inherit` = null) and `baseTaskId` (0 = the sole need; CLI `task edit --start-mode --base-task`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
+- Trees: `create_task` takes `treeId`, `needs` and `startMode` (`auto|manual|inherit`) (CLI `task add --tree ID --needs 3,5 --start-mode M --after-me`); `update_task` takes `startMode` (`inherit` = null; CLI `task edit --start-mode`). `set_needs {taskId, needs}` (CLI `task needs ID [NEED...]`, none clears). `create_tree {title, startMode?, tasks: [{id, needs?}]}` (CLI `tree new --title T [--start-mode M] ID[:NEED,NEED]...`), `get_tree {id}` (CLI `tree show ID`: levels with state, `#id`, title, needs, readiness), `list_trees {status?, all?, project?}` (compact rows `{id, title, startMode, tasks, levels, projects, states, settledAt, status}`, `states` = non-zero counts with `blocked`/`ready` split from `backlog`; CLI `tree ls [--status S] [--all] [--project P]`), `update_tree {id, title?, startMode?, status?}` (CLI `tree edit`; `status` `done|archived|open`: CLI `tree done ID`, `tree archive ID`, `--undo` reopens), `delete_tree {id}` (only when deletable; CLI `tree rm-tree ID`), `add_to_tree {treeId, taskId, needs?}` (CLI `tree add TREE TASK [--needs ..]`), `remove_from_tree {taskId}` (looks up the task's tree; CLI `tree rm TASK`), `start_tree {id}` (CLI `tree start ID`). Dissolving a tree is REST/web only.
 - Close work: `archive_task {id, archived?}` (default archives; CLI `task archive ID [--undo]`), `list_tasks {closed?}` (`true|all`; CLI `task ls --closed true|all`; rows carry `treeStatus` and `archived`), `delete_task` only for a task that never started and has no recorded work. See "Done, archive and delete".
 - `adopt_session {session?, callerSession?, projectId?, newProjectTitle?, title?, initialNote?, treeId?}` (default: the caller session) returns `{ task, created }` (CLI `sessions adopt [--target-connection ID --target-session ID] [--title --initial-note --tree]`).
 - `start_task` on a blocked task fails until the user completes its needs in Stage.
 - `create_task` and `update_task` take optional `handoff` (CLI `task add --handoff=false`, `task edit --handoff=true|false`); omitted keeps the task's value (default true). `get_task` returns `handoff` and `currentHandoffs`; `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records, plus `tree` and `readiness` lines.
-- `create_task`, `create_schedule`, `update_task` and `update_schedule` take optional `base` (`ref|predecessor`; CLI `task add|edit --base`). On create it needs `baseRef` (retained for an explicit ref choice) where the harness takes one, else `workspaceType` `worktree` (Claude Code; CLI `--workspace worktree`); on `update_task` without `baseRef` or `workspaceType` it keeps the task's current worktree (error for a root task). `get_task` returns `currentLaunchBase`; `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
+- Launch options (a worktree, its base ref and branch where the harness declares them) go in `executionConfig.options` (CLI `--execution-config`; `list_models` and `models ls --connection ID` list them with `kind`, `label` and `dependsOn`). The pin's options fill in when `executionConfig` names no model. `stage task show` prints `options  worktree=true baseRef=origin/main`.
 - `imagePaths` reads local files and uploads them (`POST /api/uploads`); CLI and stdio only (HTTP MCP rejects them).
 - `wait_task` polls `GET /api/tasks/:id` every 3s until the state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` (default 600, max 3600); CLI `task wait` exits 3 on timeout.
 

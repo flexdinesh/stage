@@ -48,8 +48,10 @@ func (f Capabilities) OptionsFor(m *Model) []Option {
 	return out
 }
 
-// Valid rejects capabilities whose option ids collide: twice harness-wide,
-// or a model option reusing a harness-wide id (or its own twice).
+// Valid rejects malformed capabilities: option ids that collide (twice
+// harness-wide, or a model option reusing a harness-wide id or its own),
+// and options that do not fit their kind or depend on an option outside
+// their config's set.
 func (f Capabilities) Valid() error {
 	wide := map[string]bool{}
 	for _, o := range f.Options {
@@ -57,6 +59,9 @@ func (f Capabilities) Valid() error {
 			return fmt.Errorf("malformed capabilities: harness option %s defined twice", o.ID)
 		}
 		wide[o.ID] = true
+	}
+	if err := validDeclarations(f.Options); err != nil {
+		return err
 	}
 	for _, m := range f.Models {
 		own := map[string]bool{}
@@ -66,11 +71,83 @@ func (f Capabilities) Valid() error {
 			}
 			own[o.ID] = true
 		}
+		if err := validDeclarations(f.OptionsFor(&m)); err != nil {
+			return fmt.Errorf("%w (model %s)", err, m.ID)
+		}
 	}
 	return nil
 }
 
-// validOptions checks each option once against allowed.
+// validDeclarations checks each option's kind, values and dependency
+// within set (the options one config may set).
+func validDeclarations(set []Option) error {
+	for _, o := range set {
+		if err := validDeclaration(o); err != nil {
+			return err
+		}
+		if o.DependsOn == nil {
+			continue
+		}
+		i := slices.IndexFunc(set, func(d Option) bool { return d.ID == o.DependsOn.Option })
+		if i < 0 || set[i].ID == o.ID {
+			return fmt.Errorf("malformed capabilities: option %s depends on unknown option %s", o.ID, o.DependsOn.Option)
+		}
+		if set[i].check(o.DependsOn.Value) != nil {
+			return fmt.Errorf("malformed capabilities: option %s depends on a value option %s does not take", o.ID, o.DependsOn.Option)
+		}
+	}
+	return nil
+}
+
+// Declared reports whether o, on its own, is a well-formed declaration
+// (kind, values, default). An adapter that passes another system's options
+// through drops the ones that fail, so one bad option never makes its whole
+// capabilities malformed.
+func (o Option) Declared() error { return validDeclaration(o) }
+
+func validDeclaration(o Option) error {
+	switch o.EffectiveKind() {
+	case OptionChoice:
+	case OptionBoolean:
+		if slices.ContainsFunc(o.Values, func(v OptionValue) bool { return !v.IsBool }) {
+			return fmt.Errorf("malformed capabilities: boolean option %s has a non-boolean value", o.ID)
+		}
+	case OptionText:
+		if len(o.Values) > 0 {
+			return fmt.Errorf("malformed capabilities: text option %s lists values", o.ID)
+		}
+	default:
+		return fmt.Errorf("malformed capabilities: option %s has unknown kind %q", o.ID, o.Kind)
+	}
+	if o.Default != nil && o.check(*o.Default) != nil {
+		return fmt.Errorf("malformed capabilities: option %s has a default it does not take", o.ID)
+	}
+	return nil
+}
+
+// check is whether o takes v: one of a choice's values, a boolean (one of
+// its values when it lists them), or a non-empty text.
+func (o Option) check(v OptionValue) error {
+	switch o.EffectiveKind() {
+	case OptionBoolean:
+		if !v.IsBool || (len(o.Values) > 0 && !slices.Contains(o.Values, v)) {
+			return fmt.Errorf("option %s takes true or false", o.ID)
+		}
+	case OptionText:
+		if v.IsBool || strings.TrimSpace(v.Str) == "" {
+			return fmt.Errorf("option %s takes a non-empty text; leave it out for the harness default", o.ID)
+		}
+	default:
+		if !slices.Contains(o.Values, v) {
+			return fmt.Errorf("option %s is unavailable for this model; choose a value from list_models", o.ID)
+		}
+	}
+	return nil
+}
+
+// validOptions checks each option once against allowed: it must be
+// declared, take its value, and have its dependency met (the dependency's
+// selected value, else its default).
 func validOptions(options []ModelOption, allowed []Option) error {
 	seen := map[string]bool{}
 	for _, v := range options {
@@ -78,8 +155,27 @@ func validOptions(options []ModelOption, allowed []Option) error {
 			return fmt.Errorf("duplicate model option %s", v.ID)
 		}
 		seen[v.ID] = true
-		if !slices.ContainsFunc(allowed, func(o Option) bool { return o.ID == v.ID && slices.Contains(o.Values, v.Value) }) {
+		i := slices.IndexFunc(allowed, func(o Option) bool { return o.ID == v.ID })
+		if i < 0 {
 			return fmt.Errorf("option %s is unavailable for this model; choose a value from list_models", v.ID)
+		}
+		if err := allowed[i].check(v.Value); err != nil {
+			return err
+		}
+	}
+	for _, v := range options {
+		o := allowed[slices.IndexFunc(allowed, func(o Option) bool { return o.ID == v.ID })]
+		if o.DependsOn == nil {
+			continue
+		}
+		dep := allowed[slices.IndexFunc(allowed, func(d Option) bool { return d.ID == o.DependsOn.Option })]
+		got, set := Config{Options: options}.Lookup(dep.ID)
+		if !set && dep.Default != nil {
+			got, set = *dep.Default, true
+		}
+		if !set || got != o.DependsOn.Value {
+			want, _ := o.DependsOn.Value.MarshalJSON()
+			return fmt.Errorf("option %s applies only when %s is %s", o.ID, dep.ID, want)
 		}
 	}
 	return nil

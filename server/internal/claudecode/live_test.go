@@ -121,7 +121,10 @@ func TestLiveClaude(t *testing.T) {
 		t.Helper()
 		marker := execution.LaunchMarker(req)
 		in := execution.Intent{RequestID: req, ConnectionID: 1, Project: dir, Directory: dir, Title: "Stage live " + req, Prompt: prompt + "\n\n" + marker, Marker: marker,
-			Workspace: execution.Workspace{Kind: kind}, Config: execution.Config{Model: "haiku", Permission: permission}, Images: images}
+			Config: execution.Config{Model: "haiku", Permission: permission}, Images: images}
+		if kind == "worktree" {
+			in.Config.Options = []execution.ModelOption{worktreeOn}
+		}
 		o, err := a.Launch(ctx, in, execution.Checkpoint{}, nil)
 		if err != nil {
 			t.Fatalf("launch %s: %v", req, err)
@@ -283,39 +286,10 @@ func TestLiveClaude(t *testing.T) {
 	// A worktree per attempt, in the repository.
 	_, o = launch("live-wt", repo, "worktree", "", "Without using any tools, reply with exactly: stage wt ok")
 	done = await(o.Session, "done")
-	if done.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-wt")) || done.Project != repo || done.Branch != "worktree-"+claudecode.WorktreeName("live-wt") || !done.Base.Available {
+	if done.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-wt")) || done.Project != repo || done.Branch != "worktree-"+claudecode.WorktreeName("live-wt") {
 		t.Fatalf("worktree %+v", done)
 	}
 
-	// A predecessor base: Claude's next worktree starts at the predecessor
-	// worktree's commit (docs/adr/0005 E10).
-	gitIn := func(dir string, args ...string) string {
-		t.Helper()
-		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=stage", "-c", "user.email=stage@example.invalid"}, args...)...).Output()
-		if err != nil {
-			t.Fatalf("git %v in %s: %v", args, dir, err)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	gitIn(done.Directory, "commit", "-q", "--allow-empty", "-m", "predecessor")
-	tip := gitIn(done.Directory, "rev-parse", "HEAD")
-	marker := execution.LaunchMarker("live-dep")
-	dep := execution.Intent{RequestID: "live-dep", ConnectionID: 1, Project: repo, Directory: repo, Title: "Stage live live-dep", Prompt: "Without using any tools, reply with exactly: stage dep ok\n\n" + marker, Marker: marker,
-		Workspace: execution.Workspace{Kind: "worktree", Base: done.Branch}, Config: execution.Config{Model: "haiku"}}
-	o, err = a.Launch(ctx, dep, execution.Checkpoint{}, nil)
-	if err != nil {
-		t.Fatalf("launch live-dep: %v", err)
-	}
-	if s, ok := strings.CutPrefix(o.Links.Command, "claude attach "); ok {
-		shorts = append(shorts, s)
-	}
-	depDone := await(o.Session, "done")
-	if depDone.Directory != claudecode.WorktreeDir(repo, claudecode.WorktreeName("live-dep")) || depDone.Project != repo {
-		t.Fatalf("dependent %+v", depDone)
-	}
-	if head := gitIn(depDone.Directory, "rev-parse", "HEAD"); head != tip {
-		t.Fatalf("dependent starts at %s, want the predecessor's %s", head, tip)
-	}
 }
 
 // trust marks dirs trusted in Claude's state file (what accepting the trust

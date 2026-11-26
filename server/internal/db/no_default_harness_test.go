@@ -28,7 +28,7 @@ func TestFreshInstallHasNoConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, Title: "T", Prompt: "p", Workspace: db.Workspace{Type: "root"}}); err == nil {
+	if _, err := s.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, Title: "T", Prompt: "p"}); err == nil {
 		t.Fatal("task created without a connection")
 	}
 	id, err := s.EnsureOpenCode(t.Context(), db.LocalMachine)

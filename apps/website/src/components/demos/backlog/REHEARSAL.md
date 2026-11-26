@@ -3,7 +3,7 @@
 ## Story
 stage's New task drawer over a project page (`api-gateway`, Tasks panel filtered to backlog).
 1. Prompt typed, then title.
-2. Model select opened, `claude-opus-5-5` picked; Effort rolls `medium` to `high`. Workspace `root` to `worktree`.
+2. Model select opened, `claude-opus-5-5` picked; Effort rolls `medium` to `high`. (No worktree beat: a worktree is the harness's own launch option, not a Stage field.)
 3. Start `Now` to `Backlog`: the one primary footer button rolls `Save & start` to `Save to backlog` (real TaskForm behavior). Pressed; drawer slides out, scrim fades.
 4. Payoff: `#58 Add rate limit headers` opens at the top of the list (Collapse carries rows down), idle `backlog` chip, meta `claude-opus-5-5 · high  just now`, count rolls 5 to 6, soft landing tint.
 5. Reset with a cause: the new row's Start rolls its chip to `launching` (run tone) and the row leaves the backlog list; New task opens a fresh drawer (fields snapped while hidden).
@@ -15,7 +15,7 @@ Poster: drawer closed, new row landed on top and still tinted; the row's meta ca
 
 ## What changed from the golds
 - Look: stage Ink Workbench tokens only (`--st-*`), 0 radius, mono metadata, ink primary buttons with `--st-on-accent` text (kit default `#fff` is invisible in dark).
-- Product parts rebuilt from stage source (TaskList.tsx, TaskForm.tsx, ModelFields.tsx, ui.tsx): state chip, task row grid (118px state column), panel header bar, selects with stage's chevron, segmented control (content-width cells, ink fill, 150ms crossfade as in the product; the kit Segmented forces equal widths, which did not fit Workspace + Start on one row).
+- Product parts rebuilt from stage source (TaskList.tsx, TaskForm.tsx, ModelFields.tsx, ui.tsx): state chip, task row grid (118px state column), panel header bar, selects with stage's chevron, segmented control (content-width cells, ink fill, 150ms crossfade as in the product; the kit Segmented forces equal widths).
 - Kit parts used: Stage, Window, Field (title), Button (New task, Start, Save, close), Kbd, Popover (model list), Roll, Count, Collapse, Text.
 - Deviation from brief: brief said "Save to backlog (secondary to Start)". Real stage has one primary button whose label follows the Start segmented control, so the demo picks Backlog there and the button rolls to "Save to backlog".
 - Wide drawer is 464px in a 648px window (real: 680px on a wide screen); provider/model/effort grid is 96 / 1fr / 96 instead of equal thirds so the model id fits.

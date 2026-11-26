@@ -16,7 +16,7 @@ type ConfigInput struct {
 	Model   string `json:"model,omitempty"`
 	Options []struct {
 		ID    string `json:"id"`
-		Value any    `json:"value" jsonschema:"a string or boolean advertised by the selected model"`
+		Value any    `json:"value" jsonschema:"a value the connection declares in list_models (harness-wide options and the model's own): one of a choice's values, true or false for a boolean, any text for a text option (e.g. a worktree base ref)"`
 	} `json:"options,omitempty"`
 	Permission string `json:"permission,omitempty"`
 	Mode       string `json:"mode,omitempty"`

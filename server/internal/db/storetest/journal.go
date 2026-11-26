@@ -301,7 +301,7 @@ func caseJournalClosedWritesAndPermanentProtection(t *testing.T, open Factory) {
 func caseJournalInitialNotesScheduleDuplicateAndRollback(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
-	in := db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "a", Prompt: "p", Workspace: db.Workspace{Type: "root"}, InitialNote: "initial"}
+	in := db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "a", Prompt: "p", InitialNote: "initial"}
 	a, err := s.CreateTask(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -395,7 +395,7 @@ func caseJournalCreateIntoTreeInvalidatesCursor(t *testing.T, open Factory) {
 	if page.NextCursor == nil {
 		t.Fatal("missing cursor")
 	}
-	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "new member", Prompt: "p", Workspace: db.Workspace{Type: "root"}, TreeID: &tr.ID, InitialNote: "member note"})
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "new member", Prompt: "p", TreeID: &tr.ID, InitialNote: "member note"})
 	if err != nil {
 		t.Fatal(err)
 	}

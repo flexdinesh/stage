@@ -143,7 +143,7 @@ func contractTask(t *testing.T, p placement) (*db.Store, db.Task) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 2, Title: "Write", Prompt: "Keep this intent", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed", Mode: "compose"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 2, Title: "Write", Prompt: "Keep this intent", ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed", Mode: "compose"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 		if text := coordinator.ComposeAcceptedHandoff(accepted[0], 4000); !strings.Contains(text, "connection 2") || !strings.Contains(text, "Saved result") {
 			t.Fatal(text)
 		}
-		sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 2, ProjectID: source.ProjectID, Title: "Scheduled document", Prompt: "scheduled", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: source.ExecutionConfig, Cron: "0 * * * *", Tz: "UTC"})
+		sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 2, ProjectID: source.ProjectID, Title: "Scheduled document", Prompt: "scheduled", ExecutionConfig: source.ExecutionConfig, Cron: "0 * * * *", Tz: "UTC"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -352,13 +352,6 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 		handoffs, err := store.GetHandoffs(ctx, spawned.ID, 1)
 		if err != nil || len(handoffs) != 1 || handoffs[0].Session == nil || handoffs[0].Session.ConnectionID != 2 {
 			t.Fatal("handoff lost scope", handoffs, err)
-		}
-		if err = store.RecordLaunchBase(ctx, spawned.ID, db.LaunchBase{Session: ref, Attempt: 1, Source: db.LaunchBasePredecessor, SourceTaskID: &source.ID, SourceThreadID: &ref.ExternalSessionID, BaseRef: "branch"}); err != nil {
-			t.Fatal(err)
-		}
-		base, err := store.GetLaunchBase(ctx, spawned.ID, 1)
-		if err != nil || base.Session == nil || base.Session.ConnectionID != 2 {
-			t.Fatal("base lost scope", base, err)
 		}
 	})
 }

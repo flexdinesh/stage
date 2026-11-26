@@ -66,9 +66,6 @@ type selection struct {
 // nothing started (execution.Rejected).
 func (a *Adapter) validate(ctx context.Context, in execution.Intent) (selection, error) {
 	var sel selection
-	if in.Workspace.Kind != "" && in.Workspace.Kind != "root" {
-		return sel, &execution.Rejected{Reason: "Codex runs in the project checkout; choose the project root workspace."}
-	}
 	if strings.TrimSpace(in.Directory) == "" {
 		return sel, &execution.Rejected{Reason: "Choose a bound Codex project directory."}
 	}

@@ -36,6 +36,41 @@ func TestRemovedModelFieldsNameTheReplacement(t *testing.T) {
 	}
 }
 
+// A worktree is a harness launch option: workspace is a 400 that names
+// executionConfig.options, on task and schedule create and update.
+func TestRemovedWorkspaceFieldNamesLaunchOptions(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/v8-ws")
+	tk := e.task(p.ID, "A", nil)
+	var sc schedule
+	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC"}, 201, &sc)
+	for _, req := range []struct {
+		method, path string
+		body         map[string]any
+	}{
+		{"POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "connectionId": dbtest.T3Connection}},
+		{"PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{}},
+		{"POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "cron": "0 2 * * *", "tz": "UTC"}},
+		{"PATCH", fmt.Sprintf("/api/schedules/%d", sc.ID), map[string]any{}},
+	} {
+		req.body["workspace"] = map[string]any{"type": "worktree", "baseRef": "origin/main"}
+		msg := e.refused(req.method, req.path, req.body, 400)
+		if !strings.HasPrefix(msg, "workspace was removed in API v8") || !strings.Contains(msg, "executionConfig.options") {
+			t.Fatalf("%s %s with workspace: %q", req.method, req.path, msg)
+		}
+	}
+	// The replacement: T3's worktree launch options.
+	opts := []map[string]any{{"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}}
+	var created task
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "connectionId": dbtest.T3Connection, "executionConfig": map[string]any{"options": opts}}, 201, &created)
+	if created.Config == nil || len(created.Config.Options) != 2 || !strings.Contains(string(created.Config.Options[1]), `"origin/main"`) {
+		t.Fatalf("launch options %+v", created.Config)
+	}
+	if msg := e.refused("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "connectionId": dbtest.T3Connection, "executionConfig": map[string]any{"options": opts[1:]}}, 400); !strings.Contains(msg, "applies only when worktree is true") {
+		t.Fatalf("baseRef without worktree: %q", msg)
+	}
+}
+
 // With no harness binding and no default connection, a task or schedule
 // names its connection: there is no default harness.
 func TestConnectionRequiredWithoutBinding(t *testing.T) {

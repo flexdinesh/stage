@@ -290,15 +290,11 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
-	WorkspaceType   string       `json:"workspaceType,omitempty" jsonschema:"root or worktree; a harness that picks its own worktree base (OpenCode, Claude Code) takes no baseRef or branch, and Claude Code takes base=predecessor without baseRef"`
 	ConnectionID    int64        `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
-	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty" jsonschema:"the selected connection's model, options, permission and mode from list_models; omitted = the connection's pinned model, else the harness defaults"`
+	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty" jsonschema:"the selected connection's model, options, permission and mode from list_models; options include the harness's launch options (a worktree, its base ref or branch where the harness declares them); omitted = the connection's pinned model, else the harness defaults"`
 	Project         string       `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
 	Title           string       `json:"title" jsonschema:"short task title"`
 	Prompt          string       `json:"prompt" jsonschema:"the full prompt the agent session starts with; self-contained"`
-	BaseRef         string       `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
-	Branch          string       `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
-	Base            string       `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only); without baseRef pass workspaceType worktree"`
 	ImagePaths      []string     `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
 
@@ -307,7 +303,6 @@ type resolvedConfig struct {
 	connectionID  int64
 	config        *execution.Config
 	project       db.Project
-	workspace     *db.Workspace
 	attachmentIDs []int64
 }
 
@@ -317,48 +312,6 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func workspace(baseRef, branch, base string) *db.Workspace {
-	if strings.TrimSpace(baseRef) == "" {
-		return nil
-	}
-	return &db.Workspace{Type: "worktree", BaseRef: strings.TrimSpace(baseRef), Branch: strPtr(branch), Base: strings.TrimSpace(base)}
-}
-
-// errBaseNeedsWorktree: base without a worktree to apply it to.
-var errBaseNeedsWorktree = errors.New("base needs a worktree: pass workspaceType worktree, or baseRef where the harness takes one (with base predecessor it is the fallback)")
-
-// baseOnly patches task id's current workspace with base and/or baseTask
-// (given without baseRef; nil = unchanged).
-func (o *Ops) baseOnly(ctx context.Context, id int64, base *string, baseTaskID *int64, p client.Patch) error {
-	cur, err := o.Client.Task(ctx, id)
-	if err != nil {
-		return err
-	}
-	w := cur.Workspace
-	if w.Type != "worktree" {
-		return errBaseNeedsWorktree
-	}
-	if base != nil {
-		w.Base = strings.TrimSpace(*base)
-	}
-	if baseTaskID != nil {
-		w.BaseTaskID = baseTask(*baseTaskID)
-	}
-	if w.Base != db.BasePredecessor {
-		w.BaseTaskID = nil
-	}
-	p["workspace"] = w
-	return nil
-}
-
-// baseTask is a baseTaskId argument: 0 = none (the sole need).
-func baseTask(id int64) *int64 {
-	if id <= 0 {
-		return nil
-	}
-	return &id
 }
 
 // parsedStartMode is a startMode argument: mode nil = omitted (or inherit).
@@ -430,11 +383,16 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 			return rc, err
 		}
 	}
-	if pin != nil && config.Model == "" && len(config.Options) == 0 {
-		config.Model, config.Options = pin.Model, append([]execution.ModelOption{}, pin.Options...)
+	if pin != nil && config.Model == "" {
+		config.Model = pin.Model
+		for _, o := range pin.Options {
+			if _, set := config.Lookup(o.ID); !set {
+				config.Options = append(config.Options, o)
+			}
+		}
 	}
 	rc.config = &config
-	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || a.BaseRef != "" || a.WorkspaceType == "worktree" || len(a.ImagePaths) > 0 {
+	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || len(a.ImagePaths) > 0 {
 		f, err := o.Client.ProjectCapabilities(ctx, rc.connectionID, p.ID)
 		if err != nil {
 			return rc, err
@@ -442,39 +400,11 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 		if err := f.ValidateConfig(config); err != nil {
 			return rc, err
 		}
-		if a.BaseRef != "" || a.WorkspaceType == "worktree" {
-			if err := execution.RequireChoice("workspace", "worktree", f.Workspaces); err != nil {
-				return rc, err
-			}
-		}
-		if a.Base == db.BasePredecessor {
-			if err := execution.RequireAvailable("predecessor base", f.Operations[execution.OpPredecessorBase]); err != nil {
-				return rc, err
-			}
-		}
 		if len(a.ImagePaths) > 0 {
 			if err := execution.RequireAvailable("images", f.Operations[execution.OpImages]); err != nil {
 				return rc, err
 			}
 		}
-	}
-	// The server checks the base against the harness's worktree policy.
-	rc.workspace = workspace(a.BaseRef, a.Branch, a.Base)
-	switch a.WorkspaceType {
-	case "root":
-		if rc.workspace != nil || a.Branch != "" || strings.TrimSpace(a.Base) != "" {
-			return rc, errors.New("a root workspace cannot select a branch, base or base ref")
-		}
-	case "worktree":
-		if rc.workspace == nil {
-			rc.workspace = &db.Workspace{Type: "worktree", Branch: strPtr(a.Branch), Base: strings.TrimSpace(a.Base)}
-		}
-	case "":
-		if rc.workspace == nil && strings.TrimSpace(a.Base) != "" {
-			return rc, errBaseNeedsWorktree
-		}
-	default:
-		return rc, errors.New("choose workspaceType root or worktree")
 	}
 	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
 	return rc, err
@@ -579,7 +509,6 @@ type WaitArgs struct {
 	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task runs after (same tree): it starts once all of them settle; tasks sharing a need run in parallel"`
 	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task waits for its user completion in Stage (needs your session id)"`
 	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit unless the user asks). In an auto tree the task launches once its needs are completed, at once if they already are: expected, not a reason for manual. auto or manual (reads ready) only for a user-requested per-task exception, preserved when the tree mode changes"`
-	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from (default: the sole need)"`
 	StartLocal string  `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
 	StartTz    string  `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`
 	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
@@ -622,15 +551,9 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 	if err != nil {
 		return client.Task{}, err
 	}
-	if a.BaseTaskID != nil {
-		if rc.workspace == nil {
-			return client.Task{}, errBaseNeedsWorktree
-		}
-		rc.workspace.BaseTaskID = a.BaseTaskID
-	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
-		Workspace: rc.workspace, InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
+		InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
@@ -639,45 +562,16 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only the title changes.
 type UpdateArgs struct {
-	WorkspaceType   *string      `json:"workspaceType,omitempty"`
 	ConnectionID    int64        `json:"connectionId,omitempty"`
 	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty"`
 	ID              int64        `json:"id"`
 	Project         *string      `json:"project,omitempty" jsonschema:"move to project (id or title)"`
 	Title           *string      `json:"title,omitempty"`
 	Prompt          *string      `json:"prompt,omitempty"`
-	BaseRef         *string      `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
-	Branch          *string      `json:"branch,omitempty"`
-	Base            *string      `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; unavailable predecessors block launch; choose base=ref explicitly to use baseRef); without baseRef keeps the current worktree"`
-}
-
-// workspacePatch is the workspace baseRef/branch/base set (ok false without
-// baseRef).
-func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
-	branch, base := "", ""
-	if a.Branch != nil {
-		branch = *a.Branch
-	}
-	if a.Base != nil {
-		base = strings.TrimSpace(*a.Base)
-	}
-	if a.BaseRef == nil {
-		if a.WorkspaceType != nil {
-			return db.Workspace{Type: *a.WorkspaceType, Branch: a.Branch, Base: base}, true
-		}
-		return db.Workspace{}, false
-	}
-	if w := workspace(*a.BaseRef, branch, base); w != nil {
-		return *w, true
-	}
-	return db.Workspace{Type: "root", Base: base}, true
 }
 
 func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
 	p := client.Patch{}
-	if a.WorkspaceType != nil && (*a.WorkspaceType != "root" && *a.WorkspaceType != "worktree" || *a.WorkspaceType == "root" && a.BaseRef != nil && *a.BaseRef != "") {
-		return nil, errors.New("choose root without a base or choose worktree")
-	}
 	if a.ConnectionID != 0 {
 		p["connectionId"] = a.ConnectionID
 	}
@@ -734,9 +628,6 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 	if a.Prompt != nil {
 		p["prompt"] = *a.Prompt
 	}
-	if w, ok := a.workspacePatch(); ok {
-		p["workspace"] = w
-	}
 	return p, nil
 }
 
@@ -747,7 +638,6 @@ type UpdateTaskArgs struct {
 	StartTz    *string `json:"startTz,omitempty"`
 	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch; backlog only"`
 	StartMode  *string `json:"startMode,omitempty" jsonschema:"auto | manual | inherit (the tree's); backlog only"`
-	BaseTaskID *int64  `json:"baseTaskId,omitempty" jsonschema:"with base=predecessor, the need whose branch the worktree starts from; 0 = the sole need"`
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
@@ -775,17 +665,6 @@ func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, er
 		} else {
 			p["startMode"] = *mode.mode
 		}
-	}
-	if (a.Base != nil || a.BaseTaskID != nil) && a.BaseRef == nil && a.WorkspaceType == nil {
-		if err := o.baseOnly(ctx, a.ID, a.Base, a.BaseTaskID, p); err != nil {
-			return client.Task{}, err
-		}
-	} else if w, ok := a.workspacePatch(); ok && a.BaseTaskID != nil {
-		if w.Type != "worktree" {
-			return client.Task{}, errBaseNeedsWorktree
-		}
-		w.BaseTaskID = baseTask(*a.BaseTaskID)
-		p["workspace"] = w
 	}
 	return o.Client.UpdateTask(ctx, a.ID, p)
 }
@@ -923,8 +802,7 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 	}
 	return o.Client.CreateSchedule(ctx, client.CreateSchedule{
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
-		Workspace: rc.workspace,
-		Notes:     strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
+		Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})
 }

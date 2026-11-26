@@ -23,7 +23,6 @@ const task = {
   prompt: "Do it",
   connectionId: 3,
   executionConfig: { model: "m", options: [], permission: "", mode: "" },
-  workspace: { type: "local" },
   attachments: [{ id: 11 }],
 };
 
@@ -39,12 +38,11 @@ test("a missing options list compares equal to an empty one", () => {
   assert.deepEqual(taskEditChanges(taskEditBaseline(legacy), next), {});
 });
 
-test("a new harness or project also carries the config and workspace the server checks against it", () => {
+test("a new harness or project also carries the config the server checks against it", () => {
   const next = { ...taskEditBaseline(task), connectionId: 4 };
   assert.deepEqual(taskEditChanges(taskEditBaseline(task), next), {
     connectionId: 4,
     executionConfig: task.executionConfig,
-    workspace: task.workspace,
   });
 });
 

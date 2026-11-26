@@ -70,22 +70,21 @@ type createTaskReq struct {
 }
 
 type taskConfigReq struct {
-	ConnectionID       *int64                  `json:"connectionId"`
-	NeedsSession       *db.SessionRef          `json:"needsSession"`
-	ExecutionConfig    *execution.Config       `json:"executionConfig"`
-	OriginSession      *db.SessionRef          `json:"originSession"`
-	ProjectID          *int64                  `json:"projectId"`
-	Title              string                  `json:"title"`
-	Prompt             string                  `json:"prompt"`
-	Workspace          *db.Workspace           `json:"workspace"`
-	TreeID             *int64                  `json:"treeId"`
-	Needs              []int64                 `json:"needs"`
-	StartMode          *db.StartMode           `json:"startMode"`
-	AttachmentIDs      []int64                 `json:"attachmentIds"`
-	StartLocal         *string                 `json:"startLocal"`
-	StartTz            *string                 `json:"startTz"`
-	Handoff            *bool                   `json:"handoff"`
-	Start              bool                    `json:"start"`
+	ConnectionID    *int64            `json:"connectionId"`
+	NeedsSession    *db.SessionRef    `json:"needsSession"`
+	ExecutionConfig *execution.Config `json:"executionConfig"`
+	OriginSession   *db.SessionRef    `json:"originSession"`
+	ProjectID       *int64            `json:"projectId"`
+	Title           string            `json:"title"`
+	Prompt          string            `json:"prompt"`
+	TreeID          *int64            `json:"treeId"`
+	Needs           []int64           `json:"needs"`
+	StartMode       *db.StartMode     `json:"startMode"`
+	AttachmentIDs   []int64           `json:"attachmentIds"`
+	StartLocal      *string           `json:"startLocal"`
+	StartTz         *string           `json:"startTz"`
+	Handoff         *bool             `json:"handoff"`
+	Start           bool              `json:"start"`
 }
 
 // A request without a connection starts on the default connection when the
@@ -121,22 +120,21 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	}
 }
 
-func (req createTaskReq) validate(rule worktreeRule) (db.NewTask, error) {
-	in, err := req.taskConfigReq.validate(rule)
+func (req createTaskReq) validate() (db.NewTask, error) {
+	in, err := req.taskConfigReq.validate()
 	in.InitialNote = req.InitialNote
 	return in, err
 }
 
-// rule is the destination's worktree policy (server.worktreeRule). An
-// omitted executionConfig runs on the harness defaults.
-func (req taskConfigReq) validate(rule worktreeRule) (db.NewTask, error) {
+// validate checks the fields Stage owns; an omitted executionConfig runs
+// on the harness defaults (its adapter validates it: validateSelection).
+func (req taskConfigReq) validate() (db.NewTask, error) {
 	in := db.NewTask{
 		NeedsSession:    req.NeedsSession,
 		ExecutionConfig: req.ExecutionConfig,
 		OriginSession:   req.OriginSession,
 		Title:           strings.TrimSpace(req.Title),
 		Prompt:          req.Prompt,
-		Workspace:       db.Workspace{Type: "root"},
 		TreeID:          req.TreeID,
 		Needs:           req.Needs,
 		StartMode:       req.StartMode,
@@ -174,11 +172,6 @@ func (req taskConfigReq) validate(rule worktreeRule) (db.NewTask, error) {
 		return in, db.Invalid("prompt is required")
 	}
 	var err error
-	if req.Workspace != nil {
-		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID, rule); err != nil {
-			return in, err
-		}
-	}
 	if in.StartAt, err = startAt(req.StartLocal, req.StartTz, time.Now()); err != nil {
 		return in, err
 	}
@@ -229,7 +222,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.worktreeRule)
+	in, err := req.validate()
 	if err != nil {
 		return err
 	}
@@ -315,9 +308,6 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if out.CurrentHandoffs, err = s.Store.GetHandoffs(ctx, id, task.LaunchAttempt); err != nil {
 			return err
 		}
-		if out.CurrentLaunchBase, err = s.Store.GetLaunchBase(ctx, id, task.LaunchAttempt); err != nil {
-			return err
-		}
 	}
 	if task.OriginSession != nil {
 		batch, err := s.Store.CreatedBySession(ctx, *task.OriginSession)
@@ -366,8 +356,8 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := validateConfigPatch(configPatch{
 		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
-		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
-	}, s.worktreeRule); err != nil {
+		AttachmentIDs: &p.AttachmentIDs,
+	}); err != nil {
 		return err
 	}
 	if p.StartMode.Set && !p.StartMode.Null && !p.StartMode.V.Valid() {
@@ -407,13 +397,11 @@ type configPatch struct {
 	ProjectID     *db.Optional[int64]
 	Title         *db.Optional[string]
 	Prompt        *db.Optional[string]
-	Workspace     *db.Optional[db.Workspace]
 	AttachmentIDs *db.Optional[[]int64]
 }
 
 // validateConfigPatch validates and normalizes the shared config fields.
-func validateConfigPatch(c configPatch, rule worktreeRule) error {
-	var err error
+func validateConfigPatch(c configPatch) error {
 	if c.ProjectID.Set && c.ProjectID.Null {
 		return db.Invalid("projectId must not be null")
 	}
@@ -422,14 +410,6 @@ func validateConfigPatch(c configPatch, rule worktreeRule) error {
 	}
 	if c.Prompt.Set && (c.Prompt.Null || strings.TrimSpace(c.Prompt.V) == "") {
 		return db.Invalid("prompt must be a non-empty string")
-	}
-	if c.Workspace.Set {
-		if c.Workspace.Null {
-			return db.Invalid("workspace must not be null")
-		}
-		if c.Workspace.V, err = validateWorkspaceFor(c.Workspace.V, c.ConnectionID, rule); err != nil {
-			return err
-		}
 	}
 	if c.AttachmentIDs.Set {
 		if err := attachmentIDs(c.AttachmentIDs.V); err != nil {

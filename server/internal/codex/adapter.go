@@ -148,13 +148,10 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	c := execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-			execution.OpImages:          available,
-			execution.OpPredecessorBase: {Reason: "Codex runs in the project checkout; Stage can't start it on another task's branch."},
-			execution.OpWorktreeBase:    {Reason: "Codex runs in the project checkout."},
-			execution.OpRespond:         {Reason: answerInCodex},
-			execution.OpSend:            {Reason: answerInCodex},
+			execution.OpImages:  available,
+			execution.OpRespond: {Reason: answerInCodex},
+			execution.OpSend:    {Reason: answerInCodex},
 		},
-		Workspaces: []execution.Choice{{ID: "root", Label: "Project checkout", Availability: available}},
 	}
 	for _, p := range permissions {
 		c.Permissions = append(c.Permissions, execution.Choice{ID: p.ID, Label: p.Label, Availability: available})
@@ -169,7 +166,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		}
 		em := execution.Model{Choice: execution.Choice{ID: m.ID, Label: label, Availability: available}, Group: "Codex"}
 		if len(m.SupportedReasoningEfforts) > 0 {
-			opt := execution.Option{ID: effortOption}
+			opt := execution.Option{ID: effortOption, Kind: execution.OptionChoice, Label: "Reasoning effort"}
 			for _, e := range m.SupportedReasoningEfforts {
 				opt.Values = append(opt.Values, execution.StringValue(e.ReasoningEffort))
 			}

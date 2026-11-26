@@ -7,8 +7,8 @@ import { IconChevron, IconClose, IconPlus } from './icons'
 import './backlog.css'
 
 // stage's New task drawer saving to the backlog. Beats: the prompt is typed,
-// then the title; a model is picked (its effort follows); Workspace goes to
-// worktree; Start goes to Backlog and the drawer's one primary button rolls
+// then the title; a model is picked (its effort follows); Start goes to
+// Backlog and the drawer's one primary button rolls
 // from "Save & start" to "Save to backlog"; it is pressed, the drawer closes
 // and the task lands at the top of the project's backlog, carrying the rows
 // below it down. The reset has a cause: the new row's Start sends it on (it
@@ -22,7 +22,6 @@ const PROMPT = 'Return X-RateLimit-Limit, -Remaining and -Reset on every /v1 res
 
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
 const EFFORT_DEFAULT = ['high', 'medium', 'low']
-const WORKSPACES = ['root', 'worktree']
 const STARTS = ['Now', 'Backlog', 'At', 'After', 'Repeat']
 
 type Focus = 'none' | 'title' | 'prompt'
@@ -33,16 +32,15 @@ type S = {
   prompt: string
   menu: boolean
   model: number
-  ws: number
   start: number
   landed: boolean
   fresh: boolean
   started: boolean
 }
 
-const initial: S = { open: true, focus: 'none', title: '', prompt: '', menu: false, model: 1, ws: 0, start: 0, landed: false, fresh: false, started: false }
+const initial: S = { open: true, focus: 'none', title: '', prompt: '', menu: false, model: 1, start: 0, landed: false, fresh: false, started: false }
 // The payoff: the drawer has closed and the new row sits on top, still lit as just arrived
-const poster: S = { ...initial, open: false, title: TITLE, prompt: PROMPT, model: 0, ws: 1, start: 1, landed: true, fresh: true }
+const poster: S = { ...initial, open: false, title: TITLE, prompt: PROMPT, model: 0, start: 1, landed: true, fresh: true }
 
 const REST = { wide: { x: 150, y: 440 }, compact: { x: 290, y: 400 } }
 
@@ -65,9 +63,6 @@ async function script(a: Act<S>) {
   await a.click({ at: 'opt-0', x: 0.82, y: 0.55 })
   a.put({ menu: false, model: 0 })
   await a.wait(450)
-  await a.click({ at: 'ws-1', x: 0.6, y: 0.62 })
-  a.put({ ws: 1 })
-  await a.wait(300)
   a.mark('backlog')
   await a.click({ at: 'start-1', x: 0.6, y: 0.62 })
   a.put({ start: 1 })
@@ -90,7 +85,7 @@ async function script(a: Act<S>) {
   a.mark('new')
   await a.click({ at: 'new', x: 0.62, y: 0.6 })
   // Out of sight behind the closed drawer: the form starts over
-  await a.snap({ focus: 'none', title: '', prompt: '', model: 1, ws: 0, start: 0, started: false })
+  await a.snap({ focus: 'none', title: '', prompt: '', model: 1, start: 0, started: false })
   a.put({ open: true })
   await a.wait(250)
   await a.move(rest)
@@ -217,10 +212,6 @@ function Drawer({ s, compact }: { s: S; compact: boolean }) {
           </div>
         </div>
         <div className="bl-launch">
-          <div className="bl-group">
-            <span className="bl-label">Workspace</span>
-            <Segmented options={WORKSPACES} value={s.ws} name="ws" />
-          </div>
           <div className="bl-group bl-group--start">
             <span className="bl-label">Start</span>
             <Segmented options={STARTS} value={s.start} name="start" fill={compact} />

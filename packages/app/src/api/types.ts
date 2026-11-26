@@ -45,20 +45,6 @@ export interface ModelOption {
   value: string | boolean;
 }
 
-/** Worktree base: ref (from baseRef) or predecessor (from a need's branch; baseRef is the fallback). */
-export type WorkspaceBase = "ref" | "predecessor";
-
-export type Workspace =
-  | { type: "root" }
-  | {
-      type: "worktree";
-      baseRef: string;
-      branch: string | null;
-      base?: WorkspaceBase;
-      /** With base predecessor: the need whose branch the worktree starts from (null = the sole need). */
-      baseTaskId?: number | null;
-    };
-
 // ---- Health ----
 
 /** GET /api/health: a live Stage server (status/db) and, separately, each connected harness's last known state. */
@@ -284,8 +270,6 @@ export interface HarnessDescriptor {
   };
   /** How a launch learns its session identity: reserved before any effect, or correlated by a marker after. */
   launch: "reserved" | "correlated";
-  /** What a worktree workspace may take from Stage: a base ref and branch, or a need's branch. */
-  worktree: { baseRef: boolean; predecessor: boolean };
   /** It runs other harnesses' sessions and leaves these origins in them; Stage refuses those sessions elsewhere. */
   wraps?: { origins: string[] };
   available: boolean;
@@ -426,7 +410,23 @@ export interface CodexDetails {
 /** Codex's harness status with its details parsed (lib/codex.ts); null details: missing or malformed. */
 export type CodexStatus = Omit<HarnessStatus, "details"> & { details: CodexDetails | null };
 export interface HarnessChoice {id: string; label: string; available: boolean; reason?: string}
-export interface HarnessOption {id: string; values: (string | boolean)[]; default?: string | boolean}
+/** How a launch option takes its value: one of `values`, true or false, or a string the harness validates. */
+export type HarnessOptionKind = "choice" | "boolean" | "text";
+/**
+ * A launch option a harness declares (harness-wide, or a model's own). An older harness may omit `kind` (boolean when
+ * every value is boolean, else choice) and `label` (reads as the id): lib/options.ts fills them in.
+ */
+export interface HarnessOption {
+  id: string;
+  kind?: HarnessOptionKind;
+  /** The option's name in the harness's own words. */
+  label?: string;
+  /** A choice's values; a boolean's true and false; none for text. */
+  values: (string | boolean)[];
+  default?: string | boolean | null;
+  /** It applies only while another option of the same config has this value (baseRef only with worktree on). */
+  dependsOn?: { option: string; value: string | boolean };
+}
 export interface HarnessModel extends HarnessChoice {
   group: string;
   options: HarnessOption[] | null;
@@ -441,8 +441,6 @@ export type OperationId =
   | "opening"
   | "attention"
   | "images"
-  | "predecessorBase"
-  | "worktreeBase"
   | "respond"
   | "send";
 export interface Capabilities {
@@ -454,7 +452,6 @@ export interface Capabilities {
   operations: Partial<Record<OperationId, {available: boolean; reason?: string}>>;
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;
-  workspaces: HarnessChoice[] | null;
 }
 export interface ExecutionConfig {
   model: string;
@@ -499,7 +496,6 @@ export interface Task {
   projectTitle: string;
   title: string;
   prompt: string;
-  workspace: Workspace;
   state: TaskState;
   externalSessionId: string | null;
   /** The task's tree; null outside one. */
@@ -598,8 +594,6 @@ export interface TaskDetail extends Task {
   batch: CreatedTasks | null;
   /** Handoff records of the current launch attempt, one per need; empty when none. */
   currentHandoffs: Handoff[];
-  /** Worktree base the current launch attempt used (base predecessor); null when none was recorded. */
-  currentLaunchBase: LaunchBase | null;
 }
 
 export interface AcceptedEvidence {
@@ -650,20 +644,6 @@ export interface AcceptanceRequest {
 export interface AcceptanceResult {
   revision: number;
   acceptanceId: number | null;
-}
-
-/** The worktree base a launch attempt with base "predecessor" used: a need's branch, or the fallback and why. */
-export interface LaunchBase {
-  attempt: number;
-  baseRef: string;
-  startFromOrigin: boolean;
-  source: "predecessor" | "fallback";
-  sourceTaskId: number | null;
-  sourceThreadId: string | null;
-  sourceTitle: string;
-  /** Why it fell back; null when it used the need's branch. */
-  reason: string | null;
-  at: string;
 }
 
 /** What a launch attempt appended (or why it appended nothing) from one need. */
@@ -866,7 +846,6 @@ export interface CreateTaskRequest {
   projectId: number;
   title: string;
   prompt: string;
-  workspace?: Workspace;
   initialNote?: string;
   /** Join this tree (default: the needs' tree, else a new tree when there are needs). */
   treeId?: number;
@@ -892,7 +871,6 @@ export interface UpdateTaskRequest {
   projectId?: number;
   title?: string;
   prompt?: string;
-  workspace?: Workspace;
   /** Backlog only: null inherits the tree's. */
   startMode?: StartMode | null;
   /** Backlog only: append each need's handoff at launch. */
@@ -970,7 +948,6 @@ export interface Schedule {
   projectTitle: string;
   title: string;
   prompt: string;
-  workspace: Workspace;
   notes: string;
   attachments: Attachment[];
   /** Standard 5-field cron, evaluated in tz. */
@@ -1023,7 +1000,6 @@ export interface CreateScheduleRequest {
   projectId: number;
   title: string;
   prompt: string;
-  workspace?: Workspace;
   notes?: string;
   attachmentIds?: number[];
   cron: string;

@@ -35,6 +35,8 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{name: "referenced connection kept", seed: seedV0032(`INSERT INTO projects (id, title) VALUES (1, 'P')`, `INSERT INTO tasks (id, project_id, title, prompt, connection_id) VALUES (1, 1, 'T', 'p', 1)`), check: checkV0032Connection(true)},
 		{name: "bound connection kept", seed: seedV0032(`INSERT INTO projects (id, title) VALUES (1, 'P')`, `INSERT INTO project_bindings (project_id, connection_id, external_project_id, workspace) VALUES (1, 1, 'x', '/w')`), check: checkV0032Connection(true)},
 	},
+	33: {{name: "workspaces become launch options", seed: seedV0032(launchOptionsSeed...), check: checkV0033LaunchOptions}},
+	34: {{name: "workspace columns and launch bases dropped", seed: seedV0032(launchBasesSeed...), check: checkV0034DropWorkspaces}},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -276,4 +278,112 @@ func checkV0032Connection(kept bool) func(*testing.T, *sql.DB) {
 			}
 		}
 	}
+}
+
+// launchOptionsSeed (0033): a connection per harness kind and tasks,
+// schedules and unfinished attempts with each kind of saved workspace (the
+// SQLite scenario's rows).
+var launchOptionsSeed = []string{
+	`INSERT INTO harness_connections (id, machine_id, harness) VALUES (2, 1, 't3'), (3, 1, 'claude'), (4, 1, 'opencode'), (5, 1, 'codex')`,
+	`INSERT INTO projects (id, title) VALUES (1, 'P')`,
+	`INSERT INTO task_trees (id, title) VALUES (1, 'Stack')`,
+	`INSERT INTO session_identities (id, connection_id, external_id) VALUES (1, 2, 'thread-a')`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id, workspace, execution_config) VALUES
+	 (1, 1, 't3 ref', 'p', 2, '{"type":"worktree","baseRef":"origin/main","branch":"feat-x","base":"ref"}', '{"model":"m","options":[{"id":"effort","value":"high"}],"permission":"","mode":""}'),
+	 (2, 1, 'claude worktree', 'p', 3, '{"type":"worktree","baseRef":"","branch":null,"base":"ref"}', NULL),
+	 (3, 1, 'opencode worktree', 'p', 4, '{"type":"worktree"}', '{"model":"","options":null,"permission":"","mode":""}'),
+	 (4, 1, 'codex root', 'p', 5, '{"type":"root"}', '{"model":"","options":[],"permission":"","mode":""}'),
+	 (5, 1, 'codex worktree', 'p', 5, '{"type":"worktree"}', '{"model":"","options":[],"permission":"","mode":""}'),
+	 (8, 1, 't3 root', 'p', 2, '{"type":"root"}', '{"model":"","options":[],"permission":"","mode":""}')`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id, workspace, execution_config, tree_id, session_id, launch_attempt, state) VALUES
+	 (6, 1, 't3 predecessor', 'p', 2, '{"type":"worktree","baseRef":"origin/main","branch":null,"base":"predecessor","baseTaskId":1}', '{"model":"","options":[],"permission":"","mode":""}', 1, 1, 2, 'failed'),
+	 (7, 1, 'claude predecessor', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 1, NULL, 0, 'backlog'),
+	 (9, 1, 't3 predecessor without ref', 'p', 2, '{"type":"worktree","baseRef":"","branch":"stack-b","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 1, NULL, 0, 'backlog')`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id, workspace, execution_config, state, archived_at) VALUES
+	 (10, 1, 'claude predecessor done', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 'done', NULL),
+	 (11, 1, 'claude predecessor archived', 'p', 3, '{"type":"worktree","base":"predecessor"}', '{"model":"","options":[],"permission":"","mode":""}', 'backlog', '2026-01-01 00:00:00+00')`,
+	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, connection_id, workspace, execution_config) VALUES
+	 (1, 1, 't3 nightly', 'p', '@daily', 'UTC', 2, '{"type":"worktree","baseRef":"main","branch":null,"base":"ref"}', '{"model":"","options":[],"permission":"","mode":""}'),
+	 (2, 1, 'claude nightly', 'p', '@daily', 'UTC', 3, '{"type":"root"}', '{"model":"","options":[],"permission":"","mode":""}')`,
+	`INSERT INTO execution_attempts (task_id, attempt, phase, intent) VALUES
+	 (6, 2, 'unconfirmed', '{"requestId":"r6","connectionId":2,"config":{"model":"","options":[],"permission":"","mode":""},"workspace":{"kind":"worktree","base":"feat-a","fromRemote":false}}'),
+	 (1, 1, 'confirmed', '{"requestId":"r1","connectionId":2,"config":{"model":"","options":[],"permission":"","mode":""},"workspace":{"kind":"worktree","base":"origin/main","fromRemote":true}}'),
+	 (2, 1, 'unconfirmed', '{"requestId":"r2","connectionId":3,"config":{"model":"","options":null,"permission":"","mode":""},"workspace":{"kind":"worktree"}}')`,
+}
+
+// wantPGRows fails unless q (one text column) returns exactly want.
+func wantPGRows(t *testing.T, pool *sql.DB, q string, want ...string) {
+	t.Helper()
+	rows, err := pool.QueryContext(context.Background(), q)
+	if err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s:\n got  %q\n want %q", q, got, want)
+	}
+}
+
+// checkV0033LaunchOptions: as on SQLite, each workspace became its
+// harness's launch options, the unfinished attempts' intents carry them,
+// and each predecessor-based task has one journal event.
+func checkV0033LaunchOptions(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT id || ' ' || COALESCE(execution_config->'options', 'null')::text FROM tasks ORDER BY id`,
+		`1 [{"id": "effort", "value": "high"}, {"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}, {"id": "branch", "value": "feat-x"}]`,
+		`2 [{"id": "worktree", "value": true}]`,
+		`3 [{"id": "worktree", "value": true}]`,
+		`4 []`,
+		`5 []`,
+		`6 [{"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}]`,
+		`7 [{"id": "worktree", "value": true}]`,
+		`8 []`,
+		`9 [{"id": "worktree", "value": true}, {"id": "branch", "value": "stack-b"}]`,
+		`10 [{"id": "worktree", "value": true}]`,
+		`11 [{"id": "worktree", "value": true}]`)
+	wantPGRows(t, pool, `SELECT execution_config->>'model' FROM tasks WHERE id = 1`, "m")
+	wantPGRows(t, pool, `SELECT id || ' ' || (execution_config->'options')::text FROM schedules ORDER BY id`,
+		`1 [{"id": "worktree", "value": true}, {"id": "baseRef", "value": "main"}]`, `2 []`)
+	wantPGRows(t, pool, `SELECT task_id || ' ' || COALESCE(intent->'config'->'options', 'null')::text FROM execution_attempts ORDER BY task_id`,
+		`1 []`,
+		`2 [{"id": "worktree", "value": true}]`,
+		`6 [{"id": "worktree", "value": true}, {"id": "baseRef", "value": "feat-a"}]`)
+	wantPGRows(t, pool, `SELECT task_id || ' ' || COALESCE(tree_id::text, '-') || ' ' || COALESCE(source_session_id::text, '-') || ' ' || attempt || ' ' || kind || ' ' || event_type || ' ' || created_by_user_id FROM journal_entries ORDER BY id`,
+		"6 1 1 2 event task_event 1", "7 1 - 0 event task_event 1", "9 1 - 0 event task_event 1")
+	wantPGRows(t, pool, `SELECT task_id || ' ' || text FROM journal_entries ORDER BY id`,
+		"6 Predecessor bases were removed: this task now starts its worktree from origin/main, not its predecessor's branch. The handoff carries the branch the predecessor reported.",
+		"7 Predecessor bases were removed: this task no longer starts from its predecessor's branch. Its worktree now starts from the harness default. The handoff carries the branch the predecessor reported.",
+		"9 Predecessor bases were removed: this task no longer starts from its predecessor's branch. Set a base ref before it starts (T3 needs one for a new worktree). The handoff carries the branch the predecessor reported.")
+}
+
+// launchBasesSeed (0034): a task and schedule with workspaces and a launch
+// base record.
+var launchBasesSeed = []string{
+	`INSERT INTO harness_connections (id, machine_id, harness) VALUES (2, 1, 't3')`,
+	`INSERT INTO projects (id, title) VALUES (1, 'P')`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id, workspace, execution_config) VALUES (1, 1, 'T', 'p', 2, '{"type":"worktree","baseRef":"main"}', '{"model":"","options":[{"id":"worktree","value":true}],"permission":"","mode":""}')`,
+	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, connection_id, workspace) VALUES (1, 1, 'S', 'p', '@daily', 'UTC', 2, '{"type":"root"}')`,
+	`INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source) VALUES (1, 1, 'main', false, 'fallback')`,
+}
+
+// checkV0034DropWorkspaces: the workspace columns and launch bases are
+// gone, rows and their execution configs stay.
+func checkV0034DropWorkspaces(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT count(*)::text FROM information_schema.columns WHERE table_schema = current_schema() AND column_name = 'workspace' AND table_name IN ('tasks', 'schedules')`, "0")
+	wantPGRows(t, pool, `SELECT count(*)::text FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'task_launch_bases'`, "0")
+	wantPGRows(t, pool, `SELECT id || ' ' || (execution_config->'options')::text FROM tasks`, `1 [{"id": "worktree", "value": true}]`)
+	wantPGRows(t, pool, `SELECT count(*)::text FROM schedules`, "1")
+	seedV0032(`INSERT INTO tasks (id, project_id, title, prompt, connection_id) VALUES (2, 1, 'New', 'p', 2)`)(t, pool)
 }

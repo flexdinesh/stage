@@ -35,7 +35,7 @@ const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 
 
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active=1),''), t.title, t.prompt,
-  t.workspace, t.state, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
+  t.state, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT json_group_array(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'),
   COALESCE((SELECT json_group_array(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
@@ -60,7 +60,7 @@ LEFT JOIN schedules sc ON sc.id = t.schedule_id`
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
-		&t.Workspace, &t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.CreatedAt,
@@ -77,9 +77,6 @@ func scanTask(row rowScanner) (store.Task, error) {
 	t.LastWordPreview = store.Preview(t.LastWordPreview)
 	t.Needs = nonNilIDs(t.Needs)
 	t.Dependents = nonNilIDs(t.Dependents)
-	if t.Workspace.Type == "" {
-		t.Workspace.Type = "root"
-	}
 	return t, nil
 }
 
@@ -230,10 +227,10 @@ func (r tasks) ProjectBySession(ctx context.Context, sessionID int64) (*int64, e
 func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `
-INSERT INTO tasks (project_id, title, prompt, workspace, start_at, start_tz, schedule_id, handoff, start_mode,
+INSERT INTO tasks (project_id, title, prompt, start_at, start_tz, schedule_id, handoff, start_mode,
   connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, true),$9,$10,$11,$12,$13,$14) RETURNING id`,
-		in.ProjectID, in.Title, in.Prompt, in.Workspace, in.StartAt, in.StartTz, in.ScheduleID, in.Handoff, in.StartMode,
+VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, true),$8,$9,$10,$11,$12,$13) RETURNING id`,
+		in.ProjectID, in.Title, in.Prompt, in.StartAt, in.StartTz, in.ScheduleID, in.Handoff, in.StartMode,
 		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID,
 	).Scan(&id)
 	return id, err
@@ -280,9 +277,6 @@ func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	if u.Prompt.Set {
 		set("prompt", u.Prompt.V)
 	}
-	if u.Workspace.Set {
-		set("workspace", u.Workspace.V)
-	}
 	if u.Handoff.Set {
 		set("handoff", u.Handoff.V)
 	}
@@ -292,16 +286,6 @@ func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	sets = append(sets, "updated_at = "+nowSQL)
 	_, err := r.Exec(ctx, `UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
 	return err
-}
-
-func (r tasks) BaseTask(ctx context.Context, id int64) (*int64, bool, error) {
-	var base *int64
-	var isNeed bool
-	err := r.QueryRow(ctx, `
-SELECT json_extract(workspace, '$.baseTaskId'),
-  EXISTS (SELECT 1 FROM task_needs n WHERE n.task_id = tasks.id AND n.need_id = json_extract(tasks.workspace, '$.baseTaskId'))
-FROM tasks WHERE id = $1`, id).Scan(&base, &isNeed)
-	return base, isNeed, notFound(err)
 }
 
 func (r tasks) Deletability(ctx context.Context, id int64) (store.TaskState, bool, error) {

@@ -46,7 +46,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 		t.Run(step, func(t *testing.T) {
 			svc := compose()
 			in := f.intent("lost-"+step, "worktree")
-			task, e := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: 2, Title: in.Title, Prompt: in.Prompt, ExecutionConfig: &in.Config, Workspace: db.Workspace{Type: "worktree"}})
+			task, e := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: 2, Title: in.Title, Prompt: in.Prompt, ExecutionConfig: &in.Config})
 			if e != nil {
 				t.Fatal(e)
 			}

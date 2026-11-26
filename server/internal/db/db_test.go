@@ -29,7 +29,7 @@ func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, t
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
 		ProjectID: projectID, Title: title, Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, Needs: needs,
+		Needs: needs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestSweepStagedAttachments(t *testing.T) {
 	}
 	p := mustProject(t, s, ctx, "p-sweep").ID
 	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p, Title: "t", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
+		AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := testDB.Pool.ExecContext(ctx, `UPDATE task_attachments SET created_at = strftime('%Y-%m-%dT%H:%M:%f000Z', 'now', '-25 hours') WHERE id IN ($1, $2)`,
@@ -169,8 +169,7 @@ func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int6
 	t.Helper()
 	sc, err := s.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
 		ProjectID: projectID, Title: "nightly", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"},
-		Cron:      cron, Tz: "UTC",
+		Cron: cron, Tz: "UTC",
 	})
 	if err != nil {
 		t.Fatal(err)

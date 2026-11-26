@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -50,54 +49,6 @@ const (
 	ReadinessReady   Readiness = "ready"
 )
 
-// Workspace bases: ref (the worktree starts from BaseRef) or predecessor
-// (from a need's branch; BaseRef is the fallback, docs/api.md "Predecessor
-// base").
-const (
-	BaseRef         = "ref"
-	BasePredecessor = "predecessor"
-)
-
-// Workspace is the task workspace config (jsonb).
-type Workspace struct {
-	Type    string  `json:"type"` // root | worktree
-	BaseRef string  `json:"baseRef,omitempty"`
-	Branch  *string `json:"branch,omitempty"`
-	Base    string  `json:"base,omitempty"` // worktree: ref ("" = ref) | predecessor
-	// BaseTaskID: with base predecessor, the need whose branch the worktree
-	// starts from (nil = the sole need).
-	BaseTaskID *int64 `json:"baseTaskId,omitempty"`
-}
-
-// FromPredecessor: a worktree that starts from a need's branch.
-func (w Workspace) FromPredecessor() bool {
-	return w.Type == "worktree" && w.Base == BasePredecessor
-}
-
-// MarshalJSON emits {type:"root"} or {type:"worktree", baseRef,
-// branch|null, base, baseTaskId|null}.
-func (w Workspace) MarshalJSON() ([]byte, error) {
-	if w.Type == "worktree" {
-		base := BaseRef
-		baseTask := w.BaseTaskID
-		if w.Base == BasePredecessor {
-			base = BasePredecessor
-		} else {
-			baseTask = nil
-		}
-		return json.Marshal(struct {
-			Type       string  `json:"type"`
-			BaseRef    string  `json:"baseRef"`
-			Branch     *string `json:"branch"`
-			Base       string  `json:"base"`
-			BaseTaskID *int64  `json:"baseTaskId"`
-		}{w.Type, w.BaseRef, w.Branch, base, baseTask})
-	}
-	return json.Marshal(struct {
-		Type string `json:"type"`
-	}{w.Type})
-}
-
 type Task struct {
 	ExecutionConfig *execution.Config `json:"executionConfig"`
 	Launch          *Attempt          `json:"launch,omitempty"`
@@ -120,7 +71,6 @@ type Task struct {
 	ProjectTitle            string      `json:"projectTitle"`
 	Title                   string      `json:"title"`
 	Prompt                  string      `json:"prompt"`
-	Workspace               Workspace   `json:"workspace"`
 	State                   TaskState   `json:"state"`
 	// T3ThreadID is the session's external id (nil without a session).
 	T3ThreadID *string `json:"externalSessionId"`
@@ -210,43 +160,6 @@ type ObservedSession struct {
 	Title string           `json:"title"`
 	State string           `json:"state"`
 	Links *execution.Links `json:"links,omitempty"`
-}
-
-// Launch base sources: predecessor (the worktree started from the
-// predecessor's branch) or fallback (from the task's own baseRef; Reason
-// says why).
-const (
-	LaunchBasePredecessor = "predecessor"
-	LaunchBaseFallback    = "fallback"
-)
-
-// LaunchBase is the worktree base one launch attempt of a task with
-// workspace.base "predecessor" used (docs/api.md "Predecessor base").
-type LaunchBase struct {
-	Session         *SessionRef `json:"session,omitempty"`
-	Attempt         int         `json:"attempt"`
-	BaseRef         string      `json:"baseRef"`
-	StartFromOrigin bool        `json:"startFromOrigin"`
-	Source          string      `json:"source"`
-	SourceTaskID    *int64      `json:"sourceTaskId"`
-	// SourceThreadID is Session's external id on reads (nil without one).
-	SourceThreadID *string   `json:"sourceThreadId"`
-	SourceTitle    string    `json:"sourceTitle"`
-	Reason         *string   `json:"reason"` // why it fell back
-	At             time.Time `json:"at"`
-}
-
-// Detail is the launching task event: `base from #12's branch feat-x` or
-// `base fallback origin/main: <reason>`.
-func (b LaunchBase) Detail() string {
-	if b.Source == LaunchBasePredecessor {
-		return fmt.Sprintf("base from %s's branch %s", HandoffSource{TaskID: b.SourceTaskID, Title: b.SourceTitle}.Label(), b.BaseRef)
-	}
-	reason := ""
-	if b.Reason != nil {
-		reason = *b.Reason
-	}
-	return fmt.Sprintf("base fallback %s: %s", b.BaseRef, reason)
 }
 
 // Handoff statuses: sent (the block went out with the launch prompt) or
@@ -343,7 +256,6 @@ type TaskInsert struct {
 	ProjectID       int64
 	Title           string
 	Prompt          string
-	Workspace       Workspace
 	StartAt         *time.Time
 	StartTz         *string
 	ScheduleID      *int64
@@ -388,7 +300,6 @@ type TaskUpdate struct {
 	ProjectID       Optional[int64]
 	Title           Optional[string]
 	Prompt          Optional[string]
-	Workspace       Optional[Workspace]
 	Handoff         Optional[bool]
 	StartMode       Optional[StartMode]
 }
@@ -438,8 +349,6 @@ type Tasks interface {
 	SetStart(ctx context.Context, id int64, at *time.Time, tz *string) error
 	// Update sets u's columns and updated_at.
 	Update(ctx context.Context, id int64, u TaskUpdate) error
-	// BaseTask is workspace.baseTaskId and whether it names a need.
-	BaseTask(ctx context.Context, id int64) (base *int64, isNeed bool, err error)
 	// Deletability is the task's state and whether it has no notes or
 	// execution history.
 	Deletability(ctx context.Context, id int64) (state TaskState, unstarted bool, err error)
@@ -479,7 +388,7 @@ type TaskJournalState struct {
 }
 
 // Attempts is the launch attempt repository: attempts, claims, pinned
-// destinations and inputs, launch bases and handoffs.
+// destinations and inputs, and handoffs.
 type Attempts interface {
 	Get(ctx context.Context, taskID int64, n int) (Attempt, error)
 	// Prepare records the intent of a prepared attempt that has none.
@@ -504,10 +413,6 @@ type Attempts interface {
 	// BoundDestination is the task's active available binding (ErrNotFound).
 	BoundDestination(ctx context.Context, taskID int64) (LaunchDestination, error)
 	PinDestination(ctx context.Context, taskID int64, n int, d LaunchDestination) error
-	// RecordBase replaces the attempt's launch base.
-	RecordBase(ctx context.Context, taskID int64, b LaunchBase, sourceSessionID *int64) error
-	// Base is the attempt's launch base (nil: none).
-	Base(ctx context.Context, taskID int64, n int) (*LaunchBase, error)
 	// RecordHandoff replaces the attempt's handoff from h's source.
 	RecordHandoff(ctx context.Context, taskID int64, h Handoff, sourceSessionID *int64) error
 	// Handoffs are the attempt's handoffs by source task id.
@@ -529,4 +434,3 @@ type Observations interface {
 	// owns observed needing input.
 	NeedsInputCount(ctx context.Context) (int, error)
 }
-

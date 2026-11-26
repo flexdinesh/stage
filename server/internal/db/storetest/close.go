@@ -137,7 +137,7 @@ func caseMarkTreeDoneAndReopen(t *testing.T, open Factory) {
 	_, err = s.UpdateTree(ctx, tree, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}})
 	wantConflict(t, err, "is done")
 	_, err = s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "e", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, TreeID: &tree})
+		TreeID: &tree})
 	wantConflict(t, err, "is done")
 	if _, err := s.UpdateTree(ctx, tree, db.TreePatch{Title: db.Optional[string]{Set: true, V: "renamed"}}); err != nil {
 		t.Fatalf("rename done tree: %v", err)

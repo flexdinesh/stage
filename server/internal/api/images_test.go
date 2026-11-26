@@ -126,7 +126,7 @@ func TestImagesFollowTheImagesOperation(t *testing.T) {
 	// Moving images to a connection without the operation is refused; moving
 	// without them is not.
 	path := fmt.Sprintf("/api/tasks/%d", tk.ID)
-	move := map[string]any{"connectionId": textConn, "executionConfig": map[string]any{"model": "m"}, "workspace": map[string]any{"type": "root"}}
+	move := map[string]any{"connectionId": textConn, "executionConfig": map[string]any{"model": "m"}}
 	refusal(e.refused("PATCH", path, move, 400))
 	refusal(e.refused("PATCH", fmt.Sprintf("/api/schedules/%d", sc.ID), move, 400))
 	move["attachmentIds"] = []int64{}

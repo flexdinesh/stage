@@ -41,7 +41,7 @@ func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, t
 	t.Helper()
 	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
 		ProjectID: projectID, Title: title, Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, Needs: needs,
+		Needs: needs,
 	})
 	if err != nil {
 		t.Fatal(err)

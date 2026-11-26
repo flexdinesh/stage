@@ -196,7 +196,7 @@ func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
